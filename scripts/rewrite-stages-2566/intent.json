@@ -1,5 +1,5 @@
 {
-  "baseline": "5ea6d33d6b1d2afe6f13ae14df07ddbbfc08576b",
+  "baseline": "c0f7c2ac5be811b373061a8075d9d603b74e3431",
   "scope": "reviewed positive entry/end equivalence plus explicitly classified generated/partial source and negative-oracle cut; runtime closure requires the separate execution proof matrix",
   "changes": [
     {
@@ -2505,8 +2505,8 @@
     },
     {
       "file": "internal/runtime/conformance/persisted_surfaces_test.go",
-      "before_hash": "592975f40098bf51da44a18a57022ab1b39685994865281c199d58bca240a8d7",
-      "after_hash": "4c893bc6981198c5d01517b5f31b8870874396396c47feb74b5fbd2f071a3cf2",
+      "before_hash": "adcec16e430927fb90ad23fbfaa18ae600efc879b9c0053f177c1560c404f9c0",
+      "after_hash": "4937289beccad1fcd168faab58c994146d6ca6a119804ac2bcff6600e3e49107",
       "edits": [
         {
           "offset": 71116,
@@ -2514,7 +2514,7 @@
           "after": "\twriteConformanceSnapshotFixture(t, fixtureRoot, \"mutation-flow/schema.yaml\", \"stages:\\n  done: {final: true}\\n\")\n"
         },
         {
-          "offset": 84441,
+          "offset": 85220,
           "before": "\twriteConformanceSnapshotFixture(t, fixtureRoot, \"schema.yaml\", \"name: review\\nstages:\\n  queued: {initial: true}\\n  done: {terminal: true}\\n\")\n",
           "after": "\twriteConformanceSnapshotFixture(t, fixtureRoot, \"schema.yaml\", \"name: review\\nstages:\\n  queued: {}\\n  done: {final: true}\\n\")\n"
         }
@@ -4086,86 +4086,76 @@
     },
     {
       "file": "internal/runtime/pipeline/engine_adapter_test.go",
-      "before_hash": "e9e2cadea862dc3a99d67dcbad84a27091375a4c3ce7157a3628539760efd66b",
-      "after_hash": "3ac0d294ff2be17be207ffddec12368a8dc20da45bf33c58b40d43a97b3dec90",
+      "before_hash": "1a4a052427f9e2341d04ab4cd36ad6e59e6d2541f4b2d848884e67ae69b980ba",
+      "after_hash": "38005078c8c2a8ecdfddce1753d30fba07f6e408d06b3172c58633c491fa61d1",
       "edits": [
         {
-          "offset": 6742,
+          "offset": 7526,
           "before": "  ready: {initial: true}\n",
           "after": "  ready: {}\n"
         },
         {
-          "offset": 6814,
+          "offset": 7598,
           "before": "  queued: {initial: true}\n",
           "after": "  queued: {}\n"
         },
         {
-          "offset": 14740,
-          "before": "\t\t\tName:         \"root\",\n\t\t\tInitialStage: \"pending\",\n",
-          "after": "\t\t\tName: \"root\",\n"
-        },
-        {
-          "offset": 16413,
-          "before": "\t\t\"review/schema.yaml\":   \"name: review\\ninstance: instance_id\\nstages:\\n  pending: {initial: true}\\n  completed: {terminal: true}\\n\",\n",
-          "after": "\t\t\"review/schema.yaml\":   \"name: review\\ninstance: instance_id\\nstages:\\n  pending: {}\\n  completed: {final: true}\\n\",\n"
-        },
-        {
-          "offset": 30699,
+          "offset": 28303,
           "before": "  queued: {initial: true}\n",
           "after": "  queued: {}\n"
         },
         {
-          "offset": 43130,
+          "offset": 40838,
           "before": "\t\t\"schema.yaml\": \"stages:\\n  idle: {initial: true}\\n  done: {terminal: true}\\npins:\\n  inputs:\\n    - parent.trigger\\n  outputs:\\n    - parent.result\\n\",\n",
           "after": "\t\t\"schema.yaml\": \"stages:\\n  idle: {}\\n  done: {final: true}\\npins:\\n  inputs:\\n    - parent.trigger\\n  outputs:\\n    - parent.result\\n\",\n"
         },
         {
-          "offset": 43381,
+          "offset": 41089,
           "before": "\t\t\"child/schema.yaml\": \"name: child\\nstages:\\n  waiting: {initial: true}\\n  processed: {terminal: true}\\npins:\\n  inputs:\\n    - child.start\\n  outputs:\\n    - child.internal\\n\",\n",
           "after": "\t\t\"child/schema.yaml\": \"name: child\\nstages:\\n  waiting: {}\\n  processed: {final: true}\\npins:\\n  inputs:\\n    - child.start\\n  outputs:\\n    - child.internal\\n\",\n"
         },
         {
-          "offset": 45324,
+          "offset": 43032,
           "before": "\t\t\"schema.yaml\": \"stages:\\n  idle: {initial: true}\\n  done: {terminal: true}\\npins:\\n  inputs:\\n    - parent.trigger\\n\",\n",
           "after": "\t\t\"schema.yaml\": \"stages:\\n  idle: {}\\n  done: {final: true}\\npins:\\n  inputs:\\n    - parent.trigger\\n\",\n"
         },
         {
-          "offset": 45505,
+          "offset": 43213,
           "before": "\t\t\"child/schema.yaml\":   \"name: child\\ninstance: entity_id\\nstages:\\n  waiting: {initial: true}\\n  processed: {terminal: true}\\npins:\\n  inputs:\\n    - child.start\\n  outputs:\\n    - child.done\\n\",\n",
           "after": "\t\t\"child/schema.yaml\":   \"name: child\\ninstance: entity_id\\nstages:\\n  waiting: {}\\n  processed: {final: true}\\npins:\\n  inputs:\\n    - child.start\\n  outputs:\\n    - child.done\\n\",\n"
         },
         {
-          "offset": 47649,
+          "offset": 45357,
           "before": "\t\t\"schema.yaml\": \"stages:\\n  idle: {initial: true}\\n  done: {terminal: true}\\npins:\\n  inputs:\\n    - parent.trigger\\n  outputs:\\n    - parent.result\\n\",\n",
           "after": "\t\t\"schema.yaml\": \"stages:\\n  idle: {}\\n  done: {final: true}\\npins:\\n  inputs:\\n    - parent.trigger\\n  outputs:\\n    - parent.result\\n\",\n"
         },
         {
-          "offset": 47900,
+          "offset": 45608,
           "before": "\t\t\"child/schema.yaml\": \"name: child\\nstages:\\n  waiting: {initial: true}\\n  processed: {terminal: true}\\npins:\\n  inputs:\\n    - child.start\\n  outputs:\\n    - child.internal\\n\",\n",
           "after": "\t\t\"child/schema.yaml\": \"name: child\\nstages:\\n  waiting: {}\\n  processed: {final: true}\\npins:\\n  inputs:\\n    - child.start\\n  outputs:\\n    - child.internal\\n\",\n"
         },
         {
-          "offset": 49790,
+          "offset": 47498,
           "before": "\t\t\"schema.yaml\": \"stages:\\n  idle: {initial: true}\\n  done: {terminal: true}\\npins:\\n  inputs:\\n    - parent.trigger\\n  outputs:\\n    - parent.result\\n\",\n",
           "after": "\t\t\"schema.yaml\": \"stages:\\n  idle: {}\\n  done: {final: true}\\npins:\\n  inputs:\\n    - parent.trigger\\n  outputs:\\n    - parent.result\\n\",\n"
         },
         {
-          "offset": 50124,
+          "offset": 47832,
           "before": "\t\t\"child/schema.yaml\": \"name: child\\nstages:\\n  waiting: {initial: true}\\n  processed: {terminal: true}\\npins:\\n  inputs:\\n    - child.start\\n  outputs:\\n    - child.internal\\n\",\n",
           "after": "\t\t\"child/schema.yaml\": \"name: child\\nstages:\\n  waiting: {}\\n  processed: {final: true}\\npins:\\n  inputs:\\n    - child.start\\n  outputs:\\n    - child.internal\\n\",\n"
         },
         {
-          "offset": 55032,
+          "offset": 52740,
           "before": "\t\t\"schema.yaml\": \"stages:\\n  idle: {initial: true}\\n  done: {terminal: true}\\npins:\\n  outputs:\\n    - handoff.completed\\n\",\n",
           "after": "\t\t\"schema.yaml\": \"stages:\\n  idle: {}\\n  done: {final: true}\\npins:\\n  outputs:\\n    - handoff.completed\\n\",\n"
         },
         {
-          "offset": 55285,
+          "offset": 52993,
           "before": "\t\t\"child/schema.yaml\": \"name: child\\nstages:\\n  waiting: {initial: true}\\n  processed: {terminal: true}\\npins:\\n  outputs:\\n    - handoff.completed\\n\",\n",
           "after": "\t\t\"child/schema.yaml\": \"name: child\\nstages:\\n  waiting: {}\\n  processed: {final: true}\\npins:\\n  outputs:\\n    - handoff.completed\\n\",\n"
         },
         {
-          "offset": 59972,
+          "offset": 57680,
           "before": "\t\t\"schema.yaml\":   \"name: work\\nstages:\\n  active: {initial: true}\\n\",\n",
           "after": "\t\t\"schema.yaml\":   \"name: work\\nstages:\\n  active: {}\\n\",\n"
         }
@@ -4192,21 +4182,6 @@
             "queued"
           ],
           "finals": []
-        },
-        {
-          "site": "internal/runtime/pipeline/engine_adapter_test.go:442:27",
-          "entry": "pending",
-          "before_order": [
-            "pending",
-            "completed"
-          ],
-          "after_order": [
-            "pending",
-            "completed"
-          ],
-          "finals": [
-            "completed"
-          ]
         },
         {
           "site": "internal/runtime/pipeline/engine_adapter_test.go:775:25",
@@ -4384,8 +4359,8 @@
     },
     {
       "file": "internal/runtime/pipeline/entity_complete_snapshot_test.go",
-      "before_hash": "33fc964ea67e580830ce6e1be397f35bbd382d383dbf3987fa23ee19a10b7234",
-      "after_hash": "62dd9ed4a48c6f38f0781bf2c54cdc2eae641d0cc3f6997c422885ff4ddb6176",
+      "before_hash": "46f693db2d41c649717748d8c252be0335d8a5846c73c62c1ce99eed00304639",
+      "after_hash": "f9fd190122d51e7ad42585a8131d2dca98b4cd79f05ae2066cfe0a9566b8d125",
       "edits": [
         {
           "offset": 536,
@@ -4393,12 +4368,12 @@
           "after": "\t\t\t\t\"schema.yaml\":   \"stages:\\n  active: {}\\n\",\n"
         },
         {
-          "offset": 4053,
+          "offset": 4145,
           "before": "\t\t\t\t\"schema.yaml\":   \"stages:\\n  active: {initial: true}\\n\",\n",
           "after": "\t\t\t\t\"schema.yaml\":   \"stages:\\n  active: {}\\n\",\n"
         },
         {
-          "offset": 6623,
+          "offset": 6715,
           "before": "\t\t\t\t\t\t\"schema.yaml\": \"stages:\\n  active: {initial: true}\\n\",\n",
           "after": "\t\t\t\t\t\t\"schema.yaml\": \"stages:\\n  active: {}\\n\",\n"
         }
@@ -4737,17 +4712,101 @@
       ]
     },
     {
-      "file": "internal/runtime/pipeline/reviewer_2460_finalization_test.go",
-      "before_hash": "ac2362a9b81bf0ecab09d7ce51a4852bec6e5147056d5b675c93f71234135f85",
-      "after_hash": "64199f96132ddcb8a256ab14a5876363ab997d87d55dbad88709ff69aa60ba66",
+      "file": "internal/runtime/pipeline/issue2564_activity_result_retry_test.go",
+      "entry_source_revision": "c0f7c2ac5be811b373061a8075d9d603b74e3431",
+      "before_hash": "a73dce33456c03087c2d6ddd0132d9348559aa6a929581156212eec83e43fc7f",
+      "after_hash": "6573522bf4100aac261eb155e265bf5fc79537519385b6e6201d9d6022f5ed62",
       "edits": [
         {
-          "offset": 6176,
+          "offset": 15608,
+          "before": "\t\t\"schema.yaml\":   \"name: issue2564-m25\\nstages: {pending: {initial: true}}\\n\",\n",
+          "after": "\t\t\"schema.yaml\":   \"name: issue2564-m25\\nstages: {pending: {}}\\n\",\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "internal/runtime/pipeline/issue2564_activity_result_retry_test.go:280:20",
+          "entry": "pending",
+          "before_order": [
+            "pending"
+          ],
+          "after_order": [
+            "pending"
+          ],
+          "finals": []
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/pipeline/issue2564_h2_baseline_mechanisms_test.go",
+      "entry_source_revision": "c0f7c2ac5be811b373061a8075d9d603b74e3431",
+      "before_hash": "2a902918ee1e4a3a2ceef0a5b966ad8b755ca5de07fa7558e15a2a253184d4f3",
+      "after_hash": "dc213720529bd22ee2b6528c0122e7bba4ad5748eeb862f1450337943039e62e",
+      "edits": [
+        {
+          "offset": 6416,
+          "before": "\t\t\t\t\t\"schema.yaml\":   \"name: h2-mechanism-equivalent\\nstages:\\n  s1:\\n    initial: true\\n    timers: [{id: h2.s1_to_s2, after: 1s, advances_to: s2}]\\n  s2:\\n    timers: [{id: h2.s2_to_s1, after: 1s, advances_to: s1}]\\n  closed: {terminal: true}\\n\",\n",
+          "after": "\t\t\t\t\t\"schema.yaml\":   \"name: h2-mechanism-equivalent\\nstages:\\n  s1:\\n    timers: [{id: h2.s1_to_s2, after: 1s, advances_to: s2}]\\n  s2:\\n    timers: [{id: h2.s2_to_s1, after: 1s, advances_to: s1}]\\n  closed: {final: true}\\n\",\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "internal/runtime/pipeline/issue2564_h2_baseline_mechanisms_test.go:186:23",
+          "entry": "s1",
+          "before_order": [
+            "s1",
+            "s2",
+            "closed"
+          ],
+          "after_order": [
+            "s1",
+            "s2",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/pipeline/issue2564_publication_handoff_external_test.go",
+      "entry_source_revision": "c0f7c2ac5be811b373061a8075d9d603b74e3431",
+      "before_hash": "45e45d5b7da9ce8e9295bdadfe46e1886d241b9109a2a03485822a5397fd0aad",
+      "after_hash": "21d54e6addb741967087d06e7388d8cd21e6cdb848737a2991abe75f89b19863",
+      "edits": [
+        {
+          "offset": 3164,
+          "before": "  active: {initial: true}\n",
+          "after": "  active: {}\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "internal/runtime/pipeline/issue2564_publication_handoff_external_test.go:87:18",
+          "entry": "active",
+          "before_order": [
+            "active"
+          ],
+          "after_order": [
+            "active"
+          ],
+          "finals": []
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/pipeline/reviewer_2460_finalization_test.go",
+      "before_hash": "68137f3407b5f115cadbf7a7d85cbb280be42a9c6e3e6780ea18747760fb35d6",
+      "after_hash": "3ce14c9b64309aabeb0e6a09d278617a6af4732fb3690792f6a75b82aad1c3a4",
+      "edits": [
+        {
+          "offset": 6171,
           "before": "\t\t\t\t\"schema.yaml\":   \"name: retry-cleanup\\nstages:\\n  queued: {initial: true}\\n  done: {terminal: true}\\n\",\n",
           "after": "\t\t\t\t\"schema.yaml\":   \"name: retry-cleanup\\nstages:\\n  queued: {}\\n  done: {final: true}\\n\",\n"
         },
         {
-          "offset": 9601,
+          "offset": 9596,
           "before": "\t\t\t\t\"schema.yaml\":   \"name: committed-cleanup\\nstages:\\n  queued: {initial: true}\\n  done: {terminal: true}\\n\",\n",
           "after": "\t\t\t\t\"schema.yaml\":   \"name: committed-cleanup\\nstages:\\n  queued: {}\\n  done: {final: true}\\n\",\n"
         }
@@ -5199,26 +5258,26 @@
     },
     {
       "file": "internal/runtime/pipeline/workflow_gate_recovery_external_test.go",
-      "before_hash": "4c2b2d5aceb2c5f78bcc20fd00e4470e683cd54036ce69703a2fd5f83deb148e",
-      "after_hash": "1a7b9771185fc09bad61137b3b1e2eaa40df4043045edd26cae8c45088f90c20",
+      "before_hash": "5e895b103b4b2849f01e89b298387f1ff89d0440294e69da920206ebee77f514",
+      "after_hash": "b43de738399eaab53b496dda9321313289ce7887133ba29fd83b918cb9ca9d8d",
       "edits": [
         {
-          "offset": 67389,
+          "offset": 66515,
           "before": "\t\tstagecatalogfixture.NewTerminalCatalog(\n\t\t\tbundle.FlowTerminalStages(\".\"),\n\t\t\tmap[string][]string{\".\": bundle.FlowTerminalStages(\".\")},\n",
           "after": "\t\tstagecatalogfixture.NewFinalCatalog(\n\t\t\tbundle.FlowFinalStages(\".\"),\n\t\t\tmap[string][]string{\".\": bundle.FlowFinalStages(\".\")},\n"
         },
         {
-          "offset": 76189,
+          "offset": 75315,
           "before": "\t\t\"schema.yaml\":   \"name: support\\nstages:\\n  drafting: {initial: true}\\n\",\n",
           "after": "\t\t\"schema.yaml\":   \"name: support\\nstages:\\n  drafting: {}\\n\",\n"
         },
         {
-          "offset": 83153,
+          "offset": 82279,
           "before": "\t\toutcome = \"          advances_to: completed\\n  completed: {terminal: true}\\n\"\n",
           "after": "\t\toutcome = \"          advances_to: completed\\n  completed: {final: true}\\n\"\n"
         },
         {
-          "offset": 83323,
+          "offset": 82449,
           "before": "    initial: true\n",
           "after": ""
         }
@@ -5239,8 +5298,8 @@
     },
     {
       "file": "internal/runtime/pipeline/workflow_guard_cause_hostility_test.go",
-      "before_hash": "22efa1ed3d0e7e4bc36fb28fc7585c9fec8ff9254681394eca49b667a4b643f4",
-      "after_hash": "70e0d8a0d21e80885e4f7621796615881faad73028bc81efec7fe436c15752e4",
+      "before_hash": "32fc0feeed8d66f21ade705be43e1b3e789a75168895d99052a16a697ea1d4fe",
+      "after_hash": "76423bef8a45271cb2402847ec73ad6ddcd9b66072d76cf1ceb26fd65acd946c",
       "edits": [
         {
           "offset": 761,
@@ -5621,6 +5680,36 @@
       ]
     },
     {
+      "file": "internal/runtime/pipeline/workflow_timer_outcome_test.go",
+      "entry_source_revision": "c0f7c2ac5be811b373061a8075d9d603b74e3431",
+      "before_hash": "2f3357b09cf274817164afd489f23d19003dcc5df59eb491dc9055b8b561ac66",
+      "after_hash": "5b740cbfc1d9a41c4d7946ace68a98d706eb480d35342f12c36898e319e522b8",
+      "edits": [
+        {
+          "offset": 2509,
+          "before": "\t\t\t\t\"schema.yaml\": \"name: timer-fence-proof\\nstages:\\n  waiting:\\n    initial: true\\n    timers:\\n      - {id: waiting.timeout, after: 1h, advances_to: done}\\n  done: {terminal: true}\\n\",\n",
+          "after": "\t\t\t\t\"schema.yaml\": \"name: timer-fence-proof\\nstages:\\n  waiting:\\n    timers:\\n      - {id: waiting.timeout, after: 1h, advances_to: done}\\n  done: {final: true}\\n\",\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "internal/runtime/pipeline/workflow_timer_outcome_test.go:69:20",
+          "entry": "waiting",
+          "before_order": [
+            "waiting",
+            "done"
+          ],
+          "after_order": [
+            "waiting",
+            "done"
+          ],
+          "finals": [
+            "done"
+          ]
+        }
+      ]
+    },
+    {
       "file": "internal/runtime/pipeline/workflow_timer_owner_test.go",
       "before_hash": "e23e9a771088322c1f08168af03b650997d584a7f8209851ad5c85d8bf034661",
       "after_hash": "f7b1f7b120ecbdd23c67eddd53687255641b13ea841ebba04c68a1b8fc95938b",
@@ -5776,11 +5865,11 @@
     },
     {
       "file": "internal/runtime/pipeline/workflow_timer_preserved_state_proof_test.go",
-      "before_hash": "b5dc1fa6e19f4f27ead812689e4fc6b0d058d499ea75f1fce6c3fa94468677b9",
-      "after_hash": "e2e9fb0fbd1155baf204169267ebf10e6b5b7f9d3f40343ab2dc1b6f22608c2f",
+      "before_hash": "bf58017a8bf187a0906a13141c25b9e7a757ccf7c2fe47e049842e203c32f776",
+      "after_hash": "835e16beb496e4c95850d43b705e7b773e231cfc5499ff42e853f81e86477901",
       "edits": [
         {
-          "offset": 3595,
+          "offset": 3937,
           "before": "\t\t\t\t\t\t\"schema.yaml\": \"name: preserved-timer-proof\\nstages:\\n  waiting: {initial: true}\\n\",\n",
           "after": "\t\t\t\t\t\t\"schema.yaml\": \"name: preserved-timer-proof\\nstages:\\n  waiting: {}\\n\",\n"
         }
@@ -5866,8 +5955,8 @@
     },
     {
       "file": "internal/runtime/pipeline/workflow_transition_mutation_test.go",
-      "before_hash": "038f87abaf4fc5dd10231285d3a9d48aa64b18d461292a385f0439220f084157",
-      "after_hash": "ba5c03aac0d963dd07bc55305ff05e9279b616099da9993c0f9bbd0ef6168bce",
+      "before_hash": "00b88b6213dc3d273fba773240c916af539120729bea7d134b2ab9ffd80b1ac5",
+      "after_hash": "3552dd6b972b1712f46af5e32d0afb977fc7825e05102c302fec70bce1b9029d",
       "edits": [
         {
           "offset": 791,
@@ -7343,8 +7432,8 @@
     },
     {
       "file": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitters.go",
-      "before_hash": "1af56938e78ae84398d45afcde0413a6cd36e1e37befe7facae5c30ca2035422",
-      "after_hash": "96875f2928b13725c0f4d1edf76cf94e06e4d221d0b8c790c9677c00eb3513c8",
+      "before_hash": "35c2c8b3639e5399954532fc57ce2ab55f73ad22dc2189fea368c410dbd6384a",
+      "after_hash": "9bd21a94d7b648b25dfc6873d8157787d7ce97b6c530afb93dfc8b573f1e0b95",
       "edits": [
         {
           "offset": 425,
@@ -7397,32 +7486,32 @@
           "after": "\twriteClosedVariantFile(t, root, \"schema.yaml\", \"name: template-driver\\nstages:\\n  active: {}\\n  done: {final: true}\\npins:\\n  inputs:\\n    - work.observed\\n    - work.finished\\n\"+inputs+\"  outputs:\\n\"+outputs+\"connect:\\n\"+connects)\n"
         },
         {
-          "offset": 15827,
+          "offset": 15872,
           "before": "  waiting: {initial: true}\n",
           "after": "  waiting: {}\n"
         },
         {
-          "offset": 16077,
+          "offset": 16122,
           "before": "  done: {terminal: true}\n",
           "after": "  done: {final: true}\n"
         },
         {
-          "offset": 18927,
+          "offset": 19017,
           "before": "\t\twriteClosedVariantFile(t, root, \"ordinary/schema.yaml\", \"name: ordinary\\nstages:\\n  waiting: {initial: true}\\n  observed: {terminal: true}\\npins:\\n  inputs:\\n    - ordinary.repeated\\n\")\n",
           "after": "\t\twriteClosedVariantFile(t, root, \"ordinary/schema.yaml\", \"name: ordinary\\nstages:\\n  waiting: {}\\n  observed: {final: true}\\npins:\\n  inputs:\\n    - ordinary.repeated\\n\")\n"
         },
         {
-          "offset": 20134,
+          "offset": 21735,
           "before": "  waiting: {initial: true}\n",
           "after": "  waiting: {}\n"
         },
         {
-          "offset": 20189,
+          "offset": 21790,
           "before": "  escaped: {terminal: true}\n  done: {terminal: true}\n",
           "after": "  escaped: {final: true}\n  done: {final: true}\n"
         },
         {
-          "offset": 21558,
+          "offset": 23159,
           "before": "  waiting: {initial: true}\n  done: {terminal: true}\n",
           "after": "  waiting: {}\n  done: {final: true}\n"
         }
@@ -9341,6 +9430,197 @@
       ]
     },
     {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/final-entry-completion/schema.yaml",
+      "before_hash": "dcab86952c8da79814fc497a06601a5c1c18cd0f39acc9aea90adbfa1175ad48",
+      "after_hash": "e01fb6d4c5efa7d920d04b8c5e8a8c590c1b591251ebad17824bc635587ed4c4",
+      "edits": [
+        {
+          "offset": 39,
+          "before": "pins: {inputs: [overlap.start, overlap.arm, overlap.finish]}\n",
+          "after": "stages: {active: {}, done: {final: true}}\npins: {inputs: [overlap.start, overlap.arm, overlap.finish, overlap.root_closed]}\n"
+        }
+      ],
+      "equivalence": [],
+      "review": "Deliberate D2 fixture lifecycle: keep the routing root active through business-input admission, then end it with a separate declared overlap.root_closed control, fieldless primary entity and existing root handler. Held child ACK still blocks completion. Original business cardinality, public admission, acknowledged fields/history and no-retirement assertions remain. Not old-source equivalence."
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/final-entry-completion/work/schema.yaml",
+      "before_hash": "53d1f8a2bbf334ae7bce5d211ddd3bbee076c6c2d66f9e279040a3d7d242b83f",
+      "after_hash": "84437103ed6b10dd2b3d0b9ebb6075447bb700fc4bdd39f37432aad1792f2604",
+      "edits": [
+        {
+          "offset": 37,
+          "before": "  waiting: {initial: true}\n",
+          "after": "  waiting: {}\n"
+        },
+        {
+          "offset": 144,
+          "before": "  done: {terminal: true}\n",
+          "after": "  done: {final: true}\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "waiting",
+          "before_order": [
+            "waiting",
+            "timed",
+            "done"
+          ],
+          "after_order": [
+            "waiting",
+            "timed",
+            "done"
+          ],
+          "finals": [
+            "done"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h1/hub/schema.yaml",
+      "before_hash": "54a7caf1bddc8bdc801dd74fa623ccc5c25a075eb3b4e5b000bfd33bc1667353",
+      "after_hash": "3b87608e9eb71205e8471896d72bfda0549799d9c11566f5bc3dc392bf857150",
+      "edits": [
+        {
+          "offset": 27,
+          "before": "stages: {open: {initial: true}, active: {}, closed: {terminal: true}}\n",
+          "after": "stages: {open: {}, active: {}, closed: {final: true}}\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "open",
+          "before_order": [
+            "open",
+            "active",
+            "closed"
+          ],
+          "after_order": [
+            "open",
+            "active",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h2/hub/schema.yaml",
+      "before_hash": "1533a0394306a5285b0efeb876a92d537408bdba81f6780f6137cecee61dd18c",
+      "after_hash": "b8034fbabb1331e33bfdad3ca3d1b4368d9be977d67a40f9da7abfda5c7af081",
+      "edits": [
+        {
+          "offset": 41,
+          "before": "    initial: true\n",
+          "after": ""
+        },
+        {
+          "offset": 185,
+          "before": "  closed: {terminal: true}\n",
+          "after": "  closed: {final: true}\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "s1",
+          "before_order": [
+            "s1",
+            "s2",
+            "closed"
+          ],
+          "after_order": [
+            "s1",
+            "s2",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h3/hub/schema.yaml",
+      "before_hash": "c6df2b7a33de1d65ceffceced0464992fbbd903976876e0bfea525a6c187575a",
+      "after_hash": "2051c76e4ba3171731f665b4f64d547599df4a33c1c1c6afd99f2c4fa40d7365",
+      "edits": [
+        {
+          "offset": 35,
+          "before": "  idle: {initial: true}\n",
+          "after": "  idle: {}\n"
+        },
+        {
+          "offset": 73,
+          "before": "  closed: {terminal: true}\n",
+          "after": "  closed: {final: true}\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "idle",
+          "before_order": [
+            "idle",
+            "working",
+            "closed"
+          ],
+          "after_order": [
+            "idle",
+            "working",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/m33/hub/schema.yaml",
+      "before_hash": "8eb97a54a5ec59797a0e408680c43e67f2c3fe05ccd26f74882884c64d7cfbe9",
+      "after_hash": "df26c097ef39384026dc57a39ae7d89751e8b4984bf651aa2b1382d3ed10bf71",
+      "edits": [
+        {
+          "offset": 35,
+          "before": "  idle: {initial: true}\n",
+          "after": "  idle: {}\n"
+        },
+        {
+          "offset": 150,
+          "before": "  closed: {terminal: true}\n",
+          "after": "  closed: {final: true}\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "idle",
+          "before_order": [
+            "idle",
+            "working",
+            "review",
+            "closed"
+          ],
+          "after_order": [
+            "idle",
+            "working",
+            "review",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
       "file": "internal/runtime/testfixtures/canonicalrouting/wave1_expression.go",
       "before_hash": "cc088324e070e53a316bff489b21f3917229b8fd68df082f9c1801f34bf09d5a",
       "after_hash": "4eb3d787a52ba93b845de1c07e736c47845d59368af6c6f1191cef8b0125b2ae",
@@ -9476,14 +9756,46 @@
       ]
     },
     {
-      "file": "internal/runtime/tools/entity_sparse_mutation_test.go",
-      "before_hash": "6a47d6c0290195425e3db198beebbfd5ee715483a7855bec9f43698c3eb2c674",
-      "after_hash": "d81d1c74890dd4f174597d3893ed9cc1e93c024b989bda714a795c80dbfe076d",
+      "file": "internal/runtime/tools/entity_operation_surface_test.go",
+      "entry_source_revision": "c0f7c2ac5be811b373061a8075d9d603b74e3431",
+      "before_hash": "0721641248078ffa5d646b7a3d80805c5c8a89203731bc9d7b0d4243d286f625",
+      "after_hash": "26d1c2b284ade2d56979d52f1205a2e3d740bd188d99701ced7aad9d8bb24b08",
       "edits": [
         {
-          "offset": 3592,
-          "before": "\t\t\t\t\tSchemaYAML: \"name: work\\nstages:\\n  queued: {initial: true}\\n  done: {terminal: true}\\n\",\n",
-          "after": "\t\t\t\t\tSchemaYAML: \"name: work\\nstages:\\n  queued: {}\\n  done: {final: true}\\n\",\n"
+          "offset": 3024,
+          "before": "\t\t\tSchemaYAML:   \"name: review\\nstages:\\n  queued: {initial: true}\\n  marginal_review: {}\\n  closed: {terminal: true}\\n\",\n",
+          "after": "\t\t\tSchemaYAML:   \"name: review\\nstages:\\n  queued: {}\\n  marginal_review: {}\\n  closed: {final: true}\\n\",\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "internal/runtime/tools/entity_operation_surface_test.go:79:18",
+          "entry": "queued",
+          "before_order": [
+            "queued",
+            "marginal_review",
+            "closed"
+          ],
+          "after_order": [
+            "queued",
+            "marginal_review",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/tools/entity_sparse_mutation_test.go",
+      "before_hash": "60af53e7f0391df168b93ef4fecf11cb44962fbcfae15594f9e172fb0a8eac31",
+      "after_hash": "080d82980a688aa7ba0bc73db3f7bf259012f9965cefde6907ba737301f350df",
+      "edits": [
+        {
+          "offset": 9896,
+          "before": "\t\t\t\t\tSchemaYAML: \"name: work\\ninstance: fixture_key\\nstages:\\n  queued: {initial: true}\\n  done: {terminal: true}\\n\",\n",
+          "after": "\t\t\t\t\tSchemaYAML: \"name: work\\ninstance: fixture_key\\nstages:\\n  queued: {}\\n  done: {final: true}\\n\",\n"
         }
       ],
       "equivalence": [
@@ -9506,46 +9818,41 @@
     },
     {
       "file": "internal/runtime/tools/executor_entity_test.go",
-      "before_hash": "9c89508ffe7855f8872c09a27d02e8f5d4eb5c25f4ace934281b46dda32c828f",
-      "after_hash": "0aaf8e453f75c8c0a708afbc93a344b9829c877d0e68e76c15beefff7e95522b",
+      "before_hash": "e99048968838a5f6aff2f38d9d1ea4582aa04f63220476fb6f35fa5c23316556",
+      "after_hash": "6db44b972276ab70cd274dc02fd07cd496c1e976a021cc12ab852db81d918319",
       "edits": [
         {
-          "offset": 16949,
+          "offset": 17003,
           "before": "  queued: {initial: true}\n  closed: {terminal: true}\n",
           "after": "  queued: {}\n  closed: {final: true}\n"
         },
         {
-          "offset": 68139,
+          "offset": 69332,
           "before": "  active: {initial: true}\n  done: {terminal: true}\n",
           "after": "  active: {}\n  done: {final: true}\n"
         },
         {
-          "offset": 103586,
+          "offset": 106452,
+          "before": "  queued: {initial: %t}\n  marginal_review: {initial: %t}\n  closed: {terminal: true}\n`, flowID, initial == \"queued\", initial == \"marginal_review\"))\n",
+          "after": "  queued: {}\n  marginal_review: {}\n  closed: {final: true}\n`, flowID))\n"
+        },
+        {
+          "offset": 107588,
           "before": "  queued: {initial: true}\n",
           "after": "  queued: {}\n"
         },
         {
-          "offset": 103634,
+          "offset": 107626,
           "before": "  closed: {terminal: true}\n",
           "after": "  closed: {final: true}\n"
         },
         {
-          "offset": 104558,
+          "offset": 110436,
           "before": "  queued: {initial: true}\n",
           "after": "  queued: {}\n"
         },
         {
-          "offset": 104596,
-          "before": "  closed: {terminal: true}\n",
-          "after": "  closed: {final: true}\n"
-        },
-        {
-          "offset": 107364,
-          "before": "  queued: {initial: true}\n",
-          "after": "  queued: {}\n"
-        },
-        {
-          "offset": 107470,
+          "offset": 110542,
           "before": "  finished: {terminal: true}\n  closed: {terminal: true}\n  killed: {terminal: true}\n",
           "after": "  finished: {final: true}\n  closed: {final: true}\n  killed: {final: true}\n"
         }
@@ -9799,8 +10106,8 @@
     },
     {
       "file": "internal/serveapp/startup_creation_handoff_test.go",
-      "before_hash": "5ed1dedce817e588726b3ef933a44d6cec8f392bd1e0e8e5370170ea133226a6",
-      "after_hash": "f919890a34e51388bf52940b532617f609f23e959122784c9f8d17f706d9e9cd",
+      "before_hash": "613793fcd31556a414de4a12e9e433d2d4155b74cac7645ac386443a606ddad6",
+      "after_hash": "c4c99e80a263a90f9f8fe70fde8a728281cc813581e7523781e85df4cad95dbf",
       "edits": [
         {
           "offset": 5389,
@@ -10399,9 +10706,39 @@
       ]
     },
     {
+      "file": "internal/store/internal/runtimepersistence/issue2564_operations_test.go",
+      "entry_source_revision": "c0f7c2ac5be811b373061a8075d9d603b74e3431",
+      "before_hash": "1f4e262324470e16865fcc6e9175161ed8501fa57ce8cb9283e77fe42cf64e14",
+      "after_hash": "3d06d04d1e03c2678f30b385b61f0f5498fb20dd5cb94c95eba0acab014d2888",
+      "edits": [
+        {
+          "offset": 25025,
+          "before": "\t\t\"operations/schema.yaml\": \"name: operations\\ninstance: receiver_key\\nstages:\\n  active: {initial: true}\\n  done: {terminal: true}\\npins:\\n  inputs: [construct.requested]\\n\",\n",
+          "after": "\t\t\"operations/schema.yaml\": \"name: operations\\ninstance: receiver_key\\nstages:\\n  active: {}\\n  done: {final: true}\\npins:\\n  inputs: [construct.requested]\\n\",\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "internal/store/internal/runtimepersistence/issue2564_operations_test.go:435:29",
+          "entry": "active",
+          "before_order": [
+            "active",
+            "done"
+          ],
+          "after_order": [
+            "active",
+            "done"
+          ],
+          "finals": [
+            "done"
+          ]
+        }
+      ]
+    },
+    {
       "file": "internal/store/internal/runtimepersistence/receiver_config_activation_atomicity_test.go",
-      "before_hash": "a3322c203d4f12e5ffa4705102c4b540a69aeac2fad1f57b927e2efc3fadbd87",
-      "after_hash": "278eadb49ffc12033187f7d695f93fedd473df1f6160595d8bda52b941b9d29d",
+      "before_hash": "e2f40f92e90daca96afc1c299ec3be32e706bbd4eeebc940c759f9810a2e3826",
+      "after_hash": "592c578950d234c4b7a7fda9a1544390ee88bf94148294a07c682cb270323ed3",
       "edits": [
         {
           "offset": 3351,
@@ -10513,16 +10850,16 @@
     },
     {
       "file": "internal/store/internal/runtimepersistence/run_fork_activation_contention_test.go",
-      "before_hash": "5399a897951a7eaf234a8000b1a698fdcb872921625b0a35d3958fb3ace7de5f",
-      "after_hash": "a420961bd34039415aab967e8b9b289daa541dc5d2aee130e7109f8913ace071",
+      "before_hash": "8dc60411724d7a7fd74bdf9c28d4d8db0e3962e30c5078d9ebe5f8ba0245306d",
+      "after_hash": "fadb4b319e04793cfd4cd8a8df704435cf0e362e4f3e72ee736f9889ac6869ea",
       "edits": [
         {
-          "offset": 15716,
+          "offset": 15731,
           "before": "\t\t\"schema.yaml\":   \"name: generic-frontier\\nstages:\\n  pending: {initial: true}\\n  done: {}\\n\",\n",
           "after": "\t\t\"schema.yaml\":   \"name: generic-frontier\\nstages:\\n  pending: {}\\n  done: {}\\n\",\n"
         },
         {
-          "offset": 27521,
+          "offset": 27569,
           "before": "",
           "after": "\tassertRetainedStageCatalogsForFork(t, f.source, loaded.Source)\n"
         }
@@ -10596,18 +10933,19 @@
     },
     {
       "file": "internal/store/internal/runtimepersistence/run_fork_branch_point_activation_test.go",
-      "before_hash": "ca93aa155562982fa24db17a9d82db455cc4bc73f4f22c9907b7179e1515431e",
-      "after_hash": "d89fae99af8b62885aa96c1c5ce21681f3b6e41a53fe6324dcb2bf7b4553bc79",
+      "entry_source_revision": "c0f7c2ac5be811b373061a8075d9d603b74e3431",
+      "before_hash": "9506053996edc6b303af6e2c66f70c959124f82f4f86e5e24f571f54dce9e1f0",
+      "after_hash": "5bf57400ba6a84fdeb23cad2a141d1372c1f07955b96e8553d17c8b57ccb2de3",
       "edits": [
         {
-          "offset": 12023,
+          "offset": 12266,
           "before": "\t\t\"schema.yaml\": \"name: branch-revision\\nstages:\\n  pending: {initial: true}\\n  later: {terminal: true}\\npins:\\n  outputs:\\n    - records.ready\\n\",\n",
           "after": "\t\t\"schema.yaml\": \"name: branch-revision\\nstages:\\n  pending: {}\\n  later: {final: true}\\npins:\\n  outputs:\\n    - records.ready\\n\",\n"
         }
       ],
       "equivalence": [
         {
-          "site": "internal/store/internal/runtimepersistence/run_fork_branch_point_activation_test.go:219:18",
+          "site": "internal/store/internal/runtimepersistence/run_fork_branch_point_activation_test.go:225:18",
           "entry": "pending",
           "before_order": [
             "pending",
@@ -10990,8 +11328,8 @@
     },
     {
       "file": "platform-spec.yaml",
-      "before_hash": "64742038f881ab4b5afd82fe943f7891a41312caa29aa5d85294aafe82f8c073",
-      "after_hash": "1938935f8bcfa3ebe3733b313c3fb992ed5d2d3921b9cb49ce61c731de5cc297",
+      "before_hash": "f5c3b714b70f5432362d9e661ea42f08c6190682e7dcf3d5739d42320c3e2040",
+      "after_hash": "f167034c7f1f9183a0642b03e050ae64e0bb0de23cb85fb34fc5d3dad2ce1f24",
       "edits": [
         {
           "offset": 33663,
@@ -11034,57 +11372,57 @@
           "after": "          `stages.\u003cstage\u003e.timers`. Executable rows on final stages are rejected\n          at admission; new activation also consumes the same compiled final\n          fact. This cannot cancel or invalidate an accepted occurrence/retry.\n          Each row uses `after:` plus `emit:`,\n"
         },
         {
-          "offset": 206379,
+          "offset": 206891,
           "before": "    schema_yaml: \"stages:\\n  waiting: {initial: true}\\n  done: {terminal: true}\\npins:\\n  inputs: [hello.requested]\\n  outputs: [hello.completed]\"\n",
           "after": "    schema_yaml: \"stages:\\n  waiting: {}\\n  done: {final: true}\\npins:\\n  inputs: [hello.requested]\\n  outputs: [hello.completed]\"\n"
         },
         {
-          "offset": 272745,
+          "offset": 274167,
           "before": "",
           "after": "    entry_and_final_authority: |\n      Entry is the first effective node-backed stages declaration, never a\n      sorted map or a mutable projection. Optional final: true is the explicit\n      end choice; omission or false is non-final. No handler executes and no\n      new timer arms there. Explicit loop and join source restrictions cannot\n      widen this eligibility: an authored final source is rejected during\n      verification and is excluded from executable topology. Arrival-join\n      stage applicability is checked once for the declaration, whether its\n      outcomes advance, emit, or write data and whether it owns a deadline;\n      stage-free fan-out delivery joins retain their separate semantics. Final entry alone\n      cancels no accepted work, revokes no acknowledged writes, and creates no\n      resource-cleanup authority. No-final flows are valid services that never\n      complete; finite run.start rejects their selected constructor/route\n      closure before creation, including independently selected feed receivers.\n"
         },
         {
-          "offset": 794354,
+          "offset": 801921,
           "before": "      \\      - after: \\\"{{marginal_park_days}}d\\\"\\n        advances_to: expired\\n  expired:\\n    terminal: true\\n\\\n",
           "after": "      \\      - after: \\\"{{marginal_park_days}}d\\\"\\n        advances_to: expired\\n  expired:\\n    final: true\\n\\\n"
         },
         {
-          "offset": 845902,
+          "offset": 853469,
           "before": "        a non-empty stages mapping lacks exactly one initial stage, or a non-empty stages mapping declares no terminal\n        stage. Retired legacy lifecycle fields fail during source admission before boot.\n",
           "after": "        the declaration-order entry is missing from its compiled catalog, or final-stage gate/exit restrictions\n        are violated. No-final flows are valid services; finite completion admission belongs to run.start.\n        Retired lifecycle fields fail during source admission before boot.\n"
         },
         {
-          "offset": 1660652,
+          "offset": 1668936,
           "before": "          full public summary and snapshot reads remain strict. The entity projection consumes the admitted terminal\n          catalog; a missing, malformed, or nonterminal entity is never guessed terminal. Once those blocking\n",
           "after": "          full public summary and snapshot reads remain strict. The entity projection consumes the admitted final-stage\n          catalog; a missing, malformed, or non-final entity is never guessed final. Once those blocking\n"
         },
         {
-          "offset": 1661352,
+          "offset": 1669636,
           "before": "          subordinate reservation ownership. Entity ownership resolves exact terminal descriptors through the admitted\n          terminal catalog. Constructed headers use the exact authored template '.', including a fieldless root;\n",
           "after": "          subordinate reservation ownership. Entity ownership resolves exact final-stage descriptors through the admitted\n          final-stage catalog. Constructed headers use the exact authored template '.', including a fieldless root;\n"
         },
         {
-          "offset": 2002525,
+          "offset": 2011273,
           "before": "        rule: Handlers source from all non-terminal declared states of their already-constructed instance;\n",
           "after": "        rule: Handlers source from all non-final declared stages of their already-constructed instance;\n"
         },
         {
-          "offset": 2002715,
+          "offset": 2011463,
           "before": "      terminal_states:\n        rule: terminal states are sinks in this slice.\n",
           "after": "      final_stages:\n        rule: Optional authored final stages admit no handler execution or exit. Their membership\n          is not inferred from outdegree; a no-final service is structurally valid. Explicit loop\n          sources and arrival-join outcome sources cannot override final exclusion and must reject\n          on authored final-source presence rather than silently removing the offending declaration.\n"
         },
         {
-          "offset": 2725202,
+          "offset": 2734101,
           "before": "",
           "after": "      RUN_NEVER_COMPLETES:\n        type: object\n        additionalProperties: false\n        required: [flow_id, detail]\n        properties:\n          flow_id: {type: string}\n          detail: {type: string}\n        description: Finite run.start requires an explicit final stage in every instance-bearing flow of its canonical constructor/routing closure. A no-final service remains valid for serve.\n"
         },
         {
-          "offset": 2759623,
+          "offset": 2768522,
           "before": "",
           "after": "        After exact source/input/feed admission, including canonical event payload preflight,\n        and before either atomic creation owner, require an explicit final stage for the selected root,\n        eagerly constructed keyless descendants, and possible compiled routing receivers/templates and\n        their constructor children. Independently selected nested imports and pins seed this closure\n        with the exact receivers matched by their already-admitted declaration/routing evidence;\n        they do not instantiate the source producer or select its unrelated output routes.\n        Unknown or contradictory catalog evidence fails closed. Do not\n        infer sink stages, guess CEL outcomes, inspect unrelated dormant filesystem declarations, or\n        treat stateless instances as exempt containers. A no-final service is structurally valid but\n        refuses finite initiation with RUN_NEVER_COMPLETES and the exact offending flow.\n        Malformed event payloads fail PAYLOAD_VALIDATION_FAILED before this finite-eligibility\n        check; a valid payload cannot waive the no-final refusal. Committed\n        idempotency replay/conflicts retain their existing owners; existing-run event.publish and\n        standing/schedule/serve starts are not finite initiation. Refusal occurs before run, event,\n        resource, feed and permanent-receipt effects.\n\n"
         },
         {
-          "offset": 2762402,
+          "offset": 2771301,
           "before": "",
           "after": "      - RUN_NEVER_COMPLETES\n"
         }

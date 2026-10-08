@@ -1707,21 +1707,6 @@
   {
     "file": "internal/runtime/pipeline/engine_adapter_test.go",
     "source": "internal/runtime/pipeline/engine_adapter_test.go",
-    "flow": "TestPrepareTerminalFlowInstanceDeactivationPassesTerminalState/literal-4",
-    "entry": "pending",
-    "order": [
-      "pending",
-      "completed"
-    ],
-    "finals": [
-      "completed"
-    ],
-    "function": "TestPrepareTerminalFlowInstanceDeactivationPassesTerminalState",
-    "literal": 4
-  },
-  {
-    "file": "internal/runtime/pipeline/engine_adapter_test.go",
-    "source": "internal/runtime/pipeline/engine_adapter_test.go",
     "flow": "TestPipelineEngineStateRepoLoadStateMissingEntityDoesNotMaterializeDefaults/literal-4",
     "entry": "queued",
     "order": [
@@ -2129,6 +2114,46 @@
     ],
     "finals": [],
     "function": "TestEntitylessPayloadGuardDoesNotPublishOrMaterializeOnBothStores",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/issue2564_activity_result_retry_test.go",
+    "source": "internal/runtime/pipeline/issue2564_activity_result_retry_test.go",
+    "flow": "issue2564M25Bundle/literal-2",
+    "entry": "pending",
+    "order": [
+      "pending"
+    ],
+    "finals": [],
+    "function": "issue2564M25Bundle",
+    "literal": 2
+  },
+  {
+    "file": "internal/runtime/pipeline/issue2564_h2_baseline_mechanisms_test.go",
+    "source": "internal/runtime/pipeline/issue2564_h2_baseline_mechanisms_test.go",
+    "flow": "VerifyIssue2564H2BaselineMechanismsForTest/literal-8",
+    "entry": "s1",
+    "order": [
+      "s1",
+      "s2",
+      "closed"
+    ],
+    "finals": [
+      "closed"
+    ],
+    "function": "VerifyIssue2564H2BaselineMechanismsForTest",
+    "literal": 8
+  },
+  {
+    "file": "internal/runtime/pipeline/issue2564_publication_handoff_external_test.go",
+    "source": "internal/runtime/pipeline/issue2564_publication_handoff_external_test.go",
+    "flow": "newIssue2564PublicationFixture/literal-2",
+    "entry": "active",
+    "order": [
+      "active"
+    ],
+    "finals": [],
+    "function": "newIssue2564PublicationFixture",
     "literal": 2
   },
   {
@@ -2546,6 +2571,21 @@
       "done"
     ],
     "function": "VerifyWorkflowHandlerFailureDiagnosticPersistsOnBothStoresForTest",
+    "literal": 4
+  },
+  {
+    "file": "internal/runtime/pipeline/workflow_timer_outcome_test.go",
+    "source": "internal/runtime/pipeline/workflow_timer_outcome_test.go",
+    "flow": "VerifyWorkflowTimerTransitionEntityFenceForTest/literal-4",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "VerifyWorkflowTimerTransitionEntityFenceForTest",
     "literal": 4
   },
   {
@@ -4575,6 +4615,77 @@
     "finals": []
   },
   {
+    "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/final-entry-completion/work/schema.yaml",
+    "source": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/final-entry-completion",
+    "flow": "work",
+    "entry": "waiting",
+    "order": [
+      "waiting",
+      "timed",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ]
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h1/hub/schema.yaml",
+    "source": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h1",
+    "flow": "hub",
+    "entry": "open",
+    "order": [
+      "open",
+      "active",
+      "closed"
+    ],
+    "finals": [
+      "closed"
+    ]
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h2/hub/schema.yaml",
+    "source": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h2",
+    "flow": "hub",
+    "entry": "s1",
+    "order": [
+      "s1",
+      "s2",
+      "closed"
+    ],
+    "finals": [
+      "closed"
+    ]
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h3/hub/schema.yaml",
+    "source": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h3",
+    "flow": "hub",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "working",
+      "closed"
+    ],
+    "finals": [
+      "closed"
+    ]
+  },
+  {
+    "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/m33/hub/schema.yaml",
+    "source": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/m33",
+    "flow": "hub",
+    "entry": "idle",
+    "order": [
+      "idle",
+      "working",
+      "review",
+      "closed"
+    ],
+    "finals": [
+      "closed"
+    ]
+  },
+  {
     "file": "internal/runtime/testfixtures/canonicalrouting/wave1_expression.go",
     "source": "internal/runtime/testfixtures/canonicalrouting/wave1_expression.go",
     "flow": "CopyWave1Expression/literal-7",
@@ -4643,6 +4754,22 @@
     "finals": [],
     "function": "TestLoadRejectsGeneratedEmitToolSchemaWithUnresolvedFlowLocalType",
     "literal": 16
+  },
+  {
+    "file": "internal/runtime/tools/entity_operation_surface_test.go",
+    "source": "internal/runtime/tools/entity_operation_surface_test.go",
+    "flow": "newOperationSurfaceFixture/literal-6",
+    "entry": "queued",
+    "order": [
+      "queued",
+      "marginal_review",
+      "closed"
+    ],
+    "finals": [
+      "closed"
+    ],
+    "function": "newOperationSurfaceFixture",
+    "literal": 6
   },
   {
     "file": "internal/runtime/tools/entity_sparse_mutation_test.go",
@@ -5122,6 +5249,21 @@
     "literal": 4
   },
   {
+    "file": "internal/store/internal/runtimepersistence/issue2564_operations_test.go",
+    "source": "internal/store/internal/runtimepersistence/issue2564_operations_test.go",
+    "flow": "newIssue2564OperationFixture/literal-9",
+    "entry": "active",
+    "order": [
+      "active",
+      "done"
+    ],
+    "finals": [
+      "done"
+    ],
+    "function": "newIssue2564OperationFixture",
+    "literal": 9
+  },
+  {
     "file": "internal/store/internal/runtimepersistence/receiver_config_activation_atomicity_test.go",
     "source": "internal/store/internal/runtimepersistence/receiver_config_activation_atomicity_test.go",
     "flow": "newReceiverConfigActivationFixtureWithTimerAndCommitter/literal-4",
@@ -5215,7 +5357,7 @@
   {
     "file": "internal/store/internal/runtimepersistence/run_fork_branch_point_activation_test.go",
     "source": "internal/store/internal/runtimepersistence/run_fork_branch_point_activation_test.go",
-    "flow": "newBranchPointFixture/literal-2",
+    "flow": "newBranchPointDeploymentFixture/literal-2",
     "entry": "pending",
     "order": [
       "pending",
@@ -5224,7 +5366,7 @@
     "finals": [
       "later"
     ],
-    "function": "newBranchPointFixture",
+    "function": "newBranchPointDeploymentFixture",
     "literal": 2
   },
   {

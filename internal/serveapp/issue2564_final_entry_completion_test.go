@@ -50,6 +50,7 @@ func issue2564H2FinalEntryCompletion(t *testing.T, backend string, acceptedTimer
 	unblock := func() { releaseOnce.Do(func() { close(release) }) }
 	defer unblock()
 	var acknowledgments, retirements atomic.Int32
+	var completionEntity atomic.Value
 	opts.TestLifecycleProbe = issue2564H2CompletionObserver(func(ctx context.Context, signal lifecycleprobe.Signal) {
 		probe.NotifyLifecycle(ctx, signal)
 		if signal.Kind == lifecycleprobe.WorkflowTerminalCommitted {
@@ -75,7 +76,7 @@ func issue2564H2FinalEntryCompletion(t *testing.T, backend string, acceptedTimer
 	})
 	if acceptedTimer {
 		opts.TestEntityStateHook = func(entityID, state string) {
-			if state != "done" || acknowledgments.Add(1) != 1 {
+			if state != "done" || completionEntity.Load() != entityID || acknowledgments.Add(1) != 1 {
 				return
 			}
 			held <- entityID
@@ -97,6 +98,7 @@ func issue2564H2FinalEntryCompletion(t *testing.T, backend string, acceptedTimer
 		"payload": map[string]any{"case_id": "ordering"}, "idempotency_key": "ordering-start",
 	})
 	entityID := rt.waitEntityStage(t, seed.RunID, "", "waiting")
+	completionEntity.Store(entityID)
 	rt.waitDeliveries(t, seed.RunID)
 	entity, err := rt.selected.LoadOperatorEntity(t.Context(), entityID, seed.RunID)
 	if err != nil {
@@ -129,6 +131,13 @@ func issue2564H2FinalEntryCompletion(t *testing.T, backend string, acceptedTimer
 	case <-time.After(servedProofPollDeadline):
 		t.Fatalf("final-entry ACK hook never entered\n%s\n%s", issue2564H2CompletionReceipt(t, rt, seed.RunID), process.outputString())
 	}
+	// Close the routing root after business input admission; the child's actual
+	// acknowledgment or pending timer receipt still determines completion.
+	requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+		"event_name": "overlap.root_closed", "run_id": seed.RunID,
+		"payload": map[string]any{}, "idempotency_key": "ordering-root-close",
+	})
+	rt.waitEntityStage(t, seed.RunID, seed.RunID, "done")
 	ack := issue2564H2CompletionWorkflow(t, rt, owner)
 	transitions := 1
 	if acceptedTimer {

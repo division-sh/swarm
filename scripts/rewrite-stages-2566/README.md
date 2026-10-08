@@ -31,9 +31,10 @@ branches also retain their original assertions: entry-selection variants now
 move exact declarations instead of setting markers. No generic YAML re-dump is
 used, and preparing a non-first marked entry fails for explicit review.
 
-`entries.json` permanently checks 204 baseline-reviewed disk source/flow/entry
-tuples against current typed admission. A sorted-but-still-reachable hostile
-fixture proves reachability cannot replace this guard. Later intentional entry
+`entries.json` permanently checks 566 baseline-reviewed source/flow/entry
+tuples: 214 disk declarations and 352 embedded declarations. A
+sorted-but-still-reachable hostile fixture proves reachability cannot replace
+this guard. Later intentional entry
 changes must update the affected golden explicitly; this does not freeze other
 fixture bytes or require maintaining the historical rewrite hashes forever.
 
@@ -42,8 +43,7 @@ Post-rebase capture preserves those decisions instead of deriving intent from
 the new parser. To refresh exact integration edits after a reviewed repair:
 
 ```sh
-go run ./scripts/rewrite-stages-2566 -refresh-baseline af250de63 \
-  -reviewed-plan-revision bd43e4a8d
+go run ./scripts/rewrite-stages-2566 -refresh-baseline c0f7c2ac5
 go run ./scripts/rewrite-stages-2566 -prove
 go test ./scripts/rewrite-stages-2566 -race -count=3
 ```
@@ -61,6 +61,14 @@ census pin their own `entry_source_revision`; this is offline proof provenance,
 not a runtime fallback. The cheap incoming-source test reads the actual Docker
 source without taking its opt-in skip; real transport still needs the opt-in run.
 
+`rebase-2582-fixtures.json` records six complete Go literals, five child schemas
+and the already-reviewed explicit root-close fixture against c0f7c2ac5. The
+main inventory retains 552 original decisions, the three earlier incoming
+decisions and 11 new A decisions. One deactivation-test golden is retired with
+the removed capability; its replacement is the public H2 completion proof.
+The relocated branch-point fixture keeps its pending/later order and final
+membership through an explicit source-selector update, not a fallback search.
+
 `finite-fixtures.json` is the supplemental plan for the release and generated
 finite-call fixtures whose roots previously had no final stage. It
 does not reinterpret the original entry/end equivalence decisions or mark
@@ -71,9 +79,9 @@ go run ./scripts/rewrite-stages-2566 -ledger scripts/rewrite-stages-2566/finite-
 go run ./scripts/rewrite-stages-2566 -ledger scripts/rewrite-stages-2566/finite-fixtures.json -prove
 ```
 
-The finite-caller regression checks 16 actual loaded root/constructor/connection
+The finite-caller regression checks 18 actual loaded root/constructor/connection
 closures, including generated feed sources and ordinary source verification.
-The no-final census explicitly classifies the 38 remaining disk roots, and
+The no-final census explicitly classifies the 43 remaining disk roots, and
 deliberate service variants still refuse finite initiation. Reusable collectors
 have an explicit close path, not end-on-first-row or decorative final stages.
 Real release execution still must

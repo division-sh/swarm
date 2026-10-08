@@ -1,0 +1,353 @@
+{
+  "baseline": "c0f7c2ac5be811b373061a8075d9d603b74e3431",
+  "scope": "incoming #2582 stage cut: six complete Go literals, five child stage schemas and the independently accepted explicit root-close completion fixture",
+  "changes": [
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h1/hub/schema.yaml",
+      "before_hash": "54a7caf1bddc8bdc801dd74fa623ccc5c25a075eb3b4e5b000bfd33bc1667353",
+      "after_hash": "3b87608e9eb71205e8471896d72bfda0549799d9c11566f5bc3dc392bf857150",
+      "edits": [
+        {
+          "offset": 0,
+          "before": "name: hub\ninstance: hub_id\nstages: {open: {initial: true}, active: {}, closed: {terminal: true}}\npins: {inputs: [hub.start, hub.bump, hub.close, hub.again]}\n",
+          "after": "name: hub\ninstance: hub_id\nstages: {open: {}, active: {}, closed: {final: true}}\npins: {inputs: [hub.start, hub.bump, hub.close, hub.again]}\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "open",
+          "before_order": [
+            "open",
+            "active",
+            "closed"
+          ],
+          "after_order": [
+            "open",
+            "active",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h2/hub/schema.yaml",
+      "before_hash": "1533a0394306a5285b0efeb876a92d537408bdba81f6780f6137cecee61dd18c",
+      "after_hash": "b8034fbabb1331e33bfdad3ca3d1b4368d9be977d67a40f9da7abfda5c7af081",
+      "edits": [
+        {
+          "offset": 0,
+          "before": "name: hub\ninstance: hub_id\nstages:\n  s1:\n    initial: true\n    timers: [{id: h2.s1_to_s2, after: 1s, advances_to: s2}]\n  s2:\n    timers: [{id: h2.s2_to_s1, after: 1s, advances_to: s1}]\n  closed: {terminal: true}\npins: {inputs: [hub.start, hub.bump, hub.close]}\n",
+          "after": "name: hub\ninstance: hub_id\nstages:\n  s1:\n    timers: [{id: h2.s1_to_s2, after: 1s, advances_to: s2}]\n  s2:\n    timers: [{id: h2.s2_to_s1, after: 1s, advances_to: s1}]\n  closed: {final: true}\npins: {inputs: [hub.start, hub.bump, hub.close]}\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "s1",
+          "before_order": [
+            "s1",
+            "s2",
+            "closed"
+          ],
+          "after_order": [
+            "s1",
+            "s2",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h3/hub/schema.yaml",
+      "before_hash": "c6df2b7a33de1d65ceffceced0464992fbbd903976876e0bfea525a6c187575a",
+      "after_hash": "2051c76e4ba3171731f665b4f64d547599df4a33c1c1c6afd99f2c4fa40d7365",
+      "edits": [
+        {
+          "offset": 0,
+          "before": "name: hub\ninstance: hub_id\nstages:\n  idle: {initial: true}\n  working: {}\n  closed: {terminal: true}\npins:\n  inputs: [hub.start, hub.begin, hub.close]\n",
+          "after": "name: hub\ninstance: hub_id\nstages:\n  idle: {}\n  working: {}\n  closed: {final: true}\npins:\n  inputs: [hub.start, hub.begin, hub.close]\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "idle",
+          "before_order": [
+            "idle",
+            "working",
+            "closed"
+          ],
+          "after_order": [
+            "idle",
+            "working",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/m33/hub/schema.yaml",
+      "before_hash": "8eb97a54a5ec59797a0e408680c43e67f2c3fe05ccd26f74882884c64d7cfbe9",
+      "after_hash": "df26c097ef39384026dc57a39ae7d89751e8b4984bf651aa2b1382d3ed10bf71",
+      "edits": [
+        {
+          "offset": 0,
+          "before": "name: hub\ninstance: hub_id\nstages:\n  idle: {initial: true}\n  working:\n    timers:\n      - {id: deadline, after: 5s, advances_to: review}\n  review: {}\n  closed: {terminal: true}\npins:\n  inputs: [hub.start, hub.begin, hub.close]\n",
+          "after": "name: hub\ninstance: hub_id\nstages:\n  idle: {}\n  working:\n    timers:\n      - {id: deadline, after: 5s, advances_to: review}\n  review: {}\n  closed: {final: true}\npins:\n  inputs: [hub.start, hub.begin, hub.close]\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "idle",
+          "before_order": [
+            "idle",
+            "working",
+            "review",
+            "closed"
+          ],
+          "after_order": [
+            "idle",
+            "working",
+            "review",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/final-entry-completion/work/schema.yaml",
+      "before_hash": "53d1f8a2bbf334ae7bce5d211ddd3bbee076c6c2d66f9e279040a3d7d242b83f",
+      "after_hash": "84437103ed6b10dd2b3d0b9ebb6075447bb700fc4bdd39f37432aad1792f2604",
+      "edits": [
+        {
+          "offset": 0,
+          "before": "name: work\ninstance: case_id\nstages:\n  waiting: {initial: true}\n  timed:\n    timers: [{id: overlap.finish_final, after: 1s, advances_to: done}]\n  done: {terminal: true}\npins: {inputs: [overlap.start, overlap.arm, overlap.finish]}\n",
+          "after": "name: work\ninstance: case_id\nstages:\n  waiting: {}\n  timed:\n    timers: [{id: overlap.finish_final, after: 1s, advances_to: done}]\n  done: {final: true}\npins: {inputs: [overlap.start, overlap.arm, overlap.finish]}\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "whole-file",
+          "entry": "waiting",
+          "before_order": [
+            "waiting",
+            "timed",
+            "done"
+          ],
+          "after_order": [
+            "waiting",
+            "timed",
+            "done"
+          ],
+          "finals": [
+            "done"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/final-entry-completion/schema.yaml",
+      "before_hash": "dcab86952c8da79814fc497a06601a5c1c18cd0f39acc9aea90adbfa1175ad48",
+      "after_hash": "e01fb6d4c5efa7d920d04b8c5e8a8c590c1b591251ebad17824bc635587ed4c4",
+      "edits": [
+        {
+          "offset": 0,
+          "before": "name: issue2564-final-entry-completion\npins: {inputs: [overlap.start, overlap.arm, overlap.finish]}\nconnect:\n  - {event: overlap.start, from: ., to: work, resolution: select-or-create}\n  - {event: overlap.arm, from: ., to: work, resolution: select}\n  - {event: overlap.finish, from: ., to: work, resolution: select}\n",
+          "after": "name: issue2564-final-entry-completion\nstages: {active: {}, done: {final: true}}\npins: {inputs: [overlap.start, overlap.arm, overlap.finish, overlap.root_closed]}\nconnect:\n  - {event: overlap.start, from: ., to: work, resolution: select-or-create}\n  - {event: overlap.arm, from: ., to: work, resolution: select}\n  - {event: overlap.finish, from: ., to: work, resolution: select}\n"
+        }
+      ],
+      "equivalence": [],
+      "review": "Deliberate D2 fixture lifecycle: keep the routing root active through business-input admission, then end it with a separate declared overlap.root_closed control, fieldless primary entity and existing root handler. Held child ACK still blocks completion. Original business cardinality, public admission, acknowledged fields/history and no-retirement assertions remain. Not old-source equivalence."
+    },
+    {
+      "file": "internal/runtime/pipeline/issue2564_activity_result_retry_test.go",
+      "entry_source_revision": "c0f7c2ac5be811b373061a8075d9d603b74e3431",
+      "before_hash": "a73dce33456c03087c2d6ddd0132d9348559aa6a929581156212eec83e43fc7f",
+      "after_hash": "6573522bf4100aac261eb155e265bf5fc79537519385b6e6201d9d6022f5ed62",
+      "edits": [
+        {
+          "offset": 15608,
+          "before": "\t\t\"schema.yaml\":   \"name: issue2564-m25\\nstages: {pending: {initial: true}}\\n\",\n",
+          "after": "\t\t\"schema.yaml\":   \"name: issue2564-m25\\nstages: {pending: {}}\\n\",\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "internal/runtime/pipeline/issue2564_activity_result_retry_test.go:280:20",
+          "entry": "pending",
+          "before_order": [
+            "pending"
+          ],
+          "after_order": [
+            "pending"
+          ],
+          "finals": []
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/pipeline/issue2564_h2_baseline_mechanisms_test.go",
+      "entry_source_revision": "c0f7c2ac5be811b373061a8075d9d603b74e3431",
+      "before_hash": "2a902918ee1e4a3a2ceef0a5b966ad8b755ca5de07fa7558e15a2a253184d4f3",
+      "after_hash": "dc213720529bd22ee2b6528c0122e7bba4ad5748eeb862f1450337943039e62e",
+      "edits": [
+        {
+          "offset": 6416,
+          "before": "\t\t\t\t\t\"schema.yaml\":   \"name: h2-mechanism-equivalent\\nstages:\\n  s1:\\n    initial: true\\n    timers: [{id: h2.s1_to_s2, after: 1s, advances_to: s2}]\\n  s2:\\n    timers: [{id: h2.s2_to_s1, after: 1s, advances_to: s1}]\\n  closed: {terminal: true}\\n\",\n",
+          "after": "\t\t\t\t\t\"schema.yaml\":   \"name: h2-mechanism-equivalent\\nstages:\\n  s1:\\n    timers: [{id: h2.s1_to_s2, after: 1s, advances_to: s2}]\\n  s2:\\n    timers: [{id: h2.s2_to_s1, after: 1s, advances_to: s1}]\\n  closed: {final: true}\\n\",\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "internal/runtime/pipeline/issue2564_h2_baseline_mechanisms_test.go:186:23",
+          "entry": "s1",
+          "before_order": [
+            "s1",
+            "s2",
+            "closed"
+          ],
+          "after_order": [
+            "s1",
+            "s2",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/pipeline/issue2564_publication_handoff_external_test.go",
+      "entry_source_revision": "c0f7c2ac5be811b373061a8075d9d603b74e3431",
+      "before_hash": "45e45d5b7da9ce8e9295bdadfe46e1886d241b9109a2a03485822a5397fd0aad",
+      "after_hash": "21d54e6addb741967087d06e7388d8cd21e6cdb848737a2991abe75f89b19863",
+      "edits": [
+        {
+          "offset": 3164,
+          "before": "  active: {initial: true}\n",
+          "after": "  active: {}\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "internal/runtime/pipeline/issue2564_publication_handoff_external_test.go:87:18",
+          "entry": "active",
+          "before_order": [
+            "active"
+          ],
+          "after_order": [
+            "active"
+          ],
+          "finals": []
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/pipeline/workflow_timer_outcome_test.go",
+      "entry_source_revision": "c0f7c2ac5be811b373061a8075d9d603b74e3431",
+      "before_hash": "2f3357b09cf274817164afd489f23d19003dcc5df59eb491dc9055b8b561ac66",
+      "after_hash": "5b740cbfc1d9a41c4d7946ace68a98d706eb480d35342f12c36898e319e522b8",
+      "edits": [
+        {
+          "offset": 2509,
+          "before": "\t\t\t\t\"schema.yaml\": \"name: timer-fence-proof\\nstages:\\n  waiting:\\n    initial: true\\n    timers:\\n      - {id: waiting.timeout, after: 1h, advances_to: done}\\n  done: {terminal: true}\\n\",\n",
+          "after": "\t\t\t\t\"schema.yaml\": \"name: timer-fence-proof\\nstages:\\n  waiting:\\n    timers:\\n      - {id: waiting.timeout, after: 1h, advances_to: done}\\n  done: {final: true}\\n\",\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "internal/runtime/pipeline/workflow_timer_outcome_test.go:69:20",
+          "entry": "waiting",
+          "before_order": [
+            "waiting",
+            "done"
+          ],
+          "after_order": [
+            "waiting",
+            "done"
+          ],
+          "finals": [
+            "done"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/runtime/tools/entity_operation_surface_test.go",
+      "entry_source_revision": "c0f7c2ac5be811b373061a8075d9d603b74e3431",
+      "before_hash": "0721641248078ffa5d646b7a3d80805c5c8a89203731bc9d7b0d4243d286f625",
+      "after_hash": "26d1c2b284ade2d56979d52f1205a2e3d740bd188d99701ced7aad9d8bb24b08",
+      "edits": [
+        {
+          "offset": 3024,
+          "before": "\t\t\tSchemaYAML:   \"name: review\\nstages:\\n  queued: {initial: true}\\n  marginal_review: {}\\n  closed: {terminal: true}\\n\",\n",
+          "after": "\t\t\tSchemaYAML:   \"name: review\\nstages:\\n  queued: {}\\n  marginal_review: {}\\n  closed: {final: true}\\n\",\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "internal/runtime/tools/entity_operation_surface_test.go:79:18",
+          "entry": "queued",
+          "before_order": [
+            "queued",
+            "marginal_review",
+            "closed"
+          ],
+          "after_order": [
+            "queued",
+            "marginal_review",
+            "closed"
+          ],
+          "finals": [
+            "closed"
+          ]
+        }
+      ]
+    },
+    {
+      "file": "internal/store/internal/runtimepersistence/issue2564_operations_test.go",
+      "entry_source_revision": "c0f7c2ac5be811b373061a8075d9d603b74e3431",
+      "before_hash": "1f4e262324470e16865fcc6e9175161ed8501fa57ce8cb9283e77fe42cf64e14",
+      "after_hash": "3d06d04d1e03c2678f30b385b61f0f5498fb20dd5cb94c95eba0acab014d2888",
+      "edits": [
+        {
+          "offset": 25025,
+          "before": "\t\t\"operations/schema.yaml\": \"name: operations\\ninstance: receiver_key\\nstages:\\n  active: {initial: true}\\n  done: {terminal: true}\\npins:\\n  inputs: [construct.requested]\\n\",\n",
+          "after": "\t\t\"operations/schema.yaml\": \"name: operations\\ninstance: receiver_key\\nstages:\\n  active: {}\\n  done: {final: true}\\npins:\\n  inputs: [construct.requested]\\n\",\n"
+        }
+      ],
+      "equivalence": [
+        {
+          "site": "internal/store/internal/runtimepersistence/issue2564_operations_test.go:435:29",
+          "entry": "active",
+          "before_order": [
+            "active",
+            "done"
+          ],
+          "after_order": [
+            "active",
+            "done"
+          ],
+          "finals": [
+            "done"
+          ]
+        }
+      ]
+    }
+  ]
+}

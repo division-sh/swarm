@@ -74,6 +74,10 @@ func TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens(t *testing.T) {
 		expected []entryGolden
 	}
 	fixtures := []generatedFixture{
+		{"accepted-final-entry-completion", canonicalrouting.CopyIssue2564FinalEntryCompletion, []entryGolden{
+			{Flow: ".", Entry: "active", Order: []string{"active", "done"}, Finals: []string{"done"}},
+			{Flow: "work", Entry: "waiting", Order: []string{"waiting", "timed", "done"}, Finals: []string{"done"}},
+		}},
 		{"numeric-scenario-overlay", func(t testing.TB) string {
 			root := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
 			canonicalrouting.InstallNovelNumericScenarioLifecycle(t, root)
