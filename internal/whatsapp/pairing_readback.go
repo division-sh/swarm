@@ -24,6 +24,9 @@ func (q *pairingQR) readAuthorized(ctx context.Context, principal operatorchanne
 		return pairingQRSnapshot{}, errPairingScope
 	}
 	op, err := operations.GetChannelOnboarding(ctx, q.scope.OperationID)
+	if ctx.Err() != nil {
+		return pairingQRSnapshot{}, errPairingStopped
+	}
 	if err != nil {
 		return pairingQRSnapshot{}, err
 	}
@@ -33,5 +36,9 @@ func (q *pairingQR) readAuthorized(ctx context.Context, principal operatorchanne
 		op.Revision < 1 || op.RequestedAt.IsZero() || !op.CompletedAt.IsZero() {
 		return pairingQRSnapshot{}, errPairingScope
 	}
-	return q.read(q.scope)
+	result, err := q.read(q.scope)
+	if ctx.Err() != nil {
+		return pairingQRSnapshot{}, errPairingStopped
+	}
+	return result, err
 }
