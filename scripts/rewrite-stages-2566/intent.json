@@ -9819,8 +9819,13 @@
     {
       "file": "internal/runtime/tools/executor_entity_test.go",
       "before_hash": "e99048968838a5f6aff2f38d9d1ea4582aa04f63220476fb6f35fa5c23316556",
-      "after_hash": "6db44b972276ab70cd274dc02fd07cd496c1e976a021cc12ab852db81d918319",
+      "after_hash": "3c370a2dccd8fbdcf55e3196144d22b60d9479ff269ac744278d603d59bc088d",
       "edits": [
+        {
+          "offset": 103,
+          "before": "",
+          "after": "\t\"reflect\"\n"
+        },
         {
           "offset": 17003,
           "before": "  queued: {initial: true}\n  closed: {terminal: true}\n",
@@ -9832,9 +9837,19 @@
           "after": "  active: {}\n  done: {final: true}\n"
         },
         {
+          "offset": 106325,
+          "before": "\twriteEntityToolFixtureFile(t, filepath.Join(root, flowID, \"schema.yaml\"), fmt.Sprintf(`name: %s\n",
+          "after": "\tschemaYAML := fmt.Sprintf(`name: %s\n"
+        },
+        {
           "offset": 106452,
           "before": "  queued: {initial: %t}\n  marginal_review: {initial: %t}\n  closed: {terminal: true}\n`, flowID, initial == \"queued\", initial == \"marginal_review\"))\n",
-          "after": "  queued: {}\n  marginal_review: {}\n  closed: {final: true}\n`, flowID))\n"
+          "after": "  queued: {}\n  marginal_review: {}\n  closed: {final: true}\n`, flowID)\n\tswitch initial {\n\tcase \"queued\":\n\tcase \"marginal_review\":\n\t\tschemaYAML = strings.Replace(schemaYAML, \"  queued: {}\\n  marginal_review: {}\\n\", \"  marginal_review: {}\\n  queued: {}\\n\", 1)\n\tdefault:\n\t\tt.Fatalf(\"unsupported entity-tool fixture initial stage %q; want queued or marginal_review\", initial)\n\t}\n\twriteEntityToolFixtureFile(t, filepath.Join(root, flowID, \"schema.yaml\"), schemaYAML)\n"
+        },
+        {
+          "offset": 107295,
+          "before": "",
+          "after": "func TestEntityToolFixtureInitialStageBranches(t *testing.T) {\n\tactor := models.AgentConfig{ID: \"validator\", Role: \"validator\", Tools: []string{\"get_entity\", \"save_entity_field\"}}\n\tfor _, tc := range []struct {\n\t\tentry string\n\t\torder []string\n\t}{\n\t\t{\"queued\", []string{\"queued\", \"marginal_review\", \"closed\"}},\n\t\t{\"marginal_review\", []string{\"marginal_review\", \"queued\", \"closed\"}},\n\t} {\n\t\tt.Run(tc.entry, func(t *testing.T) {\n\t\t\tbundle := loadWave1EntityToolBundleWithInitialStage(t, actor, \"validation\", \"validation_case\", \"\", \"validation_case:\\n  status: text\\n\", tc.entry)\n\t\t\tgraph, ok := bundle.WorkflowStageTopology(\"validation\")\n\t\t\tif !ok {\n\t\t\t\tt.Fatal(\"missing compiled validation stage catalog\")\n\t\t\t}\n\t\t\tif entry := bundle.FlowInitialStage(\"validation\"); entry != tc.entry || graph.InitialStage != tc.entry {\n\t\t\t\tt.Fatalf(\"requested entry %q, compiled entry %q (graph %q)\", tc.entry, entry, graph.InitialStage)\n\t\t\t}\n\t\t\tif order := graph.StageIDs(); !reflect.DeepEqual(order, tc.order) {\n\t\t\t\tt.Fatalf(\"compiled declaration order = %v, want %v\", order, tc.order)\n\t\t\t}\n\t\t\tif finals := graph.FinalStageIDs(); !reflect.DeepEqual(finals, []string{\"closed\"}) {\n\t\t\t\tt.Fatalf(\"compiled final stages = %v, want [closed]\", finals)\n\t\t\t}\n\t\t})\n\t}\n}\n\n"
         },
         {
           "offset": 107588,
@@ -9905,7 +9920,8 @@
             "closed"
           ]
         }
-      ]
+      ],
+      "review": "loadWave1EntityToolBundleWithInitialStage is a parameterized generated source, not a standalone literal-equivalence claim: queued and marginal_review branches select the requested first declaration and preserve final closed. TestEntityToolFixtureInitialStageBranches executes the actual helper and asserts compiled entry/order/final membership for both branches; TestEntityTools_BracketListTypeRefsAcrossConsumers preserves the marginal_review filter and one-row assertion. Unsupported helper entry names fail clearly."
     },
     {
       "file": "internal/runtime/tools/human_task_construction_fixture_test.go",
