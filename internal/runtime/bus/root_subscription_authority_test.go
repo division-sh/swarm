@@ -53,6 +53,7 @@ func TestRootInputSourceLoadedConsumerCardinality(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					installConnectionSourceConstruction(t, eb, source, ".")
 					evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "thing.created", "", "", []byte("{}"), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 					plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 					if err != nil {
