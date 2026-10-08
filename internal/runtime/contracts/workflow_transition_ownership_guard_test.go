@@ -182,7 +182,7 @@ func (pc *PipelineCoordinator) isTerminalFlowState(flowID, state string) bool {
     graph, ok := semanticview.WorkflowStageTopology(pc.SemanticSource(), flowID)
     if !ok || graph.FlowID != flowID { return false }
     ref, err := graph.ResolveStoredStage(state)
-    return err == nil && ref.IsTerminal()
+    return err == nil && ref.IsFinal()
 }
 func (pc *PipelineCoordinator) prepareTerminalFlowInstanceDeactivation(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID, nextState string) (PreparedFlowInstanceDeactivation, error) {
     _ = pc.isTerminalFlowState(flowIdentity.Route.InstancePath, nextState)
