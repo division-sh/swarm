@@ -717,7 +717,7 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 		}
 	}
 	add(evt.RoutingSource().Route())
-	r.addProviderSourceLookupPaths(ctx, evt, paths, add)
+	r.addProviderSourceLookupPaths(ctx, evt, paths)
 	add(evt.SourceRoute())
 	add(evt.TargetRoute())
 	for _, route := range evt.TargetRoutes() {
@@ -788,7 +788,7 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 	return scope, true
 }
 
-func (r connectRoutePlanResolver) addProviderSourceLookupPaths(ctx context.Context, evt events.Event, paths map[string]struct{}, add func(events.RouteIdentity)) {
+func (r connectRoutePlanResolver) addProviderSourceLookupPaths(ctx context.Context, evt events.Event, paths map[string]struct{}) {
 	if evt.RoutingSource().Kind() != events.RoutingSourceExternalIngress {
 		return
 	}
@@ -799,7 +799,9 @@ func (r connectRoutePlanResolver) addProviderSourceLookupPaths(ctx context.Conte
 	}
 	projection := selectedRunTargetOwnerProjection{source: r.source}
 	if instance, err := projection.providerExecutionIdentity(evt, flowID, false); err == nil {
-		add(events.RouteIdentity{FlowInstance: instance.InstancePath})
+		if path := (events.RouteIdentity{FlowInstance: instance.InstancePath}).Normalized().FlowInstance; path != "" {
+			paths[path] = struct{}{}
+		}
 	}
 	if owners, err := r.lifecycle.constructionOwners(ctx, evt.RunID()); err == nil {
 		// Read candidates only; the compiled path still selects exact ancestry.
