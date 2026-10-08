@@ -56,8 +56,9 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			if !ok || refusal.Data["code"] != "EVENT_NOT_DECLARED" || details["reason"] != "declared_event_has_no_selected_run_recipient" {
 				t.Fatalf("handler-free redundant seed refusal=%#v", refusal)
 			}
-			if !reflect.DeepEqual(repeatedStaticRunSnapshot(t, rt.DB, runID), beforeRedundantSeed) {
-				t.Fatal("redundant tree seed changed canonical construction or delivery evidence")
+			afterRedundantSeed := repeatedStaticRunSnapshot(t, rt.DB, runID)
+			if !reflect.DeepEqual(afterRedundantSeed, beforeRedundantSeed) {
+				t.Fatalf("redundant tree seed changed canonical construction or delivery evidence: before=%#v after=%#v", beforeRedundantSeed, afterRedundantSeed)
 			}
 			var decisions []map[string]any
 			var gateEntities []string
