@@ -368,13 +368,33 @@ func runCommandLiveRestartJourney(t *testing.T, binary, project string, store go
 func TestCommandLiveReceiptUsesExactConfiguredConversation(t *testing.T) {
 	for _, chat := range []string{"42", "424242"} {
 		t.Run(chat, func(t *testing.T) {
-			receipt := fullLifecycleIngressReceipt{EntityID: "standing", EventIDs: []string{"raw", "normalized"}, EventNames: []string{"inbound.telegram", "inbound.telegram.text_message"}}
+			receipt := fullLifecycleIngressReceipt{Status: "accepted", ServiceID: "standing", RunID: "standing-run", Generation: 1,
+				FlowPath: "telegram-ingress", Provider: "telegram", ProviderEventID: "1001", PublicationID: "publication",
+				EventIDs: []string{"raw", "normalized"}, EventNames: []string{"inbound.telegram", "inbound.telegram.text_message"}}
 			events := []fullLifecycleEvent{
 				{EventID: "raw", EventName: "inbound.telegram", RunID: "standing-run", NoDelivery: &fullLifecycleNoDelivery{Reason: "no_subscriber_by_design"}},
 				{EventID: "normalized", EventName: "inbound.telegram.text_message", RunID: "standing-run", EntityID: "downstream", Payload: map[string]any{"provider_message_reference": float64(1001), "conversation_reference": chat}, Deliveries: []fullLifecycleEventDelivery{{SubscriberType: "agent", SubscriberID: "phrase-bot", Target: fullLifecycleDeliveryTarget{Kind: "materializing_entity", EntityID: "downstream", FlowID: "telegram-chat", FlowInstance: "telegram-chat/instance"}}}},
 			}
 			if _, _, err := fullLifecycleReceiptEvents(events, receipt, 1001, chat); err != nil {
 				t.Fatal(err)
+			}
+			for _, field := range []string{"service", "run", "generation", "declaration", "provider_delivery"} {
+				invalid := receipt
+				switch field {
+				case "service":
+					invalid.ServiceID = ""
+				case "run":
+					invalid.RunID = "foreign-run"
+				case "generation":
+					invalid.Generation = 0
+				case "declaration":
+					invalid.FlowPath = "telegram-chat"
+				case "provider_delivery":
+					invalid.ProviderEventID = ""
+				}
+				if _, _, err := fullLifecycleReceiptEvents(events, invalid, 1001, chat); err == nil {
+					t.Fatalf("invalid %s binding accepted: %+v", field, invalid)
+				}
 			}
 			if _, _, err := fullLifecycleReceiptEvents(events, receipt, 1001, "wrong-chat"); err == nil {
 				t.Fatal("wrong conversation accepted")

@@ -689,18 +689,24 @@ func approveLifecycleEffectMode(t *testing.T, rpc *releaseRPCClient, runID, key,
 }
 
 type fullLifecycleIngressReceipt struct {
-	Status        string   `json:"status"`
-	EntityID      string   `json:"entity_id"`
-	PublicationID string   `json:"publication_id"`
-	EventIDs      []string `json:"event_ids"`
-	EventNames    []string `json:"event_names"`
+	Status          string   `json:"status"`
+	ServiceID       string   `json:"service_id"`
+	RunID           string   `json:"run_id"`
+	Generation      int64    `json:"generation"`
+	FlowPath        string   `json:"flow_path"`
+	Provider        string   `json:"provider"`
+	ProviderEventID string   `json:"provider_event_id"`
+	PublicationID   string   `json:"publication_id"`
+	EventIDs        []string `json:"event_ids"`
+	EventNames      []string `json:"event_names"`
 }
 
 func assertFullLifecycleStandingReceiptContinuity(t *testing.T, first fullLifecycleIngressReceipt, subsequent ...fullLifecycleIngressReceipt) {
 	t.Helper()
 	for index, receipt := range subsequent {
-		if receipt.EntityID != first.EntityID {
-			t.Fatalf("standing ingress receipt entity changed at occurrence %d: first=%#v current=%#v", index+2, first, receipt)
+		if receipt.ServiceID != first.ServiceID || receipt.RunID != first.RunID || receipt.Generation != first.Generation ||
+			receipt.FlowPath != first.FlowPath || receipt.Provider != first.Provider {
+			t.Fatalf("standing ingress receipt binding changed at occurrence %d: first=%#v current=%#v", index+2, first, receipt)
 		}
 	}
 }
@@ -735,28 +741,38 @@ func sendLifecycleTelegramUpdateWithSecret(t *testing.T, process *releaseServePr
 	if response.StatusCode != http.StatusAccepted {
 		t.Fatalf("lifecycle webhook status=%d receipt=%#v\n%s", response.StatusCode, receipt, process.output.String())
 	}
-	if receipt.Status != "accepted" || strings.TrimSpace(receipt.EntityID) == "" || strings.TrimSpace(receipt.PublicationID) == "" {
-		t.Fatalf("lifecycle webhook receipt omitted accepted identity: %#v", receipt)
+	var shape map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &shape); err != nil {
+		t.Fatal(err)
 	}
-	wantNames := []string{"inbound.telegram", "inbound.telegram.text_message"}
-	if len(receipt.EventIDs) != len(wantNames) || len(receipt.EventNames) != len(wantNames) {
-		t.Fatalf("lifecycle webhook child receipt = ids:%#v names:%#v, want exact ordered two-child receipt", receipt.EventIDs, receipt.EventNames)
+	for _, retired := range []string{"entity_id", "instance_id", "target_flow_instance"} {
+		if _, present := shape[retired]; present {
+			t.Fatalf("lifecycle receipt restored concrete source identity %s: %s", retired, raw)
+		}
 	}
-	identities := []string{receipt.EntityID, receipt.PublicationID, receipt.EventIDs[0], receipt.EventIDs[1]}
+	if err := validateFullLifecycleIngressReceipt(receipt); err != nil || receipt.ProviderEventID != fmt.Sprint(updateID) {
+		t.Fatalf("lifecycle webhook receipt changed admitted identity: %#v err=%v", receipt, err)
+	}
+	return receipt
+}
+
+func validateFullLifecycleIngressReceipt(receipt fullLifecycleIngressReceipt) error {
+	if receipt.Status != "accepted" || receipt.Generation <= 0 || receipt.FlowPath != "telegram-ingress" ||
+		receipt.Provider != "telegram" || receipt.ProviderEventID == "" {
+		return fmt.Errorf("lifecycle receipt lacks its exact declaration binding: %#v", receipt)
+	}
+	if len(receipt.EventIDs) != 2 || len(receipt.EventNames) != 2 || receipt.EventNames[0] != "inbound.telegram" || receipt.EventNames[1] != "inbound.telegram.text_message" {
+		return fmt.Errorf("lifecycle receipt lacks its ordered raw/normalized children: %#v", receipt)
+	}
+	identities := []string{receipt.ServiceID, receipt.RunID, receipt.PublicationID, receipt.EventIDs[0], receipt.EventIDs[1]}
 	seen := make(map[string]bool, len(identities))
 	for _, identity := range identities {
-		identity = strings.TrimSpace(identity)
-		if identity == "" || seen[identity] {
-			t.Fatalf("lifecycle webhook receipt has empty or duplicate identity: %#v", receipt)
+		if identity == "" || identity != strings.TrimSpace(identity) || seen[identity] {
+			return fmt.Errorf("lifecycle receipt has empty, noncanonical or duplicate identity: %#v", receipt)
 		}
 		seen[identity] = true
 	}
-	for i, want := range wantNames {
-		if receipt.EventNames[i] != want {
-			t.Fatalf("lifecycle webhook child %d = (%s, %q), want (%s, %q): %#v", i, receipt.EventIDs[i], receipt.EventNames[i], receipt.EventIDs[i], want, receipt)
-		}
-	}
-	return receipt
+	return nil
 }
 
 func pauseFullLifecycleRun(t *testing.T, rpc *releaseRPCClient, runID string) {
@@ -1123,10 +1139,27 @@ func requireFullLifecycleReceiptEvents(t *testing.T, rpc *releaseRPCClient, runI
 	if err != nil {
 		t.Fatalf("join lifecycle webhook receipt to public events: %v; receipt=%#v all=%#v", err, receipt, events)
 	}
+	entities, err := readGoldenEntities(ctx, rpc, receipt.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := normalized.Deliveries[0].Target
+	found := false
+	for _, entity := range entities {
+		if entity.EntityID == target.EntityID {
+			found = entity.FlowInstance == target.FlowInstance
+		}
+	}
+	if !found {
+		t.Fatalf("receipt delivery has no exact public receiver: target=%+v entities=%+v", target, entities)
+	}
 	return normalized
 }
 
 func fullLifecycleReceiptEvents(events []fullLifecycleEvent, receipt fullLifecycleIngressReceipt, providerMessageReference int, conversationReference string) (fullLifecycleEvent, fullLifecycleEvent, error) {
+	if err := validateFullLifecycleIngressReceipt(receipt); err != nil {
+		return fullLifecycleEvent{}, fullLifecycleEvent{}, err
+	}
 	byID := make(map[string]fullLifecycleEvent, len(events))
 	var transportMatches []fullLifecycleEvent
 	for _, event := range events {
@@ -1144,7 +1177,7 @@ func fullLifecycleReceiptEvents(events []fullLifecycleEvent, receipt fullLifecyc
 	if !rawOK || !normalizedOK {
 		return fullLifecycleEvent{}, fullLifecycleEvent{}, fmt.Errorf("event.list omitted receipt children raw=%t normalized=%t", rawOK, normalizedOK)
 	}
-	if raw.EventName != receipt.EventNames[0] || receipt.EntityID == "" || raw.EntityID != "" || raw.RunID == "" || raw.RunID != normalized.RunID || len(raw.Deliveries) != 0 ||
+	if raw.EventName != receipt.EventNames[0] || raw.EntityID != "" || raw.RunID != receipt.RunID || raw.RunID != normalized.RunID || len(raw.Deliveries) != 0 ||
 		raw.NoDelivery == nil || raw.NoDelivery.Reason != "no_subscriber_by_design" || len(raw.DeadLetters) != 0 {
 		return fullLifecycleEvent{}, fullLifecycleEvent{}, fmt.Errorf("consumerless raw event does not match exact receipt settlement: receipt=%#v event=%#v", receipt, raw)
 	}
