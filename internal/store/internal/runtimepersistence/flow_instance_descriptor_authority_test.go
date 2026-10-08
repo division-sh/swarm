@@ -1053,6 +1053,10 @@ func exactFlowInstanceDescriptorReadinessJSON(
 			TemplateID: templateID, ScopeKey: templateID,
 			InstanceID: runtimeflowidentity.LogicalInstanceID(instancePath), InstancePath: instancePath,
 			EntityID: entityID, HasStoredPath: true,
+			ParentEntityID: runtimeflowidentity.EntityID(runID),
+			ParentRoute: runtimeflowidentity.ParentRoute{
+				FlowID: ".", FlowInstance: runID, EntityID: runtimeflowidentity.EntityID(runID),
+			},
 		},
 		RunID: runID, BundleHash: bundleHash, WorkflowVersion: workflowVersion, ExecutionMode: "live",
 	}).Normalized()

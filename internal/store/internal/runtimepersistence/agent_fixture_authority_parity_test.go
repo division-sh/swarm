@@ -618,7 +618,7 @@ func seedExactAgentFixtureFlowState(
 	if err != nil {
 		t.Fatalf("normalize flow readiness owner: %v", err)
 	}
-	seedLifecycleReadinessOwner(t, ctx, selected, readinessPlan, time.Now().UTC())
+	readinessPlan = seedLifecycleReadinessOwner(t, ctx, selected, readinessPlan, time.Now().UTC())
 	fingerprint, err := readinessPlan.Hash()
 	if err != nil {
 		t.Fatal(err)

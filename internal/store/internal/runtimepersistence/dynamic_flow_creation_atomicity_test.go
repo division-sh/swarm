@@ -262,10 +262,13 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	}
 
 	occurredAt := time.Now().UTC().Truncate(time.Microsecond)
-	identity := runtimeflowidentity.Instance{
-		TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",
-		InstancePath: "review/inst-1", EntityID: uuid.NewString(), HasStoredPath: true,
+	source := semanticview.Wrap(bundle)
+	root := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, "", "")
+	identity, err := runtimeflowidentity.KeyedChild(source, root, "review", "inst-1")
+	if err != nil {
+		t.Fatal(err)
 	}
+	identity.EntityID = uuid.NewString()
 	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 	if !ok {
 		t.Fatal("creation atomicity context is missing author-activity scope")

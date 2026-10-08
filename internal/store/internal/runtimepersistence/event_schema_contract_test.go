@@ -71,6 +71,13 @@ func TestFreshEventDDLRejectsMalformedStructuralFactsParity(t *testing.T) {
 		{"runtime_control_with_absent_source", "check", validUnsafeRuntimeControlEventRow, func(row *unsafeEventRow) { row.routingSourceKind = "absent" }},
 		{"diagnostic_with_platform_control_source", "check", validUnsafeRuntimeLogEventRow, func(row *unsafeEventRow) { row.routingSourceKind = "platform_control" }},
 	}
+	cases = append(cases, ddlCase{
+		name: "inbound_recorded_entity_scope", category: "check", baseline: validUnsafeInboundRecordedEventRow,
+		mutate: func(row *unsafeEventRow) {
+			entity := validUnsafeInboundRecordedEntityEventRow()
+			row.scope, row.entityID, row.flowInstance = entity.scope, entity.entityID, entity.flowInstance
+		},
+	})
 	for _, eventType := range []string{"platform.runtime_log", "platform.inbound_recorded", "platform.agent_directive"} {
 		baseline := validUnsafeRuntimeLogEventRow
 		switch eventType {
@@ -99,7 +106,6 @@ func TestFreshEventDDLRejectsMalformedStructuralFactsParity(t *testing.T) {
 				{"runtime_log_global_without_run", validUnsafeRuntimeLogEventRow},
 				{"runtime_log_global_with_run", validUnsafeRuntimeLogWithRunEventRow},
 				{"inbound_recorded_global", validUnsafeInboundRecordedEventRow},
-				{"inbound_recorded_entity", validUnsafeInboundRecordedEntityEventRow},
 				{"agent_directive_global", validUnsafeAgentDirectiveEventRow},
 				{"generic_entity_scope", validUnsafeEntityEventRow},
 				{"generic_flow_scope", validUnsafeFlowEventRow},

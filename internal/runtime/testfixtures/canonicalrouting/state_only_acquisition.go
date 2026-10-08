@@ -14,7 +14,17 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 		t.Fatal("state-only acquisition fixture requires an exact target flow")
 	}
 	root := t.TempDir()
+	var keyedParents []string
+	for path, mode := range modes {
+		if mode == "template" && strings.HasPrefix(targetFlow, path+"/") {
+			keyedParents = append(keyedParents, path)
+		}
+	}
+	sort.Strings(keyedParents)
 	rootSchema := "name: " + workflowName + "\npins:\n  inputs: [test.node_emitted.selector, test.node_emitted.upserter]\n"
+	if len(keyedParents) != 0 {
+		rootSchema = strings.Replace(rootSchema, "inputs: [test.node_emitted.selector, test.node_emitted.upserter]", "inputs: [test.node_emitted.selector, test.node_emitted.upserter, test.fixture_parent.construct]", 1)
+	}
 	if targetFlow != "." {
 		rootSchema += "  outputs: [test.node_emitted.selector, test.node_emitted.upserter]\nconnect:\n"
 		for _, name := range []string{"test.node_emitted.selector", "test.node_emitted.upserter"} {
@@ -28,9 +38,20 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 			}
 			rootSchema += fmt.Sprintf("  - {event: %s, from: ., to: %s%s}\n", name, targetFlow, policy)
 		}
+		for _, parent := range keyedParents {
+			rootSchema += fmt.Sprintf("  - {event: test.fixture_parent.construct, from: ., to: %s, resolution: select-or-create}\n", parent)
+			for _, name := range []string{"test.node_emitted.selector", "test.node_emitted.upserter"} {
+				rootSchema += fmt.Sprintf("  - {event: %s, from: ., to: %s, resolution: select, key_from: payload.parent_key}\n", name, parent)
+			}
+		}
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", rootSchema)
-	const eventSchemas = "test.node_emitted.selector:\n  account_id: text\n  instance_key: text\ntest.node_emitted.upserter:\n  account_id: text\n  instance_key: text\n"
+	const baseEventSchemas = "test.node_emitted.selector:\n  account_id: text\n  instance_key: text\ntest.node_emitted.upserter:\n  account_id: text\n  instance_key: text\n"
+	eventSchemas := baseEventSchemas
+	if len(keyedParents) != 0 {
+		eventSchemas = strings.ReplaceAll(eventSchemas, "  instance_key: text\n", "  instance_key: text\n  parent_key: text\n")
+		eventSchemas += "test.fixture_parent.construct:\n  account_id: text\n  instance_key: text\n"
+	}
 	writeClosedVariantFile(t, root, "events.yaml", eventSchemas)
 	paths := make([]string, 0, len(modes))
 	for path, mode := range modes {
@@ -44,6 +65,7 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 	sort.Strings(paths)
 	for _, path := range paths {
 		mode := modes[path]
+		parentConstructor := mode == "template" && strings.HasPrefix(targetFlow, path+"/")
 		schema := fmt.Sprintf("name: %s\nstages:\n  active: {}\n  done: {final: true}\n", filepath.Base(path))
 		if path == "." {
 			schema = strings.Replace(schema, "name: .", "name: "+workflowName, 1) + strings.TrimPrefix(rootSchema, "name: "+workflowName+"\n")
@@ -53,6 +75,8 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 			}
 			if path == targetFlow {
 				schema += "pins:\n  inputs:\n    - test.node_emitted.selector\n    - test.node_emitted.upserter\n"
+			} else if parentConstructor {
+				schema += "pins:\n  inputs: [test.fixture_parent.construct, test.node_emitted.selector, test.node_emitted.upserter]\n"
 			}
 		}
 		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "schema.yaml")), schema)
@@ -62,9 +86,11 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 		}
 		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "entities.yaml")), entity)
 		if path != "." && path != targetFlow {
-			writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "events.yaml")), eventSchemas)
+			if !parentConstructor {
+				writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "events.yaml")), baseEventSchemas)
+			}
 		}
-		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "nodes.yaml")), `selector:
+		nodes := `selector:
   execution_type: system_node
   subscribes_to: [test.node_emitted.selector]
   event_handlers:
@@ -75,7 +101,11 @@ upserter:
   subscribes_to: [test.node_emitted.upserter]
   event_handlers:
     test.node_emitted.upserter: {}
-`)
+`
+		if parentConstructor {
+			nodes += "parent_constructor:\n  execution_type: system_node\n  event_handlers:\n    test.fixture_parent.construct: {}\n"
+		}
+		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "nodes.yaml")), nodes)
 	}
 	return root
 }
