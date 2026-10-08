@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -233,8 +232,8 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	serviceID, firstRunID, firstGeneration := loadServedStandingOwner(t, db, string(backend))
 	firstScheduleResult := managerProbe.arm(t, firstManager, firstRunID)
 	firstRouteRelease, firstRouteStarted := telegramGate.blockNext()
-	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(firstEndpoint, "/v1/rpc"), 9000, 42); entity == "" {
-		t.Fatalf("%s initial standing service returned empty entity", backend)
+	if binding := sendStandingTelegramUpdate(t, strings.TrimSuffix(firstEndpoint, "/v1/rpc"), 9000, 42); binding.ServiceID != serviceID || binding.RunID != firstRunID || binding.Generation != firstGeneration {
+		t.Fatalf("%s initial standing service returned wrong binding: %+v", backend, binding)
 	}
 	firstSchedules := waitForServedManagerScheduleProjection(t, firstScheduleResult, backend, "suspend", func() string {
 		return first.outputString() + "\n" + servedEventPublishDebugSummary(t, db, debugBackend, firstRunID)
@@ -273,8 +272,8 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	}
 	resumedScheduleResult := managerProbe.arm(t, secondManager, firstRunID)
 	resetRouteRelease, resetRouteStarted := telegramGate.blockNext()
-	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(secondEndpoint, "/v1/rpc"), 9002, 84); entity == "" {
-		t.Fatalf("%s resumed standing service returned empty entity", backend)
+	if binding := sendStandingTelegramUpdate(t, strings.TrimSuffix(secondEndpoint, "/v1/rpc"), 9002, 84); binding.ServiceID != serviceID || binding.RunID != firstRunID || binding.Generation != firstGeneration {
+		t.Fatalf("%s resumed standing service returned wrong binding: %+v", backend, binding)
 	}
 	resumedSchedules := waitForServedManagerScheduleProjection(t, resumedScheduleResult, backend, "reset", func() string {
 		return second.outputString() + "\n" + servedEventPublishDebugSummary(t, db, debugBackend, firstRunID)
@@ -290,8 +289,8 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	if reset.EffectiveState != "active" || reset.Transition != "reset" || reset.Generation != firstGeneration+1 || reset.RunID == firstRunID {
 		t.Fatalf("%s reset result = %#v", backend, reset)
 	}
-	if entity := sendStandingTelegramUpdate(t, strings.TrimSuffix(secondEndpoint, "/v1/rpc"), 9003, 126); entity == "" {
-		t.Fatalf("%s reset standing service returned empty entity", backend)
+	if binding := sendStandingTelegramUpdate(t, strings.TrimSuffix(secondEndpoint, "/v1/rpc"), 9003, 126); binding.ServiceID != serviceID || binding.RunID != reset.RunID || binding.Generation != reset.Generation {
+		t.Fatalf("%s reset standing service returned wrong binding: %+v", backend, binding)
 	}
 	requireStandingLifecycleTelegramCall(t, telegramCalls, backend, "reset")
 	replayedReset := invokeServedStandingOperation(t, secondEndpoint, "standing.reset", serviceID, resetKey)
@@ -895,10 +894,10 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-	firstEntity := sendStandingTelegramUpdate(t, firstURL, 101, 42)
-	secondEntity := sendStandingTelegramUpdate(t, firstURL, 102, 42)
-	if firstEntity == "" || firstEntity != secondEntity {
-		t.Fatalf("delivery entities = %q and %q, want one standing entity", firstEntity, secondEntity)
+	firstBinding := sendStandingTelegramUpdate(t, firstURL, 101, 42)
+	secondBinding := sendStandingTelegramUpdate(t, firstURL, 102, 42)
+	if firstBinding != secondBinding {
+		t.Fatalf("delivery bindings = %+v and %+v, want one standing generation", firstBinding, secondBinding)
 	}
 	requireStandingTelegramCalls(t, calls, sqlitePath, 42, 42)
 	waitForStandingDeliveryQuiescence(t, sqlitePath)
@@ -936,9 +935,9 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
-	restartedEntity := sendStandingTelegramUpdate(t, secondURL, 103, 84)
-	if restartedEntity != firstEntity {
-		t.Fatalf("restart entity = %q, want %q", restartedEntity, firstEntity)
+	restartedBinding := sendStandingTelegramUpdate(t, secondURL, 103, 84)
+	if restartedBinding != firstBinding {
+		t.Fatalf("restart binding = %+v, want %+v", restartedBinding, firstBinding)
 	}
 	requireStandingTelegramCalls(t, calls, sqlitePath, 84)
 	waitForStandingDeliveryQuiescence(t, sqlitePath)
@@ -956,14 +955,15 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		}
 	}()
 	var runs, instances, entities int
-	var standingRunID string
+	var standingRunID, standingEntityID string
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
-		SELECT current_run_id
-		FROM standing_services
-		WHERE flow_path = 'telegram-ingress'
-		  AND declaration_present = TRUE
-		  AND effective_state = 'active'
-	`).Scan(&standingRunID); err != nil {
+		SELECT s.current_run_id, f.entity_id
+		FROM standing_services s
+		JOIN flow_instances f ON f.run_id = s.current_run_id AND f.flow_template = s.flow_path
+		WHERE s.flow_path = 'telegram-ingress'
+		  AND s.declaration_present = TRUE
+		  AND s.effective_state = 'active'
+	`).Scan(&standingRunID, &standingEntityID); err != nil || standingRunID != firstBinding.RunID || standingEntityID == "" {
 		t.Fatalf("resolve standing run authority: %v", err)
 	}
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
@@ -976,7 +976,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-ingress'`).Scan(&instances); err != nil {
 		t.Fatalf("count standing instances: %v", err)
 	}
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM entity_state WHERE entity_id = ?`, firstEntity).Scan(&entities); err != nil {
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM entity_state WHERE entity_id = ?`, standingEntityID).Scan(&entities); err != nil {
 		t.Fatalf("count standing entities: %v", err)
 	}
 	if runs != 1 || instances != 1 || entities != 1 {
@@ -996,19 +996,20 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		t.Fatalf("normalized routing = chat_instances:%d events:%d wrong_run:%d, want 2/3/0", chatInstances, normalizedEvents, wrongNormalizedRuns)
 	}
 	var pendingCards int
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = ? AND status = 'pending' AND json_extract(snapshot, '$.decision') = 'retire_service'`, firstEntity).Scan(&pendingCards); err != nil || pendingCards != 1 {
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = ? AND status = 'pending' AND json_extract(snapshot, '$.decision') = 'retire_service'`, standingEntityID).Scan(&pendingCards); err != nil || pendingCards != 1 {
 		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
 	}
-	var entityEvents, wrongRunEvents int
+	var rawEvents, wrongRunEvents, borrowedEntityEvents int
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
-		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = ? THEN 0 ELSE 1 END), 0)
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = ? THEN 0 ELSE 1 END), 0),
+		       COALESCE(SUM(CASE WHEN COALESCE(entity_id, '') = '' THEN 0 ELSE 1 END), 0)
 		FROM events
-		WHERE entity_id = ?
-	`, standingRunID, firstEntity).Scan(&entityEvents, &wrongRunEvents); err != nil {
-		t.Fatalf("inspect standing event lineage: %v", err)
+		WHERE event_name = 'inbound.telegram'
+	`, standingRunID).Scan(&rawEvents, &wrongRunEvents, &borrowedEntityEvents); err != nil {
+		t.Fatalf("inspect declaration publication lineage: %v", err)
 	}
-	if entityEvents == 0 || wrongRunEvents != 0 {
-		t.Fatalf("standing entity event lineage = events:%d wrong_run:%d, want events>0/wrong_run:0", entityEvents, wrongRunEvents)
+	if rawEvents != 3 || wrongRunEvents != 0 || borrowedEntityEvents != 0 {
+		t.Fatalf("declaration publication lineage = events:%d wrong_run:%d borrowed_entity:%d, want 3/0/0", rawEvents, wrongRunEvents, borrowedEntityEvents)
 	}
 	if err := sqliteStore.Close(); err != nil {
 		t.Fatalf("close SQLite inspection store before restart matrix: %v", err)
@@ -1160,9 +1161,9 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
 	baseURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-	entity := sendStandingTelegramUpdate(t, baseURL, 201, 42)
-	if got := sendStandingTelegramUpdate(t, baseURL, 202, 42); got != entity {
-		t.Fatalf("second entity = %q, want %q", got, entity)
+	binding := sendStandingTelegramUpdate(t, baseURL, 201, 42)
+	if got := sendStandingTelegramUpdate(t, baseURL, 202, 42); got != binding {
+		t.Fatalf("second binding = %+v, want %+v", got, binding)
 	}
 	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, 42, 42)
 	waitForStandingDeliveryQuiescence(t, "postgres:"+dsn)
@@ -1176,8 +1177,8 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	enableServeRuntimeRecovery(t, opts.ConfigPath)
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
-	if got := sendStandingTelegramUpdate(t, "http://"+serveRuntimeAPIListenerFromOutput(t, second.outputString()), 203, 84); got != entity {
-		t.Fatalf("restart entity = %q, want %q", got, entity)
+	if got := sendStandingTelegramUpdate(t, "http://"+serveRuntimeAPIListenerFromOutput(t, second.outputString()), 203, 84); got != binding {
+		t.Fatalf("restart binding = %+v, want %+v", got, binding)
 	}
 	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, 84)
 	waitForStandingDeliveryQuiescence(t, "postgres:"+dsn)
@@ -1191,14 +1192,15 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	}
 	defer db.Close()
 	var runs, instances, entities int
-	var standingRunID string
+	var standingRunID, entity string
 	if err := db.QueryRow(`
-		SELECT current_run_id::text
-		FROM standing_services
-		WHERE flow_path = 'telegram-ingress'
-		  AND declaration_present = TRUE
-		  AND effective_state = 'active'
-	`).Scan(&standingRunID); err != nil {
+		SELECT s.current_run_id::text, f.entity_id::text
+		FROM standing_services s
+		JOIN flow_instances f ON f.run_id = s.current_run_id AND f.flow_template = s.flow_path
+		WHERE s.flow_path = 'telegram-ingress'
+		  AND s.declaration_present = TRUE
+		  AND s.effective_state = 'active'
+	`).Scan(&standingRunID, &entity); err != nil || standingRunID != binding.RunID || entity == "" {
 		t.Fatalf("resolve standing run authority: %v", err)
 	}
 	if err := db.QueryRow(`
@@ -1234,16 +1236,17 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND anchor->>'entity_id' = $1 AND status = 'pending' AND snapshot->>'decision' = 'retire_service'`, entity).Scan(&pendingCards); err != nil || pendingCards != 1 {
 		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
 	}
-	var entityEvents, wrongRunEvents int
+	var rawEvents, wrongRunEvents, borrowedEntityEvents int
 	if err := db.QueryRow(`
-		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = $1::uuid THEN 0 ELSE 1 END), 0)
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = $1::uuid THEN 0 ELSE 1 END), 0),
+		       COALESCE(SUM(CASE WHEN entity_id IS NULL THEN 0 ELSE 1 END), 0)
 		FROM events
-		WHERE entity_id = $2::uuid
-	`, standingRunID, entity).Scan(&entityEvents, &wrongRunEvents); err != nil {
-		t.Fatalf("inspect standing event lineage: %v", err)
+		WHERE event_name = 'inbound.telegram'
+	`, standingRunID).Scan(&rawEvents, &wrongRunEvents, &borrowedEntityEvents); err != nil {
+		t.Fatalf("inspect declaration publication lineage: %v", err)
 	}
-	if entityEvents == 0 || wrongRunEvents != 0 {
-		t.Fatalf("standing entity event lineage = events:%d wrong_run:%d, want events>0/wrong_run:0", entityEvents, wrongRunEvents)
+	if rawEvents != 3 || wrongRunEvents != 0 || borrowedEntityEvents != 0 {
+		t.Fatalf("declaration publication lineage = events:%d wrong_run:%d borrowed_entity:%d, want 3/0/0", rawEvents, wrongRunEvents, borrowedEntityEvents)
 	}
 	disableServeRuntimeRecovery(t, opts.ConfigPath)
 	requireChangedStandingColdStartMatrix(t, opts, sourceRoot, standingRunID, func(t *testing.T) {
@@ -1333,8 +1336,8 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			healthyService, healthyRun, healthyGeneration := loadServedStandingOwnerByFlow(t, db, backend, "telegram-ingress")
 			terminalService, terminalRun, terminalGeneration := loadServedStandingOwnerByFlow(t, db, backend, "telegram-stopped")
 			firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-			if entity := sendStandingTelegramUpdate(t, firstURL, 301, 42); entity == "" {
-				t.Fatalf("%s healthy standing service returned an empty entity before restart", backend)
+			if binding := sendStandingTelegramUpdate(t, firstURL, 301, 42); binding.ServiceID != healthyService || binding.RunID != healthyRun || binding.Generation != healthyGeneration {
+				t.Fatalf("%s healthy standing service returned wrong binding before restart: %+v", backend, binding)
 			}
 			requireStandingTelegramCalls(t, calls, selectedStore, 42)
 			waitForStandingDeliveryQuiescence(t, selectedStore)
@@ -1355,8 +1358,8 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 				}
 			}
 			secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, secondOutput)
-			if entity := sendStandingTelegramUpdate(t, secondURL, 302, 84); entity == "" {
-				t.Fatalf("%s healthy standing service returned an empty entity after restart", backend)
+			if binding := sendStandingTelegramUpdate(t, secondURL, 302, 84); binding.ServiceID != healthyService || binding.RunID != healthyRun || binding.Generation != healthyGeneration {
+				t.Fatalf("%s healthy standing service returned wrong binding after restart: %+v", backend, binding)
 			}
 			requireStandingTelegramCalls(t, calls, selectedStore, 84)
 			waitForStandingDeliveryQuiescence(t, selectedStore)
@@ -1637,32 +1640,9 @@ func requireStandingLifecycleTelegramCall(t testing.TB, calls <-chan struct{}, b
 	}
 }
 
-func sendStandingTelegramUpdate(t testing.TB, baseURL string, updateID, chatID int, diagnostics ...func() string) string {
+func sendStandingTelegramUpdate(t testing.TB, baseURL string, updateID, chatID int, diagnostics ...func() string) standingTelegramBinding {
 	t.Helper()
-	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":%d},"chat":{"id":%d,"type":"private"},"text":"hello %d"}}`, updateID, updateID, chatID, chatID, updateID))
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/chat/telegram", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("new webhook request: %v", err)
-	}
-	req.Header.Set("content-type", "application/json")
-	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("send webhook: %v", err)
-	}
-	defer resp.Body.Close()
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read webhook response status=%d: %v", resp.StatusCode, err)
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(responseBody, &payload); err != nil {
-		t.Fatalf("decode webhook response status=%d body=%q: %v%s", resp.StatusCode, strings.TrimSpace(string(responseBody)), err, standingWebhookDiagnostics(diagnostics))
-	}
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("webhook status=%d payload=%v%s", resp.StatusCode, payload, standingWebhookDiagnostics(diagnostics))
-	}
-	return strings.TrimSpace(fmt.Sprint(payload["entity_id"]))
+	return sendStandingTelegramUpdatePublication(t, baseURL, updateID, chatID, diagnostics...).standingTelegramBinding
 }
 
 func standingWebhookDiagnostics(diagnostics []func() string) string {
@@ -1853,7 +1833,10 @@ func writeMixedStandingTelegramServeFixture(t testing.TB, telegramBaseURL string
 	if ingress := strings.Index(stoppedSchema, "\ningress:\n"); ingress >= 0 {
 		stoppedSchema = stoppedSchema[:ingress+1]
 	}
+	stoppedSchema += "schedules:\n  retained: {every: 24h, emit: service.tick}\n"
 	writeStandingCandidateFile(t, filepath.Join(flowDir, "schema.yaml"), stoppedSchema)
+	writeStandingCandidateFile(t, filepath.Join(flowDir, "events.yaml"), "service.tick:\n")
+	writeStandingCandidateFile(t, filepath.Join(flowDir, "nodes.yaml"), "hold:\n  execution_type: system_node\n  subscribes_to: [service.tick]\n  event_handlers:\n    service.tick:\n      guard: {id: hold, check: true}\n")
 	baseEntities, err := os.ReadFile(filepath.Join(root, "telegram-ingress", "entities.yaml"))
 	if err != nil {
 		t.Fatalf("read healthy standing flow entities: %v", err)

@@ -260,15 +260,12 @@ func TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles(t *testing.
 	diagnostics := func() string {
 		return process.outputString() + "\ndiagnostics: " + standingSQLiteDiagnostics(sqlitePath)
 	}
-	entityID := sendStandingTelegramUpdate(t, baseURL, 201, 42, diagnostics)
-	if entityID == "" {
-		t.Fatal("live graduation returned an empty standing entity")
-	}
+	binding := sendStandingTelegramUpdate(t, baseURL, 201, 42, diagnostics)
 	providerRecorder.waitForInitialCount(t, 1)
 	waitForStandingMemoryCompletion(t, "sqlite", sqlitePath, "live", 1)
 	requireStandingLiveTelegramCalls(t, telegramCalls, "Live turn 1: hello 201")
-	if got := sendStandingTelegramUpdate(t, baseURL, 202, 42, diagnostics); got != entityID {
-		t.Fatalf("live graduation second entity = %q, want same conversation owner %q", got, entityID)
+	if got := sendStandingTelegramUpdate(t, baseURL, 202, 42, diagnostics); got != binding {
+		t.Fatalf("live graduation second binding = %+v, want same generation %+v", got, binding)
 	}
 	providerRecorder.waitForInitialCount(t, 2)
 	waitForStandingMemoryCompletion(t, "sqlite", sqlitePath, "live", 2)
@@ -411,18 +408,18 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	requireStandingTelegramEvidenceCounts(t, backend, storeLocation, standingTelegramEvidenceCounts{Raw: 1}, "unmatched raw-only update")
 	requireStandingTelegramPublicationSettlement(t, firstURL, unmatched, false)
 	firstMatched := sendStandingTelegramUpdatePublication(t, firstURL, 101, 42, firstDiagnostics)
-	entity := firstMatched.EntityID
+	binding := firstMatched.standingTelegramBinding
 	waitForStandingMemoryCompletion(t, backend, storeLocation, "mock", 1)
 	requireStandingTelegramPublicationSettlement(t, firstURL, firstMatched, true)
 	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, firstURL, 101, 42), firstMatched)
 	requireStandingMemoryAttemptCount(t, backend, storeLocation, "mock", 1, "same-process exact duplicate")
 	secondMatched := sendStandingTelegramUpdatePublication(t, firstURL, 102, 42, firstDiagnostics)
-	if secondMatched.EntityID != entity {
-		t.Fatalf("A2 entity = %q, want A1 entity %q", secondMatched.EntityID, entity)
+	if secondMatched.standingTelegramBinding != binding {
+		t.Fatalf("A2 binding = %+v, want A1 binding %+v", secondMatched.standingTelegramBinding, binding)
 	}
 	thirdMatched := sendStandingTelegramUpdatePublication(t, firstURL, 103, 84, firstDiagnostics)
-	if thirdMatched.EntityID != entity {
-		t.Fatalf("B1 entity = %q, want standing entity %q", thirdMatched.EntityID, entity)
+	if thirdMatched.standingTelegramBinding != binding {
+		t.Fatalf("B1 binding = %+v, want standing binding %+v", thirdMatched.standingTelegramBinding, binding)
 	}
 	waitForStandingMemoryCompletion(t, backend, storeLocation, "mock", 3)
 	requireStandingTelegramPublicationSettlement(t, firstURL, secondMatched, true)
@@ -466,8 +463,8 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, rec
 	requireStandingTelegramPublicationSettlement(t, secondURL, firstMatched, true)
 	requireStandingMemoryAttemptCount(t, backend, storeLocation, "mock", 3, "post-restart exact duplicate")
 	fourthMatched := sendStandingTelegramUpdatePublication(t, secondURL, 104, 42)
-	if fourthMatched.EntityID != entity {
-		t.Fatalf("A3 entity = %q, want standing entity %q", fourthMatched.EntityID, entity)
+	if fourthMatched.standingTelegramBinding != binding {
+		t.Fatalf("A3 binding = %+v, want standing binding %+v", fourthMatched.standingTelegramBinding, binding)
 	}
 	waitForStandingMemoryCompletion(t, backend, storeLocation, "mock", 4)
 	requireStandingTelegramPublicationSettlement(t, secondURL, fourthMatched, true)
@@ -491,11 +488,21 @@ type standingTelegramEvidenceCounts struct {
 	Activities int
 }
 
+type standingTelegramBinding struct {
+	ServiceID  string `json:"service_id"`
+	RunID      string `json:"run_id"`
+	Generation int64  `json:"generation"`
+	FlowPath   string `json:"flow_path"`
+}
+
 type standingTelegramPublication struct {
-	Status     string   `json:"status"`
-	EntityID   string   `json:"entity_id"`
-	EventIDs   []string `json:"event_ids"`
-	EventNames []string `json:"event_names"`
+	standingTelegramBinding
+	Status          string   `json:"status"`
+	Provider        string   `json:"provider"`
+	ProviderEventID string   `json:"provider_event_id"`
+	PublicationID   string   `json:"publication_id"`
+	EventIDs        []string `json:"event_ids"`
+	EventNames      []string `json:"event_names"`
 }
 
 func requireStandingTelegramSignatureRejection(t testing.TB, baseURL string) {
@@ -564,8 +571,23 @@ func sendStandingTelegramPublication(t testing.TB, baseURL string, body []byte, 
 	if resp.StatusCode != wantCode || publication.Status != wantStatus {
 		t.Fatalf("Telegram publication status=%d payload=%#v, want %d/%s%s", resp.StatusCode, publication, wantCode, wantStatus, standingWebhookDiagnostics(diagnostics))
 	}
-	if publication.EntityID == "" || len(publication.EventIDs) == 0 || len(publication.EventIDs) != len(publication.EventNames) {
+	if publication.ServiceID == "" || publication.RunID == "" || publication.Generation <= 0 || publication.FlowPath == "" || publication.Provider != "telegram" || publication.ProviderEventID == "" || publication.PublicationID == "" || len(publication.EventIDs) == 0 || len(publication.EventIDs) != len(publication.EventNames) {
 		t.Fatalf("Telegram publication identity = %#v", publication)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(responseBody, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, retired := range []string{"entity_id", "instance_id", "target_flow_instance"} {
+		if _, exists := fields[retired]; exists {
+			t.Fatalf("declaration receipt contains retired %s: %s", retired, responseBody)
+		}
+	}
+	var update struct {
+		UpdateID int `json:"update_id"`
+	}
+	if err := json.Unmarshal(body, &update); err != nil || publication.ProviderEventID != fmt.Sprint(update.UpdateID) {
+		t.Fatalf("Telegram receipt changed provider delivery identity: %+v err=%v", publication, err)
 	}
 	return publication
 }
@@ -628,7 +650,7 @@ func sendStandingTelegramDuplicate(t testing.TB, baseURL string, updateID, chatI
 
 func requireStandingTelegramDuplicateIdentity(t testing.TB, got, want standingTelegramPublication) {
 	t.Helper()
-	if got.EntityID != want.EntityID || !slices.Equal(got.EventIDs, want.EventIDs) || !slices.Equal(got.EventNames, want.EventNames) {
+	if got.standingTelegramBinding != want.standingTelegramBinding || got.Provider != want.Provider || got.ProviderEventID != want.ProviderEventID || got.PublicationID != want.PublicationID || !slices.Equal(got.EventIDs, want.EventIDs) || !slices.Equal(got.EventNames, want.EventNames) {
 		t.Fatalf("duplicate publication = %#v, want exact identity %#v", got, want)
 	}
 }
@@ -660,6 +682,9 @@ func requireStandingTelegramPublicationSettlement(t *testing.T, baseURL string, 
 
 	var raw operatorread.OperatorEventFull
 	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": rawID}, &raw)
+	if raw.RunID != publication.RunID || raw.EntityID != "" {
+		t.Fatalf("raw publication borrowed a receiver or changed binding run: %+v receipt=%+v", raw, publication)
+	}
 	requireStandingConsumerlessRawSettlement(t, raw, rawID)
 	var listed operatorread.OperatorEventListResult
 	requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
