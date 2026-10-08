@@ -219,23 +219,8 @@ func (c PublicationCommand) validatePublicationFacts() error {
 	if c.Commit.RouteSettlement.WriteClass() != events.EventWriteNormalPublication {
 		return fmt.Errorf("publication command requires normal publication settlement")
 	}
-	if c.HasAuthorScope {
-		if c.AuthorScope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(c.AuthorScope.RuntimeInstanceID) == "" || strings.TrimSpace(c.AuthorScope.BundleHash) == "" {
-			return fmt.Errorf("publication author scope requires exact runtime and bundle identity")
-		}
-	} else if c.AuthorScope.Kind != "" || strings.TrimSpace(c.AuthorScope.RuntimeInstanceID) != "" || strings.TrimSpace(c.AuthorScope.BundleHash) != "" {
-		return fmt.Errorf("publication author scope facts require explicit presence")
-	}
-	if c.HasAuthorDescriptor {
-		if !c.HasAuthorScope {
-			return fmt.Errorf("publication author descriptor requires exact author scope")
-		}
-		if strings.TrimSpace(c.AuthorDescriptor.EventType) != strings.TrimSpace(string(c.Commit.Event.Event().Type())) {
-			return fmt.Errorf("publication author descriptor does not match event type")
-		}
-		if strings.TrimSpace(string(c.AuthorDescriptor.Disposition)) == "" {
-			return fmt.Errorf("publication author descriptor requires disposition")
-		}
+	if err := c.validatePublicationAuthor(); err != nil {
+		return err
 	}
 	for index, activation := range c.Activations {
 		if err := activation.Validate(); err != nil {
@@ -257,6 +242,28 @@ func (c PublicationCommand) validatePublicationFacts() error {
 		}
 		if len(c.Activations) != 0 {
 			return fmt.Errorf("dynamic flow creation publication cannot activate another flow instance")
+		}
+	}
+	return nil
+}
+
+func (c PublicationCommand) validatePublicationAuthor() error {
+	if c.HasAuthorScope {
+		if c.AuthorScope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(c.AuthorScope.RuntimeInstanceID) == "" || strings.TrimSpace(c.AuthorScope.BundleHash) == "" {
+			return fmt.Errorf("publication author scope requires exact runtime and bundle identity")
+		}
+	} else if c.AuthorScope.Kind != "" || strings.TrimSpace(c.AuthorScope.RuntimeInstanceID) != "" || strings.TrimSpace(c.AuthorScope.BundleHash) != "" {
+		return fmt.Errorf("publication author scope facts require explicit presence")
+	}
+	if c.HasAuthorDescriptor {
+		if !c.HasAuthorScope {
+			return fmt.Errorf("publication author descriptor requires exact author scope")
+		}
+		if strings.TrimSpace(c.AuthorDescriptor.EventType) != strings.TrimSpace(string(c.Commit.Event.Event().Type())) {
+			return fmt.Errorf("publication author descriptor does not match event type")
+		}
+		if strings.TrimSpace(string(c.AuthorDescriptor.Disposition)) == "" {
+			return fmt.Errorf("publication author descriptor requires disposition")
 		}
 	}
 	return nil

@@ -246,29 +246,8 @@ type CommittedWorkflowLifecycleMutation struct {
 }
 
 func (r CommittedWorkflowLifecycleMutation) Validate() error {
-	for _, op := range r.QueuedDirectiveCancellations {
-		if op.State != agentcontrol.DirectiveOperationCanceled || op.CancellationReason != runtimedelivery.CancellationTerminate || op.ExecutionOwnerID != "" || !op.ExecutionAdmittedAt.IsZero() || r.Committed && !op.Acknowledged {
-			return fmt.Errorf("queued directive cancellation requires exact unexecuted commit evidence")
-		}
-		if err := agentcontrol.ValidateDirectiveOperationEvidence(op); err != nil {
-			return err
-		}
-	}
-	for _, snapshot := range r.QueuedCancellations {
-		if snapshot.Status != runtimedelivery.StatusCanceled || snapshot.SubscriberClass != runtimedelivery.SubscriberAgent || snapshot.ReasonCode != "terminate" {
-			return fmt.Errorf("queued cancellation requires exact canceled-agent evidence")
-		}
-		if err := runtimedelivery.ValidateCanceledSnapshot(snapshot); err != nil {
-			return err
-		}
-	}
-	for _, intent := range r.TurnCancellations {
-		if err := intent.ValidateFacts(); err != nil {
-			return err
-		}
-		if r.Committed && !intent.Committed {
-			return fmt.Errorf("committed lifecycle lacks its turn cancellation acknowledgment")
-		}
+	if err := r.validateTurnCancellationEvidence(); err != nil {
+		return err
 	}
 	seen := make(map[string]string, len(r.Wakeups)+len(r.Cancellations))
 	for _, item := range []struct {
@@ -292,6 +271,34 @@ func (r CommittedWorkflowLifecycleMutation) Validate() error {
 	for index, activation := range append(append([]runtimegenericschedule.Activation(nil), r.GenericScheduleActivations...), r.GenericScheduleCancellations...) {
 		if err := activation.Validate(); err != nil {
 			return fmt.Errorf("generic schedule evidence %d: %w", index, err)
+		}
+	}
+	return nil
+}
+
+func (r CommittedWorkflowLifecycleMutation) validateTurnCancellationEvidence() error {
+	for _, op := range r.QueuedDirectiveCancellations {
+		if op.State != agentcontrol.DirectiveOperationCanceled || op.CancellationReason != runtimedelivery.CancellationTerminate || op.ExecutionOwnerID != "" || !op.ExecutionAdmittedAt.IsZero() || r.Committed && !op.Acknowledged {
+			return fmt.Errorf("queued directive cancellation requires exact unexecuted commit evidence")
+		}
+		if err := agentcontrol.ValidateDirectiveOperationEvidence(op); err != nil {
+			return err
+		}
+	}
+	for _, snapshot := range r.QueuedCancellations {
+		if snapshot.Status != runtimedelivery.StatusCanceled || snapshot.SubscriberClass != runtimedelivery.SubscriberAgent || snapshot.ReasonCode != "terminate" {
+			return fmt.Errorf("queued cancellation requires exact canceled-agent evidence")
+		}
+		if err := runtimedelivery.ValidateCanceledSnapshot(snapshot); err != nil {
+			return err
+		}
+	}
+	for _, intent := range r.TurnCancellations {
+		if err := intent.ValidateFacts(); err != nil {
+			return err
+		}
+		if r.Committed && !intent.Committed {
+			return fmt.Errorf("committed lifecycle lacks its turn cancellation acknowledgment")
 		}
 	}
 	return nil
@@ -486,16 +493,8 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 				return err
 			}
 			fromState, toState = transition.From(), transition.To()
-			if transition.TerminatesAgentTurns() {
-				if prepared.Commit.TurnTermination != nil {
-					return fmt.Errorf("one workflow mutation cannot carry multiple turn termination causes")
-				}
-				termination, err := runtimeworkflowlifecycle.NewTurnTermination(owner, effect)
-				if err != nil {
-					return err
-				}
-				prepared.Commit.TurnTermination = &termination
-				prepared.Commit.RequestCompletionCandidate = true
+			if err := prepareWorkflowTurnTermination(owner, effect, transition, prepared); err != nil {
+				return err
 			}
 			cause.Kind = workflowTimerCauseTransition
 			cause.TransitionID = transition.ID()
@@ -525,6 +524,21 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 	}
 	if err := pc.planWorkflowGateEffect(ctx, owner.RunID, instance, route, entityID, fromState, toState, effect, prepared); err != nil {
 		return err
+	}
+	return nil
+}
+
+func prepareWorkflowTurnTermination(owner runtimeflowidentity.RunScopedFlowInstance, effect runtimeworkflowlifecycle.Effect, transition runtimeworkflowlifecycle.Transition, prepared *PreparedWorkflowLifecycleMutation) error {
+	if transition.TerminatesAgentTurns() {
+		if prepared.Commit.TurnTermination != nil {
+			return fmt.Errorf("one workflow mutation cannot carry multiple turn termination causes")
+		}
+		termination, err := runtimeworkflowlifecycle.NewTurnTermination(owner, effect)
+		if err != nil {
+			return err
+		}
+		prepared.Commit.TurnTermination = &termination
+		prepared.Commit.RequestCompletionCandidate = true
 	}
 	return nil
 }

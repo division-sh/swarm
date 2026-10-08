@@ -657,23 +657,8 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 			if existing, found, err := loadExistingExternalAttemptSQLite(txctx, tx, req.OperationID); err != nil {
 				return err
 			} else if found {
-				if resumed, ok := resumeProviderRegistrationAuthorization(authority, req, existing); ok {
-					attempt = resumed
-					return nil
-				}
-				var retry bool
-				attempt, retry, err = authorizePrelaunchRetrySQLite(txctx, tx, authority, req, existing)
-				if err != nil {
-					return err
-				}
-				if retry {
-					reservations, reserveErr := prepareCompletionBudgetReservationsSQLite(txctx, tx, authority, req.Now.UTC())
-					if reserveErr != nil {
-						return reserveErr
-					}
-					return insertCompletionBudgetReservationsSQLite(txctx, tx, attempt.AttemptID, reservations, req.Now.UTC())
-				}
-				return externalEffectReplayRefusal(authority, req, existing)
+				attempt, err = authorizeExistingExternalAttemptSQLiteTx(txctx, tx, authority, req, existing)
+				return err
 			}
 			reservations, err := prepareCompletionBudgetReservationsSQLite(txctx, tx, authority, req.Now.UTC())
 			if err != nil {
@@ -739,6 +724,24 @@ func bindExternalEffectRunLineage(ctx context.Context, authority runtimeeffects.
 	}
 	out["run_id"] = runID
 	return out, nil
+}
+
+func authorizeExistingExternalAttemptSQLiteTx(txctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) (runtimeeffects.Attempt, error) {
+	if resumed, ok := resumeProviderRegistrationAuthorization(authority, req, existing); ok {
+		return resumed, nil
+	}
+	attempt, retry, err := authorizePrelaunchRetrySQLite(txctx, tx, authority, req, existing)
+	if err != nil {
+		return runtimeeffects.Attempt{}, err
+	}
+	if retry {
+		reservations, reserveErr := prepareCompletionBudgetReservationsSQLite(txctx, tx, authority, req.Now.UTC())
+		if reserveErr != nil {
+			return runtimeeffects.Attempt{}, reserveErr
+		}
+		return attempt, insertCompletionBudgetReservationsSQLite(txctx, tx, attempt.AttemptID, reservations, req.Now.UTC())
+	}
+	return runtimeeffects.Attempt{}, externalEffectReplayRefusal(authority, req, existing)
 }
 
 type existingExternalAttempt struct {
@@ -1706,6 +1709,23 @@ func completionOriginValues(origin runtimeeffects.CompletionOrigin) []any {
 	return []any{string(origin.Kind), "", "", "", "", int64(0), "", "", origin.Directive.OperationID, origin.Directive.ExecutionOwnerID}
 }
 
+func persistExternalAttemptLaunchPostgresTx(txctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time) error {
+	res, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_attempts SET state = 'launched', launched_at = $2, updated_at = $2 WHERE attempt_id = $1::uuid AND operation_id = $3::uuid AND execution_owner=$4 AND fence_generation=$5 AND state = 'authorized'`, attempt.AttemptID, now.UTC(), attempt.OperationID, attempt.Authority.ExecutionOwner, attempt.Authority.FenceGeneration)
+	if err := requireExternalAttemptTransition(res, err); err == nil {
+		operationRes, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_operations SET state = 'launched', updated_at = $2 WHERE operation_id = $1::uuid AND state = 'authorized'`, attempt.OperationID, now.UTC())
+		if err := requireExternalAttemptTransition(operationRes, err); err != nil {
+			return err
+		}
+	} else {
+		var state string
+		var operationState string
+		if queryErr := tx.QueryRowContext(txctx, `SELECT a.state, o.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.attempt_id = $1::uuid AND a.operation_id = $2::uuid`, attempt.AttemptID, attempt.OperationID).Scan(&state, &operationState); queryErr != nil || state != string(runtimeeffects.StateLaunched) || operationState != string(runtimeeffects.StateLaunched) {
+			return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "external-effects", "launch_attempt", map[string]any{"attempt_id": attempt.AttemptID})
+		}
+	}
+	return nil
+}
+
 func (s *EffectPostgresOwner) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
 	if err := s.requireCurrent(); err != nil {
 		return runtimeeffects.ExternalAttemptLaunch{}, err
@@ -1725,18 +1745,8 @@ func (s *EffectPostgresOwner) MarkExternalAttemptLaunched(ctx context.Context, a
 			if err := requireLaunchSessionGrant(txctx, tx, true, attempt, now); err != nil {
 				return err
 			}
-			res, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_attempts SET state = 'launched', launched_at = $2, updated_at = $2 WHERE attempt_id = $1::uuid AND operation_id = $3::uuid AND execution_owner=$4 AND fence_generation=$5 AND state = 'authorized'`, attempt.AttemptID, now.UTC(), attempt.OperationID, attempt.Authority.ExecutionOwner, attempt.Authority.FenceGeneration)
-			if err := requireExternalAttemptTransition(res, err); err == nil {
-				operationRes, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_operations SET state = 'launched', updated_at = $2 WHERE operation_id = $1::uuid AND state = 'authorized'`, attempt.OperationID, now.UTC())
-				if err := requireExternalAttemptTransition(operationRes, err); err != nil {
-					return err
-				}
-			} else {
-				var state string
-				var operationState string
-				if queryErr := tx.QueryRowContext(txctx, `SELECT a.state, o.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.attempt_id = $1::uuid AND a.operation_id = $2::uuid`, attempt.AttemptID, attempt.OperationID).Scan(&state, &operationState); queryErr != nil || state != string(runtimeeffects.StateLaunched) || operationState != string(runtimeeffects.StateLaunched) {
-					return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "external-effects", "launch_attempt", map[string]any{"attempt_id": attempt.AttemptID})
-				}
+			if err := persistExternalAttemptLaunchPostgresTx(txctx, tx, attempt, now); err != nil {
+				return err
 			}
 			launchedAt, err := loadExternalEffectLaunchTime(txctx, tx, attempt.AttemptID, attempt.OperationID, true)
 			if err != nil {
@@ -1761,6 +1771,23 @@ func (s *EffectPostgresOwner) MarkExternalAttemptLaunched(ctx context.Context, a
 	return launch, effectMutationError(true, result.Err(), runtimeeffects.MutationLaunch, attempt)
 }
 
+func persistExternalAttemptLaunchSQLiteTx(txctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time) error {
+	res, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_attempts SET state = 'launched', launched_at = ?, updated_at = ? WHERE attempt_id = ? AND operation_id = ? AND execution_owner=? AND fence_generation=? AND state = 'authorized'`, now.UTC(), now.UTC(), attempt.AttemptID, attempt.OperationID, attempt.Authority.ExecutionOwner, attempt.Authority.FenceGeneration)
+	if err := requireExternalAttemptTransition(res, err); err == nil {
+		operationRes, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_operations SET state = 'launched', updated_at = ? WHERE operation_id = ? AND state = 'authorized'`, now.UTC(), attempt.OperationID)
+		if err := requireExternalAttemptTransition(operationRes, err); err != nil {
+			return err
+		}
+	} else {
+		var state string
+		var operationState string
+		if queryErr := tx.QueryRowContext(txctx, `SELECT a.state, o.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.attempt_id = ? AND a.operation_id = ?`, attempt.AttemptID, attempt.OperationID).Scan(&state, &operationState); queryErr != nil || state != string(runtimeeffects.StateLaunched) || operationState != string(runtimeeffects.StateLaunched) {
+			return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "external-effects", "launch_attempt", map[string]any{"attempt_id": attempt.AttemptID})
+		}
+	}
+	return nil
+}
+
 func (s *EffectSQLiteOwner) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
 	if err := s.requireCurrent(); err != nil {
 		return runtimeeffects.ExternalAttemptLaunch{}, err
@@ -1780,18 +1807,8 @@ func (s *EffectSQLiteOwner) MarkExternalAttemptLaunched(ctx context.Context, att
 			if err := requireLaunchSessionGrant(txctx, tx, false, attempt, now); err != nil {
 				return err
 			}
-			res, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_attempts SET state = 'launched', launched_at = ?, updated_at = ? WHERE attempt_id = ? AND operation_id = ? AND execution_owner=? AND fence_generation=? AND state = 'authorized'`, now.UTC(), now.UTC(), attempt.AttemptID, attempt.OperationID, attempt.Authority.ExecutionOwner, attempt.Authority.FenceGeneration)
-			if err := requireExternalAttemptTransition(res, err); err == nil {
-				operationRes, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_operations SET state = 'launched', updated_at = ? WHERE operation_id = ? AND state = 'authorized'`, now.UTC(), attempt.OperationID)
-				if err := requireExternalAttemptTransition(operationRes, err); err != nil {
-					return err
-				}
-			} else {
-				var state string
-				var operationState string
-				if queryErr := tx.QueryRowContext(txctx, `SELECT a.state, o.state FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id WHERE a.attempt_id = ? AND a.operation_id = ?`, attempt.AttemptID, attempt.OperationID).Scan(&state, &operationState); queryErr != nil || state != string(runtimeeffects.StateLaunched) || operationState != string(runtimeeffects.StateLaunched) {
-					return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "external-effects", "launch_attempt", map[string]any{"attempt_id": attempt.AttemptID})
-				}
+			if err := persistExternalAttemptLaunchSQLiteTx(txctx, tx, attempt, now); err != nil {
+				return err
 			}
 			launchedAt, err := loadExternalEffectLaunchTime(txctx, tx, attempt.AttemptID, attempt.OperationID, false)
 			if err != nil {

@@ -23,6 +23,32 @@ type canceledTurnRecoveryRow struct {
 }
 
 func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, request runtimeeffects.RecoveryRequest, selectedExecutionID string) ([]runtimeeffects.TurnExecutionResult, error) {
+	pending, err := loadCanceledTurnRecoveryRowsTx(ctx, tx, selectedExecutionID)
+	if err != nil {
+		return nil, err
+	}
+	turns := make([]runtimeeffects.TurnExecutionResult, 0, len(pending))
+	for _, row := range pending {
+		var turn runtimeeffects.TurnExecutionResult
+		if row.currentAttempt.Valid {
+			turn, err = recoverPhysicalCanceledTurnTx(ctx, tx, postgres, delivery, request, selectedExecutionID, row)
+		} else {
+			turn, err = recoverUnstartedCanceledTurn(ctx, tx, postgres, delivery, directives, row)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !row.currentAttempt.Valid && selectedExecutionID != "" && turn.Attempt.Origin.Kind == runtimeeffects.CompletionOriginDelivery {
+			if err := delivery.ValidateSelectedOriginExecutionTx(ctx, tx, turn.Attempt.Origin.Delivery, selectedExecutionID); err != nil {
+				return nil, err
+			}
+		}
+		turns = append(turns, turn)
+	}
+	return turns, nil
+}
+
+func loadCanceledTurnRecoveryRowsTx(ctx context.Context, tx *sql.Tx, selectedExecutionID string) ([]canceledTurnRecoveryRow, error) {
 	// The normal snapshot excludes selected possession. The selected owner alone
 	// supplies an exact execution scope after fencing its predecessor.
 	scope := `(o.authority_kind='normal_agent' OR (o.operation_id IS NULL AND
@@ -64,101 +90,112 @@ func listCanceledTurnRecoveries(ctx context.Context, tx *sql.Tx, postgres bool, 
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	turns := make([]runtimeeffects.TurnExecutionResult, 0, len(pending))
-	for _, row := range pending {
-		if !row.currentAttempt.Valid {
-			turn, err := recoverUnstartedCanceledTurn(ctx, tx, postgres, delivery, directives, row)
-			if err != nil {
-				return nil, err
-			}
-			if selectedExecutionID != "" && turn.Attempt.Origin.Kind == runtimeeffects.CompletionOriginDelivery {
-				if err := delivery.ValidateSelectedOriginExecutionTx(ctx, tx, turn.Attempt.Origin.Delivery, selectedExecutionID); err != nil {
-					return nil, err
-				}
-			}
-			turns = append(turns, turn)
-			continue
-		}
-		if row.originEvidence.Valid {
-			return nil, fmt.Errorf("physical cancellation carries contradictory origin-only evidence")
-		}
-		admitted, err := loadCanceledFirstAttempt(ctx, tx, postgres, row.admittedAttempt.String, request.Now())
-		if err != nil {
-			return nil, err
-		}
-		attempt, err := loadCanceledFirstAttempt(ctx, tx, postgres, row.currentAttempt.String, request.Now())
-		if err != nil {
-			return nil, err
-		}
-		if err := validateBusinessTurnAnchor(admitted, attempt); err != nil {
-			return nil, err
-		}
-		if selectedExecutionID == "" && attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent || selectedExecutionID != "" && (attempt.Authority.Kind != runtimeeffects.AuthoritySelectedContractFork || attempt.Authority.ID != selectedExecutionID) {
-			return nil, fmt.Errorf("canceled turn authority differs from its recovery scope")
-		}
-		if selectedExecutionID != "" && attempt.Origin.Kind == runtimeeffects.CompletionOriginDelivery {
-			if err := delivery.ValidateSelectedOriginExecutionTx(ctx, tx, attempt.Origin.Delivery, selectedExecutionID); err != nil {
-				return nil, err
-			}
-		}
-		if row.firstAttempt.Valid {
-			first, err := loadCanceledFirstAttempt(ctx, tx, postgres, row.firstAttempt.String, request.Now())
-			if err != nil {
-				return nil, err
-			}
-			if err := validateBusinessTurnAnchor(first, attempt); err != nil {
-				return nil, err
-			}
-		}
-		if err := request.Admit(attempt.Authority.ExecutionMode); err != nil {
-			return nil, err
-		}
-		id, _, err := businessTurnIdentity(attempt.Origin)
-		if err != nil || id != row.turnID {
-			return nil, fmt.Errorf("canceled turn recovery contradicts its exact first origin")
-		}
-		owner, err := businessTurnOwner(attempt.Authority)
-		if err != nil || owner.RunID != row.runID || attempt.Authority.Target.AgentID != row.agentID || owner.Route.InstancePath != row.flow {
-			return nil, fmt.Errorf("canceled turn recovery contradicts its exact first origin")
-		}
-		clock := runtimeeffects.LogicalTurnClock{Origin: attempt.Origin, FirstAttempt: row.firstAttempt.String, TimeoutEvent: row.timeoutEvent.String}
-		launched, hasLaunch, err := sqliteTimeValue(row.launched)
-		if err != nil || hasLaunch != row.firstAttempt.Valid {
-			return nil, fmt.Errorf("canceled turn recovery has contradictory launch evidence")
-		}
-		clock.LaunchedAt = launched
-		if row.bound.Valid != row.emit.Valid || row.bound.Valid != row.timeoutEvent.Valid {
-			return nil, fmt.Errorf("canceled turn recovery has incomplete bound evidence")
-		}
-		if row.bound.Valid {
-			clock.Timeout = &timeridentity.TurnTimeout{After: time.Duration(row.bound.Int64), Emit: row.emit.String}
-			clock.DeadlineAt = launched.Add(clock.Timeout.After)
-		}
-		var ownedClock *runtimeeffects.LogicalTurnClock
-		if hasLaunch {
-			if err := clock.Validate(); err != nil {
-				return nil, err
-			}
-			ownedClock = &clock
-		} else if row.reason != string(deliverylifecycle.CancellationTerminate) {
-			return nil, fmt.Errorf("unlaunched canceled turn cannot have a timeout intent")
-		}
-		requested, valid, err := sqliteTimeValue(row.requested)
-		if err != nil || !valid {
-			return nil, fmt.Errorf("canceled turn recovery lacks its intent timestamp")
-		}
-		intent := runtimeeffects.TurnCancellation{Committed: true, Requested: true, Origin: attempt.Origin, Reason: deliverylifecycle.CancellationReason(row.reason), CauseEvent: row.cause, RequestedAt: requested}
-		if err := intent.ValidateIntent(); err != nil {
-			return nil, err
-		}
-		// The intent owner admitted the exact deadline. Its canonical timestamp
-		// is occurrence evidence, not permission to re-round that deadline.
-		if intent.Reason == deliverylifecycle.CancellationTurnTimeout && (ownedClock == nil || clock.Timeout == nil || intent.CauseEvent != clock.TimeoutEvent || requested.Before(clock.LaunchedAt)) {
-			return nil, fmt.Errorf("canceled turn recovery contradicts its exact timeout")
-		}
-		turns = append(turns, runtimeeffects.TurnExecutionResult{Attempt: attempt, Cancellation: intent, Clock: ownedClock})
+	return pending, nil
+}
+
+func recoverPhysicalCanceledTurnTx(ctx context.Context, tx *sql.Tx, postgres bool, delivery providerDrainDeliveryOwner, request runtimeeffects.RecoveryRequest, selectedExecutionID string, row canceledTurnRecoveryRow) (runtimeeffects.TurnExecutionResult, error) {
+	if row.originEvidence.Valid {
+		return runtimeeffects.TurnExecutionResult{}, fmt.Errorf("physical cancellation carries contradictory origin-only evidence")
 	}
-	return turns, nil
+	attempt, err := loadCanceledTurnRecoveryAttemptTx(ctx, tx, postgres, delivery, row, request.Now(), selectedExecutionID)
+	if err != nil {
+		return runtimeeffects.TurnExecutionResult{}, err
+	}
+	if err := request.Admit(attempt.Authority.ExecutionMode); err != nil {
+		return runtimeeffects.TurnExecutionResult{}, err
+	}
+	id, _, err := businessTurnIdentity(attempt.Origin)
+	if err != nil || id != row.turnID {
+		return runtimeeffects.TurnExecutionResult{}, fmt.Errorf("canceled turn recovery contradicts its exact first origin")
+	}
+	owner, err := businessTurnOwner(attempt.Authority)
+	if err != nil || owner.RunID != row.runID || attempt.Authority.Target.AgentID != row.agentID || owner.Route.InstancePath != row.flow {
+		return runtimeeffects.TurnExecutionResult{}, fmt.Errorf("canceled turn recovery contradicts its exact first origin")
+	}
+	clock, err := canceledTurnRecoveryClock(row, attempt.Origin)
+	if err != nil {
+		return runtimeeffects.TurnExecutionResult{}, err
+	}
+	intent, err := canceledTurnRecoveryIntent(row, attempt.Origin, clock)
+	if err != nil {
+		return runtimeeffects.TurnExecutionResult{}, err
+	}
+	return runtimeeffects.TurnExecutionResult{Attempt: attempt, Cancellation: intent, Clock: clock}, nil
+}
+
+func loadCanceledTurnRecoveryAttemptTx(ctx context.Context, tx *sql.Tx, postgres bool, delivery providerDrainDeliveryOwner, row canceledTurnRecoveryRow, now time.Time, selectedExecutionID string) (runtimeeffects.Attempt, error) {
+	admitted, err := loadCanceledFirstAttempt(ctx, tx, postgres, row.admittedAttempt.String, now)
+	if err != nil {
+		return runtimeeffects.Attempt{}, err
+	}
+	attempt, err := loadCanceledFirstAttempt(ctx, tx, postgres, row.currentAttempt.String, now)
+	if err != nil {
+		return runtimeeffects.Attempt{}, err
+	}
+	if err := validateBusinessTurnAnchor(admitted, attempt); err != nil {
+		return runtimeeffects.Attempt{}, err
+	}
+	if selectedExecutionID == "" && attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent || selectedExecutionID != "" && (attempt.Authority.Kind != runtimeeffects.AuthoritySelectedContractFork || attempt.Authority.ID != selectedExecutionID) {
+		return runtimeeffects.Attempt{}, fmt.Errorf("canceled turn authority differs from its recovery scope")
+	}
+	if selectedExecutionID != "" && attempt.Origin.Kind == runtimeeffects.CompletionOriginDelivery {
+		if err := delivery.ValidateSelectedOriginExecutionTx(ctx, tx, attempt.Origin.Delivery, selectedExecutionID); err != nil {
+			return runtimeeffects.Attempt{}, err
+		}
+	}
+	if row.firstAttempt.Valid {
+		first, err := loadCanceledFirstAttempt(ctx, tx, postgres, row.firstAttempt.String, now)
+		if err != nil {
+			return runtimeeffects.Attempt{}, err
+		}
+		if err := validateBusinessTurnAnchor(first, attempt); err != nil {
+			return runtimeeffects.Attempt{}, err
+		}
+	}
+	return attempt, nil
+}
+
+func canceledTurnRecoveryClock(row canceledTurnRecoveryRow, origin runtimeeffects.CompletionOrigin) (*runtimeeffects.LogicalTurnClock, error) {
+	clock := runtimeeffects.LogicalTurnClock{Origin: origin, FirstAttempt: row.firstAttempt.String, TimeoutEvent: row.timeoutEvent.String}
+	launched, hasLaunch, err := sqliteTimeValue(row.launched)
+	if err != nil || hasLaunch != row.firstAttempt.Valid {
+		return nil, fmt.Errorf("canceled turn recovery has contradictory launch evidence")
+	}
+	clock.LaunchedAt = launched
+	if row.bound.Valid != row.emit.Valid || row.bound.Valid != row.timeoutEvent.Valid {
+		return nil, fmt.Errorf("canceled turn recovery has incomplete bound evidence")
+	}
+	if row.bound.Valid {
+		clock.Timeout = &timeridentity.TurnTimeout{After: time.Duration(row.bound.Int64), Emit: row.emit.String}
+		clock.DeadlineAt = launched.Add(clock.Timeout.After)
+	}
+	var ownedClock *runtimeeffects.LogicalTurnClock
+	if hasLaunch {
+		if err := clock.Validate(); err != nil {
+			return nil, err
+		}
+		ownedClock = &clock
+	} else if row.reason != string(deliverylifecycle.CancellationTerminate) {
+		return nil, fmt.Errorf("unlaunched canceled turn cannot have a timeout intent")
+	}
+	return ownedClock, nil
+}
+
+func canceledTurnRecoveryIntent(row canceledTurnRecoveryRow, origin runtimeeffects.CompletionOrigin, clock *runtimeeffects.LogicalTurnClock) (runtimeeffects.TurnCancellation, error) {
+	requested, valid, err := sqliteTimeValue(row.requested)
+	if err != nil || !valid {
+		return runtimeeffects.TurnCancellation{}, fmt.Errorf("canceled turn recovery lacks its intent timestamp")
+	}
+	intent := runtimeeffects.TurnCancellation{Committed: true, Requested: true, Origin: origin, Reason: deliverylifecycle.CancellationReason(row.reason), CauseEvent: row.cause, RequestedAt: requested}
+	if err := intent.ValidateIntent(); err != nil {
+		return runtimeeffects.TurnCancellation{}, err
+	}
+	// The intent owner admitted the exact deadline. Its canonical timestamp
+	// is occurrence evidence, not permission to re-round that deadline.
+	if intent.Reason == deliverylifecycle.CancellationTurnTimeout && (clock == nil || clock.Timeout == nil || intent.CauseEvent != clock.TimeoutEvent || requested.Before(clock.LaunchedAt)) {
+		return runtimeeffects.TurnCancellation{}, fmt.Errorf("canceled turn recovery contradicts its exact timeout")
+	}
+	return intent, nil
 }
 
 func loadCanceledFirstAttempt(ctx context.Context, tx *sql.Tx, postgres bool, first string, now time.Time) (runtimeeffects.Attempt, error) {

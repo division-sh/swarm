@@ -1480,21 +1480,8 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, attempt *mutationproto
 
 func (a *Adapter) settleExactClaim(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, settlement Settlement, cancellation CancellationReason, record deliveryRecord, now time.Time) (Snapshot, error) {
 	var err error
-	if cancellation == "" && record.SubscriberClass == SubscriberAgent {
-		query := `SELECT cancel_reason FROM runtime_agent_turn_lifetimes WHERE origin_kind='delivery' AND origin_id=$1::uuid FOR UPDATE`
-		if a.dialect == DialectSQLite {
-			query = `SELECT cancel_reason FROM runtime_agent_turn_lifetimes WHERE origin_kind='delivery' AND origin_id=?`
-		}
-		var reason sql.NullString
-		if err := tx.QueryRowContext(ctx, query, claim.DeliveryID()).Scan(&reason); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return Snapshot{}, err
-		}
-		if reason.Valid {
-			if _, err := ParseCancellationReason(reason.String); err != nil {
-				return Snapshot{}, err
-			}
-			return Snapshot{}, fmt.Errorf("%w: authored cancellation requires canceled-origin settlement", ErrConflict)
-		}
+	if err := a.requireOrdinaryClaimSettlementTx(ctx, tx, claim, record, cancellation); err != nil {
+		return Snapshot{}, err
 	}
 	status := StatusDelivered
 	transition := "delivered"
@@ -1533,18 +1520,8 @@ func (a *Adapter) settleExactClaim(ctx context.Context, tx *sql.Tx, attempt *mut
 	if cancellation != "" {
 		status, transition, outcome, reason = StatusCanceled, "canceled", "canceled", string(cancellation)
 	}
-	final, err := FinalSelection(status, settlement.RuleSelection)
-	if err != nil {
+	if err := a.persistSettlementRuleSelectionTx(ctx, tx, attempt, claim, record, status, settlement); err != nil {
 		return Snapshot{}, err
-	}
-	if final.Present() {
-		fact, err := final.Fact()
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if err := a.persistHandlerRuleSelection(ctx, tx, attempt, record.RunID, claim.DeliveryID(), fact); err != nil {
-			return Snapshot{}, err
-		}
 	}
 	failureRaw, err := encodeFailure(effectiveFailure)
 	if err != nil {
@@ -1593,6 +1570,43 @@ func (a *Adapter) settleExactClaim(ctx context.Context, tx *sql.Tx, attempt *mut
 		return Snapshot{}, err
 	}
 	return snapshotAt(updated, now), nil
+}
+
+func (a *Adapter) requireOrdinaryClaimSettlementTx(ctx context.Context, tx *sql.Tx, claim Claim, record deliveryRecord, cancellation CancellationReason) error {
+	if cancellation == "" && record.SubscriberClass == SubscriberAgent {
+		query := `SELECT cancel_reason FROM runtime_agent_turn_lifetimes WHERE origin_kind='delivery' AND origin_id=$1::uuid FOR UPDATE`
+		if a.dialect == DialectSQLite {
+			query = `SELECT cancel_reason FROM runtime_agent_turn_lifetimes WHERE origin_kind='delivery' AND origin_id=?`
+		}
+		var reason sql.NullString
+		if err := tx.QueryRowContext(ctx, query, claim.DeliveryID()).Scan(&reason); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if reason.Valid {
+			if _, err := ParseCancellationReason(reason.String); err != nil {
+				return err
+			}
+			return fmt.Errorf("%w: authored cancellation requires canceled-origin settlement", ErrConflict)
+		}
+	}
+	return nil
+}
+
+func (a *Adapter) persistSettlementRuleSelectionTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, record deliveryRecord, status Status, settlement Settlement) error {
+	final, err := FinalSelection(status, settlement.RuleSelection)
+	if err != nil {
+		return err
+	}
+	if final.Present() {
+		fact, err := final.Fact()
+		if err != nil {
+			return err
+		}
+		if err := a.persistHandlerRuleSelection(ctx, tx, attempt, record.RunID, claim.DeliveryID(), fact); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *Adapter) persistHandlerRuleSelection(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runID, deliveryID string, fact handlerselection.HandlerRuleSelectionFact) error {
@@ -3137,6 +3151,21 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 }
 
 func validateRecordShape(record deliveryRecord) error {
+	if err := validateRecordIdentityShape(record); err != nil {
+		return err
+	}
+	claimClear := record.claimToken == "" && record.ClaimExpiresAt.IsZero() && record.ActiveSessionID == ""
+	switch record.Status {
+	case StatusPending, StatusInProgress, StatusFailed:
+		return validateLiveRecordShape(record, claimClear)
+	case StatusDelivered, StatusDeadLetter, StatusCanceled:
+		return validateSettledRecordShape(record, claimClear)
+	default:
+		return fmt.Errorf("%w: persisted delivery %s has unknown lifecycle state", ErrConflict, record.DeliveryID)
+	}
+}
+
+func validateRecordIdentityShape(record deliveryRecord) error {
 	conflict := func(detail string) error {
 		return fmt.Errorf("%w: persisted delivery %s %s", ErrConflict, record.DeliveryID, detail)
 	}
@@ -3162,7 +3191,13 @@ func validateRecordShape(record deliveryRecord) error {
 			return conflict("has invalid active session identity")
 		}
 	}
-	claimClear := record.claimToken == "" && record.ClaimExpiresAt.IsZero() && record.ActiveSessionID == ""
+	return nil
+}
+
+func validateLiveRecordShape(record deliveryRecord, claimClear bool) error {
+	conflict := func(detail string) error {
+		return fmt.Errorf("%w: persisted delivery %s %s", ErrConflict, record.DeliveryID, detail)
+	}
 	switch record.Status {
 	case StatusPending:
 		if record.NextEligibleAt.IsZero() || !claimClear || !record.SettledAt.IsZero() || record.Failure != nil || record.ReasonCode != "" {
@@ -3181,6 +3216,15 @@ func validateRecordShape(record deliveryRecord) error {
 		if record.RetryCount <= 0 || record.NextEligibleAt.IsZero() || !claimClear || !record.SettledAt.IsZero() || record.Failure == nil {
 			return conflict("has invalid retry-scheduled shape")
 		}
+	}
+	return nil
+}
+
+func validateSettledRecordShape(record deliveryRecord, claimClear bool) error {
+	conflict := func(detail string) error {
+		return fmt.Errorf("%w: persisted delivery %s %s", ErrConflict, record.DeliveryID, detail)
+	}
+	switch record.Status {
 	case StatusDelivered:
 		if !record.NextEligibleAt.IsZero() || !claimClear || record.SettledAt.IsZero() || record.Failure != nil || record.ReasonCode != "" {
 			return conflict("has invalid delivered shape")
@@ -3196,8 +3240,6 @@ func validateRecordShape(record deliveryRecord) error {
 		if err := ValidateCanceledSnapshot(record.Snapshot); err != nil {
 			return conflict(err.Error())
 		}
-	default:
-		return conflict("has unknown lifecycle state")
 	}
 	return nil
 }

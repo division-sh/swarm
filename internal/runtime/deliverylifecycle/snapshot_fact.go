@@ -147,6 +147,10 @@ func validateHistoricalSnapshot(snapshot Snapshot) error {
 		snapshot.CreatedAt.IsZero() || snapshot.UpdatedAt.IsZero() || snapshot.ClaimVersion < 0 {
 		return fmt.Errorf("%w: historical delivery snapshot violates structural policy", ErrConflict)
 	}
+	return validateHistoricalLifecycleShape(snapshot)
+}
+
+func validateHistoricalLifecycleShape(snapshot Snapshot) error {
 	switch snapshot.Status {
 	case StatusPending:
 		if snapshot.RetryCount != 0 || snapshot.NextEligibleAt.IsZero() || !snapshot.SettledAt.IsZero() || !snapshot.ClaimExpiresAt.IsZero() {

@@ -24,6 +24,51 @@ type publishRecipientPlanner interface {
 	CheckPublishRecipientPlan(context.Context, events.Event) (runtimebus.PublishRecipientPlan, error)
 }
 
+func (e *Executor) preflightPinnedEmit(ctx context.Context, actor models.AgentConfig, toolName, flowID, schemaEventType string, emitted events.Event, envelope events.EventEnvelope, preValidationPayload, postEnrichmentPayload map[string]any) (events.Event, error) {
+	eventType, routingSource := string(emitted.Type()), emitted.RoutingSource()
+	var err error
+	resolution := runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
+		Source: e.workflowSource, FlowID: flowID, EventType: eventType, RoutingSource: routingSource,
+	}, envelope)
+	if !resolution.Failure.Empty() {
+		wrapped := failures.NewTarget(resolution.Failure.Code(), "tool-executor", "handle_emit_tool.pin_target_resolution",
+			map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType})
+		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
+		return events.Event{}, wrapped
+	}
+	emitted, err = events.ResolveEnvelope(emitted, resolution.Envelope)
+	if err != nil {
+		return events.Event{}, err
+	}
+	if planner, ok := e.bus.(publishRecipientPlanner); ok && planner != nil {
+		plan, err := planner.CheckPublishRecipientPlan(ctx, emitted)
+		if err != nil {
+			wrapped := failures.WrapDetail(
+				"route_plan_preflight_failed",
+				"tool-executor",
+				"handle_emit_tool.route_plan_preflight",
+				map[string]any{"event": eventType},
+				err,
+			)
+			e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
+			return events.Event{}, wrapped
+		}
+		if plan.UsesCanonicalRouteAuthority() {
+			if plan.TargetFailure != "" {
+				wrapped := failures.NewTarget(
+					plan.TargetFailure,
+					"tool-executor",
+					"handle_emit_tool.route_plan_preflight",
+					map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},
+				)
+				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
+				return events.Event{}, wrapped
+			}
+		}
+	}
+	return emitted, nil
+}
+
 func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig, toolName string, input any, outputIdentity ...llm.ToolOutputEventIdentity) (any, error) {
 	if len(outputIdentity) > 1 {
 		return nil, failures.New(failures.ClassSchemaInvalid, "tool_output_event_identity_ambiguous", "tool-executor", "handle_emit_tool.identity", nil)
@@ -158,44 +203,9 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		return nil, err
 	}
 	if runtimepinrouting.PinDeclaredOutput(e.workflowSource, flowID, eventType) {
-		resolution := runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
-			Source: e.workflowSource, FlowID: flowID, EventType: eventType, RoutingSource: routingSource,
-		}, envelope)
-		if !resolution.Failure.Empty() {
-			wrapped := failures.NewTarget(resolution.Failure.Code(), "tool-executor", "handle_emit_tool.pin_target_resolution",
-				map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType})
-			e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
-			return nil, wrapped
-		}
-		emitted, err = events.ResolveEnvelope(emitted, resolution.Envelope)
+		emitted, err = e.preflightPinnedEmit(ctx, actor, toolName, flowID, schemaEventType, emitted, envelope, preValidationPayload, postEnrichmentPayload)
 		if err != nil {
 			return nil, err
-		}
-		if planner, ok := e.bus.(publishRecipientPlanner); ok && planner != nil {
-			plan, err := planner.CheckPublishRecipientPlan(ctx, emitted)
-			if err != nil {
-				wrapped := failures.WrapDetail(
-					"route_plan_preflight_failed",
-					"tool-executor",
-					"handle_emit_tool.route_plan_preflight",
-					map[string]any{"event": eventType},
-					err,
-				)
-				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
-				return nil, wrapped
-			}
-			if plan.UsesCanonicalRouteAuthority() {
-				if plan.TargetFailure != "" {
-					wrapped := failures.NewTarget(
-						plan.TargetFailure,
-						"tool-executor",
-						"handle_emit_tool.route_plan_preflight",
-						map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},
-					)
-					e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
-					return nil, wrapped
-				}
-			}
 		}
 	}
 	agentIdentity, err := actor.ConcreteIdentity()

@@ -290,8 +290,7 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		}
 		return result, nil
 	}
-	runID, binding, preparation := result.RunID, record.binding, record.preparation
-	state, failure := record.state, record.failure
+	preparation, state := record.preparation, record.state
 	pending, err := owner.HasSelectedCanceledOriginsTx(ctx, attempt, result.ExecutionID)
 	if err != nil {
 		return result, err
@@ -350,7 +349,12 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		}
 		return result, err
 	}
-	failure = plan.failure
+	return recoverFailedSelectedForkTx(ctx, tx, owner, attempt, snapshot, req, sqlite, record, plan, result)
+}
+
+func recoverFailedSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool, record, plan selectedRecoveryRecord, result runfork.SelectedForkRecoveryResult) (runfork.SelectedForkRecoveryResult, error) {
+	runID, binding, state := result.RunID, record.binding, record.state
+	failure := plan.failure
 	failureRaw, err := json.Marshal(failure)
 	if err != nil {
 		return result, err
