@@ -273,12 +273,8 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 	}
 	poolWait := time.Since(poolStarted)
 	var tx *sql.Tx
-	var releaseOrdering func()
-	defer func() {
-		if releaseOrdering != nil {
-			releaseOrdering()
-		}
-	}()
+	releaseOrdering := func() {}
+	defer func() { releaseOrdering() }()
 	discard := false
 	probe := b.testTransactions.Begin(opts != nil && opts.ReadOnly, false)
 	defer func() { probe.Finish(err) }()
@@ -288,9 +284,7 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 		if tx != nil {
 			probe.RollbackAttempted()
 			rollbackErr := tx.Rollback()
-			if releaseOrdering != nil {
-				releaseOrdering()
-			}
+			releaseOrdering()
 			// ErrTxDone describes Go's handle, not the physical transaction. A
 			// concurrent cancellation may already be disposing this connection.
 			if rollbackErr != nil {
