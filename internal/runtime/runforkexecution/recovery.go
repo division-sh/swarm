@@ -195,22 +195,7 @@ func selectedRecoveryActionFor(result runfork.SelectedForkRecoveryResult, entry 
 		return 0, fmt.Errorf("selected recovery result differs from its fork binding")
 	}
 	if len(result.PendingCancellations) != 0 {
-		id, err := uuid.Parse(result.ExecutionID)
-		if err != nil || id == uuid.Nil || id.String() != result.ExecutionID {
-			return 0, errors.New("selected pending cancellation lacks exact predecessor execution")
-		}
-		if result.Disposition != runfork.SelectedForkRecoveryFailed && result.Disposition != runfork.SelectedForkRecoveryControlOnly && result.Disposition != runfork.SelectedForkRecoveryResumeFiniteFeed && result.Disposition != runfork.SelectedForkRecoveryActivateFiniteFeed {
-			return 0, errors.New("selected pending cancellation contradicts its recovery disposition")
-		}
-		for _, turn := range result.PendingCancellations {
-			if turn.Cancellation.ValidateIntent() != nil || !turn.Cancellation.Origin.Same(turn.Attempt.Origin) {
-				return 0, errors.New("selected pending cancellation lacks exact origin evidence")
-			}
-			if turn.Attempt.AttemptID != "" && (turn.Attempt.Authority.Kind != effects.AuthoritySelectedContractFork || turn.Attempt.Authority.ID != result.ExecutionID || turn.Attempt.Authority.Target.RunID != result.RunID) {
-				return 0, errors.New("selected pending cancellation differs from its execution scope")
-			}
-		}
-		return selectedRecoverySettleCancellations, nil
+		return selectedCancellationRecoveryAction(result)
 	}
 	if result.Disposition != runfork.SelectedForkRecoveryResumeFiniteFeed && result.Disposition != runfork.SelectedForkRecoveryActivateFiniteFeed && result.Resume != nil {
 		return 0, fmt.Errorf("selected recovery non-resume disposition carries executable work")
@@ -227,43 +212,66 @@ func selectedRecoveryActionFor(result runfork.SelectedForkRecoveryResult, entry 
 	case runfork.SelectedForkRecoveryCurrent:
 		return selectedRecoveryRejectCurrent, nil
 	case runfork.SelectedForkRecoveryResumeFiniteFeed, runfork.SelectedForkRecoveryActivateFiniteFeed:
-		if result.Resume == nil {
-			return 0, fmt.Errorf("selected finite-feed recovery lacks exact operation")
-		}
-		if result.Resume.ForkRunStatus != runfork.RunForkMaterializedStatus {
-			return 0, fmt.Errorf("selected finite-feed recovery child is not paused")
-		}
-		id, err := uuid.Parse(result.ExecutionID)
-		if err != nil || id == uuid.Nil || id.String() != result.ExecutionID {
-			return 0, fmt.Errorf("selected finite-feed recovery lacks exact predecessor execution")
-		}
-		operation := result.Resume.Operation
-		if _, _, err := operation.Canonical(); err != nil {
-			return 0, fmt.Errorf("selected finite-feed recovery operation: %w", err)
-		}
-		if operation.ResolvedPoint == nil || *operation.ResolvedPoint != entry.Binding.ForkPoint ||
-			operation.SourceRunID != entry.Binding.SourceRunID || operation.TargetBundleHash != entry.BundleHash ||
-			operation.ContractSelection != entry.Binding.ContractSelection {
-			return 0, fmt.Errorf("selected finite-feed recovery operation differs from its fixed binding")
-		}
-		if len(result.Resume.Pins) == 0 {
-			return 0, fmt.Errorf("selected finite-feed recovery lacks durable pins")
-		}
-		pins := make(map[string]struct{}, len(result.Resume.Pins))
-		for _, pin := range result.Resume.Pins {
-			if err := pin.Validate(); err != nil || pin.RunID != result.RunID || pin.RunState != "paused" {
-				return 0, fmt.Errorf("selected finite-feed recovery pin differs from paused child: %v", err)
-			}
-			if _, exists := pins[pin.Declaration.Key()]; exists {
-				return 0, fmt.Errorf("selected finite-feed recovery repeats declaration %s", pin.Declaration.Key())
-			}
-			pins[pin.Declaration.Key()] = struct{}{}
-		}
-		if result.Disposition == runfork.SelectedForkRecoveryActivateFiniteFeed {
-			return selectedRecoveryActivateFiniteFeed, nil
-		}
-		return selectedRecoveryResumeFiniteFeed, nil
+		return selectedFiniteFeedRecoveryAction(result, entry)
 	default:
 		return 0, fmt.Errorf("selected recovery disposition %q has no boot action", result.Disposition)
 	}
+}
+
+func selectedCancellationRecoveryAction(result runfork.SelectedForkRecoveryResult) (selectedRecoveryAction, error) {
+	id, err := uuid.Parse(result.ExecutionID)
+	if err != nil || id == uuid.Nil || id.String() != result.ExecutionID {
+		return 0, errors.New("selected pending cancellation lacks exact predecessor execution")
+	}
+	if result.Disposition != runfork.SelectedForkRecoveryFailed && result.Disposition != runfork.SelectedForkRecoveryControlOnly && result.Disposition != runfork.SelectedForkRecoveryResumeFiniteFeed && result.Disposition != runfork.SelectedForkRecoveryActivateFiniteFeed {
+		return 0, errors.New("selected pending cancellation contradicts its recovery disposition")
+	}
+	for _, turn := range result.PendingCancellations {
+		if turn.Cancellation.ValidateIntent() != nil || !turn.Cancellation.Origin.Same(turn.Attempt.Origin) {
+			return 0, errors.New("selected pending cancellation lacks exact origin evidence")
+		}
+		if turn.Attempt.AttemptID != "" && (turn.Attempt.Authority.Kind != effects.AuthoritySelectedContractFork || turn.Attempt.Authority.ID != result.ExecutionID || turn.Attempt.Authority.Target.RunID != result.RunID) {
+			return 0, errors.New("selected pending cancellation differs from its execution scope")
+		}
+	}
+	return selectedRecoverySettleCancellations, nil
+}
+
+func selectedFiniteFeedRecoveryAction(result runfork.SelectedForkRecoveryResult, entry runfork.SelectedForkRecoveryEntry) (selectedRecoveryAction, error) {
+	if result.Resume == nil {
+		return 0, fmt.Errorf("selected finite-feed recovery lacks exact operation")
+	}
+	if result.Resume.ForkRunStatus != runfork.RunForkMaterializedStatus {
+		return 0, fmt.Errorf("selected finite-feed recovery child is not paused")
+	}
+	id, err := uuid.Parse(result.ExecutionID)
+	if err != nil || id == uuid.Nil || id.String() != result.ExecutionID {
+		return 0, fmt.Errorf("selected finite-feed recovery lacks exact predecessor execution")
+	}
+	operation := result.Resume.Operation
+	if _, _, err := operation.Canonical(); err != nil {
+		return 0, fmt.Errorf("selected finite-feed recovery operation: %w", err)
+	}
+	if operation.ResolvedPoint == nil || *operation.ResolvedPoint != entry.Binding.ForkPoint ||
+		operation.SourceRunID != entry.Binding.SourceRunID || operation.TargetBundleHash != entry.BundleHash ||
+		operation.ContractSelection != entry.Binding.ContractSelection {
+		return 0, fmt.Errorf("selected finite-feed recovery operation differs from its fixed binding")
+	}
+	if len(result.Resume.Pins) == 0 {
+		return 0, fmt.Errorf("selected finite-feed recovery lacks durable pins")
+	}
+	pins := make(map[string]struct{}, len(result.Resume.Pins))
+	for _, pin := range result.Resume.Pins {
+		if err := pin.Validate(); err != nil || pin.RunID != result.RunID || pin.RunState != "paused" {
+			return 0, fmt.Errorf("selected finite-feed recovery pin differs from paused child: %v", err)
+		}
+		if _, exists := pins[pin.Declaration.Key()]; exists {
+			return 0, fmt.Errorf("selected finite-feed recovery repeats declaration %s", pin.Declaration.Key())
+		}
+		pins[pin.Declaration.Key()] = struct{}{}
+	}
+	if result.Disposition == runfork.SelectedForkRecoveryActivateFiniteFeed {
+		return selectedRecoveryActivateFiniteFeed, nil
+	}
+	return selectedRecoveryResumeFiniteFeed, nil
 }

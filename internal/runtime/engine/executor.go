@@ -449,6 +449,18 @@ func (e *Executor) SupportsStep(step Step) bool {
 	return slices.Contains(OrderedSteps, step)
 }
 
+func retainCommittedWorkflowStage(result *ExecutionResult, committed CommittedEngineMutation) error {
+	if committed.Stage != nil {
+		if stageErr := committed.Stage.Validate(); stageErr != nil {
+			return stageErr
+		} else {
+			stage := *committed.Stage
+			result.CommittedStage = &stage
+		}
+	}
+	return nil
+}
+
 func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (ExecutionResult, error) {
 	if err := e.ValidateRequest(req); err != nil {
 		result := ExecutionResult{Status: OutcomeRejected, HandlerRuleSelection: handlerselection.NotReached()}
@@ -536,14 +548,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 					return err
 				}
 				postCommitErr = err
-				if committed.Stage != nil {
-					if stageErr := committed.Stage.Validate(); stageErr != nil {
-						postCommitErr = errors.Join(postCommitErr, stageErr)
-					} else {
-						stage := *committed.Stage
-						result.CommittedStage = &stage
-					}
-				}
+				postCommitErr = errors.Join(postCommitErr, retainCommittedWorkflowStage(&result, committed))
 				intents = append([]EmitIntent(nil), committed.EmitIntents...)
 				activityIntents = append([]ActivityIntent(nil), committed.ActivityIntents...)
 				activityRequests = append([]EmitIntent(nil), committed.ActivityRequestIntents...)

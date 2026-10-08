@@ -38,18 +38,9 @@ func commitCanceledTurn(ctx context.Context, mutation *mutationprotocol.Attempt,
 		}
 		result.Cancellation = facts.intent
 		result.Cancellation.OriginSettled = true
-		var plan runtimebus.EnginePublicationPlan
-		if facts.reason == deliverylifecycle.CancellationTurnTimeout {
-			var ok bool
-			plan, ok = command.Publication.(runtimebus.EnginePublicationPlan)
-			if !ok || publications == nil {
-				return fmt.Errorf("turn timeout settlement requires its admitted reaction publication")
-			}
-			if err := validateTurnReactionTx(ctx, tx, postgres, attempt, plan); err != nil {
-				return err
-			}
-		} else if command.Publication != nil {
-			return fmt.Errorf("terminate cancellation cannot invent a timeout reaction")
+		plan, err := prepareCanceledTurnReactionTx(ctx, tx, postgres, publications, command, facts.reason)
+		if err != nil {
+			return err
 		}
 		switch attempt.Origin.Kind {
 		case runtimeeffects.CompletionOriginDelivery:
@@ -74,6 +65,24 @@ func commitCanceledTurn(ctx context.Context, mutation *mutationprotocol.Attempt,
 		return nil
 	})
 	return result, err
+}
+
+func prepareCanceledTurnReactionTx(ctx context.Context, tx *sql.Tx, postgres bool, publications canceledTurnPublicationOwner, command runtimeeffects.CanceledTurnCommand, reason deliverylifecycle.CancellationReason) (runtimebus.EnginePublicationPlan, error) {
+	attempt := *command.Attempt
+	var plan runtimebus.EnginePublicationPlan
+	if reason == deliverylifecycle.CancellationTurnTimeout {
+		var ok bool
+		plan, ok = command.Publication.(runtimebus.EnginePublicationPlan)
+		if !ok || publications == nil {
+			return runtimebus.EnginePublicationPlan{}, fmt.Errorf("turn timeout settlement requires its admitted reaction publication")
+		}
+		if err := validateTurnReactionTx(ctx, tx, postgres, attempt, plan); err != nil {
+			return runtimebus.EnginePublicationPlan{}, err
+		}
+	} else if command.Publication != nil {
+		return runtimebus.EnginePublicationPlan{}, fmt.Errorf("terminate cancellation cannot invent a timeout reaction")
+	}
+	return plan, nil
 }
 
 func validateTurnReactionTx(ctx context.Context, tx *sql.Tx, postgres bool, attempt runtimeeffects.Attempt, plan runtimebus.EnginePublicationPlan) error {

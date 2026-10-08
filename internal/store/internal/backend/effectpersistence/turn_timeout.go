@@ -98,17 +98,7 @@ func requestTurnTimeoutTx(ctx context.Context, tx *sql.Tx, postgres bool, attemp
 		settledRaw = now.UTC()
 	}
 	if reason.Valid {
-		result.Reason, err = deliverylifecycle.ParseCancellationReason(reason.String)
-		if err != nil {
-			return runtimeeffects.TurnCancellation{}, err
-		}
-		var valid bool
-		result.RequestedAt, valid, err = sqliteTimeValue(requestedRaw)
-		if err != nil || !valid || !cause.Valid {
-			return runtimeeffects.TurnCancellation{}, fmt.Errorf("turn cancellation has incomplete intent evidence")
-		}
-		result.Requested, result.CauseEvent = true, cause.String
-		return result, nil
+		return decodeTurnTimeoutIntent(result, reason, cause, requestedRaw)
 	}
 	firstLaunch, launched, err := sqliteTimeValue(launchedRaw)
 	if err != nil {
@@ -140,6 +130,21 @@ func requestTurnTimeoutTx(ctx context.Context, tx *sql.Tx, postgres bool, attemp
 		return runtimeeffects.TurnCancellation{}, fmt.Errorf("acknowledged timeout omitted its request timestamp")
 	}
 	result.Requested, result.Reason, result.CauseEvent = true, deliverylifecycle.CancellationTurnTimeout, event.String
+	return result, nil
+}
+
+func decodeTurnTimeoutIntent(result runtimeeffects.TurnCancellation, reason, cause sql.NullString, requestedRaw any) (runtimeeffects.TurnCancellation, error) {
+	var err error
+	result.Reason, err = deliverylifecycle.ParseCancellationReason(reason.String)
+	if err != nil {
+		return runtimeeffects.TurnCancellation{}, err
+	}
+	var valid bool
+	result.RequestedAt, valid, err = sqliteTimeValue(requestedRaw)
+	if err != nil || !valid || !cause.Valid {
+		return runtimeeffects.TurnCancellation{}, fmt.Errorf("turn cancellation has incomplete intent evidence")
+	}
+	result.Requested, result.CauseEvent = true, cause.String
 	return result, nil
 }
 

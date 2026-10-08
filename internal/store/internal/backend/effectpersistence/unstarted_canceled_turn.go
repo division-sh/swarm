@@ -15,26 +15,9 @@ import (
 func commitUnstartedCanceledTurn(ctx context.Context, mutation *mutationprotocol.Attempt, postgres bool, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, origin effects.CompletionOrigin, selectedRecoveryExecutionID string) (effects.CanceledTurnCommit, error) {
 	result := effects.CanceledTurnCommit{Origin: origin}
 	err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		var directive agentcontrol.DirectiveOperation
-		switch origin.Kind {
-		case effects.CompletionOriginDelivery:
-			if delivery == nil {
-				return fmt.Errorf("unstarted cancellation requires its delivery owner")
-			}
-			if _, err := delivery.ProviderOriginPendingTx(ctx, tx, origin.Delivery); err != nil {
-				return err
-			}
-		case effects.CompletionOriginDirective:
-			if directives == nil {
-				return fmt.Errorf("unstarted cancellation requires its directive owner")
-			}
-			var err error
-			directive, err = directives.DirectiveTurnOriginTx(ctx, tx, origin.Directive, true)
-			if err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("unstarted cancellation requires a real work origin")
+		directive, err := lockUnstartedCancellationOriginTx(ctx, tx, delivery, directives, origin)
+		if err != nil {
+			return err
 		}
 		turnID, _, err := businessTurnIdentity(origin)
 		if err != nil {
@@ -72,14 +55,7 @@ func commitUnstartedCanceledTurn(ctx context.Context, mutation *mutationprotocol
 		if err := result.Cancellation.ValidateFacts(); err != nil {
 			return err
 		}
-		physical, err := unstartedPhysicalAttemptCount(ctx, tx, origin)
-		if err != nil {
-			return err
-		}
-		if physical != 0 {
-			return fmt.Errorf("origin-only cancellation cannot bypass provider-attempt ownership")
-		}
-		if err := requireCanceledPhysicalSetClosed(ctx, tx, origin); err != nil {
+		if err := requireUnstartedPhysicalSetClosedTx(ctx, tx, origin); err != nil {
 			return err
 		}
 		if origin.Kind == effects.CompletionOriginDelivery {
@@ -97,6 +73,45 @@ func commitUnstartedCanceledTurn(ctx context.Context, mutation *mutationprotocol
 		return completeCanceledTurnTx(ctx, tx, postgres, turnID, now)
 	})
 	return result, err
+}
+
+func lockUnstartedCancellationOriginTx(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, origin effects.CompletionOrigin) (agentcontrol.DirectiveOperation, error) {
+	var directive agentcontrol.DirectiveOperation
+	switch origin.Kind {
+	case effects.CompletionOriginDelivery:
+		if delivery == nil {
+			return agentcontrol.DirectiveOperation{}, fmt.Errorf("unstarted cancellation requires its delivery owner")
+		}
+		if _, err := delivery.ProviderOriginPendingTx(ctx, tx, origin.Delivery); err != nil {
+			return agentcontrol.DirectiveOperation{}, err
+		}
+	case effects.CompletionOriginDirective:
+		if directives == nil {
+			return agentcontrol.DirectiveOperation{}, fmt.Errorf("unstarted cancellation requires its directive owner")
+		}
+		var err error
+		directive, err = directives.DirectiveTurnOriginTx(ctx, tx, origin.Directive, true)
+		if err != nil {
+			return agentcontrol.DirectiveOperation{}, err
+		}
+	default:
+		return agentcontrol.DirectiveOperation{}, fmt.Errorf("unstarted cancellation requires a real work origin")
+	}
+	return directive, nil
+}
+
+func requireUnstartedPhysicalSetClosedTx(ctx context.Context, tx *sql.Tx, origin effects.CompletionOrigin) error {
+	physical, err := unstartedPhysicalAttemptCount(ctx, tx, origin)
+	if err != nil {
+		return err
+	}
+	if physical != 0 {
+		return fmt.Errorf("origin-only cancellation cannot bypass provider-attempt ownership")
+	}
+	if err := requireCanceledPhysicalSetClosed(ctx, tx, origin); err != nil {
+		return err
+	}
+	return nil
 }
 
 func validateUnstartedTurnOwner(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, origin effects.CompletionOrigin, owner flowidentity.RunScopedFlowInstance, agentID string, directive agentcontrol.DirectiveOperation) error {

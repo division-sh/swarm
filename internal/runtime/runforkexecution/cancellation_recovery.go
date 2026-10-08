@@ -71,19 +71,26 @@ func (o SelectedContractExecutionOwner) settleRecoveredSelectedCancellations(ctx
 	// Acknowledged evidence survives auxiliary cleanup errors. Never release it
 	// as if the transaction rolled back or dispatch before startup admission.
 	result = committed
-	for i, settled := range committed.CanceledTurns {
-		if settled.Validate() != nil || !settled.Origin.Same(commands[i].Origin) {
-			return result, errors.Join(err, errors.New("selected cancellation recovery substituted its origin"))
-		}
-		plan := commands[i].Publication
-		if (plan == nil) != (settled.Publication == nil) || plan != nil && settled.Publication.CommittedDurablePublicationEventID() != plan.DurablePublicationEventID() {
-			return result, errors.Join(err, errors.New("selected cancellation recovery substituted its reaction"))
-		}
+	if validationErr := validateRecoveredSelectedCancellationCommits(commands, committed); validationErr != nil {
+		return result, errors.Join(err, validationErr)
 	}
 	result.Effects.PrelaunchTerminal += pending.Effects.PrelaunchTerminal
 	result.Effects.OutcomeUncertain += pending.Effects.OutcomeUncertain
 	result.CanceledTurns = append(append([]effects.CanceledTurnCommit(nil), pending.CanceledTurns...), committed.CanceledTurns...)
 	return result, err
+}
+
+func validateRecoveredSelectedCancellationCommits(commands []effects.CanceledTurnCommand, committed runfork.SelectedForkRecoveryResult) error {
+	for i, settled := range committed.CanceledTurns {
+		if settled.Validate() != nil || !settled.Origin.Same(commands[i].Origin) {
+			return errors.New("selected cancellation recovery substituted its origin")
+		}
+		plan := commands[i].Publication
+		if (plan == nil) != (settled.Publication == nil) || plan != nil && settled.Publication.CommittedDurablePublicationEventID() != plan.DurablePublicationEventID() {
+			return errors.New("selected cancellation recovery substituted its reaction")
+		}
+	}
+	return nil
 }
 
 func (o SelectedContractExecutionOwner) beginSelectedCancellationInspection(ctx context.Context, request runcontrol.SelectedForkRecoveryRequest, inspector SelectedContractSourceInspector) (p *PreparedSelectedFork, err error) {
