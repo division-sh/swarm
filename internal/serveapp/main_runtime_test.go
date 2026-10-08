@@ -3637,7 +3637,7 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	}
 	// The original publication's asynchronous log is accepted work, not an
 	// effect of the rejected replay. Settle that exact fact before snapshotting.
-	waitServedEventPublishedLog(t, db, backend, spinup.EventID)
+	waitServedEventPublishedLog(t, endpoint, runID, spinup.EventID)
 	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, backend, spinup.EventID, "issue-1384-"+backend+"-replay-pending-parent")
 
 	releaseOnce.Do(func() { close(release) })
@@ -6416,45 +6416,24 @@ func assertServedDynamicAutoEmitPayload(t *testing.T, db *sql.DB, backend, event
 	}
 }
 
-func waitServedEventPublishedLog(t *testing.T, db *sql.DB, backend, eventID string) {
+func waitServedEventPublishedLog(t *testing.T, endpoint, runID, eventID string) {
 	t.Helper()
-	query := `SELECT payload FROM events WHERE source_event_id = ? AND event_name = 'platform.runtime_log'`
-	if backend == "postgres" {
-		query = `SELECT payload::text FROM events WHERE source_event_id = $1::uuid AND event_name = 'platform.runtime_log'`
-	}
 	for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
-		rows, err := db.QueryContext(context.Background(), query, eventID)
-		if err != nil {
-			t.Fatal(err)
+		var logs operatorread.OperatorRuntimeLogListResult
+		requireServedJSONRPCResult(t, endpoint, "runtime.logs", map[string]any{
+			"run_id": runID, "component": "eventbus", "limit": 1000,
+		}, &logs)
+		if logs.NextCursor != "" {
+			t.Fatal("held publication proof exceeded its bounded log page")
 		}
 		published := 0
-		for rows.Next() {
-			var raw string
-			if err := rows.Scan(&raw); err != nil {
-				rows.Close()
-				t.Fatal(err)
+		for _, log := range logs.Logs {
+			if log.RunID != runID {
+				t.Fatalf("publication log query borrowed another run: %+v", log)
 			}
-			var log struct {
-				Details struct {
-					Action    string `json:"action"`
-					Component string `json:"component"`
-					EventID   string `json:"event_id"`
-				} `json:"details"`
-			}
-			if err := json.Unmarshal([]byte(raw), &log); err != nil {
-				rows.Close()
-				t.Fatal(err)
-			}
-			if log.Details.Action == "published" && log.Details.Component == "eventbus" && log.Details.EventID == eventID {
+			if log.Action == "published" && log.Component == "eventbus" && log.EventID == eventID {
 				published++
 			}
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			t.Fatal(err)
-		}
-		if err := rows.Close(); err != nil {
-			t.Fatal(err)
 		}
 		if published > 1 {
 			t.Fatalf("duplicate publication logs for exact event %s: %d", eventID, published)
@@ -6464,7 +6443,7 @@ func waitServedEventPublishedLog(t *testing.T, db *sql.DB, backend, eventID stri
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("%s original publication log did not settle for event %s", backend, eventID)
+	t.Fatalf("original publication log did not settle for event %s", eventID)
 }
 
 func requireServedReplayNoDeliveryHistoryNoMutation(t *testing.T, endpoint string, db *sql.DB, backend, eventID, idempotencyKey string) {
