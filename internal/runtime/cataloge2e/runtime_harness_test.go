@@ -124,17 +124,8 @@ type catalogExpectedDocument struct {
 		ChainDepthExceeded  bool                             `yaml:"chain_depth_exceeded"`
 		TemplateInstances   *int                             `yaml:"template_instances"`
 		FlowInstanceCreated map[string]any                   `yaml:"flow_instance_created"`
-		RefusedPublication  *catalogRefusedPublication       `yaml:"refused_publication"`
 		Entities            map[string]catalogEntityExpected `yaml:"entities"`
 	} `yaml:"expected"`
-}
-
-type catalogRefusedPublication struct {
-	Event         string `yaml:"event"`
-	CauseSequence int    `yaml:"cause_sequence"`
-	FailureClass  string `yaml:"failure_class"`
-	FailureDetail string `yaml:"failure_detail"`
-	Reason        string `yaml:"reason"`
 }
 
 type catalogEntityExpected struct {

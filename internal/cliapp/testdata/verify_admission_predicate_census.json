@@ -1548,10 +1548,22 @@
     "body_sha256": "ca74be994bc2f8974acc559d76fe2f5dc3e4be18a23dc311207346b329f8944a"
   },
   {
+    "owner": "internal/runtime/runforkexecution/recovery.go::selectedCancellationRecoveryAction",
+    "audit_rows": "A22,A24",
+    "proof_families": "P03,P20,P21",
+    "body_sha256": "c9cacf0461de1ecc04de006b37725482c909a0a17f9e1b34dec94cc9b0f82393"
+  },
+  {
+    "owner": "internal/runtime/runforkexecution/recovery.go::selectedFiniteFeedRecoveryAction",
+    "audit_rows": "A22,A24",
+    "proof_families": "P03,P20,P21",
+    "body_sha256": "c82d0a483d2590694f621657b5f6f511b5cac3066e76f14d32aafbb20c30919e"
+  },
+  {
     "owner": "internal/runtime/runforkexecution/recovery.go::selectedRecoveryActionFor",
     "audit_rows": "A22,A24",
     "proof_families": "P03,P20,P21",
-    "body_sha256": "6fa765c220b57229ebf0304e3328ce14bff996eea31c2b3b4998c428cd2c72fc"
+    "body_sha256": "f49fb0ab2e6f95bbf620c71df17b1883885625bb8d4e46be97deaec3297798c4"
   },
   {
     "owner": "internal/runtime/runforkexecution/recovery_inspection.go::InspectSelectedForkRecoveries",
@@ -3588,10 +3600,16 @@
     "body_sha256": "3dfdec59cde9b0ec0ff6903c3dc12275c4daf421e4236005b95507d7077556b5"
   },
   {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::recoverFailedSelectedForkTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "b53ad36779a3b0805953739d9b03c30c21901dc07064bada3a06a87e682947a3"
+  },
+  {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::recoverSelectedForkTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "801df4d2d67a579eefb8b34bab99ac074c438b4e6840cf74841886ccadcb7793"
+    "body_sha256": "24451aee6bf51dabe3bbace3cf787528fa8e09d36938a3438ee7ef1d0198884c"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::sameSelectedForkPointIdentity",
