@@ -79,6 +79,7 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	source := templatereply.LoadSource(t, templatereply.Options{DefaultEventIDCorrelation: true})
+	receipts := replyConformanceConstructionReceipts(t, source, runID)
 	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
 		t.Fatalf("default-correlation hard invalidities = %#v", got)
@@ -87,10 +88,11 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
 		Durable: bus.DurableDependencies{
-			ReplyContext:      store,
-			ActiveFlows:       store,
-			TargetOwners:      store,
-			FlowRouteTopology: store,
+			ConstructionPublications: receipts,
+			ReplyContext:             store,
+			ActiveFlows:              store,
+			TargetOwners:             store,
+			FlowRouteTopology:        store,
 		},
 	})
 	if err != nil {
@@ -102,7 +104,7 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 			Route: runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, "account-a", templatereply.RequesterFlowID+"/account-a"),
 		},
 		ActivationVariables: map[string]string{"account_id": "account-a"},
-		Instance:            runtimeflowidentity.Derive(source, templatereply.RequesterFlowID, "account-a"),
+		Instance:            replyConformanceRequesterIdentity(t, source, runID, "account-a"),
 	}); err != nil {
 		t.Fatalf("materialize requester route: %v", err)
 	}
@@ -166,13 +168,15 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	source := templatereply.LoadSource(t, templatereply.Options{ExplicitCorrelation: true})
 	store := newReplyConformanceStore()
+	receipts := replyConformanceConstructionReceipts(t, source, runID)
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
 		Durable: bus.DurableDependencies{
-			ReplyContext:      store,
-			ActiveFlows:       store,
-			TargetOwners:      store,
-			FlowRouteTopology: store,
+			ConstructionPublications: receipts,
+			ReplyContext:             store,
+			ActiveFlows:              store,
+			TargetOwners:             store,
+			FlowRouteTopology:        store,
 		},
 	})
 	if err != nil {
@@ -185,7 +189,7 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 				Route: runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, accountID, templatereply.RequesterFlowID+"/"+accountID),
 			},
 			ActivationVariables: map[string]string{"account_id": accountID},
-			Instance:            runtimeflowidentity.Derive(source, templatereply.RequesterFlowID, accountID),
+			Instance:            replyConformanceRequesterIdentity(t, source, runID, accountID),
 		}); err != nil {
 			t.Fatalf("materialize requester route %s: %v", accountID, err)
 		}
@@ -921,8 +925,11 @@ func newDurableReplyConformanceBus(t *testing.T, ctx context.Context, backend du
 			},
 			ActivationVariables: map[string]string{"account_id": accountID},
 		}
-		req.Instance = flowroutefixture.ConstructionIdentity(source, req.Identity)
-		var err error
+		evidence, err := backend.LoadFlowConstructionPublication(ctx, req.Identity, runtimeflowidentity.EntityID(req.Identity.Route.InstancePath))
+		if err != nil {
+			t.Fatalf("read exact requester construction: %v", err)
+		}
+		req.Instance = evidence.Identity
 		if _, exists := persistedByPath[req.Identity.Key()]; exists {
 			err = flowroutefixture.Publish(eb, req)
 		} else {
@@ -967,9 +974,11 @@ func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, 
 			t.Fatal(err)
 		}
 		trigger := eventtest.ExistingRunRootIngress(uuid.NewString(), "requester.setup", "fixture", "", payload, 0, runID, events.EventEnvelope{}, time.Now().UTC())
+		instance := replyConformanceRequesterIdentity(t, source, runID, accountID)
+		instance.EntityID = owner.EntityID
 		if err := runtime.manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
 			ContractBundle:   source,
-			Instance:         runtimeflowidentity.Stored(source, templatereply.RequesterFlowID, owner.FlowInstance, accountID, owner.EntityID, ""),
+			Instance:         instance,
 			ConstructorInput: "requester.setup", ResolvedKey: accountID, TriggerEvent: trigger, OccurredAt: trigger.CreatedAt(),
 		}); err != nil {
 			t.Fatalf("construct and attach requester %s: %v", owner.FlowInstance, err)
@@ -1081,6 +1090,32 @@ func newReplyConformanceStore() *replyConformanceStore {
 		scopes:   map[string]runtimepipelineobligation.CommittedScope{},
 		contexts: map[string]runtimereplycontext.Record{},
 	}
+}
+
+func replyConformanceRequesterIdentity(t *testing.T, source semanticview.Source, runID, accountID string) runtimeflowidentity.Instance {
+	t.Helper()
+	root := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")
+	instance, err := runtimeflowidentity.KeyedChild(source, root, templatereply.RequesterFlowID, accountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return instance
+}
+
+func replyConformanceConstructionReceipts(t *testing.T, source semanticview.Source, runID string) conformanceConstructionReceipts {
+	t.Helper()
+	receipts := conformanceConstructionReceipts{}
+	root := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")
+	receipts.add(t, source, runID, root)
+	provider, err := runtimeflowidentity.KeylessChild(source, root, templatereply.ProviderFlowID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipts.add(t, source, runID, provider)
+	for _, key := range []string{"account-a", "account-b"} {
+		receipts.add(t, source, runID, replyConformanceRequesterIdentity(t, source, runID, key))
+	}
+	return receipts
 }
 
 func (s *replyConformanceStore) CommitPublication(ctx context.Context, command bus.PublicationCommand) (bus.CommittedPublication, error) {

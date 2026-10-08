@@ -1171,6 +1171,11 @@ func TestOperatorEventPublishPrivateTargetCannotAuthorizePublication(t *testing.
 	targetKey := uuid.NewString()
 	targetFlowInstance := "operating/" + targetKey
 	targetEntityID := seedEventPublishConstructedFlow(t, pg, bus, source, runID, targetFlowInstance, stringValue(t, asMap(t, initial.Result)["event_id"], "event_id"))
+	targetOwner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.DeriveRoute("operating", targetKey)}
+	construction, err := pg.LoadFlowConstructionPublication(ctx, targetOwner, targetEntityID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.ExecContext(ctx, `
 		UPDATE entity_state
 		SET fields = '{"entity_id":"authored-lookalike","flow_instance":"authored/lookalike"}'::jsonb,
@@ -1182,7 +1187,7 @@ func TestOperatorEventPublishPrivateTargetCannotAuthorizePublication(t *testing.
 	if err := flowroutefixture.StageAndPublish(runtimecorrelation.WithRunID(ctx, runID), bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 		RunID: runID,
 		Route: runtimeflowidentity.DeriveRoute("operating", targetKey),
-	}, Instance: runtimeflowidentity.Derive(source, "operating", targetKey)}); err != nil {
+	}, Instance: construction.Identity}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 
@@ -1410,10 +1415,15 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 	targetKey := uuid.NewString()
 	targetFlowInstance := "operating/" + targetKey
 	targetEntityID := seedEventPublishConstructedFlow(t, pg, bus, source, runID, targetFlowInstance, stringValue(t, asMap(t, initial.Result)["event_id"], "event_id"))
+	targetOwner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.DeriveRoute("operating", targetKey)}
+	construction, err := pg.LoadFlowConstructionPublication(ctx, targetOwner, targetEntityID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := flowroutefixture.StageAndPublish(runtimecorrelation.WithRunID(ctx, runID), bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 		RunID: runID,
 		Route: runtimeflowidentity.DeriveRoute("operating", targetKey),
-	}, Instance: runtimeflowidentity.Derive(source, "operating", targetKey)}); err != nil {
+	}, Instance: construction.Identity}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	mismatchEntityID := seedEventPublishConstructedFlow(t, pg, bus, source, runID, "operating/"+uuid.NewString(), stringValue(t, asMap(t, initial.Result)["event_id"], "event_id"))

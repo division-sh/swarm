@@ -442,24 +442,38 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 			seedFanInBarrierPortfolioShell(t, ctx, seedRuntime.bus, seedRuntime.manager, source, selectedOwner)
 			requireSelectedRunTargetOwner(t, ctx, backend, runID, "portfolio/selected-period", selectedOwner)
 
-			proofBus := newFanInBarrierRouteProofBus(t, backend, source, seedRuntime.manager)
 			eventID := uuid.NewString()
+			sourceKey := eventtest.UUID("fan-in-operating-key-" + tc.name)
 			sourceRoute := events.RouteIdentity{
-				FlowID: "operating", FlowInstance: "operating/proof-instance",
+				FlowID: "operating", FlowInstance: "operating/" + sourceKey,
 				EntityID: eventtest.UUID("fan-in-source-owner-" + tc.name),
 			}.Normalized()
 			eventType := events.EventType(sourceRoute.FlowInstance + "/operating.reported")
-			sink := newFanInBarrierRouteProofSink(t, ctx, proofBus, eventType)
 			routingSource, err := events.NewConcreteTemplateInstanceRoutingSource(sourceRoute)
 			if err != nil {
 				t.Fatalf("create proof routing source: %v", err)
 			}
 			payload, err := json.Marshal(map[string]any{
-				"operating_id": "proof-instance", "period_id": "2026-Q3", "revenue": 42,
+				"operating_id": sourceKey, "period_id": "2026-Q3", "revenue": 42,
 			})
 			if err != nil {
 				t.Fatalf("marshal proof payload: %v", err)
 			}
+			root := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")
+			sourceInstance, err := runtimeflowidentity.KeyedChild(source, root, "operating", sourceKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceInstance.EntityID = sourceRoute.EntityID
+			trigger := eventtest.ExistingRunRootIngress(uuid.NewString(), "operating.report.requested", "fixture", "", payload, 0, runID, events.EventEnvelope{}, time.Now().UTC())
+			if err := seedRuntime.manager.ActivateFlowInstance(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.FlowInstanceActivationRequest{
+				ContractBundle: source, Instance: sourceInstance, ConstructorInput: "operating.report.requested",
+				ResolvedKey: sourceKey, TriggerEvent: trigger, OccurredAt: trigger.CreatedAt(),
+			}); err != nil {
+				t.Fatalf("construct exact fan-in publication source: %v", err)
+			}
+			proofBus := newFanInBarrierRouteProofBus(t, backend, source, seedRuntime.manager)
+			sink := newFanInBarrierRouteProofSink(t, ctx, proofBus, eventType)
 			event := eventtest.ExistingRunRootIngressWithRoutingSource(
 				eventID, eventType, "operating-proof", "", payload, 0, runID,
 				events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), routingSource, time.Now().UTC(),
@@ -954,15 +968,23 @@ func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrier
 func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, manager *runtimemanager.AgentManager, source semanticview.Source, entityID string) {
 	t.Helper()
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	runID := runtimecorrelation.RunIDFromContext(ctx)
+	parent := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")
+	if err := manager.ActivateFlowInstance(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source, Instance: parent, OccurredAt: enteredAt,
+	}); err != nil {
+		t.Fatalf("construct fan-in run root: %v", err)
+	}
+	instance, err := runtimeflowidentity.KeyedChild(source, parent, "portfolio", "selected-period")
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance.EntityID = entityID
 	trigger := eventtest.ExistingRunRootIngress(uuid.NewString(), "operating.reported", "operator", "", []byte(`{"operating_id":"proof-instance","period_id":"2026-Q3","revenue":42}`), 0,
 		runtimecorrelation.RunIDFromContext(ctx), events.EventEnvelope{}, enteredAt)
 	plan, err := manager.PrepareFlowInstanceActivation(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: source,
-		Instance: runtimeflowidentity.Instance{
-			TemplateID: "portfolio", ScopeKey: "portfolio", InstanceID: "selected-period",
-			InstancePath: "portfolio/selected-period", EntityID: entityID,
-			HasStoredPath: true,
-		},
+		ContractBundle:   source,
+		Instance:         instance,
 		ConstructorInput: "operating.reported", ResolvedKey: "2026-Q3",
 		TriggerEvent: trigger, OccurredAt: enteredAt,
 	})

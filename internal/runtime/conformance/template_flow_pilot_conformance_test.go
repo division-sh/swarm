@@ -380,6 +380,23 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	accountBEntityID := runtimeflowidentity.EntityID("account/acct-b")
 	sourceFact := conformanceSourceArtifactFact(t, source)
 	busCtx := testAuthorActivityContextForBundle(context.Background(), sourceFact)
+	root := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), parent.RunID(), parent.RunID(), parent.RunID(), "")
+	portfolio, err := runtimeflowidentity.KeylessChild(source, root, "portfolio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipts := conformanceConstructionReceipts{}
+	receipts.add(t, source, parent.RunID(), root)
+	receipts.add(t, source, parent.RunID(), portfolio)
+	accounts := map[string]runtimeflowidentity.Instance{}
+	for _, key := range []string{"acct-a", "acct-b"} {
+		instance, err := runtimeflowidentity.KeyedChild(source, root, "account", key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		accounts[key] = instance
+		receipts.add(t, source, parent.RunID(), instance)
+	}
 	store := &fanOutPinRouteMemoryStore{
 		sourceArtifactFact: sourceFact,
 		workflowVersion:    source.WorkflowVersion(),
@@ -396,9 +413,10 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		ContractBundle:     source,
 		SourceArtifactFact: sourceFact,
 		Durable: runtimebus.DurableDependencies{
-			ActiveAgents:      store,
-			ActiveFlows:       store,
-			FlowRouteTopology: store,
+			ConstructionPublications: receipts,
+			ActiveAgents:             store,
+			ActiveFlows:              store,
+			FlowRouteTopology:        store,
 		},
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 			t.Fatal("existing account route descriptors should satisfy fan-out delivery")
@@ -436,7 +454,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 				RunID: parent.RunID(),
 				Route: runtimeflowidentity.StoredRoute("account", instanceID, "account/"+instanceID),
 			},
-			Instance: runtimeflowidentity.Derive(source, "account", instanceID),
+			Instance: accounts[instanceID],
 		}); err != nil {
 			t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
 		}
@@ -524,6 +542,23 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 	portfolioEntityID := runtimeflowidentity.EntityID("portfolio")
 	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
+	runID := eventtest.UUID("run-notify-all-children")
+	root := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")
+	portfolio, err := runtimeflowidentity.KeylessChild(source, root, "portfolio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipts := conformanceConstructionReceipts{}
+	receipts.add(t, source, runID, root)
+	receipts.add(t, source, runID, portfolio)
+	for index, key := range []string{"acct-a-one", "acct-a-two"} {
+		instance, err := runtimeflowidentity.KeyedChild(source, root, "account", key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		instance.EntityID = runtimeflowidentity.EntityID(fmt.Sprintf("ent-a%d", index+1))
+		receipts.add(t, source, runID, instance)
+	}
 	tests := []struct {
 		name               string
 		payload            json.RawMessage
@@ -558,8 +593,9 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 				ContractBundle:     source,
 				SourceArtifactFact: sourceFact,
 				Durable: runtimebus.DurableDependencies{
-					ActiveAgents: store,
-					ActiveFlows:  store,
+					ConstructionPublications: receipts,
+					ActiveAgents:             store,
+					ActiveFlows:              store,
 				},
 				TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 					t.Fatal("fail-closed fan-out route should not activate an account instance")
