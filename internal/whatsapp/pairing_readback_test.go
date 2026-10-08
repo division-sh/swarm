@@ -17,9 +17,10 @@ import (
 // Retained operation and upstream request authentication are finite inputs in
 // this isolated disclosure proof, not a supported authenticated API journey.
 type pairingReadbackFixture struct {
-	op    channelonboarding.Operation
-	err   error
-	reads int
+	op     channelonboarding.Operation
+	err    error
+	reads  int
+	onRead func()
 }
 
 func (r *pairingReadbackFixture) GetChannelOnboarding(_ context.Context, id string) (channelonboarding.Operation, error) {
@@ -27,7 +28,96 @@ func (r *pairingReadbackFixture) GetChannelOnboarding(_ context.Context, id stri
 	if id != r.op.OperationID {
 		return channelonboarding.Operation{}, errPairingScope
 	}
+	if r.onRead != nil {
+		r.onRead()
+	}
 	return r.op, r.err
+}
+
+type pairingReadbackSnapshotWaitContext struct {
+	context.Context
+	checks  int
+	checked chan struct{}
+	proceed chan struct{}
+}
+
+func (c *pairingReadbackSnapshotWaitContext) Err() error {
+	err := c.Context.Err()
+	c.checks++
+	if c.checks == 2 {
+		close(c.checked)
+		<-c.proceed
+	}
+	return err
+}
+
+func TestWhatsAppPairingReadbackCancellationDuringLookup(t *testing.T) {
+	testPairingReadbackCancellation(t, false)
+}
+
+func TestWhatsAppPairingReadbackCancellationWhileWaitingForSnapshot(t *testing.T) {
+	testPairingReadbackCancellation(t, true)
+}
+
+func testPairingReadbackCancellation(t *testing.T, waitForSnapshot bool) {
+	t.Helper()
+	scope := pairingScopeFixture(t)
+	q, err := newPairingQR(context.Background(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := q.join(context.Background()); err != nil {
+			t.Error(err)
+		}
+	}()
+	const material = "private QR material must not enter errors"
+	if err := q.handle(&events.QR{Codes: []string{material}}); err != nil {
+		t.Fatal(err)
+	}
+	principal := operatorchannel.Principal{ID: scope.PrincipalID, CreatedAt: time.Now().UTC()}
+	reader := &pairingReadbackFixture{op: channelonboarding.Operation{OperationID: scope.OperationID,
+		PrincipalID: scope.PrincipalID, Provider: "whatsapp", Coordinate: scope.Coordinate,
+		Posture: channelonboarding.ActivationSessionConnection, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge,
+		Phase: channelonboarding.PhaseCredentialsAdmitted, Revision: 1, RequestedAt: time.Now().UTC()}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var result pairingQRSnapshot
+	if waitForSnapshot {
+		// Hold snapshot access after the post-lookup check observes a live
+		// request, so only the disclosure-boundary check can reject it.
+		observed := &pairingReadbackSnapshotWaitContext{Context: ctx, checked: make(chan struct{}), proceed: make(chan struct{})}
+		q.mu.Lock()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			result, err = q.readAuthorized(observed, principal, reader, scope.Coordinate)
+		}()
+		select {
+		case <-observed.checked:
+			cancel()
+		case <-time.After(5 * time.Second):
+			t.Error("readback did not check cancellation after lookup")
+			cancel()
+		}
+		close(observed.proceed)
+		q.mu.Unlock()
+		<-done
+	} else {
+		reader.onRead = cancel
+		result, err = q.readAuthorized(ctx, principal, reader, scope.Coordinate)
+	}
+	if err == nil || result != (pairingQRSnapshot{}) || strings.Contains(err.Error(), material) {
+		t.Fatal("canceled readback exposed snapshot material or reported success")
+	}
+	if reader.reads != 1 {
+		t.Fatalf("operation lookup count = %d, want 1", reader.reads)
+	}
+	reader.onRead = nil
+	result, err = q.readAuthorized(context.Background(), principal, reader, scope.Coordinate)
+	if err != nil || result.Code != material || result.Status != pairingAwaiting || result.Paired || result.Connected {
+		t.Fatal("canceled reader stopped the shared QR owner or changed live readback")
+	}
 }
 
 func TestWhatsAppPairingReadbackAuthorizationIsOriginalScopeOnly(t *testing.T) {
