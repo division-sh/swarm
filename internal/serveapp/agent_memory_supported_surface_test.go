@@ -719,6 +719,31 @@ func requireStandingConsumerlessRawSettlement(t testing.TB, observed operatorrea
 	}
 }
 
+func requireStandingDeclarationPublicationReadback(t *testing.T, baseURL string, binding standingTelegramBinding, deliveries []string) {
+	t.Helper()
+	var listed operatorread.OperatorEventListResult
+	requireServedJSONRPCResult(t, baseURL+"/v1/rpc", "event.list", map[string]any{
+		"filter": map[string]any{"run_id": binding.RunID, "event_name": "inbound.telegram"}, "limit": 500,
+	}, &listed)
+	if len(listed.Events) != len(deliveries) || listed.NextCursor != "" {
+		t.Fatalf("declaration raw event cardinality=%d cursor=%s, want %d", len(listed.Events), listed.NextCursor, len(deliveries))
+	}
+	remaining := make(map[string]bool, len(deliveries))
+	for _, delivery := range deliveries {
+		remaining[delivery] = true
+	}
+	for _, event := range listed.Events {
+		delivery, ok := event.Payload["provider_event_id"].(string)
+		if !ok || !remaining[delivery] || event.RunID != binding.RunID || event.EntityID != "" || event.EventName != "inbound.telegram" {
+			t.Fatalf("declaration raw event changed exact delivery/run or borrowed a sender: %+v", event)
+		}
+		delete(remaining, delivery)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("declaration lost provider deliveries: %+v", remaining)
+	}
+}
+
 func requireStandingPayloadOnlyTargetReadback(t *testing.T, baseURL, bundleHash, executionMode string, wantOwners int, wantTexts []string) {
 	t.Helper()
 	endpoint := strings.TrimRight(baseURL, "/") + "/v1/rpc"

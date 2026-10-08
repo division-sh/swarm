@@ -270,6 +270,7 @@ func postStandingRootTreePublicUpdates(t *testing.T, p *releaseServeProcess, sto
 				if len(receipt.EventIDs) != 0 || receipt.ActionDisposition != "pending" {
 					t.Fatalf("callback published business events or lost native intent: %s", raw)
 				}
+				requireStandingRootTreePublicationMarker(t, p.rpc, services[alias], receipt.FlowPath, id, receipt.PublicationID)
 				requireStandingRootTreeActionIntent(t, store, services[alias], alias, id, receipt.PublicationID, receipt.FlowPath)
 				continue
 			}
@@ -336,15 +337,8 @@ func requireStandingRootTreeActionIntent(t *testing.T, store goldenStoreSelectio
 	if err := db.QueryRowContext(ctx, `SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND flow_template=$3`, run.RunID, path, flow).Scan(&headerEntity); err != nil || headerEntity == "" {
 		t.Fatalf("generation lacks its separately constructed header: header=%s err=%v", headerEntity, err)
 	}
-	var provider, providerEvent, storedFlow, targetAlias, resolvedRun, service, state string
-	var generation int64
-	var outputCount, memberCount int
-	if err := db.QueryRowContext(ctx, `SELECT provider, provider_event_id, flow_path, target_alias, resolved_run_id, stable_service_id, expected_generation, state, output_count FROM inbound_publications WHERE publication_id=$1`, publicationID).Scan(&provider, &providerEvent, &storedFlow, &targetAlias, &resolvedRun, &service, &generation, &state, &outputCount); err != nil {
-		t.Fatal(err)
-	}
-	if provider != "telegram" || providerEvent != fmt.Sprint(updateID) || storedFlow != flow || targetAlias != alias || resolvedRun != run.RunID || service != run.Origin.ServiceID || generation != run.Origin.Generation || state != "committed" || outputCount != 0 {
-		t.Fatalf("callback publication lost exact generation/alias: provider=%s occurrence=%s flow=%s alias=%s run=%s service=%s generation=%d state=%s outputs=%d", provider, providerEvent, storedFlow, targetAlias, resolvedRun, service, generation, state, outputCount)
-	}
+	provider, providerEvent := "telegram", fmt.Sprint(updateID)
+	var memberCount int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM inbound_publication_events WHERE publication_id=$1`, publicationID).Scan(&memberCount); err != nil || memberCount != 0 {
 		t.Fatalf("callback has executable business membership: count=%d err=%v", memberCount, err)
 	}
@@ -377,5 +371,36 @@ func requireStandingRootTreeActionIntent(t *testing.T, store goldenStoreSelectio
 	// if reconciled, it must settle rejected rather than execute business work.
 	if (intentState == "pending" && disposition.Valid) || (intentState == "settled" && (!disposition.Valid || disposition.String != "rejected")) || (intentState != "pending" && intentState != "settled") {
 		t.Fatalf("callback intent state=%s disposition=%v", intentState, disposition)
+	}
+}
+
+func requireStandingRootTreePublicationMarker(t *testing.T, rpc *releaseRPCClient, run fullLifecycleRun, flow string, updateID int, publicationID string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	evidence, err := listFullLifecycleEvents(ctx, rpc, run.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched := 0
+	for _, marker := range evidence {
+		if marker.EventName != "platform.inbound_recorded" || marker.Payload["publication_id"] != publicationID {
+			continue
+		}
+		matched++
+		payload := marker.Payload
+		if marker.RunID != run.RunID || marker.EntityID != "" || payload["provider"] != "telegram" || payload["provider_event_id"] != fmt.Sprint(updateID) ||
+			payload["service_id"] != run.Origin.ServiceID || payload["run_id"] != run.RunID || payload["generation"] != float64(run.Origin.Generation) || payload["flow_path"] != flow || payload["output_count"] != float64(0) {
+			t.Fatalf("committed declaration evidence lost exact binding or borrowed a receiver: %+v", marker)
+		}
+		for _, field := range []string{"event_ids", "event_names"} {
+			children, ok := payload[field].([]any)
+			if !ok || len(children) != 0 {
+				t.Fatalf("callback declaration evidence has business children: %+v", marker)
+			}
+		}
+	}
+	if matched != 1 {
+		t.Fatalf("callback publication has %d committed markers, want exactly one", matched)
 	}
 }
