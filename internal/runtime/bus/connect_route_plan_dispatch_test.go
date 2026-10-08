@@ -3642,9 +3642,9 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameK
 		},
 	}
 	store := &connectRoutePlanConcurrentLifecycleStore{connectRoutePlanLifecycleStore: base}
-	// Hold local installation until both publications have committed their
-	// future-owner plans. Otherwise scheduler order may legitimately make the
-	// second publication a reuse rather than exercise this concurrency case.
+	// This collaborator proof covers two future-owner plans and compiled target
+	// convergence, not native immutable constructor election. The latter requires
+	// TestA9ConcurrentKeyedIngressElectionBothStores's real stores and barriers.
 	owner := &concurrentPlanFinalizationBarrier{testFlowInstanceActivationOwner: newTestFlowInstanceActivationOwner(store.Activate), ready: make(chan struct{})}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:          source,
@@ -3711,6 +3711,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameK
 	if materializing != 2 || existing != 0 {
 		t.Fatalf("ownership dispositions materializing/existing = %d/%d, want concurrent plans stamped with the same future identity", materializing, existing)
 	}
+	t.Log("proof_scope=component future-owner/compiled-target convergence; no native constructor election or immutable-replay credit")
 }
 
 func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation(t *testing.T) {

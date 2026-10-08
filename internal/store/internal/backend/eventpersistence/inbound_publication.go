@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	storechanneldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
@@ -208,13 +209,23 @@ func (s *EventPostgresOwner) CommitInboundPublication(ctx context.Context, comma
 	})
 	result, acknowledged := outcome.Value()
 	if !acknowledged {
-		return runtimeinbound.CommitResult{}, outcome.Err()
+		return rolledBackInboundConstruction(outcome.Phase(), outcome.Err()), outcome.Err()
 	}
 	result.Acknowledged = true
 	for index, publication := range result.Publications {
 		result.Publications[index] = publication.WithCommitAcknowledgment()
 	}
 	return result, outcome.Err()
+}
+
+func rolledBackInboundConstruction(phase mutationprotocol.Phase, err error) runtimeinbound.CommitResult {
+	if phase != mutationprotocol.DomainWrite {
+		return runtimeinbound.CommitResult{}
+	}
+	if owner, isolated := runtimepipeline.IsolatedFlowInstanceActivationConflict(err); isolated {
+		return runtimeinbound.CommitResult{RolledBackConstruction: &owner}
+	}
+	return runtimeinbound.CommitResult{}
 }
 
 func (s *EventPostgresOwner) LoadInboundPublicationByIdentity(ctx context.Context, identity runtimeinbound.Identity) (runtimeinbound.Record, bool, error) {

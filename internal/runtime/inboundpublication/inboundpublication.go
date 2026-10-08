@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -363,6 +364,17 @@ type CommitResult struct {
 	OperatorChannelClaim *operatorchannel.ClaimSettlement
 	// Acknowledged is set only after the selected-store mutation result confirms commit.
 	Acknowledged bool
+	// RolledBackConstruction is present only after a typed constructor conflict
+	// before COMMIT admission with no independent transaction/cleanup failure.
+	RolledBackConstruction *flowidentity.RunScopedFlowInstance
+}
+
+func (r CommitResult) CanReconcileConstruction(err error) bool {
+	if r.Acknowledged || r.RolledBackConstruction == nil {
+		return false
+	}
+	owner, isolated := pipeline.IsolatedFlowInstanceActivationConflict(err)
+	return isolated && owner == *r.RolledBackConstruction
 }
 
 type EvidencePayload struct {

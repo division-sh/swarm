@@ -12,6 +12,8 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type InboundDeliveryBatch struct {
@@ -100,6 +102,80 @@ func (p InboundDeliveryPlan) CommitCommands() []PublicationCommand {
 
 func (p InboundDeliveryPlan) Events() []InboundDeliveryEvent {
 	return append([]InboundDeliveryEvent(nil), p.events...)
+}
+
+// ReconcileInboundConstruction consumes a proven rolled-back coordinate, not
+// a generic duplicate error. The complete next batch must be planned afresh.
+func (eb *EventBus) ReconcileInboundConstruction(ctx context.Context, plan InboundDeliveryPlan, owner runtimeflowidentity.RunScopedFlowInstance) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for index, command := range plan.commands {
+		for _, activation := range command.Activations {
+			if activation.Readiness.RunID != owner.RunID || activation.Identity.Route() != owner.Route {
+				continue
+			}
+			if !eb.inboundConstructionMayReuse(plan.prepared[index], activation) {
+				return fmt.Errorf("rolled-back construction is not select-or-create")
+			}
+			reader, ok := eb.templateInstancePlanner.(pipeline.FlowConstructionPublicationReader)
+			if !ok {
+				return fmt.Errorf("construction reconciliation requires its durable receipt owner")
+			}
+			winner, err := reader.LoadFlowConstructionPublication(ctx, owner, activation.Identity.EntityID)
+			if err != nil {
+				return err
+			}
+			if winner.Identity != activation.Identity {
+				return fmt.Errorf("elected construction contradicts its proposed structural owner")
+			}
+			if err := winner.Identity.ValidateConstruction(eb.semanticSource, owner.RunID); err != nil {
+				return err
+			}
+			schema, found := eb.semanticSource.FlowSchemaByID(winner.Identity.TemplateID)
+			if !found || schema.Instance.Empty() {
+				return fmt.Errorf("construction reconciliation requires its declared receiver key")
+			}
+			key := schema.Instance.Path()
+			actual, err := runtimepinrouting.DescriptorAddressFields(winner.Fields)
+			if err != nil {
+				return err
+			}
+			proposed, err := runtimepinrouting.DescriptorAddressFields(activation.Instance.Fields)
+			if err != nil || actual["entity."+key] == "" || actual["entity."+key] != proposed["entity."+key] {
+				return errors.Join(err, fmt.Errorf("elected construction contradicts its selected key"))
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("rolled-back construction is absent from the exact inbound plan")
+}
+
+func (eb *EventBus) inboundConstructionMayReuse(prepared PreparedPublish, activation pipeline.FlowInstanceActivationPlan) bool {
+	if activation.Identity.TemplateID == semanticview.RootExecutionFlowID(eb.semanticSource) && activation.Identity.InstancePath == prepared.Event.RunID() {
+		return prepared.Event.RoutingSource().Kind() == events.RoutingSourceExternalIngress
+	}
+	graph := runtimepinrouting.CompileConnectGraph(eb.semanticSource)
+	for _, compiled := range graph.MatchingPlans(prepared.Event) {
+		if compiled.InstanceKey() == nil || compiled.InstanceKey().Mode() != runtimecontracts.FlowInputResolutionModeSelectOrCreate {
+			continue
+		}
+		identity, err := runtimepinrouting.ConnectPlanIdentity(compiled)
+		if err != nil {
+			continue
+		}
+		for _, evaluated := range prepared.plan.ConnectEvaluation.Plans() {
+			if evaluated.PlanIdentity() != identity || evaluated.Resolution() != events.ConnectPlanResolved {
+				continue
+			}
+			for _, target := range evaluated.Targets() {
+				if target.FlowID == activation.Identity.TemplateID && target.FlowInstance == activation.Identity.InstancePath && target.EntityID == activation.Identity.EntityID {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // ProviderOutputAuthorizationVerifier is the current immutable verified-pack

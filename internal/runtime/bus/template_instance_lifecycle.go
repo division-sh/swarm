@@ -156,9 +156,16 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 		if !runtimepinrouting.ConnectInstanceKeyDescriptorMatches(keyMaterial, descriptor) {
 			continue
 		}
-		instance, found := owners[descriptor.FlowInstance]
-		if !found || instance.EntityID != descriptor.EntityID {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, fmt.Errorf("receiver descriptor contradicts its stored construction")
+		flowID := descriptor.FlowID
+		if known, found := owners[descriptor.FlowInstance]; found {
+			flowID = known.TemplateID
+		}
+		if flowID != "" && flowID != plan.ReceiverEndpoint().Readback().FlowID {
+			continue
+		}
+		instance, err := o.constructionInstance(ctx, evt.RunID(), plan.ReceiverEndpoint().Readback().FlowID, descriptor.FlowInstance, descriptor.EntityID, owners)
+		if err != nil {
+			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, fmt.Errorf("receiver descriptor contradicts its stored construction: %w", err)
 		}
 		if err := instance.ValidateConstruction(o.source, evt.RunID()); err != nil {
 			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, err

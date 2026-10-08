@@ -521,45 +521,70 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusAccepted, response)
 		return
 	}
-	batchPlan, err := g.bus.PrepareInboundDeliveryBatch(pubCtx, runtimebus.InboundDeliveryBatch{
+	batch := runtimebus.InboundDeliveryBatch{
 		Provider:          provider,
 		Admission:         publicationAdmission,
 		AuthorSubjectType: authorProjection.SubjectType,
 		AuthorSubjectID:   authorProjection.SubjectID,
 		Events:            published,
-	})
-	if err != nil {
-		http.Error(w, "publish inbound failed: "+err.Error(), http.StatusServiceUnavailable)
-		return
 	}
-	prepared := batchPlan.PreparedPublications()
-	plannedEvents := batchPlan.Events()
-	finalization := runtimeinbound.Finalization{EvidenceEvent: evidence, Events: make([]runtimeinbound.EventFinalization, len(prepared))}
-	for index := range prepared {
-		manifest, _, _, manifestErr := runtimeinbound.CanonicalRecipientManifest(prepared[index].DeliveryRoutes())
-		if manifestErr != nil {
-			_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
-			http.Error(w, "publish inbound failed", http.StatusServiceUnavailable)
+	var batchPlan runtimebus.InboundDeliveryPlan
+	var commitResult runtimeinbound.CommitResult
+	reconciled := make(map[string]struct{})
+	for {
+		batchPlan, err = g.bus.PrepareInboundDeliveryBatch(pubCtx, batch)
+		if err != nil {
+			http.Error(w, "publish inbound failed: "+err.Error(), http.StatusServiceUnavailable)
 			return
 		}
-		finalization.Events[index] = runtimeinbound.EventFinalization{
-			Ordinal: index, Event: prepared[index].Event, Kind: plannedEvents[index].Kind,
-			Authorization: plannedEvents[index].Authorization, RecipientManifest: manifest,
+		prepared := batchPlan.PreparedPublications()
+		plannedEvents := batchPlan.Events()
+		finalization := runtimeinbound.Finalization{EvidenceEvent: evidence, Events: make([]runtimeinbound.EventFinalization, len(prepared))}
+		for index := range prepared {
+			manifest, _, _, manifestErr := runtimeinbound.CanonicalRecipientManifest(prepared[index].DeliveryRoutes())
+			if manifestErr != nil {
+				_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+				http.Error(w, "publish inbound failed", http.StatusServiceUnavailable)
+				return
+			}
+			finalization.Events[index] = runtimeinbound.EventFinalization{
+				Ordinal: index, Event: prepared[index].Event, Kind: plannedEvents[index].Kind,
+				Authorization: plannedEvents[index].Authorization, RecipientManifest: manifest,
+			}
 		}
+		var bareCandidate *operatorchannel.InboundText
+		if operatorEvent != nil {
+			bareCandidate = operatorEvent.BareCandidate
+		}
+		if !validate() {
+			_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+			return
+		}
+		commitResult, err = g.store.CommitInboundPublication(pubCtx, runtimeinbound.CommitCommand{
+			Request: publicationRequest, Finalization: finalization,
+			Publications: batchPlan.CommitCommands(), AuthorProjection: authorProjection,
+			PotentialBareText: bareCandidate,
+		})
+		if !commitResult.CanReconcileConstruction(err) {
+			break
+		}
+		owner := *commitResult.RolledBackConstruction
+		cleanupErr := g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+		if cleanupErr != nil {
+			writeInboundCommitError(w, g.logger, requestCtx, provider, target.ServiceID, providerEventID, errors.Join(err, cleanupErr))
+			return
+		}
+		if _, repeated := reconciled[owner.Key()]; repeated {
+			writeInboundCommitError(w, g.logger, requestCtx, provider, target.ServiceID, providerEventID, errors.Join(err, errors.New("constructor reconciliation made no durable progress")))
+			return
+		}
+		if reconcileErr := g.bus.ReconcileInboundConstruction(pubCtx, batchPlan, owner); reconcileErr != nil {
+			writeInboundCommitError(w, g.logger, requestCtx, provider, target.ServiceID, providerEventID, errors.Join(err, reconcileErr))
+			return
+		}
+		reconciled[owner.Key()] = struct{}{}
 	}
-	var bareCandidate *operatorchannel.InboundText
-	if operatorEvent != nil {
-		bareCandidate = operatorEvent.BareCandidate
-	}
-	if !validate() {
-		_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
-		return
-	}
-	commitResult, err := g.store.CommitInboundPublication(pubCtx, runtimeinbound.CommitCommand{
-		Request: publicationRequest, Finalization: finalization,
-		Publications: batchPlan.CommitCommands(), AuthorProjection: authorProjection,
-		PotentialBareText: bareCandidate,
-	})
+	prepared := batchPlan.PreparedPublications()
 	commitErr := err
 	record := commitResult.Record
 	if !commitResult.Acknowledged {

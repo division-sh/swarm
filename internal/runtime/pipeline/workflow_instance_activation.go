@@ -414,6 +414,40 @@ type FlowInstanceActivationPlanner interface {
 	PrepareFlowInstanceActivation(context.Context, FlowInstanceActivationRequest) (FlowInstanceActivationPlan, error)
 }
 
+// FlowInstanceActivationConflict preserves an occupied immutable constructor
+// as a hard error. Only a rolled-back inbound select-or-create plan may
+// reconcile this coordinate through the durable receipt owner.
+type FlowInstanceActivationConflict struct {
+	Owner runtimeflowidentity.RunScopedFlowInstance
+	Cause error
+}
+
+func (e *FlowInstanceActivationConflict) Error() string { return e.Cause.Error() }
+func (e *FlowInstanceActivationConflict) Unwrap() error { return e.Cause }
+
+// IsolatedFlowInstanceActivationConflict refuses independent errors joined
+// either by the transaction owner or by a later operation-boundary wrapper.
+func IsolatedFlowInstanceActivationConflict(err error) (runtimeflowidentity.RunScopedFlowInstance, bool) {
+	for err != nil {
+		if conflict, ok := err.(*FlowInstanceActivationConflict); ok {
+			return conflict.Owner, conflict.Owner.Validate() == nil
+		}
+		switch wrapped := err.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(children) != 1 {
+				return runtimeflowidentity.RunScopedFlowInstance{}, false
+			}
+			err = children[0]
+		case interface{ Unwrap() error }:
+			err = wrapped.Unwrap()
+		default:
+			return runtimeflowidentity.RunScopedFlowInstance{}, false
+		}
+	}
+	return runtimeflowidentity.RunScopedFlowInstance{}, false
+}
+
 // CommittedFlowInstanceActivationFinalizer consumes only durable activation
 // evidence. It owns process-local topology installation and readiness retry;
 // persistence remains entirely inside the selected-store operation.

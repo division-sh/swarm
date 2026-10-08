@@ -388,6 +388,7 @@ func (eb *EventBus) PinRoutingDescriptors(ctx context.Context) ([]runtimepinrout
 			continue
 		}
 		out = append(out, runtimepinrouting.Descriptor{
+			FlowID:        descriptor.FlowID,
 			ID:            descriptor.ID,
 			EntityID:      descriptor.EntityID,
 			FlowInstance:  descriptor.FlowInstance,
@@ -558,6 +559,13 @@ func (o *orderedActiveTargetDescriptors) add(descriptor ActiveTargetDescriptor) 
 	}
 	key := activeTargetDescriptorKeyFor(descriptor)
 	if _, exists := o.seen[key]; exists {
+		if descriptor.FlowID != "" {
+			for index := range o.descriptors {
+				if activeTargetDescriptorKeyFor(o.descriptors[index]) == key {
+					o.descriptors[index].FlowID = descriptor.FlowID
+				}
+			}
+		}
 		return
 	}
 	o.seen[key] = struct{}{}

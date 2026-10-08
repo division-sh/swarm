@@ -77,6 +77,7 @@ func ParseTargetFailure(code string) (TargetFailure, error) {
 }
 
 type Descriptor struct {
+	FlowID        string
 	ID            string
 	EntityID      string
 	FlowInstance  string

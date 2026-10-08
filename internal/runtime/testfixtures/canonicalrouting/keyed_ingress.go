@@ -81,6 +81,15 @@ ingress:
 	return root
 }
 
+func CopyConcurrentKeyedRootRawIngress(t testing.TB) string {
+	t.Helper()
+	root := CopyKeyedRootRawIngressCreationEvent(t)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "instance: provider_event_id", "instance: provider")
+	applyClosedReplacement(t, filepath.Join(root, "entities.yaml"), "  provider_event_id: text", "  provider: text")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "root.created:\n  provider_event_id: text", "root.created:\n  provider: text")
+	return root
+}
+
 func CopySchemaOmittedConstructionTree(t testing.TB) string {
 	t.Helper()
 	root := CopyNestedKeyedConnectionSelection(t)
@@ -175,5 +184,10 @@ func CopyNestedConcurrentRawIngress(t testing.TB, distinctLeaves bool) string {
 	if distinctLeaves {
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "to: parent/middle/leaf, resolution: select-or-create, key_from: payload.provider", "to: parent/middle/leaf, resolution: select-or-create, key_from: payload.provider_event_id")
 	}
+	applyClosedReplacement(t, filepath.Join(root, "parent/schema.yaml"), "stages: []\n", "stages: []\nauto_emit_on_create: {event: parent.created}\n")
+	writeClosedVariantFile(t, root, "parent/events.yaml", "parent.created:\n  id: text\n  seen: integer\n  creation_count: integer\n")
+	applyClosedReplacement(t, filepath.Join(root, "parent/entities.yaml"), "  seen: {type: integer, initial: 0}\n", "  seen: {type: integer, initial: 0}\n  creation_count: {type: integer, initial: 0}\n")
+	applyClosedReplacement(t, filepath.Join(root, "parent/nodes.yaml"), "subscribes_to: [account.opened]", "subscribes_to: [account.opened, parent.created]")
+	applyClosedReplacement(t, filepath.Join(root, "parent/nodes.yaml"), "  event_handlers:\n", "  event_handlers:\n    parent.created:\n      data_accumulation:\n        source_event: parent.created\n        writes: [{target_field: creation_count, value: entity.creation_count + 1}]\n")
 	return root
 }

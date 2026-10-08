@@ -54,7 +54,7 @@ func (s *EventSQLiteOwner) CommitInboundPublication(ctx context.Context, command
 	})
 	result, acknowledged := outcome.Value()
 	if !acknowledged {
-		return runtimeinbound.CommitResult{}, outcome.Err()
+		return rolledBackInboundConstruction(outcome.Phase(), outcome.Err()), outcome.Err()
 	}
 	result.Acknowledged = true
 	for index, publication := range result.Publications {

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestA9ReleaseKeyedIngressConstructionBothStores(t *testing.T) {
@@ -27,6 +28,7 @@ func TestA9ReleaseKeyedIngressConstructionBothStores(t *testing.T) {
 				name = "nested_declaration"
 			}
 			t.Run(string(backend)+"/"+name, func(t *testing.T) {
+				unsetStoreSelectorEnv(t)
 				secret := a9SetRawIngressCredential(t)
 				var root, alias string
 				if nested {
@@ -34,8 +36,15 @@ func TestA9ReleaseKeyedIngressConstructionBothStores(t *testing.T) {
 				} else {
 					root, alias = canonicalrouting.CopyKeyedRootRawIngressCreationEvent(t), "keyed-shop"
 				}
-				rt := startLifecycleReleaseProcess(t, binary, backend, root, "SWARM_CREDENTIALS_FILE="+os.Getenv("SWARM_CREDENTIALS_FILE"))
-				endpoint := strings.TrimSuffix(rt.Endpoint, "/v1/rpc") + "/webhooks/" + alias + "/partner"
+				var config string
+				if backend == servedparity.BackendDefaultSQLite {
+					config = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "release.sqlite"), channelOnboardingHostWorkspaceFields())
+				} else {
+					config = writeChannelOnboardingPostgresRuntimeConfig(t, testutil.StartEmptyPostgresDSN(t))
+				}
+				env := append(releaseProviderTriggerProcessEnv(), "PGPASSWORD="+os.Getenv("PGPASSWORD"), "ANTHROPIC_API_KEY=", "OPENAI_API_KEY=", "SWARM_CREDENTIALS_FILE="+os.Getenv("SWARM_CREDENTIALS_FILE"))
+				rpcEndpoint := startReleaseServeEndpoint(t, binary, backend, root, config, env)
+				endpoint := strings.TrimSuffix(rpcEndpoint, "/v1/rpc") + "/webhooks/" + alias + "/partner"
 				const body = `{"delivery_id":"compiled-binary"}`
 				code, raw := a9PostSignedRawIngress(t, endpoint, secret, body)
 				if code != 202 {
@@ -52,26 +61,26 @@ func TestA9ReleaseKeyedIngressConstructionBothStores(t *testing.T) {
 					t.Fatal("release receipt omitted event identity")
 				}
 				if nested {
-					event := a9RequireNestedIngressSettlement(t, rt.Endpoint, id)
+					event := a9RequireNestedIngressSettlement(t, rpcEndpoint, id)
 					for _, delivery := range event.Deliveries {
 						if delivery.Target.FlowID != "branch/parent" && delivery.Target.FlowID != "branch/parent/middle/leaf" {
 							t.Fatalf("release delivery escaped nested declaration scope: %+v", event)
 						}
 						var entity operatorread.OperatorEntityFull
-						requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": delivery.Target.EntityID}, &entity)
+						requireServedJSONRPCResult(t, rpcEndpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": delivery.Target.EntityID}, &entity)
 						if entity.Fields["seen"] != float64(1) {
 							t.Fatalf("release nested consumer=%+v", entity)
 						}
 					}
 				} else {
-					a9RequireRootIngressSettlement(t, rt.Endpoint, runID, id)
-					created := servedClockEvents(t, rt.Endpoint, runID, "root.created")
+					a9RequireRootIngressSettlement(t, rpcEndpoint, runID, id)
+					created := servedClockEvents(t, rpcEndpoint, runID, "root.created")
 					if len(created) != 1 || created[0].SourceEventID != id {
 						t.Fatalf("release creation publication=%+v", created)
 					}
-					a9RequireRootIngressSettlement(t, rt.Endpoint, runID, created[0].EventID)
+					a9RequireRootIngressSettlement(t, rpcEndpoint, runID, created[0].EventID)
 					var entity operatorread.OperatorEntityFull
-					requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": runID}, &entity)
+					requireServedJSONRPCResult(t, rpcEndpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": runID}, &entity)
 					if entity.Fields["processed_count"] != float64(1) || entity.Fields["creation_count"] != float64(1) {
 						t.Fatalf("release root consumer=%+v", entity)
 					}
