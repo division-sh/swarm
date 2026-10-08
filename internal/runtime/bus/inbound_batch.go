@@ -133,8 +133,8 @@ func (p InboundDeliveryPlan) proposedConstruction(owner runtimeflowidentity.RunS
 }
 
 func (eb *EventBus) validateElectedConstruction(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, activation pipeline.FlowInstanceActivationPlan) error {
-	reader, ok := eb.templateInstancePlanner.(pipeline.FlowConstructionPublicationReader)
-	if !ok {
+	reader := eb.durable.ConstructionPublications
+	if reader == nil {
 		return fmt.Errorf("construction reconciliation requires its durable receipt owner")
 	}
 	winner, err := reader.LoadFlowConstructionPublication(ctx, owner, activation.Identity.EntityID)

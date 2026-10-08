@@ -102,22 +102,23 @@ type EventBus struct {
 // DurableDependencies is the exact selected-store contract consumed by a
 // durable EventBus. EventStore is never inspected to discover these roles.
 type DurableDependencies struct {
-	ScenarioSetup         ScenarioSetupCommitOwner
-	ReplyContext          runtimereplycontext.Store
-	RunLifecycle          runtimerunlifecycle.OperationOwner
-	DeliveryLifecycle     runtimedelivery.Store
-	FlowRoutes            FlowInstanceRoutePersistence
-	FlowRouteRecords      FlowInstanceRouteRecordReader
-	FlowRouteSets         FlowInstanceRouteSetPersistence
-	FlowRouteTopology     FlowInstanceRouteTopologyPersistence
-	FlowRouteRollback     FlowInstanceRouteRollbackPersistence
-	ActiveAgents          ActiveAgentDescriptorLister
-	ActiveFlows           ActiveFlowInstanceDescriptorLister
-	TargetOwners          SelectedRunTargetOwnerLister
-	PreparedEvents        PreparedPublishEventReader
-	TargetFailureRecorder TargetFailureDeadLetterRecorder
-	RunOrigins            RunOriginReader
-	StandingRestarts      runtimerunlifecycle.StandingRestartDispositionReader
+	ConstructionPublications runtimepipeline.FlowConstructionPublicationReader
+	ScenarioSetup            ScenarioSetupCommitOwner
+	ReplyContext             runtimereplycontext.Store
+	RunLifecycle             runtimerunlifecycle.OperationOwner
+	DeliveryLifecycle        runtimedelivery.Store
+	FlowRoutes               FlowInstanceRoutePersistence
+	FlowRouteRecords         FlowInstanceRouteRecordReader
+	FlowRouteSets            FlowInstanceRouteSetPersistence
+	FlowRouteTopology        FlowInstanceRouteTopologyPersistence
+	FlowRouteRollback        FlowInstanceRouteRollbackPersistence
+	ActiveAgents             ActiveAgentDescriptorLister
+	ActiveFlows              ActiveFlowInstanceDescriptorLister
+	TargetOwners             SelectedRunTargetOwnerLister
+	PreparedEvents           PreparedPublishEventReader
+	TargetFailureRecorder    TargetFailureDeadLetterRecorder
+	RunOrigins               RunOriginReader
+	StandingRestarts         runtimerunlifecycle.StandingRestartDispositionReader
 }
 
 func (d DurableDependencies) validate() error {
@@ -125,6 +126,7 @@ func (d DurableDependencies) validate() error {
 		name  string
 		value any
 	}{
+		{"construction publication reader", d.ConstructionPublications},
 		{"run lifecycle owner", d.RunLifecycle},
 		{"delivery lifecycle owner", d.DeliveryLifecycle},
 		{"flow route owner", d.FlowRoutes},
@@ -608,7 +610,7 @@ func (eb *EventBus) rebuildRoutePlanners() {
 	if eb == nil {
 		return
 	}
-	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.PinRoutingDescriptors, eb.templateInstancePlanner, eb.durable.ReplyContext)
+	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.PinRoutingDescriptors, eb.templateInstancePlanner, eb.durable.ConstructionPublications, eb.durable.ReplyContext)
 	eb.connectRoutePlanner.loadAgents = eb.activeAgentDescriptors
 	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
 }

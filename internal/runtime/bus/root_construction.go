@@ -51,10 +51,8 @@ func (p deliveryPlanner) prepareRootConstruction(ctx context.Context, event even
 		if err := descriptor.Availability.Validate(source, flowID); err != nil {
 			return nil, err
 		}
-		if !schema.Instance.Empty() {
-			if err := p.validateRootConstructionReuse(ctx, event, identity, schema.Instance.Path()); err != nil {
-				return nil, err
-			}
+		if err := p.validateRootConstructionReuse(ctx, event, identity, schema.Instance.Path()); err != nil {
+			return nil, err
 		}
 		if err := p.connectPlanner.installConstructionIdentityPreview(ctx, event.RunID(), identity, nil); err != nil {
 			return nil, err
@@ -101,8 +99,8 @@ func prepareRootConstructorArguments(ctx context.Context, request pipeline.FlowI
 }
 
 func (p deliveryPlanner) validateRootConstructionReuse(ctx context.Context, event events.Event, instance flowidentity.Instance, key string) error {
-	reader, ok := p.connectPlanner.lifecycle.plan.(pipeline.FlowConstructionPublicationReader)
-	if !ok {
+	reader := p.connectPlanner.lifecycle.reader
+	if reader == nil {
 		return fmt.Errorf("root reuse requires its immutable construction receipt owner")
 	}
 	owner, err := flowidentity.NewRunScopedFlowInstance(event.RunID(), instance.Route())
@@ -112,6 +110,12 @@ func (p deliveryPlanner) validateRootConstructionReuse(ctx context.Context, even
 	receipt, err := reader.LoadFlowConstructionPublication(ctx, owner, instance.EntityID)
 	if err != nil {
 		return fmt.Errorf("root reuse construction receipt: %w", err)
+	}
+	if receipt.Identity != instance {
+		return fmt.Errorf("root reuse contradicts its immutable construction identity")
+	}
+	if key == "" {
+		return nil
 	}
 	contract, found := entityruntime.ResolveForFlow(p.recipientPolicy.semanticSource, instance.TemplateID)
 	if !found || receipt.CreatingInput.EventID == "" || receipt.Fields[key] == nil {

@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -138,6 +139,75 @@ func TestFlowConstructorCommitsKeylessDescendantsBothStores(t *testing.T) {
 					result.Children[0].Created != result.Created || result.Children[0].Children[0].Created != result.Created {
 					t.Fatalf("constructor lost exact descendant evidence: %+v %v", result, err)
 				}
+			}
+		})
+	}
+}
+
+func TestA9StoredKeyedParentConstructsAndRestoresDescendantsBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newEagerFlowConstructorFixture(t, backend)
+			runID := correlation.RunIDFromContext(f.ctx)
+			request := f.request("business-parent", "stored-parent", "original")
+			request.Instance.EntityID = eventtest.UUID("admitted-parent-entity")
+			if request.Instance.EntityID == flowidentity.EntityID(request.Instance.InstancePath) {
+				t.Fatal("proof requires a stored, non-derived parent identity")
+			}
+			parent, err := f.manager.PrepareFlowInstanceActivation(f.ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			committer := agentFixtureFlowActivationCommitter{store: f.store}
+			if committed, err := committer.CommitFlowInstanceActivation(f.ctx, parent); err != nil || !committed.Acknowledged || !committed.Created {
+				t.Fatalf("stored-parent construction: %+v %v", committed, err)
+			}
+			child := sqliteFlowActivationRequest(f.bundle, "review/deferred", "stored-leaf", "", "")
+			child.Instance, err = flowidentity.KeyedChild(child.ContractBundle, parent.Identity, "review/deferred", "stored-leaf")
+			if err != nil {
+				t.Fatal(err)
+			}
+			child.ConstructorInput, child.ResolvedKey = "job.started", "business-leaf"
+			child.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "job.started", "constructor-fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, child.OccurredAt)
+			leaf, err := f.manager.PrepareFlowInstanceActivation(f.ctx, child)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if committed, err := committer.CommitFlowInstanceActivation(f.ctx, leaf); err != nil || !committed.Acknowledged || !committed.Created {
+				t.Fatalf("stored-parent keyed descendant: %+v %v", committed, err)
+			}
+			plans := append(parent.ConstructionPlans(), leaf)
+			for _, plan := range plans {
+				owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: plan.Identity.Route()}
+				evidence, err := ReadReceiverConstructionPublicationForTest(f.ctx, f.store, owner, plan.Identity.EntityID)
+				if err != nil || evidence.Identity != plan.Identity || evidence.CreatingInput != plan.CreatingInput {
+					t.Fatalf("native receipt lost actual parent: %#v want=%+v err=%v", evidence, plan.Identity, err)
+				}
+				if err := evidence.Identity.ValidateConstruction(child.ContractBundle, runID); err != nil {
+					t.Fatalf("restored ancestry rejected: %v", err)
+				}
+				if plan.Identity.ParentRoute.FlowID == "review" && plan.Identity.ParentEntityID != request.Instance.EntityID {
+					t.Fatalf("descendant substituted a parent hash: %+v", plan.Identity)
+				}
+				for _, foreign := range []struct{ run, entity string }{{uuid.NewString(), plan.Identity.EntityID}, {runID, uuid.NewString()}} {
+					owner.RunID = foreign.run
+					if receipt, err := ReadReceiverConstructionPublicationForTest(f.ctx, f.store, owner, foreign.entity); err == nil || receipt.Identity != (flowidentity.Instance{}) {
+						t.Fatalf("foreign native coordinate became parent evidence: %#v %v", receipt, err)
+					}
+				}
+			}
+			before, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, plan := range []pipeline.FlowInstanceActivationPlan{parent, leaf} {
+				if replay, err := committer.CommitFlowInstanceActivation(f.ctx, plan); err != nil || !replay.Acknowledged || replay.Created {
+					t.Fatalf("exact descendant replay: %+v %v", replay, err)
+				}
+			}
+			after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("constructor replay changed immutable descendants: %v", err)
 			}
 		})
 	}

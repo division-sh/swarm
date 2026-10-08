@@ -5874,6 +5874,22 @@ engine:
       scope plus local instance ID. The exact parent context is checked against
       the canonical constructor and authored immediate child relation; it grants
       no subscription, connection or output-consumer authority.
+      A keyed parent's admitted stored entity is preserved exactly, even when it
+      differs from the creation-time path-derived identifier. Root and keyless
+      parents retain their canonical entity rules. Pure structural validation
+      proves the complete parent route, matching parent entity, immediate authored
+      ancestry and child path; it does not prove durable existence by hashing a
+      keyed parent's path. Native selection and recovery consume the exact
+      run/path/entity header and immutable constructor receipt. A proposed parent
+      is authorized only by its exact enclosing constructor plan.
+      Durable EventBus composition supplies the existing constructor-publication
+      reader independently of activation planning and finalization. Selection,
+      keyed-root reuse and stale-selection winner reconciliation consume that
+      reader even when no creation planner is installed. Missing durable reading
+      authority fails composition; a missing creation planner still refuses new
+      construction. A process route index is never committed construction
+      evidence; only the private uncommitted publication plan may supply preview
+      identities before atomic persistence.
       Selected-fork readiness and header projections consume the fixed
       revision's recorded owner and construction parent together. They project
       that exact parent into the fork run through the historical ownership owner,
@@ -41045,6 +41061,7 @@ filesystem_source_model:
     schema_owner: |
       schema.yaml owns instance shape, ingress, schedules, imports, event pins, and the exact least-common-ancestor connect declarations lowered into the compiled pin/edge owner. Mode is derived from the instance declaration, never authored. Deployment retention derives from enabled ingress bindings and active declared clocks, never an activation marker. There is no connect.yaml or manifest-owned routing surface.
       Effective shape and the compiled stage catalog exist for every admitted FlowNode, including the selected root and schema-omitted intermediate/resource-established nodes. Such nodes are keyless and stateless unless their actual declarations supply those facts; no synthetic schema file, field, pin, activation or authored provenance is created. Constructor compilation, structural identity validation and lexical ancestry selection consume that same admitted node owner. Missing, dead, reserved-resource and outside-tree coordinates do not acquire an effective schema or constructor.
+      Stage compilation consumes the admitted-tree effective schema projection, not only authored schema files. A genuinely stageless node has a valid empty catalog, with no invented stage or transition. A missing or invalid catalog remains an admission error; assignment checks never synthesize a runtime fallback.
     discovery_output: |
       One immutable trie rooted at `.`. Consumers may derive sorted registries from the trie but may not reconstruct topology from package inventories, directory names outside the artifact, or declaration contents.
   authored_identity:

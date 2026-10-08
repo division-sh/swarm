@@ -4,13 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 // Boot wires EventBus before Manager exists. This forwarding owner preserves
-// the complete construction capability when the Manager reference is published.
+// creation/finalization capability when the Manager reference is published.
 type runtimeFlowConstructionOwner struct {
 	current func() *manager.AgentManager
 }
@@ -42,14 +41,5 @@ func (o runtimeFlowConstructionOwner) FinalizeCommittedFlowInstanceActivation(ct
 	return owner.FinalizeCommittedFlowInstanceActivation(ctx, committed)
 }
 
-func (o runtimeFlowConstructionOwner) LoadFlowConstructionPublication(ctx context.Context, identity flowidentity.RunScopedFlowInstance, entityID string) (pipeline.FlowConstructionPublicationEvidence, error) {
-	owner, err := o.manager()
-	if err != nil {
-		return pipeline.FlowConstructionPublicationEvidence{}, err
-	}
-	return owner.LoadFlowConstructionPublication(ctx, identity, entityID)
-}
-
 var _ pipeline.FlowInstanceActivationPlanner = runtimeFlowConstructionOwner{}
 var _ pipeline.CommittedFlowInstanceActivationFinalizer = runtimeFlowConstructionOwner{}
-var _ pipeline.FlowConstructionPublicationReader = runtimeFlowConstructionOwner{}

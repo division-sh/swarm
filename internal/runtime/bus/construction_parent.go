@@ -7,7 +7,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -124,15 +123,14 @@ func (o templateInstanceLifecycleOwner) constructionInstance(ctx context.Context
 		}
 		return instance, nil
 	}
-	reader, ok := o.plan.(pipeline.FlowConstructionPublicationReader)
-	if !ok || entityID == "" {
+	if o.reader == nil || entityID == "" {
 		return flowidentity.Instance{}, fmt.Errorf("construction selection requires its exact durable receipt")
 	}
 	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flowidentity.ScopeKey(o.source, flowID), "", path))
 	if err != nil {
 		return flowidentity.Instance{}, err
 	}
-	evidence, err := reader.LoadFlowConstructionPublication(ctx, owner, entityID)
+	evidence, err := o.reader.LoadFlowConstructionPublication(ctx, owner, entityID)
 	if err != nil {
 		return flowidentity.Instance{}, err
 	}
@@ -150,9 +148,6 @@ func (o templateInstanceLifecycleOwner) constructionInstance(ctx context.Context
 func (o templateInstanceLifecycleOwner) constructionOwners(ctx context.Context, runID string) (map[string]flowidentity.Instance, error) {
 	owners := make(map[string]flowidentity.Instance)
 	var tables []*RouteTable
-	if _, durable := o.plan.(pipeline.FlowConstructionPublicationReader); !durable {
-		tables = append(tables, o.routeTable)
-	}
 	if preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil && preview.table != nil {
 		tables = append(tables, preview.table)
 	}

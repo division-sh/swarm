@@ -97,3 +97,64 @@ func TestA9KeyedChildRefusesAbsentOrNonStructuralParent(t *testing.T) {
 		}
 	}
 }
+
+func TestA9AdmittedKeyedParentEntityRemainsAuthoritativeForDescendants(t *testing.T) {
+	source := nestedKeyedIdentitySource(t)
+	const runID = "11111111-1111-4111-8111-111111111111"
+	root := Stored(source, ".", runID, runID, runID, "")
+	parent, err := KeyedChild(source, root, "parent", "stored-parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent.EntityID = "22222222-2222-4222-8222-222222222222"
+	if parent.EntityID == EntityID(parent.InstancePath) {
+		t.Fatal("proof requires a stored identity distinct from a creation hash")
+	}
+	if err := parent.ValidateConstruction(source, runID); err != nil {
+		t.Fatal(err)
+	}
+	middle, err := KeylessChild(source, parent, "parent/middle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := KeyedChild(source, middle, "parent/middle/leaf", "same")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if middle.ParentEntityID != parent.EntityID || middle.ParentRoute.EntityID != parent.EntityID || leaf.ParentRoute.FlowInstance != middle.InstancePath {
+		t.Fatal("descendant replaced its stored parent identity")
+	}
+	for _, instance := range []Instance{middle, leaf} {
+		if err := instance.ValidateConstruction(source, runID); err != nil {
+			t.Fatalf("stored-parent descendant %+v rejected: %v", instance, err)
+		}
+	}
+	for name, mutate := range map[string]func(*Instance){
+		"missing parent":        func(i *Instance) { i.ParentRoute = ParentRoute{} },
+		"contradictory entity":  func(i *Instance) { i.ParentEntityID = EntityID(parent.InstancePath) },
+		"foreign flow":          func(i *Instance) { i.ParentRoute.FlowID = "parent/middle/leaf" },
+		"foreign path":          func(i *Instance) { i.ParentRoute.FlowInstance = "parent/other-parent" },
+		"wrong same-key parent": func(i *Instance) { i.ParentRoute.FlowInstance = "parent/sibling" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := middle
+			mutate(&bad)
+			if err := bad.ValidateConstruction(source, runID); err == nil {
+				t.Fatalf("contradictory ancestry admitted: %+v", bad)
+			}
+		})
+	}
+	for _, parent := range []Instance{root, middle} {
+		bad := leaf
+		if parent == root {
+			bad = parent
+			bad.EntityID = "33333333-3333-4333-8333-333333333333"
+		} else {
+			bad.ParentEntityID = "33333333-3333-4333-8333-333333333333"
+			bad.ParentRoute.EntityID = bad.ParentEntityID
+		}
+		if err := bad.ValidateConstruction(source, runID); err == nil {
+			t.Fatalf("canonical root/keyless identity was relaxed: %+v", bad)
+		}
+	}
+}

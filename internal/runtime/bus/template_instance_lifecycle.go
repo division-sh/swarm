@@ -45,6 +45,7 @@ type templateInstanceLifecycleOwner struct {
 	source     semanticview.Source
 	routeTable *RouteTable
 	plan       runtimepipeline.FlowInstanceActivationPlanner
+	reader     runtimepipeline.FlowConstructionPublicationReader
 }
 
 type TemplateInstanceLifecycleDecision struct {
@@ -60,11 +61,12 @@ type TemplateInstanceLifecycleDecision struct {
 	identity      runtimeflowidentity.Instance
 }
 
-func newTemplateInstanceLifecycleOwner(source semanticview.Source, routeTable *RouteTable, planner runtimepipeline.FlowInstanceActivationPlanner) templateInstanceLifecycleOwner {
+func newTemplateInstanceLifecycleOwner(source semanticview.Source, routeTable *RouteTable, planner runtimepipeline.FlowInstanceActivationPlanner, reader runtimepipeline.FlowConstructionPublicationReader) templateInstanceLifecycleOwner {
 	return templateInstanceLifecycleOwner{
 		source:     source,
 		routeTable: routeTable,
 		plan:       planner,
+		reader:     reader,
 	}
 }
 

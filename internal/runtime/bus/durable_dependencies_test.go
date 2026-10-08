@@ -25,6 +25,10 @@ type unexpectedDurableTestRoles struct {
 	runtimerunlifecycle.OperationOwner
 }
 
+func (unexpectedDurableTestRoles) LoadFlowConstructionPublication(context.Context, runtimeflowidentity.RunScopedFlowInstance, string) (runtimepipeline.FlowConstructionPublicationEvidence, error) {
+	return runtimepipeline.FlowConstructionPublicationEvidence{}, errUnexpectedDurableTestRole
+}
+
 func (unexpectedDurableTestRoles) CreateReplyContext(context.Context, runtimereplycontext.Record) error {
 	return errUnexpectedDurableTestRole
 }
@@ -164,6 +168,9 @@ func (unexpectedDurableTestRoles) StandingRunRestartDisposition(context.Context,
 func ExactDurableTestDependencies(selected any) DurableDependencies {
 	defaults := unexpectedDurableTestRoles{}
 	deps := DurableTestDependencyProjection(selected)
+	if deps.ConstructionPublications == nil {
+		deps.ConstructionPublications = defaults
+	}
 	if deps.ReplyContext == nil {
 		deps.ReplyContext = defaults
 	}
@@ -216,6 +223,9 @@ func ExactDurableTestDependencies(selected any) DurableDependencies {
 // a synthetic store. Ephemeral fixtures use it without installing defaults.
 func DurableTestDependencyProjection(selected any) DurableDependencies {
 	var deps DurableDependencies
+	if role, ok := selected.(runtimepipeline.FlowConstructionPublicationReader); ok {
+		deps.ConstructionPublications = role
+	}
 	if role, ok := selected.(runtimereplycontext.Store); ok {
 		deps.ReplyContext = role
 	}
@@ -271,7 +281,7 @@ func TestDurableDependenciesDoNotRequireReceiverElectionReader(t *testing.T) {
 		RunLifecycle: roles, DeliveryLifecycle: roles, FlowRoutes: roles, FlowRouteRecords: roles,
 		FlowRouteSets: roles, FlowRouteTopology: roles, FlowRouteRollback: roles,
 		ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
-		PreparedEvents: roles, TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles,
+		PreparedEvents: roles, TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles,
 	}
 	opts := EventBusOptions{
 		SourceArtifactFact:  authorActivityTestSourceArtifactFact,
@@ -282,5 +292,9 @@ func TestDurableDependenciesDoNotRequireReceiverElectionReader(t *testing.T) {
 	}
 	if _, err := NewEventBusWithOptions(store, opts); err != nil {
 		t.Fatalf("construct with complete durable dependencies: %v", err)
+	}
+	opts.Durable.ConstructionPublications = nil
+	if _, err := NewEventBusWithOptions(store, opts); err == nil {
+		t.Fatal("durable bus accepted absent construction receipt reader")
 	}
 }

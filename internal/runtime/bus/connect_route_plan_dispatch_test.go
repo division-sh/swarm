@@ -699,7 +699,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsBeforeReplyContextMutation(t *
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	replyStore := &connectRoutePlanReplyMutationStore{}
-	resolver := newConnectRoutePlanResolver(source, routeTable, nil, nil, replyStore)
+	resolver := newConnectRoutePlanResolver(source, routeTable, nil, nil, nil, replyStore)
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(), "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 		Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-entity")},
 	}, time.Now().UTC())
@@ -767,6 +767,11 @@ func installConnectionSourceConstructionForRun(t testing.TB, eb *EventBus, sourc
 		owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: instance.Route()}
 		if err := eb.RouteTable().AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: instance}); err != nil {
 			t.Fatalf("install exact source construction %s: %v", declaringFlow, err)
+		}
+		if reader, ok := eb.durable.ConstructionPublications.(interface {
+			installConstructionReceipt(runtimeflowidentity.RunScopedFlowInstance, runtimepipeline.FlowConstructionPublicationEvidence)
+		}); ok {
+			reader.installConstructionReceipt(owner, runtimepipeline.FlowConstructionPublicationEvidence{Identity: instance})
 		}
 	}
 	return instance
@@ -2990,7 +2995,7 @@ func TestTemplateInstanceLifecycleUsesResolutionModeWithoutContractPolicyFallbac
 				testRunScopedFlowRoute(root.Route()): root, testRunScopedFlowRoute(producer.Route()): producer,
 				testRunScopedFlowRoute(instance.Route()): instance,
 			}}
-			owner := newTemplateInstanceLifecycleOwner(source, table, nil)
+			owner := newTemplateInstanceLifecycleOwner(source, table, nil, constructionReceiptTestReader{root, producer, instance})
 			materialization, decision, handled, err := owner.Materialize(context.Background(), evt, plan, values, descriptors)
 			if err != nil {
 				t.Fatalf("Materialize: %v", err)
@@ -3021,7 +3026,7 @@ func TestTemplateInstanceLifecycleDecisionAndActivationConfigContainNoPolicyFact
 	}
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	owner := newTemplateInstanceLifecycleOwner(source, nil, nil)
+	owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil)
 	keys := []runtimecontracts.TemplateInstanceKeyValue{{
 		Field: plan.InstanceKey().Field(),
 		Value: "acct-1",
@@ -4726,7 +4731,7 @@ func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventN
 		t.Fatal("provider fixture is missing its exact input pin")
 	}
 	source.input = pin
-	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil)
+	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil, nil)
 	externalSource, err := events.NewExternalIngressRoutingSource(".", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatalf("external routing source: %v", err)
@@ -4750,7 +4755,7 @@ func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver := newConnectRoutePlanResolver(source, table, nil, nil, nil)
+	resolver := newConnectRoutePlanResolver(source, table, nil, nil, nil, nil)
 	routingSource, err := events.NewExternalIngressRoutingSource("account", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
@@ -4774,11 +4779,18 @@ func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *
 		}
 	}
 	scope, ok = resolver.selectedTargetScope(context.Background(), evt)
+	if ok || len(scope.instancePaths) != 0 {
+		t.Fatalf("process index substituted for committed constructor evidence: ok=%t scope=%#v", ok, scope)
+	}
+	previewContext := withConnectRoutePlanPreview(context.Background())
+	preview, _ := previewContext.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes)
+	preview.table = table
+	scope, ok = resolver.selectedTargetScope(previewContext, evt)
 	if !ok || scope.sourceEntityID != "" || !slices.Equal(scope.instancePaths, []string{"account/one", "account/two"}) {
 		t.Fatalf("declaration candidate scope mixed concrete sender or foreign run: ok=%t scope=%#v", ok, scope)
 	}
 	keylessSource := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyStandingRootTreePublic(t))
-	keylessResolver := newConnectRoutePlanResolver(keylessSource, nil, nil, nil, nil)
+	keylessResolver := newConnectRoutePlanResolver(keylessSource, nil, nil, nil, nil, nil)
 	keylessRouting, err := events.NewExternalIngressRoutingSource("beta", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)

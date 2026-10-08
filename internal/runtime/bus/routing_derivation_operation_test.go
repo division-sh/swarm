@@ -411,7 +411,7 @@ func TestConnectPreviewUsesPairedRouteTableSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver := newConnectRoutePlanResolver(source, live, nil, nil, nil)
+	resolver := newConnectRoutePlanResolver(source, live, nil, nil, nil, nil)
 	preview := func(id string) {
 		t.Helper()
 		current := &connectRoutePlanPreviewRoutes{}
