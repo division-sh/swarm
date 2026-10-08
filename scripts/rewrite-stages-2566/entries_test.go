@@ -81,7 +81,7 @@ func TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens(t *testing.T) {
 		{"loop-observer-finish", func(t testing.TB) string {
 			return canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleLoopRepeatEmitsUntilObserverFinish)
 		}, []entryGolden{
-			{Flow: ".", Entry: "waiting", Order: []string{"waiting", "drafting", "review", "escaped", "done"}, Finals: []string{"escaped", "done"}},
+			{Flow: ".", Entry: "waiting", Order: []string{"waiting", "drafting", "review", "escaped", "done"}, Finals: []string{"done", "escaped"}},
 			{Flow: "ordinary", Entry: "waiting", Order: []string{"waiting", "observed", "done"}, Finals: []string{"done"}},
 			{Flow: "sink", Entry: "waiting", Order: []string{"waiting", "done"}, Finals: []string{"done"}},
 		}},
