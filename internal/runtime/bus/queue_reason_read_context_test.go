@@ -82,11 +82,7 @@ func TestDispatchQueueReasonReadContextAndLiveDecisions(t *testing.T) {
 						t.Fatal(err)
 					}
 					settled = true
-					if owned {
-						// Detached caller control cannot revive opaque evidence for a
-						// lease whose original logical context has already settled.
-						ctx = context.WithoutCancel(ctx)
-					} else {
+					if !owned {
 						cancel()
 					}
 				}
