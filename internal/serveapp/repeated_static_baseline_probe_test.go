@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
@@ -15,6 +16,8 @@ import (
 func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			probe := lifecycletest.New(t)
+			configureOwnedMockLifecycleProbe(t, probe)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyRepeatedStaticBaselineProbe(t))
 			var firstRun string
 			var firstProducer string
@@ -79,7 +82,7 @@ func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
 				if attempt == 1 {
 					firstProducer = producer
 					firstRun = seed.RunID
-					firstSnapshot = repeatedStaticRunSnapshot(t, rt.DB, firstRun)
+					firstSnapshot = settledStaticRunSnapshot(t, rt, probe, seed)
 				} else {
 					if got := repeatedStaticRunSnapshot(t, rt.DB, firstRun); !reflect.DeepEqual(got, firstSnapshot) {
 						t.Fatalf("run 2 mutated run 1: before=%#v after=%#v", firstSnapshot, got)
@@ -89,6 +92,13 @@ func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
 			}
 		})
 	}
+}
+
+func settledStaticRunSnapshot(t *testing.T, rt servedControlProofRuntime, probe *lifecycletest.Probe, published servedEventPublishRPCResult) map[string][][]string {
+	t.Helper()
+	// Delivery settlement precedes the accepted publication's diagnostic tail.
+	probe.Expect(published.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
+	return repeatedStaticRunSnapshot(t, rt.DB, published.RunID)
 }
 
 // Read every persisted field, not just counts: another run must not rebind or

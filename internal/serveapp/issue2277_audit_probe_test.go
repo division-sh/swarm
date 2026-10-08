@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store"
@@ -95,11 +96,13 @@ func TestAudit2277ForkCompletionLoss(t *testing.T) {
 func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			probe := lifecycletest.New(t)
 			root := canonicalrouting.CopyRootIngressLegacyTemplateTargetRoute(t)
 			bundle := servedEventPublishFixtureBundleHash(t, root)
 			unsetStoreSelectorEnv(t)
 			stubServeRuntimeWorkspaceLifecycle(t)
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
+			opts.TestLifecycleProbe = probe
 			var db *sql.DB
 			if backend == "sqlite" {
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "audit2277.sqlite"))
@@ -126,9 +129,11 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString()) + "/v1/rpc"
 			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"bundle_hash": bundle, "event_name": "opco.bootstrap_requested", "payload": map[string]any{"owner": "operator"}, "idempotency_key": "audit2277-stop-source"})
 			requireServedEventPublishEntityState(t, db, backend, seed.RunID, "", "waiting")
-			requireServedEventPublishRPCResult(t, endpoint, map[string]any{"run_id": seed.RunID, "source_event_id": seed.EventID, "event_name": "opco.spinup_requested", "payload": map[string]any{"instance_id": "11111111-1111-4111-8111-111111111111", "product_id": "product-1"}, "idempotency_key": "audit2277-spinup"})
+			spinup := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"run_id": seed.RunID, "source_event_id": seed.EventID, "event_name": "opco.spinup_requested", "payload": map[string]any{"instance_id": "11111111-1111-4111-8111-111111111111", "product_id": "product-1"}, "idempotency_key": "audit2277-spinup"})
 			waitServedEventPublishEventID(t, db, backend, seed.RunID, servedTypedCreationInstancePath+"/opco.product_initialization_requested")
 			waitServedRunDeliveryQuiescence(t, db, backend, seed.RunID)
+			probe.Expect(seed.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
+			probe.Expect(spinup.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
 			var readiness int
 			if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instance_runtime_readiness WHERE run_id=$1`, seed.RunID).Scan(&readiness); err != nil {
 				t.Fatal(err)
