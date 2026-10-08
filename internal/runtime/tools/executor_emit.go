@@ -24,9 +24,8 @@ type publishRecipientPlanner interface {
 	CheckPublishRecipientPlan(context.Context, events.Event) (runtimebus.PublishRecipientPlan, error)
 }
 
-func (e *Executor) preflightPinnedEmit(ctx context.Context, actor models.AgentConfig, toolName, flowID, schemaEventType string, emitted events.Event, envelope events.EventEnvelope, preValidationPayload, postEnrichmentPayload map[string]any) (events.Event, error) {
+func (e *Executor) preflightPinnedEmit(ctx context.Context, actor models.AgentConfig, toolName, flowID, schemaEventType string, emitted events.Event, envelope events.EventEnvelope, preValidationPayload, postEnrichmentPayload map[string]any) (prepared events.Event, err error) {
 	eventType, routingSource := string(emitted.Type()), emitted.RoutingSource()
-	var err error
 	resolution := runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
 		Source: e.workflowSource, FlowID: flowID, EventType: eventType, RoutingSource: routingSource,
 	}, envelope)
@@ -34,11 +33,11 @@ func (e *Executor) preflightPinnedEmit(ctx context.Context, actor models.AgentCo
 		wrapped := failures.NewTarget(resolution.Failure.Code(), "tool-executor", "handle_emit_tool.pin_target_resolution",
 			map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType})
 		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
-		return events.Event{}, wrapped
+		return prepared, wrapped
 	}
 	emitted, err = events.ResolveEnvelope(emitted, resolution.Envelope)
 	if err != nil {
-		return events.Event{}, err
+		return prepared, err
 	}
 	if planner, ok := e.bus.(publishRecipientPlanner); ok && planner != nil {
 		plan, err := planner.CheckPublishRecipientPlan(ctx, emitted)
@@ -51,7 +50,7 @@ func (e *Executor) preflightPinnedEmit(ctx context.Context, actor models.AgentCo
 				err,
 			)
 			e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
-			return events.Event{}, wrapped
+			return prepared, wrapped
 		}
 		if plan.UsesCanonicalRouteAuthority() {
 			if plan.TargetFailure != "" {
@@ -62,7 +61,7 @@ func (e *Executor) preflightPinnedEmit(ctx context.Context, actor models.AgentCo
 					map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},
 				)
 				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
-				return events.Event{}, wrapped
+				return prepared, wrapped
 			}
 		}
 	}
