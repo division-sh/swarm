@@ -16,6 +16,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
@@ -668,7 +669,7 @@ func insertRawRunOrigin(
 		StartedAt: time.Date(2026, 7, 29, 17, 0, 0, 0, time.UTC),
 	}
 	if backend == "postgres" {
-		return runlifecyclefixture.AttemptCorruptPostgresSnapshot(ctx, db, snapshot)
+		return storerunlifecycle.AttemptCorruptPostgresSnapshotForTest(ctx, db, snapshot)
 	}
-	return runlifecyclefixture.AttemptCorruptSQLiteSnapshot(ctx, db, snapshot)
+	return storerunlifecycle.AttemptCorruptSQLiteSnapshotForTest(ctx, db, snapshot)
 }

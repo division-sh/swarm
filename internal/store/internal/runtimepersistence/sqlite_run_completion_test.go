@@ -1,7 +1,6 @@
 package runtimepersistence
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"testing"
@@ -11,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
@@ -149,10 +147,10 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 	eventEntityA := uuid.NewString()
 	eventEntityB := uuid.NewString()
 	currentEntity := uuid.NewString()
-	runlifecyclefixture.RequireCorruptSQLiteSnapshot(t, ctx, store.backend.ConstructionHandle(), runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+	RequireCorruptRunSnapshotForTest(t, ctx, store, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
 		RunID: runID, State: "running",
 		BundleHash: authorActivityTestBundleHash,
-		EventCount: 99, EntityCount: 9, StartedAt: now,
+		StartedAt:  now,
 	})
 	for _, fixture := range []struct {
 		id, name, entityID string
@@ -175,24 +173,18 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 		t.Fatalf("LoadRunLifecycleSnapshot: %v", err)
 	}
 	if snap.EntityCount != 1 {
-		t.Fatalf("snapshot entity_count = %d, want entity_state count 1 despite stale run/event overcount", snap.EntityCount)
+		t.Fatalf("snapshot entity_count = %d, want entity_state count 1 despite two event entities", snap.EntityCount)
 	}
-
-	if err := runSelectedFixtureMutation(ctx, store, "test synchronize SQLite lifecycle counters", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		return store.runLifecycleSQLiteOwner.SyncCountersTx(txctx, attempt, runID)
-	}); err != nil {
-		t.Fatalf("SyncCounters: %v", err)
-	}
-	var eventCount, entityCount int
+	var eventCount int
 	if err := store.backend.QueryRowContext(ctx, `
-		SELECT event_count, entity_count
+		SELECT event_count
 		FROM runs
 		WHERE run_id = ?
-	`, runID).Scan(&eventCount, &entityCount); err != nil {
-		t.Fatalf("load synced sqlite counters: %v", err)
+	`, runID).Scan(&eventCount); err != nil {
+		t.Fatalf("load incremental sqlite event counter: %v", err)
 	}
-	if eventCount != 2 || entityCount != 1 {
-		t.Fatalf("synced counters event_count=%d entity_count=%d, want 2/1 from events/entity_state", eventCount, entityCount)
+	if eventCount != 2 || snap.EventCount != 2 {
+		t.Fatalf("incremental event_count=%d snapshot=%d, want 2 physical events without recount", eventCount, snap.EventCount)
 	}
 }
 

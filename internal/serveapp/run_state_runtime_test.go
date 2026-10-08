@@ -200,9 +200,6 @@ func seedRunStatusEntityState(t *testing.T, pg *store.PostgresStore, source runt
 	if err != nil || !committed.Acknowledged || !committed.Created {
 		t.Fatalf("seed run status aggregate: acknowledged=%t created=%t err=%v", committed.Acknowledged, committed.Created, err)
 	}
-	if err := storetest.SyncRunCounters(runStatusAuthorActivityContext(source), pg, runID); err != nil {
-		t.Fatalf("synchronize run status counters: %v", err)
-	}
 }
 
 func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, source runtimecorrelation.SourceArtifactFact, eventID string) {
@@ -368,7 +365,8 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		activeDeliveries int
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), event_count, entity_count
+		SELECT COALESCE(status, ''), event_count,
+		       (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id)
 		FROM runs
 		WHERE run_id = $1::uuid
 	`, runID).Scan(&status, &eventCount, &entityCount); err != nil {
@@ -406,7 +404,8 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		err := db.QueryRowContext(ctx, `
-			SELECT COALESCE(status, ''), event_count, entity_count
+			SELECT COALESCE(status, ''), event_count,
+			       (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id)
 			FROM runs
 			WHERE run_id = $1::uuid
 		`, runID).Scan(&status, &eventCount, &entityCount)

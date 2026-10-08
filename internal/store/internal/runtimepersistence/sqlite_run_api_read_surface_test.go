@@ -46,16 +46,16 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 			RunID: newer, State: "running", BundleHash: bundleA,
 			OriginKind:     string(runtimerunlifecycle.OriginEvent),
 			TriggerEventID: newerEvent, TriggerEventType: "scan.requested",
-			EntityCount: 3, StartedAt: now,
+			StartedAt: now,
 		},
 		{
 			RunID: older, State: "running", BundleHash: bundleB,
 			OriginKind:      string(runtimerunlifecycle.OriginForkMaterialization),
 			ForkedFromRunID: newer, ForkedFromPointKind: "event", ForkedFromRevision: 1, ForkedFromEventID: newerEvent,
-			EntityCount: 5, StartedAt: now.Add(-time.Hour),
+			StartedAt: now.Add(-time.Hour),
 		},
 	} {
-		runlifecyclefixture.RequireCorruptSQLiteSnapshot(t, ctx, sqliteStore.backend.ConstructionHandle(), snapshot)
+		RequireCorruptRunSnapshotForTest(t, ctx, sqliteStore, snapshot)
 	}
 	deliveryRoutesByEvent := map[string][]events.DeliveryRoute{
 		newerEvent:       {testAgentDeliveryRoute(t, newer, "agent-1", "fixture/agent-1")},
