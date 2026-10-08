@@ -684,6 +684,7 @@ func testContractFrontierTemplateSource(t testing.TB) semanticview.Source {
 		},
 	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{review}}
+	root.Children[0].Parent = &root
 	return semanticview.Wrap(mustCompileContractFrontierBundle(semanticviewtest.WithInstanceDeclarations(t, &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    "test-workflow",

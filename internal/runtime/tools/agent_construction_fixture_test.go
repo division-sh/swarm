@@ -6,6 +6,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 // Component fixtures use the real constructor, but this loader is not live
@@ -26,8 +27,26 @@ func toolTestConstructedActor(t testing.TB, exec *Executor, actor actors.AgentCo
 		if actor.EntityID != "" {
 			actor.EntityID = instance.EntityID
 		}
-	} else if actor.EntityID != "" {
-		instance.EntityID = actor.EntityID
+	} else {
+		bundle, found := semanticview.Bundle(exec.workflowSource)
+		if !found {
+			t.Fatal("producer fixture requires its admitted flow tree")
+		}
+		view, found := bundle.FlowViewByID(actor.FlowID)
+		if !found || view.Parent == nil {
+			t.Fatal("producer fixture requires its exact parent declaration")
+		}
+		parent, err := flowidentity.StandingForGeneration(exec.workflowSource, view.Parent.Paths.FlowPath, actor.Identity.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		instance, err = flowidentity.KeyedChild(exec.workflowSource, parent, actor.FlowID, actor.Identity.Route.InstanceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if actor.EntityID != "" {
+			instance.EntityID = actor.EntityID
+		}
 	}
 	if err := instance.ValidateConstruction(exec.workflowSource, actor.Identity.RunID); err != nil {
 		t.Fatal(err)

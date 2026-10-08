@@ -63,7 +63,7 @@ func TestDeliveryTargetApplicationPreservesCompositionTargetOnSQLiteAndPostgres(
 				t.Fatalf("unconstructed target became runnable: application=%+v err=%v", application, err)
 			}
 
-			exact := materializedWorkflowInstanceForTest(WorkflowInstance{
+			exact := materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 				InstanceID: instanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
 				WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), CurrentState: "active", Fields: expected,
 				EntityType: "review_entity",
@@ -82,7 +82,7 @@ func TestDeliveryTargetApplicationPreservesCompositionTargetOnSQLiteAndPostgres(
 			siblingID := "later-matching-sibling"
 			siblingPath := "review/" + siblingID
 			siblingEntityID := eventtest.UUID("later-matching-sibling")
-			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			if err := store.upsert(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 				InstanceID: siblingID, StorageRef: siblingPath, EntityID: siblingEntityID,
 				WorkflowName: "review", WorkflowVersion: "1", CurrentState: "active", Fields: expected,
 				EntityType: "review_entity",

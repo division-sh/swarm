@@ -55,7 +55,18 @@ func TestMaterializedAgentEmitPermissionRetainsDeclarationOnEveryScope(t *testin
 	}
 	records = append(records, leftRecord)
 	for _, flow := range []string{"right", "nested/deeper"} {
-		identity := flowidentity.Stored(source, flow, flow+"/instance-1", "instance-1", runtimepipeline.FlowInstanceEntityID(flow+"/instance-1"), "")
+		view, found := bundle.FlowViewByID(flow)
+		if !found || view.Parent == nil {
+			t.Fatal("materialization fixture requires its exact parent declaration")
+		}
+		parent, err := flowidentity.StandingForGeneration(source, view.Parent.Paths.FlowPath, managerIdentityTestRunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		identity, err := flowidentity.KeyedChild(source, parent, flow, "instance-1")
+		if err != nil {
+			t.Fatal(err)
+		}
 		materialized, err := ConstructedFlowMaterialization(source, managerIdentityTestRunID, identity)
 		if err != nil {
 			t.Fatal(err)

@@ -79,12 +79,12 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		DeliveryStore:       pg,
 		FlowRoutes:          bus,
 	})
-	seedTemplateInstanceDeliveryRouteOwner(t, ctx, pg, pc, source)
+	constructed := seedTemplateInstanceDeliveryRouteOwner(t, ctx, pg, pc, source)
 
 	if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 		RunID: templateInstanceDeliveryRunID,
 		Route: runtimeflowidentity.DeriveRoute("operating", "inst-1"),
-	}, Instance: runtimeflowidentity.Derive(source, "operating", "inst-1")}); err != nil {
+	}, Instance: constructed.Plan.Identity}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	eventID := "99999999-9999-4999-8999-999999999902"
@@ -142,11 +142,11 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 		Persistence: runtimepipeline.NewWorkflowPersistence(pg), RunLifecycle: pg,
 		PipelineObligations: pg.PipelineObligations(), DeliveryStore: pg, FlowRoutes: bus,
 	})
-	seedTemplateInstanceDeliveryRouteOwner(t, ctx, pg, pc, source)
+	constructed := seedTemplateInstanceDeliveryRouteOwner(t, ctx, pg, pc, source)
 	if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 		RunID: templateInstanceDeliveryRunID,
 		Route: runtimeflowidentity.DeriveRoute("operating", "inst-1"),
-	}, Instance: runtimeflowidentity.Derive(source, "operating", "inst-1")}); err != nil {
+	}, Instance: constructed.Plan.Identity}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	ch := runtimeInternalDeliveriesForTest(t, bus, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
@@ -193,9 +193,9 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	`, 0, eventID, templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator"))
 }
 
-func seedTemplateInstanceDeliveryRouteOwner(t testing.TB, ctx context.Context, selected runtimebus.FlowInstanceActivationCommitOwner, pc *runtimepipeline.PipelineCoordinator, source semanticview.Source) {
+func seedTemplateInstanceDeliveryRouteOwner(t testing.TB, ctx context.Context, selected runtimebus.FlowInstanceActivationCommitOwner, pc *runtimepipeline.PipelineCoordinator, source semanticview.Source) runtimepipeline.CommittedFlowInstanceActivation {
 	t.Helper()
-	seedRuntimeTestPreparedInstance(t, ctx, selected, pc, runtimepipeline.WorkflowInstance{
+	return seedRuntimeTestPreparedInstance(t, ctx, selected, pc, runtimepipeline.WorkflowInstance{
 		InstanceID: "inst-1", StorageRef: "operating/inst-1", EntityID: runtimeflowidentity.EntityID("operating/inst-1"),
 		WorkflowName: "operating", WorkflowVersion: source.WorkflowVersion(), Mode: "template",
 		CurrentState: "initializing", StageDefined: true, EntityType: "operating_state", Fields: map[string]any{"instance_id": "inst-1"},

@@ -107,6 +107,7 @@ func TestRecoveredRuntimeContextsStayFencedUntilExactPublicationRelease(t *testi
 func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *testing.T) {
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	a := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "first", catalog)
+	serviceID := a.StandingTargets[0].ServiceID
 	b := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
 	availability := fakeRunBundleAvailability{rows: map[string]runbundle.Availability{
 		"run-first": {RunID: "run-first", BundleHash: runtimeContextTestHashA, SourceArtifactPresent: true},
@@ -180,7 +181,7 @@ func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *tes
 			return use, err
 		},
 		"standing": func() (*RuntimeContextUse, error) {
-			use, _, err := manager.AcquireStandingService(context.Background(), "service-first")
+			use, _, err := manager.AcquireStandingService(context.Background(), serviceID)
 			return use, err
 		},
 		"channel": func() (*RuntimeContextUse, error) {
@@ -197,7 +198,7 @@ func TestResetRuntimeContextsRequireRetirementAndPublishWholeIdenticalSet(t *tes
 			t.Fatalf("%s escaped reset convergence: %v", name, err)
 		}
 	}
-	origin, err := runlifecycle.StandingGenerationRunOrigin("service-first", 1)
+	origin, err := runlifecycle.StandingGenerationRunOrigin(serviceID, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,11 +253,12 @@ func TestResetStandingSuppressionComesFromReconstructedEpoch(t *testing.T) {
 		t.Run(fmt.Sprintf("successor_suspended_%t", suspended), func(t *testing.T) {
 			catalog := runtimeAdmissionTestCatalog(t, "a")
 			old := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "first", catalog)
+			serviceID := old.StandingTargets[0].ServiceID
 			manager, err := newTestRuntimeContextManager(t, nil, old)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := manager.SuppressStandingServiceTargets("service-first"); err != nil {
+			if err := manager.SuppressStandingServiceTargets(serviceID); err != nil {
 				t.Fatal(err)
 			}
 			for _, result := range manager.DeactivateAll(RuntimeContextCauseUnloaded) {
@@ -268,11 +270,11 @@ func TestResetStandingSuppressionComesFromReconstructedEpoch(t *testing.T) {
 			if err := manager.StageResetRuntimeContexts(next); err != nil {
 				t.Fatal(err)
 			}
-			if manager.standingServiceSuppressedLocked("service-first") {
+			if manager.standingServiceSuppressedLocked(serviceID) {
 				t.Fatal("fresh execution retained predecessor standing suppression")
 			}
 			if suspended {
-				if err := manager.SuppressStandingServiceTargets("service-first"); err != nil {
+				if err := manager.SuppressStandingServiceTargets(serviceID); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -292,10 +294,10 @@ func TestResetStandingSuppressionComesFromReconstructedEpoch(t *testing.T) {
 				t.Fatal(err)
 			}
 			if suspended {
-				if use != nil || lookup.Cause != RuntimeContextCauseStandingSuppressed || manager.contexts[next.BundleHash()].standing["service-first"] != nil {
+				if use != nil || lookup.Cause != RuntimeContextCauseStandingSuppressed || manager.contexts[next.BundleHash()].standing[serviceID] != nil {
 					t.Fatalf("non-executable successor acquired standing authority: %+v", lookup)
 				}
-			} else if use == nil || !lookup.Loaded() || manager.contexts[next.BundleHash()].standing["service-first"] == nil {
+			} else if use == nil || !lookup.Loaded() || manager.contexts[next.BundleHash()].standing[serviceID] == nil {
 				t.Fatalf("active successor retained predecessor suppression: %+v", lookup)
 			}
 		})

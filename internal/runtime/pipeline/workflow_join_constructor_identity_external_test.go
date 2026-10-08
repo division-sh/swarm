@@ -42,7 +42,11 @@ func TestWorkflowJoinConstructedDescendantAdmissionOnBothStores(t *testing.T) {
 			pc := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source}})
 			bus.SetInterceptors(pc)
 			am := a2ActivationJoinManagerFactory(t, ctx, selected, source)(pc, bus)
-			parent := flowidentity.Stored(source, "orders", "orders/one", "one", flowidentity.EntityID("orders/one"), "")
+			root := flowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")
+			parent, err := flowidentity.KeyedChild(source, root, "orders", "one")
+			if err != nil {
+				t.Fatal(err)
+			}
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			plan, err := am.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
 				ContractBundle: source, Instance: parent, ConstructorInput: "order.created", ResolvedKey: "one",

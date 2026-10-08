@@ -255,7 +255,7 @@ func (*capturingInboundEventStore) ListEventDeliveryRecipients(context.Context, 
 
 func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "chat-flow", RunID: "41000000-0000-0000-0000-000000000001"})
+	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{BundleHash: runtimeTestBundleHash, FlowPath: "chat-flow", RunID: "41000000-0000-0000-0000-000000000001"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -266,7 +266,8 @@ func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
 	rec := httptest.NewRecorder()
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
-		BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), FlowPath: "chat-flow",
+		BundleHash: runtimeTestBundleHash, FlowPath: "chat-flow",
+		ServiceID: runtimeflowidentity.StandingServiceID("chat-flow"), Generation: 1, PublicationSequence: 1,
 		RunID: "41000000-0000-0000-0000-000000000001",
 		Alias: "chat", Provider: "telegram",
 		SigningSecret: "telegram-secret",
@@ -2436,7 +2437,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 	for _, tc := range []struct {
 		name          string
 		body          []byte
-		target        InboundTarget
+		target        *InboundTarget
 		configure     func(*http.Request, []byte)
 		wantStatus    int
 		wantBodyParts []string
@@ -2444,7 +2445,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 		{
 			name:       "missing configured secret",
 			body:       []byte(`{"update_id":123456789,"message":{"message_id":7,"text":"hello"}}`),
-			target:     InboundTarget{},
+			target:     &InboundTarget{},
 			configure:  func(*http.Request, []byte) {},
 			wantStatus: http.StatusServiceUnavailable,
 		},
@@ -2534,12 +2535,9 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
-			target := tc.target
-			if target.SigningSecret == "" {
-				target = InboundTarget{
-
-					SigningSecret: "telegram-secret",
-				}
+			target := testInboundTarget("", "telegram-secret")
+			if tc.target != nil {
+				target = *tc.target
 			}
 			store := &recordingInboundStore{
 				target:   target,
@@ -2783,7 +2781,7 @@ func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "partner-flow", RunID: eventtest.UUID("compiled-raw-admission-run-" + tc.name)})
+			bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{BundleHash: "bundle-v2:sha256:" + strings.Repeat("d", 64), FlowPath: "partner-flow", RunID: eventtest.UUID("compiled-raw-admission-run-" + tc.name)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2800,6 +2798,7 @@ func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
 			runID := eventtest.UUID("compiled-raw-admission-run-" + tc.name)
 			gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 				BundleHash: "bundle-v2:sha256:" + strings.Repeat("d", 64), FlowPath: "partner-flow", RunID: runID,
+				ServiceID: runtimeflowidentity.StandingServiceID("partner-flow"), Generation: 1, PublicationSequence: 1,
 				Alias: "partner", Provider: "partner-events",
 				SigningSecret: "partner-secret", AdmissionPlan: plan,
 			}, nil)
@@ -2839,7 +2838,7 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	mac := hmac.New(sha256.New, []byte("partner-secret"))
 	signature := hex.EncodeToString(mac.Sum(nil))
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "partner-flow", RunID: eventtest.UUID("compiled-empty-body-run")})
+	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{BundleHash: "bundle-v2:sha256:" + strings.Repeat("e", 64), FlowPath: "partner-flow", RunID: eventtest.UUID("compiled-empty-body-run")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2852,6 +2851,7 @@ func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T
 	runID := eventtest.UUID("compiled-empty-body-run")
 	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
 		BundleHash: "bundle-v2:sha256:" + strings.Repeat("e", 64), FlowPath: "partner-flow", RunID: runID,
+		ServiceID: runtimeflowidentity.StandingServiceID("partner-flow"), Generation: 1, PublicationSequence: 1,
 		Alias: "partner", Provider: "partner-events",
 		SigningSecret: "partner-secret", AdmissionPlan: plan,
 	}, nil)

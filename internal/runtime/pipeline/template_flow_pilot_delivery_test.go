@@ -26,7 +26,7 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 	entityID := uuid.NewString()
 	instanceID := "ti-template-flow-pilot"
 	flowInstance := "account/" + instanceID
-	if err := workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := workflowStore.create(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 		InstanceID:      instanceID,
 		StorageRef:      flowInstance,
 		EntityID:        entityID,

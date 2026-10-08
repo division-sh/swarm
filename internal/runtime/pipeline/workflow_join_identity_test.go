@@ -89,7 +89,7 @@ func newExactWorkflowJoinHarness(
 	harness.route = testRunScopedWorkflowInstanceFromContext(ctx, harness.path).Route
 	harness.entityID = FlowInstanceEntityID(harness.path)
 	harness.pc = harness.newCoordinator()
-	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := store.upsert(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 		InstanceID: uuid.NewString(), StorageRef: harness.path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
 		EntityID: harness.entityID, CurrentState: initialState, EnteredStageAt: time.Now().UTC(),
 		Fields:       map[string]any{"expected": append([]any{}, members...)},
@@ -237,7 +237,7 @@ func seedExactJoinScope(t *testing.T, store *workflowInstanceStore, ctx context.
 	}
 	route := testRunScopedWorkflowInstanceFromContext(ctx, path).Route
 	entityID := FlowInstanceEntityID(path)
-	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := store.upsert(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 		InstanceID: route.InstanceID, StorageRef: path, WorkflowName: executionFlowID, WorkflowVersion: "1.0.0",
 		EntityID: entityID, CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(),
 		Fields:     map[string]any{"expected": []any{"a", "b"}},
@@ -527,7 +527,7 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 				}
 				route := testRunScopedWorkflowInstanceFromContext(ctx, path).Route
 				entityID := FlowInstanceEntityID(path)
-				if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				if err := store.upsert(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 					InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
 					EntityID: entityID, CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(),
 					Fields:     map[string]any{"expected": []any{"a", "b"}},

@@ -79,6 +79,8 @@ func TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSc
 		RunID: uuid.NewString(), ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live,
 		Payload: []byte(`{"account_id":"acct-1"}`), CreatedAt: occurredAt,
 	}
+	identity.ParentRoute = runtimeflowidentity.ParentRoute{FlowID: semanticview.RootExecutionFlowID(sourceV2), FlowInstance: current.RunID, EntityID: current.RunID}
+	identity.ParentEntityID = current.RunID
 	revised, err := rebuildPendingDynamicFlowRuntimeCreationEventPlan(
 		current,
 		false,
@@ -2040,15 +2042,29 @@ func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
 	return bundle
 }
 
-func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, templateID, instanceID, sourceEntityID, flowPath string) runtimepipeline.FlowInstanceActivationRequest {
-	instance := runtimeflowidentity.Stored(
-		semanticview.Wrap(bundle),
-		templateID,
-		flowPath,
-		instanceID,
-		runtimepipeline.FlowInstanceEntityID(flowPath),
-		sourceEntityID,
-	)
+func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, templateID, instanceID, _ string, flowPath string) runtimepipeline.FlowInstanceActivationRequest {
+	source := semanticview.Wrap(bundle)
+	view, found := bundle.FlowViewByID(templateID)
+	if !found || view.Parent == nil {
+		panic("activation fixture requires an explicit child declaration")
+	}
+	parent, err := runtimeflowidentity.StandingForGeneration(source, view.Parent.Paths.FlowPath, flowActivationTestRunID)
+	if err != nil {
+		panic(err)
+	}
+	var instance runtimeflowidentity.Instance
+	if view.Schema.Instance.Empty() {
+		instance, err = runtimeflowidentity.KeylessChild(source, parent, templateID)
+	} else {
+		instance, err = runtimeflowidentity.KeyedChild(source, parent, templateID, instanceID)
+	}
+	if err != nil {
+		panic(err)
+	}
+	if flowPath != "" {
+		instance.InstancePath = flowPath
+		instance.EntityID = runtimepipeline.FlowInstanceEntityID(flowPath)
+	}
 	req := runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: semanticview.Wrap(bundle),
 		Instance:       instance,
@@ -4658,6 +4674,12 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEventWithMode(triggerEventID, executionmode.Mock, runID)
+	parent := runtimeflowidentity.Stored(req.ContractBundle, semanticview.RootExecutionFlowID(req.ContractBundle), runID, runID, runID, "")
+	var constructionErr error
+	req.Instance, constructionErr = runtimeflowidentity.KeyedChild(req.ContractBundle, parent, "review", "inst-1")
+	if constructionErr != nil {
+		t.Fatal(constructionErr)
+	}
 
 	err := activateFlowInstanceForTest(am, ctx, req)
 	if err != nil {
@@ -4881,6 +4903,12 @@ func TestActivateFlowInstancePublishesAutoEmitAfterNamedCommit(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID, runID)
+	parent := runtimeflowidentity.Stored(req.ContractBundle, semanticview.RootExecutionFlowID(req.ContractBundle), runID, runID, runID, "")
+	var constructionErr error
+	req.Instance, constructionErr = runtimeflowidentity.KeyedChild(req.ContractBundle, parent, "review", "inst-1")
+	if constructionErr != nil {
+		t.Fatal(constructionErr)
+	}
 
 	err := activateFlowInstanceForTest(am, ctx, req)
 	if err != nil {
@@ -5168,12 +5196,7 @@ func TestActivateFlowInstancePersistsFullParentRouteMetadata(t *testing.T) {
 	bundle := testFlowBundle(t, "")
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-legacy", "review/inst-1")
-	req.Instance.ParentRoute = runtimeflowidentity.ParentRoute{
-		FlowID:       "operating",
-		FlowInstance: "operating/root",
-		EntityID:     "parent-ent",
-	}
-	req.Instance.ParentEntityID = "parent-ent"
+	parent := req.Instance.ParentRoute
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -5181,14 +5204,21 @@ func TestActivateFlowInstancePersistsFullParentRouteMetadata(t *testing.T) {
 		t.Fatalf("creates = %d, want 1", len(instances.creates))
 	}
 	created := instances.creates[0]
-	if got := created.ParentFlowID; got != "operating" {
-		t.Fatalf("parent_flow_id = %#v, want operating", got)
+	if got := created.ParentFlowID; got != parent.FlowID {
+		t.Fatalf("parent_flow_id = %#v, want %q", got, parent.FlowID)
 	}
-	if got := created.ParentFlowInstance; got != "operating/root" {
-		t.Fatalf("parent_flow_instance = %#v, want operating/root", got)
+	if got := created.ParentFlowInstance; got != parent.FlowInstance {
+		t.Fatalf("parent_flow_instance = %#v, want %q", got, parent.FlowInstance)
 	}
-	if got := created.ParentEntityID; got != "parent-ent" {
-		t.Fatalf("parent_entity_id = %#v, want parent-ent", got)
+	if got := created.ParentEntityID; got != parent.EntityID {
+		t.Fatalf("parent_entity_id = %#v, want %q", got, parent.EntityID)
+	}
+	foreignInstances := &flowActivationTestInstanceStore{}
+	foreignManager := newFlowActivationManager(t, &flowActivationTestBus{}, foreignInstances)
+	req.Instance.ParentRoute = runtimeflowidentity.ParentRoute{FlowID: "operating", FlowInstance: "operating/root", EntityID: "parent-ent"}
+	req.Instance.ParentEntityID = "parent-ent"
+	if err := activateFlowInstanceForTest(foreignManager, testAuthorActivityContext(context.Background()), req); err == nil || len(foreignInstances.creates) != 0 {
+		t.Fatalf("foreign complete parent admitted or mutated: err=%v creates=%d", err, len(foreignInstances.creates))
 	}
 }
 
@@ -5495,7 +5525,12 @@ func TestStaticAndTemplateAgentMaterializationDefaultRoleToEffectiveName(t *test
 
 func TestTemplateFlowAgentMaterializationBlueprintStaysRunlessUntilAdmission(t *testing.T) {
 	source := semanticview.Wrap(testFlowBundle(t, ""))
-	materialization, err := ConstructedFlowMaterialization(source, managerIdentityTestRunID, runtimeflowidentity.Stored(source, "review", "review/inst-1", "inst-1", runtimepipeline.FlowInstanceEntityID("review/inst-1"), ""))
+	parent := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), managerIdentityTestRunID, managerIdentityTestRunID, managerIdentityTestRunID, "")
+	instance, err := runtimeflowidentity.KeyedChild(source, parent, "review", "inst-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialization, err := ConstructedFlowMaterialization(source, managerIdentityTestRunID, instance)
 	if err != nil {
 		t.Fatalf("TemplateFlowAgentMaterializationBlueprints: %v", err)
 	}

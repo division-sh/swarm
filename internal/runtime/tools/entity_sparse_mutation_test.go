@@ -154,9 +154,26 @@ func withEntityToolFixtureRoute(t *testing.T, ctx context.Context, flowInstance 
 func constructEntityToolFixture(t *testing.T, ctx context.Context, selected any, pc *pipeline.PipelineCoordinator, source semanticview.Source, flowID, flowInstance, entityID, stage string, fields map[string]any, at time.Time) flowidentity.RunScopedFlowInstance {
 	t.Helper()
 	owner := flowidentity.RunScopedFlowInstance{RunID: correlation.RunIDFromContext(ctx), Route: flowidentity.Route{ScopeKey: flowID, InstanceID: flowidentity.LogicalInstanceID(flowInstance), InstancePath: flowInstance}}
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("entity fixture requires its admitted flow tree")
+	}
+	view, found := bundle.FlowViewByID(flowID)
+	if !found || view.Parent == nil {
+		t.Fatal("entity fixture requires its explicit child declaration")
+	}
+	parent, err := flowidentity.StandingForGeneration(source, view.Parent.Paths.FlowPath, owner.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	constructed, err := flowidentity.KeyedChild(source, parent, flowID, owner.Route.InstanceID)
+	if err != nil || constructed.InstancePath != flowInstance {
+		t.Fatalf("entity fixture constructor path: constructed=%+v err=%v", constructed, err)
+	}
 	ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
 	initial, lifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, owner, pipeline.WorkflowInstance{
 		WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), StorageRef: flowInstance, InstanceID: owner.Route.InstanceID, EntityID: entityID,
+		ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
 		EntityType:   func() string { contract, _ := entityruntime.ResolveForFlow(source, flowID); return contract.EntityType }(),
 		CurrentState: stage, StageDefined: true, Fields: fields, CreatedAt: at, EnteredStageAt: at,
 	}, at)

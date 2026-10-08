@@ -32,7 +32,6 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/google/uuid"
 )
 
 type providerRawSettlementProofStore interface {
@@ -56,8 +55,7 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 			for providerIndex, provider := range providers {
 				t.Run(provider.provider, func(t *testing.T) {
 					selected := openProviderRawSettlementStore(t, backend)
-					runID := uuid.NewString()
-					entityID := uuid.NewString()
+					runID, entityID := boundedInboundTestCoordinates()
 					flowInstance := boundedProviderFlowID
 					secret := provider.provider + "-raw-settlement-secret"
 					ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
