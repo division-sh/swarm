@@ -104,12 +104,8 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	discard := false
 	serializationConflict := false
 	var tx *sql.Tx
-	var releaseOrdering func()
-	defer func() {
-		if releaseOrdering != nil {
-			releaseOrdering()
-		}
-	}()
+	releaseOrdering := func() {}
+	defer func() { releaseOrdering() }()
 	probe := b.testTransactions.Begin(opts != nil && opts.ReadOnly, false)
 	defer func() { probe.Finish(err) }()
 	defer func() {
@@ -119,9 +115,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		if tx != nil {
 			probe.RollbackAttempted()
 			rollbackErr := tx.Rollback()
-			if releaseOrdering != nil {
-				releaseOrdering()
-			}
+			releaseOrdering()
 			rolledBack = rollbackErr == nil
 			if rollbackErr != nil {
 				discard = true
