@@ -123,8 +123,8 @@ func markInboundDeliveryActiveForSession(ctx context.Context, publisher EventPub
 	if session == nil {
 		return false, nil
 	}
-	if authority, normal := runtimeeffects.CompletionAuthorityFromContext(ctx); normal && authority.Kind == runtimeeffects.AuthorityNormalAgent {
-		origin, err := runtimeeffects.NormalCompletionOriginFromContext(ctx, authority.Normal.AgentID, authority.Normal.Identity.RunID, "agent_session_binding")
+	if authority, admitted := runtimeeffects.CompletionAuthorityFromContext(ctx); admitted && authority.HasBusinessTurnOrigin() {
+		origin, err := runtimeeffects.AgentCompletionOriginFromContext(ctx, authority.Target.AgentID, authority.Target.RunID, "agent_session_binding")
 		if err != nil {
 			return false, err
 		}

@@ -51,6 +51,10 @@ func (t Transition) FlowID() string {
 	return t.guardNode.FlowPath()
 }
 
+func (t Transition) TerminatesAgentTurns() bool {
+	return t.compiled != nil && t.compiled.TerminatesAgentTurns()
+}
+
 func (t Transition) GuardsEvaluated() []string                                { return slices.Clone(t.guards) }
 func (t Transition) RuleSelection() handlerselection.HandlerRuleSelectionFact { return t.selection }
 
@@ -112,6 +116,19 @@ func (t Transition) ValidateHandlerEvidence(handler contracts.SystemNodeEventHan
 			return fmt.Errorf("guard termination evidence disagrees with the executed handler's guard checks")
 		}
 		return nil
+	}
+	edge := t.compiled.Edge()
+	if edge.AdvanceCarrier != "" {
+		matched := false
+		for _, carrier := range contracts.HandlerAdvanceCarriers(handler) {
+			if carrier.Kind == edge.AdvanceCarrier && carrier.RuleRef.Equal(edge.RuleRef) && carrier.AdvancesTo == edge.To && carrier.Terminate == edge.Terminate {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return fmt.Errorf("transition advance or termination differs from its executed carrier")
+		}
 	}
 	if t.selection.Disposition() != handlerselection.DispositionSelected {
 		return nil

@@ -536,6 +536,14 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 					return err
 				}
 				postCommitErr = err
+				if committed.Stage != nil {
+					if stageErr := committed.Stage.Validate(); stageErr != nil {
+						postCommitErr = errors.Join(postCommitErr, stageErr)
+					} else {
+						stage := *committed.Stage
+						result.CommittedStage = &stage
+					}
+				}
 				intents = append([]EmitIntent(nil), committed.EmitIntents...)
 				activityIntents = append([]ActivityIntent(nil), committed.ActivityIntents...)
 				activityRequests = append([]EmitIntent(nil), committed.ActivityRequestIntents...)

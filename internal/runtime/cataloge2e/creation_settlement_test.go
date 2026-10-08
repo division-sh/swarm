@@ -3,12 +3,15 @@ package cataloge2e
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 type catalogCreationSettlementObserver func(context.Context, lifecycleprobe.Signal)
@@ -73,7 +76,7 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 					defer cancel()
 					select {
 					case <-firstCommitted:
-						child, found, err := catalogFlowInstanceForCausalFlow(h.db, h.workflow, nil, nil, workerPath, false)
+						child, found, err := h.workflow.Load(ctx, catalogExactWorkflowRoute(workerPath))
 						if err != nil || !found {
 							return fmt.Errorf("read first handler state: found=%t err=%v", found, err)
 						}
@@ -90,6 +93,14 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 				})
 				for _, group := range transcript.groups {
 					for _, step := range group.steps {
+						var preservedChild *runtimepipeline.WorkflowInstance
+						if transcript.expected.Expected.RefusedPublication != nil && step.ReceiptOutcome == "success" {
+							child, found, err := h.workflow.Load(h.ctx, catalogExactWorkflowRoute(workerPath))
+							if err != nil || !found {
+								t.Fatalf("capture receiver before duplicate: found=%t err=%v", found, err)
+							}
+							preservedChild = &child
+						}
 						if step.Event == "flow.finished" {
 							parent, found, err := h.workflow.Load(h.ctx, catalogRootWorkflowRoute())
 							if err != nil || !found || parent.CurrentState != "spawned" {
@@ -97,7 +108,27 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 							}
 						}
 						if err := h.publishRuntimeEventResultForStep(step, catalogRuntimePublishTimeout, true); err != nil {
+							var reader operatorread.ObservabilityReader = h.pg
+							if h.sqlite != nil {
+								reader = h.sqlite
+							}
+							logs, readErr := reader.ListOperatorRuntimeLogs(h.ctx, operatorread.OperatorRuntimeLogListOptions{RunID: catalogRuntimeRunID, Limit: 30})
+							t.Logf("creation event=%s diagnostics error=%v", step.Event, readErr)
+							for _, log := range logs.Logs {
+								t.Logf("creation diagnostic: %+v", log)
+							}
+							observed, observedErr := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
+							t.Logf("creation event readback error=%v", observedErr)
+							for id, event := range observed {
+								t.Logf("creation event id=%s type=%s deliveries=%+v no_delivery=%+v dead_letters=%+v", id, event.EventName, event.Deliveries, event.NoDelivery, event.DeadLetters)
+							}
 							t.Fatal(err)
+						}
+						if preservedChild != nil {
+							child, found, err := h.workflow.Load(h.ctx, catalogExactWorkflowRoute(workerPath))
+							if err != nil || !found || !reflect.DeepEqual(*preservedChild, child) {
+								t.Fatalf("duplicate changed receiver: found=%t err=%v before=%+v after=%+v", found, err, preservedChild, child)
+							}
 						}
 					}
 					h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)

@@ -436,7 +436,7 @@ func beginGenericRecoveryPostureMatrix(t *testing.T, fixture neutralEffectParity
 			t.Fatalf("authorize %s generic %s: %v", mode, tc.name, err)
 		}
 		if tc.launch {
-			if err := fixture.store.MarkExternalAttemptLaunched(testAuthorActivityContext(), attempt, time.Now().UTC()); err != nil {
+			if _, err := fixture.store.MarkExternalAttemptLaunched(testAuthorActivityContext(), attempt, time.Now().UTC()); err != nil {
 				t.Fatalf("launch %s generic %s: %v", mode, tc.name, err)
 			}
 		}

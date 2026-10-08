@@ -14,6 +14,7 @@ func TestEmptyHandlerClassifiesEveryDeclarationField(t *testing.T) {
 		"OnSuccess":        {OnSuccess: HandlerOnSuccessSpec{Emit: EmitSpec{Event: "observed"}}},
 		"Guard":            {Guard: &GuardSpec{}},
 		"AdvancesTo":       {AdvancesTo: "ready"},
+		"Terminate":        {Terminate: true},
 		"SetsGate":         {SetsGate: &GateSpec{}},
 		"ClearGates":       {ClearGates: []string{"ready"}},
 		"DataAccumulation": {DataAccumulation: WorkflowDataAccumulation{SourceEvent: "observed"}},

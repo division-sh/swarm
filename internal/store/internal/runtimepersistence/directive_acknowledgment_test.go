@@ -20,6 +20,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -52,6 +53,9 @@ var errInjectedDirectivePersistence = errors.New("injected directive persistence
 
 type directiveIntegrationStore interface {
 	storeTestDurableEventBusStore
+	runtimebus.ScopedSelectedRunTargetOwnerLister
+	runtimebus.ScopedActiveFlowInstanceDescriptorLister
+	runtimebus.KeyedActiveFlowInstanceDescriptorLister
 	runtimeagentcontrol.DirectiveOperationStore
 	runtimemanager.ManagerPersistence
 	agentfixture.Store
@@ -167,6 +171,8 @@ type directiveAmbiguityAgent struct {
 	response string
 	err      error
 	calls    atomic.Int32
+	onBoard  func(context.Context, runtimeagentcontrol.BoardDirective) (string, error)
+	effects  runtimeeffects.Store
 }
 
 func (a *directiveAmbiguityAgent) ID() string                      { return a.id }
@@ -175,8 +181,11 @@ func (*directiveAmbiguityAgent) Subscriptions() []events.EventType { return nil 
 func (*directiveAmbiguityAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
 	return nil, nil
 }
-func (a *directiveAmbiguityAgent) BoardStep(context.Context, runtimeagentcontrol.BoardDirective) (string, error) {
+func (a *directiveAmbiguityAgent) BoardStep(ctx context.Context, directive runtimeagentcontrol.BoardDirective) (string, error) {
 	a.calls.Add(1)
+	if a.onBoard != nil {
+		return a.onBoard(ctx, directive)
+	}
 	return a.response, a.err
 }
 
@@ -525,6 +534,7 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 			EventExistence:      faults,
 			DirectiveOperations: faults,
 			DirectiveTargets:    faults,
+			LifecycleEffects:    agent.effects,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, faults))
 	rec := runtimemanager.PersistedAgent{
@@ -550,6 +560,14 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 	rec.Config = descriptor.Actor
 	if err := agentfixture.UpsertStatic(t, testAuthorActivityContext(), backend.store, rec); err != nil {
 		t.Fatalf("persist agent: %v", err)
+	}
+	if agent.effects != nil {
+		state, found, err := backend.store.LoadAgentLifecycleState(testAuthorActivityContext(), identity)
+		if err != nil || !found {
+			t.Fatalf("hydrate exact provider fixture lifecycle: found=%t err=%v", found, err)
+		}
+		rec.LifecycleEpoch, rec.LifecycleGeneration, rec.LifecyclePhase = state.RuntimeEpoch, state.Generation, state.Phase
+		rec.LifecycleRunMode, rec.ProcessBinding = state.RunMode, state.ProcessBinding
 	}
 	rec.Topology, err = runtimeagenttopology.NewEphemeralAdmission(uuid.NewString(), "runtime_shard")
 	if err != nil {

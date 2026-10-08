@@ -495,7 +495,7 @@ func (s *routePersistenceTestStore) CommitPublication(ctx context.Context, comma
 	if err := s.InsertEventDeliveryRoutes(ctx, command.Commit.Event.ID(), command.Commit.DeliveryRoutes); err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
-	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
+	return (runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}).WithCommitAcknowledgment(), nil
 }
 
 func (s *routePersistenceTestStore) InsertEventDeliveries(_ context.Context, eventID string, agentIDs []string) error {

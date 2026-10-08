@@ -91,7 +91,6 @@ func validateAgentEntityFieldOperation(mutation entityruntime.Mutation) error {
 	}
 	return nil
 }
-
 func (pc *PipelineCoordinator) applyEntityFieldMutationAttempt(ctx context.Context, command EntityFieldMutation, address runtimeengine.StateAddress) (EntityFieldMutationResult, error) {
 	unlock := pc.lockWorkflowEntity(command.EntityID)
 	defer unlock()

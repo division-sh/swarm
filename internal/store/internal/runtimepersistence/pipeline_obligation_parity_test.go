@@ -737,9 +737,7 @@ func TestPipelineObligationHasNoLegacyCapabilityAssemblers(t *testing.T) {
 				failures = append(failures, fmt.Sprintf("%s retains %s", rel, symbol))
 			}
 		}
-		ownsCanonicalPipelineSQL := rel == "internal/store/internal/backend/pipelinepersistence/owner_operations.go" ||
-			rel == "internal/store/internal/backend/pipelinepersistence/standing_service.go"
-		if strings.Contains(source, "'pipeline'") && !ownsCanonicalPipelineSQL {
+		if strings.Contains(source, "'pipeline'") && !isPipelinePersistenceOwnerFile(rel) {
 			failures = append(failures, fmt.Sprintf("%s owns exact platform/pipeline SQL outside the private adapter", rel))
 		}
 		if strings.Contains(source, "committed_replay_scopes") && !allowedScopeFiles[rel] {
@@ -752,6 +750,31 @@ func TestPipelineObligationHasNoLegacyCapabilityAssemblers(t *testing.T) {
 	}
 	if len(failures) > 0 {
 		t.Fatalf("legacy pipeline obligation paths survive:\n%s", strings.Join(failures, "\n"))
+	}
+}
+
+func isPipelinePersistenceOwnerFile(relativePath string) bool {
+	return filepath.ToSlash(filepath.Dir(relativePath)) == "internal/store/internal/backend/pipelinepersistence"
+}
+
+func TestPipelinePersistenceSQLGuardIsOwnerBounded(t *testing.T) {
+	for _, scenario := range []struct {
+		path string
+		want bool
+	}{
+		{"internal/store/internal/backend/pipelinepersistence/owner_operations.go", true},
+		{"internal/store/internal/backend/pipelinepersistence/standing_service.go", true},
+		{"internal/store/internal/backend/pipelinepersistence/test_issue2564_evidence.go", true},
+		{"internal/store/internal/runtimepersistence/legacy.go", false},
+		{"internal/runtime/pipeline/worker.go", false},
+		{"internal/store/internal/backend/pipelinepersistence_extra/owner.go", false},
+		{"internal/store/internal/backend/pipelinepersistence/child/owner.go", false},
+	} {
+		t.Run(scenario.path, func(t *testing.T) {
+			if got := isPipelinePersistenceOwnerFile(scenario.path); got != scenario.want {
+				t.Fatalf("pipeline SQL ownership for %s = %v, want %v", scenario.path, got, scenario.want)
+			}
+		})
 	}
 }
 

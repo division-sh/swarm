@@ -140,6 +140,7 @@ func NewSelectedContractExecutionOwner(
 		{"event route sets", busDurable.FlowRouteSets}, {"event route topology", busDurable.FlowRouteTopology},
 		{"event route rollback", busDurable.FlowRouteRollback}, {"event active agents", busDurable.ActiveAgents},
 		{"event active flows", busDurable.ActiveFlows}, {"event target owners", busDurable.TargetOwners},
+		{"event emit feedback", busDurable.EmitFeedback},
 		{"prepared event settlements", busDurable.PreparedEvents}, {"event target failure recorder", busDurable.TargetFailureRecorder},
 		{"event run origins", busDurable.RunOrigins}, {"event standing restarts", busDurable.StandingRestarts},
 		{"pipeline obligations", pipelineObligations}, {"manager persistence", manager},

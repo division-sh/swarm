@@ -1104,7 +1104,7 @@ func TestEntityTools_ReadsRejectUndeclaredStoredFields(t *testing.T) {
 }
 
 func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
-	ctx, exec, db := newEntityToolTestHarness(t)
+	ctx, exec, _ := newEntityToolTestHarness(t)
 	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -1119,29 +1119,21 @@ func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
 		t.Fatalf("save_entity_field: %v", err)
 	}
 
-	var (
-		domain     string
-		field      string
-		oldValue   string
-		newValue   string
-		writerType string
-		step       string
-	)
-	if err := db.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(domain, ''),
-			COALESCE(path, ''),
-			COALESCE(old_value::text, ''),
-			COALESCE(new_value::text, ''),
-			COALESCE(writer_type, ''),
-			COALESCE(handler_step, '')
-		FROM entity_mutations
-		WHERE entity_id = $1::uuid AND domain = 'authored_field' AND path = 'status'
-		ORDER BY created_at DESC
-		LIMIT 1
-	`, entityID).Scan(&domain, &field, &oldValue, &newValue, &writerType, &step); err != nil {
-		t.Fatalf("load entity mutation: %v", err)
+	fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
+	report, err := fixture.selected.(sparseEntityToolStore).LoadRunDebugReport(ctx, entityToolTestRunID, operatorread.RunDebugQueryOptions{MutationLimit: 100})
+	if err != nil {
+		t.Fatal(err)
 	}
+	var mutation operatorread.RunDebugMutation
+	for _, candidate := range report.Mutations {
+		if candidate.EntityID == entityID && candidate.Domain == "authored_field" && candidate.Path == "status" {
+			mutation = candidate
+			break
+		}
+	}
+	domain, field := mutation.Domain, mutation.Path
+	oldValue, newValue := string(mutation.OldValue), string(mutation.NewValue)
+	writerType, step := mutation.WriterType, mutation.HandlerStep
 	if domain != "authored_field" || field != "status" {
 		t.Fatalf("mutation field = %q, want status", field)
 	}

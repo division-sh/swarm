@@ -116,6 +116,7 @@ type CommittedDurablePublication interface {
 
 type CommittedEngineMutation struct {
 	Committed              bool
+	Stage                  *CommittedStage
 	ActivityIntents        []ActivityIntent
 	ActivityRequestIntents []EmitIntent
 	EmitIntents            []EmitIntent

@@ -68,12 +68,12 @@ func selectedRecoveryCandidates(ctx context.Context, tx *sql.Tx, postgres bool, 
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
-	var state string
-	if err := tx.QueryRowContext(ctx, `SELECT state FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, executionID).Scan(&state); err != nil {
+	var fenced bool
+	if err := tx.QueryRowContext(ctx, `SELECT state IN ('failed','closed') AND lease_expires_at IS NULL FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, executionID).Scan(&fenced); err != nil {
 		return nil, err
 	}
-	if state != "failed" {
-		return nil, errors.New("selected effect recovery requires fenced failed authority")
+	if !fenced {
+		return nil, errors.New("selected effect recovery requires fenced predecessor authority")
 	}
 	candidates, err := loadExternalEffectRecoveryCandidates(ctx, tx, postgres, executionID)
 	if err != nil {

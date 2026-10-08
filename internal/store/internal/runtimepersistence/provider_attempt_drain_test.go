@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -79,11 +80,11 @@ func TestProviderAttemptLaunchVersusLifecycleSupersessionParity(t *testing.T) {
 			ctx := providerDrainContext(t, fixture, "launch-wins")
 			handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "launch-wins")
 			result := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
-			if result.Phase != runtimemanager.AgentLifecycleDraining || result.ProviderDrainCount != 1 {
+			if result.Phase != runtimemanager.AgentLifecycleTerminated || result.ProviderDrainCount != 1 {
 				t.Fatalf("transition result=%+v, want one terminal drain", result)
 			}
 			requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "pending")
-			requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleDraining, result.Generation)
+			requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleTerminated, result.Generation)
 		})
 	})
 }
@@ -126,7 +127,7 @@ func TestProviderAttemptDrainLaunchSupersessionRaceParity(t *testing.T) {
 			t.Fatalf("commit raced lifecycle transition: %v", transition.err)
 		}
 		if launchErr == nil {
-			if transition.result.ProviderDrainCount != 1 || transition.result.Phase != runtimemanager.AgentLifecycleDraining {
+			if transition.result.ProviderDrainCount != 1 || transition.result.Phase != runtimemanager.AgentLifecycleTerminated {
 				t.Fatalf("launch-wins race transition=%+v, want one drain", transition.result)
 			}
 			requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "pending")
@@ -200,8 +201,8 @@ func TestProviderAttemptDrainLifecycleSupersessionParity(t *testing.T) {
 	}{
 		{name: "restart", phase: runtimemanager.AgentLifecycleRunning, wantDuring: runtimemanager.AgentLifecycleRunning, wantAfter: runtimemanager.AgentLifecycleRunning},
 		{name: "reconfigure", phase: runtimemanager.AgentLifecycleRunning, wantDuring: runtimemanager.AgentLifecycleRunning, wantAfter: runtimemanager.AgentLifecycleRunning},
-		{name: "teardown", phase: runtimemanager.AgentLifecycleTerminated, wantDuring: runtimemanager.AgentLifecycleDraining, wantAfter: runtimemanager.AgentLifecycleTerminated},
-		{name: "fail", phase: runtimemanager.AgentLifecycleFailed, wantDuring: runtimemanager.AgentLifecycleDraining, wantAfter: runtimemanager.AgentLifecycleFailed},
+		{name: "teardown", phase: runtimemanager.AgentLifecycleTerminated, wantDuring: runtimemanager.AgentLifecycleTerminated, wantAfter: runtimemanager.AgentLifecycleTerminated},
+		{name: "fail", phase: runtimemanager.AgentLifecycleFailed, wantDuring: runtimemanager.AgentLifecycleFailed, wantAfter: runtimemanager.AgentLifecycleFailed},
 	}
 	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
 		for _, target := range targets {
@@ -411,7 +412,7 @@ func TestProviderAttemptDrainAdapterParity(t *testing.T) {
 				ctx := providerDrainAttemptContext(t, fixture, authority, fixture.origin, adapter, "adapter-"+adapter)
 				handle := beginObservedCompletionForSettlementTest(t, ctx, adapter, adapter)
 				transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
-				if transition.ProviderDrainCount != 1 || transition.Phase != runtimemanager.AgentLifecycleDraining {
+				if transition.ProviderDrainCount != 1 || transition.Phase != runtimemanager.AgentLifecycleTerminated {
 					t.Fatalf("%s transition=%+v, want one draining attempt", adapter, transition)
 				}
 
@@ -446,7 +447,7 @@ func TestProviderAttemptDrainSameSlugSiblingIsolationParity(t *testing.T) {
 		siblingHandle := beginObservedCompletionForSettlementTest(t, siblingCtx, "anthropic_api", "same-slug-sibling")
 
 		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
-		if transition.ProviderDrainCount != 1 || transition.Phase != runtimemanager.AgentLifecycleDraining {
+		if transition.ProviderDrainCount != 1 || transition.Phase != runtimemanager.AgentLifecycleTerminated {
 			t.Fatalf("primary transition=%+v, want exactly one primary drain", transition)
 		}
 		requireProviderDrainState(t, fixture, primary.Attempt().AttemptID, "pending")
@@ -479,7 +480,7 @@ func TestProviderAttemptDrainTenAttemptExactnessParity(t *testing.T) {
 		}
 
 		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
-		if transition.ProviderDrainCount != attemptCount || transition.Phase != runtimemanager.AgentLifecycleDraining {
+		if transition.ProviderDrainCount != attemptCount || transition.Phase != runtimemanager.AgentLifecycleTerminated {
 			t.Fatalf("batch transition=%+v, want %d drains", transition, attemptCount)
 		}
 
@@ -493,11 +494,7 @@ func TestProviderAttemptDrainTenAttemptExactnessParity(t *testing.T) {
 			}
 			requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
 			requireDeliveryClaimOutcome(t, fixture, claims[index], "delivered", "")
-			wantPhase := runtimemanager.AgentLifecycleDraining
-			if index == attemptCount-1 {
-				wantPhase = runtimemanager.AgentLifecycleTerminated
-			}
-			requireAgentLifecycleState(t, fixture, wantPhase, transition.Generation)
+			requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleTerminated, transition.Generation)
 		}
 
 		requireProviderDrainAggregate(t, fixture, attemptCount, 2.50)
@@ -532,7 +529,6 @@ func TestProviderAttemptDrainSettlementRollbackParity(t *testing.T) {
 		{name: "spend", table: "spend_ledger", operation: "INSERT"},
 		{name: "origin_outcome", table: "event_delivery_attempts", operation: "UPDATE", predicate: "NEW.closure_kind='settled'"},
 		{name: "drain_settlement", table: "runtime_provider_attempt_drains", operation: "UPDATE", predicate: "NEW.state='settled'"},
-		{name: "lifecycle_finalization", table: "agents", operation: "UPDATE", predicate: "OLD.lifecycle_phase='draining' AND NEW.lifecycle_phase='terminated'"},
 	}
 	forEachProviderDrainStore(t, func(t *testing.T, base completionSettlementFixture) {
 		for _, boundary := range boundaries {
@@ -552,9 +548,55 @@ func TestProviderAttemptDrainSettlementRollbackParity(t *testing.T) {
 				requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "pending")
 				requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateResponseObserved, 0, 1)
 				requireDeliveryClaimPending(t, fixture, fixture.origin)
-				requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleDraining, transition.Generation)
+				requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleTerminated, transition.Generation)
 			})
 		}
+	})
+}
+
+func TestProviderAttemptDrainFinalizationPreservesLifecycleParity(t *testing.T) {
+	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
+		ctx := providerDrainContext(t, fixture, "finalization-does-not-write-lifecycle")
+		handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "finalization-does-not-write-lifecycle")
+		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
+		before := providerDrainFixtureState(t, fixture)
+		installProviderDrainFailureBoundary(t, fixture, providerDrainFailureBoundary{
+			name: "forbidden_lifecycle_rewrite", table: "agents", operation: "UPDATE",
+		})
+		settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "anthropic_api", "provider-head-current", "")
+		settlement.ProviderHead = nil
+		result, err := handle.SettleCompletion(ctx, settlement)
+		if err != nil || !result.Committed || !result.OriginSettled || result.Finalization == nil {
+			t.Fatalf("exact last-sidecar settlement: %+v err=%v", result, err)
+		}
+		after := providerDrainFixtureState(t, fixture)
+		if !reflect.DeepEqual(before, after) {
+			t.Fatalf("provider closure rewrote lifecycle: before=%+v after=%+v", before, after)
+		}
+		requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
+		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleTerminated, transition.Generation)
+	})
+}
+
+func TestProviderAttemptDrainRejectsWrongSuccessorTransitionParity(t *testing.T) {
+	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
+		ctx := providerDrainContext(t, fixture, "wrong-successor-transition")
+		handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "wrong-successor-transition")
+		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
+		if _, err := fixture.db.Exec(`UPDATE agents SET lifecycle_last_transition_id=$1 WHERE agent_id=$2 AND run_id=$3`, uuid.NewString(), fixture.agentID, fixture.authority.Normal.Identity.RunID); err != nil {
+			t.Fatal(err)
+		}
+		settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "anthropic_api", "provider-head-current", "")
+		settlement.ProviderHead = nil
+		result, err := handle.SettleCompletion(ctx, settlement)
+		failure, matched := runtimefailures.As(err)
+		if err == nil || !matched || failure.Failure.Detail.Code != "provider_attempt_drain_successor_mismatch" || result.Committed {
+			t.Fatalf("foreign transition settled predecessor: %+v err=%v", result, err)
+		}
+		requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateResponseObserved)
+		requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "pending")
+		requireDeliveryClaimPending(t, fixture, fixture.origin)
+		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleTerminated, transition.Generation)
 	})
 }
 
@@ -640,7 +682,7 @@ func TestProviderAttemptDrainPreTopologyRecoveryParity(t *testing.T) {
 		wantFrame := loadCompletionFrameBytes(t, fixture, "runtime_external_effect_operations", "operation_id", handle.Attempt().OperationID)
 		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
 
-		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleDraining, transition.Generation)
+		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleTerminated, transition.Generation)
 		requireAgentCoarseStatus(t, fixture, "terminated")
 
 		now := time.Now().UTC()
@@ -675,7 +717,7 @@ func TestProviderAttemptDrainRejectsTransitionWhilePendingParity(t *testing.T) {
 				OperationID: uuid.NewString(), OperationKind: operation, RequestHash: "pending-drain-" + operation,
 				Identity: fixture.authority.Normal.Identity, AgentID: fixture.agentID, Trigger: "provider_drain_test",
 				ExpectedEpoch: fixture.authority.Normal.RuntimeEpoch, ExpectedGeneration: transition.Generation,
-				ExpectedPhase: runtimemanager.AgentLifecycleDraining,
+				ExpectedPhase: state.Phase,
 				TargetEpoch:   fixture.authority.Normal.RuntimeEpoch, TargetGeneration: transition.Generation + 1,
 				TargetPhase: runtimemanager.AgentLifecycleRunning, ConfigRevision: state.ConfigRevision,
 				RunMode: runtimemanager.AgentRunModeStandard, Topology: state.Topology, Now: time.Now().UTC(),
@@ -686,7 +728,7 @@ func TestProviderAttemptDrainRejectsTransitionWhilePendingParity(t *testing.T) {
 			}
 		}
 		requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "pending")
-		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleDraining, transition.Generation)
+		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleFailed, transition.Generation)
 	})
 }
 
@@ -742,7 +784,7 @@ func TestProviderAttemptDrainRecoveryRejectsNewerOriginClaimParity(t *testing.T)
 		}
 		requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateResponseObserved)
 		requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "pending")
-		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleDraining, transition.Generation)
+		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleTerminated, transition.Generation)
 	})
 }
 

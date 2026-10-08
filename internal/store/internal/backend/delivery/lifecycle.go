@@ -451,6 +451,14 @@ func (s *DeliverySQLiteOwner) ValidateProviderOriginTx(ctx context.Context, tx *
 	return sqliteDeliveryAdapter.ValidateCurrentClaim(ctx, tx, claim)
 }
 
+func (s *DeliveryPostgresOwner) ProviderOriginPendingTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim) (bool, error) {
+	return postgresDeliveryAdapter.providerOriginPendingTx(ctx, tx, claim)
+}
+
+func (s *DeliverySQLiteOwner) ProviderOriginPendingTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim) (bool, error) {
+	return sqliteDeliveryAdapter.providerOriginPendingTx(ctx, tx, claim)
+}
+
 func (s *DeliveryPostgresOwner) RenewProviderOriginTx(ctx context.Context, attempt *mutationprotocol.Attempt, claim runtimedelivery.Claim, lease time.Duration) error {
 	_, err := s.renewClaimTx(ctx, attempt, claim, lease)
 	return err

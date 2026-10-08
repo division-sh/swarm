@@ -243,6 +243,7 @@ type RunForkMaterialization struct {
 
 const (
 	RunForkPendingClassificationDeliveredCompleted = "delivered_completed"
+	RunForkPendingClassificationCanceled           = "canceled"
 	RunForkPendingClassificationPending            = "pending"
 	RunForkPendingClassificationInProgress         = "in_progress"
 	RunForkPendingClassificationFailedRetryable    = "failed_retryable"
@@ -588,6 +589,7 @@ const (
 	RunForkReplayResumeFactDeliveryInProgressHistory = "delivery_in_progress_history"
 	RunForkReplayResumeFactDeliveryFailedHistory     = "delivery_failed_history"
 	RunForkReplayResumeFactDeliveryDeadLetterHistory = "delivery_dead_letter_history"
+	RunForkReplayResumeFactDeliveryCanceledHistory   = "delivery_canceled_history"
 	RunForkReplayResumeFactCommittedReplayScope      = "committed_replay_scope"
 	RunForkReplayResumeFactTimerHistory              = "timer_history"
 	RunForkReplayResumeFactRouteHistory              = "flow_route_history"

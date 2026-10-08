@@ -197,7 +197,7 @@ func NewAgentManager(bus Bus, factory AgentFactory, stores ...ManagerPersistence
 }
 
 func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManagerOptions, stores ...ManagerPersistence) *AgentManager {
-	if err := opts.ReceiverExecution.Validate(); err != nil {
+	if err := opts.ReceiverExecution.ValidateExecutable(); err != nil {
 		panic(fmt.Sprintf("agent manager receiver execution: %v", err))
 	}
 	var store ManagerPersistence
@@ -668,6 +668,9 @@ func (am *AgentManager) buildAgent(cfg models.AgentConfig) (Agent, error) {
 }
 
 func ValidateAgentBuildConfiguration(cfg models.AgentConfig) error {
+	if err := cfg.ValidateTurnTimeout(); err != nil {
+		return err
+	}
 	if err := models.ValidateNoAuthoredSystemPrompt(cfg.Config); err != nil {
 		return err
 	}

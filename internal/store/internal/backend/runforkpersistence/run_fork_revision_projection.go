@@ -110,6 +110,8 @@ func classifyRunForkDeliverySnapshot(snapshot runtimedelivery.Snapshot, deadLett
 		return runfork.RunForkPendingClassificationFailedRetryable
 	case runtimedelivery.StatusDelivered:
 		return runfork.RunForkPendingClassificationDeliveredCompleted
+	case runtimedelivery.StatusCanceled:
+		return runfork.RunForkPendingClassificationCanceled
 	default:
 		return ""
 	}

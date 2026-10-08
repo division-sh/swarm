@@ -179,7 +179,28 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 		return eventProcessResult{record: record}
 	}
 	attemptCtx, completionSettlement := runtimeeffects.WithCompletionSettlementObserver(attemptCtx)
-	out, err := agent.OnEvent(attemptCtx, evt)
+	turnCtx, turnOwner := runtimeeffects.WithTurnExecution(attemptCtx)
+	defer func() { _, _ = turnOwner.Finish() }()
+	if err := am.attachLogicalTurn(attemptCtx, turnOwner); err != nil {
+		return eventProcessResult{record: record, err: err}
+	}
+	out, err := agent.OnEvent(turnCtx, evt)
+	turn, finishErr := turnOwner.Finish()
+	err = errors.Join(err, finishErr)
+	if turn.Cancellation.Requested {
+		canceled, settleErr := am.settleCanceledDelivery(attemptCtx, evt, heartbeat, turn, completionSettlement())
+		record.Outcome = startupManagerReplayOutcomeDropped
+		record.ReasonCode = startupManagerReplayReasonProcessFailed
+		if canceled.Acknowledged && canceled.Validate() == nil {
+			record.Outcome = startupManagerReplayOutcomeSkipped
+			record.ReasonCode = "authored_turn_canceled"
+		}
+		if len(out) != 0 {
+			err = errors.Join(err, errors.New("canceled agent turn returned new output"))
+		}
+		record.Failure = failureEnvelope(errors.Join(err, settleErr), "agent-manager", "process_event.on_event")
+		return eventProcessResult{record: record, err: errors.Join(err, settleErr)}
+	}
 	if observation := completionSettlement(); observation.OriginSettled {
 		if observation.Origin.Kind != runtimeeffects.CompletionOriginDelivery {
 			originErr := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_consumer_mismatch", "agent-manager", "process_event", map[string]any{
@@ -213,9 +234,6 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 			record.ReasonCode = startupManagerReplayReasonProcessFailed
 			record.Failure = failureEnvelope(outputErr, "agent-manager", "observe_completion_settlement")
 			return eventProcessResult{record: record, err: outputErr}
-		}
-		if observation.Finalization != nil {
-			am.lifecycle.observeProviderDrainFinalization(*observation.Finalization)
 		}
 		if err != nil {
 			agentFailure := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event")

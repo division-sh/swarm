@@ -143,6 +143,10 @@ func projectNodeJoinOutcomeValue(value yamlsource.Value, owner string) (HandlerR
 			return HandlerRuleEntry{}, err
 		}
 	}
+	out.Terminate, err = projectTransitionTerminate(fields, out.AdvancesTo)
+	if err != nil {
+		return HandlerRuleEntry{}, err
+	}
 	if writes, present := fields["data_accumulation"]; present {
 		out.DataAccumulation, err = projectNodeDataAccumulationValue(writes)
 		if err != nil {

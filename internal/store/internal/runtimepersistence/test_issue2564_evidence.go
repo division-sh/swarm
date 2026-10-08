@@ -46,7 +46,6 @@ func ObserveWriterStageForTest(ctx context.Context, selected any, runID, entityI
 		return WriterStageEvidence{}, fmt.Errorf("writer stage requires selected owner")
 	}
 }
-
 func ObserveCardContentionForTest(ctx context.Context, selected any, key, cardID string) (CardContentionEvidence, error) {
 	if err := requireIssue2564EvidenceOwner(selected); err != nil {
 		return CardContentionEvidence{}, err
@@ -172,7 +171,6 @@ func ObserveEventCardinalityForTest(ctx context.Context, selected any, eventID s
 		return 0, fmt.Errorf("event cardinality requires original selected owner, got %T", selected)
 	}
 }
-
 func ObserveDeliveryEventEvidenceForTest(ctx context.Context, selected any, eventID string) (DeliveryEventEvidence, error) {
 	if err := requireIssue2564EvidenceOwner(selected); err != nil {
 		return DeliveryEventEvidence{}, err

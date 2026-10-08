@@ -261,6 +261,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 		}
 		cut.Store, cut.CompletionStore, cut.CompletionContinuationStore = selected, selected, selected
 		durable := bus.DurableDependencies{
+			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
 			FlowRouteTopology: selected, FlowRouteRollback: selected,
@@ -286,6 +287,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 		}
 		cut.Store, cut.CompletionStore, cut.CompletionContinuationStore = selected, selected, selected
 		durable := bus.DurableDependencies{
+			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
 			FlowRouteTopology: selected, FlowRouteRollback: selected,

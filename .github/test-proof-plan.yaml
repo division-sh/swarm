@@ -727,6 +727,7 @@ units:
       - github.com/division-sh/swarm/internal/serveapp
     run: '^TestServed[A-C].*$'
     required_children:
+      TestServedCanceledTurnRecoveryBothStores: [default_sqlite, explicit_postgres]
       TestServedConstructedDecisionCardDeferralBothStores: [default_sqlite, explicit_postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
@@ -797,6 +798,7 @@ units:
     required_children:
       TestProviderSelectedRootStandingBootBothStores: [default_sqlite, explicit_postgres]
       TestIssue2566ReporterFiniteFixtureCanCloseBothStores: [sqlite, postgres]
+      TestManagedEmitPublicationExactScopeBothStores: [default_sqlite/root, default_sqlite/imported, default_sqlite/nested, default_sqlite/template, explicit_postgres/root, explicit_postgres/imported, explicit_postgres/nested, explicit_postgres/template]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -864,6 +866,7 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: '^(Test($|2376.*|[AB].*|Ru($|[^n].*|n($|[^F].*)))|Example.*|Fuzz.*)$'
     required_children:
+      TestAuthoredTurnTerminationCommitsWithExactStageBothStores: [committed/sqlite, committed/postgres, late_rollback/sqlite, late_rollback/postgres, stale_cas/sqlite, stale_cas/postgres, other_instance/sqlite, other_instance/postgres, prelaunch/sqlite, prelaunch/postgres, prelaunch_restart/sqlite, prelaunch_restart/postgres]
       TestAgentFixtureSealedAuthorityRejectionParity: [sqlite, postgres]
       TestAgentLifecycleProcessBindingReadbackParity: [sqlite, postgres]
       TestAgentLifecycleReadinessSourceSetRebindBothStores: [sqlite, postgres]
@@ -956,6 +959,15 @@ units:
     # TestC moves here after full01 exceeded its unchanged command budget.
     run: '^Test(C.*|[G-H].*)$'
     required_children:
+      TestCanceledTurnPreservesCapturedProviderDrainBothStores: [delivery/sqlite, delivery/postgres, directive/sqlite, directive/postgres]
+      TestCanceledOriginWaitsForEveryCapturedProviderTailBothStores: [sqlite, postgres]
+      TestCanceledCapturedTurnRecoveryNeverReadmitsWorkBothStores: [delivery/sqlite, delivery/postgres, directive/sqlite, directive/postgres]
+      TestCanceledTurnRecoveryRejectsCorruptFirstOriginBothStores: [missing_first_attempt/sqlite, missing_first_attempt/postgres, foreign_run/sqlite, foreign_run/postgres, foreign_cause/sqlite, foreign_cause/postgres, before_first_launch/sqlite, before_first_launch/postgres]
+      TestCanceledTurnReactionCommitsAtomicallyBothStores: [delivery/sqlite, delivery/postgres, directive/sqlite, directive/postgres]
+      TestCanceledTurnRecoveryPreservesExactClaimBoundaryBothStores: [expired/sqlite, expired/postgres, reclaimed/sqlite, reclaimed/postgres]
+      TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores: [sqlite, postgres]
+      TestCanceledDeliveryTurnRollsBackAllOriginEvidenceBothStores: [sqlite, postgres]
+      TestCompletionReportsCanceledOriginWithoutDroppingAcceptedResponseBothStores: [sqlite, postgres]
       TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores: [sqlite, postgres]
       TestChannelDeliveryEffectCurrentnessSelectedStoreParity: [sqlite/eligibility_before_authorize, sqlite/eligibility_before_launch, sqlite/eligibility_after_launch, sqlite/eligibility_after_observation, sqlite/eligibility_edit, sqlite/eligibility_uncertain, sqlite/eligibility_recover_authorized, sqlite/eligibility_recover_launched, sqlite/eligibility_recover_observed, postgres/eligibility_before_authorize, postgres/eligibility_before_launch, postgres/eligibility_after_launch, postgres/eligibility_after_observation, postgres/eligibility_edit, postgres/eligibility_uncertain, postgres/eligibility_recover_authorized, postgres/eligibility_recover_launched, postgres/eligibility_recover_observed]
       TestConstructedHeaderGateSummaryBothStores: [sqlite, postgres]
@@ -969,6 +981,14 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: ^Test[I-O].*$
     required_children:
+      TestIssue2269MutationEvidencePreservesOriginalOwnerAndNullContractBothStores: [sqlite, postgres]
+      TestIssue2269MutationEvidenceRefusesUnavailableAndCanceledOwnersBothStores: [sqlite, postgres]
+      TestIssue2269HeaderContentionPreservesCompanionBothStores: [sqlite, postgres]
+      TestManagerOwnsDirectiveLaunchTimeoutAndReactionBothStores: [sqlite, postgres]
+      TestManagerConsumesCommittedTerminationAndJoinsRealDirectiveBothStores: [unstarted/sqlite, unstarted/postgres, prelaunch/sqlite, prelaunch/postgres, launched/sqlite, launched/postgres]
+      TestLogicalTurnDirectiveRetryKeepsExactExecutionOwnerBothStores: [sqlite, postgres]
+      TestLogicalTurnExecutionCancelsAndSettlesRealDeliveryOriginBothStores: [sqlite, postgres]
+      TestLogicalTurnExecutionCancelsRealDirectiveWithoutDeliveryBothStores: [sqlite, postgres]
       TestOrdinaryHandlerRequiresCanonicalConstructionBothStores: [postgres/fielded_accumulation/absent, postgres/fielded_accumulation/constructed, postgres/fielded_stage/absent, postgres/fielded_stage/constructed, postgres/fieldless_emit/absent, postgres/fieldless_emit/constructed, postgres/fieldless_gate/absent, postgres/fieldless_gate/constructed, postgres/fieldless_stage/absent, postgres/fieldless_stage/constructed, sqlite/fielded_accumulation/absent, sqlite/fielded_accumulation/constructed, sqlite/fielded_stage/absent, sqlite/fielded_stage/constructed, sqlite/fieldless_emit/absent, sqlite/fieldless_emit/constructed, sqlite/fieldless_gate/absent, sqlite/fieldless_gate/constructed, sqlite/fieldless_stage/absent, sqlite/fieldless_stage/constructed]
       TestOrdinaryReplayInitializedReceiversBothStores: [sqlite/wrong_path, sqlite/wrong_run, sqlite/foreign_template, sqlite/wrong_stage, sqlite/malformed_bookkeeping, sqlite/state_only_receiver, sqlite/missing_declared_fields, postgres/wrong_path, postgres/wrong_run, postgres/foreign_template, postgres/wrong_stage, postgres/malformed_bookkeeping, postgres/state_only_receiver, postgres/missing_declared_fields]
       TestOrdinaryWorkflowMutationCannotConstructOrRepairBothStores: [sqlite, postgres]
@@ -981,6 +1001,9 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: ^Test[P-Q].*$
+    required_children:
+      TestQueuedTurnTerminationBothStores: [pending/sqlite, pending/postgres, retry/sqlite, retry/postgres, rollback/sqlite, rollback/postgres, isolated/sqlite, isolated/postgres, root/sqlite, root/postgres, retained_settled/sqlite, retained_settled/postgres, retained_open/sqlite, retained_open/postgres]
+      TestQueuedDirectiveTerminationBothStores: [pending/sqlite, pending/postgres, rollback/sqlite, rollback/postgres, admission_wins/sqlite, admission_wins/postgres, isolated/sqlite, isolated/postgres, root/sqlite, root/postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -991,6 +1014,9 @@ units:
     # top-level tests accounted for 84.85s of the 198.41s package test time.
     run: ^TestR[^u].*$
     required_children:
+      TestRootTurnTerminationUsesConstructedRunOwnerBothStores: [prelaunch/sqlite, prelaunch/postgres, launched/sqlite, launched/postgres]
+      TestRetriedBusinessTurnTerminationAndTimeoutRecoveryBothStores: [retry_queued/sqlite, retry_queued/postgres, unstarted/sqlite, unstarted/postgres, authorized/sqlite, authorized/postgres, launched/sqlite, launched/postgres, timeout-recovery/sqlite, timeout-recovery/postgres]
+      TestRootTurnTimeoutRecoveryKeepsExactReactionBothStores: [sqlite, postgres]
       TestReceiverReadinessRequiresConstructedHeaderBothStores: [postgres/absent, postgres/fielded, postgres/fieldless, postgres/required_fields_missing, postgres/state_only, postgres/terminated_fielded, postgres/terminated_fieldless, sqlite/absent, sqlite/fielded, sqlite/fieldless, sqlite/required_fields_missing, sqlite/state_only, sqlite/terminated_fielded, sqlite/terminated_fieldless]
       TestReceiverConstructionReceiptBindsCreatingPublicationBothStores: [postgres/fieldless_descendant/contradictory_control, postgres/fieldless_descendant/contradictory_origin, postgres/fieldless_descendant/crossed_agent_scope, postgres/fieldless_descendant/exact, postgres/fieldless_descendant/missing_receipt, postgres/fieldless_descendant/partial_receipt, postgres/fieldless_descendant/unrelated_event, postgres/keyed/contradictory_control, postgres/keyed/contradictory_origin, postgres/keyed/crossed_agent_scope, postgres/keyed/exact, postgres/keyed/missing_receipt, postgres/keyed/partial_receipt, postgres/keyed/unrelated_event, postgres/root/contradictory_control, postgres/root/contradictory_origin, postgres/root/crossed_agent_scope, postgres/root/exact, postgres/root/missing_receipt, postgres/root/partial_receipt, postgres/root/unrelated_event, sqlite/fieldless_descendant/contradictory_control, sqlite/fieldless_descendant/contradictory_origin, sqlite/fieldless_descendant/crossed_agent_scope, sqlite/fieldless_descendant/exact, sqlite/fieldless_descendant/missing_receipt, sqlite/fieldless_descendant/partial_receipt, sqlite/fieldless_descendant/unrelated_event, sqlite/keyed/contradictory_control, sqlite/keyed/contradictory_origin, sqlite/keyed/crossed_agent_scope, sqlite/keyed/exact, sqlite/keyed/missing_receipt, sqlite/keyed/partial_receipt, sqlite/keyed/unrelated_event, sqlite/root/contradictory_control, sqlite/root/contradictory_origin, sqlite/root/crossed_agent_scope, sqlite/root/exact, sqlite/root/missing_receipt, sqlite/root/partial_receipt, sqlite/root/unrelated_event]
       TestReceiverConstructionAndObserverIsolationBothStores: [sqlite, postgres]
@@ -1004,6 +1030,35 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: ^Test[S-Z].*$
     required_children:
+      TestUnstartedClaimedTurnTerminationBothStores: [waiting/sqlite, waiting/postgres, waiting_restart/sqlite, waiting_restart/postgres, rollback/sqlite, rollback/postgres, authorization_wins/sqlite, authorization_wins/postgres]
+      TestUnstartedDirectiveTurnRecoveryBothStores: [root/restart/sqlite, root/restart/postgres, root/rollback/sqlite, root/rollback/postgres, completion/restart/sqlite, completion/restart/postgres, completion/rollback/sqlite, completion/rollback/postgres]
+      TestSelectedProviderTurnRetainsActualBusinessOriginBothStores: [sqlite, postgres]
+      TestSelectedTurnTerminationPreservesExactOriginBothStores: [sqlite, postgres]
+      TestSelectedRetriedTurnCancellationBothStores: [unstarted/sqlite, unstarted/postgres, authorized/sqlite, authorized/postgres, launched/sqlite, launched/postgres, timeout_recovery/sqlite, timeout_recovery/postgres]
+      TestSelectedCanceledOriginRecoveryRetainsPendingIntentBothStores: [sqlite, postgres]
+      TestSelectedCanceledOriginRecoveryCommitsReactionBothStores: [sqlite, postgres]
+      TestSelectedCanceledOriginStartupReactionBothStores: [sqlite, postgres]
+      TestSelectedTerminatedOriginStartupBothStores:
+        [sqlite/launched/healthy, sqlite/launched/lost_ack, sqlite/launched/auxiliary_error,
+         sqlite/launch_only/healthy, sqlite/launch_only/lost_ack, sqlite/launch_only/auxiliary_error,
+         sqlite/unstarted/healthy, sqlite/unstarted/lost_ack, sqlite/unstarted/auxiliary_error,
+         sqlite/prelaunch/healthy, sqlite/prelaunch/lost_ack, sqlite/prelaunch/auxiliary_error,
+         sqlite/retained_success/healthy, sqlite/retained_success/lost_ack, sqlite/retained_success/auxiliary_error,
+         sqlite/retained_uncertain/healthy, sqlite/retained_uncertain/lost_ack, sqlite/retained_uncertain/auxiliary_error,
+         sqlite/two_open_rounds/healthy, sqlite/two_open_rounds/lost_ack, sqlite/two_open_rounds/auxiliary_error,
+         postgres/launched/healthy, postgres/launched/lost_ack, postgres/launched/auxiliary_error,
+         postgres/launch_only/healthy, postgres/launch_only/lost_ack, postgres/launch_only/auxiliary_error,
+         postgres/unstarted/healthy, postgres/unstarted/lost_ack, postgres/unstarted/auxiliary_error,
+         postgres/prelaunch/healthy, postgres/prelaunch/lost_ack, postgres/prelaunch/auxiliary_error,
+         postgres/retained_success/healthy, postgres/retained_success/lost_ack, postgres/retained_success/auxiliary_error,
+         postgres/retained_uncertain/healthy, postgres/retained_uncertain/lost_ack, postgres/retained_uncertain/auxiliary_error,
+         postgres/two_open_rounds/healthy, postgres/two_open_rounds/lost_ack, postgres/two_open_rounds/auxiliary_error]
+      TestWorkflowPublicationAcceptanceStageBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
+      TestWorkflowEmitFeedbackBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
+      TestWorkflowEmitBusReadbackBothStores: [sqlite, postgres]
+      TestWorkflowEmitFeedbackConcurrentBothStores: [sqlite, postgres]
+      TestWorkflowEmitEntitylessSourceBothStores: [sqlite, postgres]
+      TestWorkflowEmitHandlerFeedbackBothStores: [sqlite/healthy, sqlite/post_commit_error, postgres/healthy, postgres/post_commit_error]
       TestScenarioConstructionNativeCommitBothStores: [sqlite/rollback_before_ack, sqlite/commit_before_lost_ack, postgres/rollback_before_ack, postgres/commit_before_lost_ack]
       TestSelectedBranchPointActivationAtomicityBothStores: [sqlite/event/running, sqlite/event/cancelled, sqlite/deployment_revision/running, sqlite/deployment_revision/cancelled, postgres/event/running, postgres/event/cancelled, postgres/deployment_revision/running, postgres/deployment_revision/cancelled]
       TestSelectedBranchPointCleanupIsolationBothStores: [sqlite/event/discard, sqlite/event/reset, sqlite/deployment_revision/discard, sqlite/deployment_revision/reset, postgres/event/discard, postgres/event/reset, postgres/deployment_revision/discard, postgres/deployment_revision/reset]

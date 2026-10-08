@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,7 +13,35 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
+
+func TestSelectedContractExecutionOwnerRequiresEmitFeedback(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var owner SelectedContractExecutionOwner
+			if backend == "sqlite" {
+				owner = selectedContractSQLiteExecutionOwnerForTest(t, storetest.StartSQLiteRuntimeStore(t))
+			} else {
+				selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+				owner = selectedContractExecutionOwnerForTest(t, selected)
+			}
+			ports := owner.ports
+			durable := ports.busDurable
+			durable.EmitFeedback = nil
+			_, err := NewSelectedContractExecutionOwner(
+				ports.workflow, ports.fork, ports.runtimeExecution, ports.replay,
+				ports.events, durable, ports.pipelineObligations, ports.manager, ports.managerRoles,
+				ports.effects, ports.completion, ports.completionHeartbeat, ports.liveSessions, ports.managedCapabilities,
+				ports.budget, ports.logs, ports.decisionCards, ports.proposedEffects, ports.humanTasks,
+				ports.decisionCardDraftExpiry, ports.humanTaskExpiry,
+			)
+			if err == nil || !strings.Contains(err.Error(), "event emit feedback") {
+				t.Fatalf("missing emit feedback admitted past selected construction: %v", err)
+			}
+		})
+	}
+}
 
 func selectedContractExecutionOwnerForTest(t testing.TB, selected *store.PostgresStore) SelectedContractExecutionOwner {
 	return selectedForkBoundOwnerForTest(t, selected, func() SelectedContractExecutionOwner {
@@ -34,6 +63,7 @@ func newSelectedContractExecutionOwnerForTest(t testing.TB, selected *store.Post
 		t.Fatal("selected postgres store is required")
 	}
 	durable := runtimebus.DurableDependencies{
+		EmitFeedback: selected,
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
 		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
@@ -70,6 +100,7 @@ func newSelectedContractSQLiteExecutionOwnerForTest(t testing.TB, selected *stor
 	t.Helper()
 	_ = runForkTestContext(t)
 	durable := runtimebus.DurableDependencies{
+		EmitFeedback: selected,
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
 		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,

@@ -208,6 +208,10 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 		return CommittedWorkflowEngineMutation{}, err
 	}
 	result.Committed = true
+	result.Stage, err = CommittedWorkflowStage(command.State)
+	if err != nil {
+		return result, err
+	}
 	result.Lifecycle.Committed = true
 	if err := result.Validate(); err != nil {
 		return CommittedWorkflowEngineMutation{}, err

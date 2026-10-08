@@ -3,8 +3,10 @@ package requiredagents
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -35,6 +37,25 @@ func TestCheckScopeReportsSubscriptionAndEmitCoverage(t *testing.T) {
 	}
 	if findings[1].Kind != FindingMissingEmits || findings[1].Missing[0] != "work.failed" {
 		t.Fatalf("emit finding = %#v", findings[1])
+	}
+}
+
+func TestCheckScopeConsumesTimeoutProductionWithoutGrantingEmitTool(t *testing.T) {
+	entry := runtimecontracts.AgentRegistryEntry{
+		Subscriptions: []string{"work.requested"},
+		TurnTimeout:   &timeridentity.TurnTimeout{After: time.Minute, Emit: "work.timed_out"},
+	}
+	scope := Scope{ID: "root", Declarations: []semanticview.AgentDeclaration{{LocalID: "worker", Entry: entry}},
+		Required: []runtimecontracts.FlowRequiredAgent{{Role: "worker", SubscribesTo: []string{"work.requested"}, Emits: []string{"work.timed_out"}}}}
+	if findings := CheckScope(scope); len(findings) != 0 {
+		t.Fatalf("platform-owned timeout reaction was treated as a missing tool: %+v", findings)
+	}
+	if len(entry.EmitEvents) != 0 || len(scope.Declarations[0].Entry.EmitEvents) != 0 {
+		t.Fatal("fulfillment granted an additional agent emit tool")
+	}
+	scope.Required[0].Emits = append(scope.Required[0].Emits, "work.unrelated")
+	if findings := CheckScope(scope); len(findings) != 1 || findings[0].Kind != FindingMissingEmits || !reflect.DeepEqual(findings[0].Missing, []string{"work.unrelated"}) {
+		t.Fatalf("timeout production admitted an unrelated output: %+v", findings)
 	}
 }
 

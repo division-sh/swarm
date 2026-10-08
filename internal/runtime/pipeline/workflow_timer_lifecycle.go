@@ -46,7 +46,6 @@ func workflowTimerInterceptionOutcome(recognized, advanced bool, err error) (run
 	failure := runtimefailures.Normalize(runtimefailures.Wrap(class, "workflow_timer_transition_interrupted", runtimeWorkflowID, "workflow_timer_transition", nil, err), runtimeWorkflowID, "workflow_timer_transition")
 	return runtimepipelineobligation.ReleaseForRetry(failure.Detail.Code, &failure), true
 }
-
 func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context, evt events.Event) (handled bool, advanced bool, resultErr error) {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.workflowTimers == nil {
 		return false, false, nil

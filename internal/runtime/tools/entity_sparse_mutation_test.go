@@ -401,7 +401,14 @@ writer:
 				if len(report.Mutations) != len(mutations) {
 					t.Fatalf("debug history omitted records: got %d want %d", len(report.Mutations), len(mutations))
 				}
-				mutations = report.Mutations
+				for i, mutation := range report.Mutations {
+					expected := mutations[i]
+					mutation.CreatedAt = mutation.CreatedAt.Round(0).UTC()
+					expected.CreatedAt = expected.CreatedAt.Round(0).UTC()
+					if !reflect.DeepEqual(mutation, expected) {
+						t.Fatalf("debug history changed mutation %d: got=%+v want=%+v", i, mutation, mutations[i])
+					}
+				}
 			}
 			labels, initials, withNote, withoutNote, nestedNames := 0, 0, 0, 0, 0
 			for _, mutation := range mutations {

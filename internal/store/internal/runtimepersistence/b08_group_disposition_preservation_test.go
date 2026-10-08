@@ -122,7 +122,10 @@ func TestB08GroupRoutedFailurePreservesExactOutcomesBothStores(t *testing.T) {
 						wantKind, wantOutcome, wantReason = pipelineobligation.DispositionTerminal, "dead_letter", "pipeline_outbox_dispatch_failed"
 						class, detail := failures.ClassComputeFailure, "b08_routed_failure"
 						if deadLetter {
-							wantKind, wantReason, class, detail = pipelineobligation.DispositionDeadLetter, "b08_routed_failure", failures.ClassComputeFailure, "b08_routed_failure"
+							wantKind, wantReason = pipelineobligation.DispositionDeadLetter, "b08_routed_failure"
+						}
+						if failure := request.Disposition.Failure(); failure == nil || !reflect.DeepEqual(*failure, failures.Normalize(fault, "b08-proof", "dispatch")) {
+							t.Fatalf("member %d changed typed failure: %+v", i, failure)
 						}
 						mixedAssertFailure(t, f, f.events[i].ID(), class, detail)
 					}

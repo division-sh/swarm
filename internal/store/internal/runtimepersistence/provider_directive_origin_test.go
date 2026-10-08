@@ -209,6 +209,27 @@ func TestProviderDirectiveOriginRecoveryParity(t *testing.T) {
 
 func admitProviderDirectiveOrigin(t *testing.T, fixture completionSettlementFixture, store providerDirectiveTestStore, label string) (runtimeagentcontrol.DirectiveExecutionOrigin, runtimeagentcontrol.DirectiveOperation, events.Event) {
 	t.Helper()
+	op, event := reserveProviderDirectiveOperation(t, fixture, store, label)
+	posture := executionposture.Live
+	if fixture.authority.ExecutionMode == runtimeeffects.ExecutionModeMock {
+		posture = executionposture.MockOnly
+	}
+	admission, err := store.AdmitDirectiveExecution(testAuthorActivityContext(), runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
+		OperationID: op.OperationID, OwnerID: uuid.NewString(), Now: time.Now().UTC(), Lease: time.Minute,
+		ExecutionPosture: posture,
+	})
+	if err != nil {
+		t.Fatalf("admit directive execution: %v", err)
+	}
+	origin, err := runtimeagentcontrol.NewDirectiveExecutionOrigin(admission.Operation)
+	if err != nil {
+		t.Fatalf("construct directive provider origin: %v", err)
+	}
+	return origin, op, event
+}
+
+func reserveProviderDirectiveOperation(t *testing.T, fixture completionSettlementFixture, store providerDirectiveTestStore, label string) (runtimeagentcontrol.DirectiveOperation, events.Event) {
+	t.Helper()
 	posture := executionposture.Live
 	if fixture.authority.ExecutionMode == runtimeeffects.ExecutionModeMock {
 		posture = executionposture.MockOnly
@@ -244,19 +265,7 @@ func admitProviderDirectiveOrigin(t *testing.T, fixture completionSettlementFixt
 	if err != nil {
 		t.Fatalf("reserve directive operation: %v", err)
 	}
-	ownerID := uuid.NewString()
-	admission, err := store.AdmitDirectiveExecution(testAuthorActivityContext(), runtimeagentcontrol.DirectiveExecutionAdmissionRequest{
-		OperationID: operationID, OwnerID: ownerID, Now: now.Add(time.Millisecond), Lease: time.Minute,
-		ExecutionPosture: posture,
-	})
-	if err != nil {
-		t.Fatalf("admit directive execution: %v", err)
-	}
-	origin, err := runtimeagentcontrol.NewDirectiveExecutionOrigin(admission.Operation)
-	if err != nil {
-		t.Fatalf("construct directive provider origin: %v", err)
-	}
-	return origin, reservation.Operation, admittedEvent.Event()
+	return reservation.Operation, admittedEvent.Event()
 }
 
 func providerDirectiveContext(t *testing.T, fixture completionSettlementFixture, origin runtimeagentcontrol.DirectiveExecutionOrigin, event events.Event, operation string) context.Context {

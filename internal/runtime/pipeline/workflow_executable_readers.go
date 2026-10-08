@@ -42,6 +42,7 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 		appendGuardExecutableReaders(out, handler.Guard)
 	},
 	"AdvancesTo": noHandlerExecutableReaders,
+	"Terminate":  noHandlerExecutableReaders,
 	"SetsGate":   noHandlerExecutableReaders,
 	"ClearGates": noHandlerExecutableReaders,
 	"DataAccumulation": func(out *[]WorkflowExecutableReader, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
@@ -107,6 +108,7 @@ var handlerRuleEntryExecutableReaderCensus = map[string]handlerRuleExecutableRea
 	},
 	"PolicyRow":  noHandlerRuleExecutableReaders,
 	"AdvancesTo": noHandlerRuleExecutableReaders,
+	"Terminate":  noHandlerRuleExecutableReaders,
 	"Emit":       noHandlerRuleExecutableReaders,
 	"Activity": func(out *[]WorkflowExecutableReader, ctx executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
 		appendActivityExecutableReaders(out, ctx, prefix+".activity", rule.Activity)

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
@@ -243,6 +244,7 @@ type HandlerTransitionSemantic struct {
 	Activity         ActivitySpec
 	Guard            *GuardSpec
 	AdvancesTo       string
+	Terminate        bool
 	SetsGate         *GateSpec
 	ClearGates       []string
 	DataAccumulation WorkflowDataAccumulation
@@ -269,6 +271,7 @@ type HandlerRuleEntry struct {
 	Condition           string                   `yaml:"condition"`
 	PolicyRow           PolicySheetRowMetadata   `yaml:"-"`
 	AdvancesTo          string                   `yaml:"advances_to"`
+	Terminate           bool                     `yaml:"terminate" json:"terminate,omitempty"`
 	Emit                EmitSpec                 `yaml:"emit"`
 	Activity            ActivitySpec             `yaml:"activity"`
 	DataAccumulation    WorkflowDataAccumulation `yaml:"data_accumulation"`
@@ -354,6 +357,7 @@ type WorkflowHandlerStageScope struct {
 }
 
 type WorkflowStageTopologyEdge struct {
+	Terminate      bool
 	From           string
 	To             string
 	Source         string
@@ -1461,6 +1465,7 @@ type SystemNodeEventHandler struct {
 	OnSuccess        HandlerOnSuccessSpec     `yaml:"on_success"`
 	Guard            *GuardSpec               `yaml:"guard"`
 	AdvancesTo       string                   `yaml:"advances_to"`
+	Terminate        bool                     `yaml:"terminate" json:"terminate,omitempty"`
 	SetsGate         *GateSpec                `yaml:"sets_gate"`
 	ClearGates       []string                 `yaml:"clear_gates"`
 	DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
@@ -1504,6 +1509,7 @@ type AgentRegistryEntry struct {
 	Mock                   mockperformance.Performance     `yaml:"mock" json:"mock,omitempty"`
 	MemoryPlan             agentmemory.Plan                `yaml:"-" json:"memory_plan"`
 	MaxTurnsPerTask        int                             `yaml:"max_turns_per_task"`
+	TurnTimeout            *timeridentity.TurnTimeout      `yaml:"-" json:"turn_timeout,omitempty"`
 	Subscriptions          []string                        `yaml:"subscriptions"`
 	SubscriptionsBootstrap []string                        `yaml:"subscriptions_bootstrap"`
 	SubscribesTo           []string                        `yaml:"subscribes_to"`
@@ -1535,6 +1541,7 @@ var agentRegistryEntryFieldOptions = map[string]struct{}{
 	"memory":             {},
 	"mock":               {},
 	"max_turns_per_task": {},
+	"turn_timeout":       {},
 	"subscriptions":      {},
 	"tools":              {},
 	"native_tools":       {},

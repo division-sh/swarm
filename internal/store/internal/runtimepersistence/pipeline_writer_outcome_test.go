@@ -95,6 +95,10 @@ func TestWorkflowEngineMutationRetainsCommittedResultAfterHandoffFailure(t *test
 				if result.DeliverySuccess == nil || !result.DeliverySuccess.Same(claimed.Claim) || submits != 1 {
 					t.Fatalf("lost committed delivery result=%+v error=%v submits=%d", result, err, submits)
 				}
+				wantStage, stageErr := runtimepipeline.CommittedWorkflowStage(record)
+				if stageErr != nil || result.Stage != wantStage {
+					t.Fatalf("handoff error lost acknowledged stage: %+v want=%+v err=%v", result.Stage, wantStage, stageErr)
+				}
 				snapshot, readErr := selected.Snapshot(ctx, claimed.Claim.DeliveryID())
 				if readErr != nil || snapshot.Status != runtimedelivery.StatusDelivered {
 					t.Fatalf("durable delivery=%+v error=%v", snapshot, readErr)

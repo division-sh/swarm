@@ -46,6 +46,7 @@ func serveappLateSplitEnvelopes() map[string]UnitPolicy {
 			RequiredChildren: map[string][]string{
 				"TestProviderSelectedRootStandingBootBothStores":       {"default_sqlite", "explicit_postgres"},
 				"TestIssue2566ReporterFiniteFixtureCanCloseBothStores": {"sqlite", "postgres"},
+				"TestManagedEmitPublicationExactScopeBothStores":       {"default_sqlite/root", "default_sqlite/imported", "default_sqlite/nested", "default_sqlite/template", "explicit_postgres/root", "explicit_postgres/imported", "explicit_postgres/nested", "explicit_postgres/template"},
 			},
 			CountMode: "count-1", EnvironmentID: "ci-postgres-gateway-empty-v1", BudgetClass: "full",
 		},

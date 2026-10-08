@@ -224,7 +224,7 @@ func (s *recordingEventStore) CommitPublication(_ context.Context, command runti
 	s.mu.Lock()
 	s.events = append(s.events, command.Commit.Event.Event())
 	s.mu.Unlock()
-	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
+	return (runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}).WithCommitAcknowledgment(), nil
 }
 
 func (*recordingEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -317,8 +317,11 @@ func (s *directRecipientTransactionalStore) CommitPublication(ctx context.Contex
 		return runtimebus.CommittedPublication{}, err
 	}
 	outcome, err := s.beginPreparedPublish(ctx, command.Commit.Event)
-	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
+	if err != nil {
 		return runtimebus.CommittedPublication{AppendOutcome: outcome}, err
+	}
+	if outcome == runtimebus.EventAppendExactDuplicate {
+		return (runtimebus.CommittedPublication{AppendOutcome: outcome}).WithCommitAcknowledgment(), nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -355,7 +358,7 @@ func (s *directRecipientTransactionalStore) CommitPublication(ctx context.Contex
 	if len(s.active) > 0 {
 		s.active = s.active[:len(s.active)-1]
 	}
-	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
+	return (runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}).WithCommitAcknowledgment(), nil
 }
 
 func commitEnginePublicationsForTest(
@@ -1390,6 +1393,45 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestEngineOutboxCommittedTargetRefusalPreservesDisposition(t *testing.T) {
+	store := &outboxClaimStore{}
+	eb, err := newScopedTestEventBus(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := runtimeengine.EmitIntent{Event: eventtest.RunCreatingRootIngress(
+		uuid.NewString(), "child/output.done", "", "", []byte(`{}`), 0,
+		runtimebustest.DefaultRunID, "",
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{
+			EntityID: uuid.NewString(), FlowInstance: "missing-flow",
+		}), time.Now().UTC(),
+	)}
+	ctx := context.Background()
+	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.receipts[intent.Event.ID()]; got != runtimepipelineobligation.DispositionDeadLetter {
+		t.Fatalf("committed disposition = %s, want dead letter", got)
+	}
+	for i := 0; i < 2; i++ {
+		if err := eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+			t.Fatal(err)
+		}
+		if got := store.receipts[intent.Event.ID()]; got != runtimepipelineobligation.DispositionDeadLetter {
+			t.Fatalf("dispatch %d replaced committed refusal with %s", i, got)
+		}
+		store.claimMu.Lock()
+		remaining := len(store.claims)
+		store.claimMu.Unlock()
+		if remaining != 0 {
+			t.Fatalf("dispatch %d retained %d claims", i, remaining)
+		}
+	}
+	if routes := store.routes[intent.Event.ID()]; len(routes) != 0 {
+		t.Fatalf("refused publication acquired deliveries: %+v", routes)
 	}
 }
 

@@ -169,6 +169,7 @@ func selectedContractExecutionOwnerForCatalogTest(t testing.TB, db *sql.DB, sele
 		fork = forkOverride[0]
 	}
 	durable := runtimebus.DurableDependencies{
+		EmitFeedback: selected,
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
 		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
@@ -215,6 +216,7 @@ func selectedContractExecutionOwnerForCatalogHarness(t testing.TB, h *runtimeHar
 		fork = forkOverride[0]
 	}
 	durable := runtimebus.DurableDependencies{
+		EmitFeedback: selected,
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
 		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,

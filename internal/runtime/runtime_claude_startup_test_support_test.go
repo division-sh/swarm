@@ -77,8 +77,8 @@ func (*startupEffectStore) AuthorizeExternalAttempt(_ context.Context, authority
 	}, nil
 }
 
-func (*startupEffectStore) MarkExternalAttemptLaunched(context.Context, runtimeeffects.Attempt, time.Time) error {
-	return nil
+func (*startupEffectStore) MarkExternalAttemptLaunched(context.Context, runtimeeffects.Attempt, time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
+	return runtimeeffects.ExternalAttemptLaunch{Committed: true}, nil
 }
 
 func (*startupEffectStore) MarkExternalAttemptResponseObserved(context.Context, runtimeeffects.Attempt, map[string]any, time.Time) error {

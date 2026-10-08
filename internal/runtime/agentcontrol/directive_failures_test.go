@@ -5,8 +5,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -91,6 +93,35 @@ func TestValidateDirectiveOperationEvidenceMatrix(t *testing.T) {
 	} {
 		if err := ValidateDirectiveOperationEvidence(op); err == nil {
 			t.Fatalf("state %s accepted invalid evidence %#v", op.State, op)
+		}
+	}
+}
+
+func TestCanceledDirectiveEvidenceRejectsFailureResponseAndOpenOwnership(t *testing.T) {
+	identity := agentidentitytest.RootRuntime(t, "directive-agent", "directive-canceled-test")
+	for _, reason := range []deliverylifecycle.CancellationReason{deliverylifecycle.CancellationTerminate, deliverylifecycle.CancellationTurnTimeout} {
+		base := DirectiveOperation{AgentIdentity: identity, State: DirectiveOperationCanceled, CancellationReason: reason, CompletedAt: time.Now().UTC()}
+		if err := ValidateDirectiveOperationEvidence(base); err != nil || !errors.Is(ErrorForDirectiveOperation(base), ErrDirectiveCanceled) {
+			t.Fatalf("exact canceled operation: %+v error=%v", base, err)
+		}
+		for name, change := range map[string]func(*DirectiveOperation){
+			"missing_reason":     func(op *DirectiveOperation) { op.CancellationReason = "" },
+			"operational_reason": func(op *DirectiveOperation) { op.CancellationReason = "shutdown" },
+			"coerced_reason":     func(op *DirectiveOperation) { op.CancellationReason = " turn_timeout " },
+			"failure":            func(op *DirectiveOperation) { failure := DirectiveExecutionNotAdmittedFailure(); op.Failure = &failure },
+			"response":           func(op *DirectiveOperation) { op.Response = []byte(`{"ok":true}`) },
+			"missing_settlement": func(op *DirectiveOperation) { op.CompletedAt = time.Time{} },
+			"open_lease":         func(op *DirectiveOperation) { op.ExecutionLeaseExpiresAt = time.Now().UTC().Add(time.Minute) },
+			"executed_response":  func(op *DirectiveOperation) { op.ExecutedAt = time.Now().UTC() },
+			"foreign_state":      func(op *DirectiveOperation) { op.State = DirectiveOperationExecuting },
+		} {
+			t.Run(string(reason)+"/"+name, func(t *testing.T) {
+				op := base
+				change(&op)
+				if err := ValidateDirectiveOperationEvidence(op); err == nil {
+					t.Fatalf("invalid canceled evidence admitted: %+v", op)
+				}
+			})
 		}
 	}
 }

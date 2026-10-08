@@ -371,7 +371,7 @@ func validateDurableSourceSetLifecycleState(state AgentLifecycleState) (runtimea
 		return runtimeagentidentity.Identity{}, "", fmt.Errorf("durable lifecycle census state is incomplete for %s", identity.Description())
 	}
 	switch state.Phase {
-	case AgentLifecycleRegistered, AgentLifecycleRunning, AgentLifecycleDraining, AgentLifecycleTerminated, AgentLifecycleFailed:
+	case AgentLifecycleRegistered, AgentLifecycleRunning, AgentLifecycleTerminated, AgentLifecycleFailed:
 	default:
 		return runtimeagentidentity.Identity{}, "", fmt.Errorf("durable lifecycle census phase is invalid for %s", identity.Description())
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	storeeffects "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storestartup "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	"github.com/google/uuid"
@@ -26,6 +27,9 @@ import (
 type selectedRecoveryTxOwner interface {
 	MarkTerminalTx(context.Context, *mutationprotocol.Attempt, runlifecycle.TerminalRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error)
 	RecoverSelectedForkEffectsTx(context.Context, *mutationprotocol.Attempt, string, runtimeeffects.RecoveryRequest) (runtimeeffects.RecoverySummary, error)
+	HasSelectedCanceledOriginsTx(context.Context, *mutationprotocol.Attempt, string) (bool, error)
+	ListSelectedCanceledTurnRecoveriesTx(context.Context, *mutationprotocol.Attempt, string, runtimeeffects.RecoveryRequest) ([]runtimeeffects.TurnExecutionResult, error)
+	CommitSelectedCanceledTurnRecoveryTx(context.Context, *mutationprotocol.Attempt, string, runtimeeffects.CanceledTurnCommand) (runtimeeffects.CanceledTurnCommit, error)
 }
 
 func (s *RunForkPostgresOwner) ListSelectedForkRecoveryEntries(ctx context.Context) ([]runfork.SelectedForkRecoveryEntry, error) {
@@ -106,6 +110,9 @@ func (s *RunForkPostgresOwner) RecoverSelectedFork(ctx context.Context, req runc
 		return runfork.SelectedForkRecoveryResult{}, result.Err()
 	}
 	recovered, _ := result.Value()
+	for index := range recovered.CanceledTurns {
+		recovered.CanceledTurns[index] = storeeffects.AcknowledgeCanceledTurn(recovered.CanceledTurns[index], true)
+	}
 	return recovered, result.Err()
 }
 
@@ -135,6 +142,9 @@ func (s *RunForkSQLiteOwner) RecoverSelectedFork(ctx context.Context, req runcon
 		return runfork.SelectedForkRecoveryResult{}, result.Err()
 	}
 	recovered, _ := result.Value()
+	for index := range recovered.CanceledTurns {
+		recovered.CanceledTurns[index] = storeeffects.AcknowledgeCanceledTurn(recovered.CanceledTurns[index], true)
+	}
 	return recovered, result.Err()
 }
 
@@ -271,13 +281,23 @@ func loadSelectedRecoveryRecordTx(ctx context.Context, tx *sql.Tx, snapshot runl
 func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool) (runfork.SelectedForkRecoveryResult, error) {
 	record, err := loadSelectedRecoveryRecordTx(ctx, tx, snapshot, req.Entry, sqlite, true)
 	result := record.SelectedForkRecoveryResult
-	if err != nil || !record.hasExecution {
+	if err != nil {
 		return result, err
+	}
+	if !record.hasExecution {
+		if len(req.Cancellations) != 0 {
+			return result, fmt.Errorf("selected cancellation recovery lacks predecessor execution")
+		}
+		return result, nil
 	}
 	runID, binding, preparation := result.RunID, record.binding, record.preparation
 	state, failure := record.state, record.failure
+	pending, err := owner.HasSelectedCanceledOriginsTx(ctx, attempt, result.ExecutionID)
+	if err != nil {
+		return result, err
+	}
 	settled, complete, err := settledSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, true)
-	if err != nil || complete {
+	if err != nil || complete && !pending && len(req.Cancellations) == 0 {
 		return settled, err
 	}
 	current, err := storestartup.PreparedProcessCurrent(ctx, tx, preparation.Coordinates, preparation.ProcessGeneration, sqlite, false)
@@ -285,6 +305,9 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		return result, err
 	}
 	if current {
+		if len(req.Cancellations) != 0 {
+			return result, fmt.Errorf("selected cancellation recovery cannot acquire a current process origin")
+		}
 		result.Disposition = runfork.SelectedForkRecoveryCurrent
 		return result, nil
 	}
@@ -295,11 +318,20 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 	if !predecessor {
 		return result, fmt.Errorf("selected recovery preparation is not a recorded predecessor")
 	}
+	var canceled []runtimeeffects.CanceledTurnCommit
+	for _, command := range req.Cancellations {
+		committed, err := owner.CommitSelectedCanceledTurnRecoveryTx(ctx, attempt, result.ExecutionID, command)
+		if err != nil {
+			return result, err
+		}
+		canceled = append(canceled, committed)
+	}
 	plan, err := planSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, true)
 	if err != nil {
 		return result, err
 	}
 	result = plan.SelectedForkRecoveryResult
+	result.CanceledTurns = canceled
 	if result.Disposition == runfork.SelectedForkRecoveryResumeFiniteFeed && state != "closed" {
 		res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions
 			SET state='closed',fence_generation=fence_generation+1,lease_expires_at=NULL,terminal_at=$2,updated_at=$2
@@ -309,18 +341,31 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		}
 	}
 	if result.Disposition != runfork.SelectedForkRecoveryFailed {
-		return result, nil
+		if pending {
+			result.Effects, err = owner.RecoverSelectedForkEffectsTx(ctx, attempt, result.ExecutionID, req.Effects)
+			if err != nil {
+				return result, err
+			}
+			result.PendingCancellations, err = owner.ListSelectedCanceledTurnRecoveriesTx(ctx, attempt, result.ExecutionID, req.Effects)
+		}
+		return result, err
 	}
 	failure = plan.failure
 	failureRaw, err := json.Marshal(failure)
 	if err != nil {
 		return result, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='failed',fence_generation=fence_generation+1,lease_expires_at=NULL,failure=$2,terminal_at=$3,updated_at=$3 WHERE execution_id=$1`, result.ExecutionID, string(failureRaw), req.Effects.Now()); err != nil {
-		return result, err
+	if state != "failed" {
+		if _, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='failed',fence_generation=fence_generation+1,lease_expires_at=NULL,failure=$2,terminal_at=$3,updated_at=$3 WHERE execution_id=$1`, result.ExecutionID, string(failureRaw), req.Effects.Now()); err != nil {
+			return result, err
+		}
 	}
 	result.Effects, err = owner.RecoverSelectedForkEffectsTx(ctx, attempt, result.ExecutionID, req.Effects)
 	if err != nil {
+		return result, err
+	}
+	result.PendingCancellations, err = owner.ListSelectedCanceledTurnRecoveriesTx(ctx, attempt, result.ExecutionID, req.Effects)
+	if err != nil || len(result.PendingCancellations) != 0 {
 		return result, err
 	}
 	if binding.ForkPoint.Kind == runfork.RunForkPointDeploymentRevision {

@@ -44,6 +44,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -67,6 +68,7 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
@@ -3370,6 +3372,59 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	frame, causalEvent := selectedForkAuthorityRaceFrame(t, authority, capabilitySurface, baseRequest.LoadedSource.SourceArtifactFact)
 	providerCtx = runtimecorrelation.WithSourceArtifactFact(providerCtx, baseRequest.LoadedSource.SourceArtifactFact)
 	providerCtx = runtimecorrelation.WithInboundEvent(providerCtx, causalEvent)
+	causalEvent, err = eventfixture.BindPayload(causalEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := events.AdmitForPublish(causalEvent, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := events.NewConnectEvaluationLedger(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settlement, err := events.NewDeliverySettlement(events.EventWriteNormalPublication, ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliveryAuthority, err := deliverylifecycle.NewSelectedExecutionAuthority(baseRequest.LoadedSource.SourceArtifactFact, authority.ID, forkRunID, authority.SelectedFork.Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(targetIdentity.AgentID()), AgentIdentity: targetIdentity}
+	scope, err := runtimeauthoractivity.BundleScopeForTarget(providerCtx, baseRequest.LoadedSource.SourceArtifactFact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := winner.store.RegisterAuthorActivityEventCatalog(scope, []runtimeauthoractivity.EventDescriptor{{
+		EventType: string(causalEvent.Type()), Disposition: runtimeauthoractivity.StoryDifferent,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(catalog.Release)
+	publicationClaim, err := winner.store.PipelineObligations().ClaimPublication(providerCtx, causalEvent.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := winner.store.PipelineObligations().Release(context.WithoutCancel(providerCtx), publicationClaim); err != nil {
+			t.Error(err)
+		}
+	}()
+	committed, err := winner.store.CommitPublication(providerCtx, bus.PublicationCommand{Commit: bus.CommitPublishRequest{
+		Event: admitted, RouteSettlement: settlement, DeliveryRoutes: []events.DeliveryRoute{route},
+		DeliveryAuthority: deliveryAuthority, ReplayScope: runtimepipelineobligation.ScopeDirect, PipelineClaim: publicationClaim,
+	}})
+	if err != nil || !committed.Acknowledged {
+		t.Fatalf("commit winning provider delivery: acknowledged=%t err=%v", committed.Acknowledged, err)
+	}
+	claimed, err := storetest.ClaimDelivery(providerCtx, winner.store, causalEvent, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerCtx = deliverylifecycle.WithClaim(providerCtx, claimed.Claim)
 	handle, err := runtimeeffects.BeginManagedCompletion(providerCtx, "openai_compatible", []byte("request"), frame, nil)
 	if err != nil {
 		t.Fatalf("winning %s authorize provider completion: %v", winner.surface, err)
@@ -3453,9 +3508,9 @@ func selectedForkAuthorityRaceFrame(t testing.TB, authority runtimeeffects.Autho
 	if err != nil {
 		t.Fatalf("assemble selected-fork race prompt: %v", err)
 	}
-	event := eventtest.RunCreatingRootIngress(
+	event := eventtest.ExistingRunRootIngress(
 		uuid.NewString(), "selected_fork.provider_turn.requested", "operator", "selected-agent",
-		json.RawMessage(`{"request":"authority-race"}`), 0, authority.Target.RunID, "",
+		json.RawMessage(`{"request":"authority-race"}`), 0, authority.Target.RunID,
 		events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()), time.Unix(1, 0).UTC(),
 	)
 	frame, err := agentframe.Complete(agentframe.SessionSeed{

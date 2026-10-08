@@ -183,8 +183,7 @@ func TestFanOutGroupMixedDispatchFailureBothStores(t *testing.T) {
 							wantComponent, wantOperation = "eventbus", "run_interceptor"
 						}
 						if kind == "dead_letter" {
-							wantKind, wantReceipt, wantReason, wantClass = pipelineobligation.DispositionDeadLetter, "dead_letter", "mixed_dispatch_dead_letter", failures.ClassComputeFailure
-							wantDetail = wantReason
+							wantKind, wantReceipt, wantReason = pipelineobligation.DispositionDeadLetter, "dead_letter", "mixed_dispatch_dead_letter"
 						}
 						failure := request.Disposition.Failure()
 						if failure == nil || failure.Class != wantClass || failure.Detail.Code != wantDetail || failure.Component != wantComponent || failure.Operation != wantOperation {

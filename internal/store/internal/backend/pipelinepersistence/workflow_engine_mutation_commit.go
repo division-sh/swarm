@@ -398,8 +398,13 @@ func commitWorkflowEngineMutation(
 	if command.State.Transition.PreservesState() && command.DeliverySuccess == nil {
 		return runtimepipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("accepted-event preservation requires exact inbound delivery settlement")
 	}
+	stage, err := runtimepipeline.CommittedWorkflowStage(command.State)
+	if err != nil {
+		return runtimepipeline.CommittedWorkflowEngineMutation{}, err
+	}
 	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
 		result := runtimepipeline.CommittedWorkflowEngineMutation{
+			Stage:        stage,
 			Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Publications)),
 			PostCommit:   command.PostCommit,
 		}
@@ -469,7 +474,7 @@ func commitWorkflowEngineMutation(
 			if err != nil {
 				return err
 			}
-			result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, attempt, store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), postgres, command.Lifecycle)
+			result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, attempt, store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), store.workflowTurnTerminationOwner(), postgres, command.Lifecycle)
 			if err != nil {
 				return err
 			}
@@ -527,14 +532,15 @@ func commitWorkflowEngineMutation(
 				}
 			}
 			if success := command.DeliverySuccess; success != nil {
-				if _, err := store.SettleWorkflowNodeSuccessTx(
+				settled, err := store.SettleWorkflowNodeSuccessTx(
 					txctx,
 					attempt,
 					success.Claim,
 					append([]string(nil), success.SideEffects...),
 					success.Duration,
 					success.RuleSelection,
-				); err != nil {
+				)
+				if err != nil {
 					return fmt.Errorf("settle workflow node delivery with engine mutation: %w", err)
 				}
 				if !command.Lifecycle.RequestCompletionCandidate {
@@ -543,6 +549,9 @@ func commitWorkflowEngineMutation(
 					}
 				}
 				claim := success.Claim
+				if err := persistWorkflowHandlerStageReceiptTx(txctx, tx, claim, settled, stage); err != nil {
+					return err
+				}
 				result.DeliverySuccess = &claim
 			}
 			return nil
@@ -554,7 +563,7 @@ func commitWorkflowEngineMutation(
 		return runtimepipeline.CommittedWorkflowEngineMutation{}, outcome.Err()
 	}
 	result.Committed = true
-	result.Lifecycle.Committed = true
+	result.Lifecycle = result.Lifecycle.WithCommitAcknowledgment()
 	for index, publication := range result.Publications {
 		result.Publications[index] = publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()
 	}

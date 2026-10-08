@@ -434,6 +434,7 @@ type eventBusCommitPublishPlan struct {
 	publicationClaim      *pipelinePublicationClaim
 	dynamicFlowCreation   *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
 	outputConsumers       *runtimepinrouting.OutputConsumerResolver
+	stageFeedback         *runtimepipeline.WorkflowPublicationStageRequest
 }
 
 func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublishPlan) (PreparedPublish, bool, error) {
@@ -446,7 +447,10 @@ func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublis
 		return PreparedPublish{}, false, err
 	}
 	committed, commitErr := owner.CommitPublication(preparedCtx, command)
-	if commitErr != nil && !committed.Acknowledged {
+	if !committed.Acknowledged {
+		if commitErr == nil {
+			commitErr = errors.New("publication commit was not acknowledged")
+		}
 		return PreparedPublish{}, false, errors.Join(commitErr, prepared.publicationClaim.Release(preparedCtx))
 	}
 	if err := committed.Validate(); err != nil {
@@ -478,6 +482,14 @@ func (eb *EventBus) preparePublishCommand(ctx context.Context, plan eventBusComm
 		return preparedCtx, PreparedPublish{}, PublicationCommand{}, err
 	}
 	prepared, command, err := eb.prepareClosedPublication(preparedCtx, plan)
+	if err == nil && plan.stageFeedback != nil {
+		request := *plan.stageFeedback
+		if err := request.ValidateEvent(prepared.Event); err != nil {
+			return preparedCtx, PreparedPublish{}, PublicationCommand{}, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
+		}
+		prepared.stageFeedback = &request
+		command.StageFeedback = &request
+	}
 	return preparedCtx, prepared, command, err
 }
 
@@ -488,7 +500,7 @@ func (eb *EventBus) applyCommittedPublication(ctx context.Context, prepared Prep
 	}
 	consequences, err := eb.finalizeCommittedPublicationConsequences(ctx, prepared, committed, false)
 	if !consequences.ready {
-		return PreparedPublish{}, false, errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
+		return consequences.prepared, false, errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
 	}
 	return consequences.prepared, true, err
 }
@@ -579,6 +591,16 @@ func (eb *EventBus) finalizeCommittedAgentReadiness(ctx context.Context, event e
 }
 
 func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication eventBusCommitPublishPlan) (PreparedPublish, PublicationCommand, error) {
+	startupTimeout, recoveringTimeout := ctx.Value(startupTurnTimeoutPublicationKey{}).(startupTurnTimeoutPublication)
+	if recoveringTimeout && (publication.event.ID() != startupTimeout.eventID || publication.event.RunID() != startupTimeout.runID || publication.event.ProducerType() != events.EventProducerPlatform || publication.event.Producer().ID() != runtimeeffects.TurnTimeoutProducerID() || publication.direct) {
+		return PreparedPublish{}, PublicationCommand{}, errors.New("startup timeout preparation differs from its exact recovered publication")
+	}
+	if eb.receiverExecution.Kind() == eventreceiver.ExecutionSelectedRecoveryPublication {
+		event := publication.event
+		if err := eb.receiverExecution.ValidateTurnTimeoutRecoveryPublication(event.RunID(), event.Producer().ID(), event.ExecutionMode()); err != nil {
+			return PreparedPublish{}, PublicationCommand{}, err
+		}
+	}
 	if err := flushEnclosingPublicationSettlement(ctx); err != nil {
 		return PreparedPublish{}, PublicationCommand{}, err
 	}
@@ -700,6 +722,16 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		targetFailureInput:    targetFailureInput,
 		providerRawSettlement: publication.providerRawSettlement,
 	}
+	if recoveringTimeout {
+		authority, ok := ctx.Value(turnTimeoutRecoveryDeliveryAuthorityKey{}).(runtimedelivery.ExecutionAuthority)
+		if !ok {
+			authority, err = eb.DeliveryAuthority()
+		}
+		if err != nil || authority.Validate() != nil || !authority.SourceArtifact().Matches(eb.sourceArtifactFact) {
+			return releaseFailure(errors.New("startup timeout publication requires its exact preparation delivery authority"))
+		}
+		prepared.recoveryDeliveryAuthority = &authority
+	}
 	prepared.settlement, err = eb.routeSettlementForPlan(evt, targetFailureInput, routePlan, events.EventWriteNormalPublication, prepared.providerRawSettlement, publication.outputConsumers)
 	if err != nil {
 		return releaseFailure(err)
@@ -716,6 +748,10 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	if publication.dynamicFlowCreation != nil && publication.dynamicFlowCreation.DispatchMode == runtimepipeline.DynamicFlowRuntimeCreationDispatchStartupRecovery {
 		prepared.dispatchQueued = true
 		prepared.queueReason = dispatchQueueStartupCreationRecovery
+	}
+	if recoveringTimeout || eb.receiverExecution.Kind() == eventreceiver.ExecutionSelectedRecoveryPublication {
+		prepared.dispatchQueued = true
+		prepared.queueReason = "startup_turn_cancellation_recovery"
 	}
 	if prepared.requiresReceiver() {
 		receiver, receiverErr := eb.receiverProjection(ctx, evt.DeliveryContext())
@@ -852,25 +888,50 @@ func publicationAuthorDescriptor(ctx context.Context, evt events.Event) (runtime
 // Its route plan remains EventBus-owned; callers may persist the exported
 // delivery-route manifest but cannot reinterpret or replace the plan.
 type PreparedPublish struct {
-	Event                 events.Event
-	admitted              events.AdmittedEvent
-	plan                  RoutePlan
-	settlement            events.RouteSettlement
-	exactDuplicate        bool
-	targetFailure         bool
-	dispatchQueued        bool
-	queueReason           string
-	direct                bool
-	publicationClaim      *pipelinePublicationClaim
-	targetFailureInput    events.Event
-	providerRawSettlement providerRawSettlementAdmission
-	receiver              receiverDispatchProjection
-	committedHandoffs     []runtimedelivery.DurableHandoffProof
-	durableHandoffReady   bool
-	authorScope           runtimeauthoractivity.Scope
-	hasAuthorScope        bool
-	authorDescriptor      runtimeauthoractivity.EventDescriptor
-	hasAuthorDescriptor   bool
+	Event                     events.Event
+	admitted                  events.AdmittedEvent
+	plan                      RoutePlan
+	settlement                events.RouteSettlement
+	exactDuplicate            bool
+	targetFailure             bool
+	dispatchQueued            bool
+	queueReason               string
+	direct                    bool
+	publicationClaim          *pipelinePublicationClaim
+	targetFailureInput        events.Event
+	providerRawSettlement     providerRawSettlementAdmission
+	receiver                  receiverDispatchProjection
+	committedHandoffs         []runtimedelivery.DurableHandoffProof
+	durableHandoffReady       bool
+	authorScope               runtimeauthoractivity.Scope
+	hasAuthorScope            bool
+	authorDescriptor          runtimeauthoractivity.EventDescriptor
+	hasAuthorDescriptor       bool
+	stageFeedback             *runtimepipeline.WorkflowPublicationStageRequest
+	acceptedStage             *runtimepipelineobligation.CommittedStageReceipt
+	recoveryDeliveryAuthority *runtimedelivery.ExecutionAuthority
+}
+
+func (p PreparedPublish) AcceptedPublicationStage() (runtimepipelineobligation.CommittedStageReceipt, bool) {
+	if p.acceptedStage == nil {
+		return runtimepipelineobligation.CommittedStageReceipt{}, false
+	}
+	return *p.acceptedStage, true
+}
+
+func (p PreparedPublish) withAcceptedPublicationStage(receipt *runtimepipelineobligation.CommittedStageReceipt) (PreparedPublish, error) {
+	if p.stageFeedback == nil {
+		if receipt != nil {
+			return p, errors.New("publication returned unrequested stage feedback")
+		}
+		return p, nil
+	}
+	if receipt == nil || receipt.Validate() != nil || receipt.EventID() != p.Event.ID() || receipt.Stage().Instance != p.stageFeedback.Instance || p.stageFeedback.EntityID != "" && receipt.Stage().EntityID != p.stageFeedback.EntityID {
+		return p, errors.New("publication omitted or contradicted its exact acceptance stage")
+	}
+	value := *receipt
+	p.acceptedStage = &value
+	return p, nil
 }
 
 func validateEventAppendOutcome(outcome EventAppendOutcome) error {
@@ -893,6 +954,9 @@ func (p PreparedPublish) RecipientIDs() []string {
 // reinterpret or replace the private plan used for later dispatch.
 func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 	authority, _ := p.publicationClaim.bus.DeliveryAuthority()
+	if p.recoveryDeliveryAuthority != nil {
+		authority = *p.recoveryDeliveryAuthority
+	}
 	request := CommitPublishRequest{
 		Event:               p.admitted,
 		RouteSettlement:     p.settlement,
@@ -1701,6 +1765,7 @@ func (eb *EventBus) runInterceptorsForDeliveryRoutes(ctx context.Context, evt ev
 		}, err
 	}
 	routePassthrough, routeDeferred, routeOutcome, routeErr := eb.runNodeDeliveryRouteInterceptors(ctx, evt, nodeRoutes, routeInterceptors)
+	routeOutcome = routeOutcome.RetainStageReceipts(outcome)
 	if routeErr != nil && !routeOutcome.Committed {
 		return deliveryRouteInterception{EventPassthrough: passthrough, NodePassthrough: routePassthrough, Deferred: append(deferred, routeDeferred...), Outcome: routeOutcome}, errors.Join(err, routeErr)
 	}
@@ -1868,8 +1933,9 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 		}
 		for _, it := range interceptors {
 			pass, out, outcome, err := it.InterceptDeliveryRoute(routeCtx, projected, route)
+			result = result.RetainStageReceipts(outcome)
 			if err != nil && !outcome.Committed && outcome.ContinueDispatch() {
-				return passthrough, deferred, runtimepipelineobligation.Continue(), errors.Join(postCommitErr, err)
+				return passthrough, deferred, runtimepipelineobligation.Continue().RetainStageReceipts(result), errors.Join(postCommitErr, err)
 			}
 			postCommitErr = errors.Join(postCommitErr, err)
 			result.Committed = result.Committed || outcome.Committed
@@ -1882,7 +1948,7 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 			}
 			deferred = append(deferred, admitted...)
 			if !outcome.ContinueDispatch() {
-				return passthrough, deferred, outcome, postCommitErr
+				return passthrough, deferred, outcome.RetainStageReceipts(result), postCommitErr
 			}
 		}
 	}
@@ -2016,6 +2082,7 @@ func (eb *EventBus) runInterceptorSet(ctx context.Context, evt events.Event, int
 	var postCommitErr error
 	for _, it := range interceptors {
 		pass, out, outcome, err := it.Intercept(ctx, evt)
+		result = result.RetainStageReceipts(outcome)
 		if err != nil && !outcome.Committed && outcome.ContinueDispatch() {
 			interceptorErr := fmt.Errorf("event interceptor failed for %s (%s): %w", evt.ID(), evt.Type(), err)
 			if _, typed := runtimefailures.As(err); !typed && !runtimefailures.IsContextInterruption(err) {
@@ -2023,7 +2090,7 @@ func (eb *EventBus) runInterceptorSet(ctx context.Context, evt events.Event, int
 					"event_id": evt.ID(), "event_type": string(evt.Type()),
 				}, err)
 			}
-			return passthrough, deferred, runtimepipelineobligation.Continue(), errors.Join(postCommitErr, interceptorErr)
+			return passthrough, deferred, runtimepipelineobligation.Continue().RetainStageReceipts(result), errors.Join(postCommitErr, interceptorErr)
 		}
 		postCommitErr = errors.Join(postCommitErr, err)
 		result.Committed = result.Committed || outcome.Committed
@@ -2032,11 +2099,11 @@ func (eb *EventBus) runInterceptorSet(ctx context.Context, evt events.Event, int
 		}
 		admitted, err := eb.admitDeferredEvents(ctx, out)
 		if err != nil {
-			return passthrough, deferred, runtimepipelineobligation.Continue(), errors.Join(postCommitErr, err)
+			return passthrough, deferred, runtimepipelineobligation.Continue().RetainStageReceipts(result), errors.Join(postCommitErr, err)
 		}
 		deferred = append(deferred, admitted...)
 		if !outcome.ContinueDispatch() {
-			return passthrough, deferred, outcome, postCommitErr
+			return passthrough, deferred, outcome.RetainStageReceipts(result), postCommitErr
 		}
 	}
 	return passthrough, deferred, result, postCommitErr

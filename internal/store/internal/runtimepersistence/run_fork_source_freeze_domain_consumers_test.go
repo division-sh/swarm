@@ -346,7 +346,7 @@ func seedForkedDirectiveOperation(t *testing.T, fixture *forkedConsumerTestBacke
 type forkedEffectConsumerSurface interface {
 	IsExternalEffectAuthorityCurrent(context.Context, runtimeeffects.Authority) (bool, error)
 	AuthorizeExternalAttempt(context.Context, runtimeeffects.Authority, runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error)
-	MarkExternalAttemptLaunched(context.Context, runtimeeffects.Attempt, time.Time) error
+	MarkExternalAttemptLaunched(context.Context, runtimeeffects.Attempt, time.Time) (runtimeeffects.ExternalAttemptLaunch, error)
 	HeartbeatCompletionAttempt(context.Context, runtimeeffects.Attempt, time.Time, time.Duration) error
 	MarkExternalAttemptResponseObserved(context.Context, runtimeeffects.Attempt, map[string]any, time.Time) error
 	SettleExternalAttempt(context.Context, runtimeeffects.Settlement) error
@@ -390,7 +390,8 @@ func TestForkedSourceManagedExternalEffectAdmissionTransitionsAndRecoveryRefuse(
 				OperationID: req.OperationID, AttemptID: req.AttemptID, Token: token, Authority: authority,
 				Kind: req.Kind, Class: req.Class, Adapter: req.Adapter, Transport: req.Transport, Ordinal: 1, AuthorizedAt: now,
 			}
-			requireForkedSourceRefusal(t, "mark external launch", surface.MarkExternalAttemptLaunched(ctx, attempt, now))
+			_, launchErr := surface.MarkExternalAttemptLaunched(ctx, attempt, now)
+			requireForkedSourceRefusal(t, "mark external launch", launchErr)
 			requireForkedSourceRefusal(t, "heartbeat external attempt", surface.HeartbeatCompletionAttempt(ctx, attempt, now, time.Minute))
 			requireForkedSourceRefusal(t, "mark external response", surface.MarkExternalAttemptResponseObserved(ctx, attempt, map[string]any{"ok": true}, now))
 			requireForkedSourceRefusal(t, "settle external attempt", surface.SettleExternalAttempt(ctx, runtimeeffects.Settlement{
