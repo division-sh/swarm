@@ -2152,7 +2152,6 @@ func createActivityJournalSQLiteSchema(t *testing.T, ctx context.Context, db *sq
 			forked_from_event_id TEXT,
 			continued_as_run_id TEXT,
 			event_count INTEGER NOT NULL DEFAULT 0,
-			entity_count INTEGER NOT NULL DEFAULT 0,
 			failure TEXT,
 			started_at TIMESTAMP NOT NULL,
 			ended_at TIMESTAMP

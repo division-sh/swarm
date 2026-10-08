@@ -182,7 +182,7 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunUnavailableSourceStates(
 			handler := fixture.handler(t)
 			runID := uuid.NewString()
 			if !tt.seedBundleRow {
-				runlifecyclefixture.RequireCorruptPostgresSnapshot(t, context.Background(), fixture.db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+				storetest.RequireCorruptRunSnapshot(t, context.Background(), fixture.pg, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
 					RunID: runID, State: string(storerunlifecycle.StateRunning),
 					BundleHash: tt.bundleHash,
 				})

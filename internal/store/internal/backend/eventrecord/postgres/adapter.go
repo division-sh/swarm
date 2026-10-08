@@ -7,9 +7,11 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/counterprojection"
 )
 
 const hydrationBatchSize = 128
@@ -118,6 +120,9 @@ func Insert(ctx context.Context, attempt *mutationprotocol.Attempt, record event
 		if err := attempt.AddFact(runID, runforkrevision.FamilyEvents, eventID); err != nil {
 			return false, err
 		}
+		if err := attempt.AddEventCountDelta(runID, 1); err != nil {
+			return false, err
+		}
 	}
 	return true, nil
 }
@@ -164,7 +169,7 @@ func InsertUnrevisionedFixtureRecord(ctx context.Context, tx *sql.Tx, record eve
 	if tx == nil {
 		return false, fmt.Errorf("unrevisioned event fixture requires a transaction")
 	}
-	_, _, inserted, err := insertRecord(ctx, tx, record)
+	_, runID, inserted, err := insertRecord(ctx, tx, record)
 	if err != nil {
 		return false, err
 	}
@@ -175,21 +180,27 @@ func InsertUnrevisionedFixtureRecord(ctx context.Context, tx *sql.Tx, record eve
 	if !found || !record.Equal(existing) {
 		return false, fmt.Errorf("unrevisioned event fixture %s conflicts with canonical readback", record.EventID)
 	}
+	if inserted && runID != "" {
+		if err := counterprojection.Apply(ctx, tx, authoractivity.DialectPostgres, runID, 1); err != nil {
+			return false, err
+		}
+	}
 	return inserted, nil
 }
 
 // DeleteSelectedForkRunEvents is the event-record portion of the closed
 // selected-fork discard operation. Cross-domain cleanup ordering remains owned
 // by the caller's named transaction.
-func DeleteSelectedForkRunEvents(ctx context.Context, exec Execer, forkRunID string) error {
+func DeleteSelectedForkRunEvents(ctx context.Context, exec Execer, forkRunID string) (int64, error) {
 	forkRunID = strings.TrimSpace(forkRunID)
 	if forkRunID == "" {
-		return fmt.Errorf("delete selected-fork event records: fork run id is required")
+		return 0, fmt.Errorf("delete selected-fork event records: fork run id is required")
 	}
-	if _, err := exec.ExecContext(ctx, `DELETE FROM events WHERE run_id = $1::uuid`, forkRunID); err != nil {
-		return fmt.Errorf("delete selected-fork event records: %w", err)
+	result, err := exec.ExecContext(ctx, `DELETE FROM events WHERE run_id = $1::uuid`, forkRunID)
+	if err != nil {
+		return 0, fmt.Errorf("delete selected-fork event records: %w", err)
 	}
-	return nil
+	return result.RowsAffected()
 }
 
 const selectRecord = `

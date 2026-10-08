@@ -6,6 +6,7 @@ import (
 
 	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
@@ -100,14 +101,15 @@ func newPostgresOwnerForTest(t *testing.T, db *sql.DB) *Postgres {
 func seedRunBundleAvailability(t *testing.T, db *sql.DB, status, bundleHash string) string {
 	t.Helper()
 	runID := uuid.NewString()
-	runlifecyclefixture.RequireCorruptPostgresSnapshot(
-		t,
+	if err := storerunlifecycle.AttemptCorruptPostgresSnapshotForTest(
 		testAuthorActivityContext(),
 		db,
 		runlifecyclefixture.CorruptSnapshot{
 			OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
 			RunID:      runID, State: status, BundleHash: bundleHash,
 		},
-	)
+	); err != nil {
+		t.Fatalf("materialize corrupt PostgreSQL run snapshot %s: %v", runID, err)
+	}
 	return runID
 }

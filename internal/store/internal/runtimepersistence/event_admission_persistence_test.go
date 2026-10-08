@@ -340,7 +340,7 @@ func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 					COALESCE(ended_at::text, ''),
 					COALESCE(failure::text, ''),
 					COALESCE(event_count, 0),
-					COALESCE(entity_count, 0),
+					(SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id),
 					COALESCE((SELECT control_status FROM run_control_state WHERE run_id = runs.run_id), ''),
 					COALESCE((SELECT reason FROM run_control_state WHERE run_id = runs.run_id), '')
 				FROM runs
@@ -432,7 +432,7 @@ func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 					COALESCE(CAST(ended_at AS TEXT), ''),
 					COALESCE(CAST(failure AS TEXT), ''),
 					COALESCE(event_count, 0),
-					COALESCE(entity_count, 0),
+					(SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id),
 					COALESCE((SELECT control_status FROM run_control_state WHERE run_id = runs.run_id), ''),
 					COALESCE((SELECT reason FROM run_control_state WHERE run_id = runs.run_id), '')
 				FROM runs

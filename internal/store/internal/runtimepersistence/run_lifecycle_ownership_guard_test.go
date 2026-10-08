@@ -20,10 +20,12 @@ import (
 func TestRunLifecycleOwnershipBoundaryGuard(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
 	allowedWrites := map[string]bool{
-		"internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go": true,
-		"internal/store/internal/backend/runlifecycle/run_lifecycle_mutation.go":   true,
-		"internal/store/internal/backend/runlifecycle/run_lifecycle_state.go":      true,
-		"internal/testutil/runlifecyclefixture/fixture.go":                         true,
+		"internal/store/internal/backend/runlifecycle/counterprojection/event_count.go": true,
+		"internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go":      true,
+		"internal/store/internal/backend/runlifecycle/run_lifecycle_mutation.go":        true,
+		"internal/store/internal/backend/runlifecycle/run_lifecycle_state.go":           true,
+		"internal/store/internal/backend/runlifecycle/test_snapshot_fault.go":           true,
+		"internal/testutil/runlifecyclefixture/fixture.go":                              true,
 	}
 	allowedCandidateColumns := map[string]bool{
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go": true,
@@ -159,6 +161,7 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 		if err != nil {
 			violations = append(violations, relative+": "+err.Error())
 		}
+		counterOracles := classifyCounterOracleRunLiterals(relative, file)
 		ast.Inspect(file, func(node ast.Node) bool {
 			literal, ok := node.(*ast.BasicLit)
 			if !ok || literal.Kind != token.STRING {
@@ -168,7 +171,7 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 			if err != nil || !runWrite.MatchString(value) {
 				return true
 			}
-			if hostile[literal.Pos()] || minimalHistory[literal.Pos()] || minimalProjection[literal.Pos()] || allowedSemanticRunFixtureLiteral(relative, value) {
+			if hostile[literal.Pos()] || minimalHistory[literal.Pos()] || minimalProjection[literal.Pos()] || counterOracles[literal.Pos()] || allowedSemanticRunFixtureLiteral(relative, value) {
 				return true
 			}
 			violations = append(violations, relative+": "+compactSQLForLifecycleGuard(value))
@@ -185,6 +188,91 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 	}
 }
 
+// These literals assert counter-owner behavior; none can execute a run mutation.
+func classifyCounterOracleRunLiterals(path string, file *ast.File) map[token.Pos]bool {
+	approved := map[token.Pos]bool{}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		if path == "internal/store/internal/backend/mutationprotocol/event_counts_test.go" && fn.Name.Name == "TestEventCountDeltasBatchOrderAndForeignReadRefusal" {
+			ast.Inspect(fn, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok || len(call.Args) != 1 {
+					return true
+				}
+				selector, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || selector.Sel.Name != "ExpectExec" {
+					return true
+				}
+				receiver, ok := selector.X.(*ast.Ident)
+				if !ok || receiver.Name != "mock" {
+					return true
+				}
+				literal, ok := call.Args[0].(*ast.BasicLit)
+				if ok && literal.Value == "`UPDATE runs SET event_count = event_count \\+`" {
+					approved[literal.Pos()] = true
+				}
+				return true
+			})
+		}
+		if path == "internal/store/internal/backend/runlifecycle/counterprojection/owner_guard_test.go" && fn.Name.Name == "TestRunCounterRetirementGuardRejectsRecountAndUnknownZero" {
+			nonExecuting := true
+			ast.Inspect(fn, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				selector, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || (selector.Sel.Name != "MatchString" && selector.Sel.Name != "Fatal" && selector.Sel.Name != "Fatalf") {
+					nonExecuting = false
+				}
+				return true
+			})
+			if !nonExecuting {
+				continue
+			}
+			ast.Inspect(fn, func(node ast.Node) bool {
+				literal, ok := node.(*ast.BasicLit)
+				if !ok {
+					return true
+				}
+				value, err := strconv.Unquote(literal.Value)
+				if err == nil && (value == "UPDATE runs SET event_count = (SELECT COUNT(*) FROM events)" || value == "UPDATE runs SET event_count = event_count + $1") {
+					approved[literal.Pos()] = true
+				}
+				return true
+			})
+		}
+	}
+	return approved
+}
+
+func TestCounterRunOracleClassificationDoesNotPermitWriters(t *testing.T) {
+	const oraclePath = "internal/store/internal/backend/runlifecycle/counterprojection/owner_guard_test.go"
+	const source = "package fixture\nfunc TestRunCounterRetirementGuardRejectsRecountAndUnknownZero() { retiredCounterSQL.MatchString(`UPDATE runs SET event_count = (SELECT COUNT(*) FROM events)`) }"
+	for _, tc := range []struct {
+		name, path, source string
+		want               int
+	}{
+		{"oracle", oraclePath, source, 1},
+		{"other-path", "internal/runtime/other_test.go", source, 0},
+		{"executing", oraclePath, strings.Replace(source, "retiredCounterSQL.MatchString", "db.Exec", 1), 0},
+		{"extra-writer", oraclePath, strings.Replace(source, " { ", " { db.Exec(`DELETE FROM runs`); ", 1), 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", tc.source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(classifyCounterOracleRunLiterals(tc.path, file)); got != tc.want {
+				t.Fatalf("classified %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.Pos]bool, error) {
 	if path == "internal/store/internal/backend/pipelinepersistence/a2_collection_projection_test.go" {
 		return classifyA2CollectionMinimalRunLiterals(file)
@@ -194,6 +282,8 @@ func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.P
 		writes []string
 	}
 	shapes := map[string]fixtureShape{
+		"internal/store/internal/backend/mutationprotocol/event_counts_test.go": {
+			"CREATE TABLE runs (run_id UUID PRIMARY KEY, event_count INTEGER NOT NULL DEFAULT 0 CHECK (event_count >= 0))", []string{"INSERT INTO runs (run_id) VALUES ($1)"}},
 		"internal/store/internal/backend/agentpersistence/selected_grant_point_test.go": {
 			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,$2)"}},
 		"internal/store/internal/backend/delivery/selected_execution_fence_test.go": {

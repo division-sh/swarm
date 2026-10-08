@@ -481,9 +481,6 @@ func (s *EventPostgresOwner) finalizeInboundPublicationTx(ctx context.Context, t
 	if affected, _ := res.RowsAffected(); affected != 1 {
 		return runtimeinbound.Record{}, fmt.Errorf("prepared inbound publication %s was not finalized", request.PublicationID)
 	}
-	if err := s.RunLifecyclePostgresOwner.SyncCountersTx(ctx, attempt, request.ResolvedRunID); err != nil {
-		return runtimeinbound.Record{}, fmt.Errorf("synchronize inbound publication event count: %w", err)
-	}
 	record, found, err := loadPostgresInboundPublicationTx(ctx, tx, request.Identity(), false)
 	if err != nil {
 		return runtimeinbound.Record{}, err

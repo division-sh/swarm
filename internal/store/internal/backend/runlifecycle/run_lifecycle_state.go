@@ -124,6 +124,11 @@ func loadPostgresRunLifecycleSnapshot(
 	if q == nil || runID == "" {
 		return runtimerunlifecycle.Snapshot{}, errors.New("run lifecycle snapshot requires query authority and run_id")
 	}
+	if tx, ok := q.(*sql.Tx); ok {
+		if err := mutationprotocol.FlushEventCountBeforeRead(ctx, tx, runID); err != nil {
+			return runtimerunlifecycle.Snapshot{}, err
+		}
+	}
 	query := `
 		SELECT run_id::text, status, bundle_hash, origin_kind,
 		       COALESCE(trigger_event_id::text, ''), COALESCE(trigger_event_type, ''),
@@ -207,6 +212,11 @@ func loadSQLiteRunLifecycleSnapshot(
 	runID = nullUUIDString(runID)
 	if q == nil || runID == "" {
 		return runtimerunlifecycle.Snapshot{}, errors.New("run lifecycle snapshot requires query authority and run_id")
+	}
+	if tx, ok := q.(*sql.Tx); ok {
+		if err := mutationprotocol.FlushEventCountBeforeRead(ctx, tx, runID); err != nil {
+			return runtimerunlifecycle.Snapshot{}, err
+		}
 	}
 	var (
 		snapshot      runtimerunlifecycle.Snapshot
@@ -416,9 +426,6 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 		}
 		return current, runtimerunlifecycle.MutationExactNoop, nil
 	}
-	if err := (postgresRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).SyncCounters(ctx, request.RunID); err != nil {
-		return runtimerunlifecycle.Snapshot{}, "", err
-	}
 	if terminalizeDeliveries {
 		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, attempt, request.RunID, "run_"+string(request.State)); err != nil {
 			return runtimerunlifecycle.Snapshot{}, "", err
@@ -506,9 +513,6 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 			return runtimerunlifecycle.Snapshot{}, "", err
 		}
 		return current, runtimerunlifecycle.MutationExactNoop, nil
-	}
-	if err := (sqliteRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).SyncCounters(ctx, request.RunID); err != nil {
-		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	if terminalizeDeliveries {
 		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, attempt, request.RunID, "run_"+string(request.State)); err != nil {
