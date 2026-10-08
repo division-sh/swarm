@@ -46,6 +46,8 @@ func TestA9ConstructionSelectionRequiresExactReceiptWithoutPlannerOrCacheFallbac
 		t.Fatal(err)
 	}
 	parent.EntityID = eventtest.UUID("non-derived-parent")
+	contradictoryParent := parent
+	contradictoryParent.ParentRoute.FlowInstance = eventtest.UUID("foreign-parent-run")
 	table := &RouteTable{instanceOwners: map[flowidentity.RunScopedFlowInstance]flowidentity.Instance{
 		testRunScopedFlowRoute(root.Route()): root, testRunScopedFlowRoute(parent.Route()): parent,
 	}}
@@ -61,6 +63,9 @@ func TestA9ConstructionSelectionRequiresExactReceiptWithoutPlannerOrCacheFallbac
 		{name: "absent receipt", reader: constructionReceiptTestReader{root}},
 		{name: "foreign run", reader: constructionReceiptTestReader{root, parent}},
 		{name: "wrong same-key entity", reader: constructionReceiptTestReader{root, parent}},
+		{name: "wrong route", reader: constructionReceiptTestReader{root, parent}},
+		{name: "declaration as instance", reader: constructionReceiptTestReader{root, parent}},
+		{name: "contradictory parent receipt", reader: constructionReceiptTestReader{root, contradictoryParent}},
 		{name: "independent failure", reader: constructionReceiptFailureTestReader{independent}, wantErr: independent},
 		{name: "cancellation", reader: constructionReceiptFailureTestReader{context.Canceled}, wantErr: context.Canceled},
 	} {
@@ -77,7 +82,14 @@ func TestA9ConstructionSelectionRequiresExactReceiptWithoutPlannerOrCacheFallbac
 			if test.name == "wrong same-key entity" {
 				entity = eventtest.UUID("wrong-entity")
 			}
-			actual, err := owner.constructionInstance(context.Background(), run, parent.TemplateID, parent.InstancePath, entity, instances)
+			path := parent.InstancePath
+			if test.name == "wrong route" {
+				path = "other/stored-parent"
+			}
+			if test.name == "declaration as instance" {
+				path = parent.TemplateID
+			}
+			actual, err := owner.constructionInstance(context.Background(), run, parent.TemplateID, path, entity, instances)
 			if test.valid {
 				if err != nil || actual != parent {
 					t.Fatalf("reader-only selection lost stored identity: %+v %v", actual, err)

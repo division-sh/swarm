@@ -5475,7 +5475,7 @@ engine:
       - The pure projection consumes a declaration identity separately from an already admitted execution RoutingSource.
       - Root business publication is local. An entityless selected-root run route does not introduce a run-ID namespace.
       - Static and singleton business publication uses the exact constructor-admitted instance and local event name. The instance normally equals the declaration scope; a keyless descendant beneath a keyed parent retains its constructor-owned concrete parent-relative coordinate instead. This rendering preserves declaration identity and grants no ancestry-based permission.
-      - Template business publication uses the exact admitted source instance and local event name.
+      - Template business publication uses the exact constructor-admitted source instance and local event name. Keyed ancestors interleave their instance discriminators with declaration segments, so the authored declaration path is not a required prefix of the concrete instance. Rendering preserves the supplied coordinate and never infers ancestry by stripping segments or testing authored-path prefixes. Compiled construction and immutable receipt admission continue to prove the actual run, entity, parent and ancestry before publication or result-journal mutation.
       - A local reference or an admitted same-declaration qualified reference identifies the declaration, not an alternate publication spelling.
       - Foreign, ambiguous, missing or contradictory declaration/source evidence fails before event or result-journal mutation.
       - Protocol/control and external/input constructors retain their own exact identities; callers cannot relabel them as business sources.
