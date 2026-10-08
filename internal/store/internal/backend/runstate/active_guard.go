@@ -9,6 +9,7 @@ import (
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 	"github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 )
 
@@ -20,12 +21,20 @@ func RequirePostgresActiveTx(ctx context.Context, tx *sql.Tx, runID string) erro
 	if tx == nil {
 		return errors.New("PostgreSQL run lifecycle transaction is required")
 	}
-	_, err := requireActiveSource(ctx, tx.QueryRowContext, runID, true, true)
+	_, err := sourceadmission.LoadPostgresTx(ctx, tx, runID, true, false)
 	return err
 }
 
 type RowQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func RequirePostgresActiveNonlockingTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	return sourceadmission.RequirePostgresActiveNonlockingTx(ctx, tx, runID)
+}
+
+func RequireSQLiteActiveNonlockingTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	return sourceadmission.RequireSQLiteActiveNonlockingTx(ctx, tx, runID)
 }
 
 // DispatchParked consumes lifecycle/control and the exact-current standing owner.
@@ -98,15 +107,14 @@ func RequirePostgresActiveQuery(ctx context.Context, queryer RowQueryer, runID s
 	if queryer == nil {
 		return errors.New("PostgreSQL run lifecycle query authority is required")
 	}
-	_, err := requireActiveSource(ctx, queryer.QueryRowContext, runID, true, false)
-	return err
+	return sourceadmission.RequirePostgresActiveQuery(ctx, queryer, runID)
 }
 
 func RequireSQLiteActiveTx(ctx context.Context, tx *sql.Tx, runID string) error {
 	if tx == nil {
 		return errors.New("SQLite run lifecycle transaction is required")
 	}
-	_, err := requireActiveSource(ctx, tx.QueryRowContext, runID, false, false)
+	_, err := sourceadmission.LoadSQLiteTx(ctx, tx, runID, true, false)
 	return err
 }
 
@@ -114,50 +122,5 @@ func RequireSQLiteActiveQuery(ctx context.Context, queryer RowQueryer, runID str
 	if queryer == nil {
 		return errors.New("SQLite run lifecycle query authority is required")
 	}
-	_, err := requireActiveSource(ctx, queryer.QueryRowContext, runID, false, false)
-	return err
-}
-
-func requireActiveSource(ctx context.Context, queryRow func(context.Context, string, ...any) *sql.Row, runID string, postgres, lock bool) (runtimecorrelation.SourceArtifactFact, error) {
-	runID = strings.TrimSpace(runID)
-	query := `SELECT status, bundle_hash FROM runs WHERE run_id = ?`
-	if postgres {
-		query = `SELECT status, bundle_hash FROM runs WHERE run_id = $1::uuid`
-		if lock {
-			query += ` FOR UPDATE`
-		}
-	}
-	var state, bundleHash string
-	if err := queryRow(ctx, query, runID).Scan(&state, &bundleHash); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
-		}
-		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("read active run lifecycle: %w", err)
-	}
-	parsed, err := runtimerunlifecycle.ParseState(state)
-	if err != nil {
-		return runtimecorrelation.SourceArtifactFact{}, err
-	}
-	if !parsed.Active() {
-		return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: parsed}
-	}
-	source, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
-	if err != nil {
-		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("decode active run lifecycle source: %w", err)
-	}
-	existsQuery := `SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = ?)`
-	if postgres {
-		existsQuery = `SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = $1)`
-	}
-	var exists bool
-	if err := queryRow(ctx, existsQuery, source.BundleHash()).Scan(&exists); err != nil {
-		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("validate active run lifecycle source: %w", err)
-	}
-	if !exists {
-		return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.SourceArtifactUnavailableError{
-			BundleHash: source.BundleHash(),
-			Cause:      "missing_source_artifact",
-		}
-	}
-	return source, nil
+	return sourceadmission.RequireSQLiteActiveQuery(ctx, queryer, runID)
 }

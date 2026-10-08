@@ -39,7 +39,7 @@ func prepareInputDraftProgressTx(ctx context.Context, tx *sql.Tx, draftID, princ
 		return preparedInputDraftText{}, fmt.Errorf("decision input progress requires transaction, draft, principal and time")
 	}
 	now = decisioncard.CanonicalTimestamp(now)
-	if err := requireActiveDecisionDraftRun(ctx, tx, draftID, postgres); err != nil {
+	if err := requireActiveDecisionDraftRunTx(ctx, tx, draftID, postgres); err != nil {
 		return preparedInputDraftText{}, err
 	}
 	draft, err := loadDecisionCardDraftWithLock(ctx, tx, draftID, lock, postgres)

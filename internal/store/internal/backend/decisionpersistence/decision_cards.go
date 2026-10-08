@@ -42,7 +42,7 @@ var _ decisioncard.Store = (*DecisionSQLiteOwner)(nil)
 func (s *DecisionPostgresOwner) CreateDecisionCard(ctx context.Context, card decisioncard.Card) error {
 	return writePostgresDecision(ctx, s, false, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
+			if err := requireActiveDecisionRunTx(txctx, tx, card.RunID, true); err != nil {
 				return err
 			}
 			return insertDecisionCardWithStory(txctx, attempt, tx, card, true)
@@ -53,7 +53,7 @@ func (s *DecisionPostgresOwner) CreateDecisionCard(ctx context.Context, card dec
 func (s *DecisionSQLiteOwner) CreateDecisionCard(ctx context.Context, card decisioncard.Card) error {
 	return writeSQLiteDecision(ctx, s, "sqlite create decision card", false, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if err := requireActiveDecisionRun(txctx, tx, card.RunID, false); err != nil {
+			if err := requireActiveDecisionRunTx(txctx, tx, card.RunID, false); err != nil {
 				return err
 			}
 			return insertDecisionCardWithStory(txctx, attempt, tx, card, false)
@@ -192,26 +192,26 @@ func (s *DecisionSQLiteOwner) LoadTx(ctx context.Context, attempt *mutationproto
 	})
 }
 
-func requireActiveDecisionRun(ctx context.Context, db decisionCardSQL, runID string, postgres bool) error {
+func requireActiveDecisionRunTx(ctx context.Context, tx *sql.Tx, runID string, postgres bool) error {
 	if postgres {
-		return requirePostgresRunActiveQuery(ctx, db, runID)
+		return storerunstate.RequirePostgresActiveNonlockingTx(ctx, tx, runID)
 	}
-	return requireSQLiteRunActiveQuery(ctx, db, runID)
+	return storerunstate.RequireSQLiteActiveNonlockingTx(ctx, tx, runID)
 }
 
-func requireActiveDecisionCardRun(ctx context.Context, db decisionCardSQL, cardID string, postgres bool) error {
+func requireActiveDecisionCardRunTx(ctx context.Context, tx *sql.Tx, cardID string, postgres bool) error {
 	query := `SELECT run_id FROM decision_cards WHERE card_id = ?`
 	if postgres {
 		query = `SELECT run_id::text FROM decision_cards WHERE card_id = $1`
 	}
 	var runID string
-	if err := db.QueryRowContext(ctx, query, strings.TrimSpace(cardID)).Scan(&runID); err != nil {
+	if err := tx.QueryRowContext(ctx, query, strings.TrimSpace(cardID)).Scan(&runID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return decisioncard.ErrNotFound
 		}
 		return err
 	}
-	if err := requireActiveDecisionRun(ctx, db, runID, postgres); err != nil {
+	if err := requireActiveDecisionRunTx(ctx, tx, runID, postgres); err != nil {
 		if errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {
 			return decisioncard.ErrAlreadyTerminal
 		}
@@ -220,19 +220,19 @@ func requireActiveDecisionCardRun(ctx context.Context, db decisionCardSQL, cardI
 	return nil
 }
 
-func requireActiveDecisionDraftRun(ctx context.Context, db decisionCardSQL, draftID string, postgres bool) error {
+func requireActiveDecisionDraftRunTx(ctx context.Context, tx *sql.Tx, draftID string, postgres bool) error {
 	query := `SELECT run_id FROM decision_card_input_drafts WHERE input_draft_id = ?`
 	if postgres {
 		query = `SELECT run_id::text FROM decision_card_input_drafts WHERE input_draft_id = $1`
 	}
 	var runID string
-	if err := db.QueryRowContext(ctx, query, strings.TrimSpace(draftID)).Scan(&runID); err != nil {
+	if err := tx.QueryRowContext(ctx, query, strings.TrimSpace(draftID)).Scan(&runID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return decisioncard.ErrDraftNotFound
 		}
 		return err
 	}
-	if err := requireActiveDecisionRun(ctx, db, runID, postgres); err != nil {
+	if err := requireActiveDecisionRunTx(ctx, tx, runID, postgres); err != nil {
 		if errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {
 			return decisioncard.ErrDraftNotAuthority
 		}
@@ -520,7 +520,7 @@ func decideDecisionCardWithStory(ctx context.Context, story runtimeauthoractivit
 	if now.IsZero() {
 		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
-	if err := requireActiveDecisionCardRun(ctx, tx, req.CardID, postgres); err != nil {
+	if err := requireActiveDecisionCardRunTx(ctx, tx, req.CardID, postgres); err != nil {
 		return decisioncard.DecisionOutcome{}, err
 	}
 	if err := RequireNormalCardControlTx(ctx, tx, req.CardID, runfork.ControlMailboxDecide, postgres); err != nil {
@@ -675,7 +675,7 @@ func deferDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity
 	if !until.After(now) {
 		return decisioncard.DecisionOutcome{}, decisioncard.ErrInvalidDeferUntil
 	}
-	if err := requireActiveDecisionCardRun(ctx, tx, req.CardID, postgres); err != nil {
+	if err := requireActiveDecisionCardRunTx(ctx, tx, req.CardID, postgres); err != nil {
 		return decisioncard.DecisionOutcome{}, err
 	}
 	if err := RequireNormalCardControlTx(ctx, tx, req.CardID, runfork.ControlMailboxDefer, postgres); err != nil {
@@ -743,7 +743,7 @@ func beginDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.Be
 	if req.TTL <= 0 {
 		req.TTL = 15 * time.Minute
 	}
-	if err := requireActiveDecisionCardRun(ctx, tx, req.CardID, postgres); err != nil {
+	if err := requireActiveDecisionCardRunTx(ctx, tx, req.CardID, postgres); err != nil {
 		return decisioncard.InputDraft{}, err
 	}
 	if err := RequireNormalCardControlTx(ctx, tx, req.CardID, runfork.ControlMailboxBeginInput, postgres); err != nil {
@@ -823,7 +823,7 @@ func cancelDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.C
 	if now.IsZero() {
 		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
-	if err := requireActiveDecisionDraftRun(ctx, tx, req.InputDraftID, postgres); err != nil {
+	if err := requireActiveDecisionDraftRunTx(ctx, tx, req.InputDraftID, postgres); err != nil {
 		return decisioncard.InputDraft{}, err
 	}
 	draft, err := loadDecisionCardDraft(ctx, tx, req.InputDraftID, postgres)
@@ -1068,7 +1068,7 @@ func supersedeDecisionCardsForStageWithStory(ctx context.Context, story runtimea
 	if now.IsZero() {
 		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
-	if err := requireActiveDecisionRun(ctx, tx, runID, postgres); err != nil {
+	if err := requireActiveDecisionRunTx(ctx, tx, runID, postgres); err != nil {
 		return false, err
 	}
 	card, err := loadDecisionCardByActivation(ctx, tx, runID, entityID, activationID, postgres)

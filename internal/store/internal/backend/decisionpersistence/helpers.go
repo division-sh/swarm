@@ -1,7 +1,6 @@
 package decisionpersistence
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -16,14 +15,6 @@ func sqliteNullTime(value time.Time) any {
 		return nil
 	}
 	return value.UTC()
-}
-
-func requirePostgresRunActiveQuery(ctx context.Context, queryer runstate.RowQueryer, runID string) error {
-	return runstate.RequirePostgresActiveQuery(ctx, queryer, runID)
-}
-
-func requireSQLiteRunActiveQuery(ctx context.Context, queryer runstate.RowQueryer, runID string) error {
-	return runstate.RequireSQLiteActiveQuery(ctx, queryer, runID)
 }
 
 func sqliteTimeValue(raw any) (time.Time, bool, error) {
