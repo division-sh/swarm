@@ -32,7 +32,63 @@ func (e capturedEvent) publicationFingerprint() (string, error) {
 	if err := e.validate(); err != nil {
 		return "", err
 	}
-	return runtimeinbound.SemanticFingerprint(e)
+	return runtimeinbound.SemanticFingerprint(struct {
+		Scope                       captureScope
+		Conversation, EventID, Kind string
+		Body                        []byte
+	}{e.Scope, e.Conversation, e.EventID, e.Kind, e.Body})
+}
+
+const captureProvenanceKey = "whatsapp_capture"
+
+// The selected-store request retains original occurrence provenance; only the
+// retry-stable content fingerprint excludes that transport occurrence.
+func withCaptureProvenance(event capturedEvent, request runtimeinbound.Request) (runtimeinbound.Request, error) {
+	if err := event.validate(); err != nil {
+		return runtimeinbound.Request{}, err
+	}
+	if request.EntityID != event.Scope.EntityID {
+		return runtimeinbound.Request{}, runtimeinbound.ErrRequestIdentityConflict
+	}
+	metadata := request.Normalized().OriginalTransportMetadata
+	if _, err := canonicaljson.Decode(metadata); err != nil {
+		return runtimeinbound.Request{}, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(metadata, &fields); err != nil || fields == nil {
+		return runtimeinbound.Request{}, fmt.Errorf("WhatsApp publication requires object transport metadata")
+	}
+	if _, exists := fields[captureProvenanceKey]; exists {
+		return runtimeinbound.Request{}, runtimeinbound.ErrRequestIdentityConflict
+	}
+	raw, err := json.Marshal(event)
+	if err != nil {
+		return runtimeinbound.Request{}, err
+	}
+	fields[captureProvenanceKey] = raw
+	request.OriginalTransportMetadata, err = json.Marshal(fields)
+	return request, err
+}
+
+func publicationCaptureProvenance(request runtimeinbound.Request) (capturedEvent, error) {
+	var event capturedEvent
+	if _, err := canonicaljson.Decode(request.OriginalTransportMetadata); err != nil {
+		return event, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(request.OriginalTransportMetadata, &fields); err != nil {
+		return event, err
+	}
+	raw, ok := fields[captureProvenanceKey]
+	if !ok {
+		return event, fmt.Errorf("WhatsApp publication has no original capture evidence")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&event); err != nil {
+		return event, err
+	}
+	return event, event.validate()
 }
 
 func publicationRequestBytes(request runtimeinbound.Request) ([]byte, error) {
@@ -66,8 +122,15 @@ func validateCapturePublication(event capturedEvent, request runtimeinbound.Requ
 		return err
 	}
 	publicationID, markerID := runtimeinbound.DeterministicIDs("whatsapp", request.EntityID, identity)
-	if request.Provider != "whatsapp" || request.ProviderEventID != identity || request.RequestFingerprint != fingerprint ||
+	if request.Provider != "whatsapp" || request.EntityID != event.Scope.EntityID || request.ProviderEventID != identity || request.RequestFingerprint != fingerprint ||
 		request.PublicationID != publicationID || request.MarkerEventID != markerID {
+		return runtimeinbound.ErrRequestIdentityConflict
+	}
+	original, err := publicationCaptureProvenance(request)
+	if err != nil {
+		return fmt.Errorf("%w: %w", runtimeinbound.ErrRequestIdentityConflict, err)
+	}
+	if !original.sameCapture(event) {
 		return runtimeinbound.ErrRequestIdentityConflict
 	}
 	return nil
@@ -144,43 +207,79 @@ type publicationReader interface {
 // committed coupling. A callback result or current connection health is not a
 // substitute. Result loss before retirement leaves the original request pending.
 func (s *captureStore) retirePublished(ctx context.Context, event capturedEvent, reader publicationReader) error {
-	if reader == nil {
+	found, err := s.reconcilePublished(ctx, event, reader)
+	if err != nil {
+		return err
+	}
+	if !found {
 		return errCapturePublicationPending
+	}
+	return nil
+}
+
+func verifyHistoricalCapture(event capturedEvent, record runtimeinbound.Record) ([]byte, error) {
+	if record.State != "committed" || record.CommittedAt.IsZero() {
+		return nil, errCapturePublicationPending
+	}
+	original, err := publicationCaptureProvenance(record.Request)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateCapturePublication(original, record.Request); err != nil {
+		return nil, err
+	}
+	if original.Scope != event.Scope || original.Conversation != event.Conversation || original.EventID != event.EventID ||
+		original.Kind != event.Kind || !bytes.Equal(original.Body, event.Body) {
+		return nil, runtimeinbound.ErrRequestIdentityConflict
+	}
+	return publicationRequestBytes(record.Request)
+}
+
+// Historical reconciliation precedes new planning and staging. The namespace
+// comes from the captured admission, never today's target. A fresh occurrence
+// can retire an identical duplicate only after verifying the original evidence.
+func (s *captureStore) reconcilePublished(ctx context.Context, event capturedEvent, reader publicationReader) (bool, error) {
+	if reader == nil {
+		return false, errCapturePublicationPending
+	}
+	identity, err := event.publicationProviderEventID()
+	if err != nil {
+		return false, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer tx.Rollback()
 	stored, err := s.readPendingRows(ctx, tx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	for _, row := range stored {
 		if !row.event.sameCapture(event) {
 			continue
 		}
-		if row.request == nil {
-			return errCapturePublicationPending
-		}
-		record, found, err := reader.LoadInboundPublicationByIdentity(ctx, "whatsapp", row.request.EntityID, row.request.ProviderEventID)
+		record, found, err := reader.LoadInboundPublicationByIdentity(ctx, "whatsapp", event.Scope.EntityID, identity)
 		if err != nil {
-			return err
+			return false, err
 		}
-		if !found || record.State != "committed" || record.CommittedAt.IsZero() {
-			return errCapturePublicationPending
+		if !found {
+			return false, nil
 		}
-		actual, err := publicationRequestBytes(record.Request)
+		actual, err := verifyHistoricalCapture(event, record)
 		if err != nil {
-			return err
+			return false, err
 		}
-		if !bytes.Equal(row.requestBytes, actual) {
-			return runtimeinbound.ErrRequestIdentityConflict
+		if row.request != nil && !bytes.Equal(row.requestBytes, actual) {
+			return false, runtimeinbound.ErrRequestIdentityConflict
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM whatsapp_incoming_capture WHERE sequence=?`, row.sequence); err != nil {
-			return err
+			return false, err
 		}
-		return tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
-	return errCaptureMissing
+	return false, errCaptureMissing
 }

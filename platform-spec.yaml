@@ -11219,6 +11219,16 @@ tool_model:
         grants no new work. Destructive device deletion additionally requires explicit current logout and cannot use
         an inherited transaction to bypass retirement. Ordinary disconnect, provider-side unlink, pairing failure,
         reset and source retirement do not authorize automatic local session deletion.
+      session_private_directory_component: >
+        On supported Linux and Darwin hosts, the concrete connection directory is keyed by the retained connection
+        UUID under an existing private runtime-state base, never source hash, run or process occurrence. Directory,
+        lock and v1 connection-header opens are descriptor-relative and no-follow; directories and regular single-link
+        files require the current effective user and no group/other permissions. Exclusive nonblocking possession
+        precedes provider state access. Unknown, copied, malformed or non-v1 headers refuse without repair or migration.
+        Failed retirement join retains possession and all provider files. Successful ordinary retirement closes
+        possession only after the complete lifetime owner joins; it never removes pairing or state. A controlled
+        store-lease fixture is not proof that an SDK client/socket has joined, and the component alone does not open
+        a provider database, install execution or authorize logout.
       session_buffer_choice: >
         V1 WhatsApp disables the SDK decrypted-event buffer and its persistent outgoing retry store. Their store
         methods refuse instead of creating hidden plaintext or resend spools. Decryption may advance provider ratchet
@@ -11241,9 +11251,26 @@ tool_model:
         admission, executable readiness, standing retention or human identity. Pairing callback installation precedes
         connect, and occurrence fencing and joining include this owner. Session execution remains unavailable until
         the complete connection is installed and qualified; isolated QR proofs do not clear upstream SDK lifetime defects.
+      session_pairing_disclosure_component: >
+        Private QR readback consumes the selected principal supplied by the authenticated API owner, the retained
+        onboarding-operation reader and the exact current runtime coordinate before accessing the bounded QR owner.
+        Provider senders or caller-authored principal fields cannot substitute. Principal, operation, provider,
+        transport, ceremony, coordinate, positive revision and active lifecycle must agree; failed, expired, canceled,
+        completed or successor responsibility refuses disclosure. Read errors and request cancellation return no
+        QR material, and diagnostics never include it. QR expiry, PairSuccess and Connected remain separate facts;
+        none grants executable session authority. Isolated supplied-operation/authentication fixtures are not a
+        qualified authenticated public session-onboarding journey.
+      session_outbound_encoding_component: >
+        Pure WhatsApp text encoding preserves the exact canonical selected PN, LID or group destination and refuses
+        missing, device-qualified, broadcast, newsletter or noncanonical targets. A reply additionally requires the
+        original same-conversation receipt, exact sender, opaque message reference and stored quoted text; it is
+        never guessed, forwarded or silently downgraded to a new message. Current text and quoted text remain distinct.
+        Existing accepted connector schemas own text bounds and receipt/principal owners own authorization. Encoding
+        performs no send, destination selection, journal mutation, retry or SDK installation; actual execution remains
+        bound to the existing admitted activity/effect owners and their uncertainty policy.
       session_incoming_capture: >
         WhatsApp incoming capture commits exact payload bytes together with the original session admission,
-        connection occurrence, source identity, onboarding responsibility, principal and binding revision before
+        connection occurrence, original admitted ingress entity, source identity, onboarding responsibility, principal and binding revision before
         reporting its local successful-capture status. A repeated provider event may retain its original occurrence;
         different payload or scope evidence conflicts rather than overwriting history. Account, conversation,
         provider event and message/edit/revoke kind are distinct identity dimensions. Captured work survives ordinary
@@ -11277,7 +11304,9 @@ tool_model:
         Before invoking atomic selected-store publication, the private incoming capture freezes its original runtime
         publication request, including exact target, run, generation, sequence, receipt time and transport metadata.
         Its existing publication identity covers connection, account, conversation, provider event and kind; its
-        semantic fingerprint binds the full original capture scope, occurrence and exact body bytes. Staging requires
+        semantic fingerprint binds the stable original capture scope and exact body bytes, excluding only the transport
+        occurrence. The original occurrence remains mandatory retained provenance in the canonical publication's
+        transport metadata; it is never overwritten by redelivery. Staging requires
         the retained capture, is idempotent only for the identical canonical request, and grants no executable authority.
         Recovery retains that request instead of selecting a current target or adopting replacement source/account facts.
         Duplicate, quota, readback, staging and retirement consume the same complete capture/publication evidence
@@ -11286,6 +11315,12 @@ tool_model:
         matching the entire frozen request. An in-memory acknowledgment, current health or another publication cannot
         authorize deletion. Read or retirement-write failure preserves the capture and request for exact retry;
         process death after commit but before retirement does not authorize provider replay or another effect.
+        After private retirement, duplicate reconciliation precedes new planning or staging and reads the canonical
+        committed publication in the original captured entity namespace. It verifies retained original capture
+        provenance, stable connection/account/admission/source/principal/binding, content and deterministic identity.
+        Only that verified historical path may acknowledge an identical delivery on a fresh occurrence without
+        selecting a current target, restaging another request or dispatching again. Changed stable authority or content
+        refuses rather than adopting history. No second spool, tombstone registry or compatibility path is introduced.
         Isolated projection, private-state and raw selected-store fixtures do not establish authenticated session
         capture-to-normalized-publication closure or supported WhatsApp execution.
       session_client_occurrence: >
