@@ -26,7 +26,7 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 		{"null required message field", `{"account_id":"acct-1","active":true,"label":null,"attributes":{}}`, false, false, true},
 		{"wrong integer", `{"account_id":"acct-1","count":"3","active":true,"label":"kept","attributes":{}}`, false, false, true},
 		{"descriptor reuse missing initialization", `{"account_id":"acct-1"}`, true, true, false},
-		{"route reuse missing initialization", `{"account_id":"acct-1"}`, true, false, false},
+		{"route without matching key cannot reuse", `{"account_id":"acct-1"}`, true, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyReceiverInitialization(t))

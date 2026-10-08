@@ -2980,12 +2980,7 @@ func TestTemplateInstanceLifecycleUsesResolutionModeWithoutContractPolicyFallbac
 			plan := mustInstanceKeyConnectRoutePlan(t, source)
 			root := ConstructedFlowInstanceIdentityFixture(source, ".", busInternalTestRunID, busInternalTestRunID)
 			producer := ConstructedFlowInstanceIdentityFixture(source, "producer", "", busInternalTestRunID)
-			keyMaterial, failure := runtimepinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, runtimepinrouting.AdmitConnectRouteMatchValues(values))
-			if !failure.Empty() {
-				t.Fatal(failure)
-			}
-			instance := ConstructedFlowInstanceIdentityFixture(source, plan.ReceiverEndpoint().Readback().FlowID, templateInstanceLifecycleInstanceID(plan, keyMaterial.Keys), busInternalTestRunID)
-			descriptors[0].FlowInstance, descriptors[0].EntityID = instance.InstancePath, instance.EntityID
+			instance := StoredFlowInstanceIdentityFixture(source, plan.ReceiverEndpoint().Readback().FlowID, "one", busInternalTestRunID, descriptors[0].EntityID)
 			sourceRoute, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: producer.TemplateID, FlowInstance: producer.InstancePath, EntityID: producer.EntityID})
 			if err != nil {
 				t.Fatal(err)
@@ -2993,6 +2988,7 @@ func TestTemplateInstanceLifecycleUsesResolutionModeWithoutContractPolicyFallbac
 			evt = eventtest.ExistingRunRootIngressWithRoutingSource(evt.ID(), evt.Type(), "", "", evt.Payload(), 0, busInternalTestRunID, events.EventEnvelope{}, sourceRoute, evt.CreatedAt())
 			table := &RouteTable{instanceOwners: map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance{
 				testRunScopedFlowRoute(root.Route()): root, testRunScopedFlowRoute(producer.Route()): producer,
+				testRunScopedFlowRoute(instance.Route()): instance,
 			}}
 			owner := newTemplateInstanceLifecycleOwner(source, table, nil)
 			materialization, decision, handled, err := owner.Materialize(context.Background(), evt, plan, values, descriptors)
