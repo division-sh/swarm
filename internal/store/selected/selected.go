@@ -337,8 +337,9 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 		core: runtime.RuntimeDeps{
 			EventStore: selected,
 			EventBusDurable: runtimebus.DurableDependencies{
-				ScenarioSetup: selected,
-				ReplyContext:  selected, RunLifecycle: selected, DeliveryLifecycle: selected,
+				ConstructionPublications: workflow,
+				ScenarioSetup:            selected,
+				ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 				FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
 				FlowRouteTopology: selected, FlowRouteRollback: selected,
 				ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
@@ -392,8 +393,9 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 		core: runtime.RuntimeDeps{
 			EventStore: selected,
 			EventBusDurable: runtimebus.DurableDependencies{
-				ScenarioSetup: selected,
-				ReplyContext:  selected, RunLifecycle: selected, DeliveryLifecycle: selected,
+				ConstructionPublications: workflow,
+				ScenarioSetup:            selected,
+				ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 				FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
 				FlowRouteTopology: selected, FlowRouteRollback: selected,
 				ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
@@ -454,7 +456,8 @@ func sqliteManagerRoles(selected *private.SQLiteRuntimeStore) runtimemanager.Per
 
 func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipeline.WorkflowPersistence) (RunFork, error) {
 	durable := runtimebus.DurableDependencies{
-		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
+		ConstructionPublications: workflow,
+		ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
 		FlowRouteTopology: selected, FlowRouteRollback: selected, ActiveAgents: selected,
 		ActiveFlows: selected, TargetOwners: selected,
@@ -473,7 +476,8 @@ func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipelin
 
 func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipeline.WorkflowPersistence) (RunFork, error) {
 	durable := runtimebus.DurableDependencies{
-		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
+		ConstructionPublications: workflow,
+		ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
 		FlowRouteTopology: selected, FlowRouteRollback: selected, ActiveAgents: selected,
 		ActiveFlows: selected, TargetOwners: selected,

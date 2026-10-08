@@ -47,6 +47,10 @@ func TestA9SchemaOmittedConstructionUsesAdmittedTreeAndRetainedSource(t *testing
 				if err != nil || !constructor.Eligible() || constructor.KeyField() != "" {
 					t.Fatalf("shared constructor rejected effective keyless node %s: %+v err=%v", flow, constructor, err)
 				}
+				catalog, found := semanticview.WorkflowStageTopology(source, flow)
+				if !found || !catalog.ValidStageCatalog() || catalog.StageCount() != 0 || len(catalog.FinalStageIDs()) != 0 {
+					t.Fatalf("admitted stageless node %s has missing or invented catalog: %+v found=%t", flow, catalog, found)
+				}
 			}
 			const runID = "11111111-1111-4111-8111-111111111111"
 			rootOwner := flowidentity.Stored(source, ".", runID, runID, runID, "")
@@ -78,6 +82,9 @@ func TestA9SchemaOmittedConstructionUsesAdmittedTreeAndRetainedSource(t *testing
 				}
 			}
 			for _, unknown := range []string{"missing", "dead", "resources/data", "../outside"} {
+				if _, found := semanticview.WorkflowStageTopology(source, unknown); found {
+					t.Fatalf("non-admitted node %s acquired a compiled catalog", unknown)
+				}
 				if _, found := source.FlowSchemaByID(unknown); found {
 					t.Fatalf("non-admitted node %s acquired a schema", unknown)
 				}

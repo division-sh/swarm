@@ -40,6 +40,7 @@ import (
 
 type targetRouteMemoryStore struct {
 	mu                sync.Mutex
+	constructions     map[runtimeflowidentity.RunScopedFlowInstance]runtimepipeline.FlowConstructionPublicationEvidence
 	events            map[string]events.Event
 	settlements       map[string]events.RouteSettlement
 	routes            map[string][]events.DeliveryRoute
@@ -56,6 +57,30 @@ type targetRouteMemoryStore struct {
 	targetOwners      []ActiveTargetDescriptor
 	workflowInstances []runtimepipeline.WorkflowInstance
 	workflowStates    []runtimepipeline.WorkflowEntityStatePersistenceRecord
+}
+
+func (s *targetRouteMemoryStore) installConstructionReceipt(owner runtimeflowidentity.RunScopedFlowInstance, evidence runtimepipeline.FlowConstructionPublicationEvidence) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.constructions == nil {
+		s.constructions = make(map[runtimeflowidentity.RunScopedFlowInstance]runtimepipeline.FlowConstructionPublicationEvidence)
+	}
+	if _, exists := s.constructions[owner]; !exists {
+		s.constructions[owner] = evidence
+	}
+}
+
+func (s *targetRouteMemoryStore) LoadFlowConstructionPublication(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entityID string) (runtimepipeline.FlowConstructionPublicationEvidence, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimepipeline.FlowConstructionPublicationEvidence{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	evidence, exists := s.constructions[owner]
+	if !exists || evidence.Identity.EntityID != entityID {
+		return runtimepipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("absent exact test construction receipt")
+	}
+	return evidence, nil
 }
 
 func (s *targetRouteMemoryStore) ListSelectedRunTargetOwners(context.Context, string) ([]ActiveTargetDescriptor, error) {
@@ -289,6 +314,15 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 	}
 	for _, plan := range command.Activations {
 		result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan, Created: true, ReadinessAttemptOrdinal: 1})
+		if s.constructions == nil {
+			s.constructions = make(map[runtimeflowidentity.RunScopedFlowInstance]runtimepipeline.FlowConstructionPublicationEvidence)
+		}
+		for _, constructor := range plan.ConstructionPlans() {
+			owner := runtimeflowidentity.RunScopedFlowInstance{RunID: constructor.Readiness.RunID, Route: constructor.Identity.Route()}
+			if _, exists := s.constructions[owner]; !exists {
+				s.constructions[owner] = runtimepipeline.FlowConstructionPublicationEvidence{Identity: constructor.Identity, CreatingInput: constructor.CreatingInput, Fields: constructor.Instance.Fields}
+			}
+		}
 	}
 	s.replaceFlowInstanceRouteTopologyLocked(command.RouteTopology)
 	return result, result.Validate()

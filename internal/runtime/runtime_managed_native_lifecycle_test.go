@@ -114,6 +114,10 @@ type managedNativeDurableRoles struct {
 	runtimerunlifecycle.OperationOwner
 }
 
+func (managedNativeDurableRoles) LoadFlowConstructionPublication(context.Context, runtimeflowidentity.RunScopedFlowInstance, string) (runtimepipeline.FlowConstructionPublicationEvidence, error) {
+	return runtimepipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("unexpected managed-native construction receipt read")
+}
+
 func (managedNativeDurableRoles) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
 	return fn(ctx)
 }
@@ -191,7 +195,7 @@ func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) run
 		FlowRoutes: roles, FlowRouteRecords: roles, FlowRouteSets: roles,
 		FlowRouteTopology: roles, FlowRouteRollback: roles, ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
 		PreparedEvents:        roles,
-		TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles,
+		TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles,
 	}
 }
 

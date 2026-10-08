@@ -213,7 +213,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		semantics.NodeHandlers[nodeRef.Key()] = handlers
 	}
 	semantics.Loops = deriveWorkflowLoopPlans(bundle, semantics.HandlerTransitions)
-	semantics.StageTopologies = deriveWorkflowStageTopologies(bundle.RootSchema, bundle.FlowSchemas, semantics)
+	semantics.StageTopologies = deriveWorkflowStageTopologies(bundle.RootSchema, bundle.effectiveChildFlowSchemas(), semantics)
 	semantics.Loops = BindWorkflowLoopRegions(semantics.Loops, semantics.StageTopologies)
 	bundle.Semantics = semantics
 	populateEventSchemaOwnershipIndex(bundle)

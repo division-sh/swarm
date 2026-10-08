@@ -405,7 +405,7 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 		FlowRouteTopology: f.selected, FlowRouteRollback: f.selected,
 		ActiveAgents: f.selected, ActiveFlows: f.selected, TargetOwners: f.selected,
 		PreparedEvents: f.selected, TargetFailureRecorder: f.selected,
-		RunOrigins: f.selected, StandingRestarts: f.selected,
+		RunOrigins: f.selected, StandingRestarts: f.selected, ConstructionPublications: f.selected,
 	}
 	var owner runforkexecution.SelectedContractExecutionOwner
 	var err error

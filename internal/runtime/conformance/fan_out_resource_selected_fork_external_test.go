@@ -266,7 +266,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			FlowRouteTopology: selected, FlowRouteRollback: selected,
 			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
 			PreparedEvents: selected, TargetFailureRecorder: selected,
-			RunOrigins: selected, StandingRestarts: selected,
+			RunOrigins: selected, StandingRestarts: selected, ConstructionPublications: selected,
 		}
 		roles := manager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
@@ -291,7 +291,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			FlowRouteTopology: selected, FlowRouteRollback: selected,
 			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
 			PreparedEvents: selected, TargetFailureRecorder: selected,
-			RunOrigins: selected, StandingRestarts: selected,
+			RunOrigins: selected, StandingRestarts: selected, ConstructionPublications: selected,
 		}
 		roles := manager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,

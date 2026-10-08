@@ -39,7 +39,11 @@ func (i Instance) ValidateConstruction(source semanticview.Source, runID string)
 		expected = Stored(source, i.TemplateID, runID, runID, EntityID(runID), "")
 	} else {
 		parent := i.ParentRoute
-		if !parent.Complete() || parent != parent.Normalized() || parent.EntityID != i.ParentEntityID || parent.EntityID != EntityID(parent.FlowInstance) {
+		if !parent.Complete() || parent != parent.Normalized() || parent.EntityID != i.ParentEntityID {
+			return fmt.Errorf("construction identity requires its exact structural parent")
+		}
+		parentSchema, found := source.FlowSchemaByID(parent.FlowID)
+		if !found || (parentSchema.Instance.Empty() || parent.FlowID == semanticview.RootExecutionFlowID(source)) && parent.EntityID != EntityID(parent.FlowInstance) {
 			return fmt.Errorf("construction identity requires its exact structural parent")
 		}
 		if parent.FlowID == semanticview.RootExecutionFlowID(source) && parent.FlowInstance != runID {

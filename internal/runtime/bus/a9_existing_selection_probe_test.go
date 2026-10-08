@@ -39,7 +39,7 @@ func TestA9TriageExistingSelectionUsesStoredConstructionAndEdgeKey(t *testing.T)
 		table.instanceOwners[coordinate] = owner
 	}
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("existing-edge-key"), "start", "test", "", []byte(`{"parent_key":"left","leaf_key":"same"}`), 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
-	owner := newTemplateInstanceLifecycleOwner(source, table, nil)
+	owner := newTemplateInstanceLifecycleOwner(source, table, nil, constructionReceiptTestReader{root, stored})
 	materialized, selected, _, err := owner.Materialize(withConnectRoutePlanPreview(context.Background()), event, plan,
 		map[string]string{"payload.parent_key": "left", "payload.leaf_key": "same"},
 		[]pinrouting.Descriptor{{EntityID: stored.EntityID, FlowInstance: stored.InstancePath, AddressFields: map[string]string{"entity.id": "left"}}})
@@ -109,7 +109,7 @@ func TestA9StoredReceiverSelectionPreservesIdentityAndChecksKeys(t *testing.T) {
 				t.Fatal("counterexample requires an installed routable derived address")
 			}
 			event := eventtest.ExistingRunRootIngress(eventtest.UUID(test.name), "producer/account.ready", "test", "", []byte(`{"account_id":"acct-1"}`), 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
-			owner := newTemplateInstanceLifecycleOwner(source, table, nil)
+			owner := newTemplateInstanceLifecycleOwner(source, table, nil, append(constructionReceiptTestReader{root}, stored...))
 			materialized, selected, handled, err := owner.Materialize(withConnectRoutePlanPreview(context.Background()), event, plan,
 				map[string]string{"payload.account_id": "acct-1"}, descriptors)
 			if err != nil || !handled || materialized.Failure != test.failure {
@@ -147,6 +147,7 @@ func TestA9StoredLeafSelectionExcludesOtherStructuralParents(t *testing.T) {
 		}
 	}
 	add(root)
+	receipts := constructionReceiptTestReader{root}
 	ctx := withConnectRoutePlanPreview(context.Background())
 	var leaves []flowidentity.Instance
 	var descriptors []pinrouting.Descriptor
@@ -156,6 +157,7 @@ func TestA9StoredLeafSelectionExcludesOtherStructuralParents(t *testing.T) {
 			t.Fatal(err)
 		}
 		add(parent)
+		receipts = append(receipts, parent)
 		if discriminator == "left-stored" {
 			if err := selectConnectionConstruction(ctx, parent); err != nil {
 				t.Fatal(err)
@@ -166,16 +168,18 @@ func TestA9StoredLeafSelectionExcludesOtherStructuralParents(t *testing.T) {
 			t.Fatal(err)
 		}
 		add(middle)
+		receipts = append(receipts, middle)
 		leaf, err := flowidentity.KeyedChild(source, middle, "parent/middle/leaf", "same-stored")
 		if err != nil {
 			t.Fatal(err)
 		}
 		add(leaf)
+		receipts = append(receipts, leaf)
 		leaves = append(leaves, leaf)
 		descriptors = append(descriptors, pinrouting.Descriptor{EntityID: leaf.EntityID, FlowInstance: leaf.InstancePath, AddressFields: map[string]string{"entity.id": "same-business-key"}})
 	}
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("parent-exclusion"), "start", "test", "", []byte(`{"parent_key":"left","leaf_key":"same-business-key"}`), 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
-	owner := newTemplateInstanceLifecycleOwner(source, table, nil)
+	owner := newTemplateInstanceLifecycleOwner(source, table, nil, receipts)
 	materialized, selected, _, err := owner.Materialize(ctx, event, plan, map[string]string{"payload.leaf_key": "same-business-key"}, descriptors)
 	if err != nil || !materialized.Failure.Empty() || selected.identity != leaves[0] || materialized.Target.FlowInstance == leaves[1].InstancePath {
 		t.Fatalf("same key under another parent changed selection: %+v selected=%+v err=%v", materialized, selected, err)

@@ -475,6 +475,7 @@ func (*runtimeTestUnavailableHumanTaskExpiry) CommitHumanTaskExpirations(context
 }
 
 type runtimeTestDurableEventStore interface {
+	runtimepipeline.FlowConstructionPublicationReader
 	runtimebus.EventStore
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
@@ -496,7 +497,8 @@ type runtimeTestDurableEventStore interface {
 
 func runtimeTestDurableDependencies(durable runtimeTestDurableEventStore) runtimebus.DurableDependencies {
 	return runtimebus.DurableDependencies{
-		ReplyContext: durable, RunLifecycle: durable,
+		ConstructionPublications: durable,
+		ReplyContext:             durable, RunLifecycle: durable,
 		DeliveryLifecycle: durable, FlowRoutes: durable, FlowRouteRecords: durable,
 		FlowRouteSets: durable, FlowRouteTopology: durable, FlowRouteRollback: durable, ActiveAgents: durable,
 		ActiveFlows: durable, TargetOwners: durable, PreparedEvents: durable,

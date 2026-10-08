@@ -105,6 +105,7 @@ type testAuthorActivityCatalogRegistrar interface {
 }
 
 type scopedTestDurableStore interface {
+	runtimepipeline.FlowConstructionPublicationReader
 	runtimebus.EventStore
 	testAuthorActivityCatalogRegistrar
 	runtimereplycontext.Store
@@ -158,21 +159,22 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 		opts.PipelineObligations = eventStore.PipelineObligations()
 	}
 	opts.Durable = runtimebus.DurableDependencies{
-		ReplyContext:          eventStore,
-		RunLifecycle:          eventStore,
-		DeliveryLifecycle:     eventStore,
-		FlowRoutes:            eventStore,
-		FlowRouteRecords:      eventStore,
-		FlowRouteSets:         eventStore,
-		FlowRouteTopology:     eventStore,
-		FlowRouteRollback:     eventStore,
-		ActiveAgents:          eventStore,
-		ActiveFlows:           eventStore,
-		TargetOwners:          eventStore,
-		PreparedEvents:        eventStore,
-		TargetFailureRecorder: eventStore,
-		RunOrigins:            eventStore,
-		StandingRestarts:      eventStore,
+		ConstructionPublications: eventStore,
+		ReplyContext:             eventStore,
+		RunLifecycle:             eventStore,
+		DeliveryLifecycle:        eventStore,
+		FlowRoutes:               eventStore,
+		FlowRouteRecords:         eventStore,
+		FlowRouteSets:            eventStore,
+		FlowRouteTopology:        eventStore,
+		FlowRouteRollback:        eventStore,
+		ActiveAgents:             eventStore,
+		ActiveFlows:              eventStore,
+		TargetOwners:             eventStore,
+		PreparedEvents:           eventStore,
+		TargetFailureRecorder:    eventStore,
+		RunOrigins:               eventStore,
+		StandingRestarts:         eventStore,
 	}
 	if opts.PayloadAdmitter == nil {
 		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {

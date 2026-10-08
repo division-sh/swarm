@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -97,6 +98,11 @@ func (eb *EventBus) AddFlowInstanceRouteContextFixture(ctx context.Context, req 
 	committed, commitErr := eb.StageFlowInstanceRouteContext(ctx, req)
 	if !committed.Acknowledged {
 		return errors.Join(commitErr, errors.New("flow-instance route topology commit was not acknowledged"))
+	}
+	if reader, ok := eb.durable.ConstructionPublications.(interface {
+		installConstructionReceipt(runtimeflowidentity.RunScopedFlowInstance, runtimepipeline.FlowConstructionPublicationEvidence)
+	}); ok {
+		reader.installConstructionReceipt(req.Identity, runtimepipeline.FlowConstructionPublicationEvidence{Identity: req.Instance})
 	}
 	return errors.Join(commitErr, eb.PublishPersistedFlowInstanceRouteFixture(req))
 }

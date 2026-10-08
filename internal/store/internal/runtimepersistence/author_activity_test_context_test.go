@@ -95,6 +95,7 @@ func ownStoreTestAgentManager(t *testing.T, manager *runtimemanager.AgentManager
 }
 
 type storeTestDurableEventBusStore interface {
+	runtimepipeline.FlowConstructionPublicationReader
 	sourceartifactfixture.Writer
 	SetEventPayloadAdmitter(runtimebus.PayloadAdmitter)
 	runtimebus.EventStore
@@ -159,7 +160,8 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 	}
 	store.SetEventPayloadAdmitter(opts.PayloadAdmitter)
 	opts.Durable = runtimebus.DurableDependencies{
-		ReplyContext: store, RunLifecycle: store, DeliveryLifecycle: store,
+		ConstructionPublications: store,
+		ReplyContext:             store, RunLifecycle: store, DeliveryLifecycle: store,
 		FlowRoutes: store, FlowRouteRecords: store, FlowRouteSets: store, FlowRouteTopology: store, FlowRouteRollback: store,
 		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, PreparedEvents: store,
 		TargetFailureRecorder: store, RunOrigins: store, StandingRestarts: store,
