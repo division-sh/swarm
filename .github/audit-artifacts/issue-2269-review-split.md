@@ -290,11 +290,16 @@ across post-commit consumer handoff, not duplicate creation alone.
 | Direct prepared dispatch | Existing committed-refusal consumption remains authoritative and unchanged. |
 | Missing-operation recovery/replay | Existing exact durable recovery owner refuses a closed obligation; no new replay or settlement right. Unresolved explicit-target republish keeps its prior refusal. |
 
-The duplicate corpus now keeps its second parent trigger successful and asserts
-one exact cause-bound child refusal: platform.target_ambiguous /
-route_plan_instance_conflict, resolution_blocked, one immutable dead letter and
-zero deliveries. Parent/other-child settlement, receiver preservation and all
-three native executions/restarts remain required. Existing store terminal-receipt
+The duplicate corpus asserts atomic pre-commit causing-handler refusal:
+platform.conflicting_duplicate / flow_instance_already_exists, with the exact
+constructed receiver identity. It must produce no second child publication or
+construction, and preserve the parent's and receiver's complete state. This is
+distinct from an already committed publication refusal; the earlier successful
+parent/failed-child expectation was retracted by the binding ruling at
+https://github.com/division-sh/swarm/issues/2269#issuecomment-6054382188.
+The first creation and all other deliveries still require successful settlement,
+and all three native executions/restarts remain required. Genuine post-commit
+refusal proofs are retained separately. Existing store terminal-receipt
 fences, accepted-effect/provider-raw rules, cancellation and graph exclusions are
 unchanged. Invariant: a committed terminal publication disposition never becomes
 a second dispatch or a new platform settlement during consumer handoff.

@@ -3,10 +3,13 @@ package cataloge2e
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 // A durable publication is not proof that its receiver finished. Failed
@@ -95,57 +98,69 @@ func validateCatalogSuccessfulDeliveries(full map[string]operatorread.OperatorEv
 	return nil
 }
 
-func validateCatalogRefusedPublication(full map[string]operatorread.OperatorEventFull, causeID string, want catalogRefusedPublication) (string, error) {
-	cause, found := full[causeID]
-	if !found {
-		return "", fmt.Errorf("refused publication cause %s is missing", causeID)
-	}
-	settled, err := catalogEventSuccessfullySettled(cause)
-	if err != nil || !settled {
-		return "", fmt.Errorf("refused publication cause %s is not successfully settled: %v", causeID, err)
-	}
-	var matches []operatorread.OperatorEventFull
-	for _, child := range full {
-		if child.SourceEventID == causeID && child.EventName == want.Event {
-			matches = append(matches, child)
-		}
-	}
-	if len(matches) != 1 {
-		return "", fmt.Errorf("cause %s has %d %s publications, want exactly one", causeID, len(matches), want.Event)
-	}
-	child := matches[0]
-	event, err := child.EventSnapshot()
-	if err != nil || event.AdmissionClass() == events.EventAdmissionRootIngress {
-		return "", fmt.Errorf("refusal %s is not an admitted child publication: %v", child.EventID, err)
-	}
-	if len(child.Deliveries) != 0 || child.NoDelivery == nil || child.NoDelivery.Reason != want.Reason || len(child.DeadLetters) != 1 {
-		return "", fmt.Errorf("refusal %s changed its exact no-delivery/dead-letter evidence: %+v", child.EventID, child)
-	}
-	failure := child.DeadLetters[0]
-	if string(failure.Failure.Class) != want.FailureClass || failure.Failure.Detail.Code != want.FailureDetail || failure.HandlerNode != "pin_routing" {
-		return "", fmt.Errorf("refusal %s failure = %+v, want %s/%s from pin_routing", child.EventID, failure, want.FailureClass, want.FailureDetail)
-	}
-	return child.EventID, nil
-}
-
-func validateCatalogCreationDeliveries(full map[string]operatorread.OperatorEventFull, required map[string]int, conflictEventID string, refusal *catalogRefusedPublication) error {
-	if conflictEventID == "" {
+func validateCatalogCreationDeliveries(full map[string]operatorread.OperatorEventFull, required map[string]int, conflict catalogTriggerStep, receipt *catalogReceiptOutcome) error {
+	if conflict.eventID == "" {
 		return validateCatalogSuccessfulDeliveries(full, required)
 	}
-	if refusal == nil {
-		return fmt.Errorf("creation refusal %s lacks an exact expectation", conflictEventID)
+	refused, found := full[conflict.eventID]
+	if !found {
+		return fmt.Errorf("exact conflicting second root %s is missing", conflict.eventID)
 	}
-	refusedID, err := validateCatalogRefusedPublication(full, conflictEventID, *refusal)
-	if err != nil {
+	if err := validateCatalogCreateConflict(refused, conflict); err != nil {
 		return err
 	}
-	// Only this cause-bound child may refuse. Its parent and every sibling must
-	// still prove successful settlement, including both authored parent triggers.
+	if err := validateCatalogCreateConflictReceipt(receipt, conflict); err != nil {
+		return err
+	}
+	// Only the exact pre-commit conflicting cause may fail. No business output
+	// from that cause exists, and the first creation and every sibling must settle.
 	successful := make(map[string]operatorread.OperatorEventFull, len(full)-1)
 	for id, event := range full {
-		if id != refusedID {
+		if event.SourceEventID == conflict.eventID {
+			return fmt.Errorf("rejected creation %s produced child %s (%s)", conflict.eventID, id, event.EventName)
+		}
+		if id != conflict.eventID {
 			successful[id] = event
 		}
 	}
 	return validateCatalogSuccessfulDeliveries(successful, required)
+}
+
+func validateCatalogCreateConflict(refused operatorread.OperatorEventFull, want catalogTriggerStep) error {
+	if want.Event != "flow.spawn_requested" || want.ReceiptOutcome != "dead_letter" || want.ReceiptFailureClass != "platform.conflicting_duplicate" || want.ReceiptFailureDetail != "flow_instance_already_exists" {
+		return fmt.Errorf("creation refusal %s lacks an exact atomic-conflict expectation", want.eventID)
+	}
+	if refused.EventID != want.eventID || refused.EventName != want.Event || len(refused.Deliveries) != 1 || len(refused.DeadLetters) != 1 || refused.NoDelivery != nil {
+		return fmt.Errorf("exact conflicting second root %s lost its delivery evidence", want.eventID)
+	}
+	event, err := refused.EventSnapshot()
+	if err != nil || event.AdmissionClass() != events.EventAdmissionRootIngress {
+		return fmt.Errorf("conflict exception is not an admitted root: %s: %v", want.eventID, err)
+	}
+	delivery := refused.Deliveries[0]
+	root := catalogRootWorkflowRoute()
+	if refused.RunID != root.RunID || delivery.Target.FlowID != root.Route.ScopeKey || delivery.Target.FlowInstance != root.Route.InstancePath || delivery.Target.EntityID != flowidentity.EntityID(root.Route.InstancePath) {
+		return fmt.Errorf("creation refusal %s lost its exact causing-handler target: %+v", want.eventID, delivery.Target)
+	}
+	if delivery.Status != "dead_letter" || !delivery.Terminal || delivery.RetryScheduled || delivery.FinishedAt == nil || delivery.FinishedAt.IsZero() || len(delivery.DeadLetters) != 1 {
+		return fmt.Errorf("exact conflicting second root %s did not finish as a dead letter", want.eventID)
+	}
+	for _, failure := range []*runtimefailures.Envelope{delivery.Failure, &delivery.DeadLetters[0].Failure, &refused.DeadLetters[0].Failure} {
+		if failure == nil || string(failure.Class) != want.ReceiptFailureClass || failure.Detail.Code != want.ReceiptFailureDetail {
+			return fmt.Errorf("creation refusal %s failure = %+v, want %s/%s", want.eventID, failure, want.ReceiptFailureClass, want.ReceiptFailureDetail)
+		}
+	}
+	return nil
+}
+
+func validateCatalogCreateConflictReceipt(receipt *catalogReceiptOutcome, want catalogTriggerStep) error {
+	if receipt == nil || receipt.Outcome != want.ReceiptOutcome || receipt.Failure == nil || string(receipt.Failure.Class) != want.ReceiptFailureClass || receipt.Failure.Detail.Code != want.ReceiptFailureDetail {
+		return fmt.Errorf("creation refusal %s lost its exact causing-handler receipt: %+v", want.eventID, receipt)
+	}
+	for key, expected := range want.ReceiptFailureAttributes {
+		if !reflect.DeepEqual(receipt.Failure.Detail.Attributes[key], expected) {
+			return fmt.Errorf("creation refusal %s receipt failure attribute %s = %#v, want %#v", want.eventID, key, receipt.Failure.Detail.Attributes[key], expected)
+		}
+	}
+	return nil
 }
