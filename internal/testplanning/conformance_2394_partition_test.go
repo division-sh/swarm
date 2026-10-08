@@ -242,7 +242,8 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	// #2496 adds the event variant of the existing public permanent-result journey.
 	// Its explicit-empty reporter regression also proves exact no-write settlement.
 	// #2438 2c adds the receiver-configuration carrier restoration guard.
-	want := []int{167, 14, 5, 1}
+	// #2438 A9 adds the exact-owner construction-receipt fixture control.
+	want := []int{168, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -254,6 +255,10 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	const preparedFaultProof = "TestSemanticProofPreparedFaultMatchesRawBothStores"
 	const emptyReporterProof = "TestEmptyReporterSettlesWithoutConstructedHeaderMutationBothStores"
 	const receiverRetirementProof = "TestCanonicalFormsReceiverConfigurationRetirement"
+	const constructionReceiptProof = "TestConformanceConstructionReceiptsRequireExactOwner"
+	if i := sort.SearchStrings(groups[0], constructionReceiptProof); i == len(groups[0]) || groups[0][i] != constructionReceiptProof {
+		t.Fatalf("#2438 exact-owner construction receipt proof missing from %s", conformance2394Units[0])
+	}
 	if i := sort.SearchStrings(groups[0], receiverRetirementProof); i == len(groups[0]) || groups[0][i] != receiverRetirementProof {
 		t.Fatalf("#2438 receiver retirement proof missing from %s", conformance2394Units[0])
 	}
