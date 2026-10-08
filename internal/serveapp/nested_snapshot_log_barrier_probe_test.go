@@ -139,13 +139,15 @@ func TestNestedSnapshotLateAcceptedLogCounterexample(t *testing.T) {
 				if err := rt.DB.QueryRow(`SELECT event_name FROM events WHERE event_id=$1`, logID).Scan(&eventType); err != nil || eventType != "platform.runtime_log" {
 					t.Fatalf("held log %s is not its exact diagnostic event: %s %v", logID, eventType, err)
 				}
-				for _, prior := range before["receipts"] {
-					found := false
-					for _, current := range after["receipts"] {
-						found = found || reflect.DeepEqual(prior, current)
-					}
-					if !found {
-						t.Fatalf("original receipt changed: %#v", prior)
+				for _, table := range []string{"events", "receipts"} {
+					for _, prior := range before[table] {
+						found := false
+						for _, current := range after[table] {
+							found = found || reflect.DeepEqual(prior, current)
+						}
+						if !found {
+							t.Fatalf("original %s row changed: %#v", table, prior)
+						}
 					}
 				}
 				var currentOriginalReceipts int
