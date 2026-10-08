@@ -31,19 +31,8 @@ func commitWorkflowEngineLifecycle(
 		result.TurnCancellations, result.QueuedCancellations = intents.Active, intents.Queued
 		result.QueuedDirectiveCancellations = intents.QueuedDirectives
 	}
-	for index, mutation := range plan.Timers {
-		ref, changed, err := commitWorkflowEngineTimerMutation(ctx, attempt, postgres, mutation)
-		if err != nil {
-			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("commit workflow engine timer mutation %d: %w", index, err)
-		}
-		switch mutation.Kind {
-		case runtimepipeline.WorkflowTimerMutationInsert:
-			result.Wakeups = append(result.Wakeups, ref)
-		case runtimepipeline.WorkflowTimerMutationCancel:
-			if changed {
-				result.Cancellations = append(result.Cancellations, ref)
-			}
-		}
+	if err := commitWorkflowEngineTimers(ctx, attempt, postgres, plan.Timers, &result); err != nil {
+		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
 	if len(plan.Schedules) > 0 && genericSchedules == nil {
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("workflow lifecycle schedule mutations require the generic schedule transaction owner")
@@ -72,6 +61,24 @@ func commitWorkflowEngineLifecycle(
 		}
 	}
 	return result, result.Validate()
+}
+
+func commitWorkflowEngineTimers(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, timers []runtimepipeline.WorkflowTimerMutation, result *runtimepipeline.CommittedWorkflowLifecycleMutation) error {
+	for index, mutation := range timers {
+		ref, changed, err := commitWorkflowEngineTimerMutation(ctx, attempt, postgres, mutation)
+		if err != nil {
+			return fmt.Errorf("commit workflow engine timer mutation %d: %w", index, err)
+		}
+		switch mutation.Kind {
+		case runtimepipeline.WorkflowTimerMutationInsert:
+			result.Wakeups = append(result.Wakeups, ref)
+		case runtimepipeline.WorkflowTimerMutationCancel:
+			if changed {
+				result.Cancellations = append(result.Cancellations, ref)
+			}
+		}
+	}
+	return nil
 }
 
 type workflowDecisionLifecycleTxOwner interface {

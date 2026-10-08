@@ -652,39 +652,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		}
 	}
 
-	planner := eb.deliveryPlanner
-	planner.recipientPolicy.prospective = publication.prospective
-	planRoutes := func(context.Context, events.Event) (RoutePlan, error) {
-		return eb.planSubscribedRoutePlanWithPlanner(withClosedPublicationPlanning(ctx), evt, true, planner)
-	}
-	replayScope := runtimepipelineobligation.ScopeSubscribed
-	if publication.direct {
-		replayScope = runtimepipelineobligation.ScopeDirect
-		switch {
-		case len(publication.directRoutes) > 0:
-			routes := events.NormalizeDeliveryRoutes(publication.directRoutes)
-			planRoutes = func(context.Context, events.Event) (RoutePlan, error) {
-				return eb.planExactDirectRoutePlan(withClosedPublicationPlanning(ctx), evt, routes)
-			}
-		default:
-			requested := uniqueStrings(publication.directRecipients)
-			if len(requested) == 0 {
-				return releaseFailure(errors.New("direct event publication requires at least one recipient"))
-			}
-			planRoutes = func(context.Context, events.Event) (RoutePlan, error) {
-				plan, err := planner.PlanDirect(withClosedPublicationPlanning(ctx), evt, requested)
-				if err != nil {
-					return RoutePlan{}, err
-				}
-				if filtered := filteredRecipients(requested, plan.RecipientIDs()); len(filtered) > 0 {
-					return RoutePlan{}, fmt.Errorf("direct delivery rejected recipients: %s", strings.Join(filtered, ", "))
-				}
-				return plan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx)), nil
-			}
-		}
-	}
-
-	routePlan, err := planRoutes(ctx, evt)
+	routePlan, err := eb.planClosedPublicationRoutes(ctx, evt, publication)
 	if err != nil {
 		return releaseFailure(err)
 	}
@@ -717,7 +685,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	}
 	prepared := PreparedPublish{
 		Event: evt, admitted: admitted, plan: routePlan,
-		direct:                replayScope == runtimepipelineobligation.ScopeDirect,
+		direct:                publication.direct,
 		publicationClaim:      claim,
 		targetFailureInput:    targetFailureInput,
 		providerRawSettlement: publication.providerRawSettlement,
@@ -739,19 +707,8 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	if !routePlan.TargetFailure.Empty() && !prepared.providerRawSettlement.authorizes(evt, targetFailureInput, routePlan) {
 		prepared.targetFailure = true
 	}
-	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
+	if err := eb.prepareClosedPublicationDispatch(ctx, evt, publication, recoveringTimeout, &prepared); err != nil {
 		return releaseFailure(err)
-	} else if reason != "" {
-		prepared.dispatchQueued = true
-		prepared.queueReason = reason
-	}
-	if publication.dynamicFlowCreation != nil && publication.dynamicFlowCreation.DispatchMode == runtimepipeline.DynamicFlowRuntimeCreationDispatchStartupRecovery {
-		prepared.dispatchQueued = true
-		prepared.queueReason = dispatchQueueStartupCreationRecovery
-	}
-	if recoveringTimeout || eb.receiverExecution.Kind() == eventreceiver.ExecutionSelectedRecoveryPublication {
-		prepared.dispatchQueued = true
-		prepared.queueReason = "startup_turn_cancellation_recovery"
 	}
 	if prepared.requiresReceiver() {
 		receiver, receiverErr := eb.receiverProjection(ctx, evt.DeliveryContext())
@@ -775,6 +732,62 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		AuthorDescriptor:    descriptor,
 		HasAuthorDescriptor: hasDescriptor,
 	}, nil
+}
+
+func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.Event, publication eventBusCommitPublishPlan) (RoutePlan, error) {
+	planner := eb.deliveryPlanner
+	planner.recipientPolicy.prospective = publication.prospective
+	planRoutes := func(context.Context, events.Event) (RoutePlan, error) {
+		return eb.planSubscribedRoutePlanWithPlanner(withClosedPublicationPlanning(ctx), evt, true, planner)
+	}
+	if publication.direct {
+		switch {
+		case len(publication.directRoutes) > 0:
+			routes := events.NormalizeDeliveryRoutes(publication.directRoutes)
+			planRoutes = func(context.Context, events.Event) (RoutePlan, error) {
+				return eb.planExactDirectRoutePlan(withClosedPublicationPlanning(ctx), evt, routes)
+			}
+		default:
+			requested := uniqueStrings(publication.directRecipients)
+			if len(requested) == 0 {
+				return RoutePlan{}, errors.New("direct event publication requires at least one recipient")
+			}
+			planRoutes = func(context.Context, events.Event) (RoutePlan, error) {
+				plan, err := planner.PlanDirect(withClosedPublicationPlanning(ctx), evt, requested)
+				if err != nil {
+					return RoutePlan{}, err
+				}
+				if filtered := filteredRecipients(requested, plan.RecipientIDs()); len(filtered) > 0 {
+					return RoutePlan{}, fmt.Errorf("direct delivery rejected recipients: %s", strings.Join(filtered, ", "))
+				}
+				return plan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx)), nil
+			}
+		}
+	}
+
+	routePlan, err := planRoutes(ctx, evt)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	return routePlan, nil
+}
+
+func (eb *EventBus) prepareClosedPublicationDispatch(ctx context.Context, evt events.Event, publication eventBusCommitPublishPlan, recoveringTimeout bool, prepared *PreparedPublish) error {
+	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
+		return err
+	} else if reason != "" {
+		prepared.dispatchQueued = true
+		prepared.queueReason = reason
+	}
+	if publication.dynamicFlowCreation != nil && publication.dynamicFlowCreation.DispatchMode == runtimepipeline.DynamicFlowRuntimeCreationDispatchStartupRecovery {
+		prepared.dispatchQueued = true
+		prepared.queueReason = dispatchQueueStartupCreationRecovery
+	}
+	if recoveringTimeout || eb.receiverExecution.Kind() == eventreceiver.ExecutionSelectedRecoveryPublication {
+		prepared.dispatchQueued = true
+		prepared.queueReason = "startup_turn_cancellation_recovery"
+	}
+	return nil
 }
 
 func (eb *EventBus) prepareFlowInstanceActivationRouteTopology(

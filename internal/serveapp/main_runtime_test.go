@@ -6457,6 +6457,15 @@ func requireServedReplayNoDeliveryHistoryNoMutation(t *testing.T, endpoint strin
 		t.Fatalf("event.replay data = %#v, want %s", errResp.Data, apiv1.EventReplayNoDeliveryHistoryCode)
 	}
 	if got := servedEventPublishSourcedEventCount(t, db, backend, eventID); got != beforeSourcedEvents {
+		var cause operatorread.OperatorEventFull
+		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": eventID}, &cause)
+		var page operatorread.OperatorEventListResult
+		requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": cause.RunID}, "limit": 100}, &page)
+		for _, child := range page.Events {
+			if child.SourceEventID == eventID {
+				t.Logf("rejected replay causal readback: event=%s type=%s source_event=%s producer=%s/%s payload=%+v", child.EventID, child.EventName, child.SourceEventID, child.ProducerType, child.Source, child.Payload)
+			}
+		}
 		t.Fatalf("%s events sourced from rejected node-only replay target = %d, want %d", backend, got, beforeSourcedEvents)
 	}
 	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.replay", idempotencyKey); got != 0 {

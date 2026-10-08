@@ -7,10 +7,62 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 )
+
+func validateUnstartedRecoveryAnchorsTx(ctx context.Context, tx *sql.Tx, postgres bool, row canceledTurnRecoveryRow, origin effects.CompletionOrigin, owner flowidentity.RunScopedFlowInstance) error {
+	at, valid, err := sqliteTimeValue(row.requested)
+	if err != nil || !valid {
+		return fmt.Errorf("retried unstarted turn lacks its intent timestamp")
+	}
+	anchor, err := loadCanceledFirstAttempt(ctx, tx, postgres, row.admittedAttempt.String, at)
+	if err != nil {
+		return err
+	}
+	anchorOwner, err := businessTurnOwner(anchor.Authority)
+	if err != nil || anchorOwner != owner || anchor.Authority.Target.AgentID != row.agentID {
+		return fmt.Errorf("retried unstarted turn contradicts its historical owner")
+	}
+	current := anchor
+	current.Origin = origin
+	if err := validateBusinessTurnAnchor(anchor, current); err != nil {
+		return err
+	}
+	if row.firstAttempt.Valid {
+		first, err := loadCanceledFirstAttempt(ctx, tx, postgres, row.firstAttempt.String, at)
+		if err != nil {
+			return err
+		}
+		if err := validateBusinessTurnAnchor(first, current); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateUnstartedRecoveryClock(row canceledTurnRecoveryRow, origin effects.CompletionOrigin) error {
+	launched, hasLaunch, err := sqliteTimeValue(row.launched)
+	if err != nil || hasLaunch != row.firstAttempt.Valid || row.bound.Valid != row.emit.Valid || row.bound.Valid != row.timeoutEvent.Valid {
+		return fmt.Errorf("unstarted recovery has contradictory historical clock evidence")
+	}
+	clock := effects.LogicalTurnClock{Origin: origin, FirstAttempt: row.firstAttempt.String, LaunchedAt: launched, TimeoutEvent: row.timeoutEvent.String}
+	if row.bound.Valid {
+		clock.Timeout = &timeridentity.TurnTimeout{After: time.Duration(row.bound.Int64), Emit: row.emit.String}
+		if err := clock.Timeout.Validate(); err != nil {
+			return err
+		}
+		clock.DeadlineAt = launched.Add(clock.Timeout.After)
+	}
+	if hasLaunch {
+		if err := clock.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func recoverUnstartedCanceledTurn(ctx context.Context, tx *sql.Tx, postgres bool, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, row canceledTurnRecoveryRow) (effects.TurnExecutionResult, error) {
 	if !row.originEvidence.Valid || row.currentAttempt.Valid || row.reason != string(deliverylifecycle.CancellationTerminate) ||
@@ -26,49 +78,12 @@ func recoverUnstartedCanceledTurn(ctx context.Context, tx *sql.Tx, postgres bool
 		return effects.TurnExecutionResult{}, fmt.Errorf("unstarted recovery contradicts its actual origin/owner")
 	}
 	if row.admittedAttempt.Valid {
-		at, valid, err := sqliteTimeValue(row.requested)
-		if err != nil || !valid {
-			return effects.TurnExecutionResult{}, fmt.Errorf("retried unstarted turn lacks its intent timestamp")
-		}
-		anchor, err := loadCanceledFirstAttempt(ctx, tx, postgres, row.admittedAttempt.String, at)
-		if err != nil {
+		if err := validateUnstartedRecoveryAnchorsTx(ctx, tx, postgres, row, origin, owner); err != nil {
 			return effects.TurnExecutionResult{}, err
-		}
-		anchorOwner, err := businessTurnOwner(anchor.Authority)
-		if err != nil || anchorOwner != owner || anchor.Authority.Target.AgentID != row.agentID {
-			return effects.TurnExecutionResult{}, fmt.Errorf("retried unstarted turn contradicts its historical owner")
-		}
-		current := anchor
-		current.Origin = origin
-		if err := validateBusinessTurnAnchor(anchor, current); err != nil {
-			return effects.TurnExecutionResult{}, err
-		}
-		if row.firstAttempt.Valid {
-			first, err := loadCanceledFirstAttempt(ctx, tx, postgres, row.firstAttempt.String, at)
-			if err != nil {
-				return effects.TurnExecutionResult{}, err
-			}
-			if err := validateBusinessTurnAnchor(first, current); err != nil {
-				return effects.TurnExecutionResult{}, err
-			}
 		}
 	}
-	launched, hasLaunch, err := sqliteTimeValue(row.launched)
-	if err != nil || hasLaunch != row.firstAttempt.Valid || row.bound.Valid != row.emit.Valid || row.bound.Valid != row.timeoutEvent.Valid {
-		return effects.TurnExecutionResult{}, fmt.Errorf("unstarted recovery has contradictory historical clock evidence")
-	}
-	clock := effects.LogicalTurnClock{Origin: origin, FirstAttempt: row.firstAttempt.String, LaunchedAt: launched, TimeoutEvent: row.timeoutEvent.String}
-	if row.bound.Valid {
-		clock.Timeout = &timeridentity.TurnTimeout{After: time.Duration(row.bound.Int64), Emit: row.emit.String}
-		if err := clock.Timeout.Validate(); err != nil {
-			return effects.TurnExecutionResult{}, err
-		}
-		clock.DeadlineAt = launched.Add(clock.Timeout.After)
-	}
-	if hasLaunch {
-		if err := clock.Validate(); err != nil {
-			return effects.TurnExecutionResult{}, err
-		}
+	if err := validateUnstartedRecoveryClock(row, origin); err != nil {
+		return effects.TurnExecutionResult{}, err
 	}
 	var directive agentcontrol.DirectiveOperation
 	if origin.Kind == effects.CompletionOriginDirective {

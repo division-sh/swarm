@@ -11,6 +11,22 @@ import (
 
 // PublishEmit uses the ordinary publication and receiver owners. It neither
 // waits for queued work nor passes the producer's authority to receivers.
+func resolveCommittedEmitStage(handoffCtx context.Context, owner pipeline.WorkflowEmitFeedbackOwner, eventID string, request pipeline.WorkflowPublicationStageRequest, candidate pipeline.WorkflowEmitFeedback) (pipeline.WorkflowEmitFeedback, error) {
+	evidence, found, readErr := owner.ReadWorkflowPublicationStages(handoffCtx, eventID, request.Instance)
+	if readErr != nil || !found {
+		return candidate, errors.Join(readErr, fmt.Errorf("accepted emit lacks exact stage evidence"))
+	}
+	if evidence.Acceptance != candidate.Receipt {
+		return candidate, errors.Join(fmt.Errorf("emit acceptance changed after dispatch"))
+	}
+	for _, receipt := range evidence.Handlers {
+		if receipt.Stage().Revision > candidate.Receipt.Stage().Revision {
+			candidate.Receipt, candidate.StageOrigin = receipt, pipeline.EmitStageHandler
+		}
+	}
+	return candidate, nil
+}
+
 func (eb *EventBus) PublishEmit(ctx context.Context, event events.Event, request pipeline.WorkflowPublicationStageRequest) (result pipeline.WorkflowEmitResult, err error) {
 	if err := request.ValidateEvent(event); err != nil {
 		return result, err
@@ -64,18 +80,11 @@ func (eb *EventBus) PublishEmit(ctx context.Context, event events.Event, request
 		candidate.Dispatch = pipeline.EmitDispatchQueued
 	}
 	if candidate.Dispatch != pipeline.EmitDispatchQueued {
-		evidence, found, readErr := owner.ReadWorkflowPublicationStages(handoffCtx, event.ID(), request.Instance)
-		if readErr != nil || !found {
-			return result, errors.Join(err, readErr, fmt.Errorf("accepted emit lacks exact stage evidence"))
+		resolved, resolveErr := resolveCommittedEmitStage(handoffCtx, owner, event.ID(), request, candidate)
+		if resolveErr != nil {
+			return result, errors.Join(err, resolveErr)
 		}
-		if evidence.Acceptance != acceptance {
-			return result, errors.Join(err, fmt.Errorf("emit acceptance changed after dispatch"))
-		}
-		for _, receipt := range evidence.Handlers {
-			if receipt.Stage().Revision > candidate.Receipt.Stage().Revision {
-				candidate.Receipt, candidate.StageOrigin = receipt, pipeline.EmitStageHandler
-			}
-		}
+		candidate = resolved
 	}
 	committed, commitErr := owner.CommitWorkflowEmitFeedback(handoffCtx, candidate)
 	if !committed.Acknowledged {

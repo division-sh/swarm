@@ -17,16 +17,7 @@ type SelectedForkRecoveryRequest struct {
 	Cancellations []effects.CanceledTurnCommand
 }
 
-func (r SelectedForkRecoveryRequest) Validate() error {
-	if err := r.Process.Validate(); err != nil {
-		return err
-	}
-	if r.Process.State != startupownership.StateActive {
-		return fmt.Errorf("selected recovery requires active process possession")
-	}
-	if err := r.Effects.Validate(); err != nil {
-		return err
-	}
+func (r SelectedForkRecoveryRequest) validateCancellationCommands() error {
 	for i, command := range r.Cancellations {
 		if err := command.Validate(); err != nil {
 			return err
@@ -39,6 +30,22 @@ func (r SelectedForkRecoveryRequest) Validate() error {
 				return fmt.Errorf("selected recovery repeats an exact canceled origin")
 			}
 		}
+	}
+	return nil
+}
+
+func (r SelectedForkRecoveryRequest) Validate() error {
+	if err := r.Process.Validate(); err != nil {
+		return err
+	}
+	if r.Process.State != startupownership.StateActive {
+		return fmt.Errorf("selected recovery requires active process possession")
+	}
+	if err := r.Effects.Validate(); err != nil {
+		return err
+	}
+	if err := r.validateCancellationCommands(); err != nil {
+		return err
 	}
 	if err := bundleidentity.ValidateCanonicalHash(r.Entry.BundleHash); err != nil {
 		return err

@@ -645,6 +645,28 @@ func (am *AgentManager) continueDirectiveOperation(ctx context.Context, store ru
 	}
 }
 
+func joinDirectiveExecutionHeartbeat(heartbeatDone <-chan struct{}, shutdownTimeout time.Duration, admitted runtimeagentcontrol.DirectiveOperation) error {
+	heartbeatShutdown := time.NewTimer(shutdownTimeout)
+	select {
+	case <-heartbeatDone:
+		if !heartbeatShutdown.Stop() {
+			select {
+			case <-heartbeatShutdown.C:
+			default:
+			}
+		}
+	case <-heartbeatShutdown.C:
+		admitted.State = runtimeagentcontrol.DirectiveOperationIndeterminate
+		failure := runtimeagentcontrol.DirectiveHeartbeatShutdownUnconfirmedFailure()
+		admitted.Failure = &failure
+		return &runtimeagentcontrol.DirectiveOperationError{
+			Err:       runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate,
+			Operation: admitted,
+		}
+	}
+	return nil
+}
+
 func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, store runtimeagentcontrol.DirectiveOperationStore, op runtimeagentcontrol.DirectiveOperation) (runtimeagentcontrol.SendDirectiveResult, error) {
 	lease, err := am.lifecycle.acquireExecutionIdentity(ctx, op.AgentIdentity, "execute_directive", false)
 	if err != nil {
@@ -708,23 +730,8 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 	executionErr = errors.Join(executionErr, turnFinishErr)
 	providerSettlement := completionSettlement()
 	stopHeartbeat()
-	heartbeatShutdown := time.NewTimer(heartbeatConfig.shutdownTimeout)
-	select {
-	case <-heartbeatDone:
-		if !heartbeatShutdown.Stop() {
-			select {
-			case <-heartbeatShutdown.C:
-			default:
-			}
-		}
-	case <-heartbeatShutdown.C:
-		admitted.State = runtimeagentcontrol.DirectiveOperationIndeterminate
-		failure := runtimeagentcontrol.DirectiveHeartbeatShutdownUnconfirmedFailure()
-		admitted.Failure = &failure
-		return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveOperationError{
-			Err:       runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate,
-			Operation: admitted,
-		}
+	if err := joinDirectiveExecutionHeartbeat(heartbeatDone, heartbeatConfig.shutdownTimeout, admitted); err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
 	if turn.Cancellation.Requested {
 		if turn.Attempt.Origin.Kind != runtimeeffects.CompletionOriginDirective || !turn.Attempt.Origin.Directive.Same(directiveOrigin) {
