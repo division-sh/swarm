@@ -941,6 +941,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	}
 	requireStandingTelegramCalls(t, calls, sqlitePath, 84)
 	waitForStandingDeliveryQuiescence(t, sqlitePath)
+	requireStandingDeclarationPublicationReadback(t, secondURL, firstBinding, []string{"101", "102", "103"})
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
@@ -955,17 +956,18 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		}
 	}()
 	var runs, instances, entities int
-	var standingRunID, standingEntityID string
+	var standingRunID string
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
-		SELECT s.current_run_id, f.entity_id
-		FROM standing_services s
-		JOIN flow_instances f ON f.run_id = s.current_run_id AND f.flow_template = s.flow_path
-		WHERE s.flow_path = 'telegram-ingress'
-		  AND s.declaration_present = TRUE
-		  AND s.effective_state = 'active'
-	`).Scan(&standingRunID, &standingEntityID); err != nil || standingRunID != firstBinding.RunID || standingEntityID == "" {
+		SELECT current_run_id
+		FROM standing_services
+		WHERE flow_path = 'telegram-ingress'
+		  AND declaration_present = TRUE
+		  AND effective_state = 'active'
+	`).Scan(&standingRunID); err != nil || standingRunID != firstBinding.RunID {
 		t.Fatalf("resolve standing run authority: %v", err)
 	}
+	_, receiver := requireSingleReceiverTargetState(t, requireReceiverProofStateReader(t, sqliteStore), standingRunID, "telegram-ingress")
+	standingEntityID := receiver.EntityID
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
 		SELECT COUNT(*)
 		FROM standing_services
@@ -998,18 +1000,6 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	var pendingCards int
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = ? AND status = 'pending' AND json_extract(snapshot, '$.decision') = 'retire_service'`, standingEntityID).Scan(&pendingCards); err != nil || pendingCards != 1 {
 		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
-	}
-	var rawEvents, wrongRunEvents, borrowedEntityEvents int
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
-		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = ? THEN 0 ELSE 1 END), 0),
-		       COALESCE(SUM(CASE WHEN COALESCE(entity_id, '') = '' THEN 0 ELSE 1 END), 0)
-		FROM events
-		WHERE event_name = 'inbound.telegram'
-	`, standingRunID).Scan(&rawEvents, &wrongRunEvents, &borrowedEntityEvents); err != nil {
-		t.Fatalf("inspect declaration publication lineage: %v", err)
-	}
-	if rawEvents != 3 || wrongRunEvents != 0 || borrowedEntityEvents != 0 {
-		t.Fatalf("declaration publication lineage = events:%d wrong_run:%d borrowed_entity:%d, want 3/0/0", rawEvents, wrongRunEvents, borrowedEntityEvents)
 	}
 	if err := sqliteStore.Close(); err != nil {
 		t.Fatalf("close SQLite inspection store before restart matrix: %v", err)
@@ -1182,6 +1172,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	}
 	requireStandingTelegramCalls(t, calls, "postgres:"+dsn, 84)
 	waitForStandingDeliveryQuiescence(t, "postgres:"+dsn)
+	requireStandingDeclarationPublicationReadback(t, "http://"+serveRuntimeAPIListenerFromOutput(t, second.outputString()), binding, []string{"201", "202", "203"})
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
@@ -1192,17 +1183,25 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	}
 	defer db.Close()
 	var runs, instances, entities int
-	var standingRunID, entity string
+	var standingRunID string
 	if err := db.QueryRow(`
-		SELECT s.current_run_id::text, f.entity_id::text
-		FROM standing_services s
-		JOIN flow_instances f ON f.run_id = s.current_run_id AND f.flow_template = s.flow_path
-		WHERE s.flow_path = 'telegram-ingress'
-		  AND s.declaration_present = TRUE
-		  AND s.effective_state = 'active'
-	`).Scan(&standingRunID, &entity); err != nil || standingRunID != binding.RunID || entity == "" {
+		SELECT current_run_id::text
+		FROM standing_services
+		WHERE flow_path = 'telegram-ingress'
+		  AND declaration_present = TRUE
+		  AND effective_state = 'active'
+	`).Scan(&standingRunID); err != nil || standingRunID != binding.RunID {
 		t.Fatalf("resolve standing run authority: %v", err)
 	}
+	observer, err := storetest.OpenReleaseProcessReadOnlyInspection("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, receiver := requireSingleReceiverTargetState(t, requireReceiverProofStateReader(t, observer), standingRunID, "telegram-ingress")
+	if err := observer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	entity := receiver.EntityID
 	if err := db.QueryRow(`
 		SELECT COUNT(*)
 		FROM standing_services
@@ -1235,18 +1234,6 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	var pendingCards int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND anchor->>'entity_id' = $1 AND status = 'pending' AND snapshot->>'decision' = 'retire_service'`, entity).Scan(&pendingCards); err != nil || pendingCards != 1 {
 		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
-	}
-	var rawEvents, wrongRunEvents, borrowedEntityEvents int
-	if err := db.QueryRow(`
-		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = $1::uuid THEN 0 ELSE 1 END), 0),
-		       COALESCE(SUM(CASE WHEN entity_id IS NULL THEN 0 ELSE 1 END), 0)
-		FROM events
-		WHERE event_name = 'inbound.telegram'
-	`, standingRunID).Scan(&rawEvents, &wrongRunEvents, &borrowedEntityEvents); err != nil {
-		t.Fatalf("inspect declaration publication lineage: %v", err)
-	}
-	if rawEvents != 3 || wrongRunEvents != 0 || borrowedEntityEvents != 0 {
-		t.Fatalf("declaration publication lineage = events:%d wrong_run:%d borrowed_entity:%d, want 3/0/0", rawEvents, wrongRunEvents, borrowedEntityEvents)
 	}
 	disableServeRuntimeRecovery(t, opts.ConfigPath)
 	requireChangedStandingColdStartMatrix(t, opts, sourceRoot, standingRunID, func(t *testing.T) {
