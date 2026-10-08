@@ -82,7 +82,8 @@ func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
 				if attempt == 1 {
 					firstProducer = producer
 					firstRun = seed.RunID
-					firstSnapshot = settledStaticRunSnapshot(t, rt, probe, seed)
+					waitServedPublicationSettlement(t, probe, seed)
+					firstSnapshot = repeatedStaticRunSnapshot(t, rt.DB, firstRun)
 				} else {
 					if got := repeatedStaticRunSnapshot(t, rt.DB, firstRun); !reflect.DeepEqual(got, firstSnapshot) {
 						t.Fatalf("run 2 mutated run 1: before=%#v after=%#v", firstSnapshot, got)
@@ -94,11 +95,10 @@ func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
 	}
 }
 
-func settledStaticRunSnapshot(t *testing.T, rt servedControlProofRuntime, probe *lifecycletest.Probe, published servedEventPublishRPCResult) map[string][][]string {
+func waitServedPublicationSettlement(t *testing.T, probe *lifecycletest.Probe, published servedEventPublishRPCResult) {
 	t.Helper()
 	// Delivery settlement precedes the accepted publication's diagnostic tail.
 	probe.Expect(published.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
-	return repeatedStaticRunSnapshot(t, rt.DB, published.RunID)
 }
 
 // Read every persisted field, not just counts: another run must not rebind or
