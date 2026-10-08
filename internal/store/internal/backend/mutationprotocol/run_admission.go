@@ -50,7 +50,11 @@ func CachedActiveRunSource(ctx context.Context, tx *sql.Tx, runID string) (runti
 	if err != nil || attempt == nil {
 		return runtimecorrelation.SourceArtifactFact{}, false, err
 	}
-	fact, ok := attempt.runAdmissions[strings.TrimSpace(runID)]
+	key, valid := physicalRunKey(attempt.dialect, runID)
+	if !valid {
+		return runtimecorrelation.SourceArtifactFact{}, false, nil
+	}
+	fact, ok := attempt.runAdmissions[key]
 	return fact, ok, nil
 }
 
@@ -61,14 +65,17 @@ func CacheActiveRunSource(ctx context.Context, tx *sql.Tx, runID string, fact ru
 	if err != nil || attempt == nil {
 		return err
 	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
+	key, valid := physicalRunKey(attempt.dialect, runID)
+	if key == "" {
 		return errors.New("run admission requires run_id")
+	}
+	if !valid {
+		return errors.New("run admission requires a physical run identity")
 	}
 	if err := fact.Validate(); err != nil {
 		return err
 	}
-	attempt.runAdmissions[runID] = fact
+	attempt.runAdmissions[key] = fact
 	return nil
 }
 
@@ -79,23 +86,16 @@ func InvalidateActiveRunSource(ctx context.Context, tx *sql.Tx, runID string) er
 	if err != nil || attempt == nil {
 		return err
 	}
-	runID = strings.TrimSpace(runID)
+	key, valid := physicalRunKey(attempt.dialect, runID)
 	if attempt.dialect == privateactivity.DialectPostgres {
-		// PostgreSQL UUID aliases name the same row, unlike SQLite TEXT keys.
-		id, err := uuid.Parse(runID)
-		if err != nil {
+		// Preserve conservative invalidation for spellings outside uuid.Parse,
+		// even when PG accepts them. Invalid spellings cannot retain authority.
+		if _, err := uuid.Parse(strings.TrimSpace(runID)); err != nil || !valid {
 			clear(attempt.runAdmissions)
 			return nil
 		}
-		for admittedRun := range attempt.runAdmissions {
-			admittedID, err := uuid.Parse(admittedRun)
-			if err != nil || admittedID == id {
-				delete(attempt.runAdmissions, admittedRun)
-			}
-		}
-	} else {
-		delete(attempt.runAdmissions, runID)
 	}
+	delete(attempt.runAdmissions, key)
 	return nil
 }
 
@@ -112,8 +112,9 @@ func (a *Attempt) RequireActiveRunSourceAdmission(ctx context.Context, runID str
 	if attempt != a {
 		return errors.New("run admission belongs to another mutation attempt")
 	}
-	admitted, ok := a.runAdmissions[strings.TrimSpace(runID)]
-	if !ok || !admitted.Matches(fact) {
+	key, valid := physicalRunKey(a.dialect, runID)
+	admitted, ok := a.runAdmissions[key]
+	if !valid || !ok || !admitted.Matches(fact) {
 		return errors.New("active run source was not admitted by this mutation attempt")
 	}
 	return nil
