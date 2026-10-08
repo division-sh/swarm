@@ -24,13 +24,6 @@ func RequirePostgresActiveTx(ctx context.Context, tx *sql.Tx, runID string) erro
 	return err
 }
 
-func RequirePostgresActiveSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
-	if tx == nil {
-		return runtimecorrelation.SourceArtifactFact{}, errors.New("PostgreSQL run lifecycle transaction is required")
-	}
-	return requireActiveSource(ctx, tx.QueryRowContext, runID, true, true)
-}
-
 type RowQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
@@ -115,13 +108,6 @@ func RequireSQLiteActiveTx(ctx context.Context, tx *sql.Tx, runID string) error 
 	}
 	_, err := requireActiveSource(ctx, tx.QueryRowContext, runID, false, false)
 	return err
-}
-
-func RequireSQLiteActiveSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
-	if tx == nil {
-		return runtimecorrelation.SourceArtifactFact{}, errors.New("SQLite run lifecycle transaction is required")
-	}
-	return requireActiveSource(ctx, tx.QueryRowContext, runID, false, false)
 }
 
 func RequireSQLiteActiveQuery(ctx context.Context, queryer RowQueryer, runID string) error {

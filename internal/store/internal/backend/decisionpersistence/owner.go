@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -15,26 +16,31 @@ import (
 type DecisionPostgresOwner struct {
 	backend           *postgresbackend.Backend
 	requireCurrent    func() error
-	candidateRequests mutationprotocol.CandidateWriter
+	candidateRequests lifecycleWriter
 	candidates        *runhandoff.CandidateCoordinator
 }
 
 type DecisionSQLiteOwner struct {
 	backend           *sqlitebackend.Backend
 	requireCurrent    func() error
-	candidateRequests mutationprotocol.CandidateWriter
+	candidateRequests lifecycleWriter
 	candidates        *runhandoff.CandidateCoordinator
 	nowFn             func() time.Time
 }
 
-func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, candidateWriter mutationprotocol.CandidateWriter, candidates *runhandoff.CandidateCoordinator) (*DecisionPostgresOwner, error) {
+type lifecycleWriter interface {
+	mutationprotocol.CandidateWriter
+	RequireActiveSourceTx(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error)
+}
+
+func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, candidateWriter lifecycleWriter, candidates *runhandoff.CandidateCoordinator) (*DecisionPostgresOwner, error) {
 	if backend == nil || !backend.Valid() || requireCurrent == nil || candidateWriter == nil || candidates == nil {
 		return nil, errors.New("decision-card PostgreSQL owner dependencies are required")
 	}
 	return &DecisionPostgresOwner{backend: backend, requireCurrent: requireCurrent, candidateRequests: candidateWriter, candidates: candidates}, nil
 }
 
-func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, candidateWriter mutationprotocol.CandidateWriter, candidates *runhandoff.CandidateCoordinator, now func() time.Time) (*DecisionSQLiteOwner, error) {
+func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, candidateWriter lifecycleWriter, candidates *runhandoff.CandidateCoordinator, now func() time.Time) (*DecisionSQLiteOwner, error) {
 	if backend == nil || !backend.Valid() || requireCurrent == nil || candidateWriter == nil || candidates == nil {
 		return nil, errors.New("decision-card SQLite owner dependencies are required")
 	}
