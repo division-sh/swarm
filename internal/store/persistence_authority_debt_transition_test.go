@@ -9,7 +9,7 @@ import (
 // digest. The origin and permission checks are hashed, so the transition cannot
 // be reactivated after landing by editing this destination alone.
 const debtG01CollectorTo = "b42ea974646e7b666459091174645baa501d91da16871813568db23858def7b7"
-const debtCacheCollectorTo = "f2ecc012b58131daa84827eae558631ff96247d556c1b328b3db4c1172734f6f"
+const debtCacheCollectorTo = "9838ebeda35431046f2c855e7b941997a846b1abc7ccbcf6a1f1fd7243c3e669"
 
 func TestPersistenceAuthorityDebtG01TransitionIsExactAndMetadataOnly(t *testing.T) {
 	digest, err := debtCollectorDigest(persistenceAuthorityRepoRoot(t))

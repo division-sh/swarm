@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strings"
 	"testing"
 
 	"golang.org/x/mod/modfile"
@@ -167,28 +166,4 @@ func (cache debtAnalysisCache) baseSites(t *testing.T, root, source string) map[
 	sites := authorityDebtSites(findings)
 	cache.write(source, sites)
 	return sites
-}
-
-func debtCommittedCensusSource(root string) string {
-	// Always scan live head. Only a successful census of a clean committed tree
-	// may be reused as another run's immutable base.
-	status, err := debtGit(root, "status", "--porcelain=v1", "--untracked-files=all")
-	if err != nil || len(bytes.TrimSpace(status)) != 0 {
-		return ""
-	}
-	head, err := debtGit(root, "rev-parse", "HEAD")
-	if err != nil {
-		return ""
-	}
-	source := strings.TrimSpace(string(head))
-	if authorityDebtHex(source, 40) {
-		return source
-	}
-	return ""
-}
-
-func (cache debtAnalysisCache) publishHead(root, source string, sites map[string]authorityDebtSite) {
-	if source != "" && source == debtCommittedCensusSource(root) {
-		cache.write(source, sites)
-	}
 }

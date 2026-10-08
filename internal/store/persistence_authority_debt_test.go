@@ -460,7 +460,6 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	baseRoot := materializeDebtBase(t, root, base)
 	cache := debtAnalysisCacheForCheckout(t, root)
 	baseActual := cache.baseSites(t, baseRoot, base)
-	headSource := debtCommittedCensusSource(root)
 	headFindings := debtLoadPersistenceAuthorityFindings(t, root)
 	headFindings = append(headFindings, debtSelectedBoundaryFindings(t, root)...)
 	actual := authorityDebtSites(headFindings)
@@ -569,7 +568,6 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 		}
 	}
 	t.Logf("debt source=%s collector=%s total-findings=%d raw-operation-sites=%d debt=%d inherited-baseline=%d confirmed-raw-operation-debt=%d unresolved-excluded-occurrences=%d", base, collector, len(headFindings), rawSites, authorityDebtCount(actual), authorityDebtCount(head.Sites), confirmedRaw, unresolved)
-	cache.publishHead(root, headSource, actual)
 }
 
 func debtSortedKeys(sites map[string]authorityDebtSite) []string {

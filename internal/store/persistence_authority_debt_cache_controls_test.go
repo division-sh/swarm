@@ -137,7 +137,7 @@ func TestPersistenceAuthorityDebtAnalysisCacheKeepsFreshSourcesAndResurrection(t
 	}
 }
 
-func TestPersistenceAuthorityDebtAnalysisCacheCannotPublishDirtyHead(t *testing.T) {
+func TestPersistenceAuthorityDebtAnalysisCacheKeepsIgnoredHeadInputOutOfBase(t *testing.T) {
 	cache := debtControlCache(t)
 	root := t.TempDir()
 	git := func(args ...string) string {
@@ -151,31 +151,24 @@ func TestPersistenceAuthorityDebtAnalysisCacheCannotPublishDirtyHead(t *testing.
 	git("init", "-q")
 	git("config", "user.name", "Debt cache control")
 	git("config", "user.email", "cache@example.invalid")
-	debtWriteModuleSource(t, root, "source.txt", "original\n")
+	debtWriteModuleSource(t, root, "go.mod", "module example.com/authorityprobe\n\ngo 1.25.0\n")
+	debtWriteModuleSource(t, root, "probe.go", "package probe;import \"database/sql\";func legacy(db *sql.DB){db.QueryRow(\"one\")}\n")
+	debtWriteModuleSource(t, root, ".gitignore", "ignored.go\n")
 	git("add", ".")
 	git("commit", "-qm", "test: cache source")
-	source := debtCommittedCensusSource(root)
-	if source == "" {
-		t.Fatal("clean committed source missing")
+	source := git("rev-parse", "HEAD")
+	immutable := materializeDebtBase(t, root, source)
+	sites := cache.baseSites(t, immutable, source)
+	debtWriteModuleSource(t, root, "ignored.go", "package probe;import \"database/sql\";func hidden(db *sql.DB){db.Exec(\"two\")}\n")
+	if git("status", "--porcelain=v1", "--untracked-files=all") != "" {
+		t.Fatal("counterexample requires git-clean ignored source")
 	}
-	debtWriteModuleSource(t, root, "untracked.go", "package probe\n")
-	cache.publishHead(root, source, debtControlSet(debtControlSite("call:Exec", 1)))
-	if _, ok := cache.read(source); ok {
-		t.Fatal("dirty checkout was published as an immutable source")
+	head := authorityDebtSites(append(debtLoadPersistenceAuthorityFindings(t, root), debtSelectedBoundaryFindings(t, root)...))
+	if len(authorityDebtSubset(head, sites, "ignored head source")) == 0 {
+		t.Fatal("fresh head census missed ignored authority")
 	}
-	if err := os.Remove(filepath.Join(root, "untracked.go")); err != nil {
-		t.Fatal(err)
-	}
-	git("commit", "-q", "--allow-empty", "-m", "test: changed head during scan")
-	cache.publishHead(root, source, debtControlSet(debtControlSite("call:Exec", 1)))
-	if _, ok := cache.read(source); ok {
-		t.Fatal("changed head was published under the old identity")
-	}
-	newSource := debtCommittedCensusSource(root)
-	sites := debtControlSet(debtControlSite("call:Exec", 1))
-	cache.publishHead(root, newSource, sites)
-	if got, ok := cache.read(newSource); !ok || !debtSitesEqual(got, sites) {
-		t.Fatal("successful clean-head census was not published for future base use")
+	if got := cache.baseSites(t, immutable, source); !debtSitesEqual(got, sites) {
+		t.Fatal("live ignored source contaminated the immutable-base census")
 	}
 }
 
