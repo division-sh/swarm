@@ -81,11 +81,14 @@ func (eb *EventBus) runtimeIngressDispatchPaused(ctx context.Context, evt events
 	if gate == nil {
 		return false, nil
 	}
-	paused, err := gate.QueueableIngressPaused(ctx)
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	paused, err := gate.QueueableIngressPaused(dispatchMetadataReadContext(ctx))
 	if err != nil {
 		return false, err
 	}
-	return paused, nil
+	return paused, ctx.Err()
 }
 
 func (eb *EventBus) runDispatchBlocked(ctx context.Context, evt events.Event) (bool, error) {
@@ -102,45 +105,45 @@ func (eb *EventBus) runDispatchBlocked(ctx context.Context, evt events.Event) (b
 	if gate == nil {
 		return false, nil
 	}
-	return gate.QueueableRunDispatchBlocked(ctx, runID)
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	blocked, err := gate.QueueableRunDispatchBlocked(dispatchMetadataReadContext(ctx), runID)
+	if err != nil {
+		return false, err
+	}
+	return blocked, ctx.Err()
 }
 
 func runtimeIngressDispatchBypass(evt events.Event) bool {
 	return events.IsRuntimePlatformEvent(evt)
 }
 
-func (eb *EventBus) dispatchQueueReason(ctx context.Context, evt events.Event) (string, error) {
-	readCtx := ctx
+func dispatchMetadataReadContext(ctx context.Context) context.Context {
 	if _, owned := runtimeWorkAdmissionFromContext(ctx); owned {
 		// The accepted lease joins only these metadata reads. Neither a late
 		// result nor the SQL context grants uncancellable receiver execution.
-		readCtx = context.WithoutCancel(ctx)
+		return context.WithoutCancel(ctx)
 	}
-	if err := ctx.Err(); err != nil {
+	return ctx
+}
+
+func (eb *EventBus) dispatchQueueReason(ctx context.Context, evt events.Event) (string, error) {
+	if paused, err := eb.runtimeIngressDispatchPaused(ctx, evt); err != nil {
 		return "", err
-	}
-	paused, err := eb.runtimeIngressDispatchPaused(readCtx, evt)
-	if err != nil {
-		return "", err
-	}
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	if paused {
+	} else if paused {
 		return dispatchQueueRuntimeIngress, nil
 	}
-	blocked, err := eb.runDispatchBlocked(readCtx, evt)
-	if err != nil {
+	if blocked, err := eb.runDispatchBlocked(ctx, evt); err != nil {
 		return "", err
-	}
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	if blocked {
+	} else if blocked {
 		eb.mu.RLock()
 		gate := eb.runDispatchGate
 		eb.mu.RUnlock()
-		parked, err := gate.QueueableRunDispatchParked(readCtx, evt.RunID())
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		parked, err := gate.QueueableRunDispatchParked(dispatchMetadataReadContext(ctx), evt.RunID())
 		if err != nil {
 			return "", err
 		}
