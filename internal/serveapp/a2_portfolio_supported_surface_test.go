@@ -267,6 +267,27 @@ func requireA2PortfolioVerification(t *testing.T, root string) {
 
 func requireA2PortfolioKeyedEntity(t *testing.T, rt servedControlProofRuntime, runID, flow, field, key string) operatorread.OperatorEntityFull {
 	t.Helper()
+	if rt.Runtime == nil || rt.Runtime.Pipeline == nil {
+		t.Fatal("portfolio readback requires the actual constructed-header owner")
+	}
+	headers, err := rt.Runtime.Pipeline.ListWorkflowInstances(t.Context(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exact := map[string]string{}
+	for _, header := range headers {
+		if header.WorkflowName == flow {
+			coordinate, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flow, header.InstanceID, header.StorageRef))
+			if err != nil {
+				t.Fatal(err)
+			}
+			initial, err := rt.Runtime.Pipeline.LoadFlowConstructionPublication(t.Context(), coordinate, header.EntityID)
+			if err != nil || initial.Identity.TemplateID != flow || initial.Identity.InstancePath != header.StorageRef || initial.Identity.EntityID != header.EntityID {
+				t.Fatalf("portfolio header lacks its exact construction evidence: %+v %v", header, err)
+			}
+			exact[initial.Identity.InstancePath] = initial.Identity.EntityID
+		}
+	}
 	var list operatorread.OperatorEntityListResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "entity.list", map[string]any{"run_id": runID, "limit": 100}, &list)
 	if list.NextCursor != "" {
@@ -277,7 +298,10 @@ func requireA2PortfolioKeyedEntity(t *testing.T, rt servedControlProofRuntime, r
 		if entity.RunID != runID {
 			t.Fatalf("portfolio keyed readback included a foreign run: %+v", entity)
 		}
-		if flowidentity.SemanticScopeFromInstancePath(entity.FlowInstance) == flow {
+		if entityID, found := exact[entity.FlowInstance]; found {
+			if entityID != entity.EntityID {
+				t.Fatalf("public entity contradicts its constructed header: %+v", entity)
+			}
 			full := requireA2PortfolioEntity(t, rt, runID, entity.FlowInstance)
 			if full.Fields[field] == key {
 				matches = append(matches, full)
