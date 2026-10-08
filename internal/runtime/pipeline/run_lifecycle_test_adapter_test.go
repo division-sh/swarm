@@ -277,10 +277,6 @@ func (m testRunLifecycleMutation) ReviseSource(
 	return testRunLifecycleAffected(result)
 }
 
-func (testRunLifecycleMutation) SyncCounters(context.Context, string) error {
-	return nil
-}
-
 func (m testRunLifecycleMutation) RequirePresentRun(ctx context.Context, runID string) error {
 	return m.RequirePresent(ctx, runID)
 }
@@ -321,10 +317,6 @@ func (m testRunLifecycleMutation) ReviseRunSource(ctx context.Context, request r
 	return m.ReviseSource(ctx, request)
 }
 
-func (m testRunLifecycleMutation) SyncRunCounters(ctx context.Context, runID string) error {
-	return m.SyncCounters(ctx, runID)
-}
-
 func (m testRunLifecycleMutation) loadSnapshot(
 	ctx context.Context,
 	runID string,
@@ -338,7 +330,7 @@ func (m testRunLifecycleMutation) loadSnapshot(
 		       COALESCE(origin_service_id, ''), COALESCE(origin_generation, 0),
 		       COALESCE(forked_from_run_id, ''), COALESCE(forked_from_point_kind, ''),
 		       COALESCE(forked_from_revision, 0), COALESCE(forked_from_event_id, ''),
-		       COALESCE(event_count, 0), COALESCE(entity_count, 0),
+		       COALESCE(event_count, 0), (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id),
 		       COALESCE(failure, ''), COALESCE(continued_as_run_id, ''),
 		       started_at, ended_at
 		FROM runs WHERE run_id = ?
@@ -350,7 +342,7 @@ func (m testRunLifecycleMutation) loadSnapshot(
 			       COALESCE(origin_service_id::text, ''), COALESCE(origin_generation, 0),
 			       COALESCE(forked_from_run_id::text, ''), COALESCE(forked_from_point_kind, ''),
 			       COALESCE(forked_from_revision, 0), COALESCE(forked_from_event_id::text, ''),
-			       COALESCE(event_count, 0), COALESCE(entity_count, 0),
+			       COALESCE(event_count, 0), (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id),
 			       COALESCE(failure::text, ''), COALESCE(continued_as_run_id::text, ''),
 			       started_at, ended_at
 			FROM runs WHERE run_id = $1::uuid FOR UPDATE

@@ -390,14 +390,6 @@ func (r *recordingRuntimeMutationRunner) ReviseRunSource(ctx context.Context, re
 	return m.ReviseRunSource(ctx, request)
 }
 
-func (r *recordingRuntimeMutationRunner) SyncRunCounters(ctx context.Context, runID string) error {
-	m, err := r.lifecycleMutation(ctx)
-	if err != nil {
-		return err
-	}
-	return m.SyncRunCounters(ctx, runID)
-}
-
 func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
 	_, err := r.RunRuntimeMutationContextAcknowledged(ctx, fn)
 	return err
@@ -504,7 +496,6 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 				forked_from_event_id TEXT,
 				continued_as_run_id TEXT,
 				event_count INTEGER NOT NULL DEFAULT 0,
-				entity_count INTEGER NOT NULL DEFAULT 0,
 				failure TEXT,
 				started_at TIMESTAMP NOT NULL,
 				ended_at TIMESTAMP

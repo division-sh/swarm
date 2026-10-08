@@ -1267,10 +1267,6 @@ func (s *PostgresStore) SuspendStandingService(ctx context.Context, operation pi
 	return s.pipelinePostgresOwner.SuspendStandingService(ctx, operation)
 }
 
-func (s *PostgresStore) SyncRunCounters(ctx context.Context, runID string) error {
-	return s.runLifecyclePostgresOwner.SyncRunCounters(ctx, runID)
-}
-
 func (s *PostgresStore) TerminalizeRun(ctx context.Context, runID string, reason string) ([]deliverylifecycle.Terminalization, error) {
 	return s.deliveryPostgresOwner.TerminalizeRun(ctx, runID, reason)
 }
@@ -2497,10 +2493,6 @@ func (s *SQLiteRuntimeStore) SupersedeProposedEffectsForLoopGenerations(ctx cont
 
 func (s *SQLiteRuntimeStore) SuspendStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
 	return s.pipelineSQLiteOwner.SuspendStandingService(ctx, operation)
-}
-
-func (s *SQLiteRuntimeStore) SyncRunCounters(ctx context.Context, runID string) error {
-	return s.runLifecycleSQLiteOwner.SyncRunCounters(ctx, runID)
 }
 
 func (s *SQLiteRuntimeStore) TerminalizeRun(ctx context.Context, runID string, reason string) ([]deliverylifecycle.Terminalization, error) {

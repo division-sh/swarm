@@ -111,6 +111,8 @@ type Attempt struct {
 	discardRetained bool
 	discardSelected bool
 	claimRetirement ClaimRetirement
+	eventCounts     map[string]int64
+	eventCountOrder []string
 }
 
 var _ runtimeactivity.Mutation = (*Attempt)(nil)
@@ -123,6 +125,15 @@ func (a *Attempt) WithSQL(ctx context.Context, writer func(context.Context, *sql
 	}
 	if writer == nil {
 		return errors.New("mutation SQL writer is required")
+	}
+	if ctx == nil {
+		return errors.New("mutation SQL context is required")
+	}
+	if current, ok := ctx.Value(sqlAttemptKey{}).(*Attempt); ok && current != a {
+		return errors.New("mutation SQL context belongs to another attempt")
+	}
+	if ctx.Value(sqlAttemptKey{}) != a {
+		ctx = context.WithValue(ctx, sqlAttemptKey{}, a)
 	}
 	return writer(ctx, a.tx)
 }
@@ -256,6 +267,9 @@ func (a *Attempt) BeginDestructiveCleanup(ctx context.Context) error {
 	if a.kind == RetainedForkCleanup && !a.discardSelected {
 		return errors.New("selected fork discard retention was not classified")
 	}
+	if err := a.FlushEventCounts(ctx); err != nil {
+		return err
+	}
 	if err := a.story.Finalize(ctx); err != nil {
 		return err
 	}
@@ -288,6 +302,9 @@ func (a *Attempt) finalize(ctx context.Context, phase *Phase) error {
 	}
 	if a.kind == RetainedForkCleanup && !a.cleanup {
 		return errors.New("retained fork cleanup did not finalize activity before deletion")
+	}
+	if err := a.FlushEventCounts(ctx); err != nil {
+		return err
 	}
 	if a.effects.HasDeclarations() {
 		*phase = RevisionFinalize
@@ -452,6 +469,7 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 				}
 			}
 			attempt := &Attempt{tx: tx, dialect: dialect, evidence: evidence, kind: kind, effects: baseline.effects, handoff: handoff, candidates: candidates, active: true}
+			txctx = context.WithValue(txctx, sqlAttemptKey{}, attempt)
 			previous = attempt
 			defer func() { attempt.active = false }()
 			phase = AcquireFence

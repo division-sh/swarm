@@ -23,7 +23,7 @@ func commitFanOutPublicationTx(ctx context.Context, attempt *mutationprotocol.At
 	}
 	// The named chunk mutation synchronizes each touched run once after its
 	// publications. No intermediate counter value can escape that transaction.
-	return commitValidatedPublicationTx(ctx, attempt, store, command, false)
+	return commitValidatedPublicationTx(ctx, attempt, store, command)
 }
 
 func (s *EventPostgresOwner) CommitFanOutPublicationTx(ctx context.Context, attempt *mutationprotocol.Attempt,

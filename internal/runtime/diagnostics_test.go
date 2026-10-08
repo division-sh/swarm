@@ -105,7 +105,7 @@ func (s runtimeLogPersistenceStub) PersistRuntimeLog(ctx context.Context, record
 			return err
 		}
 		return attempt.WithSQL(storyctx, func(ctx context.Context, tx *sql.Tx) error {
-			return syncRuntimeLogRunCountsForTest(ctx, tx, runID)
+			return nil
 		})
 	})
 }
@@ -1130,13 +1130,6 @@ func ensureRuntimeLogRunRowInStoryForTest(ctx context.Context, tx *sql.Tx, runID
 		StartedAt: time.Now().UTC(),
 	})
 	return err
-}
-
-func syncRuntimeLogRunCountsForTest(ctx context.Context, tx *sql.Tx, runID string) error {
-	if tx == nil {
-		return errors.New("runtime log counter fixture requires transaction")
-	}
-	return runlifecyclefixture.PostgresSyncCountersInMutation(ctx, tx, runID)
 }
 
 type runtimeLogPayloadArg struct {
