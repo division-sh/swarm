@@ -163,13 +163,20 @@ func TestFlowConstructorActivationConsumesExactInputBothStores(t *testing.T) {
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 				req := sqliteFlowActivationRequest(f.bundle, "review", "r1", "", "review/r1")
+				runID := correlation.RunIDFromContext(f.ctx)
+				parent := flowidentity.Stored(req.ContractBundle, ".", runID, runID, "", "")
+				child, err := flowidentity.KeyedChild(req.ContractBundle, parent, "review", "r1")
+				if err != nil {
+					t.Fatal(err)
+				}
+				req.Instance = child
 				req.ConstructorInput = "task.started"
 				if test.input != "" {
 					req.ConstructorInput = test.input
 				}
 				req.ResolvedKey = test.key
 				req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "task.started", "constructor-fixture", "", []byte(test.payload), 0, correlation.RunIDFromContext(f.ctx), events.EventEnvelope{}, req.OccurredAt)
-				err := f.manager.ActivateFlowInstance(f.ctx, req)
+				err = f.manager.ActivateFlowInstance(f.ctx, req)
 				if test.refusal != "" {
 					if err == nil || !strings.Contains(err.Error(), test.refusal) {
 						t.Fatalf("want %s before construction, got %v", test.refusal, err)

@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
@@ -37,6 +38,12 @@ func constructWorkflowMutationFixture(t *testing.T, backend, flowID string, at t
 	}, nil)
 	runID := correlation.RunIDFromContext(f.ctx)
 	req := sqliteFlowActivationRequest(f.bundle, flowID, "receiver", "", flowID+"/receiver")
+	parent := runtimeflowidentity.Stored(req.ContractBundle, semanticview.RootExecutionFlowID(req.ContractBundle), runID, runID, "", "")
+	child, err := runtimeflowidentity.KeyedChild(req.ContractBundle, parent, flowID, "receiver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Instance = child
 	req.OccurredAt = at
 	req.ConstructorInput, req.ResolvedKey = "construct.requested", "receiver"
 	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, at)

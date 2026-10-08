@@ -1093,6 +1093,13 @@ func sqliteFlowActivationRequest(bundle *runtimecontracts.WorkflowContractBundle
 func sqliteKeyedFlowActivationRequest(t *testing.T, ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, instanceID string) runtimepipeline.FlowInstanceActivationRequest {
 	t.Helper()
 	req := sqliteFlowActivationRequest(bundle, "review", instanceID, "", "review/"+instanceID)
+	runID := runtimecorrelation.RunIDFromContext(ctx)
+	parent := runtimeflowidentity.Stored(req.ContractBundle, semanticview.RootExecutionFlowID(req.ContractBundle), runID, runID, "", "")
+	child, err := runtimeflowidentity.KeyedChild(req.ContractBundle, parent, "review", instanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Instance = child
 	req.ConstructorInput, req.ResolvedKey = "task.started", instanceID
 	payload, err := json.Marshal(map[string]string{"request_id": instanceID})
 	if err != nil {

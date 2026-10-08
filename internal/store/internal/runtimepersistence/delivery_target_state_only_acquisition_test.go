@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -148,12 +149,52 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 					rootConstruction := sqliteFlowActivationRequest(bundle, ".", runID, "", runID)
 					rootConstruction.Instance = runtimeflowidentity.Stored(source, ".", runID, runID, runID, "")
 					rootConstruction.OccurredAt = time.Now().UTC()
-					constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), rootConstruction)
+					rootPlan := constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), rootConstruction)
+					var constructed runtimeflowidentity.Instance
 					if scope.template {
 						construction := sqliteFlowActivationRequest(bundle, scope.flow, "instance", "", instance)
+						view, found := bundle.FlowViewByID(scope.flow)
+						if !found || view.Parent == nil {
+							t.Fatal("template fixture requires its compiled structural parent")
+						}
+						var parents []runtimeflowidentity.Instance
+						plans := []runtimepipeline.FlowInstanceActivationPlan{rootPlan}
+						for i := 0; i < len(plans); i++ {
+							plan := plans[i]
+							plans = append(plans, plan.Children...)
+							if plan.Identity.TemplateID == view.Parent.Paths.FlowPath {
+								parents = append(parents, plan.Identity)
+							}
+						}
+						if len(parents) == 0 && view.Parent.Parent != nil && view.Parent.Parent.Paths.FlowPath == rootPlan.Identity.TemplateID {
+							parent, err := runtimeflowidentity.KeyedChild(source, rootPlan.Identity, view.Parent.Paths.FlowPath, "parent-instance")
+							if err != nil {
+								t.Fatal(err)
+							}
+							parentPlan := constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), runtimepipeline.FlowInstanceActivationRequest{
+								ContractBundle: source, Instance: parent, OccurredAt: time.Now().UTC(),
+								ConstructorInput: "test.fixture_parent.construct", ResolvedKey: "parent-instance",
+								TriggerEvent: eventtest.ExistingRunRootIngress(uuid.NewString(), "test.fixture_parent.construct", "fixture", "", []byte(`{"account_id":"parent-business-key","instance_key":"parent-instance"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC()),
+							})
+							parents = append(parents, parentPlan.Identity)
+						}
+						if len(parents) != 1 {
+							t.Fatal("template fixture lacks one exact committed structural parent")
+						}
+						child, err := runtimeflowidentity.KeyedChild(source, parents[0], scope.flow, "instance")
+						if err != nil {
+							t.Fatal(err)
+						}
+						construction.Instance = child
+						constructed = child
+						instance, entityID = child.InstancePath, child.EntityID
 						construction.ConstructorInput = "test.node_emitted.selector"
 						construction.ResolvedKey = "instance"
-						construction.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted.selector", "", "", []byte(`{"account_id":"different-business-key","instance_key":"instance"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+						creatingPayload := []byte(`{"account_id":"different-business-key","instance_key":"instance"}`)
+						if scope.name == "nested-template" {
+							creatingPayload = []byte(`{"account_id":"different-business-key","instance_key":"instance","parent_key":"parent-instance"}`)
+						}
+						construction.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted.selector", "", "", creatingPayload, 0, runID, events.EventEnvelope{}, time.Now().UTC())
 						constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), construction)
 					}
 					otherEntity := uuid.NewString()
@@ -220,7 +261,7 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 								t.Fatal(err)
 							}
 							if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{
-								Identity: identity, Instance: runtimeflowidentity.Derive(source, scope.flow, "instance"), ActivationVariables: map[string]string{"entity.instance_key": "instance"},
+								Identity: identity, Instance: constructed, ActivationVariables: map[string]string{"entity.instance_key": "instance"},
 							}); err != nil {
 								t.Fatal(err)
 							}
@@ -228,7 +269,12 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						return bus
 					}
 					bus := newBus()
-					evt := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(eventType), "", "", []byte(`{"account_id":"same-business-key","instance_key":"instance"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+					payload := []byte(`{"account_id":"same-business-key","instance_key":"instance"}`)
+					envelope := events.EventEnvelope{}
+					if scope.name == "nested-template" {
+						payload = []byte(`{"account_id":"same-business-key","instance_key":"instance","parent_key":"parent-instance"}`)
+					}
+					evt := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(eventType), "", "", payload, 0, runID, envelope, time.Now().UTC())
 					if tc.wrongOwner && scope.flow != "." {
 						evt = eventtest.TargetRouted(evt, events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance, EntityID: entityID})
 					}
@@ -254,23 +300,37 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						return
 					}
 					plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
-					if err != nil || len(plan.DeliveryRoutes) != 1 {
+					wantRoute := events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance, EntityID: entityID}.Normalized()
+					wantRoutes := map[events.RouteIdentity]bool{wantRoute: false}
+					if scope.name == "nested-template" {
+						parent := constructed.ParentRoute
+						wantRoutes[events.RouteIdentity{FlowID: parent.FlowID, FlowInstance: parent.FlowInstance, EntityID: parent.EntityID}.Normalized()] = false
+					}
+					if err != nil || len(plan.DeliveryRoutes) != len(wantRoutes) {
 						t.Fatalf("plan=%#v err=%v", plan, err)
 					}
-					wantRoute := events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance, EntityID: entityID}.Normalized()
-					if plan.DeliveryRoutes[0].Target.Route() != wantRoute || plan.DeliveryRoutes[0].Target.MaterializingEntity() {
-						t.Fatalf("wrong constructed owner: %#v want %#v", plan.DeliveryRoutes, wantRoute)
+					for _, route := range plan.DeliveryRoutes {
+						target := route.Target.Route().Normalized()
+						seen, known := wantRoutes[target]
+						if !known || seen || route.Target.MaterializingEntity() {
+							t.Fatalf("wrong or repeated constructed owner: %#v want %#v", plan.DeliveryRoutes, wantRoutes)
+						}
+						wantRoutes[target] = true
 					}
 					if err := bus.Publish(ctx, evt); err != nil {
 						t.Fatal(err)
 					}
 					prepared, found, err := selected.LoadPreparedPublishEvent(ctx, evt.ID())
-					if err != nil || !found || len(prepared.DeliveryRoutes) != 1 {
+					if err != nil || !found || len(prepared.DeliveryRoutes) != len(wantRoutes) {
 						t.Fatalf("load=%t %v %#v", found, err, prepared)
 					}
-					target := prepared.DeliveryRoutes[0].Target
-					if target.Route() != wantRoute || target.MaterializingEntity() {
-						t.Fatalf("persisted target=%#v", target)
+					for _, route := range prepared.DeliveryRoutes {
+						target := route.Target.Route().Normalized()
+						seen, known := wantRoutes[target]
+						if !known || !seen || route.Target.MaterializingEntity() {
+							t.Fatalf("wrong or repeated persisted target=%#v", route.Target)
+						}
+						wantRoutes[target] = false
 					}
 					// Late rows and a reconstructed publisher cannot re-elect an accepted receiver.
 					seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), scope.other+"/later", "active", "same-business-key")
@@ -278,10 +338,10 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						t.Fatalf("duplicate after reconstruction: %v", err)
 					}
 					again, found, err := selected.LoadPreparedPublishEvent(ctx, evt.ID())
-					if err != nil || !found || len(again.DeliveryRoutes) != 1 || again.DeliveryRoutes[0].Target != target {
+					if err != nil || !found || !reflect.DeepEqual(again.DeliveryRoutes, prepared.DeliveryRoutes) {
 						t.Fatalf("duplicate rewrote receiver: %#v %t %v", again, found, err)
 					}
-					assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
+					assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, len(wantRoutes))
 					assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, instance, 1)
 					var siblingFields string
 					if err := db.QueryRowContext(ctx, `SELECT fields FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, otherEntity).Scan(&siblingFields); err != nil {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
@@ -74,11 +75,18 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 				Alias: "domain", EntityID: entityID, FlowInstance: "freeze/domain", EntityType: "review_item",
 				CurrentState: "active", Fields: map[string]any{"account_id": "domain"},
 			}
-			if _, err := surface.SetupScenarioEntities(ctx, pipeline.ScenarioSetupRequest{
-				RunID: fixture.sourceRun, CreatedAt: fixture.forkedAt.Add(-time.Minute), Entities: []pipeline.ScenarioSetupEntityRequest{entity},
-			}); err != nil {
+			parent := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), fixture.sourceRun, fixture.sourceRun, "", "")
+			child, err := runtimeflowidentity.KeyedChild(source, parent, "freeze", "domain")
+			if err != nil {
 				t.Fatal(err)
 			}
+			child.EntityID = entityID
+			created := fixture.forkedAt.Add(-time.Minute)
+			constructHistoricalSourceFixture(t, ctx, surface.(agentFixtureFlowStore), pipeline.FlowInstanceActivationRequest{
+				ContractBundle: source, Instance: child, OccurredAt: created,
+				ConstructorInput: "test.node_emitted.upserter", ResolvedKey: "domain",
+				TriggerEvent: eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted.upserter", "fixture", "", []byte(`{"account_id":"domain","instance_key":"domain"}`), 0, fixture.sourceRun, events.EventEnvelope{}, created),
+			})
 			mutationQuery := `SELECT COUNT(*) FROM entity_mutations WHERE entity_id = ?`
 			if fixture.postgres != nil {
 				mutationQuery = `SELECT COUNT(*) FROM entity_mutations WHERE entity_id = $1::uuid`
@@ -87,7 +95,6 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			if err := fixture.db.QueryRowContext(ctx, mutationQuery, entityID).Scan(&baselineMutationRows); err != nil {
 				t.Fatal(err)
 			}
-			seedForkedFlowInstance(t, fixture, entity.FlowInstance)
 			selected := surface.(workflowTestSelectedStore)
 			opts := completeWorkflowTestCoordinatorOptions(pipeline.NewWorkflowPersistence(selected), selected)
 			opts.Module = runForkGateWorkflowModule{source: source}
@@ -106,7 +113,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 
 			lateEntity := entity
 			lateEntity.EntityID = uuid.NewString()
-			_, err := surface.SetupScenarioEntities(ctx, pipeline.ScenarioSetupRequest{
+			_, err = surface.SetupScenarioEntities(ctx, pipeline.ScenarioSetupRequest{
 				RunID: fixture.sourceRun, CreatedAt: fixture.forkedAt, Entities: []pipeline.ScenarioSetupEntityRequest{lateEntity},
 			})
 			requireForkedSourceRefusal(t, "scenario import", err)

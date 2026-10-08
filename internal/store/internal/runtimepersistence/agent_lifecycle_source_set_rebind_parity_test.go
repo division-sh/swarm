@@ -353,11 +353,11 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	if err != nil {
 		t.Fatalf("normalize readiness owner: %v", err)
 	}
+	readinessPlan = seedLifecycleReadinessOwner(t, ctx, store, readinessPlan, now)
 	readinessFingerprint, err := readinessPlan.Hash()
 	if err != nil {
 		t.Fatalf("fingerprint readiness owner: %v", err)
 	}
-	seedLifecycleReadinessOwner(t, ctx, store, readinessPlan, now)
 	activationStore, ok := store.(interface {
 		LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
 		BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeActivationRequest) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
@@ -767,7 +767,7 @@ func seedLifecycleReadinessOwner(
 	store lifecycleSourceSetRebindStore,
 	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
 	now time.Time,
-) {
+) runtimepipeline.DynamicFlowRuntimeReadinessPlan {
 	t.Helper()
 	selected, ok := store.(agentFixtureFlowStore)
 	if !ok {
@@ -781,6 +781,17 @@ func seedLifecycleReadinessOwner(
 		flowID + "/entities.yaml": "item:\n  fixture_key: text\n",
 	})
 	bundle.Semantics.Version = plan.WorkflowVersion
+	source := semanticview.Wrap(bundle)
+	parent := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), plan.RunID, plan.RunID, "", "")
+	child, err := runtimeflowidentity.KeyedChild(source, parent, flowID, plan.Identity.InstanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.InstancePath != plan.Identity.InstancePath {
+		t.Fatal("readiness fixture route disagrees with its admitted constructor")
+	}
+	child.EntityID = plan.Identity.EntityID
+	plan.Identity = child
 	fact := mustStoreTestSourceArtifactFact(plan.BundleHash)
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(storeTestWorkContext(t, ctx), plan.RunID), fact)
 	ctx = runtimeeffects.WithExecutionMode(ctx, plan.ExecutionMode)
@@ -806,6 +817,7 @@ func seedLifecycleReadinessOwner(
 	if err != nil || !committed.Acknowledged || !committed.Created {
 		t.Fatalf("construct lifecycle readiness owner: result=%+v err=%v", committed, err)
 	}
+	return plan
 }
 
 func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRebindStore) {
