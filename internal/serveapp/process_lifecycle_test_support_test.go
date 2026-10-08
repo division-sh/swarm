@@ -17,6 +17,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
@@ -200,7 +201,19 @@ func (*processIngressProofStore) ValidateInboundPublicationIntegrity(context.Con
 }
 
 type processIngressEventStore struct {
-	events []events.Event
+	events       []events.Event
+	construction runtimepipeline.FlowConstructionPublicationEvidence
+}
+
+func (s *processIngressEventStore) LoadFlowConstructionPublication(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entityID string) (runtimepipeline.FlowConstructionPublicationEvidence, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimepipeline.FlowConstructionPublicationEvidence{}, err
+	}
+	identity := s.construction.Identity
+	if identity.InstancePath == "" || identity.InstanceID != owner.RunID || identity.Route() != owner.Route || identity.EntityID != entityID {
+		return runtimepipeline.FlowConstructionPublicationEvidence{}, errors.New("transport fixture has no construction observation for that owner")
+	}
+	return s.construction, nil
 }
 
 func (s *processIngressEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
