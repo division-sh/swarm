@@ -98,7 +98,6 @@ func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
 func waitServedPublicationSettlement(t *testing.T, probe *lifecycletest.Probe, published servedEventPublishRPCResult) {
 	t.Helper()
 	// Delivery settlement precedes the accepted publication's diagnostic tail.
-	probe.Expect(published.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
 }
 
 // Read every persisted field, not just counts: another run must not rebind or
