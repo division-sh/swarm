@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -56,6 +58,10 @@ func TestEventCountDeltasRollbackAndAcknowledgmentBothStores(t *testing.T) {
 	faultMatrixStores(t, func(t *testing.T, db *sql.DB, dialect privateactivity.Dialect) {
 		runID, eventID := uuid.NewString(), uuid.NewString()
 		counterProbeSchema(t, db, runID)
+		readID := runID
+		if dialect == privateactivity.DialectPostgres {
+			readID = strings.ToUpper(runID)
+		}
 		native := faultMatrixNative(db, nil, dialect)
 		rollback := errors.New("rollback after counter visibility boundary")
 		result := run(context.Background(), dialect, RevisionOnly, Ordinary, nil, nil, native, func(ctx context.Context, attempt *Attempt) (string, error) {
@@ -63,11 +69,11 @@ func TestEventCountDeltasRollbackAndAcknowledgmentBothStores(t *testing.T) {
 				return "", err
 			}
 			if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-				if err := FlushEventCountBeforeRead(ctx, tx, runID); err != nil {
+				if err := FlushEventCountBeforeRead(ctx, tx, readID); err != nil {
 					return err
 				}
 				var count int
-				if err := tx.QueryRowContext(ctx, `SELECT event_count FROM runs WHERE run_id=$1`, runID).Scan(&count); err != nil {
+				if err := tx.QueryRowContext(ctx, `SELECT event_count FROM runs WHERE run_id=$1`, readID).Scan(&count); err != nil {
 					return err
 				}
 				if count != 1 {
@@ -99,7 +105,7 @@ func TestEventCountDeltasRollbackAndAcknowledgmentBothStores(t *testing.T) {
 		}
 		counterProbeRead(t, db, runID, 1)
 		result = run(context.Background(), dialect, RevisionOnly, Ordinary, nil, nil, native, func(ctx context.Context, attempt *Attempt) (string, error) {
-			return eventID, counterProbeInsert(ctx, attempt, runID, eventID)
+			return eventID, counterProbeInsert(ctx, attempt, readID, eventID)
 		})
 		if !result.Acknowledged() || result.Err() != nil {
 			t.Fatalf("exact duplicate replay: ack:%v err:%v", result.Acknowledged(), result.Err())
@@ -190,4 +196,126 @@ func TestEventCountDeltasBatchOrderAndForeignReadRefusal(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestEventCountDeltasPhysicalIdentityAndOrder(t *testing.T) {
+	runAdmissionDialects(t, func(t *testing.T, dialect privateactivity.Dialect) {
+		const first = "aabbccdd-eeff-0011-2233-445566778899"
+		const second = "00000000-0000-0000-0000-000000000001"
+		aliases := runIdentityAliases(first)
+		db, mock := runAdmissionMockDB(t)
+		mock.ExpectBegin()
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			mock.ExpectRollback()
+			if err := tx.Rollback(); err != nil {
+				t.Error(err)
+			}
+		}()
+		attempt := &Attempt{tx: tx, dialect: dialect, active: true, kind: Ordinary}
+		ctx := context.WithValue(context.Background(), sqlAttemptKey{}, attempt)
+		// Both additions and retained deletions use the same physical identity.
+		for i, alias := range aliases {
+			if err := attempt.AddEventCountDelta(" "+alias+" ", 2); err != nil {
+				t.Fatal(err)
+			}
+			if i == 0 {
+				if err := attempt.AddEventCountDelta(second, 3); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		for _, alias := range aliases {
+			if err := attempt.AddEventCountDelta(alias, -1); err != nil {
+				t.Fatal(err)
+			}
+		}
+		order := append([]string{aliases[0], second}, aliases[1:]...)
+		if dialect == privateactivity.DialectPostgres {
+			order = order[:2]
+		}
+		if !slices.Equal(attempt.eventCountOrder, order) || len(attempt.eventCounts) != len(order) {
+			t.Fatalf("projection order=%v keys=%v, want order=%v", attempt.eventCountOrder, attempt.eventCounts, order)
+		}
+		for _, runID := range order {
+			delta := int64(1)
+			if runID == second {
+				delta = 3
+			} else if dialect == privateactivity.DialectPostgres {
+				delta = int64(len(aliases))
+			}
+			if dialect == privateactivity.DialectPostgres {
+				mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(delta, runID).WillReturnResult(sqlmock.NewResult(0, 1))
+			} else {
+				mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(delta, runID, delta).WillReturnResult(sqlmock.NewResult(0, 1))
+			}
+		}
+		if err := attempt.FlushEventCounts(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := attempt.FlushEventCounts(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := attempt.AddEventCountDelta(first, 2); err != nil {
+			t.Fatal(err)
+		}
+		if err := attempt.AddEventCountDelta(aliases[2], -1); err != nil {
+			t.Fatal(err)
+		}
+		if dialect == privateactivity.DialectPostgres {
+			mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(int64(1), aliases[3]).WillReturnResult(sqlmock.NewResult(0, 1))
+		}
+		// Preserve the reader's SQL spelling while consuming all PG alias deltas.
+		if err := FlushEventCountBeforeRead(ctx, tx, " "+aliases[3]+" "); err != nil {
+			t.Fatal(err)
+		}
+		if dialect == privateactivity.DialectSQLite {
+			mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(int64(2), first, int64(2)).WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(int64(-1), aliases[2], int64(-1)).WillReturnResult(sqlmock.NewResult(0, 1))
+		}
+		if err := attempt.FlushEventCounts(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(attempt.eventCountOrder, order) {
+			t.Fatalf("later contribution changed order: %v", attempt.eventCountOrder)
+		}
+	})
+}
+
+func TestEventCountDeltasUnrecognizedIdentityPreservesSQLValidation(t *testing.T) {
+	runAdmissionDialects(t, func(t *testing.T, dialect privateactivity.Dialect) {
+		db, mock := runAdmissionMockDB(t)
+		mock.ExpectBegin()
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			mock.ExpectRollback()
+			if err := tx.Rollback(); err != nil {
+				t.Error(err)
+			}
+		}()
+		attempt := &Attempt{tx: tx, dialect: dialect, active: true, kind: Ordinary}
+		if err := attempt.AddEventCountDelta(" run ", 1); err != nil {
+			t.Fatal(err)
+		}
+		ctx := context.WithValue(context.Background(), sqlAttemptKey{}, attempt)
+		var want error
+		if dialect == privateactivity.DialectPostgres {
+			want = errors.New("native invalid UUID rejection")
+			mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(int64(1), "run").WillReturnError(want)
+		} else {
+			mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`).WithArgs(int64(1), "run", int64(1)).WillReturnResult(sqlmock.NewResult(0, 1))
+		}
+		if err := FlushEventCountBeforeRead(ctx, tx, " run "); !errors.Is(err, want) {
+			t.Fatalf("SQL validation err=%v, want %v", err, want)
+		}
+		if dialect == privateactivity.DialectPostgres && attempt.eventCounts["run"] != 1 {
+			t.Fatal("failed SQL discarded the pending delta")
+		}
+	})
 }

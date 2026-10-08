@@ -363,7 +363,7 @@ func TestRunAdmissionRunAndSourceIsolation(t *testing.T) {
 func TestRunAdmissionUUIDAliasInvalidation(t *testing.T) {
 	runAdmissionDialects(t, func(t *testing.T, dialect privateactivity.Dialect) {
 		runID := "aabbccdd-eeff-0011-2233-445566778899"
-		aliases := []string{runID, strings.ToUpper(runID), strings.ReplaceAll(runID, "-", ""), "{" + runID + "}"}
+		aliases := runIdentityAliases(runID)
 		unrelated, fact := uuid.NewString(), runAdmissionFact(t, "a")
 		withRunAdmissionAttempt(t, dialect, context.Background(), func(ctx context.Context, attempt *Attempt, tx *sql.Tx) {
 			for _, key := range append(aliases, unrelated) {
@@ -384,12 +384,110 @@ func TestRunAdmissionUUIDAliasInvalidation(t *testing.T) {
 					t.Fatalf("alias %s record admission: err=%v, want admitted=%v", key, err, want)
 				}
 			}
-			// Unsupported UUID spellings must never leave a potentially stale PG entry.
-			if err := InvalidateActiveRunSource(ctx, tx, "aabb-ccdd-eeff-0011-2233-4455-6677-8899"); err != nil {
+			if err := CacheActiveRunSource(ctx, tx, runID, fact); err != nil {
+				t.Fatal(err)
+			}
+			// PG also accepts forms that uuid.Parse does not recognize.
+			if err := InvalidateActiveRunSource(ctx, tx, aliases[4]); err != nil {
+				t.Fatal(err)
+			}
+			if _, cached, err := CachedActiveRunSource(ctx, tx, runID); err != nil || cached != (dialect == privateactivity.DialectSQLite) {
+				t.Fatalf("four-digit-group alias invalidation: cached=%v err=%v", cached, err)
+			}
+			if _, cached, err := CachedActiveRunSource(ctx, tx, unrelated); err != nil || cached != (dialect == privateactivity.DialectSQLite) {
+				t.Fatalf("uuid.Parse fallback invalidation: cached=%v err=%v", cached, err)
+			}
+			if err := CacheActiveRunSource(ctx, tx, unrelated, fact); err != nil {
+				t.Fatal(err)
+			}
+			// Unrecognized spellings still conservatively clear potentially stale PG authority.
+			if err := InvalidateActiveRunSource(ctx, tx, "not-a-uuid"); err != nil {
 				t.Fatal(err)
 			}
 			if _, cached, err := CachedActiveRunSource(ctx, tx, unrelated); err != nil || cached != (dialect == privateactivity.DialectSQLite) {
 				t.Fatalf("fallback invalidation: cached=%v err=%v", cached, err)
+			}
+		})
+	})
+}
+
+func TestRunAdmissionUUIDAliasReuseAndReplacement(t *testing.T) {
+	runAdmissionDialects(t, func(t *testing.T, dialect privateactivity.Dialect) {
+		const runID = "aabbccdd-eeff-0011-2233-445566778899"
+		aliases := runIdentityAliases(runID)
+		fact, replacement := runAdmissionFact(t, "a"), runAdmissionFact(t, "b")
+		withRunAdmissionAttempt(t, dialect, context.Background(), func(ctx context.Context, attempt *Attempt, tx *sql.Tx) {
+			if err := CacheActiveRunSource(ctx, tx, " "+aliases[0]+" ", fact); err != nil {
+				t.Fatal(err)
+			}
+			for _, alias := range aliases {
+				want := dialect == privateactivity.DialectPostgres || alias == aliases[0]
+				got, cached, err := CachedActiveRunSource(ctx, tx, " "+alias+" ")
+				if err != nil || cached != want || (want && !got.Matches(fact)) || (!want && got != (runtimecorrelation.SourceArtifactFact{})) {
+					t.Fatalf("alias %s reuse: fact=%v cached=%v err=%v, want cached=%v", alias, got, cached, err, want)
+				}
+				if err := attempt.RequireActiveRunSourceAdmission(ctx, alias, fact); (err == nil) != want {
+					t.Fatalf("alias %s record admission: err=%v, want admitted=%v", alias, err, want)
+				}
+			}
+			for _, alias := range aliases[1:] {
+				if err := CacheActiveRunSource(ctx, tx, alias, fact); err != nil {
+					t.Fatal(err)
+				}
+			}
+			wantKeys := len(aliases)
+			if dialect == privateactivity.DialectPostgres {
+				wantKeys = 1
+			}
+			if len(attempt.runAdmissions) != wantKeys {
+				t.Fatalf("alias admissions=%d, want %d", len(attempt.runAdmissions), wantKeys)
+			}
+			if err := CacheActiveRunSource(ctx, tx, aliases[4], replacement); err != nil {
+				t.Fatal(err)
+			}
+			for _, alias := range aliases {
+				want := fact
+				if dialect == privateactivity.DialectPostgres || alias == aliases[4] {
+					want = replacement
+				}
+				got, cached, err := CachedActiveRunSource(ctx, tx, alias)
+				if err != nil || !cached || !got.Matches(want) {
+					t.Fatalf("alias %s replacement: fact=%v cached=%v err=%v, want %v", alias, got, cached, err, want)
+				}
+				if err := attempt.RequireActiveRunSourceAdmission(ctx, alias, want); err != nil {
+					t.Fatal(err)
+				}
+				if want == replacement && attempt.RequireActiveRunSourceAdmission(ctx, alias, fact) == nil {
+					t.Fatal("aliased replacement retained stale record admission")
+				}
+			}
+		})
+	})
+}
+
+func TestRunAdmissionInvalidUUIDCannotMintButSQLiteTextCan(t *testing.T) {
+	runAdmissionDialects(t, func(t *testing.T, dialect privateactivity.Dialect) {
+		const runID = "aabbccdd-eeff-0011-2233-445566778899"
+		fact := runAdmissionFact(t, "a")
+		withRunAdmissionAttempt(t, dialect, context.Background(), func(ctx context.Context, attempt *Attempt, tx *sql.Tx) {
+			for _, input := range []string{"", " ", "run", "urn:uuid:" + runID, "[" + runID + "]", "{" + runID, "aa-bbccddeeff00112233445566778899"} {
+				if got, cached, err := CachedActiveRunSource(ctx, tx, input); err != nil || cached || got != (runtimecorrelation.SourceArtifactFact{}) {
+					t.Fatalf("unadmitted input %q: fact=%v cached=%v err=%v", input, got, cached, err)
+				}
+				want := dialect == privateactivity.DialectSQLite && strings.TrimSpace(input) != ""
+				if err := CacheActiveRunSource(ctx, tx, input, fact); (err == nil) != want {
+					t.Fatalf("input %q setter: err=%v, want admitted=%v", input, err, want)
+				}
+				got, cached, err := CachedActiveRunSource(ctx, tx, input)
+				if err != nil || cached != want || (want && !got.Matches(fact)) || (!want && got != (runtimecorrelation.SourceArtifactFact{})) {
+					t.Fatalf("input %q getter: fact=%v cached=%v err=%v, want admitted=%v", input, got, cached, err, want)
+				}
+				if err := attempt.RequireActiveRunSourceAdmission(ctx, input, fact); (err == nil) != want {
+					t.Fatalf("input %q record admission: err=%v, want admitted=%v", input, err, want)
+				}
+			}
+			if dialect == privateactivity.DialectPostgres && len(attempt.runAdmissions) != 0 {
+				t.Fatal("invalid UUID input minted authority")
 			}
 		})
 	})
