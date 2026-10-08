@@ -9,7 +9,6 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
@@ -23,24 +22,12 @@ const (
 type stateKey struct{}
 
 type state struct {
-	tx        *sql.Tx
-	mutation  runtimeauthoractivity.Mutation
-	raw       *privateauthoractivity.Mutation
-	finalized bool
-	managed   bool
+	tx       *sql.Tx
+	mutation runtimeauthoractivity.Mutation
 }
 
-func Begin(ctx context.Context, tx *sql.Tx, dialect Dialect) (context.Context, error) {
-	privateDialect := privateauthoractivity.Dialect(dialect)
-	mutation, err := privateauthoractivity.Begin(ctx, tx, privateDialect)
-	if err != nil {
-		return nil, err
-	}
-	return context.WithValue(ctx, stateKey{}, &state{tx: tx, mutation: mutation, raw: mutation}), nil
-}
-
-// WithAttempt registers protocol-owned activity for legacy test fixture
-// delegates. The protocol, not this context adapter, finalizes the mutation.
+// WithAttempt registers protocol-owned activity for test delegates. Native
+// settlement and the protocol, never this adapter, own the transaction lifetime.
 func WithAttempt(ctx context.Context, attempt *mutationprotocol.Attempt, tx *sql.Tx) (context.Context, error) {
 	if ctx == nil || attempt == nil || tx == nil {
 		return nil, fmt.Errorf("test author activity attempt and transaction are required")
@@ -53,24 +40,12 @@ func WithAttempt(ctx context.Context, attempt *mutationprotocol.Attempt, tx *sql
 	}); err != nil {
 		return nil, err
 	}
-	return context.WithValue(ctx, stateKey{}, &state{tx: tx, mutation: attempt, managed: true}), nil
-}
-
-func Finalize(ctx context.Context) error {
-	current, ok := fromContext(ctx)
-	if !ok || current.finalized {
-		return fmt.Errorf("test author activity mutation is not active")
-	}
-	if current.managed {
-		return fmt.Errorf("protocol-owned test author activity must be finalized by its mutation runner")
-	}
-	current.finalized = true
-	return current.raw.Finalize(ctx)
+	return context.WithValue(ctx, stateKey{}, &state{tx: tx, mutation: attempt}), nil
 }
 
 func Record(ctx context.Context, draft runtimeauthoractivity.Draft) error {
 	current, ok := fromContext(ctx)
-	if !ok || current.finalized {
+	if !ok {
 		return fmt.Errorf("test author activity mutation is not active")
 	}
 	return current.mutation.Record(ctx, draft)
@@ -78,15 +53,15 @@ func Record(ctx context.Context, draft runtimeauthoractivity.Draft) error {
 
 func PersistedOccurredAt(ctx context.Context, key string) (time.Time, bool, error) {
 	current, ok := fromContext(ctx)
-	if !ok || current.finalized {
+	if !ok {
 		return time.Time{}, false, fmt.Errorf("test author activity mutation is not active")
 	}
 	return current.mutation.PersistedOccurredAt(ctx, key)
 }
 
 func Require(ctx context.Context) error {
-	current, ok := fromContext(ctx)
-	if !ok || current.finalized {
+	_, ok := fromContext(ctx)
+	if !ok {
 		return fmt.Errorf("test author activity mutation is not active")
 	}
 	return nil
@@ -94,17 +69,12 @@ func Require(ctx context.Context) error {
 
 func InMutation(ctx context.Context, tx *sql.Tx) bool {
 	current, ok := fromContext(ctx)
-	return ok && !current.finalized && current.tx == tx
-}
-
-func FinalizedMutation(ctx context.Context, tx *sql.Tx) bool {
-	current, ok := fromContext(ctx)
-	return ok && current.finalized && current.tx == tx
+	return ok && current.tx == tx
 }
 
 func Mutation(ctx context.Context) (runtimeauthoractivity.Mutation, bool) {
 	current, ok := fromContext(ctx)
-	if !ok || current.finalized {
+	if !ok {
 		return nil, false
 	}
 	return current.mutation, true

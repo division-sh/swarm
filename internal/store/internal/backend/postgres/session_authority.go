@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
@@ -807,9 +808,12 @@ func runAuthorityTransaction(
 		return false, err
 	}
 	probe.Begun()
+	orderingCtx, releaseOrdering := authoractivity.BindTransaction(ctx, ctx, tx, authoractivity.DialectPostgres)
+	defer releaseOrdering()
 	serializationConflict := false
 	defer func() {
 		if tx != nil {
+			releaseOrdering()
 			cleanupStarted := time.Now()
 			probe.RollbackAttempted()
 			rolledBack, cleanupErr := rollbackSessionTransactionOutcome(tx, session)
@@ -823,7 +827,7 @@ func runAuthorityTransaction(
 			}
 		}
 	}()
-	if runErr := session.runWithCallerCancellation(ctx, func(operationCtx context.Context) error {
+	if runErr := session.runWithCallerCancellation(orderingCtx, func(operationCtx context.Context) error {
 		return fn(transactiontest.WithAttempt(operationCtx, probe), tx)
 	}); runErr != nil {
 		serializationConflict = (opts == nil || !opts.ReadOnly) && exactSerializationConflict(runErr)
@@ -836,7 +840,9 @@ func runAuthorityTransaction(
 		return false, errors.New("PostgreSQL session authority fenced before COMMIT admission")
 	}
 	probe.BeforeCommit()
-	if commitErr := tx.Commit(); commitErr != nil {
+	commitErr := tx.Commit()
+	releaseOrdering()
+	if commitErr != nil {
 		probe.CommitFailed()
 		cleanupStarted := time.Now()
 		// Fence possession before endTx releases operationMu. A successor must

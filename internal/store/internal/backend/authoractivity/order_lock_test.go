@@ -41,6 +41,8 @@ func TestPostgresOrderExistingRowNeedsNoInitializationWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
+	ctx, releaseOrdering := BindTransaction(ctx, ctx, tx, DialectPostgres)
+	defer releaseOrdering()
 	m, err := Begin(ctx, tx, DialectPostgres)
 	if err != nil || m.last != 17 {
 		t.Fatalf("existing order: mutation=%+v error=%v", m, err)
@@ -51,6 +53,7 @@ func TestPostgresOrderExistingRowNeedsNoInitializationWrite(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
+	releaseOrdering()
 	if _, err := Begin(ctx, tx, DialectPostgres); !errors.Is(err, sql.ErrTxDone) {
 		t.Fatalf("closed transaction: %v", err)
 	}
@@ -73,7 +76,9 @@ func TestPostgresOrderConcurrentInitializationAndFreshLock(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer first.Rollback()
-				m, err := Begin(ctx, first, DialectPostgres)
+				firstCtx, releaseFirst := BindTransaction(ctx, ctx, first, DialectPostgres)
+				defer releaseFirst()
+				m, err := Begin(firstCtx, first, DialectPostgres)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -85,6 +90,8 @@ func TestPostgresOrderConcurrentInitializationAndFreshLock(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer second.Rollback()
+				secondCtx, releaseSecond := BindTransaction(ctx, ctx, second, DialectPostgres)
+				defer releaseSecond()
 				var pid int
 				if err := second.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
 					t.Fatal(err)
@@ -95,7 +102,7 @@ func TestPostgresOrderConcurrentInitializationAndFreshLock(t *testing.T) {
 				}
 				done := make(chan result, 1)
 				go func() {
-					m, err := Begin(ctx, second, DialectPostgres)
+					m, err := Begin(secondCtx, second, DialectPostgres)
 					done <- result{m, err}
 				}()
 				// Observe the actual database lock wait, not a scheduling sleep.
@@ -153,6 +160,8 @@ func TestPostgresOrderReadFailureDoesNotInitialize(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
+	ctx, releaseOrdering := BindTransaction(ctx, ctx, tx, DialectPostgres)
+	defer releaseOrdering()
 	if _, err := Begin(ctx, tx, DialectPostgres); err == nil {
 		t.Fatal("invalid schema was accepted")
 	}

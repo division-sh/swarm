@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -559,12 +558,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 	})); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
-	tx, err := db.BeginTx(testAuthorActivityContext(t, context.Background()), nil)
-	if err != nil {
-		t.Fatalf("BeginTx: %v", err)
-	}
-	t.Cleanup(func() { _ = tx.Rollback() })
-	ctx := WithPipelineSQLTxContext(testPipelineCoordinatorRunContext(t, pc), tx)
+	ctx := testPipelineCoordinatorRunContext(t, pc)
 
 	completion := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
@@ -584,15 +578,16 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 
 	configurePipelineTestDeliveryOwner(t, pc)
 	route := seedPipelineNodeDeliveryAuthority(t, db, completion, pipelineNode(t, "", "root-collector"))
-	ctx, err = authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectPostgres)
-	if err != nil {
-		t.Fatalf("begin nested completion author activity story: %v", err)
-	}
-	passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(ctx, route), completion)
-	if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
-		t.Fatalf("Intercept error = %v, want stamped connect claim", err)
-	}
-	if passThrough || len(emitted) != 0 {
-		t.Fatalf("failed delivery result = passThrough:%v emitted:%#v, want no output", passThrough, emitted)
+	if err := pc.workflowStore.testRuntimeMutation().RunRuntimeMutationContext(ctx, func(ctx context.Context) error {
+		passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(ctx, route), completion)
+		if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
+			t.Fatalf("Intercept error = %v, want stamped connect claim", err)
+		}
+		if passThrough || len(emitted) != 0 {
+			t.Fatalf("failed delivery result = passThrough:%v emitted:%#v, want no output", passThrough, emitted)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("owned nested completion transaction: %v", err)
 	}
 }

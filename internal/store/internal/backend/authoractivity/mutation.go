@@ -39,7 +39,7 @@ func Begin(ctx context.Context, tx *sql.Tx, dialect Dialect) (*Mutation, error) 
 		return nil, fmt.Errorf("author activity dialect %q is not supported", dialect)
 	}
 	mutation := &Mutation{tx: tx, dialect: dialect, drafts: make([]runtimeauthoractivity.Draft, 0, 4)}
-	if err := mutation.lock(ctx); err != nil {
+	if err := mutation.lock(ctx, true); err != nil {
 		return nil, err
 	}
 	return mutation, nil
@@ -115,7 +115,7 @@ func (m *Mutation) Finalize(ctx context.Context) error {
 	return nil
 }
 
-func (m *Mutation) lock(ctx context.Context) error {
+func (m *Mutation) acquire(ctx context.Context) error {
 	switch m.dialect {
 	case DialectPostgres:
 		const lockOrder = `SELECT last_sequence FROM author_activity_order WHERE singleton_id = 1 FOR UPDATE`
@@ -154,7 +154,7 @@ func FenceMutationOrder(ctx context.Context, tx *sql.Tx, dialect Dialect) error 
 	if tx == nil || (dialect != DialectPostgres && dialect != DialectSQLite) {
 		return fmt.Errorf("mutation order requires a transaction and supported dialect")
 	}
-	return (&Mutation{tx: tx, dialect: dialect}).lock(ctx)
+	return (&Mutation{tx: tx, dialect: dialect}).lock(ctx, false)
 }
 
 func (m *Mutation) updateLast(ctx context.Context, last int64) error {

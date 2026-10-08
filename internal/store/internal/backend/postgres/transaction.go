@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/lib/pq"
 )
@@ -103,6 +104,12 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	discard := false
 	serializationConflict := false
 	var tx *sql.Tx
+	var releaseOrdering func()
+	defer func() {
+		if releaseOrdering != nil {
+			releaseOrdering()
+		}
+	}()
 	probe := b.testTransactions.Begin(opts != nil && opts.ReadOnly, false)
 	defer func() { probe.Finish(err) }()
 	defer func() {
@@ -112,6 +119,9 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		if tx != nil {
 			probe.RollbackAttempted()
 			rollbackErr := tx.Rollback()
+			if releaseOrdering != nil {
+				releaseOrdering()
+			}
 			rolledBack = rollbackErr == nil
 			if rollbackErr != nil {
 				discard = true
@@ -160,6 +170,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		return false, err
 	}
 	probe.Begun()
+	sqlCtx, releaseOrdering = authoractivity.BindTransaction(ctx, sqlCtx, tx, authoractivity.DialectPostgres)
 	sqlCtx = transactiontest.WithAttempt(sqlCtx, probe)
 	if err := ctx.Err(); err != nil {
 		return false, err
@@ -175,7 +186,9 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		return false, err
 	}
 	probe.BeforeCommit()
-	if commitErr := tx.Commit(); commitErr != nil {
+	commitErr := tx.Commit()
+	releaseOrdering()
+	if commitErr != nil {
 		probe.CommitFailed()
 		discard = true
 		return false, commitErr

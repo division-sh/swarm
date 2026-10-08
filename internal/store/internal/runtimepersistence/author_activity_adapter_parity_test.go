@@ -3,12 +3,16 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	authoractivityadapter "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity/readadapter"
+	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -21,22 +25,18 @@ func TestAuthorActivityRollbackReusesSequenceOnBothStores(t *testing.T) {
 			now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 			commitAuthorActivityDrafts(t, fixture, authorActivityInboundDraft("first", now, runtimeauthoractivity.BundleScope(fixture.runtimeID, "bundle-a")))
 
-			tx, err := fixture.db.BeginTx(context.Background(), nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			story, err := authoractivityfixture.Begin(context.Background(), tx, fixture.dialect)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := authoractivityfixture.Record(story, authorActivityInboundDraft("rolled-back", now.Add(time.Second), runtimeauthoractivity.BundleScope(fixture.runtimeID, "bundle-a"))); err != nil {
-				t.Fatal(err)
-			}
-			if err := authoractivityfixture.Finalize(story); err != nil {
-				t.Fatal(err)
-			}
-			if err := tx.Rollback(); err != nil {
-				t.Fatal(err)
+			rollback := errors.New("roll back after successful story finalization")
+			err := runAuthorActivityFixture(t, fixture, func(ctx context.Context, story *privateauthoractivity.Mutation) error {
+				if err := story.Record(ctx, authorActivityInboundDraft("rolled-back", now.Add(time.Second), runtimeauthoractivity.BundleScope(fixture.runtimeID, "bundle-a"))); err != nil {
+					return err
+				}
+				if err := story.Finalize(ctx); err != nil {
+					return err
+				}
+				return rollback
+			})
+			if !errors.Is(err, rollback) {
+				t.Fatalf("native rollback did not preserve post-finalization failure: %v", err)
 			}
 
 			commitAuthorActivityDrafts(t, fixture, authorActivityInboundDraft("second", now.Add(2*time.Second), runtimeauthoractivity.BundleScope(fixture.runtimeID, "bundle-a")))
@@ -106,29 +106,40 @@ func authorActivityAdapterFixtures(t *testing.T) []authorActivityAdapterFixture 
 
 func commitAuthorActivityDrafts(t *testing.T, fixture authorActivityAdapterFixture, drafts ...runtimeauthoractivity.Draft) {
 	t.Helper()
-	ctx := context.Background()
-	tx, err := fixture.db.BeginTx(ctx, nil)
+	err := runAuthorActivityFixture(t, fixture, func(ctx context.Context, story *privateauthoractivity.Mutation) error {
+		for _, draft := range drafts {
+			if err := story.Record(ctx, draft); err != nil {
+				return err
+			}
+		}
+		return story.Finalize(ctx)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	story, err := authoractivityfixture.Begin(ctx, tx, fixture.dialect)
-	if err != nil {
-		_ = tx.Rollback()
-		t.Fatal(err)
+}
+
+func runAuthorActivityFixture(t *testing.T, fixture authorActivityAdapterFixture, write func(context.Context, *privateauthoractivity.Mutation) error) error {
+	t.Helper()
+	operation := func(ctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.Dialect(fixture.dialect))
+		if err != nil {
+			return err
+		}
+		return write(ctx, story)
 	}
-	for _, draft := range drafts {
-		if err := authoractivityfixture.Record(story, draft); err != nil {
-			_ = tx.Rollback()
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
+		backend, err := postgresbackend.New(fixture.db)
+		if err != nil {
 			t.Fatal(err)
 		}
+		return backend.RunTransaction(context.Background(), operation)
 	}
-	if err := authoractivityfixture.Finalize(story); err != nil {
-		_ = tx.Rollback()
+	backend, err := sqlitebackend.New(fixture.db)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
+	return backend.RunTransaction(context.Background(), "author activity fixture", operation)
 }
 
 func authorActivityInboundDraft(identity string, at time.Time, scope runtimeauthoractivity.Scope) runtimeauthoractivity.Draft {

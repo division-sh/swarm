@@ -12,7 +12,8 @@ import (
 // FenceMutation uses the already-existing selected-store mutation order, not a
 // historical grant row. Acquire before domain locks and read current grant facts
 // afterwards. All append-only grant successors, including bulk retirement, use
-// this coordinate. Reacquisition in the same transaction is harmless.
+// this coordinate. Native transaction-owned possession avoids reacquisition;
+// every subsequent current-grant check remains mandatory.
 func FenceMutation(ctx context.Context, tx *sql.Tx, sqlite bool) error {
 	dialect := authoractivity.DialectPostgres
 	if sqlite {
