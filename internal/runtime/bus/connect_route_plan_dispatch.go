@@ -717,26 +717,7 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 		}
 	}
 	add(evt.RoutingSource().Route())
-	if evt.RoutingSource().Kind() == events.RoutingSourceExternalIngress {
-		flowID := evt.RoutingSource().Route().FlowID
-		if flowID == semanticview.RootExecutionFlowID(r.source) {
-			paths[evt.RunID()] = struct{}{}
-		} else {
-			projection := selectedRunTargetOwnerProjection{source: r.source}
-			if instance, err := projection.providerExecutionIdentity(evt, flowID, false); err == nil {
-				add(events.RouteIdentity{FlowInstance: instance.InstancePath})
-			}
-			if owners, err := r.lifecycle.constructionOwners(ctx, evt.RunID()); err == nil {
-				// This bounds read candidates only. The compiled path separately
-				// selects exact keyed ancestry before any recipient is admitted.
-				for _, instance := range owners {
-					if instance.TemplateID == flowID {
-						paths[instance.InstancePath] = struct{}{}
-					}
-				}
-			}
-		}
-	}
+	r.addProviderSourceLookupPaths(ctx, evt, paths, add)
 	add(evt.SourceRoute())
 	add(evt.TargetRoute())
 	for _, route := range evt.TargetRoutes() {
@@ -805,6 +786,29 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 	sort.Strings(out)
 	scope.instancePaths = out
 	return scope, true
+}
+
+func (r connectRoutePlanResolver) addProviderSourceLookupPaths(ctx context.Context, evt events.Event, paths map[string]struct{}, add func(events.RouteIdentity)) {
+	if evt.RoutingSource().Kind() != events.RoutingSourceExternalIngress {
+		return
+	}
+	flowID := evt.RoutingSource().Route().FlowID
+	if flowID == semanticview.RootExecutionFlowID(r.source) {
+		paths[evt.RunID()] = struct{}{}
+		return
+	}
+	projection := selectedRunTargetOwnerProjection{source: r.source}
+	if instance, err := projection.providerExecutionIdentity(evt, flowID, false); err == nil {
+		add(events.RouteIdentity{FlowInstance: instance.InstancePath})
+	}
+	if owners, err := r.lifecycle.constructionOwners(ctx, evt.RunID()); err == nil {
+		// Read candidates only; the compiled path still selects exact ancestry.
+		for _, instance := range owners {
+			if instance.TemplateID == flowID {
+				paths[instance.InstancePath] = struct{}{}
+			}
+		}
+	}
 }
 
 func (r connectRoutePlanResolver) descriptorsForPlans(ctx context.Context, plans []runtimepinrouting.ConnectRoutePlan) ([]runtimepinrouting.Descriptor, error) {
