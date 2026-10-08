@@ -721,12 +721,18 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 		flowID := evt.RoutingSource().Route().FlowID
 		if flowID == semanticview.RootExecutionFlowID(r.source) {
 			paths[evt.RunID()] = struct{}{}
-		} else if owners, err := r.lifecycle.constructionOwners(ctx, evt.RunID()); err == nil {
-			// This bounds read candidates only. The compiled path separately
-			// selects exact keyed ancestry before any recipient is admitted.
-			for _, instance := range owners {
-				if instance.TemplateID == flowID {
-					paths[instance.InstancePath] = struct{}{}
+		} else {
+			projection := selectedRunTargetOwnerProjection{source: r.source}
+			if instance, err := projection.providerExecutionIdentity(evt, flowID, false); err == nil {
+				add(events.RouteIdentity{FlowInstance: instance.InstancePath})
+			}
+			if owners, err := r.lifecycle.constructionOwners(ctx, evt.RunID()); err == nil {
+				// This bounds read candidates only. The compiled path separately
+				// selects exact keyed ancestry before any recipient is admitted.
+				for _, instance := range owners {
+					if instance.TemplateID == flowID {
+						paths[instance.InstancePath] = struct{}{}
+					}
 				}
 			}
 		}

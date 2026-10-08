@@ -909,7 +909,7 @@ func runChannelOnboardingCLIJourney(t *testing.T, configPath, endpoint string, p
 		accountID = 7000
 	}
 	requestBody, err := json.Marshal(map[string]any{
-		"update_id": time.Now().UnixNano(),
+		"update_id": deliveryIndex + 1,
 		"message": map[string]any{
 			"message_id": deliveryIndex + 1,
 			"from":       map[string]any{"id": accountID, "username": fmt.Sprintf("operator_%d", deliveryIndex)},

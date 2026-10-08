@@ -161,7 +161,7 @@ func startChannelOnboardingEffectRestartCommand(t *testing.T, configPath, endpoi
 func submitChannelOnboardingRestartClaim(t *testing.T, callbackURL, signingSecret, challenge string) <-chan error {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{
-		"update_id": time.Now().UnixNano(),
+		"update_id": 1,
 		"message": map[string]any{
 			"message_id": 1,
 			"from":       map[string]any{"id": 7001, "username": "effect_restart_operator"},

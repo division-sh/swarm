@@ -199,8 +199,13 @@ func requireStandingRootTreePublicEvidence(t *testing.T, store goldenStoreSelect
 func postStandingRootTreePublicUpdates(t *testing.T, p *releaseServeProcess, store goldenStoreSelection, services map[string]fullLifecycleRun, base int) {
 	t.Helper()
 	type publicationReceipt struct {
+		ServiceID         string   `json:"service_id"`
+		RunID             string   `json:"run_id"`
+		Generation        int64    `json:"generation"`
+		FlowPath          string   `json:"flow_path"`
+		Provider          string   `json:"provider"`
+		ProviderEventID   string   `json:"provider_event_id"`
 		PublicationID     string   `json:"publication_id"`
-		EntityID          string   `json:"entity_id"`
 		EventIDs          []string `json:"event_ids"`
 		ActionDisposition string   `json:"operator_channel_action_disposition"`
 	}
@@ -224,8 +229,24 @@ func postStandingRootTreePublicUpdates(t *testing.T, p *releaseServeProcess, sto
 			raw, err := io.ReadAll(response.Body)
 			response.Body.Close()
 			var receipt publicationReceipt
-			if err != nil || response.StatusCode != http.StatusAccepted || json.Unmarshal(raw, &receipt) != nil || receipt.PublicationID == "" || receipt.EntityID == "" {
+			if err != nil || response.StatusCode != http.StatusAccepted || json.Unmarshal(raw, &receipt) != nil || receipt.PublicationID == "" {
 				t.Fatalf("%s %s ingress: status=%d response=%s err=%v\n%s", alias, shape, response.StatusCode, raw, err, p.output.String())
+			}
+			flow := "beta"
+			if alias == "alpha" {
+				flow = "."
+			}
+			if receipt.ServiceID != services[alias].Origin.ServiceID || receipt.RunID != services[alias].RunID || receipt.Generation != services[alias].Origin.Generation || receipt.FlowPath != flow || receipt.Provider != "telegram" || receipt.ProviderEventID != fmt.Sprint(id) {
+				t.Fatalf("%s %s ingress lost exact declaration binding: %+v", alias, shape, receipt)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &fields); err != nil {
+				t.Fatal(err)
+			}
+			for _, retired := range []string{"entity_id", "instance_id", "target_flow_instance"} {
+				if _, exists := fields[retired]; exists {
+					t.Fatalf("declaration receipt includes retired %s: %s", retired, raw)
+				}
 			}
 			duplicateRequest, err := http.NewRequest(http.MethodPost, req.URL.String(), bytes.NewBufferString(body))
 			if err != nil {
@@ -239,14 +260,17 @@ func postStandingRootTreePublicUpdates(t *testing.T, p *releaseServeProcess, sto
 			duplicateRaw, err := io.ReadAll(duplicateResponse.Body)
 			duplicateResponse.Body.Close()
 			var duplicate publicationReceipt
-			if err != nil || duplicateResponse.StatusCode != http.StatusOK || json.Unmarshal(duplicateRaw, &duplicate) != nil || duplicate.PublicationID != receipt.PublicationID || duplicate.EntityID != receipt.EntityID || !reflect.DeepEqual(duplicate.EventIDs, receipt.EventIDs) {
+			decodeErr := json.Unmarshal(duplicateRaw, &duplicate)
+			// Duplicate readback carries the immutable publication, not pending intent state.
+			duplicate.ActionDisposition = receipt.ActionDisposition
+			if err != nil || duplicateResponse.StatusCode != http.StatusOK || decodeErr != nil || !reflect.DeepEqual(duplicate, receipt) {
 				t.Fatalf("%s %s duplicate: status=%d response=%s err=%v", alias, shape, duplicateResponse.StatusCode, duplicateRaw, err)
 			}
 			if shape == "callback" {
 				if len(receipt.EventIDs) != 0 || receipt.ActionDisposition != "pending" {
 					t.Fatalf("callback published business events or lost native intent: %s", raw)
 				}
-				requireStandingRootTreeActionIntent(t, store, services[alias], alias, id, receipt.PublicationID, receipt.EntityID)
+				requireStandingRootTreeActionIntent(t, store, services[alias], alias, id, receipt.PublicationID, receipt.FlowPath)
 				continue
 			}
 			if len(receipt.EventIDs) != 2 || receipt.ActionDisposition != "" {
@@ -292,7 +316,7 @@ func postStandingRootTreePublicUpdates(t *testing.T, p *releaseServeProcess, sto
 	}
 }
 
-func requireStandingRootTreeActionIntent(t *testing.T, store goldenStoreSelection, run fullLifecycleRun, alias string, updateID int, publicationID, entityID string) {
+func requireStandingRootTreeActionIntent(t *testing.T, store goldenStoreSelection, run fullLifecycleRun, alias string, updateID int, publicationID, declaringFlow string) {
 	t.Helper()
 	db, err := openLifecycleFailureInspection(store)
 	if err != nil {
@@ -305,18 +329,21 @@ func requireStandingRootTreeActionIntent(t *testing.T, store goldenStoreSelectio
 	if alias == "alpha" {
 		flow, path = ".", run.RunID
 	}
-	var headerEntity string
-	if err := db.QueryRowContext(ctx, `SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND flow_template=$3`, run.RunID, path, flow).Scan(&headerEntity); err != nil || headerEntity != entityID {
-		t.Fatalf("callback does not target its generation's constructed header: entity=%s header=%s err=%v", entityID, headerEntity, err)
+	if declaringFlow != flow {
+		t.Fatalf("callback declaration=%s, want %s", declaringFlow, flow)
 	}
-	var provider, storedEntity, providerEvent, storedFlow, instance, resolvedRun, service, state string
+	var headerEntity string
+	if err := db.QueryRowContext(ctx, `SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND flow_template=$3`, run.RunID, path, flow).Scan(&headerEntity); err != nil || headerEntity == "" {
+		t.Fatalf("generation lacks its separately constructed header: header=%s err=%v", headerEntity, err)
+	}
+	var provider, providerEvent, storedFlow, targetAlias, resolvedRun, service, state string
 	var generation int64
 	var outputCount, memberCount int
-	if err := db.QueryRowContext(ctx, `SELECT provider, entity_id, provider_event_id, flow_path, instance_id, resolved_run_id, stable_service_id, expected_generation, state, output_count FROM inbound_publications WHERE publication_id=$1`, publicationID).Scan(&provider, &storedEntity, &providerEvent, &storedFlow, &instance, &resolvedRun, &service, &generation, &state, &outputCount); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT provider, provider_event_id, flow_path, target_alias, resolved_run_id, stable_service_id, expected_generation, state, output_count FROM inbound_publications WHERE publication_id=$1`, publicationID).Scan(&provider, &providerEvent, &storedFlow, &targetAlias, &resolvedRun, &service, &generation, &state, &outputCount); err != nil {
 		t.Fatal(err)
 	}
-	if provider != "telegram" || providerEvent != fmt.Sprint(updateID) || storedEntity != entityID || storedFlow != flow || instance != path || resolvedRun != run.RunID || service != run.Origin.ServiceID || generation != run.Origin.Generation || state != "committed" || outputCount != 0 {
-		t.Fatalf("callback publication lost exact generation/alias: provider=%s occurrence=%s entity=%s flow=%s instance=%s run=%s service=%s generation=%d state=%s outputs=%d", provider, providerEvent, storedEntity, storedFlow, instance, resolvedRun, service, generation, state, outputCount)
+	if provider != "telegram" || providerEvent != fmt.Sprint(updateID) || storedFlow != flow || targetAlias != alias || resolvedRun != run.RunID || service != run.Origin.ServiceID || generation != run.Origin.Generation || state != "committed" || outputCount != 0 {
+		t.Fatalf("callback publication lost exact generation/alias: provider=%s occurrence=%s flow=%s alias=%s run=%s service=%s generation=%d state=%s outputs=%d", provider, providerEvent, storedFlow, targetAlias, resolvedRun, service, generation, state, outputCount)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM inbound_publication_events WHERE publication_id=$1`, publicationID).Scan(&memberCount); err != nil || memberCount != 0 {
 		t.Fatalf("callback has executable business membership: count=%d err=%v", memberCount, err)

@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -169,8 +170,15 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	first := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	first.waitForReadyLine()
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-	entityID := sendStandingTelegramUpdate(t, firstURL, 301, 42)
+	publication := sendStandingTelegramUpdatePublication(t, firstURL, 301, 42)
+	binding := publication.standingTelegramBinding
 	waitForMockAgentTurns(t, backend, location, 1)
+	var normalized operatorread.OperatorEventFull
+	requireServedJSONRPCResult(t, firstURL+"/v1/rpc", "event.get", map[string]any{"event_id": publication.EventIDs[1]}, &normalized)
+	if normalized.RunID != binding.RunID || normalized.EntityID == "" || len(normalized.Deliveries) != 1 || normalized.Deliveries[0].Target.EntityID != normalized.EntityID {
+		t.Fatalf("mock receiver readback lost exact delivery target: %+v", normalized)
+	}
+	entityID := normalized.EntityID
 	cardID := waitForMockConnectorDecisionCard(t, backend, location, 1)
 	assertMockMailboxReadback(t, firstURL+"/v1/rpc", cardID)
 	approveMockDecisionCard(t, firstURL+"/v1/rpc", cardID)
@@ -188,8 +196,8 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
 	waitForMockConnectorAttempts(t, backend, location, 1)
-	if got := sendStandingTelegramUpdate(t, secondURL, 302, 42); got != entityID {
-		t.Fatalf("post-restart entity = %q, want %q", got, entityID)
+	if got := sendStandingTelegramUpdate(t, secondURL, 302, 42); got != binding {
+		t.Fatalf("post-restart binding = %+v, want %+v", got, binding)
 	}
 	waitForMockAgentTurns(t, backend, location, 2)
 	secondCardID := waitForMockConnectorDecisionCard(t, backend, location, 2)

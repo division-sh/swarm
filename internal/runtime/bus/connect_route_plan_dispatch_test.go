@@ -4777,6 +4777,20 @@ func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *
 	if !ok || scope.sourceEntityID != "" || !slices.Equal(scope.instancePaths, []string{"account/one", "account/two"}) {
 		t.Fatalf("declaration candidate scope mixed concrete sender or foreign run: ok=%t scope=%#v", ok, scope)
 	}
+	keylessSource := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyStandingRootTreePublic(t))
+	keylessResolver := newConnectRoutePlanResolver(keylessSource, nil, nil, nil, nil)
+	keylessRouting, err := events.NewExternalIngressRoutingSource("beta", events.RoutingSourceAuthorityProviderAdmissionPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keylessEvent := eventtest.RunCreatingRootIngressWithRoutingSource(
+		uuid.NewString(), "inbound.telegram", "provider", "", json.RawMessage(`{}`),
+		0, uuid.NewString(), "", events.EventEnvelope{}, keylessRouting, time.Now().UTC(),
+	)
+	scope, ok = keylessResolver.selectedTargetScope(context.Background(), keylessEvent)
+	if !ok || scope.sourceEntityID != "" || !slices.Equal(scope.instancePaths, []string{"beta"}) {
+		t.Fatalf("compiled keyless declaration lost its exact lookup path without a process index: ok=%t scope=%#v", ok, scope)
+	}
 }
 
 func TestPrivateTemplateInputCannotBecomePublicAPIEndpoint(t *testing.T) {
