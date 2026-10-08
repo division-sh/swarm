@@ -829,7 +829,7 @@ func TestInboundGateway_GitHubAdapterDuplicateDeliveryDoesNotPublishAgain(t *tes
 
 func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedRedactedSemantics(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "ingress", RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687"})
+	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{BundleHash: runtimeTestBundleHash, FlowPath: "ingress", RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -838,7 +838,8 @@ func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedR
 	firstPlan, firstCatalog := compiledRedactedNormalizedPlan(t, "1.0.0", "string")
 	bus.SetProviderOutputAuthorizationVerifier(firstCatalog)
 	target := InboundTarget{
-		ServiceID: "9f733ec3-f834-47ff-bd55-3ea9038187ef", FlowPath: "ingress",
+		BundleHash: runtimeTestBundleHash,
+		ServiceID:  runtimeflowidentity.StandingServiceID("ingress"), FlowPath: "ingress",
 		RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", Generation: 1, PublicationSequence: 1,
 
 		Alias: "chat", Provider: "telegram", AdmissionPlan: firstPlan,
@@ -881,7 +882,7 @@ func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedR
 
 func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProjectionFailure(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "ingress", RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687"})
+	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{BundleHash: runtimeTestBundleHash, FlowPath: "ingress", RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -891,7 +892,8 @@ func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProject
 	projectionFailingPlan, _ := compiledRedactedNormalizedPlan(t, "2.0.0", "integer")
 	bus.SetProviderOutputAuthorizationVerifier(firstCatalog)
 	target := InboundTarget{
-		ServiceID: "9f733ec3-f834-47ff-bd55-3ea9038187ef", FlowPath: "ingress",
+		BundleHash: runtimeTestBundleHash,
+		ServiceID:  runtimeflowidentity.StandingServiceID("ingress"), FlowPath: "ingress",
 		RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", Generation: 1, PublicationSequence: 1,
 
 		Alias: "chat", Provider: "telegram", AdmissionPlan: firstPlan,

@@ -53,6 +53,12 @@ func ConstructedFlowInstanceIdentityFixture(source semanticview.Source, flowID, 
 	return child
 }
 
+func StoredFlowInstanceIdentityFixture(source semanticview.Source, flowID, instanceID, runID, entityID string) runtimeflowidentity.Instance {
+	instance := ConstructedFlowInstanceIdentityFixture(source, flowID, instanceID, runID)
+	instance.EntityID = entityID
+	return instance
+}
+
 func (rt *RouteTable) AddConstructedFlowInstanceRouteFixture(req FlowInstanceRouteMaterializationRequest) error {
 	return rt.AddFlowInstanceRoute(rt.ConstructedRouteRequestFixture(req))
 }
