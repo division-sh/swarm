@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
@@ -272,6 +273,12 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 	}
 	poolWait := time.Since(poolStarted)
 	var tx *sql.Tx
+	var releaseOrdering func()
+	defer func() {
+		if releaseOrdering != nil {
+			releaseOrdering()
+		}
+	}()
 	discard := false
 	probe := b.testTransactions.Begin(opts != nil && opts.ReadOnly, false)
 	defer func() { probe.Finish(err) }()
@@ -281,6 +288,9 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 		if tx != nil {
 			probe.RollbackAttempted()
 			rollbackErr := tx.Rollback()
+			if releaseOrdering != nil {
+				releaseOrdering()
+			}
 			// ErrTxDone describes Go's handle, not the physical transaction. A
 			// concurrent cancellation may already be disposing this connection.
 			if rollbackErr != nil {
@@ -307,6 +317,7 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 		return false, err
 	}
 	probe.Begun()
+	ctx, releaseOrdering = authoractivity.BindTransaction(ctx, ctx, tx, authoractivity.DialectSQLite)
 	ctx = transactiontest.WithAttempt(ctx, probe)
 	if err = ctx.Err(); err != nil {
 		return false, err
@@ -318,7 +329,9 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 		return false, err
 	}
 	probe.BeforeCommit()
-	if err = tx.Commit(); err != nil {
+	err = tx.Commit()
+	releaseOrdering()
+	if err != nil {
 		probe.CommitFailed()
 		discard = true
 		// Only this owner's Commit result is classified here. Automatic rollback

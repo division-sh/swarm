@@ -32,7 +32,7 @@ func TestEmptyDeclaredEffectsSkipRevisionFinalizerWithoutSkippingEvidence(t *tes
 				receipt := slot.Begin(false, false)
 				ctx := transactiontest.WithAttempt(context.Background(), receipt)
 				value := string(dialect) + "-empty-" + tc.name
-				result := run(ctx, dialect, tc.evidence, Ordinary, nil, nil, faultMatrixNative(db, nil), func(ctx context.Context, attempt *Attempt) (string, error) {
+				result := run(ctx, dialect, tc.evidence, Ordinary, nil, nil, faultMatrixNative(db, nil, dialect), func(ctx context.Context, attempt *Attempt) (string, error) {
 					if err := faultMatrixInsert(ctx, attempt, value); err != nil {
 						return "", err
 					}

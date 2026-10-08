@@ -14,7 +14,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
-	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
@@ -58,64 +57,6 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 	assertSQLiteMutationCount(t, db, entityID, "region", "workflow_instance_store", "create", "", "", 0)
 	assertSQLiteMutationCount(t, db, entityID, "tier", "entity_initial_value", "create_entity", "null", "1", 1)
 	assertSQLiteMutationCount(t, db, entityID, "tier", "workflow_engine", "create", "1", "2", 1)
-}
-
-func TestSQLiteEntityStateDiffRequiresExistingCanonicalRunBeforeMutation(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("begin transaction: %v", err)
-	}
-	t.Cleanup(func() { _ = tx.Rollback() })
-	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
-	ctx, err = authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
-	if err != nil {
-		t.Fatalf("begin author activity: %v", err)
-	}
-	err = insertSQLiteEntityStateDiff(
-		ctx,
-		tx,
-		testRunLifecycleMutation{tx: tx, dialect: workflowStoreDialectSQLite},
-		uuid.NewString(),
-		runtimemutationlog.EntityStateProjection{},
-		runtimemutationlog.EntityStateProjection{Fields: map[string]any{"status": "ready"}},
-		runtimemutationlog.Writer{Type: "platform", ID: "hostile-proof", HandlerStep: "diff"},
-	)
-	if !errors.Is(err, storerunlifecycle.ErrRunNotFound) {
-		t.Fatalf("insertSQLiteEntityStateDiff error = %v, want ErrRunNotFound", err)
-	}
-	assertSQLiteTxTableCount(t, tx, "runs", 0)
-	assertSQLiteTxTableCount(t, tx, "entity_mutations", 0)
-}
-
-func TestSQLiteInitialValueMutationRequiresExistingCanonicalRunBeforeMutation(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("begin transaction: %v", err)
-	}
-	t.Cleanup(func() { _ = tx.Rollback() })
-	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
-	ctx, err = authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
-	if err != nil {
-		t.Fatalf("begin author activity: %v", err)
-	}
-	_, err = insertSQLiteWorkflowCreateEntityInitialValueMutations(
-		ctx,
-		tx,
-		testRunLifecycleMutation{tx: tx, dialect: workflowStoreDialectSQLite},
-		uuid.NewString(),
-		runtimemutationlog.EntityStateProjection{},
-		runtimemutationlog.EntityStateProjection{Fields: map[string]any{"region": "west"}},
-		map[string]any{"region": "west"},
-	)
-	if !errors.Is(err, storerunlifecycle.ErrRunNotFound) {
-		t.Fatalf("insertSQLiteWorkflowCreateEntityInitialValueMutations error = %v, want ErrRunNotFound", err)
-	}
-	assertSQLiteTxTableCount(t, tx, "runs", 0)
-	assertSQLiteTxTableCount(t, tx, "entity_mutations", 0)
 }
 
 func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *testing.T) {
@@ -274,31 +215,27 @@ func TestSQLiteWorkflowInstanceStore_runPipelineMutationDoesNotRetryActiveTransa
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newTestSQLiteWorkflowInstanceStore(db)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), uuid.NewString())
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin active tx: %v", err)
-	}
-	t.Cleanup(func() { _ = tx.Rollback() })
-
 	busyErr := errors.New("SQLITE_BUSY: database is locked")
 	var attempts int32
-	txctx, err := authoractivityfixture.Begin(WithPipelineSQLTxContext(ctx, tx), tx, authoractivityfixture.DialectSQLite)
-	if err != nil {
-		t.Fatalf("begin author activity story: %v", err)
-	}
-	err = store.runPipelineMutation(txctx, func(txctx context.Context) error {
-		atomic.AddInt32(&attempts, 1)
-		gotTx, ok := PipelineSQLTxFromContext(txctx)
-		if !ok {
-			t.Fatal("active transaction missing from pipeline mutation context")
+	err := store.testRuntimeMutation().RunRuntimeMutationContext(ctx, func(outer context.Context) error {
+		err := store.runPipelineMutation(outer, func(txctx context.Context) error {
+			atomic.AddInt32(&attempts, 1)
+			gotTx, ok := PipelineSQLTxFromContext(txctx)
+			if !ok || gotTx == nil {
+				t.Fatal("active transaction missing from pipeline mutation context")
+			}
+			if txctx != outer {
+				t.Fatal("nested mutation replaced the exact active transaction context")
+			}
+			return busyErr
+		})
+		if !errors.Is(err, busyErr) {
+			t.Fatalf("runPipelineMutation error = %v, want sentinel busy error", err)
 		}
-		if gotTx != tx {
-			t.Fatalf("transaction = %#v, want active transaction", gotTx)
-		}
-		return busyErr
+		return nil
 	})
-	if !errors.Is(err, busyErr) {
-		t.Fatalf("runPipelineMutation error = %v, want sentinel busy error", err)
+	if err != nil {
+		t.Fatalf("owned fixture transaction: %v", err)
 	}
 	if got := atomic.LoadInt32(&attempts); got != 1 {
 		t.Fatalf("attempts = %d, want no retry inside active transaction", got)

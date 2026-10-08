@@ -106,10 +106,7 @@ func (s *workflowInstanceStore) runInPipelineTransaction(ctx context.Context, fn
 		if authoractivityfixture.InMutation(ctx, tx) {
 			return fn(ctx, tx)
 		}
-		if !authoractivityfixture.FinalizedMutation(ctx, tx) {
-			return fmt.Errorf("pipeline fixture entered from a raw transaction without author activity ownership")
-		}
-		ctx = WithoutPipelineSQLTxContext(ctx)
+		return fmt.Errorf("pipeline fixture entered from a raw transaction without author activity ownership")
 	}
 	runner := s.testRuntimeMutation()
 	if runner == nil {
@@ -132,10 +129,7 @@ func (s *workflowInstanceStore) runInPipelineTransactionAcknowledged(ctx context
 		if authoractivityfixture.InMutation(ctx, tx) {
 			return false, fn(ctx, tx)
 		}
-		if !authoractivityfixture.FinalizedMutation(ctx, tx) {
-			return false, fmt.Errorf("pipeline fixture entered from a raw transaction without author activity ownership")
-		}
-		ctx = WithoutPipelineSQLTxContext(ctx)
+		return false, fmt.Errorf("pipeline fixture entered from a raw transaction without author activity ownership")
 	}
 	runner, ok := s.testRuntimeMutation().(acknowledgedRuntimeMutationRunner)
 	if !ok {
