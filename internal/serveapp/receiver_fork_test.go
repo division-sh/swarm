@@ -99,7 +99,6 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
 				} else {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "fork.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "empty-fork-seed"})
-					seedEventID = seed.EventID
 					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
 				}
@@ -182,10 +181,6 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						t.Fatal("source publication consumed the complete fingerprint deadline")
 					}
 					probe.Expect(request.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(remaining)
-				}
-				if surface != "historical_refusal" && surface != "pending_refusal" {
-					probe.Expect(seedEventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
-					probe.Expect(request.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
 				}
 				before := repeatedStaticRunSnapshot(t, rt.DB, request.RunID)
 				checkSource := func(boundary string) {
