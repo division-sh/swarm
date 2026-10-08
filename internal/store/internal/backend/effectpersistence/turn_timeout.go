@@ -110,27 +110,36 @@ func requestTurnTimeoutTx(ctx context.Context, tx *sql.Tx, postgres bool, attemp
 	if !event.Valid || event.String == "" {
 		return runtimeeffects.TurnCancellation{}, fmt.Errorf("launched turn timeout has no stable event identity")
 	}
-	query = `UPDATE runtime_agent_turn_lifetimes SET cancel_reason='turn_timeout',cancel_cause_event_id=$1::uuid,cancel_requested_at=$2 WHERE turn_id=$3::uuid AND cancel_reason IS NULL AND settled_at IS NULL`
+	result.RequestedAt, err = persistTurnTimeoutIntentTx(ctx, tx, postgres, turnID, event.String, now)
+	if err != nil {
+		return runtimeeffects.TurnCancellation{}, err
+	}
+	result.Requested, result.Reason, result.CauseEvent = true, deliverylifecycle.CancellationTurnTimeout, event.String
+	return result, nil
+}
+
+func persistTurnTimeoutIntentTx(ctx context.Context, tx *sql.Tx, postgres bool, turnID, eventID string, now time.Time) (time.Time, error) {
+	var requestedRaw any
+	query := `UPDATE runtime_agent_turn_lifetimes SET cancel_reason='turn_timeout',cancel_cause_event_id=$1::uuid,cancel_requested_at=$2 WHERE turn_id=$3::uuid AND cancel_reason IS NULL AND settled_at IS NULL`
 	if !postgres {
 		query = `UPDATE runtime_agent_turn_lifetimes SET cancel_reason='turn_timeout',cancel_cause_event_id=?,cancel_requested_at=? WHERE turn_id=? AND cancel_reason IS NULL AND settled_at IS NULL`
 	}
-	write, err := tx.ExecContext(ctx, query, event.String, now.UTC(), turnID)
+	write, err := tx.ExecContext(ctx, query, eventID, now.UTC(), turnID)
 	if err := requireExternalAttemptTransition(write, err); err != nil {
-		return runtimeeffects.TurnCancellation{}, err
+		return time.Time{}, err
 	}
 	query = `SELECT cancel_requested_at FROM runtime_agent_turn_lifetimes WHERE turn_id=$1::uuid`
 	if !postgres {
 		query = `SELECT cancel_requested_at FROM runtime_agent_turn_lifetimes WHERE turn_id=?`
 	}
 	if err := tx.QueryRowContext(ctx, query, turnID).Scan(&requestedRaw); err != nil {
-		return runtimeeffects.TurnCancellation{}, err
+		return time.Time{}, err
 	}
-	result.RequestedAt, launched, err = sqliteTimeValue(requestedRaw)
-	if err != nil || !launched {
-		return runtimeeffects.TurnCancellation{}, fmt.Errorf("acknowledged timeout omitted its request timestamp")
+	requestedAt, valid, err := sqliteTimeValue(requestedRaw)
+	if err != nil || !valid {
+		return time.Time{}, fmt.Errorf("acknowledged timeout omitted its request timestamp")
 	}
-	result.Requested, result.Reason, result.CauseEvent = true, deliverylifecycle.CancellationTurnTimeout, event.String
-	return result, nil
+	return requestedAt, nil
 }
 
 func decodeTurnTimeoutIntent(result runtimeeffects.TurnCancellation, reason, cause sql.NullString, requestedRaw any) (runtimeeffects.TurnCancellation, error) {

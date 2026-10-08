@@ -456,14 +456,8 @@ func workflowLifecycleHasScheduleMutation(items []WorkflowScheduleMutation, sche
 func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, instance *WorkflowInstance, effect runtimeworkflowlifecycle.Effect, prepared *PreparedWorkflowLifecycleMutation) error {
 	entityID := effect.EntityID()
 	route := owner.Route
-	if effect.OccurredAt().IsZero() {
-		return fmt.Errorf("workflow lifecycle effect disagrees with the prepared instance scope")
-	}
-	if effect.Route() != route {
-		return fmt.Errorf("workflow lifecycle effect route disagrees with the exact live flow owner")
-	}
-	if _, err := requireWorkflowInstanceIdentity(route, entityID, *instance); err != nil {
-		return fmt.Errorf("workflow lifecycle effect disagrees with the prepared instance scope: %w", err)
+	if err := validateWorkflowLifecycleEffectOwner(owner, *instance, effect); err != nil {
+		return err
 	}
 	fromState, toState := "", ""
 	cause := workflowTimerCause{OccurredAt: effect.OccurredAt(), ExecutionMode: effect.ExecutionMode()}
@@ -524,6 +518,20 @@ func (pc *PipelineCoordinator) planWorkflowLifecycleEffect(ctx context.Context, 
 	}
 	if err := pc.planWorkflowGateEffect(ctx, owner.RunID, instance, route, entityID, fromState, toState, effect, prepared); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateWorkflowLifecycleEffectOwner(owner runtimeflowidentity.RunScopedFlowInstance, instance WorkflowInstance, effect runtimeworkflowlifecycle.Effect) error {
+	route, entityID := owner.Route, effect.EntityID()
+	if effect.OccurredAt().IsZero() {
+		return fmt.Errorf("workflow lifecycle effect disagrees with the prepared instance scope")
+	}
+	if effect.Route() != route {
+		return fmt.Errorf("workflow lifecycle effect route disagrees with the exact live flow owner")
+	}
+	if _, err := requireWorkflowInstanceIdentity(route, entityID, instance); err != nil {
+		return fmt.Errorf("workflow lifecycle effect disagrees with the prepared instance scope: %w", err)
 	}
 	return nil
 }
