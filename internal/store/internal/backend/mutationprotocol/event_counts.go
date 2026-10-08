@@ -24,14 +24,15 @@ func (a *Attempt) AddEventCountDelta(runID string, delta int64) error {
 	if a.kind == WholeParentDeletion {
 		return errors.New("whole-parent deletion has no surviving event counter")
 	}
+	key, _ := physicalRunKey(a.dialect, runID)
 	if a.eventCounts == nil {
 		a.eventCounts = make(map[string]int64)
 	}
-	if _, seen := a.eventCounts[runID]; !seen {
+	if _, seen := a.eventCounts[key]; !seen {
 		// Keep the original contribution order; do not introduce a new run-lock order.
 		a.eventCountOrder = append(a.eventCountOrder, runID)
 	}
-	a.eventCounts[runID] += delta
+	a.eventCounts[key] += delta
 	return nil
 }
 
@@ -39,14 +40,15 @@ func (a *Attempt) flushEventCount(ctx context.Context, runID string) error {
 	if err := a.requireActive(); err != nil {
 		return err
 	}
-	delta := a.eventCounts[runID]
+	key, _ := physicalRunKey(a.dialect, runID)
+	delta := a.eventCounts[key]
 	if delta == 0 {
 		return nil
 	}
 	if err := counterprojection.Apply(ctx, a.tx, a.dialect, runID, delta); err != nil {
 		return err
 	}
-	a.eventCounts[runID] = 0
+	a.eventCounts[key] = 0
 	return nil
 }
 
