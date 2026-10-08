@@ -210,6 +210,7 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 			if len(created) != 4 {
 				t.Fatalf("ordinary operating creation count=%d, want 4 independent instances", len(created))
 			}
+			requireServedRunStatus(t, rt.Endpoint, setup.RunID, "completed")
 			var header struct {
 				Run operatorread.RunHeader `json:"run"`
 			}

@@ -48,7 +48,10 @@ func (p selectedRunTargetOwnerProjection) ordinarySource(evt events.Event) (ordi
 	if expected.InstancePath == "" {
 		if p.context != nil {
 			if preview, _ := p.context.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil {
-				expected = preview.selected[route.FlowID]
+				expected, err = providerConstructionCandidate(route.FlowID, preview.selected[route.FlowID])
+				if err != nil {
+					return ordinaryPublicationSource{}, err
+				}
 			}
 		}
 		if expected.InstancePath == "" {
@@ -79,6 +82,17 @@ func (p selectedRunTargetOwnerProjection) ordinarySource(evt events.Event) (ordi
 		return ordinaryPublicationSource{route: owner, root: root}, nil
 	}
 	return ordinaryPublicationSource{}, fmt.Errorf("provider source ownership resolution failed")
+}
+
+func providerConstructionCandidate(flowID string, candidates []runtimeflowidentity.Instance) (runtimeflowidentity.Instance, error) {
+	switch len(candidates) {
+	case 0:
+		return runtimeflowidentity.Instance{}, nil
+	case 1:
+		return candidates[0], nil
+	default:
+		return runtimeflowidentity.Instance{}, fmt.Errorf("provider declaring flow %q requires one selected-run execution owner; got %d", flowID, len(candidates))
+	}
 }
 
 func (p selectedRunTargetOwnerProjection) providerExecutionIdentity(event events.Event, flowID string, root bool) (runtimeflowidentity.Instance, error) {
