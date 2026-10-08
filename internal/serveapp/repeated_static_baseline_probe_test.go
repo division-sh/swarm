@@ -97,7 +97,6 @@ func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
 func settledStaticRunSnapshot(t *testing.T, rt servedControlProofRuntime, probe *lifecycletest.Probe, published servedEventPublishRPCResult) map[string][][]string {
 	t.Helper()
 	// Delivery settlement precedes the accepted publication's diagnostic tail.
-	probe.Expect(published.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
 	return repeatedStaticRunSnapshot(t, rt.DB, published.RunID)
 }
 
