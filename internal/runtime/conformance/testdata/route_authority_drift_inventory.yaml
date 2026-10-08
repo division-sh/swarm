@@ -126,7 +126,6 @@ search_dimensions:
       - platform-spec.yaml
       - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
-      - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/routing_derivation.go
     canonical_layer: route_plan_authority
@@ -453,8 +452,10 @@ seam_families:
       exact admitted construction ancestry. Its process-local preview carries
       same-publication selections; it grants no independent connection,
       binding-generation or persistence authority. The nested sibling proof
-      and retained existing-selection counterexample cover this consumer;
-      the latter remains an unresolved #2438 triage obligation, not closure.
+      and stored-selection controls cover exact parents, non-hash stored
+      identities, same-key siblings, ambiguity, conflict, key gaps and a
+      routable derived address with the wrong key. Creation derives its
+      discriminator only after no eligible stored owner matches.
       Dynamic instance intent consists only of opaque
       TemplateInstanceField, typed FlowInputInstanceSource, and exhaustive
       FlowInputResolutionMode. The source-type owner resolves actual payload
@@ -808,7 +809,7 @@ seam_families:
       - internal/runtime/core/pinrouting/connect_scoped_candidates_test.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/connect_candidate_scope_test.go
-      - internal/runtime/bus/template_instance_lifecycle.go
+      - internal/runtime/bus/a9_existing_selection_probe_test.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/routing_derivation.go
       - internal/runtime/runforkadmission/contract_frontier.go
@@ -824,8 +825,10 @@ seam_families:
       - legacy route/subscriber interpretation after matched ConnectRoutePlan
     notes: >
       CompiledConnectGraph evaluates receiver identity and typed recipient
-      registrations once. EventBus planning, lifecycle, pending frontier, and
-      pending route history consume the opaque result. Receiver event-key
+      registrations once. EventBus planning, pending frontier, and pending
+      route history consume the opaque result. Lifecycle supplies only
+      key/parent-admitted stored or authorized-to-create receiver identities;
+      a routable address alone is not selection authority. Receiver event-key
       reconstruction, local subscriber rematching, and RouteTable shadow
       decisions are retired and prohibited.
   - id: compiled_receiver_instance_key_consumer

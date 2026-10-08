@@ -2,6 +2,14 @@ package canonicalrouting
 
 import "testing"
 
+func CopySchemaOmittedConstructionTree(t testing.TB) string {
+	t.Helper()
+	root := CopyNestedKeyedConnectionSelection(t)
+	removeClosedVariantFiles(t, root, "schema.yaml", "parent/middle/schema.yaml")
+	writeClosedVariantFile(t, root, "resources/data/probe.json", `{"value": 1}`)
+	return root
+}
+
 // CopyNestedKeyedConnectionSelection gives two independent per-edge keys to
 // a keyed parent and a keyed leaf beneath an eager keyless intermediate.
 func CopyNestedKeyedConnectionSelection(t testing.TB) string {

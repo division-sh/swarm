@@ -99,7 +99,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 			semantics.GuardByID[id] = entry
 		}
 	}
-	for flowID, schema := range bundle.FlowSchemas {
+	for flowID, schema := range bundle.effectiveChildFlowSchemas() {
 		flowID = strings.TrimSpace(flowID)
 		if flowID == "" {
 			continue

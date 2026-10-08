@@ -146,20 +146,25 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 	if err != nil {
 		return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, err
 	}
-	instanceID := templateInstanceLifecycleInstanceID(plan, keyMaterial)
-	instance, err := runtimeflowidentity.KeyedChild(o.source, parent, plan.ReceiverEndpoint().Readback().FlowID, instanceID)
+	owners, err := o.constructionOwners(ctx, evt.RunID())
 	if err != nil {
 		return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, err
 	}
-	var matches []events.RouteIdentity
+	var matches []runtimeflowidentity.Instance
+	parentRoute := runtimeflowidentity.ParentRoute{FlowID: parent.TemplateID, FlowInstance: parent.InstancePath, EntityID: parent.EntityID}
 	for _, descriptor := range descriptors {
-		if descriptor.FlowInstance == instance.InstancePath {
-			if descriptor.EntityID != instance.EntityID {
-				return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, fmt.Errorf("receiver descriptor contradicts its structural identity")
-			}
-			if runtimepinrouting.ConnectInstanceKeyDescriptorMatches(keyMaterial, descriptor) {
-				matches = append(matches, plan.ReceiverRoute(descriptor.FlowInstance, descriptor.EntityID))
-			}
+		if !runtimepinrouting.ConnectInstanceKeyDescriptorMatches(keyMaterial, descriptor) {
+			continue
+		}
+		instance, found := owners[descriptor.FlowInstance]
+		if !found || instance.EntityID != descriptor.EntityID {
+			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, fmt.Errorf("receiver descriptor contradicts its stored construction")
+		}
+		if err := instance.ValidateConstruction(o.source, evt.RunID()); err != nil {
+			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, err
+		}
+		if instance.TemplateID == plan.ReceiverEndpoint().Readback().FlowID && instance.ParentRoute == parentRoute {
+			matches = append(matches, instance)
 		}
 	}
 	if len(matches) > 1 {
@@ -169,24 +174,22 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 		if mode == runtimecontracts.FlowInputResolutionModeCreate {
 			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureInstanceConflict}, TemplateInstanceLifecycleDecision{}, true, nil
 		}
-		decision := o.decision(plan, evt, keyMaterial, matches[0], templateInstanceLifecycleExistingAction(mode))
+		instance := matches[0]
+		route := plan.ReceiverRoute(instance.InstancePath, instance.EntityID)
+		decision := o.decision(plan, evt, keyMaterial, route, templateInstanceLifecycleExistingAction(mode))
 		decision.identity = instance
-		return templateInstanceLifecycleMaterialization(plan, matches), decision, true, nil
-	}
-	derivedRoute := plan.ReceiverRoute(instance.InstancePath, instance.EntityID)
-	if templateInstanceLifecycleMatchIsRoutable(o.routeTable, evt.RunID(), plan, derivedRoute) {
-		if mode == runtimecontracts.FlowInputResolutionModeCreate {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureInstanceConflict}, TemplateInstanceLifecycleDecision{}, true, nil
-		}
-		decision := o.decision(plan, evt, keyMaterial, derivedRoute, templateInstanceLifecycleExistingAction(mode))
-		decision.identity = instance
-		return templateInstanceLifecycleMaterialization(plan, []events.RouteIdentity{derivedRoute}), decision, true, nil
+		return templateInstanceLifecycleMaterialization(plan, []events.RouteIdentity{route}), decision, true, nil
 	}
 	if mode == runtimecontracts.FlowInputResolutionModeSelect {
 		return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetUnresolved}, TemplateInstanceLifecycleDecision{}, true, nil
 	}
 	if o.plan == nil {
 		return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureLifecycleUnavailable}, TemplateInstanceLifecycleDecision{}, true, nil
+	}
+	instanceID := templateInstanceLifecycleInstanceID(plan, keyMaterial)
+	instance, err := runtimeflowidentity.KeyedChild(o.source, parent, plan.ReceiverEndpoint().Readback().FlowID, instanceID)
+	if err != nil {
+		return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, err
 	}
 	req, decision, err := o.activationRequest(evt, plan, instance, keyMaterial)
 	if err != nil {
@@ -319,17 +322,6 @@ func templateInstanceLifecycleExistingAction(mode runtimecontracts.FlowInputReso
 		return templateInstanceLifecycleActionReused
 	}
 	return templateInstanceLifecycleActionSelectedExisting
-}
-
-func templateInstanceLifecycleMatchIsRoutable(routeTable *RouteTable, runID string, plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) bool {
-	if routeTable == nil || strings.TrimSpace(runID) == "" {
-		return false
-	}
-	target = target.Normalized()
-	if target.Empty() {
-		return false
-	}
-	return len(routeTable.evaluateConnectPlan(runID, plan, []events.RouteIdentity{target}).Recipients()) > 0
 }
 
 func templateInstanceLifecycleParentRoute(evt events.Event, plan runtimepinrouting.ConnectRoutePlan) runtimeflowidentity.ParentRoute {

@@ -108,7 +108,7 @@ func TestNestedChildToConcreteTemplateReceiverUsesSelectedOwner(t *testing.T) {
 	store.bus = eventBus
 	runID := uuid.NewString()
 	constructedSource := installConnectionSourceConstructionForRun(t, eventBus, source, "left/child/producer", runID)
-	if err := eventBus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRouteForRun(runID, runtimeflowidentity.DeriveRoute("account", "one"))}); err != nil {
+	if err := eventBus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRouteForRun(runID, runtimeflowidentity.DeriveRoute("account", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "account", "one", runID, selectedEntityID)}); err != nil {
 		t.Fatalf("add selected template route: %v", err)
 	}
 	sourceRoute := events.RouteIdentity{

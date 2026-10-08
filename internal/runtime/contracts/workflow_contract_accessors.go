@@ -127,11 +127,36 @@ func (b *WorkflowContractBundle) FlowSchemaByID(id string) (FlowSchemaDocument, 
 	if b == nil || id == "" {
 		return FlowSchemaDocument{}, false
 	}
+	// The admitted tree owns effective node shape, including live FlowNodes
+	// with no schema file. Declaration maps retain authored-file provenance.
+	if b.FlowTree.Root != nil {
+		view, found := b.FlowViewByID(id)
+		if !found {
+			return FlowSchemaDocument{}, false
+		}
+		return view.Schema, true
+	}
 	if id == "." && b.RootSchema != nil {
 		return *b.RootSchema, true
 	}
 	schema, ok := b.FlowSchemas[id]
 	return schema, ok
+}
+
+func (b *WorkflowContractBundle) effectiveChildFlowSchemas() map[string]FlowSchemaDocument {
+	if b.FlowTree.Root == nil {
+		return b.FlowSchemas
+	}
+	out := make(map[string]FlowSchemaDocument, len(b.FlowTree.ByID))
+	for id := range b.FlowTree.ByID {
+		if id == "." {
+			continue
+		}
+		if schema, found := b.FlowSchemaByID(id); found {
+			out[id] = schema
+		}
+	}
+	return out
 }
 func (b *WorkflowContractBundle) HasFlow(id string) bool {
 	_, ok := b.FlowViewByID(id)

@@ -14501,6 +14501,8 @@ flow_model:
             - {event: validation.requested, from: producer, to: validator, resolution: create, key_from: generated.uuid}
         source_type_authority: |
           The canonical instance-source type resolver owns compatibility for every runnable create, select, and select-or-create path before route-plan lowering. For `payload.<field>`, the actual source type comes from that field in the bound producer event schema. For `generated.uuid` and `event.id`, the actual source type is the intrinsic UUID-compatible platform type. No authored type assertion or conversion seam exists. The actual source type MUST also be scalar-compatible with the receiver entity instance field after named catalog aliases are resolved.
+        stored_receiver_selection: |
+          Existing receiver selection consumes the compiled typed per-edge business key, exact receiver declaration, selected run, structural parent, and admitted stored construction identity. The selected discriminator, path and entity remain the stored facts; they need not equal a would-create hash. Creation derives a discriminator only after no eligible existing match and an authorized create decision. A routable derived address cannot substitute for the same key and owner checks. Same-key receivers under different structural parents are distinct; ambiguity within the selected parent fails closed.
         modes:
           create:
             status: runnable_in_1835_pr1
@@ -41023,6 +41025,7 @@ filesystem_source_model:
       Every non-reserved directory segment above a classified declaration, typed resource, or live descendant is a FlowNode. Child identity is its exact slash-relative path from the selected root. The selected root is spelled exactly `.`; an empty path, backslash spelling, or any other normalized-equivalent spelling is invalid rather than repaired. A non-root node must have local semantic/resource content or a live descendant; dead directories fail. The selected root must contain at least one semantic declaration, typed resource, or live descendant.
     schema_owner: |
       schema.yaml owns instance shape, ingress, schedules, imports, event pins, and the exact least-common-ancestor connect declarations lowered into the compiled pin/edge owner. Mode is derived from the instance declaration, never authored. Deployment retention derives from enabled ingress bindings and active declared clocks, never an activation marker. There is no connect.yaml or manifest-owned routing surface.
+      Effective shape and the compiled stage catalog exist for every admitted FlowNode, including the selected root and schema-omitted intermediate/resource-established nodes. Such nodes are keyless and stateless unless their actual declarations supply those facts; no synthetic schema file, field, pin, activation or authored provenance is created. Constructor compilation, structural identity validation and lexical ancestry selection consume that same admitted node owner. Missing, dead, reserved-resource and outside-tree coordinates do not acquire an effective schema or constructor.
     discovery_output: |
       One immutable trie rooted at `.`. Consumers may derive sorted registries from the trie but may not reconstruct topology from package inventories, directory names outside the artifact, or declaration contents.
   authored_identity:

@@ -248,6 +248,14 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 			}
 			evt := finalFlowInstanceAuthoringEvent(uuid.NewString(), tc.payload)
 			installConnectionSourceConstructionForRun(t, eb, source, "producer", evt.RunID())
+			for _, descriptor := range tc.flowInstances {
+				instance := StoredFlowInstanceIdentityFixture(source, finalflowinstanceauthoring.TemplateFlowID, descriptor.InstanceID, evt.RunID(), descriptor.EntityID)
+				if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{
+					Identity: testRunScopedFlowRouteForRun(evt.RunID(), instance.Route()), Instance: instance,
+				}); err != nil {
+					t.Fatalf("install ambiguous receiver construction: %v", err)
+				}
+			}
 
 			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 			if err != nil {
