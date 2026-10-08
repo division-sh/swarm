@@ -66,11 +66,10 @@ func newBoundedInboundTestEventBus(t *testing.T, selected runtimebus.EventStore,
 
 func seedBoundedInboundFlow(t *testing.T, ctx context.Context, selected interface {
 	CommitFlowInstanceActivation(context.Context, runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error)
-}, runID, entityID, path, slug string) {
+}, source semanticview.Source, runID, entityID, path, slug string) {
 	t.Helper()
 	now := time.Now().UTC()
 	ctx = runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), runtimeeffects.ExecutionModeLive)
-	source := boundedInboundTestSource(t)
 	child, err := runtimeflowidentity.KeylessChild(source,
 		runtimeflowidentity.Stored(source, ".", runID, runID, runID, ""), boundedProviderFlowID)
 	if err != nil || child.InstancePath != path {
@@ -1147,13 +1146,20 @@ func seedPostgresInboundGatewayRuntime(
 	provider string,
 	webhookSecret string,
 	agentID string,
+	sources ...semanticview.Source,
 ) runtimepkg.InboundTarget {
 	t.Helper()
 	target := seedBoundedStandingTarget(t, ctx, pg, entityID)
 	if target.RunID != runID {
 		t.Fatalf("bounded receiver run %s differs from admitted standing run %s", runID, target.RunID)
 	}
-	seedBoundedInboundFlow(t, ctx, pg, runID, entityID, flowInstance, entitySlug)
+	source := boundedInboundTestSource(t)
+	if len(sources) == 1 {
+		source = sources[0]
+	} else if len(sources) != 0 {
+		t.Fatal("inbound fixture requires one exact constructor source")
+	}
+	seedBoundedInboundFlow(t, ctx, pg, source, runID, entityID, flowInstance, entitySlug)
 	if strings.TrimSpace(agentID) != "" {
 		if err := storetest.UpsertStaticAgentFixture(t, ctx, pg, runtimemanager.PersistedAgent{
 			Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
@@ -1270,6 +1276,7 @@ func seedSQLiteInboundGatewayRuntime(
 	provider string,
 	webhookSecret string,
 	agentID string,
+	sources ...semanticview.Source,
 ) runtimepkg.InboundTarget {
 	t.Helper()
 	now := time.Now().UTC()
@@ -1277,7 +1284,13 @@ func seedSQLiteInboundGatewayRuntime(
 	if target.RunID != runID {
 		t.Fatalf("bounded receiver run %s differs from admitted standing run %s", runID, target.RunID)
 	}
-	seedBoundedInboundFlow(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug)
+	source := boundedInboundTestSource(t)
+	if len(sources) == 1 {
+		source = sources[0]
+	} else if len(sources) != 0 {
+		t.Fatal("inbound fixture requires one exact constructor source")
+	}
+	seedBoundedInboundFlow(t, ctx, sqliteStore, source, runID, entityID, flowInstance, entitySlug)
 	if strings.TrimSpace(agentID) != "" {
 		if err := storetest.UpsertStaticAgentFixture(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
 			Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{

@@ -54,11 +54,12 @@ func TestInboundGatewaySignedTelegramOperatorChannelClaimSelectedStoreParity(t *
 func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorChannelInboundSelectedStore, db *sql.DB, sqlite bool, runID, entityID, flowInstance string) {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	source := providerRawSettlementSemanticSource(t, runtimepkg.InboundTarget{FlowPath: flowInstance, Alias: entityID}, providerRawSettlementCase{provider: "telegram", eventName: "inbound.telegram"}, "telegram-secret")
 	var inboundTarget runtimepkg.InboundTarget
 	if sqlite {
-		inboundTarget = seedSQLiteInboundGatewayRuntime(t, ctx, selected.(*store.SQLiteRuntimeStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer")
+		inboundTarget = seedSQLiteInboundGatewayRuntime(t, ctx, selected.(*store.SQLiteRuntimeStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer", source)
 	} else {
-		inboundTarget = seedPostgresInboundGatewayRuntime(t, ctx, selected.(*store.PostgresStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer")
+		inboundTarget = seedPostgresInboundGatewayRuntime(t, ctx, selected.(*store.PostgresStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer", source)
 	}
 
 	plan := compileEmbeddedTelegramOperatorChannelPlan(t)
@@ -108,7 +109,7 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 		t.Fatal(err)
 	}
 
-	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: providerRawSettlementSemanticSource(t, inboundTarget, providerRawSettlementCase{provider: "telegram", eventName: "inbound.telegram"}, "telegram-secret")},
+	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source},
 		"inbound.telegram", "inbound.telegram.text_message", "inbound.telegram.callback_action")
 	if err != nil {
 		t.Fatal(err)
