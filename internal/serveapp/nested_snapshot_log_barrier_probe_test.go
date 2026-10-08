@@ -17,9 +17,10 @@ import (
 )
 
 type nestedSnapshotHeldLog struct {
-	logger  *runtimepkg.RuntimeLogger
-	entered chan string
-	release <-chan struct{}
+	logger   *runtimepkg.RuntimeLogger
+	entered  chan string
+	finished chan error
+	release  <-chan struct{}
 }
 
 func (h *nestedSnapshotHeldLog) ProjectLifecycleDiagnostic(ctx context.Context, item diaglog.LifecycleDiagnostic) error {
@@ -35,13 +36,17 @@ func (h *nestedSnapshotHeldLog) Log(ctx context.Context, level diaglog.Level, me
 			return ctx.Err()
 		}
 	}
-	return h.logger.Log(ctx, runtimepkg.RuntimeLogEntry{
+	err := h.logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level: level, Message: message, Component: component, Action: action,
 		EventID: eventID, EventType: eventType, AgentID: agentID,
 		EntityID: strings.TrimSpace(entityID), SessionID: sessionID,
 		Correlation: correlation, Detail: detail,
 		Failure: runtimefailures.CloneEnvelope(failure), DurationUS: durationUS,
 	})
+	if component == "eventbus" && action == "published" && eventType == "left.work.requested" {
+		h.finished <- err
+	}
+	return err
 }
 
 func TestNestedSnapshotLateAcceptedLogCounterexample(t *testing.T) {
@@ -56,7 +61,7 @@ func TestNestedSnapshotLateAcceptedLogCounterexample(t *testing.T) {
 				release := make(chan struct{})
 				unlock := sync.OnceFunc(func() { close(release) })
 				t.Cleanup(unlock)
-				hook := &nestedSnapshotHeldLog{logger: rt.Runtime.Logger, entered: make(chan string, 1), release: release}
+				hook := &nestedSnapshotHeldLog{logger: rt.Runtime.Logger, entered: make(chan string, 1), finished: make(chan error, 1), release: release}
 				rt.Runtime.Bus.SetLoggerHook(hook)
 				result := make(chan servedEventPublishRPCResult, 1)
 				go func() {
@@ -81,6 +86,10 @@ func TestNestedSnapshotLateAcceptedLogCounterexample(t *testing.T) {
 				}
 				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
 				before := repeatedStaticRunSnapshot(t, rt.DB, seed.RunID)
+				var priorSeedReceipts int
+				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_receipts WHERE event_id=$1`, seed.EventID).Scan(&priorSeedReceipts); err != nil {
+					t.Fatal(err)
+				}
 				if rejectSecondSeed {
 					refusal := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{
 						"event_name": "right.work.requested", "run_id": seed.RunID,
@@ -92,6 +101,14 @@ func TestNestedSnapshotLateAcceptedLogCounterexample(t *testing.T) {
 					}
 				}
 				unlock()
+				select {
+				case err := <-hook.finished:
+					if err != nil {
+						t.Fatal(err)
+					}
+				case <-time.After(5 * time.Second):
+					t.Fatal("held diagnostic did not finish after release")
+				}
 				logID := ""
 				for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
 					var logs operatorread.OperatorRuntimeLogListResult
@@ -108,11 +125,6 @@ func TestNestedSnapshotLateAcceptedLogCounterexample(t *testing.T) {
 				}
 				if logID == "" {
 					t.Fatal("original publication diagnostic did not persist after release")
-				}
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				if err := rt.Runtime.Bus.WaitForQuiescence(ctx); err != nil {
-					t.Fatal(err)
 				}
 				after := repeatedStaticRunSnapshot(t, rt.DB, seed.RunID)
 				for _, table := range []string{"flow_instances", "entity_state", "deliveries", "outcomes"} {
@@ -136,14 +148,15 @@ func TestNestedSnapshotLateAcceptedLogCounterexample(t *testing.T) {
 						t.Fatalf("original receipt changed: %#v", prior)
 					}
 				}
-				var logReceipts int
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_receipts WHERE event_id=$1`, logID).Scan(&logReceipts); err != nil {
+				var currentOriginalReceipts int
+				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_receipts WHERE event_id=$1 OR event_id=$2`, logID, seed.EventID).Scan(&currentOriginalReceipts); err != nil {
 					t.Fatal(err)
 				}
-				if len(after["receipts"])-len(before["receipts"]) != logReceipts {
-					t.Fatalf("additional receipt does not belong to the held diagnostic: before=%#v after=%#v log=%s", before["receipts"], after["receipts"], logID)
+				newReceipts := currentOriginalReceipts - priorSeedReceipts
+				if len(after["receipts"])-len(before["receipts"]) != newReceipts {
+					t.Fatalf("additional receipt does not belong to the original publication or held diagnostic: before=%#v after=%#v seed=%s log=%s", before["receipts"], after["receipts"], seed.EventID, logID)
 				}
-				t.Logf("original snapshot assertion is false; only original event %s publication log %s and %d diagnostic receipts arrived; construction/state/delivery/outcomes unchanged; rejected_second_seed=%t", seed.EventID, logID, logReceipts, rejectSecondSeed)
+				t.Logf("original snapshot assertion is false; only original event %s publication log %s and %d original-publication/log receipts arrived; construction/state/delivery/outcomes unchanged; rejected_second_seed=%t", seed.EventID, logID, newReceipts, rejectSecondSeed)
 			})
 		}
 	}
