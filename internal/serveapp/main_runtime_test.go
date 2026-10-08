@@ -722,12 +722,12 @@ func seedServeBundleAdmissionCurrentStandingRun(t *testing.T, ctx context.Contex
 	serviceID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO standing_services (
-			service_id, flow_path, instance_id, entity_id, declaration_present, binding_enabled,
+			service_id, flow_path, declaration_present, binding_enabled,
 			operator_override, effective_state, current_bundle_hash,
 			revision_sequence, current_generation, current_run_id, publication_state,
 			publication_sequence, created_at, updated_at
-		) VALUES ($1::uuid, $2, $3, $4::uuid, TRUE, TRUE, 'none', 'active', $5, 1, 1, $6::uuid, 'pending', 0, NOW(), NOW())
-	`, serviceID, "bundle-admission-proof", uuid.NewString(), uuid.NewString(), bundleHash, runID); err != nil {
+		) VALUES ($1::uuid, $2, TRUE, TRUE, 'none', 'active', $3, 1, 1, $4::uuid, 'pending', 0, NOW(), NOW())
+	`, serviceID, "bundle-admission-proof", bundleHash, runID); err != nil {
 		t.Fatalf("seed current standing bundle admission run: %v", err)
 	}
 }
