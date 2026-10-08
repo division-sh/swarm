@@ -2907,8 +2907,13 @@ func addRoutedRootInputFlowNodeSibling(bundle *runtimecontracts.WorkflowContract
 	validation := bundle.FlowTree.Root.Children[0]
 	bundle.FlowTree.Root.Children = []runtimecontracts.FlowContractView{validation, audit}
 	bundle.FlowTree.ByID = map[string]*runtimecontracts.FlowContractView{
+		".":          bundle.FlowTree.Root,
 		"validation": &bundle.FlowTree.Root.Children[0],
 		"audit":      &bundle.FlowTree.Root.Children[1],
+	}
+	bundle.FlowTree.ByPath = bundle.FlowTree.ByID
+	for index := range bundle.FlowTree.Root.Children {
+		bundle.FlowTree.Root.Children[index].Parent = bundle.FlowTree.Root
 	}
 	bundle.FlowSchemas["audit"] = audit.Schema
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
@@ -3644,16 +3649,19 @@ func routedRootInputFlowNodeBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{validation}}
+	root.Schema.Pins = runtimecontracts.FlowPins{
+		Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}},
+	}
+	root.Children[0].Parent = &root
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}},
-			},
-		},
+		RootSchema: &root.Schema,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
-				"validation": &root.Children[0],
+				".": &root, "validation": &root.Children[0],
+			},
+			ByPath: map[string]*runtimecontracts.FlowContractView{
+				".": &root, "validation": &root.Children[0],
 			},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
