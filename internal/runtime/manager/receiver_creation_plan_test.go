@@ -36,11 +36,15 @@ func TestRebuildPendingCreationConsumesCompiledReceiverOccurrence(t *testing.T) 
 	if !ok {
 		t.Fatal("missing receiver flow")
 	}
-	identity := flowidentity.Stored(source, "worker-flow", "worker-flow/worker-001", "worker-001", uuid.NewString(), "")
 	current := &pipeline.DynamicFlowRuntimeCreationEventPlan{
 		EventID: uuid.NewString(), EventType: "worker-flow/worker-001/worker.inspect.requested",
 		RunID: uuid.NewString(), ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live,
 		Payload: []byte(`{"worker_id":"worker-001"}`), CreatedAt: time.Unix(100, 0).UTC(),
+	}
+	parent := flowidentity.Stored(source, ".", current.RunID, current.RunID, "", "")
+	identity, err := flowidentity.KeyedChild(source, parent, "worker-flow", "worker-001")
+	if err != nil {
+		t.Fatal(err)
 	}
 	plan, err := rebuildPendingDynamicFlowRuntimeCreationEventPlan(current, false, source, schema, identity)
 	if err != nil {

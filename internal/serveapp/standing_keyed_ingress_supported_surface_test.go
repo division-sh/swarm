@@ -19,12 +19,27 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestA9KeyedRootIngressConstructionBothStores(t *testing.T) {
+	a9KeyedRootIngressConstruction(t, false)
+}
+
+func TestA9KeyedRootIngressCreationPublicationBothStores(t *testing.T) {
+	a9KeyedRootIngressConstruction(t, true)
+}
+
+func a9KeyedRootIngressConstruction(t *testing.T, autoEmit bool) {
+	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			root := a9KeyedRootIngressSource(t)
+			var root string
+			if autoEmit {
+				root = canonicalrouting.CopyKeyedRootRawIngressCreationEvent(t)
+			} else {
+				root = canonicalrouting.CopyKeyedRootRawIngress(t)
+			}
 			credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 			t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
 			file, err := credentials.NewFileStore(credentialPath)
@@ -65,6 +80,9 @@ func TestA9KeyedRootIngressConstructionBothStores(t *testing.T) {
 			if err != nil || len(instances) != 0 {
 				t.Fatalf("binding manufactured receivers before authentication: %+v err=%v", instances, err)
 			}
+			if events := servedClockEvents(t, served.Endpoint, status.RunID, "root.created"); len(events) != 0 {
+				t.Fatalf("declaration alone emitted creation: %+v", events)
+			}
 			endpoint := strings.TrimSuffix(served.Endpoint, "/v1/rpc") + "/webhooks/keyed-shop/partner"
 			const body = `{"delivery_id":"first","account_id":"account-7"}`
 			code, refused := a9PostSignedRawIngress(t, endpoint, "wrong-secret", body)
@@ -92,6 +110,15 @@ func TestA9KeyedRootIngressConstructionBothStores(t *testing.T) {
 				t.Fatalf("receipt lost binding-generation authority: %+v err=%v", receipt, err)
 			}
 			a9RequireRootIngressSettlement(t, served.Endpoint, status.RunID, receipt.EventIDs[0])
+			var creationID string
+			if autoEmit {
+				created := servedClockEvents(t, served.Endpoint, status.RunID, "root.created")
+				if len(created) != 1 || created[0].EntityID != status.RunID || created[0].Payload["provider_event_id"] != "first" || created[0].Payload["processed_count"] != float64(0) || created[0].Payload["creation_count"] != float64(0) {
+					t.Fatalf("creation publication lost original constructor fields: %+v", created)
+				}
+				creationID = created[0].EventID
+				a9RequireRootIngressSettlement(t, served.Endpoint, status.RunID, creationID)
+			}
 			rootOwner, err := flowidentity.NewRunScopedFlowInstance(status.RunID, flowidentity.StoredRoute(".", status.RunID, status.RunID))
 			if err != nil {
 				t.Fatal(err)
@@ -109,6 +136,9 @@ func TestA9KeyedRootIngressConstructionBothStores(t *testing.T) {
 			if entity.Fields["provider_event_id"] != "first" || entity.Fields["processed_count"] != float64(1) {
 				t.Fatalf("creating event was not supplied and delivered once: %+v", entity)
 			}
+			if autoEmit && entity.Fields["creation_count"] != float64(1) {
+				t.Fatalf("declared creation consumer was not executed once: %+v", entity)
+			}
 			code, duplicate := a9PostSignedRawIngress(t, endpoint, secret, body)
 			if code != http.StatusOK || !reflect.DeepEqual(a9AliasReceipt(t, accepted), a9AliasReceipt(t, duplicate)) {
 				t.Fatalf("exact retry changed receipt: %s -> %s status=%d", accepted, duplicate, code)
@@ -116,6 +146,12 @@ func TestA9KeyedRootIngressConstructionBothStores(t *testing.T) {
 			requireServedJSONRPCResult(t, served.Endpoint, "entity.get", map[string]any{"run_id": status.RunID, "entity_id": status.RunID}, &entity)
 			if entity.Fields["processed_count"] != float64(1) {
 				t.Fatalf("receipt retry redelivered the constructor event: %+v", entity)
+			}
+			if autoEmit {
+				created := servedClockEvents(t, served.Endpoint, status.RunID, "root.created")
+				if len(created) != 1 || created[0].EventID != creationID || entity.Fields["creation_count"] != float64(1) {
+					t.Fatalf("retry re-emitted or redelivered creation: events=%+v fields=%+v", created, entity.Fields)
+				}
 			}
 			code, contradiction := a9PostSignedRawIngress(t, endpoint, secret, `{"delivery_id":"second","account_id":"account-8"}`)
 			if code != http.StatusServiceUnavailable || !strings.Contains(string(contradiction), "immutable constructor key") {
@@ -165,9 +201,17 @@ func a9PostSignedRawIngress(t *testing.T, endpoint, secret, body string) (int, [
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body))
+	status, receipt, err := a9SignedRawIngress(ctx, endpoint, secret, body)
 	if err != nil {
 		t.Fatal(err)
+	}
+	return status, receipt
+}
+
+func a9SignedRawIngress(ctx context.Context, endpoint, secret, body string) (int, []byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body))
+	if err != nil {
+		return 0, nil, err
 	}
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = io.WriteString(mac, body)
@@ -175,51 +219,9 @@ func a9PostSignedRawIngress(t *testing.T, endpoint, secret, body string) (int, [
 	request.Header.Set("X-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		t.Fatal(err)
+		return 0, nil, err
 	}
 	defer response.Body.Close()
 	receipt, err := io.ReadAll(response.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return response.StatusCode, receipt
-}
-
-func a9KeyedRootIngressSource(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	for name, body := range map[string]string{
-		"schema.yaml": `name: keyed-shop
-instance: provider_event_id
-stages: []
-pins:
-  inputs: [account.opened]
-ingress:
-  providers:
-    - provider: partner
-      signing_secret: webhook_signing.partner
-      admission:
-        kind: raw
-        event: account.opened
-        payload: json
-        authentication: {kind: hmac_sha256, header: X-Signature, prefix: "sha256=", encoding: hex}
-        delivery_id: {source: json_path, json_path: "$.delivery_id"}
-`,
-		"events.yaml":   "account.opened:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n",
-		"entities.yaml": "account_state:\n  provider_event_id: text\n  processed_count: {type: integer, initial: 0}\n",
-		"nodes.yaml": `receiver:
-  execution_type: system_node
-  subscribes_to: [account.opened]
-  event_handlers:
-    account.opened:
-      data_accumulation:
-        source_event: account.opened
-        writes:
-          - {target_field: processed_count, value: entity.processed_count + 1}
-`,
-		"audit/schema.yaml": "name: audit\n",
-	} {
-		writeWorkflowValidationFixtureFile(t, filepath.Join(root, name), body)
-	}
-	return root
+	return response.StatusCode, receipt, err
 }

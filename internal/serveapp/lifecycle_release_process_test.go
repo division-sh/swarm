@@ -124,7 +124,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 	}
 }
 
-func startLifecycleReleaseProcess(t *testing.T, binary string, backend servedparity.Backend, root string) servedControlProofRuntime {
+func startLifecycleReleaseProcess(t *testing.T, binary string, backend servedparity.Backend, root string, extraEnv ...string) servedControlProofRuntime {
 	t.Helper()
 	unsetStoreSelectorEnv(t)
 	var db *sql.DB
@@ -147,6 +147,7 @@ func startLifecycleReleaseProcess(t *testing.T, binary string, backend servedpar
 		config = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 	}
 	env := append(releaseProviderTriggerProcessEnv(), "PGPASSWORD="+os.Getenv("PGPASSWORD"), "ANTHROPIC_API_KEY=", "OPENAI_API_KEY=")
+	env = append(env, extraEnv...)
 	verify := exec.Command(binary, "verify", root, "--portable", "--config", config)
 	verify.Dir, verify.Env = repoRootForTest(), env
 	if output, err := verify.CombinedOutput(); err != nil {

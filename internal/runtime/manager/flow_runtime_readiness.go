@@ -346,7 +346,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		am.dynamicFlowReadinessMu.Unlock()
 		return nil
 	}
-	evt, err := dynamicFlowRuntimeCreationEvent(plan)
+	evt, err := dynamicFlowRuntimeCreationEvent(source, plan)
 	if err != nil {
 		return err
 	}

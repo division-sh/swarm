@@ -21730,6 +21730,11 @@ observation_model:
             the schema, or if emit.fields authors an envelope-owned key, handler execution fails. Runtime does not silently trim
             producer-authored business payload keys.
       auto_emit_on_create_surface:
+        identity_owner: >-
+          Creation planning and recovery admit the complete constructor identity through the existing flow-execution
+          routing-source owner before projecting publication identity or its deterministic event ID. The selected root
+          publishes a local event name even when keyed; keyless and keyed descendants preserve their actual constructed
+          parent-relative route. No template-only source or path-shape inference replaces construction admission.
         construction_order:
         - 1. Start from the canonical constructor's admitted initial fields, not runtime control metadata or an independent configuration copy.
         - '2. Keep activation lifecycle context, including instance_id, template_id, flow_path, and parent_entity_id, on runtime

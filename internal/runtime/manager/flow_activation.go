@@ -705,9 +705,7 @@ func (am *AgentManager) buildDynamicFlowRuntimeReadinessPlan(
 	creationEvent, err := buildDynamicFlowRuntimeCreationEventPlan(
 		req.ContractBundle,
 		schema,
-		req.Instance.TemplateID,
-		req.Instance.InstancePath,
-		req.Instance.EntityID,
+		req.Instance,
 		lineage,
 		fields,
 		req.Context,
@@ -723,7 +721,7 @@ func (am *AgentManager) buildDynamicFlowRuntimeReadinessPlan(
 func buildDynamicFlowRuntimeCreationEventPlan(
 	source semanticview.Source,
 	schema runtimecontracts.FlowSchemaDocument,
-	templateID, flowPath, flowEntityID string,
+	instance runtimeflowidentity.Instance,
 	lineage events.EventLineage,
 	config map[string]any,
 	deliveryContext events.DeliveryContext,
@@ -736,13 +734,12 @@ func buildDynamicFlowRuntimeCreationEventPlan(
 	if strings.TrimSpace(lineage.RunID) == "" || strings.TrimSpace(lineage.ParentEventID) == "" {
 		return nil, fmt.Errorf("auto-emit %s requires exact trigger run_id and parent_event_id", autoEmit)
 	}
-	routingSource, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
-		FlowID: templateID, FlowInstance: flowPath, EntityID: flowEntityID,
-	})
+	route := events.RouteIdentity{FlowID: instance.TemplateID, FlowInstance: instance.InstancePath, EntityID: instance.EntityID}
+	routingSource, err := runtimepinrouting.AdmitFlowExecutionRoutingSource(source, lineage.RunID, instance, route)
 	if err != nil {
 		return nil, fmt.Errorf("auto-emit %s source: %w", autoEmit, err)
 	}
-	publication, err := runtimepinrouting.AdmitPublicationIdentity(templateID, autoEmit, routingSource)
+	publication, err := runtimepinrouting.AdmitPublicationIdentity(instance.TemplateID, autoEmit, routingSource)
 	if err != nil {
 		return nil, fmt.Errorf("auto-emit %s identity: %w", autoEmit, err)
 	}
@@ -755,7 +752,7 @@ func buildDynamicFlowRuntimeCreationEventPlan(
 		}
 		payload[key] = value
 	}
-	if err := validateAutoEmitPayload(source, templateID, autoEmit, payload); err != nil {
+	if err := validateAutoEmitPayload(source, instance.TemplateID, autoEmit, payload); err != nil {
 		return nil, fmt.Errorf("auto-emit %s: %w", autoEmit, err)
 	}
 	encoded, err := canonicaljson.MarshalPreservingNumberKinds(payload)
@@ -765,7 +762,7 @@ func buildDynamicFlowRuntimeCreationEventPlan(
 	eventID := uuid.NewSHA1(dynamicFlowCreationEventNamespace, []byte(strings.Join([]string{
 		strings.TrimSpace(lineage.RunID),
 		strings.TrimSpace(lineage.ParentEventID),
-		strings.Trim(strings.TrimSpace(flowPath), "/"),
+		instance.InstancePath,
 		strings.TrimSpace(eventType),
 	}, "\x00"))).String()
 	return &runtimepipeline.DynamicFlowRuntimeCreationEventPlan{

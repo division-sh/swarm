@@ -77,6 +77,18 @@ func TestPublicationCandidateKeysProjectOnlyTheExactSourceInstance(t *testing.T)
 	}
 }
 
+func TestRootCreationCandidateUsesAdmittedRunNotPathHeuristic(t *testing.T) {
+	runID := eventtest.UUID("root-creation-run")
+	source := eventtest.StaticFlowRoutingSource(".", runID, runID)
+	if got, want := SourceEventRouteKeys("root.created", source), []string{"root.created", runID + "/root.created"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("root constructor lost its concrete subscription: got=%v want=%v", got, want)
+	}
+	foreign := eventtest.StaticFlowRoutingSource(".", eventtest.UUID("other-run"), eventtest.UUID("other-run"))
+	if got := SourceEventRouteKeys("root.created", foreign); reflect.DeepEqual(got, SourceEventRouteKeys("root.created", source)) {
+		t.Fatal("another run borrowed the constructed root's candidate")
+	}
+}
+
 func TestPublicationDiagnosticDoesNotInventReceiverLocalIdentity(t *testing.T) {
 	root := t.TempDir()
 	write := func(path, body string) {

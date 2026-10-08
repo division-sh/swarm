@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -220,9 +221,7 @@ func rebuildPendingDynamicFlowRuntimeCreationEventPlan(
 	return buildDynamicFlowRuntimeCreationEventPlan(
 		source,
 		schema,
-		identity.TemplateID,
-		identity.InstancePath,
-		identity.EntityID,
+		identity,
 		events.EventLineage{
 			RunID:         current.RunID,
 			ParentEventID: current.ParentEventID,
@@ -234,15 +233,14 @@ func rebuildPendingDynamicFlowRuntimeCreationEventPlan(
 	)
 }
 
-func dynamicFlowRuntimeCreationEvent(plan runtimepipeline.DynamicFlowRuntimeReadinessPlan) (events.Event, error) {
+func dynamicFlowRuntimeCreationEvent(source semanticview.Source, plan runtimepipeline.DynamicFlowRuntimeReadinessPlan) (events.Event, error) {
 	var empty events.Event
 	creation := plan.CreationEvent
 	if creation == nil {
 		return empty, fmt.Errorf("dynamic flow creation event plan is required")
 	}
-	routingSource, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
-		FlowID: plan.Identity.TemplateID, FlowInstance: plan.Identity.InstancePath, EntityID: plan.Identity.EntityID,
-	})
+	route := events.RouteIdentity{FlowID: plan.Identity.TemplateID, FlowInstance: plan.Identity.InstancePath, EntityID: plan.Identity.EntityID}
+	routingSource, err := pinrouting.AdmitFlowExecutionRoutingSource(source, plan.RunID, plan.Identity, route)
 	if err != nil {
 		return empty, err
 	}
