@@ -667,6 +667,17 @@ func joinDirectiveExecutionHeartbeat(heartbeatDone <-chan struct{}, shutdownTime
 	return nil
 }
 
+func (am *AgentManager) finishCanceledDirectiveOperation(directiveCtx context.Context, directiveOrigin runtimeagentcontrol.DirectiveExecutionOrigin, turn runtimeeffects.TurnExecutionResult, providerSettlement runtimeeffects.CompletionSettlementObservation, executionErr error) (runtimeagentcontrol.SendDirectiveResult, error) {
+	if turn.Attempt.Origin.Kind != runtimeeffects.CompletionOriginDirective || !turn.Attempt.Origin.Directive.Same(directiveOrigin) {
+		return runtimeagentcontrol.SendDirectiveResult{}, errors.Join(executionErr, errors.New("canceled directive substituted its admitted operation"))
+	}
+	canceled, settleErr := am.settleCanceledDirective(directiveCtx, turn, providerSettlement)
+	if !canceled.Acknowledged || canceled.Validate() != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, errors.Join(executionErr, settleErr)
+	}
+	return runtimeagentcontrol.SendDirectiveResult{}, errors.Join(runtimeagentcontrol.ErrorForDirectiveOperation(canceled.Directive), executionErr, settleErr)
+}
+
 func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, store runtimeagentcontrol.DirectiveOperationStore, op runtimeagentcontrol.DirectiveOperation) (runtimeagentcontrol.SendDirectiveResult, error) {
 	lease, err := am.lifecycle.acquireExecutionIdentity(ctx, op.AgentIdentity, "execute_directive", false)
 	if err != nil {
@@ -734,14 +745,7 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
 	if turn.Cancellation.Requested {
-		if turn.Attempt.Origin.Kind != runtimeeffects.CompletionOriginDirective || !turn.Attempt.Origin.Directive.Same(directiveOrigin) {
-			return runtimeagentcontrol.SendDirectiveResult{}, errors.Join(executionErr, errors.New("canceled directive substituted its admitted operation"))
-		}
-		canceled, settleErr := am.settleCanceledDirective(directiveCtx, turn, providerSettlement)
-		if !canceled.Acknowledged || canceled.Validate() != nil {
-			return runtimeagentcontrol.SendDirectiveResult{}, errors.Join(executionErr, settleErr)
-		}
-		return runtimeagentcontrol.SendDirectiveResult{}, errors.Join(runtimeagentcontrol.ErrorForDirectiveOperation(canceled.Directive), executionErr, settleErr)
+		return am.finishCanceledDirectiveOperation(directiveCtx, directiveOrigin, turn, providerSettlement, executionErr)
 	}
 	if executionErr != nil {
 		if terminal, terminalErr := consumeProviderSettledDirective(ctx, store, admitted, directiveOrigin, providerSettlement); terminal || terminalErr != nil {

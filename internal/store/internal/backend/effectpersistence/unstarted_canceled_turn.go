@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -58,21 +59,30 @@ func commitUnstartedCanceledTurn(ctx context.Context, mutation *mutationprotocol
 		if err := requireUnstartedPhysicalSetClosedTx(ctx, tx, origin); err != nil {
 			return err
 		}
-		if origin.Kind == effects.CompletionOriginDelivery {
-			if selectedRecoveryExecutionID == "" {
-				result.Delivery, err = delivery.SettleProviderCanceledOriginTx(ctx, mutation, origin.Delivery, deliverylifecycle.CancellationTerminate, 0)
-			} else {
-				result.Delivery, err = delivery.SettleSelectedCanceledOriginRecoveryTx(ctx, mutation, origin.Delivery, selectedRecoveryExecutionID, deliverylifecycle.CancellationTerminate, 0)
-			}
-		} else {
-			result.Directive, err = directives.SettleProviderCanceledDirectiveTx(ctx, mutation, origin.Directive, deliverylifecycle.CancellationTerminate, now)
-		}
-		if err != nil {
+		if err := settleUnstartedCanceledOriginTx(ctx, mutation, delivery, directives, selectedRecoveryExecutionID, now, &result); err != nil {
 			return err
 		}
 		return completeCanceledTurnTx(ctx, tx, postgres, turnID, now)
 	})
 	return result, err
+}
+
+func settleUnstartedCanceledOriginTx(ctx context.Context, mutation *mutationprotocol.Attempt, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, selectedRecoveryExecutionID string, now time.Time, result *effects.CanceledTurnCommit) error {
+	origin := result.Origin
+	var err error
+	if origin.Kind == effects.CompletionOriginDelivery {
+		if selectedRecoveryExecutionID == "" {
+			result.Delivery, err = delivery.SettleProviderCanceledOriginTx(ctx, mutation, origin.Delivery, deliverylifecycle.CancellationTerminate, 0)
+		} else {
+			result.Delivery, err = delivery.SettleSelectedCanceledOriginRecoveryTx(ctx, mutation, origin.Delivery, selectedRecoveryExecutionID, deliverylifecycle.CancellationTerminate, 0)
+		}
+	} else {
+		result.Directive, err = directives.SettleProviderCanceledDirectiveTx(ctx, mutation, origin.Directive, deliverylifecycle.CancellationTerminate, now)
+	}
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func lockUnstartedCancellationOriginTx(ctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, origin effects.CompletionOrigin) (agentcontrol.DirectiveOperation, error) {
