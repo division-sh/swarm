@@ -75,9 +75,13 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 				bus.SetInterceptors(pc)
 				newManager := a2ActivationJoinManagerFactory(t, ctx, selected, source)
 				am := newManager(pc, bus)
-				identity := flowidentity.Instance{
-					TemplateID: "orders", ScopeKey: "orders", InstanceID: "order-1", InstancePath: "orders/order-1",
-					EntityID: flowidentity.EntityID("orders/order-1"), HasStoredPath: true,
+				parent, err := flowidentity.StandingForGeneration(source, ".", runID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				identity, err := flowidentity.KeyedChild(source, parent, "orders", "order-1")
+				if err != nil {
+					t.Fatal(err)
 				}
 				owner, err := flowidentity.NewRunScopedFlowInstance(runID, identity.Route())
 				if err != nil {
@@ -160,7 +164,10 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 				var siblingCommit pipeline.CommittedFlowInstanceActivation
 				if strings.HasPrefix(scenario.name, "nested_two_parents") {
 					siblingReq := req
-					siblingReq.Instance = flowidentity.Derive(source, "orders", "order-2")
+					siblingReq.Instance, err = flowidentity.KeyedChild(source, parent, "orders", "order-2")
+					if err != nil {
+						t.Fatal(err)
+					}
 					siblingReq.ResolvedKey = "order-2"
 					siblingReq.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "order.created", "operator", "", []byte(`{"order_id":"order-2"}`), 0, runID, events.EventEnvelope{}, now)
 					siblingPlan, err := am.PrepareFlowInstanceActivation(ctx, siblingReq)

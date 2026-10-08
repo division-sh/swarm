@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
@@ -25,7 +26,7 @@ func TestA2JoinAdmissionFirstPublicationAndRetainedEvidence(t *testing.T) {
 	bundle := workflowJoinLifecycleBundle(t)
 	plan := exactCompiledJoinPlanForTest(bundle, "orders")
 	source := exactWorkflowJoinSource{Source: workflowJoinLifecycleRootAndFlowSource(bundle), plans: []runtimecontracts.WorkflowJoinPlan{plan}}
-	run := "run-a"
+	run := eventtest.UUID("join-admission-run-a")
 	target := events.RouteIdentity{FlowID: "orders", FlowInstance: "orders/one", EntityID: FlowInstanceEntityID("orders/one")}
 	owner, err := WorkflowJoinAdmissionOwner(source, run, target)
 	if err != nil {
@@ -38,8 +39,10 @@ func TestA2JoinAdmissionFirstPublicationAndRetainedEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(plan.Node), Target: events.MustExistingEntityTarget(target)}
-	instance := WorkflowInstance{InstanceID: owner.Route.InstanceID, StorageRef: owner.Route.InstancePath, EntityID: target.EntityID,
-		WorkflowName: "orders", EntityType: "test_entity", CurrentState: "awaiting", Revision: 1}
+	instance := materializedWorkflowInstanceForSource(t, source, correlation.WithRunID(context.Background(), run), WorkflowInstance{
+		InstanceID: owner.Route.InstanceID, StorageRef: owner.Route.InstancePath, EntityID: target.EntityID,
+		WorkflowName: "orders", EntityType: "test_entity", CurrentState: "awaiting", Revision: 1,
+	})
 	arm := func(entry timeridentity.StageEntryRef) {
 		t.Helper()
 		instance.Bookkeeping = map[string]any{}

@@ -1472,8 +1472,17 @@ accounts:
 	`, sourceRunID, entityID, at, at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
 	}
-	configPayload, err := runtimepipeline.WorkflowInstanceHeaderPayloadForRoute(
-		flowidentity.StoredRoute("review", "inst-1", "review/inst-1"), bundle.Semantics.Version)
+	source := semanticview.Wrap(bundle)
+	parent, err := flowidentity.StandingForGeneration(source, ".", sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, err := flowidentity.KeyedChild(source, parent, "review", "inst-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance.EntityID = entityID
+	configPayload, err := runtimepipeline.WorkflowInstanceHeaderPayloadForIdentity(instance, bundle.Semantics.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
