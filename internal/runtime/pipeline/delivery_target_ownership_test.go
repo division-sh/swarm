@@ -552,10 +552,11 @@ func deliveryTargetOwnershipSource(t *testing.T) semanticview.Source {
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{flow}}
 	root.Children[0].Parent = &root
 	bundle := admitSyntheticEntityContractsForTest(t, &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &root.Schema,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"review": &root.Children[0]},
+			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "review": &root.Children[0]},
 		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"review": flow.Schema},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{".": root.Schema, "review": flow.Schema},
 	}, "", map[string]string{"review": "review_entity"})
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatalf("compile delivery-target ownership semantics: %v", err)

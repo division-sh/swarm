@@ -362,6 +362,22 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 	if mode == "static" {
 		instance = workflowOwnershipKeylessInstance(t, source, runID, flow)
 		path, entityID = instance.InstancePath, instance.EntityID
+	} else {
+		bundle, found := semanticview.Bundle(source)
+		if !found {
+			t.Fatal("keyed ownership fixture requires its admitted tree")
+		}
+		view, found := bundle.FlowViewByID(flow)
+		if !found || view.Parent == nil {
+			t.Fatal("keyed ownership fixture requires its declared parent")
+		}
+		parent := workflowOwnershipKeylessInstance(t, source, runID, view.Parent.Paths.FlowPath)
+		var err error
+		instance, err = flowidentity.KeyedChild(source, parent, flow, "item")
+		if err != nil {
+			t.Fatal(err)
+		}
+		instance.EntityID = entityID
 	}
 	graph, found := semanticview.WorkflowStageTopology(source, flow)
 	if !found {
@@ -405,9 +421,6 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 		}
 		other.MaterializationMetadata = &metadata
 		plan.Entities = append(plan.Entities, other)
-	}
-	if mode == "template" {
-		plan.Entities[0].MaterializationMetadata.FlowConfig = json.RawMessage(`{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item"}`)
 	}
 	plan = plan.WithHistoricalEvents(7, []string{"event-a", "event-b"})
 	eventName := "outer.requested"

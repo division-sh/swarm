@@ -15,7 +15,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -119,9 +118,12 @@ func TestExecSchedulePreservesImportedTemplateAgentRoutingSource(t *testing.T) {
 			agentID: runtimecontracts.EffectiveAgentRegistryEntry(agentID, runtimecontracts.AgentRegistryEntry{ID: agentID, Role: agentID}),
 		},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{{
+		Path: "telegram-ingress", Paths: runtimecontracts.FlowContractPaths{FlowPath: "telegram-ingress"},
+		Children: []runtimecontracts.FlowContractView{flow},
+	}}}
 	bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: runtimecontracts.FlowTree{
-		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
+		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0].Children[0]},
 	}}
 	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, flowID))
 	source := toolTestSourceWithDeclaredAgent(t, bundle, agentID, flowID)
@@ -142,11 +144,8 @@ func TestExecSchedulePreservesImportedTemplateAgentRoutingSource(t *testing.T) {
 		EntityID:      "entity-chat",
 	}
 	scheduler := &captureScheduleScheduler{}
-	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, GenericSchedules: scheduler,
-		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{instancePath: {
-			WorkflowName: flowID, StorageRef: instancePath, InstanceID: "chat-1", EntityID: actor.EntityID,
-		}}},
-	})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, GenericSchedules: scheduler})
+	actor = toolTestConstructedActor(t, exec, actor)
 	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(context.Background(), toolTestRunID), runtimeeffects.ExecutionModeLive)
 	if _, err := exec.execSchedule(ctx, actor, map[string]any{
 		"schedule_key": "imported-proof",

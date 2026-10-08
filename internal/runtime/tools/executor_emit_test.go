@@ -76,14 +76,17 @@ func TestHandleEmitToolPreservesImportedAgentSemanticSource(t *testing.T) {
 		},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{agentID: entry},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{{
+		Path: "telegram-ingress", Paths: runtimecontracts.FlowContractPaths{FlowPath: "telegram-ingress"},
+		Children: []runtimecontracts.FlowContractView{flow},
+	}}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			eventType: eventEntry,
 		},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
+			ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0].Children[0]},
 		},
 	}
 	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, flowID))
@@ -110,10 +113,8 @@ func TestHandleEmitToolPreservesImportedAgentSemanticSource(t *testing.T) {
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{
 		WorkflowSource: source,
 		EmitRegistry:   NewEmitRegistry(source, nil),
-		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{instancePath: {
-			WorkflowName: flowID, StorageRef: instancePath, InstanceID: "chat-1", EntityID: actor.EntityID,
-		}}},
 	})
+	actor = toolTestConstructedActor(t, exec, actor)
 	if _, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_telegram_reply_requested", map[string]any{
 		"chat_id": "42", "text": "hello",
 	}); err != nil {
@@ -833,8 +834,8 @@ func TestHandleEmitTool_RejectsCompleteParentWithoutConsumer(t *testing.T) {
 	bus := &publishBusCapture{}
 	parentRoute := events.RouteIdentity{
 		FlowID:       ".",
-		FlowInstance: "root",
-		EntityID:     "11111111-1111-1111-1111-111111111111",
+		FlowInstance: toolTestRunID,
+		EntityID:     runtimeflowidentity.EntityID(toolTestRunID),
 	}
 	exec := NewExecutorWithOptions(bus, ExecutorOptions{
 		WorkflowSource: source,
@@ -947,10 +948,10 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
 	if err == nil {
-		t.Fatal("handleEmitTool error = nil, want missing consumer rejection")
+		t.Fatal("handleEmitTool error = nil, want incomplete construction rejection")
 	}
-	if !strings.Contains(err.Error(), "target_required_missing") {
-		t.Fatalf("handleEmitTool error = %v, want missing consumer rejection", err)
+	if !strings.Contains(err.Error(), "construction identity requires its exact structural parent") {
+		t.Fatalf("handleEmitTool error = %v, want incomplete construction rejection", err)
 	}
 	if bus.count != 0 {
 		t.Fatalf("publish count = %d, want 0", bus.count)
@@ -1237,11 +1238,19 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 	source := toolTestSourceWithDeclaredAgent(t, bundle, "reviewer", "review", "assessment.reported")
 	store := newEmitRoutePlanStore()
 	eventBus := newEmitRoutePlanEventBus(t, store, source)
-	route := runtimeflowidentity.DeriveRoute("review", "instance-1")
+	parent, err := runtimeflowidentity.StandingForGeneration(source, ".", toolTestRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, err := runtimeflowidentity.KeyedChild(source, parent, "review", "instance-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := instance.Route()
 	if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 		RunID: toolTestRunID,
 		Route: route,
-	}, Instance: runtimeflowidentity.Derive(source, "review", "instance-1")}); err != nil {
+	}, Instance: instance}); err != nil {
 		t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
 	}
 	entityID := runtimeflowidentity.EntityID(route.InstancePath)
@@ -1352,11 +1361,11 @@ func TestHandleEmitTool_RootReceiverConnectRemainsTargetlessBeforePreflight(t *t
 	store := newEmitRoutePlanStore()
 	eb := newEmitRoutePlanEventBus(t, store, source)
 	emitRegistry := NewEmitRegistry(source, nil)
-	runID := eventtest.UUID("emit-root-receiver-run")
+	runID := toolTestRunID
 	parentRoute := events.RouteIdentity{
 		FlowID:       ".",
 		FlowInstance: runID,
-		EntityID:     runtimeflowidentity.EntityID("root-entity"),
+		EntityID:     runtimeflowidentity.EntityID(runID),
 	}
 	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
 		ID: parentRoute.FlowInstance, EntityID: parentRoute.EntityID, FlowInstance: parentRoute.FlowInstance,
@@ -1428,7 +1437,7 @@ func TestHandleEmitTool_RootReceiverConnectRequiresSelectedOwnerNotParentMetadat
 		{name: "complete_but_unselected", rows: map[string]runtimepipeline.WorkflowInstance{
 			"producer/inst-1": {
 				WorkflowName: "producer", StorageRef: "producer/inst-1", InstanceID: "inst-1", EntityID: runtimeflowidentity.EntityID("producer-entity"),
-				ParentFlowID: ".", ParentFlowInstance: "root/inst-1", ParentEntityID: eventtest.UUID("unselected-root"),
+				ParentFlowID: ".", ParentFlowInstance: toolTestRunID, ParentEntityID: runtimeflowidentity.EntityID(toolTestRunID),
 			},
 		}, want: "route_plan_preflight_failed"},
 	} {

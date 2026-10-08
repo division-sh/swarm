@@ -338,6 +338,9 @@ func TestJoinScheduleFactsAreDerivedOnlyFromTypedDeclarationHandle(t *testing.T)
 			instance := WorkflowInstance{
 				WorkflowName: ref.FlowPath(), StorageRef: path, InstanceID: instanceRoute.InstanceID, EntityID: entityID,
 			}
+			if tc.flowID != "" {
+				instance = materializedWorkflowInstanceForSource(t, source, runtimecorrelation.WithRunID(context.Background(), runID), instance)
+			}
 			command, err := joinSchedule(source, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: instanceRoute}, instance, activation, executionmode.Live)
 			if err != nil {
 				t.Fatal(err)

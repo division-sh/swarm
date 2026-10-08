@@ -990,7 +990,18 @@ func newFactoryDirectiveAgent(t *testing.T, cfg models.AgentConfig, modelRuntime
 	var construction runtimetools.WorkflowInstanceLoader
 	if cfg.Identity.Route.Presence != agentidentity.RouteRoot {
 		// This component fixture supplies exact constructor facts, not live attachment proof.
-		instance := flowidentity.Derive(source, cfg.FlowID, cfg.Identity.Route.InstanceID)
+		view, found := bundle.FlowViewByID(cfg.FlowID)
+		if !found || view.Parent == nil {
+			t.Fatal("directive fixture requires its exact parent declaration")
+		}
+		parent, err := flowidentity.StandingForGeneration(source, view.Parent.Paths.FlowPath, cfg.Identity.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		instance, err := flowidentity.KeyedChild(source, parent, cfg.FlowID, cfg.Identity.Route.InstanceID)
+		if err != nil {
+			t.Fatal(err)
+		}
 		instance.EntityID = cfg.EntityID
 		if err := instance.ValidateConstruction(source, cfg.Identity.RunID); err != nil {
 			t.Fatal(err)
@@ -1002,6 +1013,7 @@ func newFactoryDirectiveAgent(t *testing.T, cfg models.AgentConfig, modelRuntime
 		construction = directiveFactoryConstructionLoader{owner: owner, instance: pipeline.WorkflowInstance{
 			WorkflowName: instance.TemplateID, StorageRef: instance.InstancePath,
 			InstanceID: instance.InstanceID, EntityID: instance.EntityID,
+			ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance, ParentEntityID: instance.ParentEntityID,
 		}}
 	}
 	exec := runtimetools.NewExecutorWithOptions(bus, runtimetools.ExecutorOptions{
@@ -1105,8 +1117,10 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 	root := &runtimecontracts.FlowContractView{
 		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{*flow},
 	}
+	root.Children[0].Parent = root
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"campaign-flow": flow.Schema},
+		RootSchema:  &root.Schema,
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{".": root.Schema, "campaign-flow": flow.Schema},
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{
 				"campaign-flow/campaign-coordinator": {Kind: "agent", FlowID: "campaign-flow", LocalID: "campaign-coordinator", Full: owner},

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -60,7 +61,21 @@ func TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 			plan, planning, _, modes, _ := workflowOwnershipProjection(t, source, "consumer")
 			runID, entityID := plan.SourceRunID, plan.Entities[0].EntityID
 			const path = "consumer/item"
-			const config = `{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item","workflow_version":"v1"}`
+			parent := workflowOwnershipKeylessInstance(t, source, runID, ".")
+			instance, err := flowidentity.KeyedChild(source, parent, "consumer", "item")
+			if err != nil {
+				t.Fatal(err)
+			}
+			instance.EntityID = entityID
+			payload, err := pipeline.WorkflowInstanceHeaderPayloadForIdentity(instance, "v1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := canonicaljson.MarshalPreservingNumberKinds(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config := string(encoded)
 			if _, err := tx.Exec(`INSERT INTO runs VALUES ($1)`, runID); err != nil {
 				t.Fatal(err)
 			}
