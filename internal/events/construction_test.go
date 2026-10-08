@@ -63,6 +63,10 @@ var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	{Path: "internal/store/internal/backend/eventpersistence/lifecycle_diagnostic.go", Scope: "persistLifecycleDiagnosticTx", Constructor: "NewRunScopedDiagnosticDirectEvent"}:  1,
 	{Path: "internal/store/internal/backend/eventpersistence/lifecycle_diagnostic.go", Scope: "persistLifecycleDiagnosticTx", Constructor: "NewStandaloneDiagnosticDirectEvent"}: 1,
 	{Path: "internal/store/internal/backend/eventpersistence/lifecycle_diagnostic.go", Scope: "persistLifecycleDiagnosticTx", Constructor: "NewCausalDiagnosticDirectEvent"}:     1,
+
+	// Publication creates the owned timeout occurrence; settlement checks its immutable producer facts.
+	{Path: "internal/store/internal/backend/effectpersistence/canceled_turn_commit.go", Scope: "validateTurnReactionTx", Constructor: "NewRunScopedRuntimeControlEvent"}: 1,
+	{Path: "internal/runtime/bus/turn_timeout_reaction.go", Scope: "EventBus.prepareTurnTimeoutReaction", Constructor: "NewRunScopedRuntimeControlEvent"}:                1,
 }
 
 var productionRootConstructorAllowlist = map[runtimeConstructorCallsite]int{

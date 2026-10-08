@@ -73,6 +73,10 @@ func managedCompletionTestFrame(t testing.TB, authority runtimeeffects.Authority
 }
 
 func managedCompletionTestFrameWithEvent(t testing.TB, authority runtimeeffects.Authority, adapter string, event events.Event) agentframe.Frame {
+	return managedCompletionTestFrameForSource(t, authority, adapter, event, sourceartifactfixture.BundleHash)
+}
+
+func managedCompletionTestFrameForSource(t testing.TB, authority runtimeeffects.Authority, adapter string, event events.Event, bundleHash string) agentframe.Frame {
 	t.Helper()
 	surface := managedCompletionTestSurface(t, authority, adapter)
 	intent, err := agentintent.Resolve(
@@ -103,7 +107,7 @@ func managedCompletionTestFrameWithEvent(t testing.TB, authority runtimeeffects.
 		ModelAlias:     "regular",
 		Model:          "store-test-model",
 	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
-		BundleHash: sourceartifactfixture.BundleHash,
+		BundleHash: bundleHash,
 		Surface:    surface,
 	})
 	if err != nil {
@@ -142,6 +146,9 @@ func beginManagedCompletionForTest(t testing.TB, ctx context.Context, adapter st
 	event := managedCompletionTestEvent(authority)
 	if causal, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
 		event = causal
+	}
+	if source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); ok {
+		return runtimeeffects.BeginManagedCompletion(ctx, adapter, request, managedCompletionTestFrameForSource(t, authority, adapter, event, source.BundleHash()), nil)
 	}
 	return runtimeeffects.BeginManagedCompletion(ctx, adapter, request, managedCompletionTestFrameWithEvent(t, authority, adapter, event), nil)
 }
@@ -446,13 +453,17 @@ func withManagedCompletionTestSurface(t testing.TB, ctx context.Context, authori
 		generation = authority.SelectedFork.Generation
 		runID = authority.SelectedFork.ForkRunID
 	}
+	bundleHash := sourceartifactfixture.BundleHash
+	if source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); ok {
+		bundleHash = source.BundleHash()
+	}
 	admission, err := managedexecution.New(
 		kind,
 		executionAuthorityID,
 		generation,
 		runID,
 		"store-test-completion-actors",
-		sourceartifactfixture.BundleHash,
+		bundleHash,
 		nil,
 	)
 	if err != nil {

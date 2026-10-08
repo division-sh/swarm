@@ -22,18 +22,19 @@ type mcpLaunchCommitProbe struct {
 	joined bool
 }
 
-func (p *mcpLaunchCommitProbe) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, at time.Time) error {
-	if err := p.Harness.MarkExternalAttemptLaunched(ctx, attempt, at); err != nil {
-		return err
+func (p *mcpLaunchCommitProbe) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, at time.Time) (runtimeeffects.ExternalAttemptLaunch, error) {
+	launch, launchErr := p.Harness.MarkExternalAttemptLaunched(ctx, attempt, at)
+	if launchErr != nil {
+		return launch, launchErr
 	}
 	if p.cancel != nil {
 		p.cancel()
 	}
 	err := runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationLaunch, attempt, p.fault)
 	if p.joined {
-		return errors.Join(err, context.Canceled)
+		return launch, errors.Join(err, context.Canceled)
 	}
-	return err
+	return launch, err
 }
 
 func mcpLaunchCommitContext(harness *effecttest.Harness, identity string, cancelAfterCommit bool, joined ...bool) context.Context {

@@ -105,7 +105,6 @@ func observeCardContention(ctx context.Context, tx *sql.Tx, key, cardID string, 
 	}
 	return tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM api_idempotency WHERE idempotency_key=$1),(SELECT COUNT(*) FROM decision_card_changes WHERE card_id=$2 AND change_type='decided')`, key, cardID).Scan(&out.Requests, &out.DecidedChanges)
 }
-
 func (s *PipelinePostgresOwner) ObservePendingFixtureCardForTest(ctx context.Context, runID string) (string, error) {
 	var id string
 	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {

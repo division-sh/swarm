@@ -149,6 +149,12 @@ func runForkReplayResumeDispositionForPendingWork(item runfork.RunForkPendingWor
 		return disposition
 	}
 	switch item.Classification {
+	case runfork.RunForkPendingClassificationCanceled:
+		disposition.Fact = runfork.RunForkReplayResumeFactDeliveryCanceledHistory
+		disposition.Disposition = runfork.RunForkReplayResumeDispositionLineageOnly
+		disposition.Classification = item.Classification
+		disposition.Message = "authored canceled delivery is immutable source lineage, never redelivered or converted to success"
+		return disposition
 	case runfork.RunForkPendingClassificationDeliveredCompleted:
 		disposition.Fact = runfork.RunForkReplayResumeFactDeliveryCompletedHistory
 		disposition.Disposition = runfork.RunForkReplayResumeDispositionLineageOnly

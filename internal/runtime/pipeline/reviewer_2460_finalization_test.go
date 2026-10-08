@@ -70,6 +70,7 @@ func TestCommittedLifecycleAttemptsCancellationAndActivationAfterPanic(t *testin
 	}
 	schedules := &review2460ScheduleOwner{panicAt: 1}
 	storeOwner := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{
+		Stage:     outcomeCommittedStage(t),
 		Committed: true, Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true,
 			GenericScheduleCancellations: activations[:1], GenericScheduleActivations: activations[1:]},
 	}}
@@ -293,6 +294,7 @@ func TestReview2460LifecycleContinuesIndependentCommittedSchedules(t *testing.T)
 	fault := errors.New("first schedule enqueued recovery after read failure")
 	schedules := &review2460ScheduleOwner{fault: fault}
 	storeOwner := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{
+		Stage:     outcomeCommittedStage(t),
 		Committed: true, Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true, GenericScheduleActivations: activations},
 	}}
 	owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: storeOwner},

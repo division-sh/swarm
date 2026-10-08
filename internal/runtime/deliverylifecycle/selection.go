@@ -142,6 +142,9 @@ func ValidateSelectionPresence(status Status, p SelectionPresence) error {
 		if status == StatusDelivered && p.fact.Disposition() == handlerselection.DispositionEvaluationFailed {
 			return fmt.Errorf("delivered selection cannot be evaluation_failed")
 		}
+	case StatusCanceled:
+		// Cancellation may precede selection. A reached observation remains exact;
+		// absence must not be replaced with invented not_applicable evidence.
 	default:
 		return fmt.Errorf("invalid delivery status %q for selection", status)
 	}
@@ -155,7 +158,7 @@ func FinalSelection(status Status, observed handlerselection.Observation) (Selec
 		return SelectionPresence{}, err
 	}
 	p := AbsentSelection()
-	if status == StatusDelivered || status == StatusDeadLetter {
+	if status == StatusDelivered || status == StatusDeadLetter || (status == StatusCanceled && observed.Reached()) {
 		fact, err := observed.ResolvedFact()
 		if !observed.Reached() && status == StatusDeadLetter {
 			fact, err = handlerselection.NotApplicable(), nil

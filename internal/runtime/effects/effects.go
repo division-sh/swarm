@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
@@ -15,6 +16,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -248,6 +250,7 @@ func RegistrationFor(adapter string) (Registration, bool) {
 }
 
 type AuthorizeRequest struct {
+	TurnTimeout        *timeridentity.TurnTimeout
 	SessionGrantID     string
 	SessionLockOwner   string
 	OperationID        string
@@ -265,6 +268,7 @@ type AuthorizeRequest struct {
 }
 
 type Attempt struct {
+	TurnTimeout      *timeridentity.TurnTimeout
 	SessionGrantID   string
 	SessionLockOwner string
 	OperationID      string
@@ -447,7 +451,7 @@ type Settlement struct {
 type Store interface {
 	IsExternalEffectAuthorityCurrent(context.Context, Authority) (bool, error)
 	AuthorizeExternalAttempt(context.Context, Authority, AuthorizeRequest) (Attempt, error)
-	MarkExternalAttemptLaunched(context.Context, Attempt, time.Time) error
+	MarkExternalAttemptLaunched(context.Context, Attempt, time.Time) (ExternalAttemptLaunch, error)
 	MarkExternalAttemptResponseObserved(context.Context, Attempt, map[string]any, time.Time) error
 	SettleExternalAttempt(context.Context, Settlement) error
 }
@@ -719,6 +723,7 @@ type Handle struct {
 	differentOwner    DifferentOwner
 	recovered         bool
 	continuationGrant SessionGrant
+	turnClock         atomic.Pointer[LogicalTurnClock]
 }
 
 func (h *Handle) BindRecoveredContinuationGrant(grant SessionGrant) error {
@@ -1109,8 +1114,8 @@ func beginCompletion(ctx context.Context, adapter string, request []byte, frame 
 			return nil, err
 		}
 		capabilitySurface = &surface
-		if authority.Kind == AuthorityNormalAgent {
-			origin, err = NormalCompletionOriginFromContext(ctx, authority.Normal.AgentID, authority.Target.RunID, strings.TrimSpace(adapter))
+		if authority.HasBusinessTurnOrigin() {
+			origin, err = AgentCompletionOriginFromContext(ctx, authority.Target.AgentID, authority.Target.RunID, strings.TrimSpace(adapter))
 			if err != nil {
 				return nil, err
 			}
@@ -1251,7 +1256,38 @@ func (h *Handle) MarkLaunched(ctx context.Context) error {
 	if _, continuation := h.attempt.CompletionContinuation(); continuation {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_continuation_dispatch_forbidden", "external-effects", "launch_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
-	return reportPostCommitMutation(h.controller.MarkLaunched(ctx, h.attempt))
+	launch, err := h.controller.MarkLaunched(ctx, h.attempt)
+	if !launch.Committed && err == nil {
+		return runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "external_effect_launch_acknowledgment_missing", "external-effects", "launch_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
+	}
+	if launch.Committed && h.attempt.TurnTimeout != nil && launch.Turn == nil {
+		return errors.Join(reportPostCommitMutation(err), fmt.Errorf("bounded provider launch omitted its logical turn clock"))
+	}
+	if launch.Committed && launch.Turn != nil {
+		if clockErr := launch.Turn.Validate(); clockErr != nil {
+			return errors.Join(reportPostCommitMutation(err), clockErr)
+		}
+		if !launch.Turn.Origin.Same(h.attempt.Origin) {
+			return errors.Join(reportPostCommitMutation(err), fmt.Errorf("provider launch returned a foreign logical turn clock"))
+		}
+		clock := cloneLogicalTurnClock(*launch.Turn)
+		h.turnClock.Store(&clock)
+		if ownerErr := observeTurnLaunch(ctx, h, clock); ownerErr != nil {
+			return errors.Join(reportPostCommitMutation(err), ownerErr)
+		}
+	}
+	return reportPostCommitMutation(err)
+}
+
+func (h *Handle) LogicalTurnClock() (LogicalTurnClock, bool) {
+	if h == nil {
+		return LogicalTurnClock{}, false
+	}
+	clock := h.turnClock.Load()
+	if clock == nil {
+		return LogicalTurnClock{}, false
+	}
+	return cloneLogicalTurnClock(*clock), true
 }
 
 func (h *Handle) Heartbeat(ctx context.Context, lease time.Duration) error {
@@ -1336,11 +1372,23 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 	if result.Committed && !result.Disposition.Valid() {
 		return CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_settlement_disposition_invalid", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": h.attempt.AttemptID, "disposition": result.Disposition})
 	}
+	if result.Committed && result.Cancellation != nil {
+		validationErr := result.Cancellation.ValidateIntent()
+		if !result.Cancellation.Origin.Same(h.attempt.Origin) || result.Cancellation.OriginSettled != result.OriginSettled {
+			validationErr = errors.Join(validationErr, fmt.Errorf("completion cancellation contradicts its exact origin settlement"))
+		}
+		if validationErr != nil {
+			return result, errors.Join(reportPostCommitMutation(err), validationErr)
+		}
+	}
 	if result.Committed {
 		recordCompletionSettlementObservation(ctx, CompletionSettlementObservation{
 			AttemptID: result.AttemptID, Disposition: result.Disposition, Origin: result.Origin,
-			OriginSettled: result.OriginSettled, Finalization: result.Finalization,
+			OriginSettled: result.OriginSettled, Cancellation: result.Cancellation, Finalization: result.Finalization,
 		})
+		if result.Cancellation != nil {
+			err = errors.Join(err, observeTurnCancellation(ctx, *result.Cancellation))
+		}
 	}
 	if result.Committed && result.SpendRecorded && h.controller.completionSpendProjector != nil {
 		h.controller.completionSpendProjector.ProjectCommittedCompletionSpend(context.WithoutCancel(ctx), CompletionSpendProjection{
@@ -1442,6 +1490,12 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 		}, err)
 	}
 	if registration.Kind == KindProviderTurn {
+		req.TurnTimeout = turnTimeoutFromContext(ctx)
+		if req.TurnTimeout != nil {
+			if err := req.TurnTimeout.Validate(); err != nil {
+				return Attempt{}, err
+			}
+		}
 		if err := authority.ValidateCompletionAdapter(req.Adapter); err != nil {
 			return Attempt{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_execution_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter}, err)
 		}
@@ -1471,12 +1525,12 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 					"adapter": req.Adapter, "validation_error": err.Error(),
 				})
 			}
-			if authority.Kind == AuthorityNormalAgent {
+			if authority.HasBusinessTurnOrigin() {
 				if err := req.Origin.Validate(); err != nil {
 					return Attempt{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_missing_or_ambiguous", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter}, err)
 				}
 				if req.Origin.Kind == CompletionOriginDelivery && (req.Origin.Delivery.SubscriberClass() != runtimedelivery.SubscriberAgent ||
-					req.Origin.Delivery.SubscriberID() != authority.Normal.AgentID || req.Origin.Delivery.RunID() != authority.Target.RunID) {
+					req.Origin.Delivery.SubscriberID() != authority.Target.AgentID || req.Origin.Delivery.RunID() != authority.Target.RunID) {
 					return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter, "delivery_id": req.Origin.Delivery.DeliveryID()})
 				}
 			} else if req.Origin.Validate() == nil {
@@ -1533,7 +1587,11 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 	if req.Now.IsZero() {
 		req.Now = time.Now().UTC()
 	}
-	return c.store.AuthorizeExternalAttempt(ctx, authority, req)
+	attempt, err := c.store.AuthorizeExternalAttempt(ctx, authority, req)
+	if attempt.AuthorizationAcknowledged && attempt.Kind == KindProviderTurn && attempt.Origin.Validate() == nil {
+		err = errors.Join(err, observeTurnAuthorization(ctx, attempt))
+	}
+	return attempt, err
 }
 
 // StartupProbeSurfaceMatchesAuthority is shared by effect admission and the
@@ -1570,9 +1628,9 @@ func AttemptID(operationID string, ordinal int) (string, error) {
 	return uuid.NewSHA1(operationUUID, []byte(fmt.Sprintf("attempt:%d", ordinal))).String(), nil
 }
 
-func (c *Controller) MarkLaunched(ctx context.Context, attempt Attempt) error {
+func (c *Controller) MarkLaunched(ctx context.Context, attempt Attempt) (ExternalAttemptLaunch, error) {
 	if c == nil || c.store == nil || attempt.AttemptID == "" {
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "launch_attempt", nil)
+		return ExternalAttemptLaunch{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "launch_attempt", nil)
 	}
 	return c.store.MarkExternalAttemptLaunched(context.WithoutCancel(ctx), attempt, time.Now().UTC())
 }

@@ -726,6 +726,11 @@ type selectedRuntimeAuthorityRow struct {
 }
 
 func selectedRuntimeAuthorityMatches(authority runtimeeffects.Authority, current selectedRuntimeAuthorityRow) bool {
+	return selectedRuntimeAuthorityIdentityMatches(authority, current) &&
+		current.state == "running" && current.owner == authority.ExecutionOwner && current.fence == authority.FenceGeneration && current.leaseCurrent
+}
+
+func selectedRuntimeAuthorityIdentityMatches(authority runtimeeffects.Authority, current selectedRuntimeAuthorityRow) bool {
 	selected := authority.SelectedFork
 	return strings.TrimSpace(current.executionID) == strings.TrimSpace(selected.ExecutionID) &&
 		strings.TrimSpace(current.forkRunID) == strings.TrimSpace(selected.ForkRunID) &&
@@ -733,8 +738,7 @@ func selectedRuntimeAuthorityMatches(authority runtimeeffects.Authority, current
 		current.admissionFingerprint == selected.AdmissionFingerprint &&
 		current.containerFingerprint == selected.ContainerPlanFingerprint &&
 		current.actorFingerprint == selected.ActorCensusFingerprint &&
-		current.configFingerprint == selected.EffectiveConfigFingerprint &&
-		current.state == "running" && current.owner == authority.ExecutionOwner && current.fence == authority.FenceGeneration && current.leaseCurrent
+		current.configFingerprint == selected.EffectiveConfigFingerprint
 }
 
 func forkChatAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {

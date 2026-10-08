@@ -2119,9 +2119,25 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 	construction := newFanInBarrierRuntimeForSource(t, pg, source, fact, 1)
 	constructionCtx := runtimecorrelation.WithRunID(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runID)
-	if err := construction.manager.ActivateFlowInstance(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: source, Instance: runtimeflowidentity.Stored(source, ".", runID, runID, runID, ""), OccurredAt: time.Now().UTC(),
-	}); err != nil {
+	at := time.Now().UTC()
+	initial, lifecycle, err := construction.pipeline.PrepareInitialEntryLifecycle(constructionCtx, runtimeflowidentity.RunScopedFlowInstance{
+		RunID: runID, Route: runtimeflowidentity.Route{ScopeKey: ".", InstanceID: runID, InstancePath: runID},
+	}, runtimepipeline.WorkflowInstance{
+		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), StorageRef: runID, InstanceID: runID, EntityID: runID,
+		EntityType: "accounts", CurrentState: "queued", StageDefined: true, Fields: map[string]any{}, CreatedAt: at, EnteredStageAt: at,
+	}, at)
+	if err != nil {
+		t.Fatalf("prepare tool mutation target: %v", err)
+	}
+	command, err := flowactivationfixture.Command(constructionCtx, initial, lifecycle, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed, err := pg.CommitFlowInstanceActivation(constructionCtx, command)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("construct tool mutation target: result=%+v err=%v", committed, err)
+	}
+	if err := construction.pipeline.FinalizeInitialEntryLifecycle(constructionCtx, committed.Lifecycle); err != nil {
 		t.Fatalf("construct tool mutation target: %v", err)
 	}
 	declaration, ok := runtimesemanticview.ResolveAgentDeclaration(source, runtimeactors.AgentConfig{ID: "tester", FlowID: "."})

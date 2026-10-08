@@ -108,7 +108,6 @@ func ObserveEventCardinality(t testing.TB, ctx context.Context, selected any, ev
 	}
 	return value
 }
-
 func ObserveDeliveryEventEvidence(t testing.TB, ctx context.Context, selected any, eventID string) DeliveryEventEvidence {
 	t.Helper()
 	value, err := private.ObserveDeliveryEventEvidenceForTest(ctx, selected, eventID)

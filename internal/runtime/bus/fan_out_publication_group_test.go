@@ -82,6 +82,94 @@ func TestNodeRouteCoverageDoesNotConflateAgentAndNodeIDs(t *testing.T) {
 	}
 }
 
+func TestCommittedRefusalCannotEnterNodeOnlyFanOutGroup(t *testing.T) {
+	refusal := pipelineobligation.DeadLetter("route_plan_instance_conflict", nil)
+	publication := CommittedEnginePublication{plan: EnginePublicationPlan{
+		command: PublicationCommand{Commit: CommitPublishRequest{Disposition: &refusal}},
+	}}
+	if nodeOnlyCommittedFanOutGroup([]engine.CommittedDurablePublication{publication}) {
+		t.Fatal("zero-route refusal entered node-only fan-out settlement")
+	}
+}
+
+func TestFanOutDispatchConsumesAlreadyCommittedRefusal(t *testing.T) {
+	owner := newTerminalReleasePipelineOwner()
+	bus, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{PipelineObligations: owner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := receiverProjectionEvent("fan-out-refusal")
+	claim, err := bus.claimPipelinePublication(context.Background(), event.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	refusal := pipelineobligation.DeadLetter("route_plan_instance_conflict", nil)
+	operation := pendingOutboxOperation{
+		intent: engine.EmitIntent{Event: event}, outcome: EventAppendInserted,
+		publicationClaim: claim, committedDisposition: &refusal,
+	}
+	settlement := &fanOutPublicationSettlement{bus: bus}
+	if err := (engineDispatcher{bus: bus}).dispatchFanOutOperation(context.Background(), operation, RoutePlan{}, settlement, true); err != nil {
+		t.Fatal(err)
+	}
+	if owner.releaseCalls[event.ID()] != 1 || len(owner.current) != 0 || len(settlement.members) != 0 {
+		t.Fatalf("refusal did not release once without collection: releases=%v current=%v members=%v", owner.releaseCalls, owner.current, settlement.members)
+	}
+}
+
+func TestCommittedRefusalDoesNotHideFinalizationFailure(t *testing.T) {
+	owner := newTerminalReleasePipelineOwner()
+	bus, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{PipelineObligations: owner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := receiverProjectionEvent("blocked-refusal")
+	claim, err := bus.claimPipelinePublication(context.Background(), event.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	refusal := pipelineobligation.DeadLetter("route_plan_instance_conflict", nil)
+	failure := errors.New("committed readiness finalization failed")
+	intent := engine.EmitIntent{Event: event}
+	bus.stageCommittedOutboxOperationWithFinalization(intent, event, EventAppendInserted, claim, nil, false, failure, &refusal)
+	for i := 0; i < 2; i++ {
+		result, err := (engineDispatcher{bus: bus}).dispatchPendingOutboxOperation(context.Background(), intent)
+		if !result.handled || !errors.Is(err, failure) {
+			t.Fatalf("finalization failure became refusal success: handled=%t err=%v", result.handled, err)
+		}
+	}
+	if owner.releaseCalls[event.ID()] != 1 || len(owner.current) != 0 || len(bus.pendingOutboxByID[event.ID()]) != 1 {
+		t.Fatalf("failed finalization changed exact release/blocking ownership: releases=%v current=%v pending=%v", owner.releaseCalls, owner.current, bus.pendingOutboxByID)
+	}
+}
+
+func TestFanOutHandoffRejectsChangedCommittedDisposition(t *testing.T) {
+	bus := &EventBus{pendingOutboxByID: make(map[string][]pendingOutboxOperation)}
+	claim := publicationCollectorClaim(t, bus)
+	event := eventtest.RunCreatingRootIngress(claim.eventID, "custom.emitted", "", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refusal := pipelineobligation.DeadLetter("route_plan_instance_conflict", nil)
+	changed := pipelineobligation.Acknowledged("pipeline_persisted")
+	intent := engine.EmitIntent{Event: event}
+	committed := CommittedEnginePublication{
+		plan: EnginePublicationPlan{
+			command: PublicationCommand{Commit: CommitPublishRequest{Event: admitted, Disposition: &refusal}},
+			intent:  intent, prepared: PreparedPublish{publicationClaim: claim},
+		},
+		committed: CommittedPublication{AppendOutcome: EventAppendInserted},
+	}
+	bus.stageCommittedOutboxOperationWithFinalization(intent, event, EventAppendInserted, claim, nil, false, nil, &changed)
+	if _, _, err := bus.takeCommittedOutboxOperation(committed); err == nil {
+		t.Fatal("changed disposition passed exact committed-group matching")
+	}
+	if len(bus.pendingOutboxByID[event.ID()]) != 1 || claim.released.Load() || claim.retired.Load() {
+		t.Fatal("mismatched handoff consumed or released exact publication ownership")
+	}
+}
+
 func publicationCollectorClaim(t *testing.T, bus *EventBus) *pipelinePublicationClaim {
 	t.Helper()
 	claim, err := pipelineobligation.NewClaimIssuer().Issue(uuid.NewString(), pipelineobligation.PurposePublication)

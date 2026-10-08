@@ -18,8 +18,9 @@ type ExecutionKind string
 type executionContextKey struct{}
 
 const (
-	ExecutionNormal               ExecutionKind = "normal"
-	ExecutionSelectedContractFork ExecutionKind = "selected_contract_fork"
+	ExecutionNormal                      ExecutionKind = "normal"
+	ExecutionSelectedContractFork        ExecutionKind = "selected_contract_fork"
+	ExecutionSelectedRecoveryPublication ExecutionKind = "selected_recovery_publication"
 )
 
 // ExecutionVariant is the closed receiver-owned execution state admitted at
@@ -35,6 +36,24 @@ type ExecutionVariant struct {
 
 func NormalExecution() ExecutionVariant {
 	return ExecutionVariant{configured: true, kind: ExecutionNormal}
+}
+
+// SelectedRecoveryPublication retains the recorded predecessor identity solely
+// for publication planning. It cannot bind a receiver or authorize execution.
+func SelectedRecoveryPublication(authority runtimeeffects.Authority) (ExecutionVariant, error) {
+	v := ExecutionVariant{configured: true, kind: ExecutionSelectedRecoveryPublication, authority: authority}
+	return v, v.Validate()
+}
+
+func (v ExecutionVariant) ValidateTurnTimeoutRecoveryPublication(runID, producerID string, mode executionmode.Mode) error {
+	if err := v.Validate(); err != nil {
+		return err
+	}
+	if v.Kind() != ExecutionSelectedRecoveryPublication || runID != v.authority.Target.RunID ||
+		producerID != runtimeeffects.TurnTimeoutProducerID() || mode != v.authority.ExecutionMode {
+		return errors.New("selected recovery publication differs from its recorded timeout origin")
+	}
+	return nil
 }
 
 func SelectedContractForkExecution(
@@ -102,9 +121,28 @@ func (v ExecutionVariant) Validate() error {
 			return errors.New("selected receiver execution requires an execution mode")
 		}
 		return nil
+	case ExecutionSelectedRecoveryPublication:
+		if !v.authority.Valid() || v.authority.Kind != runtimeeffects.AuthoritySelectedContractFork || v.admission.Validate() == nil || v.controller != nil ||
+			v.authority.Target.Kind != runtimeeffects.UsageTargetAgentTurn || v.authority.Target.RunID != v.authority.SelectedFork.ForkRunID {
+			return errors.New("selected recovery publication requires only its recorded predecessor identity")
+		}
+		if _, _, _, err := v.authority.BusinessTurnCoordinates(); err != nil {
+			return err
+		}
+		return nil
 	default:
 		return fmt.Errorf("receiver execution kind %q is invalid", v.kind)
 	}
+}
+
+func (v ExecutionVariant) ValidateExecutable() error {
+	if err := v.Validate(); err != nil {
+		return err
+	}
+	if v.Kind() == ExecutionSelectedRecoveryPublication {
+		return errors.New("selected recovery publication cannot authorize receiver execution")
+	}
+	return nil
 }
 
 // Bind installs only receiver-owned state. The event's causal mode is always
@@ -114,7 +152,7 @@ func (v ExecutionVariant) Bind(ctx context.Context, mode executionmode.Mode) (co
 	if !v.Configured() {
 		return nil, errors.New("receiver execution owner is not configured")
 	}
-	if err := v.Validate(); err != nil {
+	if err := v.ValidateExecutable(); err != nil {
 		return nil, err
 	}
 	if !mode.Valid() {
@@ -149,7 +187,7 @@ func hasRuntimeLineage(lineage runtimecorrelation.RuntimeLineage) bool {
 }
 
 func (v ExecutionVariant) ValidateBound(ctx context.Context, mode executionmode.Mode) error {
-	if err := v.Validate(); err != nil {
+	if err := v.ValidateExecutable(); err != nil {
 		return err
 	}
 	if kind, ok := ctx.Value(executionContextKey{}).(ExecutionKind); !ok || kind != v.Kind() {

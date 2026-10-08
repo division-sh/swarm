@@ -1239,13 +1239,13 @@
     "owner": "internal/runtime/manager/agent_manager.go::NewAgentManagerWithOptions",
     "audit_rows": "A11,A23,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "140c9dc41c79c4badb487715c8f03543f9f1b1198ff2e8ea0c2c744ff18ab9d6"
+    "body_sha256": "eed12efb7cd0ac43e3a9013522c82b2bdf2404de01c1f31558bf351f439e24a8"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::ValidateAgentBuildConfiguration",
     "audit_rows": "A11,A23,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "c0b23571bc434551cf9b5f9f1677e4c587455f4c08a168baf113885b0d79101f"
+    "body_sha256": "1f0f9d7f808e342ebeff11842db1ac292212fe285386daa94963f5365d875ac0"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::ValidatePersistedAgentExecution",
@@ -1521,7 +1521,7 @@
     "owner": "internal/runtime/manager/static_topology.go::validateDurableSourceSetLifecycleState",
     "audit_rows": "A11,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "7757ceeb3e622d25607daf0a84af9cbfe5cb144c1f279053ebc74d26371550bd"
+    "body_sha256": "7c1da774ed0eccf1e99075493f8914e5878e7628ff9b088425bd312f0429b99e"
   },
   {
     "owner": "internal/runtime/manager/static_topology.go::verifySourceSetDesiredAgents",
@@ -1539,7 +1539,7 @@
     "owner": "internal/runtime/runforkexecution/recovery.go::SelectedContractExecutionOwner.RecoverSelectedForkContexts",
     "audit_rows": "A22,A24",
     "proof_families": "P03,P20,P21",
-    "body_sha256": "2edb90c19f0a942db191c27afa5a51cb781534289162e4203c66b8c913303d54"
+    "body_sha256": "4d5caa9f7b66b0a5e0c09272c38ae8ba83b8ae9ce8e97f933df09257bc6c978d"
   },
   {
     "owner": "internal/runtime/runforkexecution/recovery.go::admitSelectedRecoverySource",
@@ -1551,7 +1551,7 @@
     "owner": "internal/runtime/runforkexecution/recovery.go::selectedRecoveryActionFor",
     "audit_rows": "A22,A24",
     "proof_families": "P03,P20,P21",
-    "body_sha256": "f144fa349ec9036ba39f3e9c86d18372b1c3c22b9ad709af6d886d95f0742a2b"
+    "body_sha256": "6fa765c220b57229ebf0304e3328ce14bff996eea31c2b3b4998c428cd2c72fc"
   },
   {
     "owner": "internal/runtime/runforkexecution/recovery_inspection.go::InspectSelectedForkRecoveries",
@@ -1695,7 +1695,7 @@
     "owner": "internal/runtime/runtime.go::*Runtime.prepareStartupLifecycleLocked",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "0fc7d966c85f1ef7f15568f52b47733d75b2e0947cb3141c9bdd41a6f0ffb613"
+    "body_sha256": "ce6434771062b7b35be3efec39809e6687de0250787fe9c08aa3345c4797b95f"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.publishBootCompleted",
@@ -2331,7 +2331,7 @@
     "owner": "internal/runtime/tools/native_tools_admission.go::nativeToolAgentConfig",
     "audit_rows": "A13",
     "proof_families": "P09,P11",
-    "body_sha256": "46388a972061029ad8decfca512c4390ab353725160ff52b9bda172e84393251"
+    "body_sha256": "b9c5d72b468523432babbf37cfc80d18f89b17f00e308f2fbc6cc08d2e8f1f66"
   },
   {
     "owner": "internal/runtime/tools/native_tools_admission.go::nativeToolCapabilitySupported",
@@ -3549,7 +3549,7 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkPostgresOwner.RecoverSelectedFork",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "281d155296c993e39d1d644d9a286cb2bac5b0ed8e79dcd2e254ce638fa0aa2b"
+    "body_sha256": "b490146d1c8aa25fc7221004ff0d43d8176e6e7fcd8acf104b8ced1b095f86f2"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkSQLiteOwner.ListSelectedForkRecoveryEntries",
@@ -3561,7 +3561,7 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkSQLiteOwner.RecoverSelectedFork",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "f192a0e221ab2795c5c92e4f4757bc81cdcfbfc296d7881fcedfa6182db01297"
+    "body_sha256": "510c3601b624b2b4a945d0a1dafe05a7abd83403bb0fa3d0877f3791ed39c93c"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::admitSelectedRecoveryTx",
@@ -3591,7 +3591,7 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::recoverSelectedForkTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "284515ef157f160924eca16188d2093d8054d2d87c4fa250cb1cd2061951a373"
+    "body_sha256": "801df4d2d67a579eefb8b34bab99ac074c438b4e6840cf74841886ccadcb7793"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::sameSelectedForkPointIdentity",

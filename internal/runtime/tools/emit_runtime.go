@@ -9,6 +9,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -235,6 +236,7 @@ func providerSchemaValidationActors(source semanticview.Source) ([]models.AgentC
 			Model:           strings.TrimSpace(entry.Model),
 			Memory:          entry.MemoryPlan,
 			MaxTurnsPerTask: entry.MaxTurnsPerTask,
+			TurnTimeout:     timeridentity.CloneTurnTimeout(entry.TurnTimeout),
 			Subscriptions:   UniqueNonEmpty(entry.Subscriptions),
 			EmitEvents:      UniqueNonEmpty(entry.EmitEvents),
 			Criteria:        UniqueNonEmpty(entry.Criteria),

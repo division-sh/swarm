@@ -152,6 +152,10 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 		}
 		out.Condition = strings.TrimSpace(out.Condition)
 	}
+	out.Terminate, err = projectTransitionTerminate(fields, out.AdvancesTo)
+	if err != nil {
+		return HandlerRuleEntry{}, err
+	}
 	for _, entry := range []struct {
 		key     string
 		project func(yamlsource.Value) error

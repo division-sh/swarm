@@ -31,7 +31,7 @@ func eachExactFactStore(t *testing.T, prove func(*testing.T, exactFactStore)) {
 				return
 			}
 			_, db, _ := testutil.StartPostgres(t)
-			prove(t, exactFactStore{db: db, postgres: true, selected: newPostgresStoreWithBackend(mustPostgresBackend(db))})
+			prove(t, exactFactStore{db: db, postgres: true, selected: admitTestPostgresStore(t, db)})
 		})
 	}
 }

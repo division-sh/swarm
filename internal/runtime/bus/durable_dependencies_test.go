@@ -226,6 +226,9 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 	if role, ok := selected.(runtimepipeline.FlowConstructionPublicationReader); ok {
 		deps.ConstructionPublications = role
 	}
+	if role, ok := selected.(runtimepipeline.WorkflowEmitFeedbackOwner); ok {
+		deps.EmitFeedback = role
+	}
 	if role, ok := selected.(runtimereplycontext.Store); ok {
 		deps.ReplyContext = role
 	}

@@ -178,6 +178,7 @@ type PublicationCommand struct {
 	HasAuthorScope      bool
 	AuthorDescriptor    runtimeauthoractivity.EventDescriptor
 	HasAuthorDescriptor bool
+	StageFeedback       *runtimepipeline.WorkflowPublicationStageRequest
 }
 
 func (c PublicationCommand) Validate() error {
@@ -204,6 +205,11 @@ func (c PublicationCommand) ValidateFanOut() error {
 }
 
 func (c PublicationCommand) validatePublicationFacts() error {
+	if c.StageFeedback != nil {
+		if err := c.StageFeedback.ValidateEvent(c.Commit.Event.Event()); err != nil {
+			return err
+		}
+	}
 	if err := events.ValidatePersistentEvent(c.Commit.Event.Event()); err != nil {
 		return err
 	}
@@ -264,12 +270,17 @@ type CommittedPublication struct {
 	DeliveryHandoffs []runtimedelivery.DurableHandoffProof
 	Activations      []CommittedFlowInstanceActivation
 	RouteTopology    []FlowInstanceRouteRecordSet
+	AcceptedStage    *runtimepipelineobligation.CommittedStageReceipt
 	// Acknowledged is false for transaction-local publication evidence.
 	Acknowledged bool
 }
 
 func (r CommittedPublication) WithCommitAcknowledgment() CommittedPublication {
 	r.Acknowledged = true
+	if r.AcceptedStage != nil {
+		stage := *r.AcceptedStage
+		r.AcceptedStage = &stage
+	}
 	activations := make([]CommittedFlowInstanceActivation, len(r.Activations))
 	for index, activation := range r.Activations {
 		activations[index] = activation.WithCommitAcknowledgment()
@@ -279,6 +290,11 @@ func (r CommittedPublication) WithCommitAcknowledgment() CommittedPublication {
 }
 
 func (r CommittedPublication) Validate() error {
+	if r.AcceptedStage != nil {
+		if err := r.AcceptedStage.Validate(); err != nil {
+			return fmt.Errorf("committed publication stage: %w", err)
+		}
+	}
 	if err := validateEventAppendOutcome(r.AppendOutcome); err != nil {
 		return err
 	}
@@ -765,6 +781,7 @@ func (InMemoryEventStore) CommitPublication(_ context.Context, command Publicati
 		AppendOutcome: EventAppendInserted,
 		RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
 	}
+	result = result.WithCommitAcknowledgment()
 	return result, result.Validate()
 }
 

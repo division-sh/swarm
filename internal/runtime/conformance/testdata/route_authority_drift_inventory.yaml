@@ -1419,6 +1419,31 @@ seam_families:
       satisfy the executor's bus interface while capturing runtime logs. Both
       methods are inert; this proof concerns acknowledged human-task creation,
       not direct-route authority or a route-plan producer.
+  - id: entity_mutation_rejecting_test_bus
+    layer: conformance_guardrails
+    classification: separate_semantic_concept
+    paths:
+      - internal/runtime/tools/entity_sparse_mutation_test.go
+    search_dimensions: [direct_delivery_path]
+    notes: >
+      entityToolPipelineBus implements PublishDirect only to satisfy the typed
+      workflow bus port and always rejects publication. Its post-commit
+      dispatcher likewise rejects dispatch. The fixture proves acknowledged
+      sparse entity mutation through the existing pipeline owner, not direct
+      delivery, alternate recipient selection or route authority.
+  - id: agent_turn_bound_configuration_fixture
+    layer: conformance_guardrails
+    classification: separate_semantic_concept
+    paths:
+      - internal/runtime/manager/turn_timeout_config_test.go
+    search_dimensions: [live_agent_subscription_route_authority]
+    notes: >
+      TestIssue2269StaticAndTemplateAgentsRetainExactTurnTimeout authors a
+      subscription in its fixture while proving immutable timeout configuration
+      through the existing static/template configuration constructors. The paired
+      plan/recovery proof checks bound identity and invalid-bound refusal.
+      Neither test registers a live subscription, creates a route or grants a
+      provider emit tool for the platform-owned timeout reaction.
   - id: operation_local_output_compilation_isolation
     layer: route_plan_authority
     classification: valid_consumer

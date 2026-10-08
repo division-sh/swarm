@@ -37,7 +37,10 @@ func TestSQLiteEffectWritesRejectStaleSchemaBeforeMutation(t *testing.T) {
 			return err
 		}},
 		{"settle external attempt", func() error { return owner.SettleExternalAttempt(ctx, runtimeeffects.Settlement{}) }},
-		{"launch external attempt", func() error { return owner.MarkExternalAttemptLaunched(ctx, runtimeeffects.Attempt{}, time.Now()) }},
+		{"launch external attempt", func() error {
+			_, err := owner.MarkExternalAttemptLaunched(ctx, runtimeeffects.Attempt{}, time.Now())
+			return err
+		}},
 		{"recover continuation", func() error {
 			_, _, err := owner.RecoverCompletionContinuation(ctx, runtimeeffects.CompletionContinuationRequest{})
 			return err

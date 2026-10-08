@@ -21,6 +21,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -1237,6 +1238,7 @@ func buildFlowAgentBlueprint(
 		Intent:          entry.ResolvedIntent,
 		Prompt:          prompt,
 		MaxTurnsPerTask: entry.MaxTurnsPerTask,
+		TurnTimeout:     timeridentity.CloneTurnTimeout(entry.TurnTimeout),
 		Subscriptions:   rendered,
 		EmitEvents:      emitEvents,
 		Tools:           normalizedConfiguredToolList(entry.ConfiguredTools()),
@@ -1431,6 +1433,7 @@ func buildStaticFlowAgentBlueprint(
 		Intent:          entry.ResolvedIntent,
 		Prompt:          prompt,
 		MaxTurnsPerTask: entry.MaxTurnsPerTask,
+		TurnTimeout:     timeridentity.CloneTurnTimeout(entry.TurnTimeout),
 		Subscriptions:   rendered,
 		EmitEvents:      emitEvents,
 		Tools:           normalizedConfiguredToolList(entry.ConfiguredTools()),

@@ -90,11 +90,13 @@ func proveSelectedCurrentAuthorityTransition(t *testing.T, sqlite bool) {
 	setSelectedReviewAuthority(t, fixture, authority.ID, "running", time.Now().UTC().Add(time.Minute))
 
 	providerAuthority := authority
-	providerAuthority.Target = selectedAgentTurnTarget(fixture.forkRun)
+	admitSelectedProviderFixture(t, ctx, fixture, issued, authority)
+	providerAuthority.Target = selectedProviderTarget(fixture)
 	providerCtx := runtimeeffects.WithLogicalOperationIdentity(
 		runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, providerAuthority), newCompletionControllerForTest(fixture.store)),
 		"review:selected-live-attempt",
 	)
+	providerCtx = selectedProviderClaimContext(t, providerCtx, fixture, providerAuthority)
 	providerCtx = withManagedCompletionTestSurface(t, providerCtx, providerAuthority, "anthropic_api")
 	handle, err := beginManagedCompletionForTest(t, providerCtx, "anthropic_api", []byte("review-selected"))
 	if err != nil {
@@ -242,10 +244,10 @@ func newSelectedReviewFixture(t *testing.T, sqlite bool) selectedCompletionFixtu
 	t.Helper()
 	if sqlite {
 		s := newBootstrappedSQLiteRuntimeStoreForTest(t)
-		return newSelectedCompletionFixture(t, s, s.backend.ConstructionHandle(), true)
+		return newSelectedProviderCompletionFixture(t, s, s.backend.ConstructionHandle(), true)
 	}
 	_, db, _ := testutil.StartPostgres(t)
-	return newSelectedCompletionFixture(t, admitTestPostgresStore(t, db), db, false)
+	return newSelectedProviderCompletionFixture(t, admitTestPostgresStore(t, db), db, false)
 }
 
 func newCompletionReviewFixture(t *testing.T, sqlite bool) completionSettlementFixture {

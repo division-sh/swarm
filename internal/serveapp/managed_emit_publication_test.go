@@ -1,12 +1,16 @@
 package serveapp
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
@@ -38,6 +42,7 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				feedbackByEvent := make(map[string][]byte)
 				assertResult := func(runID, flow, path, role string, expected any) {
 					t.Helper()
 					name := "work.result"
@@ -49,6 +54,26 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 					if err := rt.DB.QueryRow("SELECT event_id,source_route,payload,produced_by,produced_by_type,source_event_id,routing_source_kind,COALESCE(routing_source_authority,'') FROM events WHERE run_id=$1 AND event_name=$2", runID, name).Scan(&id, &rawSource, &payload, &producer, &producerType, &parent, &kind, &authority); err != nil {
 						t.Fatalf("managed publication: %v\n%s", err, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
 					}
+					var feedbackOwner pipeline.WorkflowEmitFeedbackOwner = rt.SQLite
+					if rt.Postgres != nil {
+						feedbackOwner = rt.Postgres
+					}
+					instance, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flow, "", path))
+					if err != nil {
+						t.Fatal(err)
+					}
+					feedback, found, err := feedbackOwner.ReadWorkflowEmitFeedback(context.Background(), id, instance)
+					if err != nil || !found || feedback.Validate() != nil || feedback.Receipt.EventID() != id || feedback.Receipt.Stage().Instance != instance || feedback.Dispatch == pipeline.EmitDispatchError {
+						t.Fatalf("managed emit did not retain its exact acknowledged occurrence feedback: %+v found=%v err=%v", feedback, found, err)
+					}
+					encoded, err := json.Marshal(feedback)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if prior, exists := feedbackByEvent[id]; exists && !bytes.Equal(prior, encoded) {
+						t.Fatalf("restart/readback changed immutable emit feedback: before=%s after=%s", prior, encoded)
+					}
+					feedbackByEvent[id] = encoded
 					var routing events.RouteIdentity
 					if err := json.Unmarshal(rawSource, &routing); err != nil {
 						t.Fatal(err)

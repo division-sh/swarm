@@ -45,7 +45,7 @@ func TestCommittedEngineTransfersDeclaredLifecyclePublications(t *testing.T) {
 							}
 							publications = append(publications, requests...)
 						}
-						storeOwner := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true, Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true}}}
+						storeOwner := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true, Stage: outcomeCommittedStage(t), Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true}}}
 						for _, intent := range publications {
 							command.Publications = append(command.Publications, pipelineTestPublicationPlan{intent: intent})
 							storeOwner.result.Publications = append(storeOwner.result.Publications, pipelineTestCommittedPublication{eventID: intent.Event.ID(), intent: intent})
@@ -123,7 +123,7 @@ func TestCommittedEngineRejectsChangedPublicationReceipts(t *testing.T) {
 			case "missing_activity":
 				mutation.ActivityIntents = []runtimeengine.ActivityIntent{testActivityIntent("https://example.com/missing")}
 			}
-			store := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true, Publications: committed, Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true}}}
+			store := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true, Stage: outcomeCommittedStage(t), Publications: committed, Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true}}}
 			planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}}
 			owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: store}, publication: planner}
 			result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, command.Publications)

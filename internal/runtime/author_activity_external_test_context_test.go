@@ -406,6 +406,7 @@ func admitExternalManagerTestGeneration(t testing.TB, ctx context.Context, selec
 type externalRuntimeTestDurableEventStore interface {
 	runtimepipeline.FlowConstructionPublicationReader
 	runtimebus.EventStore
+	runtimepipeline.WorkflowEmitFeedbackOwner
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
@@ -427,6 +428,7 @@ type externalRuntimeTestDurableEventStore interface {
 func externalRuntimeTestDurableDependencies(durable externalRuntimeTestDurableEventStore) runtimebus.DurableDependencies {
 	return runtimebus.DurableDependencies{
 		ConstructionPublications: durable,
+		EmitFeedback:             durable,
 		ReplyContext:             durable, RunLifecycle: durable,
 		DeliveryLifecycle: durable, FlowRoutes: durable, FlowRouteRecords: durable,
 		FlowRouteSets: durable, FlowRouteTopology: durable, FlowRouteRollback: durable, ActiveAgents: durable,

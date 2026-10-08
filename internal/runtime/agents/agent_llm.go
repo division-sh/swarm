@@ -146,6 +146,7 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	a.prepareConversationForInvocation(evt)
 
 	ctx = models.WithActor(ctx, a.cfg)
+	ctx = runtimeeffects.WithTurnTimeout(ctx, a.cfg.TurnTimeout)
 	ctx = runtimeeffects.WithExecutionMode(ctx, turnMode)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
@@ -346,6 +347,7 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive runtimeagentcontrol.
 	a.prepareConversationForInvocation(evt)
 
 	ctx = models.WithActor(ctx, a.cfg)
+	ctx = runtimeeffects.WithTurnTimeout(ctx, a.cfg.TurnTimeout)
 	ctx = runtimeeffects.WithExecutionMode(ctx, turnMode)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)

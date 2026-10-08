@@ -13,13 +13,15 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -42,25 +44,27 @@ type selectedCompletionAuthorityStore interface {
 }
 
 type selectedCompletionFixture struct {
-	process   startupownership.ProcessCapability
-	store     selectedCompletionAuthorityStore
-	db        *sql.DB
-	sqlite    bool
-	sourceRun string
-	forkRun   string
-	eventID   string
-	admission runfork.RunForkSelectedContractExecutionAdmission
-	request   runfork.SelectedContractRuntimeExecutionIssueRequest
+	providerSource semanticview.Source
+	providerActor  manager.PersistedAgent
+	process        startupownership.ProcessCapability
+	store          selectedCompletionAuthorityStore
+	db             *sql.DB
+	sqlite         bool
+	sourceRun      string
+	forkRun        string
+	eventID        string
+	admission      runfork.RunForkSelectedContractExecutionAdmission
+	request        runfork.SelectedContractRuntimeExecutionIssueRequest
 }
 
 func TestSelectedForkCompletionAuthorityIssuanceConsumesExactAdmissionSQLite(t *testing.T) {
 	s := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveSelectedForkCompletionAuthorityIssuance(t, newSelectedCompletionFixture(t, s, s.backend.ConstructionHandle(), true))
+	proveSelectedForkCompletionAuthorityIssuance(t, newSelectedProviderCompletionFixture(t, s, s.backend.ConstructionHandle(), true))
 }
 
 func TestSelectedForkCompletionAuthorityIssuanceConsumesExactAdmissionPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveSelectedForkCompletionAuthorityIssuance(t, newSelectedCompletionFixture(t, admitTestPostgresStore(t, db), db, false))
+	proveSelectedForkCompletionAuthorityIssuance(t, newSelectedProviderCompletionFixture(t, admitTestPostgresStore(t, db), db, false))
 }
 
 func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selectedCompletionFixture) {
@@ -158,6 +162,13 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 	if !authority.Valid() || authority.Kind != runtimeeffects.AuthoritySelectedContractFork {
 		t.Fatalf("claimed authority = %#v", authority)
 	}
+	admitSelectedProviderFixture(t, ctx, fixture, issued, authority)
+	providerAuthority := authority
+	providerAuthority.Target = selectedProviderTarget(fixture)
+	providerCtx := runtimeeffects.WithLogicalOperationIdentity(runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, providerAuthority), newCompletionControllerForTest(fixture.store)), "selected:successful-completion")
+	providerCtx = selectedProviderClaimContext(t, providerCtx, fixture, providerAuthority)
+	providerCtx = managedSelectedExecutionStoreTestContext(t, providerCtx, providerAuthority)
+	providerCtx = withManagedCompletionTestSurface(t, providerCtx, providerAuthority, "anthropic_api")
 
 	for _, tc := range []struct {
 		name   string
@@ -173,25 +184,21 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 		{name: "config", mutate: func(a *runtimeeffects.Authority) { a.SelectedFork.EffectiveConfigFingerprint += ":stale" }},
 	} {
 		t.Run("reject authorize "+tc.name, func(t *testing.T) {
-			stale := authority
+			stale := providerAuthority
 			tc.mutate(&stale)
-			stale.Target = selectedAgentTurnTarget(fixture.forkRun)
-			attemptCtx := runtimeeffects.WithLogicalOperationIdentity(runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, stale), newCompletionControllerForTest(fixture.store)), "stale:"+tc.name)
+			attemptCtx := runtimeeffects.WithLogicalOperationIdentity(runtimeeffects.WithAuthority(providerCtx, stale), "stale:"+tc.name)
 			attemptCtx = withManagedCompletionTestSurface(t, attemptCtx, stale, "anthropic_api")
 			if _, err := beginManagedCompletionForTest(t, attemptCtx, "anthropic_api", []byte("request")); err == nil {
 				t.Fatalf("authorize accepted stale %s", tc.name)
+			} else if strings.Contains(err.Error(), "completion_origin_missing_or_ambiguous") {
+				t.Fatalf("stale %s proof did not carry its real origin: %v", tc.name, err)
 			}
 		})
 	}
 
-	providerAuthority := authority
-	providerAuthority.Target = selectedAgentTurnTarget(fixture.forkRun)
 	if err := fixture.store.HeartbeatRunForkSelectedContractRuntimeExecution(ctx, authority, 3*time.Minute); err != nil {
 		t.Fatalf("renew selected completion authority before provider call: %v", err)
 	}
-	providerCtx := runtimeeffects.WithLogicalOperationIdentity(runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, providerAuthority), newCompletionControllerForTest(fixture.store)), "selected:successful-completion")
-	providerCtx = managedSelectedExecutionStoreTestContext(t, providerCtx, providerAuthority)
-	providerCtx = withManagedCompletionTestSurface(t, providerCtx, providerAuthority, "anthropic_api")
 	for _, registration := range runtimeeffects.Registrations() {
 		switch registration.Kind {
 		case runtimeeffects.KindChannelDelivery, runtimeeffects.KindChannelActionAck, runtimeeffects.KindChannelNativeSetting:
@@ -380,17 +387,17 @@ func proveSelectedForkCompletionAuthoritySingleCurrentGeneration(t *testing.T, f
 
 func TestSelectedForkCompletionAuthorityRecoveryNoRedispatchSQLite(t *testing.T) {
 	s := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t, newSelectedCompletionFixture(t, s, s.backend.ConstructionHandle(), true))
+	proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t, newSelectedProviderCompletionFixture(t, s, s.backend.ConstructionHandle(), true))
 }
 
 func TestSelectedForkCompletionAuthorityRecoveryNoRedispatchPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t, newSelectedCompletionFixture(t, admitTestPostgresStore(t, db), db, false))
+	proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t, newSelectedProviderCompletionFixture(t, admitTestPostgresStore(t, db), db, false))
 }
 
 func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixture selectedCompletionFixture) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := testAuthorActivityContextForBundle(fixture.request.DeclarationPlan.BundleHash)
 	issued, err := fixture.store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 	if err != nil {
 		t.Fatal(err)
@@ -400,6 +407,7 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 		t.Fatal(err)
 	}
 	controller := newCompletionControllerForTest(fixture.store)
+	admitSelectedProviderFixture(t, ctx, fixture, issued, authority)
 	type recoveryCase struct {
 		name string
 		mark func(context.Context, *runtimeeffects.Handle) error
@@ -418,8 +426,9 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	handles := make(map[string]*runtimeeffects.Handle, len(cases))
 	for _, tc := range cases {
 		attemptAuthority := authority
-		attemptAuthority.Target = selectedAgentTurnTarget(fixture.forkRun)
+		attemptAuthority.Target = selectedProviderTarget(fixture)
 		attemptCtx := runtimeeffects.WithLogicalOperationIdentity(runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, attemptAuthority), controller), "recover:"+tc.name)
+		attemptCtx = selectedProviderClaimContext(t, attemptCtx, fixture, attemptAuthority)
 		attemptCtx = managedSelectedExecutionStoreTestContext(t, attemptCtx, attemptAuthority)
 		attemptCtx = withManagedCompletionTestSurface(t, attemptCtx, attemptAuthority, "openai_responses")
 		handle, err := beginManagedCompletionForTest(t, attemptCtx, "openai_responses", []byte(tc.name))
@@ -580,6 +589,11 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	}
 	for _, tc := range cases {
 		requireExternalAttemptState(t, fixture.db, fixture.sqlite, handles[tc.name].Attempt().AttemptID, tc.want)
+		claim := handles[tc.name].Attempt().Origin.Delivery
+		snapshot, err := fixture.store.(runtimedelivery.Store).Snapshot(ctx, claim.DeliveryID())
+		if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter || snapshot.ClaimVersion != claim.Version()+1 {
+			t.Fatalf("recovered %s origin was not terminalized by its selected owner: %+v %v", tc.name, snapshot, err)
+		}
 	}
 	if err := handles["authorized"].MarkLaunched(ctx); err == nil {
 		t.Fatal("recovered selected attempt was launchable")
@@ -885,7 +899,7 @@ func installSelectedForkDiscardFailure(t *testing.T, ctx context.Context, db *sq
 func TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)
-	fixture := newSelectedCompletionFixture(t, store, db, false)
+	fixture := newSelectedProviderCompletionFixture(t, store, db, false)
 	ctx := testAuthorActivityContext()
 
 	issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
@@ -896,11 +910,13 @@ func TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres
 	if err != nil {
 		t.Fatalf("claim selected completion authority: %v", err)
 	}
-	authority.Target = selectedAgentTurnTarget(fixture.forkRun)
+	admitSelectedProviderFixture(t, ctx, fixture, issued, authority)
+	authority.Target = selectedProviderTarget(fixture)
 	completionCtx := runtimeeffects.WithLogicalOperationIdentity(
 		runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), newCompletionControllerForTest(store)),
 		"selected:cleanup-preservation",
 	)
+	completionCtx = selectedProviderClaimContext(t, completionCtx, fixture, authority)
 	completionCtx = managedSelectedExecutionStoreTestContext(t, completionCtx, authority)
 	completionCtx = withManagedCompletionTestSurface(t, completionCtx, authority, "openai_compatible")
 	handle, err := beginManagedCompletionForTest(t, completionCtx, "openai_compatible", []byte("cleanup-preservation"))
@@ -1030,11 +1046,17 @@ func TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres
 	wantTombstones := []runforkrevision.Family{
 		runforkrevision.FamilyAgentSessions,
 		runforkrevision.FamilyCommittedReplayScopes,
+		runforkrevision.FamilyCommittedReplayScopes,
 		runforkrevision.FamilyDeadLetters,
 		runforkrevision.FamilyEntityMetadata,
+		runforkrevision.FamilyEntityMetadata,
+		runforkrevision.FamilyEntityMutations,
+		runforkrevision.FamilyEntityMutations,
 		runforkrevision.FamilyEntityMutations,
 		runforkrevision.FamilyEventDeliveries,
+		runforkrevision.FamilyEventDeliveries,
 		runforkrevision.FamilyEventReceipts,
+		runforkrevision.FamilyEvents,
 		runforkrevision.FamilyEvents,
 		runforkrevision.FamilyTimers,
 	}
@@ -1498,15 +1520,6 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	}
 }
 
-func selectedAgentTurnTarget(runID string) runtimeeffects.UsageTarget {
-	identity := mustTestAgentIdentityForRun(runID, "selected-agent", "selected-test")
-	return runtimeeffects.UsageTarget{
-		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: runID,
-		AgentID: "selected-agent", AgentIdentity: identity, SessionID: uuid.NewString(),
-		Memory: agentmemory.Plan{}, FlowInstance: "selected-test",
-	}
-}
-
 func settleSelectedCompletionForTest(t *testing.T, ctx context.Context, handle *runtimeeffects.Handle, target runtimeeffects.UsageTarget, now time.Time) {
 	t.Helper()
 	input, output := int64(8), int64(3)
@@ -1530,6 +1543,9 @@ func settleSelectedCompletionForTest(t *testing.T, ctx context.Context, handle *
 		Now: now,
 	}
 	applyManagedCompletionContextSurface(t, ctx, settlement.AgentTurn)
+	if event, ok := correlation.InboundEventFromContext(ctx); ok {
+		settlement.AgentTurn.TriggerEventID, settlement.AgentTurn.TriggerEventType = event.ID(), string(event.Type())
+	}
 	_, err := handle.SettleCompletion(ctx, settlement)
 	if err != nil {
 		t.Fatalf("settle selected completion: %v", err)

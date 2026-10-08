@@ -483,6 +483,7 @@ func (m *StateMutation) SetStateBuckets(raw map[string]map[string]any) {
 type ExecutionResult struct {
 	// Committed is acknowledged persistence, not a prediction from partial intents.
 	Committed               bool
+	CommittedStage          *CommittedStage
 	Status                  OutcomeStatus
 	Failure                 *failures.Envelope
 	FailureDisposition      FailureDisposition

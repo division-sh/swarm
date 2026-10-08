@@ -8,6 +8,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -252,6 +253,7 @@ func nativeToolAgentConfig(agentID, role string, entry runtimecontracts.AgentReg
 		Memory:          entry.MemoryPlan,
 		Mock:            entry.Mock,
 		MaxTurnsPerTask: entry.MaxTurnsPerTask,
+		TurnTimeout:     timeridentity.CloneTurnTimeout(entry.TurnTimeout),
 		Subscriptions:   append([]string{}, entry.Subscriptions...),
 		EmitEvents:      append([]string{}, entry.EmitEvents...),
 		Tools:           entry.ConfiguredTools(),

@@ -143,7 +143,7 @@ func (s *apiEventPublicationMemoryStore) CommitAPIEventPublication(ctx context.C
 		return CommittedAPIEventPublication{}, err
 	}
 	s.completion = command.Completion
-	return CommittedAPIEventPublication{Publication: publication, Completion: command.Completion}, nil
+	return CommittedAPIEventPublication{Publication: publication, Completion: command.Completion, Acknowledged: publication.Acknowledged}, nil
 }
 
 func (s *connectRoutePlanDescriptorStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []FlowInstanceRouteRecordSet) (FlowInstanceRouteTopologyResult, error) {

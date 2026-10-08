@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
@@ -27,6 +28,7 @@ const (
 	DirectiveOperationSucceeded     DirectiveOperationState = "succeeded"
 	DirectiveOperationFailed        DirectiveOperationState = "failed"
 	DirectiveOperationIndeterminate DirectiveOperationState = "indeterminate"
+	DirectiveOperationCanceled      DirectiveOperationState = "canceled"
 )
 
 var (
@@ -37,6 +39,7 @@ var (
 	ErrDirectiveTransitionConflict   = errors.New("agent directive transition conflict")
 	ErrDirectiveIdempotencyConflict  = errors.New("agent directive idempotency conflict")
 	ErrDirectiveProviderDrained      = errors.New("agent directive provider attempt drained")
+	ErrDirectiveCanceled             = errors.New("agent directive canceled")
 )
 
 type DirectiveOperation struct {
@@ -54,6 +57,7 @@ type DirectiveOperation struct {
 	OperatorID              string
 	DirectiveEventID        string
 	State                   DirectiveOperationState
+	CancellationReason      deliverylifecycle.CancellationReason
 	ExecutionOwnerID        string
 	ExecutionLeaseExpiresAt time.Time
 	Response                json.RawMessage
@@ -97,6 +101,11 @@ func (o DirectiveOperation) FlowInstance() string {
 
 func ValidateDirectiveOperationEvidence(op DirectiveOperation) error {
 	op = op.Normalized()
+	switch op.State {
+	case DirectiveOperationPrepared, DirectiveOperationExecuting, DirectiveOperationExecuted, DirectiveOperationSucceeded, DirectiveOperationFailed, DirectiveOperationIndeterminate, DirectiveOperationCanceled:
+	default:
+		return fmt.Errorf("directive operation state %q is invalid", op.State)
+	}
 	if err := op.AgentIdentity.Validate(); err != nil {
 		return fmt.Errorf("directive operation agent identity is invalid: %w", err)
 	}
@@ -120,6 +129,16 @@ func ValidateDirectiveOperationEvidence(op DirectiveOperation) error {
 		if err := runtimefailures.ValidateEnvelope(*op.Failure); err != nil {
 			return fmt.Errorf("directive operation state %s failure is invalid: %w", op.State, err)
 		}
+	}
+	if op.State == DirectiveOperationCanceled {
+		if _, err := deliverylifecycle.ParseCancellationReason(string(op.CancellationReason)); err != nil {
+			return err
+		}
+		if op.CompletedAt.IsZero() || !op.ExecutionLeaseExpiresAt.IsZero() || !op.ExecutedAt.IsZero() {
+			return fmt.Errorf("canceled directive requires settled evidence, no execution response or open lease")
+		}
+	} else if op.CancellationReason != "" {
+		return fmt.Errorf("only canceled directives carry authored cancellation reasons")
 	}
 	return nil
 }
@@ -269,6 +288,8 @@ func ErrorForDirectiveOperation(op DirectiveOperation) error {
 		err = ErrDirectiveExecutionFailed
 	case DirectiveOperationIndeterminate:
 		err = ErrDirectiveOutcomeIndeterminate
+	case DirectiveOperationCanceled:
+		err = ErrDirectiveCanceled
 	default:
 		err = ErrDirectiveTransitionConflict
 	}

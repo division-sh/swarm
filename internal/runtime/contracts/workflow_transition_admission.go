@@ -53,6 +53,8 @@ func (t CompiledTransition) FlowID() string                  { return t.flow }
 func (t CompiledTransition) Edge() WorkflowStageTopologyEdge { return t.edge }
 func (t CompiledTransition) Valid() bool                     { return t.Validate() == nil }
 
+func (t CompiledTransition) TerminatesAgentTurns() bool { return t.edge.Terminate }
+
 // ValidateAgainst checks persisted or transported evidence against the selected
 // source graph without selecting a replacement carrier.
 func (t CompiledTransition) ValidateAgainst(graph WorkflowStageTopology) error {
