@@ -156,7 +156,7 @@ func (p PreparedWorkflowPublicationState) PinRoutingDescriptor() (runtimepinrout
 	if err != nil {
 		return runtimepinrouting.Descriptor{}, err
 	}
-	return runtimepinrouting.Descriptor{ID: p.instanceID, EntityID: p.route.EntityID, FlowInstance: p.route.FlowInstance, AddressFields: addresses}, nil
+	return runtimepinrouting.Descriptor{FlowID: p.route.FlowID, ID: p.instanceID, EntityID: p.route.EntityID, FlowInstance: p.route.FlowInstance, AddressFields: addresses}, nil
 }
 
 func (p PreparedWorkflowPublicationState) ValidateTarget(route events.RouteIdentity) error {
