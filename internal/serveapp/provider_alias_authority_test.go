@@ -607,7 +607,7 @@ func requireProviderAliasStoredSource(t *testing.T, rt servedWorkspaceProofRunti
 	event := storetest.LoadCanonicalEventRecord(t, context.Background(), rt.Events, eventID)
 	source := event.RoutingSource()
 	if source.Kind() != events.RoutingSourceExternalIngress || source.Authority() != events.RoutingSourceAuthorityProviderAdmissionPlan ||
-		source.Route().FlowID != flow || source.Route().EntityID == "" || source.Route().FlowInstance != "" {
+		source.Route().FlowID != flow || source.Route().EntityID != "" || source.Route().FlowInstance != "" {
 		t.Fatalf("stored gateway source changed authority: %#v", source)
 	}
 	requireProviderAliasPipelineSettlement(t, rt, event.RunID())
