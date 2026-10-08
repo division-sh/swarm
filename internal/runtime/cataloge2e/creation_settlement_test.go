@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
@@ -93,13 +94,9 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 				})
 				for _, group := range transcript.groups {
 					for _, step := range group.steps {
-						var preservedChild *runtimepipeline.WorkflowInstance
-						if transcript.expected.Expected.RefusedPublication != nil && step.ReceiptOutcome == "success" {
-							child, found, err := h.workflow.Load(h.ctx, catalogExactWorkflowRoute(workerPath))
-							if err != nil || !found {
-								t.Fatalf("capture receiver before duplicate: found=%t err=%v", found, err)
-							}
-							preservedChild = &child
+						var preserved map[flowidentity.RunScopedFlowInstance]runtimepipeline.WorkflowInstance
+						if step.ReceiptFailureClass == "platform.conflicting_duplicate" {
+							preserved = captureCatalogConstruction(t, h.ctx, h.workflow, workerPath)
 						}
 						if step.Event == "flow.finished" {
 							parent, found, err := h.workflow.Load(h.ctx, catalogRootWorkflowRoute())
@@ -124,12 +121,7 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 							}
 							t.Fatal(err)
 						}
-						if preservedChild != nil {
-							child, found, err := h.workflow.Load(h.ctx, catalogExactWorkflowRoute(workerPath))
-							if err != nil || !found || !reflect.DeepEqual(*preservedChild, child) {
-								t.Fatalf("duplicate changed receiver: found=%t err=%v before=%+v after=%+v", found, err, preservedChild, child)
-							}
-						}
+						assertCatalogConstructionUnchanged(t, h.ctx, h.workflow, preserved)
 					}
 					h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
 				}
@@ -150,6 +142,29 @@ func requireCatalogCreationHandlerOrders(t *testing.T, fixtureName, workerPath, 
 				}
 				transcript.requireUnchanged(t)
 			})
+		}
+	}
+}
+
+func captureCatalogConstruction(t testing.TB, ctx context.Context, reader catalogWorkflowPersistence, workerPath string) map[flowidentity.RunScopedFlowInstance]runtimepipeline.WorkflowInstance {
+	t.Helper()
+	before := map[flowidentity.RunScopedFlowInstance]runtimepipeline.WorkflowInstance{}
+	for _, route := range []flowidentity.RunScopedFlowInstance{catalogRootWorkflowRoute(), catalogExactWorkflowRoute(workerPath)} {
+		instance, found, err := reader.Load(ctx, route)
+		if err != nil || !found {
+			t.Fatalf("capture construction before duplicate: route=%+v found=%t err=%v", route, found, err)
+		}
+		before[route] = instance
+	}
+	return before
+}
+
+func assertCatalogConstructionUnchanged(t testing.TB, ctx context.Context, reader catalogWorkflowPersistence, before map[flowidentity.RunScopedFlowInstance]runtimepipeline.WorkflowInstance) {
+	t.Helper()
+	for route, instance := range before {
+		after, found, err := reader.Load(ctx, route)
+		if err != nil || !found || !reflect.DeepEqual(instance, after) {
+			t.Fatalf("duplicate changed construction: route=%+v found=%t err=%v before=%+v after=%+v", route, found, err, instance, after)
 		}
 	}
 }

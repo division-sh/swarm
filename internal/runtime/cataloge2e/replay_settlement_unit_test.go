@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -134,28 +135,39 @@ func TestCatalogSuccessfulDeliveriesRejectsEquivalentDeadLetters(t *testing.T) {
 	}
 }
 
-func TestCatalogCreationDeliveriesOnlyExemptsExactRefusedPublication(t *testing.T) {
+func TestCatalogCreationDeliveriesOnlyExemptsExactPrecommitConflict(t *testing.T) {
 	created := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	for _, change := range []string{"exact_refusal", "failed_child", "failed_first_root", "missing_refusal", "refusal_delivered", "wrong_cause", "wrong_class", "wrong_detail", "extra_refusal", "missing_reason", "parent_refused"} {
+	for _, change := range []string{"exact_refusal", "failed_child", "failed_first_root", "missing_refusal", "refusal_delivered", "wrong_cause", "wrong_event", "wrong_class", "wrong_detail", "wrong_target", "extra_refusal", "missing_event_dead_letter", "missing_delivery_dead_letter", "no_finish", "retry_pending", "extra_delivery", "refused_output", "successful_output", "wrong_expectation", "missing_receipt", "successful_receipt", "wrong_receipt_class", "wrong_receipt_detail"} {
 		t.Run(change, func(t *testing.T) {
 			root := createdRootEvent(eventtest.UUID("creation-first"), "flow.spawn_requested", "author", "task", `{}`, catalogRuntimeRunID, events.EventEnvelope{}, created)
 			first := replayOperatorEvent(t, root)
 			first.Deliveries = []operatorread.OperatorEventDelivery{catalogSettledUnitDelivery()}
 			conflict := replayOperatorEvent(t, createdRootEvent(eventtest.UUID("creation-conflict"), "flow.spawn_requested", "author", "task", `{}`, catalogRuntimeRunID, events.EventEnvelope{}, created.Add(time.Second)))
-			conflict.Deliveries = []operatorread.OperatorEventDelivery{catalogSettledUnitDelivery()}
+			failure := replayFailure(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists")
+			failure.Detail.Attributes = map[string]any{"flow_instance": "worker-flow/ti-bc9c6acffc914a7ed5a2793b"}
+			receipt := &catalogReceiptOutcome{Outcome: "dead_letter", Failure: &failure}
+			delivery := catalogSettledUnitDelivery()
+			rootRoute := catalogRootWorkflowRoute()
+			delivery.Target = operatorread.OperatorDeliveryTarget{FlowID: rootRoute.Route.ScopeKey, FlowInstance: rootRoute.Route.InstancePath, EntityID: flowidentity.EntityID(rootRoute.Route.InstancePath)}
+			delivery.DeliveryID = eventtest.UUID("conflicting-delivery")
+			delivery.Status, delivery.Failure = "dead_letter", &failure
+			deadLetter := operatorread.OperatorDeadLetterRecord{
+				DeadLetterID: eventtest.UUID("conflicting-dead-letter"), DeliveryID: delivery.DeliveryID,
+				Failure: failure, HandlerNode: "task-handler",
+			}
+			delivery.DeadLetters = []operatorread.OperatorDeadLetterRecord{deadLetter}
+			conflict.Deliveries = []operatorread.OperatorEventDelivery{delivery}
+			conflict.DeadLetters = []operatorread.OperatorDeadLetterRecord{deadLetter}
 			child := replayOperatorEvent(t, eventtest.Child(eventtest.UUID("creation-child"), events.EventType("flow.spawned"), "worker", "task", json.RawMessage(`{}`), 1, root, events.EventEnvelope{}, created.Add(time.Second)))
 			child.Deliveries = []operatorread.OperatorEventDelivery{catalogSettledUnitDelivery()}
 			conflictSource, err := conflict.EventSnapshot()
 			if err != nil {
 				t.Fatal(err)
 			}
-			refused := replayOperatorEvent(t, eventtest.Child(eventtest.UUID("creation-refused"), "flow.spawned", "worker", "task", json.RawMessage(`{}`), 1, conflictSource, events.EventEnvelope{}, created.Add(2*time.Second)))
-			refused.NoDelivery = &operatorread.OperatorNoDelivery{Reason: "resolution_blocked"}
-			refused.DeadLetters = []operatorread.OperatorDeadLetterRecord{{
-				DeadLetterID: eventtest.UUID("refusal-dead-letter"), HandlerNode: "pin_routing",
-				Failure: replayFailure(runtimefailures.ClassTargetAmbiguous, "route_plan_instance_conflict"),
-			}}
-			want := &catalogRefusedPublication{Event: "flow.spawned", FailureClass: "platform.target_ambiguous", FailureDetail: "route_plan_instance_conflict", Reason: "resolution_blocked"}
+			want := catalogTriggerStep{
+				Event: "flow.spawn_requested", eventID: conflict.EventID, ReceiptOutcome: "dead_letter",
+				ReceiptFailureClass: "platform.conflicting_duplicate", ReceiptFailureDetail: "flow_instance_already_exists",
+			}
 			full := map[string]operatorread.OperatorEventFull{}
 			switch change {
 			case "failed_child":
@@ -163,29 +175,56 @@ func TestCatalogCreationDeliveriesOnlyExemptsExactRefusedPublication(t *testing.
 			case "failed_first_root":
 				first.Deliveries[0] = replayProjectionDelivery(t, "unexpected-first-root-failure")
 			case "refusal_delivered":
-				refused.Deliveries = []operatorread.OperatorEventDelivery{catalogSettledUnitDelivery()}
+				conflict.Deliveries = []operatorread.OperatorEventDelivery{catalogSettledUnitDelivery()}
 			case "wrong_cause":
-				refused.SourceEventID = first.EventID
+				want.eventID = first.EventID
+			case "wrong_event":
+				want.Event = "other.event"
 			case "wrong_class":
-				refused.DeadLetters[0].Failure = replayFailure(runtimefailures.ClassInternalFailure, "route_plan_instance_conflict")
+				conflict.Deliveries[0].Failure = replayFailurePointer(runtimefailures.ClassInternalFailure, "flow_instance_already_exists")
 			case "wrong_detail":
-				refused.DeadLetters[0].Failure = replayFailure(runtimefailures.ClassTargetAmbiguous, "other_refusal")
+				conflict.DeadLetters[0].Failure = replayFailure(runtimefailures.ClassConflictingDuplicate, "other_refusal")
+			case "wrong_target":
+				conflict.Deliveries[0].Target.FlowInstance = "worker-flow/foreign"
 			case "extra_refusal":
-				extra := refused
+				extra := conflict
 				extra.EventID = eventtest.UUID("extra-refusal")
 				full[extra.EventID] = extra
-			case "missing_reason":
-				refused.NoDelivery = nil
-			case "parent_refused":
-				conflict.Deliveries[0] = replayProjectionDelivery(t, "parent-refused")
+			case "missing_event_dead_letter":
+				conflict.DeadLetters = nil
+			case "missing_delivery_dead_letter":
+				conflict.Deliveries[0].DeadLetters = nil
+			case "no_finish":
+				conflict.Deliveries[0].FinishedAt = nil
+			case "retry_pending":
+				conflict.Deliveries[0].RetryScheduled = true
+			case "extra_delivery":
+				conflict.Deliveries = append(conflict.Deliveries, catalogSettledUnitDelivery())
+			case "refused_output", "successful_output":
+				output := replayOperatorEvent(t, eventtest.Child(eventtest.UUID("rejected-output"), "flow.spawned", "worker", "task", json.RawMessage(`{}`), 1, conflictSource, events.EventEnvelope{}, created.Add(2*time.Second)))
+				output.Deliveries = []operatorread.OperatorEventDelivery{catalogSettledUnitDelivery()}
+				if change == "refused_output" {
+					output.Deliveries[0] = replayProjectionDelivery(t, "rejected-output")
+				}
+				full[output.EventID] = output
+			case "wrong_expectation":
+				want.ReceiptFailureClass = "platform.target_ambiguous"
+			case "missing_receipt":
+				receipt = nil
+			case "successful_receipt":
+				receipt.Outcome = "success"
+			case "wrong_receipt_class":
+				receipt.Failure = replayFailurePointer(runtimefailures.ClassTargetAmbiguous, "flow_instance_already_exists")
+			case "wrong_receipt_detail":
+				receipt.Failure = replayFailurePointer(runtimefailures.ClassConflictingDuplicate, "other_conflict")
 			}
-			for _, event := range []operatorread.OperatorEventFull{first, conflict, child, refused} {
+			for _, event := range []operatorread.OperatorEventFull{first, conflict, child} {
 				full[event.EventID] = event
 			}
 			if change == "missing_refusal" {
-				delete(full, refused.EventID)
+				delete(full, conflict.EventID)
 			}
-			err = validateCatalogCreationDeliveries(full, map[string]int{"flow.spawn_requested": 2, "flow.spawned": 1}, conflict.EventID, want)
+			err = validateCatalogCreationDeliveries(full, map[string]int{"flow.spawn_requested": 1, "flow.spawned": 1}, want, receipt)
 			if (err == nil) != (change == "exact_refusal") {
 				t.Fatalf("creation success obligation: %v, want success=%t", err, change == "exact_refusal")
 			}

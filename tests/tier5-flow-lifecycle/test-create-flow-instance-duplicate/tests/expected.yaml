@@ -8,20 +8,16 @@ trigger:
       payload:
         instance_id: worker-dup
         worker_id: worker-dup
-      receipt_outcome: success
+      receipt_outcome: dead_letter
+      receipt_failure_class: platform.conflicting_duplicate
+      receipt_failure_detail: flow_instance_already_exists
     - event: flow.finished
       payload: {}
 
 expected:
 
   entity_state: done
-  dead_letter: false
-  refused_publication:
-    event: flow.spawned
-    cause_sequence: 2
-    failure_class: platform.target_ambiguous
-    failure_detail: route_plan_instance_conflict
-    reason: resolution_blocked
+  dead_letter: true
   emitted_events:
     - flow.spawned
   flow_instance_created:

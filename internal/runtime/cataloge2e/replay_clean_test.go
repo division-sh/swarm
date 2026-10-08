@@ -439,18 +439,22 @@ func reopenCatalogTranscript(t *testing.T, fixture testcatalog.Fixture, transcri
 func assertCatalogReplayFixtureOutcome(t testing.TB, fixture testcatalog.Fixture, h *runtimeHarness, transcript *catalogExecutionTranscript) {
 	t.Helper()
 	var required map[string]int
-	var childPath, childState, conflictEventID string
+	var childPath, childState string
+	var conflict catalogTriggerStep
 	switch fixture.RelativePath {
 	case "tests/tier5-flow-lifecycle/test-create-flow-instance-config":
 		required = map[string]int{"flow.spawn_with_config": 1, "flow.spawned": 1, "worker-flow/ti-5c59b413ad4dd4f8d1321e7a/worker.ready": 1}
 		childPath, childState = "worker-flow/ti-5c59b413ad4dd4f8d1321e7a", "complete"
 	case "tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate":
-		required = map[string]int{"flow.spawn_requested": 2, "flow.spawned": 1, "worker-flow/ti-bc9c6acffc914a7ed5a2793b/worker.ready": 1, "flow.finished": 1}
+		required = map[string]int{"flow.spawn_requested": 1, "flow.spawned": 1, "worker-flow/ti-bc9c6acffc914a7ed5a2793b/worker.ready": 1, "flow.finished": 1}
 		childPath, childState = "worker-flow/ti-bc9c6acffc914a7ed5a2793b", "complete"
-		if len(transcript.groups) != 3 || len(transcript.groups[1].steps) != 1 || transcript.groups[1].steps[0].ReceiptOutcome != "success" || transcript.expected.Expected.RefusedPublication == nil || len(transcript.groups[2].steps) != 1 || transcript.groups[2].steps[0].Event != "flow.finished" {
-			t.Fatal("duplicate creation proof lost its successful second root and exact child refusal")
+		if len(transcript.groups) != 3 || len(transcript.groups[1].steps) != 1 || len(transcript.groups[2].steps) != 1 || transcript.groups[2].steps[0].Event != "flow.finished" {
+			t.Fatal("duplicate creation proof lost its exact conflicting second root")
 		}
-		conflictEventID = transcript.groups[1].steps[0].eventID
+		conflict = transcript.groups[1].steps[0]
+		if conflict.ReceiptOutcome != "dead_letter" || conflict.ReceiptFailureClass != "platform.conflicting_duplicate" || conflict.ReceiptFailureDetail != "flow_instance_already_exists" {
+			t.Fatal("duplicate creation proof lost its exact atomic create-conflict refusal")
+		}
 	case "tests/tier5-flow-lifecycle/test-create-flow-instance":
 		childPath, childState = "worker-flow/ti-878653cc40fdc8ad8e9c2d85", "complete"
 		required = map[string]int{"flow.spawn_requested": 1, "flow.spawned": 1, childPath + "/worker.ready": 1, childPath + "/worker.observed": 1}
@@ -480,7 +484,14 @@ func assertCatalogReplayFixtureOutcome(t testing.TB, fixture testcatalog.Fixture
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := validateCatalogCreationDeliveries(full, required, conflictEventID, transcript.expected.Expected.RefusedPublication); err != nil {
+		var receipt *catalogReceiptOutcome
+		if conflict.eventID != "" {
+			receipt, err = h.loadCatalogReceipt(conflict.eventID)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := validateCatalogCreationDeliveries(full, required, conflict, receipt); err != nil {
 			t.Fatalf("%s expected-success delivery proof: %v", fixture.Name, err)
 		}
 	}

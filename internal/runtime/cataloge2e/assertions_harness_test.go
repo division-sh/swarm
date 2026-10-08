@@ -22,26 +22,6 @@ func catalogRuntimeContext() context.Context {
 
 func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catalogExpectedDocument) {
 	t.Helper()
-	if refusal := expected.Expected.RefusedPublication; refusal != nil {
-		h.mu.Lock()
-		order := append([]string(nil), h.publishedOrder...)
-		h.mu.Unlock()
-		if refusal.CauseSequence < 1 || refusal.CauseSequence > len(order) {
-			t.Fatalf("refused publication has invalid cause sequence %d", refusal.CauseSequence)
-		}
-		causeID := order[refusal.CauseSequence-1]
-		full, err := h.catalogOperatorEvents()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := validateCatalogRefusedPublication(full, causeID, *refusal); err != nil {
-			t.Fatal(err)
-		}
-		receipt, err := h.loadCatalogReceipt(causeID)
-		if err != nil || receipt == nil || receipt.Outcome != "success" || receipt.Failure != nil {
-			t.Fatalf("refusal cause %s did not retain its own successful receipt: %+v err=%v", causeID, receipt, err)
-		}
-	}
 	if len(expected.Expected.FlowInstanceCreated) > 0 {
 		assertFlowInstanceCreated(t, h.db, h.startedAt, expected.Expected.FlowInstanceCreated)
 	}
