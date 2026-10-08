@@ -74,12 +74,14 @@ func faultMatrixActivitySchema(t *testing.T, db *sql.DB) {
 	}
 }
 
-func faultMatrixNative(db *sql.DB, opts *sql.TxOptions) nativeRunner {
+func faultMatrixNative(db *sql.DB, opts *sql.TxOptions, dialect privateactivity.Dialect) nativeRunner {
 	return func(ctx context.Context, write func(context.Context, *sql.Tx) error) (bool, error) {
 		tx, err := db.BeginTx(ctx, opts)
 		if err != nil {
 			return false, err
 		}
+		ctx, releaseOrdering := privateactivity.BindTransaction(ctx, ctx, tx, dialect)
+		defer releaseOrdering()
 		if err := write(ctx, tx); err != nil {
 			return false, errors.Join(err, tx.Rollback())
 		}
@@ -128,7 +130,7 @@ func faultMatrixDraft(key string) runtimeactivity.Draft {
 
 func TestFaultMatrixRollbackAndFinalizationPhases(t *testing.T) {
 	faultMatrixStores(t, func(t *testing.T, db *sql.DB, dialect privateactivity.Dialect) {
-		native := faultMatrixNative(db, nil)
+		native := faultMatrixNative(db, nil, dialect)
 		cases := []struct {
 			name     string
 			evidence Evidence
@@ -179,7 +181,7 @@ func TestFaultMatrixRollbackAndFinalizationPhases(t *testing.T) {
 
 func TestFaultMatrixCancellationAndCommitAcknowledgement(t *testing.T) {
 	faultMatrixStores(t, func(t *testing.T, db *sql.DB, dialect privateactivity.Dialect) {
-		base := faultMatrixNative(db, nil)
+		base := faultMatrixNative(db, nil, dialect)
 		t.Run("cancel_after_domain_write", func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -255,7 +257,7 @@ func TestFaultMatrixRetryResetsEffectsAndRetiresAttempts(t *testing.T) {
 		ctx := context.Background()
 		baseline := NewBaseline()
 		retry := errors.New("retry first domain write")
-		base := faultMatrixNative(db, nil)
+		base := faultMatrixNative(db, nil, dialect)
 		var generated []string
 		var attempts []*Attempt
 		native := func(ctx context.Context, write func(context.Context, *sql.Tx) error) (bool, error) {
@@ -352,7 +354,7 @@ func TestFaultMatrixDestructiveEarlyStoryCut(t *testing.T) {
 		if dialect == privateactivity.DialectPostgres {
 			opts = &sql.TxOptions{Isolation: sql.LevelSerializable}
 		}
-		native := faultMatrixNative(db, opts)
+		native := faultMatrixNative(db, opts, dialect)
 		t.Run("direct_whole_parent_rejected_before_transaction", func(t *testing.T) {
 			entered := false
 			result := run(context.Background(), dialect, Story, WholeParentDeletion, nil, nil,
