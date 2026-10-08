@@ -59,8 +59,8 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 					flowInstance := boundedProviderFlowID
 					secret := provider.provider + "-raw-settlement-secret"
 					ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-					target := seedProviderRawSettlementRuntime(t, ctx, selected, runID, entityID, flowInstance, provider.provider, secret, "")
-					source := providerRawSettlementSemanticSource(t, target, provider, secret)
+					source := providerRawSettlementSemanticSource(t, runtimepkg.InboundTarget{FlowPath: flowInstance, Alias: entityID}, provider, secret)
+					target := seedProviderRawSettlementRuntime(t, ctx, selected, source, runID, entityID, flowInstance, provider.provider, secret, "")
 					for _, realSubscriber := range []bool{false, true} {
 						outcome := "zero_consumer"
 						if realSubscriber {
@@ -265,13 +265,13 @@ func openProviderRawSettlementStore(t *testing.T, backend string) providerRawSet
 	return selected
 }
 
-func seedProviderRawSettlementRuntime(t *testing.T, ctx context.Context, selected providerRawSettlementProofStore, runID, entityID, flowInstance, provider, secret, agentID string) runtimepkg.InboundTarget {
+func seedProviderRawSettlementRuntime(t *testing.T, ctx context.Context, selected providerRawSettlementProofStore, source semanticview.Source, runID, entityID, flowInstance, provider, secret, agentID string) runtimepkg.InboundTarget {
 	t.Helper()
 	switch typed := selected.(type) {
 	case *store.PostgresStore:
-		return seedPostgresInboundGatewayRuntime(t, ctx, typed, runID, entityID, flowInstance, "customer-a", provider, secret, agentID)
+		return seedPostgresInboundGatewayRuntime(t, ctx, typed, runID, entityID, flowInstance, "customer-a", provider, secret, agentID, source)
 	case *store.SQLiteRuntimeStore:
-		return seedSQLiteInboundGatewayRuntime(t, ctx, typed, runID, entityID, flowInstance, "customer-a", provider, secret, agentID)
+		return seedSQLiteInboundGatewayRuntime(t, ctx, typed, runID, entityID, flowInstance, "customer-a", provider, secret, agentID, source)
 	default:
 		t.Fatalf("unsupported provider raw settlement store %T", selected)
 		return runtimepkg.InboundTarget{}
