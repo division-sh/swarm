@@ -113,6 +113,8 @@ type Attempt struct {
 	claimRetirement ClaimRetirement
 	eventCounts     map[string]int64
 	eventCountOrder []string
+	callerCtx       context.Context
+	runAdmissions   activeRunSources
 }
 
 var _ runtimeactivity.Mutation = (*Attempt)(nil)
@@ -468,7 +470,7 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 					return err
 				}
 			}
-			attempt := &Attempt{tx: tx, dialect: dialect, evidence: evidence, kind: kind, effects: baseline.effects, handoff: handoff, candidates: candidates, active: true}
+			attempt := &Attempt{tx: tx, dialect: dialect, evidence: evidence, kind: kind, effects: baseline.effects, handoff: handoff, candidates: candidates, active: true, callerCtx: ctx, runAdmissions: make(activeRunSources)}
 			txctx = context.WithValue(txctx, sqlAttemptKey{}, attempt)
 			previous = attempt
 			defer func() { attempt.active = false }()
