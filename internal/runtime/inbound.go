@@ -332,24 +332,24 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		http.Error(w, err.Error(), status)
 		return
 	}
-	if admitted.Response != nil {
+	if response := admitted.Response(); response != nil {
 		if !validate() {
 			return
 		}
-		status := admitted.Response.Status
+		status := response.Status
 		if status == 0 {
 			status = http.StatusOK
 		}
-		contentType := strings.TrimSpace(admitted.Response.ContentType)
+		contentType := strings.TrimSpace(response.ContentType)
 		if contentType == "" {
 			contentType = "text/plain; charset=utf-8"
 		}
 		w.Header().Set("content-type", contentType)
 		w.WriteHeader(status)
-		_, _ = w.Write(admitted.Response.Body)
+		_, _ = w.Write(response.Body)
 		return
 	}
-	providerEventID := admitted.ProviderEventID
+	providerEventID := admitted.ProviderEventID()
 	requestCtx := r.Context()
 	if strings.TrimSpace(target.RunID) != "" {
 		requestCtx = runtimecorrelation.WithRunID(requestCtx, target.RunID)
@@ -371,7 +371,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	}{
 		ProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion,
 		Provider:          provider, ProviderEventID: providerEventID,
-		ProviderEventType: admitted.ProviderEventType, SemanticDigest: admitted.SemanticContentDigest,
+		ProviderEventType: admitted.ProviderEventType(), SemanticDigest: admitted.SemanticContentDigest(),
 		StableServiceID: target.ServiceID, FlowPath: target.FlowPath,
 		Generation: target.Generation,
 	})
@@ -387,7 +387,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		return
 	}
 	ackMode := runtimeinbound.AcknowledgementAfterPublish
-	if admitted.AcknowledgeBeforeDispatch {
+	if admitted.AcknowledgeBeforeDispatch() {
 		ackMode = runtimeinbound.AcknowledgementDurableBeforeDispatch
 	}
 	publicationRequest := runtimeinbound.Request{
@@ -428,7 +428,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 				http.Error(w, "inbound provider identity conflicts with the committed semantic request", http.StatusConflict)
 				return
 			}
-			writeJSON(w, http.StatusOK, inboundPublicationResponse("duplicate", existing, admitted.ProviderEventType))
+			writeJSON(w, http.StatusOK, inboundPublicationResponse("duplicate", existing, admitted.ProviderEventType()))
 			return
 		}
 	}
@@ -452,7 +452,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			http.Error(w, "inbound provider identity conflicts with the committed semantic request", http.StatusConflict)
 			return
 		}
-		writeJSON(w, http.StatusOK, inboundPublicationResponse("duplicate", existing, admitted.ProviderEventType))
+		writeJSON(w, http.StatusOK, inboundPublicationResponse("duplicate", existing, admitted.ProviderEventType()))
 		return
 	}
 
@@ -504,7 +504,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		if !commitResult.Record.Created {
 			status = "duplicate"
 		}
-		response := inboundPublicationResponse(status, commitResult.Record, admitted.ProviderEventType)
+		response := inboundPublicationResponse(status, commitResult.Record, admitted.ProviderEventType())
 		if commitResult.OperatorChannelClaim != nil {
 			response["operator_channel_claim_disposition"] = commitResult.OperatorChannelClaim.Disposition
 			response["operator_channel_operation_id"] = commitResult.OperatorChannelClaim.Operation.OperationID
@@ -605,7 +605,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		if commitErr != nil {
 			reportInboundCommittedCleanup(g.logger, requestCtx, provider, target.ServiceID, providerEventID, commitErr)
 		}
-		writeJSON(w, http.StatusOK, inboundPublicationResponse("duplicate", record, admitted.ProviderEventType))
+		writeJSON(w, http.StatusOK, inboundPublicationResponse("duplicate", record, admitted.ProviderEventType()))
 		return
 	}
 	handoffCtx := pubCtx
@@ -670,7 +670,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	if commitErr != nil {
 		reportInboundCommittedCleanup(g.logger, requestCtx, provider, target.ServiceID, providerEventID, commitErr)
 	}
-	writeJSON(w, http.StatusAccepted, inboundPublicationResponse("accepted", record, admitted.ProviderEventType))
+	writeJSON(w, http.StatusAccepted, inboundPublicationResponse("accepted", record, admitted.ProviderEventType()))
 }
 
 func writeInboundPublicationError(w http.ResponseWriter, err error) {
@@ -770,7 +770,7 @@ func projectOperatorTextOutput(fact operatorchannel.TextFact, output providertri
 
 func projectInboundPublication(target InboundTarget, delivery providertriggers.Delivery, admitted providertriggers.AdmittedRequest, request runtimeinbound.Request, now time.Time, posture executionposture.Posture, channelPlans []packs.SatisfactionPlan, selectBare func(operatorchannel.InboundText) (bool, error)) ([]runtimebus.InboundDeliveryEvent, events.Event, runtimeauthoractivity.InboundProjection, *operatorInboundProjection, error) {
 	var noEvidence events.Event
-	if delivery.ProviderEventID != admitted.ProviderEventID || delivery.ProviderEventType != admitted.ProviderEventType {
+	if delivery.ProviderEventID != admitted.ProviderEventID() || delivery.ProviderEventType != admitted.ProviderEventType() {
 		return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, fmt.Errorf("compiled provider projection changed admitted request identity")
 	}
 	routingSource, err := events.NewExternalIngressRoutingSource(target.FlowPath, events.RoutingSourceAuthorityProviderAdmissionPlan)

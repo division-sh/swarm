@@ -11312,6 +11312,12 @@ tool_model:
         human identity, or publication success. Accepted trigger normalization and original-authority admission remain
         separate mandatory consumers, and session execution remains unavailable until complete qualification.
       session_capture_publication: >
+        The admitted trigger BODY owns one post-authentication payload gate and projection shared by transports;
+        pure normalized projection consumes the same object requirement without minting request or output authority.
+        Authenticated request identity, semantic-content digest, acknowledgment posture and challenge evidence are
+        read-only owner projections, never writable or serializable authority. Delivery and publication projection
+        refuse changed authenticated content before normalization or output sealing; challenge responses are defensive
+        copies rather than writable admission state. Historical receipt lookup consumes that same immutable identity.
         An admitted trigger BODY projects the exact captured JSON bytes through the same normalized-field and branch
         owner as webhook delivery. This pure projection grants neither request authentication nor provider-output
         authorization; session admission and the existing normalized-output authorization owner remain mandatory.

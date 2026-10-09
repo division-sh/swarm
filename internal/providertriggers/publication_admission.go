@@ -33,7 +33,7 @@ func (p InboundAdmissionPlan) ProjectPublication(admitted AdmittedRequest, bundl
 	if err != nil {
 		return Delivery{}, PublicationAdmission{}, err
 	}
-	if delivery.Response != nil || delivery.ProviderEventID != admitted.ProviderEventID || delivery.ProviderEventType != admitted.ProviderEventType {
+	if delivery.Response != nil || delivery.ProviderEventID != admitted.ProviderEventID() || delivery.ProviderEventType != admitted.ProviderEventType() {
 		return Delivery{}, PublicationAdmission{}, fmt.Errorf("publication requires the exact admitted delivery, not a challenge or changed identity")
 	}
 	admission := PublicationAdmission{bundleHash: bundleHash, flowID: flowID, provider: p.provider}
