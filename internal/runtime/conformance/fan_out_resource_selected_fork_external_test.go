@@ -256,6 +256,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 	var err error
 	switch selected := f.selected.(type) {
 	case *store.SQLiteRuntimeStore:
+		workflow := pipeline.NewWorkflowPersistence(selected)
 		if fork == nil {
 			fork = selected
 		}
@@ -267,7 +268,8 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			FlowRouteTopology: selected,
 			ActiveAgents:      selected, ActiveFlows: selected, TargetOwners: selected,
 			PreparedEvents: selected, TargetFailureRecorder: selected,
-			RunOrigins: selected, StandingRestarts: selected, ConstructionPublications: selected,
+			RunOrigins: selected, StandingRestarts: selected,
+			Instances: workflow, ConstructionPublications: workflow,
 		}
 		roles := manager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
@@ -276,12 +278,13 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(
-			pipeline.NewWorkflowPersistence(selected), fork, selected, selected, selected,
+			workflow, fork, selected, selected, selected,
 			durable, selected.PipelineObligations(), selected, roles,
 			cut, cut, selected, selected, selected, selected, selected,
 			selected, selected, selected, selected, selected,
 		)
 	case *store.PostgresStore:
+		workflow := pipeline.NewWorkflowPersistence(selected)
 		if fork == nil {
 			fork = selected
 		}
@@ -293,7 +296,8 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			FlowRouteTopology: selected,
 			ActiveAgents:      selected, ActiveFlows: selected, TargetOwners: selected,
 			PreparedEvents: selected, TargetFailureRecorder: selected,
-			RunOrigins: selected, StandingRestarts: selected, ConstructionPublications: selected,
+			RunOrigins: selected, StandingRestarts: selected,
+			Instances: workflow, ConstructionPublications: workflow,
 		}
 		roles := manager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
@@ -302,7 +306,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(
-			pipeline.NewWorkflowPersistence(selected), fork, selected, selected, selected,
+			workflow, fork, selected, selected, selected,
 			durable, selected.PipelineObligations(), selected, roles,
 			cut, cut, selected, selected, selected, selected, selected,
 			selected, selected, selected, selected, selected,
