@@ -1,0 +1,42 @@
+registry-intake:
+  execution_type: system_node
+  subscribes_to: [company.registered]
+  event_handlers:
+    company.registered:
+      data_accumulation:
+        writes:
+          - source_field: slug
+            target_field: slug
+          - source_field: name
+            target_field: name
+          - source_field: eng_roles
+            target_field: eng_roles
+      advances_to: investigating
+      emit:
+        event: company.evaluation.requested
+        fields:
+          slug: entity.slug
+registry-evaluate:
+  execution_type: system_node
+  subscribes_to: [company.evaluation.requested]
+  event_handlers:
+    company.evaluation.requested:
+      data_accumulation:
+        writes:
+          - target_field: verdict
+            value: |
+              entity.eng_roles >= 7 ? 'qualified' : 'watchlist'
+      advances_to: assessed
+      emit:
+        event: company.status
+        fields:
+          slug: entity.slug
+          name: entity.name
+          eng_roles: entity.eng_roles
+          verdict: entity.verdict
+registry-finalize:
+  execution_type: system_node
+  subscribes_to: [company.status]
+  event_handlers:
+    company.status:
+      advances_to: done

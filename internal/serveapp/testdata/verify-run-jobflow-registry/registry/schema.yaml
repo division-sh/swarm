@@ -1,0 +1,12 @@
+name: registry
+instance: slug
+stages:
+  registered: {}
+  investigating: {}
+  assessed: {}
+  done: {final: true}
+pins:
+  inputs:
+    - company.registered
+  outputs:
+    - company.status

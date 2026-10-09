@@ -1,0 +1,7 @@
+company.evaluation.requested:
+  slug: text
+company.status:
+  slug: text
+  name: text
+  eng_roles: integer
+  verdict: text

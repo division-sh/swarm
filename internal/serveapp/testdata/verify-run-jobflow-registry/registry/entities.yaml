@@ -1,0 +1,5 @@
+company:
+  slug: text
+  name: text
+  eng_roles: integer
+  verdict: text?
