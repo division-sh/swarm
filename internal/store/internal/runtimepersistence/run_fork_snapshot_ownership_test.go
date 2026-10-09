@@ -12,9 +12,11 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
@@ -45,6 +47,12 @@ func newSnapshotOwnershipFixture(t *testing.T, backend eventRecordContractBacken
 	f := snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, ctx: construction.ctx, runID: runtimecorrelation.RunIDFromContext(construction.ctx)}
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	req := sqliteFlowActivationRequest(construction.bundle, "owner", "one", "", "owner/one")
+	parent := flowidentity.Stored(req.ContractBundle, semanticview.RootExecutionFlowID(req.ContractBundle), f.runID, f.runID, f.runID, "")
+	child, err := flowidentity.KeyedChild(req.ContractBundle, parent, "owner", "one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Instance = child
 	req.OccurredAt = at
 	req.ConstructorInput, req.ResolvedKey = "construct.requested", "one"
 	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(`{}`), 0, f.runID, events.EventEnvelope{}, at)

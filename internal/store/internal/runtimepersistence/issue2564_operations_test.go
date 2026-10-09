@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -444,6 +445,12 @@ func newIssue2564OperationFixture(t *testing.T, backend string) issue2564Operati
 	}, nil)
 	runID := correlation.RunIDFromContext(f.ctx)
 	req := sqliteFlowActivationRequest(f.bundle, flow, "receiver", "", flow+"/receiver")
+	parent := flowidentity.Stored(req.ContractBundle, semanticview.RootExecutionFlowID(req.ContractBundle), runID, runID, runID, "")
+	child, err := flowidentity.KeyedChild(req.ContractBundle, parent, flow, "receiver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Instance = child
 	req.OccurredAt = time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	req.ConstructorInput, req.ResolvedKey = "construct.requested", "receiver"
 	req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, req.OccurredAt)

@@ -4,7 +4,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
@@ -40,4 +43,28 @@ func constructHistoricalSourceFixture(t *testing.T, ctx context.Context, selecte
 		t.Fatalf("construct historical source: result=%+v err=%v", committed, err)
 	}
 	return plan
+}
+
+func constructStaticPublicationSourceFixture(t *testing.T, ctx context.Context, selected agentFixtureFlowStore, bundle *contracts.WorkflowContractBundle, flowID string) events.RoutingSource {
+	t.Helper()
+	source := semanticview.Wrap(bundle)
+	runID := correlation.RunIDFromContext(ctx)
+	rootID := semanticview.RootExecutionFlowID(source)
+	req := sqliteFlowActivationRequest(bundle, rootID, runID, "", runID)
+	req.Instance = flowidentity.Stored(source, rootID, runID, runID, runID, "")
+	plan := constructHistoricalSourceFixture(t, ctx, selected, req)
+	for _, construction := range plan.ConstructionPlans() {
+		if construction.Identity.TemplateID != flowID {
+			continue
+		}
+		route, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
+			FlowID: flowID, FlowInstance: construction.Identity.InstancePath, EntityID: construction.Identity.EntityID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return route
+	}
+	t.Fatalf("root construction did not create static publication source %q", flowID)
+	return events.RoutingSource{}
 }

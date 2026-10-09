@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -41,6 +42,12 @@ func TestIssue2564M28OneEntityFenceDoesNotBlockIndependentEntityBothStores(t *te
 		t.Run(backend, func(t *testing.T) {
 			f := newIssue2564OperationFixture(t, backend)
 			request := sqliteFlowActivationRequest(f.bundle, "operations", "independent", "", "operations/independent")
+			parent := flowidentity.Stored(request.ContractBundle, semanticview.RootExecutionFlowID(request.ContractBundle), f.state.Identity.RunID, f.state.Identity.RunID, f.state.Identity.RunID, "")
+			child, err := flowidentity.KeyedChild(request.ContractBundle, parent, "operations", "independent")
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Instance = child
 			request.OccurredAt = time.Now().UTC().Truncate(time.Microsecond)
 			request.ConstructorInput, request.ResolvedKey = "construct.requested", "independent"
 			request.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "construct.requested", "constructor-fixture", "", []byte(`{}`), 0, f.state.Identity.RunID, events.EventEnvelope{}, request.OccurredAt)

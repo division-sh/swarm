@@ -1594,6 +1594,12 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	entityID := runtimepipeline.FlowInstanceEntityID("root/acme")
 	createdAt := time.Now().UTC()
 	req := sqliteFlowActivationRequest(f.bundle, "root", "acme", "", "root/acme")
+	parent := runtimeflowidentity.Stored(req.ContractBundle, semanticview.RootExecutionFlowID(req.ContractBundle), runID, runID, runID, "")
+	child, err := runtimeflowidentity.KeyedChild(req.ContractBundle, parent, "root", "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Instance = child
 	req.ConstructorInput, req.ResolvedKey = "company.opened", "acme"
 	req.Bookkeeping = map[string]any{"evidence": map[string]any{"seed": true}}
 	req.OccurredAt = createdAt
