@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -33,6 +34,7 @@ type registryProofCompany struct {
 }
 
 func TestVerifyRunJobflowRegistryIntegrationBothStores(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/serveapp/testdata/verify-run-jobflow-registry"))
 	root := filepath.Join(repoRootForTest(), "internal/serveapp/testdata/verify-run-jobflow-registry")
 	companies := registryProofInput(t, root)
 	outputEvents := loadWorkflowValidationBundleAt(t, root).FlowOutputEvents("registry")
