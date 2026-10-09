@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/construction"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -25,6 +26,7 @@ import (
 
 type verifyCompositionBootStore interface {
 	store.SchemaBootstrapper
+	storetest.RunFixtureStore
 	startupownership.Store
 	InspectSchema(context.Context, store.SchemaBootstrapRequest) (store.SchemaInspection, error)
 	Close() error
