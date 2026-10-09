@@ -12,6 +12,10 @@ func ReadReceiverHistoricalEntityState(ctx context.Context, selected any, owner 
 	return private.ReadReceiverHistoricalEntityStateForTest(ctx, selected, owner, entityID, revision)
 }
 
+func ReadReceiverEntityAtEventCut(ctx context.Context, selected any, runID, entityID, eventID string) (runfork.RunForkEntityState, error) {
+	return private.ReadReceiverEntityAtEventCutForTest(ctx, selected, runID, entityID, eventID)
+}
+
 func ReadEventIdempotencyCardinality(ctx context.Context, selected any, key string) (int, error) {
 	return private.ReadEventIdempotencyCardinalityForTest(ctx, selected, key)
 }

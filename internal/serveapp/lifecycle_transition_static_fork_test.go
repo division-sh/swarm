@@ -40,7 +40,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 			}
 			for _, scope := range scopes {
 				entityID := requireLifecycleFlowEntity(t, rt, fork.ForkRunID, scope, "done")
-				history := readLifecycleTransitionHistory(t, rt, fork.ForkRunID, entityID)
+				history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, fork.ForkRunID, entityID)
 				if len(history) != 1 || history[0].From != "active" || history[0].To != "done" {
 					t.Fatalf("scope %q history: %+v", scope, history)
 				}
@@ -48,7 +48,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 				if flow == "" {
 					flow = "."
 				}
-				first := readLifecycleTransitionAtCut(t, rt, fork.ForkRunID, entityID, history[0].TriggerEventID)
+				first := readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, fork.ForkRunID, entityID, history[0].TriggerEventID)
 				selected := first.Evidence.RuleSelection()
 				if first.From != "waiting" || first.To != "active" || first.TriggerEventID != childEvent ||
 					first.Evidence.FlowID() != flow || selected.Ref().Flow().String() != flow || selected.DisplayLabel() != "alpha" ||
