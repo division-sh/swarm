@@ -228,7 +228,12 @@ func debtCollectorDigest(root string) (string, error) {
 	// Include the whole census implementation and the ratchet/scope policy.
 	// Hostile tests and generated debt rows do not define the permission model.
 	hash := sha256.New()
-	for _, path := range []string{"internal/store/persistence_authority_debt_census_test.go", "internal/store/persistence_authority_debt_test.go"} {
+	for _, path := range []string{"internal/store/persistence_authority_debt_census_test.go", "internal/store/persistence_authority_debt_test.go", "internal/store/persistence_authority_debt_cache_test.go", "internal/store/persistence_authority_debt_sidecar_test.go"} {
+		if path == "internal/store/persistence_authority_debt_cache_test.go" || path == "internal/store/persistence_authority_debt_sidecar_test.go" {
+			if _, err := os.Stat(filepath.Join(root, path)); os.IsNotExist(err) {
+				continue // Only immutable predecessor archives predate these owners.
+			}
+		}
 		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, path), nil, parser.AllErrors)
 		if err != nil {
 			return "", err
@@ -452,9 +457,8 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 		t.Fatal(err)
 	}
 	baseRoot := materializeDebtBase(t, root, base)
-	baseFindings := debtLoadPersistenceAuthorityFindings(t, baseRoot)
-	baseFindings = append(baseFindings, debtSelectedBoundaryFindings(t, baseRoot)...)
-	baseActual := authorityDebtSites(baseFindings)
+	cache := debtAnalysisCacheForCheckout(t, root)
+	baseActual := cache.baseSites(t, baseRoot, base)
 	headFindings := debtLoadPersistenceAuthorityFindings(t, root)
 	headFindings = append(headFindings, debtSelectedBoundaryFindings(t, root)...)
 	actual := authorityDebtSites(headFindings)
@@ -505,22 +509,22 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 		if baseErr != nil {
 			t.Fatal(baseErr)
 		}
-		trusted, err = parseAuthorityDebtBaseline(baseBytes)
+		baseCollector, err := debtCollectorDigest(baseRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
-		baseCollector, err := debtCollectorDigest(baseRoot)
+		trusted, err = debtBaselineWithCollector(baseRoot, baseBytes, baseCollector, true)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if headErr != nil {
 			t.Fatalf("landed debt baseline cannot be removed or bootstrapped again: %v", headErr)
 		}
-		head, err = parseAuthorityDebtBaseline(headBytes)
+		head, err = debtBaselineWithCollector(root, headBytes, collector, false)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := debtValidateCollectorIdentity(baseCollector, collector, trusted, head); err != nil {
+		if err := debtValidateCollectorIdentity(baseCollector, collector, trusted, head, collector); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -544,7 +548,17 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 			}
 		}
 		head.Sites = actual
-		if err := os.WriteFile(filepath.Join(root, debtBaselinePath), marshalAuthorityDebtBaseline(head), 0644); err != nil {
+		// Preserve the historical TSV header; active collector identity is sidecar-owned.
+		head.Collector = debtCacheCollectorFrom
+		data := marshalAuthorityDebtBaseline(head)
+		if err := os.WriteFile(filepath.Join(root, debtBaselinePath), data, 0644); err != nil {
+			t.Fatal(err)
+		}
+		metadata, err := debtCollectorMetadataBytes(debtCollectorMetadata{Version: 1, Collector: collector, BaselineSHA256: debtBaselineChecksum(data), Predecessor: debtCacheCollectorFrom})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, debtCollectorSidecarPath), metadata, 0644); err != nil {
 			t.Fatal(err)
 		}
 		t.Logf("downward-only refresh removed=%d added=0", removed)
@@ -575,7 +589,7 @@ func debtSortedKeys(sites map[string]authorityDebtSite) []string {
 	sort.Strings(keys)
 	return keys
 }
-func debtValidateCollectorIdentity(base, current string, trusted, head authorityDebtBaseline) error {
+func debtValidateCollectorIdentity(base, current string, trusted, head authorityDebtBaseline, reviewedTransition string) error {
 	if head.BootstrapSource != trusted.BootstrapSource {
 		return fmt.Errorf("debt baseline bootstrap source changed")
 	}
@@ -587,7 +601,12 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil
 	}
-	return fmt.Errorf("authority census/role policy changed outside the exact reviewed G01 transition; silent scan narrowing is forbidden")
+	if base == debtCacheCollectorFrom && trusted.Collector == debtCacheCollectorFrom &&
+		current == reviewedTransition && authorityDebtHex(reviewedTransition, 64) &&
+		head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil
+	}
+	return fmt.Errorf("authority census/role policy changed outside the exact reviewed transition; silent scan narrowing is forbidden")
 }
 
 func debtSitesEqual(left, right map[string]authorityDebtSite) bool {
