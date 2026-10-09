@@ -1,0 +1,5 @@
+company.registered:
+  key: slug
+  slug: text
+  name: text
+  eng_roles: integer
