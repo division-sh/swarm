@@ -29,12 +29,15 @@ func runVerifyRunCommand(ctx context.Context, repo string, opts verifyCommandOpt
 	var cause error
 	if err := opts.logging.validate(); err != nil {
 		cause = failures.Wrap(failures.ClassSchemaInvalid, "invalid_logging_options", "verify", "run", nil, err)
-	} else if _, err := uuid.Parse(result.RunID); err != nil {
+	} else if parsed, err := uuid.Parse(result.RunID); err != nil {
 		cause = failures.Wrap(failures.ClassSchemaInvalid, "invalid_run_id", "verify", "run", nil, err)
-	} else if opts.portable {
-		cause = failures.New(failures.ClassSchemaInvalid, "run_requires_store", "verify", "run", map[string]any{"reason": "--portable cannot be combined with --run"})
 	} else {
-		result.DriftReport, cause = inspectVerifyRun(ctx, repo, opts, result.RunID)
+		result.RunID = parsed.String()
+		if opts.portable {
+			cause = failures.New(failures.ClassSchemaInvalid, "run_requires_store", "verify", "run", map[string]any{"reason": "--portable cannot be combined with --run"})
+		} else {
+			result.DriftReport, cause = inspectVerifyRun(ctx, repo, opts, result.RunID)
+		}
 	}
 	code := cliExitOK
 	if cause != nil {
@@ -148,11 +151,11 @@ func verifyRunFailure(runID string, cause error) error {
 		return failures.Wrap(failures.ClassTimeout, "run_inspection_timeout", "verify", "run", attrs, cause)
 	}
 	var missing *runlifecycle.RunNotFoundError
-	if errors.As(cause, &missing) {
+	if errors.As(cause, &missing) && failures.OnlyBranches(cause, func(err error) bool { return err == runlifecycle.ErrRunNotFound }) {
 		return failures.Wrap(failures.ClassSchemaInvalid, "run_not_found", "verify", "run", attrs, cause)
 	}
 	var history *mutationlog.HistoryError
-	if errors.As(cause, &history) {
+	if errors.As(cause, &history) && failures.OnlyBranches(cause, func(err error) bool { _, ok := err.(*mutationlog.HistoryError); return ok }) {
 		attrs["entity_id"], attrs["mutation_id"] = history.EntityID, history.MutationID
 		return failures.Wrap(failures.ClassSchemaInvalid, history.Code, "verify", "run", attrs, cause)
 	}

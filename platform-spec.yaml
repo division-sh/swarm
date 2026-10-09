@@ -21171,6 +21171,10 @@ run_model:
       schema/dependency errors and a typed non-retryable missing run cannot yield a clean verdict. A missing selected
       store retains verify's explicit not_run disposition without creating it. This operation never repairs state,
       prepares schema, acquires runtime possession or activates a runtime; use it when debugging unexpected state.
+      Accepted run UUIDs are canonicalized before lookup, coordinate admission and result/error rendering on both stores.
+      SQL NULL mutation values retain removal semantics; empty or malformed non-NULL JSON is a typed history error
+      carrying mutation coordinates. Snapshot SQL, transport, iteration and cleanup failures preserve their causes
+      and operational classification; they are not reclassified as permanent corrupt history.
     retention: 'Mutation rows are never auto-deleted. Retention policy is an operational concern. The platform
       may provide a future archive/purge API for mutations older than N days on terminated entities.'
   flight_recorder:

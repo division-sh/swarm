@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -368,7 +369,7 @@ func loadRunForkRevisionSnapshot(ctx context.Context, tx *sql.Tx, runID string, 
 
 // The oracle shares fork admission and ordering, but needs only mutation
 // coordinates; unrelated historical families are not its evidence operands.
-func loadRunForkRevisionSnapshotScope(ctx context.Context, tx *sql.Tx, runID string, revision int64, mutationsOnly bool) (*runForkRevisionSnapshot, error) {
+func loadRunForkRevisionSnapshotScope(ctx context.Context, tx *sql.Tx, runID string, revision int64, mutationsOnly bool) (_ *runForkRevisionSnapshot, err error) {
 	if tx == nil {
 		return nil, fmt.Errorf("run fork revision snapshot requires a database transaction")
 	}
@@ -391,7 +392,7 @@ func loadRunForkRevisionSnapshotScope(ctx context.Context, tx *sql.Tx, runID str
 	if err != nil {
 		return nil, fmt.Errorf("load run fork revision snapshot: %w", err)
 	}
-	defer rows.Close()
+	defer func() { err = errors.Join(err, rows.Close()) }()
 	snapshot := &runForkRevisionSnapshot{RunID: runID, Revision: revision}
 	for rows.Next() {
 		var fact runForkHistoricalFactContext
@@ -400,6 +401,9 @@ func loadRunForkRevisionSnapshotScope(ctx context.Context, tx *sql.Tx, runID str
 			return nil, fmt.Errorf("scan run fork revision fact: %w", err)
 		}
 		if err := appendRunForkHistoricalFact(snapshot, fact, raw); err != nil {
+			if mutationsOnly {
+				return nil, runHistoryError(runID, "", fact.Key, "invalid_mutation_order", err.Error())
+			}
 			return nil, err
 		}
 	}
