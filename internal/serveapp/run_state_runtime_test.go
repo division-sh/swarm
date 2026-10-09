@@ -15,9 +15,10 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -28,11 +29,10 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
@@ -52,26 +52,47 @@ func (b runStatusManagerBus) Publish(ctx context.Context, evt events.Event) erro
 	return err
 }
 
-func runStatusSubscriptionSource() semanticview.Source {
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}, "scan.completed": {}},
+func runStatusSubscriptionSource(t *testing.T, withAgent bool) semanticview.Source {
+	t.Helper()
+	root := t.TempDir()
+	files := map[string]string{
+		"schema.yaml":   "name: run-status\nrequired_agents: []\nstages:\n  ready: {}\npins:\n  inputs: [scan.requested]\n  outputs: [scan.completed]\n",
+		"events.yaml":   "scan.requested:\n  topic: text\nscan.completed:\n",
+		"entities.yaml": "default: {}\n",
 	}
-	source := semanticviewtest.WrapRootAgents(bundle)
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(err)
+	if withAgent {
+		files["agents.yaml"] = "agent-1:\n  role: worker\n  intent: {inline: Complete the scan.}\n  model: regular\n  subscriptions: [scan.requested]\n"
 	}
-	bundle.Semantics.Version = "1.0.0"
-	return source
+	for name, body := range files {
+		writeWorkflowValidationFixtureFile(t, filepath.Join(root, name), body)
+	}
+	return semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))
 }
 
-func runStatusAgentConfig(t *testing.T, runID, agentID string) runtimeactors.AgentConfig {
+func runStatusAgentConfig(t *testing.T, source semanticview.Source, runID, agentID string) runtimeactors.AgentConfig {
 	t.Helper()
+	scope, found := source.FlowScopeByID(".")
+	if !found {
+		t.Fatal("run-status root declaration is required")
+	}
+	plan, err := semanticview.FlowAgentNamePlan(source, scope, agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := plan.Materialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := agentidentity.New(runID, name, agentidentity.RootRoute())
+	if err != nil {
+		t.Fatal(err)
+	}
 	profile, err := llmselection.ResolveActiveBackend("anthropic")
 	if err != nil {
 		t.Fatal(err)
 	}
 	resolved, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, llmselection.BuiltInModelAliases(), serveTestAgentConfig(runtimeactors.AgentConfig{
-		ID: agentID, Identity: servedRuntimeRootIdentityForRun(t, runID, agentID),
+		ID: agentID, Identity: identity,
 		FlowID: ".", Role: "worker", Type: "stub", Model: "regular",
 		Subscriptions: []string{"scan.requested"},
 	}))
@@ -107,9 +128,12 @@ func registerRunStatusEventCatalog(t *testing.T, registrar runStatusEventCatalog
 	t.Cleanup(lease.Release)
 }
 
-func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore) (*runtimebus.EventBus, *worklifetime.RuntimeOccurrence, runtimecorrelation.SourceArtifactFact) {
+func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore, runID string, withAgent bool) (*runtimebus.EventBus, *worklifetime.RuntimeOccurrence, runtimecorrelation.SourceArtifactFact, semanticview.Source) {
 	t.Helper()
-	sourceFact := requireServeTestSourceArtifactFact(t, pg)
+	workflow := runtimepipeline.NewWorkflowPersistence(pg)
+	source := runStatusSubscriptionSource(t, withAgent)
+	bundle, _ := semanticview.Bundle(source)
+	sourceFact := sourceartifactfixture.RequireArtifact(t, context.Background(), pg, bundle.SourceArtifact)
 	workOwner := newSupervisorTestRuntimeOccurrence(t, sourceFact.BundleHash())
 	authority, err := runtimedelivery.NewNormalExecutionAuthority(sourceFact, runStatusTestRuntimeInstanceID, 1)
 	if err != nil {
@@ -119,7 +143,7 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore) (*runtimebus.Ev
 		t.Fatalf("activate run status delivery authority: %v", err)
 	}
 	bus, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
-		ContractBundle:      runStatusSubscriptionSource(),
+		ContractBundle:      source,
 		ExecutionPosture:    executionposture.Live,
 		RuntimeInstanceID:   runStatusTestRuntimeInstanceID,
 		SourceArtifactFact:  sourceFact,
@@ -130,7 +154,8 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore) (*runtimebus.Ev
 			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
 			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteTopology: pg,
 			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, PreparedEvents: pg,
-			TargetFailureRecorder: pg, RunOrigins: pg, StandingRestarts: pg, ConstructionPublications: pg,
+			TargetFailureRecorder: pg, RunOrigins: pg, StandingRestarts: pg,
+			Instances: workflow, ConstructionPublications: workflow,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
@@ -139,27 +164,43 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore) (*runtimebus.Ev
 	if err := bus.SetDeliveryContinuationOwner(runtimebustest.NewDeliveryContinuationOwner(false)); err != nil {
 		t.Fatalf("install run status delivery continuation owner: %v", err)
 	}
-	return bus, workOwner, sourceFact
-}
-
-func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, source runtimecorrelation.SourceArtifactFact, runID, entityID string) string {
-	t.Helper()
-	eventID := uuid.NewString()
-	if err := bus.Publish(runStatusAuthorActivityContext(source), eventtest.RunCreatingRootIngress(
-		eventID,
-		events.EventType("scan.requested"),
-		"api.v1",
-		"",
-		[]byte(`{"topic":"sample"}`),
-		0,
-		runID,
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-		time.Now().UTC(),
-	)); err != nil {
-		t.Fatalf("publish root event: %v", err)
+	module, _, err := cliapp.NewSwarmWorkflowModuleForBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return eventID
+	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
+		Module: module, Persistence: workflow, SourceArtifactFact: sourceFact, WorkOwner: workOwner,
+		ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(),
+		RunLifecycle: pg, PipelineObligations: pg.PipelineObligations(), DeliveryStore: pg, DeadLetters: pg,
+		DecisionCards: pg, ProposedEffects: pg, HumanTasks: pg,
+		DecisionCardDraftExpiry: pg, HumanTaskExpiry: pg, DeliveryRuntime: bus,
+	})
+	if coordinator == nil {
+		t.Fatal("run-status constructor coordinator was not admitted")
+	}
+	planner := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		BaseContext: runStatusAuthorActivityContext(sourceFact), SemanticSource: source, SourceArtifactFact: sourceFact,
+		WorkflowInstances: coordinator, WorkOwner: workOwner, ExecutionPosture: executionposture.Live,
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
+	// Completion controls use a prepared native root; they do not qualify
+	// public launch or attachment. Publication consumes its exact index evidence.
+	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(runStatusAuthorActivityContext(sourceFact), runID), runtimeeffects.ExecutionModeLive)
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: sourceFact.BundleHash(), Artifact: bundle.SourceArtifact,
+	})
+	plan, err := planner.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source, OccurredAt: time.Now().UTC(),
+		Instance: flowidentity.Stored(source, ".", runID, runID, runID, ""),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed, err := pg.CommitFlowInstanceActivation(ctx, runtimebus.FlowInstanceActivationCommand{Plan: plan})
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("prepare run-status root: acknowledged=%t created=%t err=%v", committed.Acknowledged, committed.Created, err)
+	}
+	return bus, workOwner, sourceFact, source
 }
 
 func publishRunStatusExistingRootEvent(t *testing.T, bus *runtimebus.EventBus, source runtimecorrelation.SourceArtifactFact, runID, entityID string) string {
@@ -179,27 +220,6 @@ func publishRunStatusExistingRootEvent(t *testing.T, bus *runtimebus.EventBus, s
 		t.Fatalf("publish existing-run root event: %v", err)
 	}
 	return eventID
-}
-
-func seedRunStatusEntityState(t *testing.T, pg *store.PostgresStore, source runtimecorrelation.SourceArtifactFact, runID, entityID string) {
-	t.Helper()
-	now := time.Now().UTC()
-	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(runStatusAuthorActivityContext(source), runID), runtimeeffects.ExecutionModeLive)
-	// This isolated completion control seeds a prepared header/fields aggregate;
-	// its empty topology is not public construction or attachment qualification.
-	command, err := flowactivationfixture.Command(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: entityID,
-		WorkflowName: ".", WorkflowVersion: "1.0.0", EntityType: "default",
-		CurrentState: "ready", StageDefined: true, CreatedAt: now, EnteredStageAt: now,
-		Fields: map[string]any{},
-	}, runtimepipeline.WorkflowLifecycleMutationPlan{}, now)
-	if err != nil {
-		t.Fatalf("prepare run status aggregate: %v", err)
-	}
-	committed, err := pg.CommitFlowInstanceActivation(ctx, command)
-	if err != nil || !committed.Acknowledged || !committed.Created {
-		t.Fatalf("seed run status aggregate: acknowledged=%t created=%t err=%v", committed.Acknowledged, committed.Created, err)
-	}
 }
 
 func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, source runtimecorrelation.SourceArtifactFact, eventID string) {
@@ -280,12 +300,11 @@ func waitRunStatusEventSettlement(t *testing.T, db *sql.DB, runID string, wantEv
 func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	eb, _, source := newRunStatusEventBus(t, pg)
-	registerRunStatusEventCatalog(t, pg, source)
 	runID := uuid.NewString()
+	eb, _, source, _ := newRunStatusEventBus(t, pg, runID, false)
+	registerRunStatusEventCatalog(t, pg, source)
 	entityID := runID
-	eventID := publishRunStatusRootEvent(t, eb, source, runID, entityID)
-	seedRunStatusEntityState(t, pg, source, runID, entityID)
+	eventID := publishRunStatusExistingRootEvent(t, eb, source, runID, entityID)
 	markRunStatusCompleted(t, pg, source, eventID)
 
 	ctx := context.Background()
@@ -314,7 +333,8 @@ func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
 func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	eb, workOwner, source := newRunStatusEventBus(t, pg)
+	runID := uuid.NewString()
+	eb, workOwner, source, semanticSource := newRunStatusEventBus(t, pg, runID, true)
 	registerRunStatusEventCatalog(t, pg, source)
 
 	agentStarted := make(chan struct{}, 1)
@@ -333,23 +353,22 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
 		LifecycleStore:   storetest.AgentLifecycleFixture(t, pg),
-		SemanticSource:   runStatusSubscriptionSource(),
+		SemanticSource:   semanticSource,
 		DeliveryStore:    pg,
 		SessionResetter:  pg,
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
-	runID := uuid.NewString()
-	registerServeTestDurableAgent(t, runStatusAuthorActivityContext(source), pg, am, runStatusAgentConfig(t, runID, testAgent.id), source)
+	config := runStatusAgentConfig(t, semanticSource, runID, testAgent.id)
+	registerServeTestDurableAgent(t, runStatusAuthorActivityContext(source), pg, am, config, source)
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext(source))); err != nil {
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
-	installServeTestExactAgentReadiness(t, eb, servedRuntimeRootIdentityForRun(t, runID, testAgent.id))
+	installServeTestExactAgentReadiness(t, eb, config.Identity)
 	defer func() { _ = am.Shutdown() }()
 
 	entityID := runID
 	eventID := publishRunStatusExistingRootEvent(t, eb, source, runID, entityID)
-	seedRunStatusEntityState(t, pg, source, runID, entityID)
 
 	select {
 	case <-agentStarted:
@@ -440,7 +459,8 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	eb, workOwner, source := newRunStatusEventBus(t, pg)
+	runID := uuid.NewString()
+	eb, workOwner, source, semanticSource := newRunStatusEventBus(t, pg, runID, true)
 	registerRunStatusEventCatalog(t, pg, source)
 
 	agentStarted := make(chan struct{}, 1)
@@ -459,23 +479,22 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
 		LifecycleStore:   storetest.AgentLifecycleFixture(t, pg),
-		SemanticSource:   runStatusSubscriptionSource(),
+		SemanticSource:   semanticSource,
 		DeliveryStore:    pg,
 		SessionResetter:  pg,
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
-	runID := uuid.NewString()
-	registerServeTestDurableAgent(t, runStatusAuthorActivityContext(source), pg, am, runStatusAgentConfig(t, runID, testAgent.id), source)
+	config := runStatusAgentConfig(t, semanticSource, runID, testAgent.id)
+	registerServeTestDurableAgent(t, runStatusAuthorActivityContext(source), pg, am, config, source)
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext(source))); err != nil {
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
-	installServeTestExactAgentReadiness(t, eb, servedRuntimeRootIdentityForRun(t, runID, testAgent.id))
+	installServeTestExactAgentReadiness(t, eb, config.Identity)
 	defer func() { _ = am.Shutdown() }()
 
 	entityID := runID
 	eventID := publishRunStatusExistingRootEvent(t, eb, source, runID, entityID)
-	seedRunStatusEntityState(t, pg, source, runID, entityID)
 
 	select {
 	case <-agentStarted:
