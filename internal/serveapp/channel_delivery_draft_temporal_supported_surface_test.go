@@ -22,7 +22,7 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 				if transition == "expire" {
 					ttl = 4 * time.Second
 				}
-				h, db, hash := startChannelAnchorJourneyWithDraftTTL(t, backend, "draft-temporal-token", false, ttl, nil)
+				h, db, hash := startChannelAnchorJourneyWithDraftTTL(t, backend, "draft-temporal-token", false, ttl)
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 					"event_name": "work.requested", "bundle_hash": hash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "draft-temporal-seed",
