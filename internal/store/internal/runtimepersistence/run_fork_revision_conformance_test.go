@@ -329,13 +329,21 @@ func TestRunForkRevisionCaptureSerializesSameRunCommitVisibility(t *testing.T) {
 		t.Fatalf("begin second transaction: %v", err)
 	}
 	defer func() { _ = second.Rollback() }()
-	seedPostgresSemanticEventRecordFixtureTx(t, ctx, second, secondEventID, runID, "revision.second", events.EventProducerPlatform, "revision-test", "", "", time.Now().UTC())
 	type captureResult struct {
 		revision int64
 		err      error
 	}
 	done := make(chan captureResult, 1)
 	go func() {
+		// The staged fixture's exact counter update shares the parent row.
+		// Keep the complete second write off the thread releasing the first.
+		event := semanticEventRecordFixture(secondEventID, runID, "revision.second",
+			eventtest.Producer(events.EventProducerPlatform, "revision-test"), []byte(`{}`),
+			semanticEventRecordFixtureEnvelope("", ""), time.Now().UTC())
+		if err := insertPostgresCanonicalEventRecordFixtureTx(ctx, second, event); err != nil {
+			done <- captureResult{err: err}
+			return
+		}
 		revision, err := finalizePostgresRunForkTestRevision(ctx, second, runID, runforkrevision.FamilyEvents)
 		done <- captureResult{revision: revision, err: err}
 	}()
