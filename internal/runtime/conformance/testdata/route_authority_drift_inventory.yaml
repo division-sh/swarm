@@ -1499,6 +1499,18 @@ seam_families:
       agent identities, label independence, hostile producer contradictions,
       receipt round-trips, and scope-local readiness subscriptions. These
       fixture and guard references do not authorize new route interpreters.
+  - id: immutable_test_time_reference_names
+    layer: conformance_guardrails
+    classification: separate_semantic_concept
+    paths:
+      - .github/test-time-reference.json
+    search_dimensions: [descriptor_evidence, flow_owned_subscription_pattern_authority, route_plan_source_reason, typed_connect_recipient_evaluation]
+    notes: >
+      The source/run/attempt-pinned timing reference records test root names
+      and elapsed observations only. Names matching route-authority searches
+      are historical measurement coordinates, not runtime route producers,
+      readers, interpreters, or assertions of semantic proof. The timing owner
+      admits exact canonical bytes; no routing consumer reads this artifact.
 guardrail_proposals:
   - id: drift_inventory_search_dimension_guard
     implementation_state: implemented_in_this_pr

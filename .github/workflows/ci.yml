@@ -593,6 +593,8 @@ jobs:
             if [ "$check" -lt 12 ]; then sleep 5; fi
           done
           go run ./cmd/swarm-test-timing -evaluate-budget \
+            -event "$GITHUB_EVENT_NAME" \
+            -test-time-reference .github/test-time-reference.json \
             -plan test-results/plan/proof-plan.json \
             -policy .github/test-timing-budgets.yaml \
             -weight-model .github/test-timing-weights.json \
