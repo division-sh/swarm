@@ -28,6 +28,12 @@ type DriftReport struct {
 	Rows            []DriftRow `json:"rows"`
 }
 
+// Nested atomic values need the same numeric evidence as scalar mismatches.
+func (row DriftRow) MarshalJSON() ([]byte, error) {
+	type wire DriftRow
+	return canonicaljson.MarshalPreservingNumberKinds(wire(row))
+}
+
 // CompareEntityStateProjections is deliberately not the writer's diff: presence
 // and runtime numeric kinds are evidence even when JSON encodes them alike.
 func CompareEntityStateProjections(runID string, folded, stored map[string]EntityStateProjection) (DriftReport, error) {
