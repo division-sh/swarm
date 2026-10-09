@@ -6044,6 +6044,9 @@ engine:
           ambiguous or foreign construction fails closed. Valid fixed historical headers consume their admitted fixed
           provenance without requiring a nonexistent fresh constructor receipt. Original committed deliveries and replay
           retain their exact identities rather than reselecting against today's instance inventory.
+          A deployment feed remains declaration-owned and carries no concrete sender. An admitted selected-root feed's
+          genuine local consumers bind through the exact run-root construction observed by the same native index;
+          declaration admission or an output export does not invent a receiver or suppress those consumers.
         recovery: Startup recovery of active flow-instance routes MUST load one exact run-scoped projection from the
           active `flow_instances` row identified by the persisted route's `{run_id, instance_path}`. Dynamic instances additionally
           consume their exact `flow_instance_runtime_readiness` plan. The plan owns the creation run and expected declared

@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -32,6 +33,12 @@ func (r connectRoutePlanResolver) resolvePubsubSubscribers(ctx context.Context, 
 	}
 	if len(scope.FlowIDs()) == 0 && len(scope.Coordinates()) == 0 {
 		return nil, nil
+	}
+	if event.RoutingSource().Kind() == events.RoutingSourceDeploymentFeed {
+		keys = append([]string(nil), keys...)
+		for _, coordinate := range scope.Coordinates() {
+			keys = append(keys, coordinate.Route.InstancePath+"/"+string(event.Type()))
+		}
 	}
 	if r.lifecycle.index == nil {
 		return nil, fmt.Errorf("pubsub planning requires its compiled source and native instance index")
@@ -98,6 +105,14 @@ func (r connectRoutePlanResolver) pubsubLookupScope(event events.Event, publicat
 	}
 	if event.RoutingSource().Kind() == events.RoutingSourceRoot {
 		route = events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(r.source), FlowInstance: event.RunID()}
+	}
+	if event.RoutingSource().Kind() == events.RoutingSourceDeploymentFeed {
+		if _, err := pinrouting.AdmitDeploymentFeedDeclaration(r.source, event.Type(), event.RoutingSource()); err != nil {
+			return pipeline.FlowInstanceLookupScope{}, err
+		}
+		if route.FlowID == semanticview.RootExecutionFlowID(r.source) {
+			route.FlowInstance = event.RunID()
+		}
 	}
 	var exact []flowidentity.RunScopedFlowInstance
 	var flows []string
