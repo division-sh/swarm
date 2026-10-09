@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 )
 
 func TestPostgresCanceledReadJoinsClaimedRollbackDisposition(t *testing.T) {
@@ -108,8 +110,16 @@ func TestPostgresCanceledReadJoinsClaimedDriverClose(t *testing.T) {
 			defer releaseCallback()
 			callbackReturned := make(chan struct{})
 			done := make(chan error, 1)
+			scope := make(chan struct {
+				ctx context.Context
+				tx  *sql.Tx
+			}, 1)
 			go func() {
 				done <- b.RunReadTransaction(ctx, func(readCtx context.Context, tx *sql.Tx) error {
+					scope <- struct {
+						ctx context.Context
+						tx  *sql.Tx
+					}{readCtx, tx}
 					var value int
 					if err := tx.QueryRowContext(readCtx, "SELECT 1").Scan(&value); err != nil {
 						return err
@@ -131,6 +141,10 @@ func TestPostgresCanceledReadJoinsClaimedDriverClose(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				t.Fatal("bad rollback did not claim driver disposal")
 			}
+			binding := <-scope
+			if err := authoractivity.FenceMutationOrder(binding.ctx, binding.tx, authoractivity.DialectPostgres); !errors.Is(err, context.Canceled) {
+				t.Fatalf("claimed disposal released transaction ordering scope early: %v", err)
+			}
 			if closeFinished {
 				releaseClose()
 				<-probe.closedSignal
@@ -148,6 +162,9 @@ func TestPostgresCanceledReadJoinsClaimedDriverClose(t *testing.T) {
 			}
 			if probe.closed.Load() != 1 {
 				t.Fatalf("returned before exact disposal completed: closed=%d", probe.closed.Load())
+			}
+			if err := authoractivity.FenceMutationOrder(binding.ctx, binding.tx, authoractivity.DialectPostgres); !errors.Is(err, sql.ErrTxDone) {
+				t.Fatalf("finished cleanup retained transaction ordering scope: %v", err)
 			}
 			next, stop := context.WithTimeout(context.Background(), time.Second)
 			defer stop()
