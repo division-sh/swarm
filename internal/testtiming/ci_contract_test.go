@@ -51,6 +51,7 @@ func TestCIJobCollectionWaitsOnlyForTerminalEvidence(t *testing.T) {
 	fetchAt := strings.Index(step.Run, "gh api --paginate --slurp")
 	evaluateAt := strings.Index(step.Run, "-evaluate-budget")
 	if assertAt < 0 || fetchAt <= assertAt || evaluateAt <= fetchAt ||
+		!strings.Contains(step.Run, `-event "$GITHUB_EVENT_NAME"`) ||
 		!strings.Contains(step.Run, "attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100") ||
 		!strings.Contains(step.Run, "for check in $(seq 1 12)") ||
 		!strings.Contains(step.Run, "if [ \"$check\" -lt 12 ]; then sleep 5; fi") ||
