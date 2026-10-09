@@ -53,7 +53,7 @@ func requireForkReceiverExecution(t *testing.T, rt servedControlProofRuntime, ru
 		row := readForkReceiverRows(t, rt, runID)[path]
 		var entity operatorread.OperatorEntityFull
 		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
-		if entity.Entity.RunID != runID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != path || entity.Entity.EntityType != "receipt" || entity.Entity.CurrentState != row.State || !reflect.DeepEqual(entity.Fields, row.Fields) {
+		if entity.Entity.RunID != runID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != path || entity.Entity.EntityType != "receipt" || entity.Entity.CurrentState == nil || *entity.Entity.CurrentState != row.State || !reflect.DeepEqual(entity.Fields, row.Fields) {
 			t.Fatalf("public receiver state: %+v rows=%+v", entity, row)
 		}
 	}

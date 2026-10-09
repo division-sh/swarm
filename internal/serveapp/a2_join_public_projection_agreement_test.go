@@ -72,7 +72,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 			}
 			a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 0, true)
 			created := requireA2PortfolioEntity(t, rt, opened.RunID, opened.RunID)
-			if created.Entity.CurrentState != "dispatching" {
+			if created.Entity.CurrentState == nil || *created.Entity.CurrentState != "dispatching" {
 				t.Fatalf("actual root creation did not enter dispatching: %+v", created)
 			}
 			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt, opened.EventID, opened.RunID, "order.started",
@@ -87,7 +87,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 			if err != nil || !found || entry != initial.JoinRef().StageEntry() || entry.EventID != dispatched.EventID || entry.Cause != "delivery" {
 				t.Fatalf("public bookkeeping/arm lost the actual admitted entry: entry=%+v arm=%+v err=%v", entry, initial, err)
 			}
-			if initialEntity.Entity.CurrentState != "awaiting" || initial.Status != joinruntime.StatusOpen || initial.Completed() != 0 ||
+			if initialEntity.Entity.CurrentState == nil || *initialEntity.Entity.CurrentState != "awaiting" || initial.Status != joinruntime.StatusOpen || initial.Completed() != 0 ||
 				initial.Expected() != 2 || initial.OutcomePending || initial.OutcomeFired || initial.DeadlineAt.Sub(initial.ArmedAt) != time.Hour {
 				t.Fatalf("public initial arrival obligation: entity=%+v arm=%+v", initialEntity, initial)
 			}
@@ -126,7 +126,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 			pendingDiagnosis := a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 1, false)
 			pendingEntity, pending := a2ReadJoinPublicObligation(t, rt, opened.RunID)
 			a2RequireJoinPublicIdentity(t, initial, pending)
-			if pendingEntity.Entity.CurrentState != "awaiting" || pending.Status != joinruntime.StatusClosed || pending.CloseReason != joinruntime.CloseReasonComplete ||
+			if pendingEntity.Entity.CurrentState == nil || *pendingEntity.Entity.CurrentState != "awaiting" || pending.Status != joinruntime.StatusClosed || pending.CloseReason != joinruntime.CloseReasonComplete ||
 				pending.Completed() != 2 || pending.TimerCancelled || !pending.OutcomePending || pending.OutcomeFired || pending.TimerHandle().Kind() != timeridentity.TimerHandleJoinComplete {
 				t.Fatalf("public closed-pending obligation ran inline or lost closure: entity=%+v arm=%+v", pendingEntity, pending)
 			}
@@ -170,7 +170,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 			}
 			firedEntity, fired := a2ReadJoinPublicObligation(t, rt, opened.RunID)
 			a2RequireJoinPublicIdentity(t, initial, fired)
-			if firedEntity.Entity.CurrentState != "ready" || fired.Status != joinruntime.StatusClosed || fired.CloseReason != joinruntime.CloseReasonComplete ||
+			if firedEntity.Entity.CurrentState == nil || *firedEntity.Entity.CurrentState != "ready" || fired.Status != joinruntime.StatusClosed || fired.CloseReason != joinruntime.CloseReasonComplete ||
 				fired.OutcomePending || !fired.OutcomeFired || !fired.TimerCancelled || !reflect.DeepEqual(pending.Outputs, fired.Outputs) {
 				t.Fatalf("public fired obligation did not consume the real continuation: entity=%+v arm=%+v", firedEntity, fired)
 			}
@@ -284,7 +284,7 @@ func a2RequireJoinPublicGraph(t *testing.T, rt servedControlProofRuntime, root s
 	}
 	currentFound, completeFound, deadlineFound := false, false, false
 	for _, stage := range graph.Nodes {
-		if stage.ID == entity.Entity.CurrentState {
+		if entity.Entity.CurrentState != nil && stage.ID == *entity.Entity.CurrentState {
 			currentFound = true
 			if stage.Final != arm.OutcomeFired {
 				t.Fatalf("CLI stage graph/public lifecycle disagree: stage=%+v entity=%+v arm=%+v", stage, entity.Entity, arm)

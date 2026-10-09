@@ -44,27 +44,6 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowInstance(ctx context.Con
 	return instance, err == nil, err
 }
 
-func (r pipelineTestWorkflowInstanceReader) LoadWorkflowEntityState(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
-	identity = identity.Normalize()
-	entityID = runtimeidentity.NormalizeEntityID(entityID.String())
-	if err := identity.Validate(); err != nil || entityID.IsZero() {
-		return WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("workflow entity state lookup requires exact route and entity identity")
-	}
-	route, runID := identity.Route, identity.RunID
-	query := `SELECT entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
-	if r.dialect == workflowStoreDialectPostgres {
-		query = `SELECT entity_id::text, flow_instance, entity_type, slug, name, fields, created_at, updated_at FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3`
-	}
-	record, err := scanPipelineTestWorkflowEntityState(r.db.QueryRowContext(ctx, query, runID, entityID.String(), route.InstancePath))
-	if err == sql.ErrNoRows {
-		return WorkflowEntityStatePersistenceRecord{}, false, nil
-	}
-	if err != nil {
-		return WorkflowEntityStatePersistenceRecord{}, false, err
-	}
-	return record, true, nil
-}
-
 func (r pipelineTestWorkflowInstanceReader) LoadWorkflowTargetPersistence(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (WorkflowTargetPersistenceRecord, error) {
 	identity = identity.Normalize()
 	entityID = runtimeidentity.NormalizeEntityID(entityID.String())
@@ -355,10 +334,6 @@ var _ WorkflowTargetPersistenceReader = pipelineTestWorkflowInstanceReader{}
 
 func (r *recordingRuntimeMutationRunner) LoadWorkflowInstance(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) (WorkflowInstance, bool, error) {
 	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.LoadWorkflowInstance(ctx, identity)
-}
-
-func (r *recordingRuntimeMutationRunner) LoadWorkflowEntityState(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
-	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.LoadWorkflowEntityState(ctx, identity, entityID)
 }
 
 func (r *recordingRuntimeMutationRunner) LoadWorkflowTargetPersistence(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (WorkflowTargetPersistenceRecord, error) {
