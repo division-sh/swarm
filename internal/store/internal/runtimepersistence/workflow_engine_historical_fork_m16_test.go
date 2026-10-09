@@ -34,7 +34,7 @@ func TestWorkflowEngineHistoricalForkM16BothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if preFork.ForkPoint != prePlan.ForkPoint || prePlan.EventCountAtFork != 2 || len(prePlan.Entities) != 1 || prePlan.Entities[0].CurrentState != "waiting" || prePlan.Entities[0].Fields["marker"] != "source-owned" {
+			if preFork.ForkPoint != prePlan.ForkPoint || prePlan.EventCountAtFork != 2 || len(prePlan.Entities) != 1 || prePlan.Entities[0].CurrentState == nil || *prePlan.Entities[0].CurrentState != "waiting" || prePlan.Entities[0].Fields["marker"] != "source-owned" {
 				t.Fatalf("pre-handler cut lost the source state/publication prefix: fork=%+v plan=%+v", preFork.ForkPoint, prePlan)
 			}
 			m16RequireHistoricalEventSet(t, prePlan, eventID, false, "")
@@ -85,7 +85,7 @@ func TestWorkflowEngineHistoricalForkM16BothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if preFork.ForkRunID == postFork.ForkRunID || preFork.ForkPoint.Revision >= postFork.ForkPoint.Revision || postFork.ForkPoint != postPlan.ForkPoint || postPlan.EventCountAtFork != 3 || len(postPlan.Entities) != 1 || postPlan.Entities[0].CurrentState != "done" || postPlan.Entities[0].Fields["handled"] != true {
+			if preFork.ForkRunID == postFork.ForkRunID || preFork.ForkPoint.Revision >= postFork.ForkPoint.Revision || postFork.ForkPoint != postPlan.ForkPoint || postPlan.EventCountAtFork != 3 || len(postPlan.Entities) != 1 || postPlan.Entities[0].CurrentState == nil || *postPlan.Entities[0].CurrentState != "done" || postPlan.Entities[0].Fields["handled"] != true {
 				t.Fatalf("distinct ordered historical cuts: pre=%+v post=%+v", preFork, postFork)
 			}
 			m16RequireHistoricalEventSet(t, postPlan, eventID, true, postEvent.ID())

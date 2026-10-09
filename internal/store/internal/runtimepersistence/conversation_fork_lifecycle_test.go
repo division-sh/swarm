@@ -329,7 +329,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 		t.Fatalf("snapshot entities = %#v, want one reconstructed entity", result.Snapshot.EntitySnapshot)
 	}
 	entity := result.Snapshot.EntitySnapshot[0]
-	if entity.EntityID != entityID || entity.CurrentState != "draft" || entity.Fields["name"] != "Before" {
+	if entity.EntityID != entityID || entity.CurrentState == nil || *entity.CurrentState != "draft" || entity.Fields["name"] != "Before" {
 		t.Fatalf("entity snapshot = %#v, want source-at-fork projection", entity)
 	}
 	if entity.EnteredStateAt == nil || !entity.EnteredStateAt.Equal(source.turn1At.Add(-30*time.Second)) {

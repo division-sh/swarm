@@ -136,7 +136,7 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 		t.Fatalf("SQLite snapshot entities = %#v", prepared.Snapshot.EntitySnapshot)
 	}
 	entity := prepared.Snapshot.EntitySnapshot[0]
-	if entity.EntityID != entityID || entity.CurrentState != "draft" {
+	if entity.EntityID != entityID || entity.CurrentState == nil || *entity.CurrentState != "draft" {
 		t.Fatalf("SQLite reconstructed entity = %#v", entity)
 	}
 	if _, ok := entity.Fields["removed"]; ok {
