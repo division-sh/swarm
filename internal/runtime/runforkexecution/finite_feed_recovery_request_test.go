@@ -14,16 +14,23 @@ func TestSelectedFiniteFeedResumeRequiresExactPermanentRequest(t *testing.T) {
 		SourceRunID: uuid.NewString(), TargetBundleHash: "bundle-test", ResolvedPoint: &point,
 		ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 	}
+	op, hash, err := op.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	childID := uuid.NewString()
 	result := runfork.SelectedForkRecoveryResult{
-		RunID: uuid.NewString(), ExecutionID: uuid.NewString(),
-		Disposition: runfork.SelectedForkRecoveryResumeFiniteFeed,
-		Resume:      &runfork.SelectedForkFiniteFeedResume{Operation: op},
+		RunID: childID, ExecutionID: uuid.NewString(),
+		Disposition: runfork.SelectedForkRecoveryResume,
+		Operation: &runfork.ForkOperationRecord{Request: op, SemanticHash: hash, ForkRunID: childID,
+			BindingID: uuid.NewString(), Status: runfork.ForkOperationMaterialized},
+		Continuation: &runfork.SelectedForkContinuation{ForkRunStatus: runfork.RunForkMaterializedStatus},
 	}
 	request := SelectedContractExecutionRequest{
 		ForkOperation: &op, Recovery: &result, SourceRunID: op.SourceRunID,
 		ExpectedBundleHash: op.TargetBundleHash, ContractSelection: op.ContractSelection,
 	}
-	if err := validateSelectedFiniteFeedRecoveryRequest(request); err != nil {
+	if err := validateSelectedForkRecoveryRequest(request); err != nil {
 		t.Fatalf("exact deployment resume rejected: %v", err)
 	}
 	for _, tc := range []struct {
@@ -46,21 +53,22 @@ func TestSelectedFiniteFeedResumeRequiresExactPermanentRequest(t *testing.T) {
 		}},
 		{"event point", func(r *SelectedContractExecutionRequest) {
 			copy := *r.Recovery
-			resume := *copy.Resume
-			changed := *resume.Operation.ResolvedPoint
+			operation := *copy.Operation
+			changed := *operation.Request.ResolvedPoint
 			changed.Kind = runfork.RunForkPointEvent
 			changed.EventID = uuid.NewString()
-			resume.Operation.ResolvedPoint = &changed
-			copy.Resume = &resume
+			operation.Request.ResolvedPoint = &changed
+			copy.Operation = &operation
 			r.Recovery = &copy
 		}},
 		{"wrong disposition", func(r *SelectedContractExecutionRequest) {
 			copy := *r.Recovery
-			copy.Disposition = runfork.SelectedForkRecoveryActivateFiniteFeed
+			copy.Disposition = runfork.SelectedForkRecoveryControlOnly
 			r.Recovery = &copy
 		}},
 		{"missing predecessor", func(r *SelectedContractExecutionRequest) {
 			copy := *r.Recovery
+			copy.Disposition = runfork.SelectedForkRecoveryActivate
 			copy.ExecutionID = ""
 			r.Recovery = &copy
 		}},
@@ -68,9 +76,16 @@ func TestSelectedFiniteFeedResumeRequiresExactPermanentRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			changed := request
 			tc.mutate(&changed)
-			if err := validateSelectedFiniteFeedRecoveryRequest(changed); err == nil {
+			if err := validateSelectedForkRecoveryRequest(changed); err == nil {
 				t.Fatal("contradictory selected resume reached preparation")
 			}
 		})
+	}
+	first := request
+	firstRecovery := result
+	firstRecovery.ExecutionID = ""
+	first.Recovery = &firstRecovery
+	if err := validateSelectedForkRecoveryRequest(first); err != nil {
+		t.Fatalf("keyed first attachment rejected: %v", err)
 	}
 }

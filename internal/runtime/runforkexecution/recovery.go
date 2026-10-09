@@ -73,7 +73,7 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 		return nil, err
 	}
 	results := make([]runfork.SelectedForkRecoveryResult, 0, len(entries))
-	finite := make([]runfork.SelectedForkRecoveryResult, 0)
+	continuations := make([]runfork.SelectedForkRecoveryResult, 0)
 	var diagnostics error
 	for _, entry := range entries {
 		fact, err := admitSelectedRecoverySource(ctx, ports.fork, entry)
@@ -96,11 +96,11 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 		if action == selectedRecoveryRejectCurrent {
 			return results, errors.Join(diagnostics, err, fmt.Errorf("selected startup encountered unregistered current-process execution"))
 		}
-		if action == selectedRecoveryResumeFiniteFeed || action == selectedRecoveryActivateFiniteFeed {
+		if action == selectedRecoveryResume || action == selectedRecoveryActivate {
 			if err != nil {
 				return results, errors.Join(diagnostics, err)
 			}
-			finite = append(finite, result)
+			continuations = append(continuations, result)
 		}
 		if err != nil {
 			diagnostics = errors.Join(diagnostics, fmt.Errorf("recover selected fork %s: %w", entry.Binding.ForkRunID, err))
@@ -109,28 +109,28 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 	if err := ctx.Err(); err != nil {
 		return results, errors.Join(diagnostics, err)
 	}
-	if len(finite) != 0 && (environment.SourceLoader == nil || environment.AgentRuntime.ProcessCapability == nil) {
-		return results, errors.New("selected finite-feed recovery requires source loader and bound process capability")
+	if len(continuations) != 0 && (environment.SourceLoader == nil || environment.AgentRuntime.ProcessCapability == nil) {
+		return results, errors.New("selected fork recovery requires source loader and bound process capability")
 	}
 	contexts.recovered = true
 	contexts.mu.Unlock()
 	locked = false
 	request := SelectedContractExecutionRequest{SourceLoader: environment.SourceLoader, AgentRuntime: environment.AgentRuntime}
-	for _, result := range finite {
+	for _, result := range continuations {
 		if err := ctx.Err(); err != nil {
 			return results, errors.Join(diagnostics, err)
 		}
 		switch result.Disposition {
-		case runfork.SelectedForkRecoveryActivateFiniteFeed:
-			if _, err := o.ActivateRecoveredSelectedFiniteFeed(ctx, result, request); err != nil {
-				return results, errors.Join(diagnostics, fmt.Errorf("activate recovered selected finite feed %s: %w", result.RunID, err))
+		case runfork.SelectedForkRecoveryActivate:
+			if _, err := o.ActivateRecoveredSelectedFork(ctx, result, request); err != nil {
+				return results, errors.Join(diagnostics, fmt.Errorf("activate recovered selected fork %s: %w", result.RunID, err))
 			}
-		case runfork.SelectedForkRecoveryResumeFiniteFeed:
-			if _, err := o.ResumeRecoveredSelectedFiniteFeed(ctx, result, request); err != nil {
-				return results, errors.Join(diagnostics, fmt.Errorf("resume recovered selected finite feed %s: %w", result.RunID, err))
+		case runfork.SelectedForkRecoveryResume:
+			if _, err := o.ResumeRecoveredSelectedFork(ctx, result, request); err != nil {
+				return results, errors.Join(diagnostics, fmt.Errorf("resume recovered selected fork %s: %w", result.RunID, err))
 			}
 		default:
-			return results, errors.Join(diagnostics, fmt.Errorf("selected finite-feed recovery changed disposition %q", result.Disposition))
+			return results, errors.Join(diagnostics, fmt.Errorf("selected fork recovery changed disposition %q", result.Disposition))
 		}
 	}
 	admissionFailed = false
@@ -158,8 +158,8 @@ const (
 	selectedRecoveryControlOnly
 	selectedRecoveryFailed
 	selectedRecoveryRejectCurrent
-	selectedRecoveryResumeFiniteFeed
-	selectedRecoveryActivateFiniteFeed
+	selectedRecoveryResume
+	selectedRecoveryActivate
 )
 
 // Boot recognizes these outcomes but never treats one as executable authority.
@@ -167,8 +167,11 @@ func selectedRecoveryActionFor(result runfork.SelectedForkRecoveryResult, entry 
 	if result.RunID != entry.Binding.ForkRunID {
 		return 0, fmt.Errorf("selected recovery result differs from its fork binding")
 	}
-	if result.Disposition != runfork.SelectedForkRecoveryResumeFiniteFeed && result.Disposition != runfork.SelectedForkRecoveryActivateFiniteFeed && result.Resume != nil {
+	if result.Disposition != runfork.SelectedForkRecoveryResume && result.Disposition != runfork.SelectedForkRecoveryActivate && result.Continuation != nil {
 		return 0, fmt.Errorf("selected recovery non-resume disposition carries executable work")
+	}
+	if err := validateSelectedRecoveryOperation(result, entry); err != nil {
+		return 0, err
 	}
 	switch result.Disposition {
 	case runfork.SelectedForkRecoveryTerminal:
@@ -181,44 +184,78 @@ func selectedRecoveryActionFor(result runfork.SelectedForkRecoveryResult, entry 
 		return selectedRecoveryFailed, nil
 	case runfork.SelectedForkRecoveryCurrent:
 		return selectedRecoveryRejectCurrent, nil
-	case runfork.SelectedForkRecoveryResumeFiniteFeed, runfork.SelectedForkRecoveryActivateFiniteFeed:
-		if result.Resume == nil {
-			return 0, fmt.Errorf("selected finite-feed recovery lacks exact operation")
+	case runfork.SelectedForkRecoveryResume, runfork.SelectedForkRecoveryActivate:
+		if result.Continuation == nil || result.Operation == nil {
+			return 0, fmt.Errorf("selected fork recovery lacks exact operation")
 		}
-		if result.Resume.ForkRunStatus != runfork.RunForkMaterializedStatus {
-			return 0, fmt.Errorf("selected finite-feed recovery child is not paused")
+		if err := validateSelectedRecoveryContinuation(result); err != nil {
+			return 0, err
 		}
-		id, err := uuid.Parse(result.ExecutionID)
-		if err != nil || id == uuid.Nil || id.String() != result.ExecutionID {
-			return 0, fmt.Errorf("selected finite-feed recovery lacks exact predecessor execution")
-		}
-		operation := result.Resume.Operation
-		if _, _, err := operation.Canonical(); err != nil {
-			return 0, fmt.Errorf("selected finite-feed recovery operation: %w", err)
-		}
-		if operation.ResolvedPoint == nil || *operation.ResolvedPoint != entry.Binding.ForkPoint ||
-			operation.SourceRunID != entry.Binding.SourceRunID || operation.TargetBundleHash != entry.BundleHash ||
-			operation.ContractSelection != entry.Binding.ContractSelection {
-			return 0, fmt.Errorf("selected finite-feed recovery operation differs from its fixed binding")
-		}
-		if len(result.Resume.Pins) == 0 {
-			return 0, fmt.Errorf("selected finite-feed recovery lacks durable pins")
-		}
-		pins := make(map[string]struct{}, len(result.Resume.Pins))
-		for _, pin := range result.Resume.Pins {
-			if err := pin.Validate(); err != nil || pin.RunID != result.RunID || pin.RunState != "paused" {
-				return 0, fmt.Errorf("selected finite-feed recovery pin differs from paused child: %v", err)
+		pins := make(map[string]string, len(result.Continuation.Pins))
+		for _, pin := range result.Continuation.Pins {
+			if err := pin.Validate(); err != nil || pin.RunID != result.RunID || pin.RunState != result.Continuation.ForkRunStatus {
+				return 0, fmt.Errorf("selected fork recovery pin differs from current child: %v", err)
 			}
 			if _, exists := pins[pin.Declaration.Key()]; exists {
-				return 0, fmt.Errorf("selected finite-feed recovery repeats declaration %s", pin.Declaration.Key())
+				return 0, fmt.Errorf("selected fork recovery repeats declaration %s", pin.Declaration.Key())
 			}
-			pins[pin.Declaration.Key()] = struct{}{}
+			pins[pin.Declaration.Key()] = string(pin.VersionID)
 		}
-		if result.Disposition == runfork.SelectedForkRecoveryActivateFiniteFeed {
-			return selectedRecoveryActivateFiniteFeed, nil
+		for _, explicit := range result.Operation.Request.DataPinOverrides {
+			if pins[explicit.Declaration.Key()] != string(explicit.VersionID) {
+				return 0, fmt.Errorf("selected recovery lost permanent pin override %s", explicit.Declaration.Key())
+			}
 		}
-		return selectedRecoveryResumeFiniteFeed, nil
+		if result.Disposition == runfork.SelectedForkRecoveryActivate {
+			return selectedRecoveryActivate, nil
+		}
+		return selectedRecoveryResume, nil
 	default:
 		return 0, fmt.Errorf("selected recovery disposition %q has no boot action", result.Disposition)
 	}
+}
+
+func validateSelectedRecoveryOperation(result runfork.SelectedForkRecoveryResult, entry runfork.SelectedForkRecoveryEntry) error {
+	if result.Operation == nil {
+		return nil
+	}
+	record := result.Operation
+	if err := record.Validate(); err != nil {
+		return fmt.Errorf("selected recovery operation: %w", err)
+	}
+	operation := record.Request
+	if record.ForkRunID != result.RunID || record.BindingID != entry.Binding.BindingID ||
+		operation.ResolvedPoint == nil || *operation.ResolvedPoint != entry.Binding.ForkPoint ||
+		operation.SourceRunID != entry.Binding.SourceRunID || operation.TargetBundleHash != entry.BundleHash ||
+		operation.ContractSelection != entry.Binding.ContractSelection {
+		return fmt.Errorf("selected recovery operation differs from its fixed binding")
+	}
+	return nil
+}
+
+func validateSelectedRecoveryContinuation(result runfork.SelectedForkRecoveryResult) error {
+	switch result.Operation.Status {
+	case runfork.ForkOperationMaterialized:
+		if result.Continuation.ForkRunStatus != runfork.RunForkMaterializedStatus {
+			return fmt.Errorf("materialized selected recovery child is not paused")
+		}
+	case runfork.ForkOperationActivated:
+		status := result.Continuation.ForkRunStatus
+		if result.Disposition != runfork.SelectedForkRecoveryResume || (status != runfork.RunForkActivatedStatus && status != runfork.RunForkMaterializedStatus) {
+			return fmt.Errorf("activated selected recovery cannot reactivate or change child state")
+		}
+	default:
+		return fmt.Errorf("selected recovery cannot resume a failed or uncertain operation")
+	}
+	if result.ExecutionID == "" {
+		if result.Operation.Status != runfork.ForkOperationMaterialized || result.Disposition != runfork.SelectedForkRecoveryResume {
+			return fmt.Errorf("selected recovery lacks exact predecessor execution")
+		}
+		return nil
+	}
+	id, err := uuid.Parse(result.ExecutionID)
+	if err != nil || id == uuid.Nil || id.String() != result.ExecutionID {
+		return fmt.Errorf("selected recovery lacks exact predecessor execution")
+	}
+	return nil
 }

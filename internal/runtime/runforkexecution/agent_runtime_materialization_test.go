@@ -520,12 +520,12 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 	}
 
 	agents.Options.AgentManagerOptions = runtimemanager.AgentManagerOptions{WorkOwner: owner, ReceiverExecution: receiverExecution}
-	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
+	runtime, _, err := prepareSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
 		Owner: executionOwner, LoadedSource: loaded,
 		Prepared: prepared, AgentRuntime: agents, Admission: executionAdmission,
 	}, eventBus, &runtimepipeline.PipelineCoordinator{}, nil)
 	if err != nil {
-		t.Fatalf("startSelectedContractAgentRuntime: %v", err)
+		t.Fatalf("prepareSelectedContractAgentRuntime: %v", err)
 	}
 	grantDone := runtime.generationGrant.Done()
 	cancel()

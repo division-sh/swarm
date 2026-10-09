@@ -16,6 +16,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -1080,6 +1081,90 @@ func runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(admission
 	return admission
 }
 
+// RequireRunForkSelectedContractExecutionSettlement checks final business
+// completion after serving has stopped, never attachment admission. It does not
+// quiesce or acknowledge activation; the existing execution lifecycle owns that
+// transition and rechecks its current fence and live attempts.
+func (s *RunForkPostgresOwner) RequireRunForkSelectedContractExecutionSettlement(ctx context.Context, authority runtimeeffects.Authority, allowedSourceEventIDs []string, source semanticview.Source) error {
+	if s == nil || s.backend == nil {
+		return fmt.Errorf("postgres store is required")
+	}
+	if err := s.requireRunForkSelectedContractExecutionAccess(); err != nil {
+		return err
+	}
+	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		snapshot, err := s.LoadSnapshotTx(ctx, tx, authority.SelectedFork.ForkRunID, true)
+		if err != nil {
+			return err
+		}
+		if err := requireSelectedContractSettlementAuthorityTx(ctx, tx, snapshot, authority, s.EffectPostgresOwner, false); err != nil {
+			return err
+		}
+		return s.requireRunForkSelectedContractExecutionSettlementTx(ctx, tx, authority.SelectedFork.ForkRunID, allowedSourceEventIDs, source)
+	})
+}
+
+func (s *RunForkSQLiteOwner) RequireRunForkSelectedContractExecutionSettlement(ctx context.Context, authority runtimeeffects.Authority, allowedSourceEventIDs []string, source semanticview.Source) error {
+	if err := s.requireRunForkSelectedContractExecutionAccess(); err != nil {
+		return err
+	}
+	return s.runRuntimeMutation(ctx, "sqlite selected-contract execution settlement", func(ctx context.Context, tx *sql.Tx) error {
+		snapshot, err := s.LoadSnapshotTx(ctx, tx, authority.SelectedFork.ForkRunID)
+		if err != nil {
+			return err
+		}
+		if err := requireSelectedContractSettlementAuthorityTx(ctx, tx, snapshot, authority, s.EffectSQLiteOwner, true); err != nil {
+			return err
+		}
+		return s.requireRunForkSelectedContractExecutionSettlementTx(ctx, tx, authority.SelectedFork.ForkRunID, allowedSourceEventIDs, source)
+	})
+}
+
+type selectedContractSettlementAuthorityOwner interface {
+	selectedContractCurrentAuthorityOwner
+	RequireCompletionAuthorityNoLiveAttemptsTx(context.Context, *sql.Tx, runtimeeffects.Authority) error
+}
+
+func requireSelectedContractSettlementAuthorityTx(ctx context.Context, tx *sql.Tx, snapshot runtimerunlifecycle.Snapshot, authority runtimeeffects.Authority, owner selectedContractSettlementAuthorityOwner, sqlite bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !authority.Valid() || authority.Kind != runtimeeffects.AuthoritySelectedContractFork || snapshot.RunID != authority.SelectedFork.ForkRunID {
+		return fmt.Errorf("selected-contract settlement requires exact running execution authority")
+	}
+	binding, err := loadRunForkSelectedContractBinding(ctx, tx, snapshot.RunID)
+	if err != nil {
+		return err
+	}
+	record, err := loadSelectedRecoveryRecordTx(ctx, tx, snapshot, runfork.SelectedForkRecoveryEntry{
+		Binding: binding, BundleHash: snapshot.BundleHash,
+	}, sqlite, true)
+	if err != nil {
+		return err
+	}
+	if !record.hasExecution || record.state != "running" || record.failure != nil || record.ExecutionID != authority.SelectedFork.ExecutionID {
+		return fmt.Errorf("selected-contract settlement requires the current running executor")
+	}
+	if err := owner.RequireCurrentExternalEffectAuthorityTx(ctx, tx, authority); err != nil {
+		return err
+	}
+	return requireSelectedRuntimeNoLiveAttempts(ctx, tx, owner, authority.SelectedFork.ExecutionID)
+}
+
+func (s *RunForkPostgresOwner) requireRunForkSelectedContractExecutionSettlementTx(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string, source semanticview.Source) error {
+	if err := requireSelectedDeploymentDrainedTx(ctx, tx, forkRunID); err != nil {
+		return err
+	}
+	return s.ensureRunForkSelectedContractExecutionForkState(ctx, tx, forkRunID, allowedSourceEventIDs, source)
+}
+
+func (s *RunForkSQLiteOwner) requireRunForkSelectedContractExecutionSettlementTx(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string, source semanticview.Source) error {
+	if err := requireSelectedDeploymentDrainedTx(ctx, tx, forkRunID); err != nil {
+		return err
+	}
+	return s.ensureSQLiteRunForkSelectedContractExecutionForkState(ctx, tx, forkRunID, allowedSourceEventIDs, source)
+}
+
 func (s *RunForkPostgresOwner) ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string, source semanticview.Source) error {
 	allowedEvents := uniqueNonEmptyStrings(allowedSourceEventIDs)
 	if len(allowedEvents) == 0 {
@@ -1092,8 +1177,8 @@ func (s *RunForkPostgresOwner) ensureRunForkSelectedContractExecutionForkState(c
 		}
 	}
 
-	// Materialization preflights empty fork-local replay state. At activation
-	// time, sessions/turns/audits may be fresh outputs from selected execution.
+	// Materialization preflights empty fork-local replay state. At final
+	// settlement, sessions/turns/audits may be fresh selected execution outputs.
 	var missingLineage int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*)

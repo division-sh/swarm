@@ -11,6 +11,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -354,12 +355,8 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			}
 			return result, resources.cleanupExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, err)
 		}
-		defer func() { finalErr = errors.Join(finalErr, container.diagnostics.err()) }()
 		ctx = operation.Context()
-		published, err := container.Publish(ctx)
-		result.ExecutedEventCount = len(published)
-		result.ForkEvents = published
-		if err != nil {
+		if err := container.PrepareAttachment(ctx); err != nil {
 			if authorityErr := container.Fail(ctx, err); authorityErr != nil {
 				err = errors.Join(err, authorityErr)
 			} else {
@@ -367,12 +364,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			}
 			return result, err
 		}
-		if err := container.Quiesce(ctx); err != nil {
-			if authorityErr := container.Fail(ctx, err); authorityErr != nil {
-				return result, errors.Join(err, authorityErr)
-			}
-			return result, resources.cleanupExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, err)
-		}
+		ctx = runtimeeffects.WithAuthority(ctx, container.authority)
 		activation, err := executionPorts.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 			ExecutionSource:       loadedSource.Source,
 			ForkRunID:             forkRunID,
@@ -383,14 +375,17 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			RecipientPlanning:     *model.RecipientPlanning,
 		})
 		result.RunForkActivation = activation
-		closeErr := container.Close(ctx)
-		err = errors.Join(err, closeErr)
 		if activation.Activated {
-			err = errors.Join(err, req.ExecutionOwner.retainPrepared(resources))
-		} else if err != nil && closeErr == nil {
-			err = resources.cleanupExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, err)
+			container.RetainActivated(resources, err)
+			return result, nil
 		}
-		return result, err
+		if err == nil {
+			err = errors.New("selected staged activation was not acknowledged")
+		}
+		if authorityErr := container.Fail(ctx, err); authorityErr != nil {
+			return result, errors.Join(err, authorityErr)
+		}
+		return result, resources.cleanupExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, err)
 	}
 	if plan.ReplayResumeAdmission.ReplayResumeFactsPresent {
 		return result, fmt.Errorf("selected-contract activation gate blocks historical replay before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))

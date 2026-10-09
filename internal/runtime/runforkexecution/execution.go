@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
@@ -54,18 +55,18 @@ type SelectedContractExecutionResult struct {
 	ForkEvents                         []SelectedContractExecutionForkEvent               `json:"fork_events,omitempty"`
 }
 
-// ResumeRecoveredSelectedFiniteFeed re-enters the selected execution sequence
+// ResumeRecoveredSelectedFork re-enters the selected execution sequence
 // from one durable child and predecessor, never from a new fork materialization.
-func (o SelectedContractExecutionOwner) ResumeRecoveredSelectedFiniteFeed(ctx context.Context, recovered runfork.SelectedForkRecoveryResult, request SelectedContractExecutionRequest) (SelectedContractExecutionResult, error) {
-	if recovered.Disposition != runfork.SelectedForkRecoveryResumeFiniteFeed {
-		return SelectedContractExecutionResult{}, errors.New("selected finite-feed resume requires unfinished recovery evidence")
+func (o SelectedContractExecutionOwner) ResumeRecoveredSelectedFork(ctx context.Context, recovered runfork.SelectedForkRecoveryResult, request SelectedContractExecutionRequest) (SelectedContractExecutionResult, error) {
+	if recovered.Disposition != runfork.SelectedForkRecoveryResume && recovered.Disposition != runfork.SelectedForkRecoveryActivate {
+		return SelectedContractExecutionResult{}, errors.New("selected resume requires unfinished recovery evidence")
 	}
-	admitted, err := o.admitSelectedFiniteFeedRecovery(ctx, recovered, request)
+	admitted, err := o.admitSelectedRecovery(ctx, recovered, request)
 	if err != nil {
 		return SelectedContractExecutionResult{}, err
 	}
-	if admitted.action != selectedRecoveryResumeFiniteFeed {
-		return SelectedContractExecutionResult{}, errors.New("selected finite-feed resume received non-resume action")
+	if admitted.action != selectedRecoveryResume && admitted.action != selectedRecoveryActivate {
+		return SelectedContractExecutionResult{}, errors.New("selected resume received non-executable action")
 	}
 	admitted.request.Recovery = &recovered
 	return ExecuteSelectedContractRunFork(ctx, admitted.request)
@@ -100,7 +101,11 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if !acknowledged {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, materializationDiagnostic
 	}
-	defer func() { finalErr = errors.Join(finalErr, materializationDiagnostic) }()
+	defer func() {
+		if !out.Activation.Activated {
+			finalErr = errors.Join(finalErr, materializationDiagnostic)
+		}
+	}()
 	ctx = operation.Context()
 	agentRuntime, err = agentRuntime.bindRun(materialization.ForkRunID, materialization.AgentTopologies)
 	if err != nil {
@@ -168,11 +173,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		}
 		return result, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, req.ForkOperation, err)
 	}
-	defer func() { finalErr = errors.Join(finalErr, container.diagnostics.err()) }()
-	published, err := container.Publish(ctx)
-	result.ExecutedEventCount = len(published)
-	result.ForkEvents = published
-	if err != nil {
+	if err := container.PrepareAttachment(ctx); err != nil {
 		if authorityErr := container.Fail(ctx, err); authorityErr != nil {
 			err = errors.Join(err, authorityErr)
 		} else {
@@ -180,15 +181,26 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		}
 		return result, err
 	}
-	if err := container.Quiesce(ctx); err != nil {
-		if authorityErr := container.Fail(ctx, err); authorityErr != nil {
-			return result, errors.Join(err, authorityErr)
+	if req.Recovery != nil {
+		committed, activated, err := req.Recovery.ActivatedResult()
+		if err != nil {
+			return result, err
 		}
-		return result, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, req.ForkOperation, err)
+		if activated {
+			result.Activation = runfork.RunForkActivation{
+				SourceRunID: committed.SourceRunID, ForkRunID: committed.ForkRunID,
+				ForkRunStatus: committed.ForkRunStatus, SourceRunStatus: committed.SourceRunStatus,
+				ForkPoint: committed.ForkPoint, Activated: true, SourceFrozen: committed.SourceFrozen,
+				SelectedContractBinding: materialization.SelectedContractBinding,
+			}
+			result.ExecutedEventCount = committed.ExecutedEventCount
+			container.RetainActivated(prepared, materializationDiagnostic)
+			return result, nil
+		}
 	}
+	ctx = runtimeeffects.WithAuthority(ctx, container.authority)
 	activation, err := ports.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		ForkOperation:         req.ForkOperation,
-		ExecutedEventCount:    len(published),
 		DataPins:              materialization.DataPins,
 		ExecutionSource:       loadedSource.Source,
 		ForkRunID:             materialization.ForkRunID,
@@ -199,15 +211,19 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		RecipientPlanning:     *model.RecipientPlanning,
 	})
 	result.Activation = activation
-	closeErr := container.Close(ctx)
-	err = errors.Join(err, closeErr)
-	if activation.Activated {
-		// A later error must not dispose the context of a committed active fork.
-		err = errors.Join(err, req.Owner.retainPrepared(prepared))
-	} else if err != nil && closeErr == nil {
-		err = prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, req.ForkOperation, err)
+	if !activation.Activated {
+		if err == nil {
+			err = errors.New("selected fork activation was not acknowledged")
+		}
+		if authorityErr := container.Fail(ctx, err); authorityErr != nil {
+			return result, errors.Join(err, authorityErr)
+		}
+		return result, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, req.ForkOperation, err)
 	}
-	return result, err
+	// The permanent result owns acknowledgment; registration or cleanup loss
+	// cannot reverse it. Recovery resumes the committed child and owed work.
+	container.RetainActivated(prepared, errors.Join(err, materializationDiagnostic))
+	return result, nil
 }
 
 func validateSelectedContractExecutionFrontierForMutation(frontier runfork.RunForkContractFrontierAdmission) error {
@@ -348,8 +364,11 @@ func newSelectedContractPipeline(
 	ports *selectedContractExecutionPorts,
 	loaded LoadedSelectedContractSource,
 	agentRuntime SelectedContractAgentRuntimeOptions,
+	scheduler *runtimepipeline.Scheduler,
 ) *runtimepipeline.PipelineCoordinator {
-	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selectedContractPipelineCoordinatorOptions(bus, ports, loaded, agentRuntime))
+	options := selectedContractPipelineCoordinatorOptions(bus, ports, loaded, agentRuntime)
+	options.TimerScheduler = scheduler
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, options)
 }
 
 func selectedContractPipelineCoordinatorOptions(
