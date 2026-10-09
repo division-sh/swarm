@@ -26,6 +26,7 @@ import (
 
 type selectedChannelDeliveryTestStore interface {
 	channelOnboardingEffectSelectedStore
+	SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
 	InsertMailboxItem(context.Context, runtimetools.MailboxItem) (string, error)
 	CurrentChannelDeliveryActivationID(context.Context) (string, bool, error)
 	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (render.ResolvedAction, bool, error)
@@ -225,10 +226,41 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				if _, err := runtimeeffects.BeginChannelDelivery(effectCtx, []byte("message"), nil); err == nil {
 					t.Fatal("effect authorization before successful onboarding was admitted")
 				}
+				textFact := operatorchannel.InboundText{
+					TextFact: operatorchannel.TextFact{Interface: binding.Interface, ExternalAccountRef: "account",
+						ConversationRef: activation.ConversationRef, ConversationScope: conversationScope,
+						Text: "open inbox", MessageReference: `{"id":12}`},
+					Provider: activation.Provider, ProviderEventID: "text-12", PublicationID: uuid.NewString(),
+					ProviderAuthorization: "verified-text-auth",
+				}
+				// Ordinary source discovery is not executable activation authority.
+				// The notice remains retained while activation/effect checks refuse it.
+				if plans, err := selected.ListCurrentChannelDeliveryPlans(ctx, "", 200); err != nil || len(plans) != 1 || plans[0].DeliveryID != deliveryID {
+					t.Fatalf("pre-completion retained plans=%#v err=%v", plans, err)
+				}
+				if _, found, err := selected.ResolveCurrentChannelText(ctx, textFact); err != nil || found {
+					t.Fatalf("pre-completion text current=%t err=%v", found, err)
+				}
+				completionHints := observeChannelHints(t, selected)
 				onboarding, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
 					OperationID: onboarding.OperationID, ExpectedRevision: onboarding.Revision,
-					Phase: channelonboarding.PhaseSucceeded, Now: now.Add(20 * time.Second),
+					Phase: onboarding.Phase, Now: now.Add(19 * time.Second),
 				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				completionHints.expect(t, 0)
+				completion := channelonboarding.AdvanceRequest{
+					OperationID: onboarding.OperationID, ExpectedRevision: onboarding.Revision,
+					Phase: channelonboarding.PhaseSucceeded, Now: now.Add(20 * time.Second),
+				}
+				staleCompletion := completion
+				staleCompletion.ExpectedRevision--
+				if _, err := selected.AdvanceChannelOnboarding(ctx, staleCompletion); !errors.Is(err, channelonboarding.ErrRevisionConflict) {
+					t.Fatalf("stale completion error=%v", err)
+				}
+				completionHints.expect(t, 0)
+				onboarding, err = selected.AdvanceChannelOnboarding(ctx, completion)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -236,12 +268,16 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				if err != nil || !found || selectedActivationID != activation.ActivationID {
 					t.Fatalf("selected activation = %s, found=%t err=%v", selectedActivationID, found, err)
 				}
-				textFact := operatorchannel.InboundText{
-					TextFact: operatorchannel.TextFact{Interface: binding.Interface, ExternalAccountRef: "account",
-						ConversationRef: activation.ConversationRef, ConversationScope: conversationScope,
-						Text: "open inbox", MessageReference: `{"id":12}`},
-					Provider: activation.Provider, ProviderEventID: "text-12", PublicationID: uuid.NewString(),
-					ProviderAuthorization: "verified-text-auth",
+				completionHints.expect(t, render.ReconcileOrdinary|render.ReconcileNative)
+				completion.ExpectedRevision = onboarding.Revision
+				if _, err := selected.AdvanceChannelOnboarding(ctx, completion); !errors.Is(err, channelonboarding.ErrConflict) {
+					t.Fatalf("terminal completion error=%v", err)
+				}
+				completionHints.expect(t, 0)
+				completionHints.subscription.Close()
+				plans, err := selected.ListCurrentChannelDeliveryPlans(ctx, "", 200)
+				if err != nil || len(plans) != 1 || plans[0].DeliveryID != deliveryID {
+					t.Fatalf("post-completion current plans=%#v err=%v", plans, err)
 				}
 				resolvedText, foundText, err := selected.ResolveCurrentChannelText(ctx, textFact)
 				if err != nil || !foundText || resolvedText.PrincipalID != principal.ID ||
@@ -268,12 +304,14 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					PackManifestHash: activation.Interface.ChannelManifestHash,
 					PlanGeneration:   activation.Coordinate.PlanGeneration, EntryContractHash: entryContractHash,
 				}
+				hints := observeChannelHints(t, selected)
 				setting, err := native.AttachNativeInboxSetting(ctx, admission)
 				expectedInstallID, idErr := channelnative.InstallOperationID(setting.SettingID, setting.Generation)
 				if err != nil || idErr != nil || setting.State != "planned" || setting.Generation != 1 ||
 					setting.CurrentConsumerCount != 1 || setting.InstallOperationID != expectedInstallID {
 					t.Fatalf("attach physical native setting = %#v, %v", setting, err)
 				}
+				hints.expect(t, render.ReconcileOrdinary|render.ReconcileNative)
 				wantScope, wantMember := "chat", ""
 				if conversationScope == operatorchannel.ConversationScopeShared {
 					wantScope, wantMember = "chat_member", "account"
@@ -286,6 +324,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					replayedSetting.CurrentConsumerCount != 1 || replayedSetting.InstallOperationID != expectedInstallID {
 					t.Fatalf("native setting replay = %#v, %v", replayedSetting, err)
 				}
+				hints.expect(t, 0)
 				for _, stale := range []struct {
 					name, sqliteUpdate, postgresUpdate string
 				}{
@@ -307,7 +346,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 							if _, err := tx.ExecContext(txctx, query, arg); err != nil {
 								return err
 							}
-							if err := channeldelivery.RetireStaleNativeInboxConsumersTx(txctx, tx, postgres); err != nil {
+							if _, err := channeldelivery.RetireStaleNativeInboxConsumersTx(txctx, tx, postgres); err != nil {
 								return err
 							}
 							query = `SELECT state FROM channel_native_setting_consumers WHERE activation_id=?`
@@ -338,6 +377,12 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				if _, err := native.AttachNativeInboxSetting(ctx, incompatible); err == nil {
 					t.Fatal("native setting accepted incompatible contract with a current consumer")
 				}
+				hints.expect(t, 0)
+				if err := native.RetireStaleNativeInboxConsumers(ctx); err != nil {
+					t.Fatal(err)
+				}
+				hints.expect(t, 0)
+				hints.subscription.Close()
 				nativeAuthority := runtimeeffects.Authority{
 					Kind: runtimeeffects.AuthorityChannelNativeSetting, ID: setting.InstallOperationID,
 					ExecutionOwner: "channel-native-test", LeaseExpiresAt: time.Now().Add(5 * time.Minute),
@@ -729,6 +774,7 @@ func proveNativeQualificationFences(t *testing.T, selected selectedChannelDelive
 	admission channelnative.Admission, setting channelnative.Setting, operationID string, now time.Time) {
 	t.Helper()
 	ctx := context.Background()
+	hints := observeChannelHints(t, selected)
 	localeOwner := selected.(channelonboarding.Store)
 	declared, err := localeOwner.SetChannelClientLocale(ctx, channelonboarding.SetClientLocaleRequest{
 		OperationID: operationID, PrincipalID: admission.PrincipalID, ExpectedRevision: setting.ClientLocaleRevision,
@@ -737,6 +783,14 @@ func proveNativeQualificationFences(t *testing.T, selected selectedChannelDelive
 	if err != nil {
 		t.Fatal(err)
 	}
+	hints.expect(t, render.ReconcileOrdinary|render.ReconcileNative)
+	if _, err := localeOwner.SetChannelClientLocale(ctx, channelonboarding.SetClientLocaleRequest{
+		OperationID: operationID, PrincipalID: admission.PrincipalID, ExpectedRevision: setting.ClientLocaleRevision,
+		Language: "en", Now: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hints.expect(t, 0)
 	request := channelnative.QualificationRequest{
 		SettingID: setting.SettingID, SettingGeneration: setting.Generation, ActivationID: admission.ActivationID,
 		ActivationRevision: admission.ActivationRevision, ContextGeneration: admission.ContextPublicationGeneration,
@@ -766,9 +820,16 @@ func proveNativeQualificationFences(t *testing.T, selected selectedChannelDelive
 			}
 		})
 	}
+	hints.expect(t, 0)
 	if err := native.RecordNativeInboxQualification(ctx, request); err != nil {
 		t.Fatal(err)
 	}
+	hints.expect(t, render.ReconcileOrdinary)
+	request.ObservedAt = now.Add(time.Millisecond)
+	if err := native.RecordNativeInboxQualification(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	hints.expect(t, 0)
 	qualified, err := native.ReadNativeInboxQualification(ctx, admission.ActivationID)
 	if err != nil || qualified.State != channelnative.QualificationQualified || qualified.LocaleRevision != declared.ClientLocaleRevision {
 		t.Fatalf("exact qualification=%#v err=%v", qualified, err)
@@ -780,6 +841,7 @@ func proveNativeQualificationFences(t *testing.T, selected selectedChannelDelive
 	if err != nil {
 		t.Fatal(err)
 	}
+	hints.expect(t, render.ReconcileOrdinary|render.ReconcileNative)
 	stale, err := native.ReadNativeInboxQualification(ctx, admission.ActivationID)
 	if err != nil || stale.State != channelnative.QualificationStale {
 		t.Fatalf("locale change retained predecessor qualification: %#v err=%v", stale, err)
@@ -787,12 +849,14 @@ func proveNativeQualificationFences(t *testing.T, selected selectedChannelDelive
 	if err := native.RecordNativeInboxQualification(ctx, request); err == nil {
 		t.Fatal("predecessor observation qualified a successor declaration")
 	}
+	hints.expect(t, 0)
 	request.ClientLanguage, request.LocaleRevision = changed.ClientLanguage, changed.ClientLocaleRevision
 	request.State, request.ReadbackHash, request.Reason = channelnative.QualificationInvalid, "", "selected locale has conflicting commands"
 	request.ObservedAt = now.Add(2 * time.Second)
 	if err := native.RecordNativeInboxQualification(ctx, request); err != nil {
 		t.Fatal(err)
 	}
+	hints.expect(t, render.ReconcileOrdinary)
 	invalid, err := native.ReadNativeInboxQualification(ctx, admission.ActivationID)
 	retained, attachErr := native.AttachNativeInboxSetting(ctx, admission)
 	if err != nil || attachErr != nil || invalid.State != channelnative.QualificationInvalid ||
@@ -800,4 +864,5 @@ func proveNativeQualificationFences(t *testing.T, selected selectedChannelDelive
 		retained.InstallOperationID != setting.InstallOperationID || retained.State != "installed" {
 		t.Fatalf("fresh invalid qualification changed install history: qualification=%#v setting=%#v errors=%v/%v", invalid, retained, err, attachErr)
 	}
+	hints.expect(t, 0)
 }

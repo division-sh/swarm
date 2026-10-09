@@ -123,15 +123,17 @@ func commitOneFlowInstanceActivation(
 }
 
 func (s *PipelinePostgresOwner) CommitFlowInstanceActivation(ctx context.Context, command runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error) {
-	return commitOneFlowInstanceActivation(ctx, command, s, true, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedFlowInstanceActivation, error)) mutationprotocol.Result[runtimepipeline.CommittedFlowInstanceActivation] {
+	result, err := commitOneFlowInstanceActivation(ctx, command, s, true, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedFlowInstanceActivation, error)) mutationprotocol.Result[runtimepipeline.CommittedFlowInstanceActivation] {
 		return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
 	})
+	return result, errors.Join(err, s.publishCardChanges(result.Acknowledged, result.ChannelCardsChanged()))
 }
 
 func (s *PipelineSQLiteOwner) CommitFlowInstanceActivation(ctx context.Context, command runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error) {
-	return commitOneFlowInstanceActivation(ctx, command, s, false, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedFlowInstanceActivation, error)) mutationprotocol.Result[runtimepipeline.CommittedFlowInstanceActivation] {
+	result, err := commitOneFlowInstanceActivation(ctx, command, s, false, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedFlowInstanceActivation, error)) mutationprotocol.Result[runtimepipeline.CommittedFlowInstanceActivation] {
 		return mutationprotocol.RunSQLite(ctx, s.backend, "sqlite commit flow instance activation", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
 	})
+	return result, errors.Join(err, s.publishCardChanges(result.Acknowledged, result.ChannelCardsChanged()))
 }
 
 var _ runtimebus.FlowInstanceActivationCommitOwner = (*PipelinePostgresOwner)(nil)

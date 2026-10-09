@@ -12,6 +12,7 @@ import (
 
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -35,6 +36,7 @@ type StartupPostgresOwner struct {
 	agents           *storeagent.AgentPostgresOwner
 	destructiveReset *storeadmin.DestructiveResetPostgresOwner
 	fanOutPipeline   *storepipeline.PipelinePostgresOwner
+	channelChanges   *runtimechanneldelivery.ReconcileSignal
 }
 
 type StartupSQLiteOwner struct {
@@ -46,6 +48,23 @@ type StartupSQLiteOwner struct {
 	agents          *storeagent.AgentSQLiteOwner
 	ownerMu         sync.Mutex
 	fanOutPipeline  *storepipeline.PipelineSQLiteOwner
+	channelChanges  *runtimechanneldelivery.ReconcileSignal
+}
+
+func (s *StartupPostgresOwner) BindChannelReconciliation(signal *runtimechanneldelivery.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return errors.New("startup PostgreSQL channel reconciliation must be bound exactly once")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *StartupSQLiteOwner) BindChannelReconciliation(signal *runtimechanneldelivery.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return errors.New("startup SQLite channel reconciliation must be bound exactly once")
+	}
+	s.channelChanges = signal
+	return nil
 }
 
 func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentPostgresOwner, destructiveReset *storeadmin.DestructiveResetPostgresOwner, pipeline *storepipeline.PipelinePostgresOwner) (*StartupPostgresOwner, error) {
@@ -306,7 +325,7 @@ func (s *postgresSession) CommitSourceSet(ctx context.Context, req runtimeagentt
 
 func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (runtimedestructivereset.CleanupResult, error) {
 	var result runtimedestructivereset.CleanupResult
-	err := s.lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	committed, err := postgresbackend.RunAuthorityTransactionOutcome(ctx, s.lease.Session(), func(txctx context.Context, tx *sql.Tx) error {
 		if err := generationauthority.FenceMutation(txctx, tx, false); err != nil {
 			return err
 		}
@@ -335,6 +354,9 @@ func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req 
 		}
 		return err
 	})
+	if committed && result.ChannelSourcesChanged && s.owner.channelChanges != nil {
+		err = errors.Join(err, s.owner.channelChanges.PublishAcknowledged(true, runtimechanneldelivery.ReconcileOrdinary|runtimechanneldelivery.ReconcileNative))
+	}
 	return result, err
 }
 
@@ -511,7 +533,7 @@ func (s *sqliteSession) CommitSourceSet(ctx context.Context, req runtimeagenttop
 }
 
 func (s *sqliteSession) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest, topology *runtimeagenttopology.SourceSetCommitRequest) (result runtimedestructivereset.CleanupResult, err error) {
-	err = s.owner.backend.RunTransaction(ctx, "commit destructive reset cleanup", func(txctx context.Context, tx *sql.Tx) error {
+	committed, err := s.owner.backend.RunTransactionOutcome(ctx, "commit destructive reset cleanup", func(txctx context.Context, tx *sql.Tx) error {
 		if !req.Result.DryRun {
 			previous, err := storeadmin.ReadResetCleanupTx(txctx, tx, req)
 			if err != nil {
@@ -537,6 +559,9 @@ func (s *sqliteSession) ApplyDestructiveResetCleanup(ctx context.Context, req ru
 		}
 		return err
 	})
+	if committed && result.ChannelSourcesChanged && s.owner.channelChanges != nil {
+		err = errors.Join(err, s.owner.channelChanges.PublishAcknowledged(true, runtimechanneldelivery.ReconcileOrdinary|runtimechanneldelivery.ReconcileNative))
+	}
 	return result, err
 }
 

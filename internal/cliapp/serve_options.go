@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -59,6 +60,9 @@ type ServeOptions struct {
 	TestAfterAuthorActivityHead      func() error
 	TestChannelOnboardingNow         func() time.Time
 	TestChannelOnboardingBarrier     channelonboarding.TestLifecycleBarrier
+	TestChannelReconcileCadence      runtimechanneldelivery.ReconcileCadence
+	TestChannelReconcilePass         func(runtimechanneldelivery.ReconcilePass)
+	TestChannelReconcileStarted      func(runtimechanneldelivery.Store, func() (runtimechanneldelivery.ReconcileMark, bool))
 }
 
 func DefaultServeOptions() ServeOptions {

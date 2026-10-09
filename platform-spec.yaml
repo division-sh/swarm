@@ -41116,6 +41116,31 @@ managed_external_effect_authority:
       prelaunch retry by a fresh execution owner. The operation's original authority remains
       immutable history and must still match its first attempt; it is not the later attempt's authority.
       No agent, run, entity, or synthetic token is required.
+      Reconciliation scheduling is owned by the single served Process worker. Named local domain owners
+      publish coalesced ordinary/native observation hints only for actual changes after acknowledged OUTER
+      transaction finalization or completed exact process publication.
+      Onboarding's first transition to succeeded is a channel eligibility change and publishes ordinary/native
+      demand after its acknowledged commit, not at an earlier checkpoint. Same-phase, stale and terminal
+      refusals grant neither a wake nor different phase authority; actual rebound publication is a distinct change.
+      Proposed-card dispatch rendering also consumes the activity journal's exact reserved request, run and
+      execution mode. Actual linked attempt insertion and terminal-status change publish ordinary demand after
+      the journal's outer acknowledged commit. Its public acknowledgment boolean is not a changed-row fact;
+      exact replay, unrelated activity and refused or unacknowledged writes grant no demand or redispatch.
+      Borrowed writers return change facts; they never notify before the outer transaction can no longer roll back.
+      A later cleanup or handoff error
+      does not erase acknowledgment or its hint, and remains reported. Rollback or unknown commit never
+      fabricates acknowledgment, execution permission, or a retry. Hints grant no business authority;
+      the existing selected-store, source, receipt, currentness and compiled-publication rechecks remain binding.
+      The immediate startup scan and production 1s ordinary / 5s native repair backstops remain required for
+      remote provider changes, other-process changes and work committed while no worker subscribes.
+      A hint is consumed before its pass; an in-pass action creating work after delivery scanning remains
+      pending for a later pass. Idempotent qualification, attach, render and planning observations do not
+      generate a self-sustaining wake. Subscription and worker retire and join with the exact Process;
+      retained runtime reset does not imply worker replacement and wakes after exact completed publication.
+      Private test cadence affects observation frequency only, never source time, TTL, deadlines or authority.
+      Negative pass credit requires successful relevant reconciliation started after its durable mutation cut;
+      errored, canceled, pre-cut and foreign-process attempts cannot satisfy it. Native adverse cases with
+      no successful pass retain their existing 5.5s refusal/identity/count proofs, not fictitious success credit.
     channel_native_setting: >
       A native-entry install requires the exact physical setting, generation, install operation,
       compiled contract and current connection authority at authorization and launch.

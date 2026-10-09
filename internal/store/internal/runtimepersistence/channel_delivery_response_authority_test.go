@@ -37,7 +37,7 @@ func proveChannelResponseReceiptMatrix(t *testing.T, selected selectedChannelDel
 					return err
 				}
 				var err error
-				deliveryID, err = channeldelivery.PlanTextResponseTx(ctx, tx, text, "Retained requested response", "teaching", postgres)
+				deliveryID, _, err = channeldelivery.PlanTextResponseTx(ctx, tx, text, "Retained requested response", "teaching", postgres)
 				if err != nil {
 					return err
 				}

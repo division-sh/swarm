@@ -18,23 +18,23 @@ import (
 // render together with the verified inbound intent disposition. Delivery is a
 // later managed effect; the entry alone grants no resend or mailbox mutation.
 func PlanInboxResponseTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText,
-	expected render.ResolvedInboxEntry, fullText string, postgres bool) (string, error) {
+	expected render.ResolvedInboxEntry, fullText string, postgres bool) (string, bool, error) {
 	if tx == nil || text.EntryReference == "" || expected.PrincipalID == "" {
-		return "", fmt.Errorf("native inbox response requires verified entry")
+		return "", false, fmt.Errorf("native inbox response requires verified entry")
 	}
 	if err := LockPrincipalTx(ctx, tx, expected.PrincipalID, postgres); err != nil {
-		return "", err
+		return "", false, err
 	}
 	entry, err := requireInboxResponseEntryTx(ctx, tx, text, expected, postgres)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	selected, found, err := LockDefaultTx(ctx, tx, postgres)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if !found || selected.State != StateCurrent || selected.PrincipalID != entry.PrincipalID {
-		return "", fmt.Errorf("native inbox response has no current delivery epoch")
+		return "", false, fmt.Errorf("native inbox response has no current delivery epoch")
 	}
 	audience := render.Audience{
 		PrincipalID: entry.PrincipalID, InterfaceKey: entry.InterfaceKey,
@@ -43,11 +43,11 @@ func PlanInboxResponseTx(ctx context.Context, tx *sql.Tx, text operatorchannel.I
 	}
 	fullText, err = appendUncertaintyReadbackTx(ctx, tx, audience, fullText, postgres)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	recovery, err := ListActionableUncertainTx(ctx, tx, selected, postgres)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	var frozen render.Frozen
 	if len(recovery) == 0 {
@@ -56,17 +56,17 @@ func PlanInboxResponseTx(ctx context.Context, tx *sql.Tx, text operatorchannel.I
 		frozen, err = render.FreezeRecoveryInbox(text.PublicationID, fullText, recovery, audience)
 	}
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	now := time.Now().UTC()
 	deliveryID, err := insertResponsePlanTx(ctx, tx, frozen, entry.ActivationID, entry.BindingRevision, now, postgres)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if err := SettleTextIntentTx(ctx, tx, text, "entry", postgres); err != nil {
-		return "", err
+		return "", false, err
 	}
-	return deliveryID, nil
+	return deliveryID, true, nil
 }
 
 func requireInboxResponseEntryTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText,
@@ -96,51 +96,51 @@ func requireInboxResponseEntryTx(ctx context.Context, tx *sql.Tx, text operatorc
 // PlanTextResponseTx records a non-sensitive response to a verified ordinary
 // text occurrence. It does not grant card, draft, or resend authority.
 func PlanTextResponseTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText,
-	fullText, disposition string, postgres bool) (string, error) {
+	fullText, disposition string, postgres bool) (string, bool, error) {
 	if tx == nil || text.EntryReference != "" || (disposition != "teaching" && disposition != "chooser") {
-		return "", fmt.Errorf("channel text response requires verified ordinary text and a response disposition")
+		return "", false, fmt.Errorf("channel text response requires verified ordinary text and a response disposition")
 	}
 	activationID, bindingRevision, audience, err := currentTextResponseAudienceTx(ctx, tx, text, postgres)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	frozen, err := render.FreezeResponse(text.PublicationID, fullText, audience)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	now := time.Now().UTC()
 	deliveryID, err := insertResponsePlanTx(ctx, tx, frozen, activationID, bindingRevision, now, postgres)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if err := SettleTextIntentTx(ctx, tx, text, disposition, postgres); err != nil {
-		return "", err
+		return "", false, err
 	}
-	return deliveryID, nil
+	return deliveryID, true, nil
 }
 
-func PlanDraftChooserTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, at time.Time, postgres bool) (string, error) {
+func PlanDraftChooserTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, at time.Time, postgres bool) (string, bool, error) {
 	if tx == nil || at.IsZero() || text.EntryReference != "" {
-		return "", fmt.Errorf("draft chooser requires a verified ordinary text occurrence")
+		return "", false, fmt.Errorf("draft chooser requires a verified ordinary text occurrence")
 	}
 	activationID, bindingRevision, audience, err := currentTextResponseAudienceTx(ctx, tx, text, postgres)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	choices := make([]render.DraftChoice, 0)
 	cursor := ""
 	for {
 		candidates, next, err := ListCurrentInputDraftsTx(ctx, tx, text, at, cursor, 200, true, postgres)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		for _, candidate := range candidates {
 			card, err := decisionpersistence.LoadDecisionCardInTx(ctx, tx, candidate.CardID, postgres)
 			if err != nil {
-				return "", err
+				return "", false, err
 			}
 			if card.Status != decisioncard.StatusPending {
-				return "", fmt.Errorf("draft chooser card is no longer pending")
+				return "", false, fmt.Errorf("draft chooser card is no longer pending")
 			}
 			label := card.Snapshot.Title
 			if label == "" {
@@ -153,25 +153,25 @@ func PlanDraftChooserTx(ctx context.Context, tx *sql.Tx, text operatorchannel.In
 			break
 		}
 		if next == cursor {
-			return "", fmt.Errorf("channel draft chooser cursor did not advance")
+			return "", false, fmt.Errorf("channel draft chooser cursor did not advance")
 		}
 		cursor = next
 	}
 	if len(choices) < 2 {
-		return "", fmt.Errorf("draft chooser no longer has multiple current prompts")
+		return "", false, fmt.Errorf("draft chooser no longer has multiple current prompts")
 	}
 	frozen, err := render.FreezeDraftChooser(text.PublicationID, text.PublicationID, choices, audience)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	deliveryID, err := insertResponsePlanTx(ctx, tx, frozen, activationID, bindingRevision, time.Now().UTC(), postgres)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if err := SettleTextIntentTx(ctx, tx, text, "chooser", postgres); err != nil {
-		return "", err
+		return "", false, err
 	}
-	return deliveryID, nil
+	return deliveryID, true, nil
 }
 
 func currentTextResponseAudienceTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) (string, int64, render.Audience, error) {
@@ -324,36 +324,36 @@ func freezeActionResponseTx(ctx context.Context, tx *sql.Tx, action operatorchan
 // verified callback in the same selected-store transaction. View-full content
 // is derived only from the immutable source render referenced by the tap.
 func PlanActionResponseTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction,
-	expected render.ResolvedAction, inboxText string, postgres bool) (string, error) {
+	expected render.ResolvedAction, inboxText string, postgres bool) (string, bool, error) {
 	if tx == nil || expected.PrincipalID == "" {
-		return "", fmt.Errorf("channel navigation response requires a verified action")
+		return "", false, fmt.Errorf("channel navigation response requires a verified action")
 	}
 	if err := LockPrincipalTx(ctx, tx, expected.PrincipalID, postgres); err != nil {
-		return "", err
+		return "", false, err
 	}
 	state, err := RequireActionIntentTx(ctx, tx, action, postgres, true)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if state != "pending" {
-		return "", fmt.Errorf("channel navigation action is already settled")
+		return "", false, fmt.Errorf("channel navigation action is already settled")
 	}
 	resolved, found, err := ResolveActionFactForMutationTx(ctx, tx, action.ActionFact, postgres)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if !found || !resolved.CurrentRender || resolved != expected {
-		return "", fmt.Errorf("channel navigation action is no longer current")
+		return "", false, fmt.Errorf("channel navigation action is no longer current")
 	}
 	selected, found, err := LockDefaultTx(ctx, tx, postgres)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if !found || selected.State != StateCurrent || selected.PrincipalID != resolved.PrincipalID ||
 		(resolved.SourceKind != PlanResponse && (selected.BindingRevision != resolved.BindingRevision ||
 			selected.InterfaceKey != action.Interface.Key() || selected.ExternalAccountRef != action.ExternalAccountRef ||
 			selected.ConversationRef != action.ConversationRef || selected.ConversationScope != action.ConversationScope)) {
-		return "", fmt.Errorf("channel navigation destination is no longer current")
+		return "", false, fmt.Errorf("channel navigation destination is no longer current")
 	}
 	audience := render.Audience{
 		PrincipalID: resolved.PrincipalID, InterfaceKey: action.Interface.Key(),
@@ -362,12 +362,12 @@ func PlanActionResponseTx(ctx context.Context, tx *sql.Tx, action operatorchanne
 	}
 	frozen, err := freezeActionResponseTx(ctx, tx, action, resolved, inboxText, audience, postgres)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	now := time.Now().UTC()
 	deliveryID, err := insertResponsePlanTx(ctx, tx, frozen, resolved.ActivationID, resolved.BindingRevision, now, postgres)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	query := `UPDATE operator_channel_action_intents SET state='settled', disposition='navigation', settled_at=?
 		WHERE publication_id=? AND state='pending'`
@@ -377,14 +377,14 @@ func PlanActionResponseTx(ctx context.Context, tx *sql.Tx, action operatorchanne
 	}
 	result, err := tx.ExecContext(ctx, query, now, action.PublicationID)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if rows != 1 {
-		return "", fmt.Errorf("channel navigation intent was not settled with its response")
+		return "", false, fmt.Errorf("channel navigation intent was not settled with its response")
 	}
-	return deliveryID, nil
+	return deliveryID, true, nil
 }

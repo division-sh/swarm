@@ -373,7 +373,7 @@ func assertRunForkRevisionContributionPaths(t *testing.T, root string) {
 		},
 		{
 			Path: "internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_activation_owner.go", Writer: "postgresRunForkSelectedContractActivationPort",
-			WriterTokens: []string{"mutationprotocol.RunPostgresWithOptions", "operation(txctx, tx, attempt)", "freeze:  s.applyRunForkSourceFreeze", "result.Acknowledged()"},
+			WriterTokens: []string{"mutationprotocol.RunPostgresWithOptions", "operation(txctx, tx, attempt)", "freeze:                s.applyRunForkSourceFreeze", "publishChannelChanges: s.publishChannelChanges", "result.Acknowledged()"},
 			ProofPath:    "internal/store/internal/runtimepersistence/run_fork_selected_contract_execution_mutation_test.go", Proof: "TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation",
 			ProofTokens: []string{"ActivateRunForkForSelectedContractExecution", "ValidateCompletePostgres"},
 		},

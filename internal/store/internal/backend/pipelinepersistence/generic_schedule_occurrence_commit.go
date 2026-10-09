@@ -139,7 +139,8 @@ func commitGenericScheduleOccurrence(
 	if result.Publication != nil {
 		result.Publication = result.Publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()
 	}
-	return result, errors.Join(outcome.Err(), result.Validate())
+	changed := result.Publication != nil && result.Publication.(runtimebus.CommittedEnginePublication).ChannelCardsChanged()
+	return result, errors.Join(outcome.Err(), result.Validate(), store.publishCardChanges(acknowledged, changed))
 }
 
 // Rearming advances a due coordinate without accepting an occurrence. The

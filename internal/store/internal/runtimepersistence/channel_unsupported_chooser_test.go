@@ -144,7 +144,7 @@ func proveUnsupportedChooserRetirement(t *testing.T, cards decisioncard.Store, s
 		if err := retire(ctx, tx); err != nil {
 			return err
 		}
-		if err := channeldelivery.SettleUnappliedActionIntentTx(ctx, tx, action, render.ActionUnsupported, postgres); err != nil {
+		if _, err := channeldelivery.SettleUnappliedActionIntentTx(ctx, tx, action, render.ActionUnsupported, postgres); err != nil {
 			return err
 		}
 		if err := check(ctx, tx, "unsupported", "unsupported"); err != nil {

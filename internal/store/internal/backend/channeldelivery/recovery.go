@@ -56,33 +56,33 @@ func ListActionableUncertainTx(ctx context.Context, tx *sql.Tx, selected Default
 }
 
 func PlanManualResendTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction,
-	expected render.ResolvedAction, postgres bool) (string, error) {
+	expected render.ResolvedAction, postgres bool) (string, bool, error) {
 	if tx == nil || expected.Action.Kind != "resend" || uuid.Validate(expected.Action.RecoveryDeliveryID) != nil {
-		return "", fmt.Errorf("manual resend requires exact uncertain delivery action")
+		return "", false, fmt.Errorf("manual resend requires exact uncertain delivery action")
 	}
 	if err := LockPrincipalTx(ctx, tx, expected.PrincipalID, postgres); err != nil {
-		return "", err
+		return "", false, err
 	}
 	state, err := RequireActionIntentTx(ctx, tx, action, postgres, true)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if state != "pending" {
-		return "", fmt.Errorf("manual resend action was already consumed")
+		return "", false, fmt.Errorf("manual resend action was already consumed")
 	}
 	resolved, found, err := ResolveActionFactForMutationTx(ctx, tx, action.ActionFact, postgres)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if !found || !resolved.CurrentRender || resolved != expected || resolved.SourceKind != PlanResponse {
-		return "", fmt.Errorf("manual resend action is not current")
+		return "", false, fmt.Errorf("manual resend action is not current")
 	}
 	selected, found, err := LockDefaultTx(ctx, tx, postgres)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if !found || selected.State != StateCurrent || selected.PrincipalID != resolved.PrincipalID {
-		return "", fmt.Errorf("manual resend destination is no longer current")
+		return "", false, fmt.Errorf("manual resend destination is no longer current")
 	}
 	query := `SELECT source_kind, source_id, resend_generation FROM channel_delivery_plans p
 		WHERE delivery_id=? AND state='uncertain' AND source_kind IN ('notice','card')
@@ -107,9 +107,10 @@ func PlanManualResendTx(ctx context.Context, tx *sql.Tx, action operatorchannel.
 		selected.InterfaceKey, selected.DeliveryEpoch, selected.ExternalAccountRef, selected.ConversationRef,
 		string(selected.ConversationScope)).Scan(&kind, &sourceID, &generation); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", SettleUnappliedActionIntentTx(ctx, tx, action, render.ActionStale, postgres)
+			changed, err := SettleUnappliedActionIntentTx(ctx, tx, action, render.ActionStale, postgres)
+			return "", changed, err
 		}
-		return "", fmt.Errorf("manual resend predecessor is no longer actionable: %w", err)
+		return "", false, fmt.Errorf("manual resend predecessor is no longer actionable: %w", err)
 	}
 	newID := uuid.NewString()
 	query = `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, principal_id,
@@ -126,10 +127,10 @@ func PlanManualResendTx(ctx context.Context, tx *sql.Tx, action operatorchannel.
 		selected.BindingRevision, selected.DeliveryEpoch, selected.ExternalAccountRef, selected.ConversationRef,
 		string(selected.ConversationScope), generation+1, resolved.Action.RecoveryDeliveryID,
 		action.PublicationID, time.Now().UTC()); err != nil {
-		return "", fmt.Errorf("plan linked manual resend: %w", err)
+		return "", false, fmt.Errorf("plan linked manual resend: %w", err)
 	}
 	if err := SettleAppliedActionIntentTx(ctx, tx, action, render.ActionApplied, postgres); err != nil {
-		return "", err
+		return "", false, err
 	}
-	return newID, nil
+	return newID, true, nil
 }

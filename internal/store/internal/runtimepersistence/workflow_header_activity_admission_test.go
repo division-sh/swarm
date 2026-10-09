@@ -1,13 +1,18 @@
 package runtimepersistence
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -66,6 +71,39 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 						EffectClass: "non_idempotent_write", Attempt: 1, ExecutionMode: executionmode.Live,
 						SuccessEvent: "write.succeeded", FailureEvent: "write.failed", InputHash: "exact-input", Generation: loop.Generation(), LoopStage: "review",
 					}
+					if cell == "current" || cell == "stale" {
+						card, continuation := newRootProposedEffectTestCard(t, run, at)
+						continuation.BundleHash, continuation.WorkflowVersion = f.bundle.SourceArtifact.BundleHash(), f.bundle.WorkflowVersion()
+						card.BundleHash, card.WorkflowVersion = continuation.BundleHash, continuation.WorkflowVersion
+						continuation.NodeID, continuation.HandlerEventKey = record.NodeID, record.HandlerEventKey
+						continuation.ActivityID, continuation.Tool = record.ActivityID, record.Tool
+						continuation.SuccessEvent, continuation.FailureEvent = record.SuccessEvent, record.FailureEvent
+						continuation.Generation, continuation.LoopStage = loop.Generation(), record.LoopStage
+						effect, err := continuation.EffectValue()
+						if err != nil {
+							t.Fatal(err)
+						}
+						continuation.EffectContentHash, err = canonicaljson.HashValue(effect)
+						if err != nil {
+							t.Fatal(err)
+						}
+						card.Anchor, err = decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
+							RequestEventID: continuation.RequestEventID, ActivityID: record.ActivityID, Decision: "support_reply",
+							Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: run, EntityID: run}, Source: eventtest.RootRoutingSource(run),
+						})
+						if err != nil {
+							t.Fatal(err)
+						}
+						card.EffectContentHash = continuation.EffectContentHash
+						card, err = decisioncard.New(card)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if err := f.store.(decisioncard.ProposedEffectStore).CreateProposedEffectCard(f.ctx, card, continuation); err != nil {
+							t.Fatal(err)
+						}
+						record.RequestEventID = continuation.RequestEventID
+					}
 					switch cell {
 					case "stale":
 						record.Generation.RevisionID = uuid.NewString()
@@ -87,6 +125,9 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 						}
 					}
 					before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
+					hints := observeChannelHints(t, f.store.(interface {
+						SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
+					}))
 					journal := f.store.(activityStoryJournal)
 					actual, inserted, err := journal.ClaimActivityAttemptForLoopGeneration(f.ctx, record)
 					if cell != "current" {
@@ -96,15 +137,22 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 						if after := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres"); !reflect.DeepEqual(before, after) {
 							t.Fatal("refused activity mutated durable state")
 						}
+						hints.expect(t, 0)
 						return
 					}
 					if err != nil || !inserted || actual.Status != pipeline.ActivityAttemptStatusStarted {
 						t.Fatalf("canonical activity admission: %+v %t %v", actual, inserted, err)
 					}
+					hints.expect(t, render.ReconcileOrdinary)
+					if repeated, inserted, err := journal.ClaimActivityAttemptForLoopGeneration(f.ctx, record); err != nil || inserted || !reflect.DeepEqual(repeated, actual) {
+						t.Fatalf("exact loop claim replay: %+v inserted=%t error=%v", repeated, inserted, err)
+					}
+					hints.expect(t, 0)
 					completed, _, err := journal.CompleteActivityAttempt(f.ctx, activityStoryTerminal(t, actual, "succeeded"))
 					if err != nil || completed.Status != pipeline.ActivityAttemptStatusSucceeded || !completed.Generation.Equal(loop.Generation()) {
 						t.Fatalf("result persistence: %+v %v", completed, err)
 					}
+					hints.expect(t, render.ReconcileOrdinary)
 					loaded, found, err := journal.LoadActivityAttempt(f.ctx, record.RequestEventID)
 					if err != nil || !found || !reflect.DeepEqual(loaded, completed) {
 						t.Fatalf("persisted result: %+v %t %v", loaded, found, err)

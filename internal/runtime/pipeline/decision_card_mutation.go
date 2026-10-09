@@ -298,13 +298,14 @@ func (c DecisionCardMutationCommand) Validate() error {
 }
 
 type CommittedDecisionCardMutation struct {
-	Acknowledged   bool
-	Completion     apiidempotency.Completion
-	Kind           DecisionCardMutationKind
-	Outcome        decisioncard.DecisionOutcome
-	Draft          decisioncard.InputDraft
-	Publication    runtimeengine.CommittedDurablePublication
-	HasPublication bool
+	ChannelCardsChanged bool `json:"-"`
+	Acknowledged        bool
+	Completion          apiidempotency.Completion
+	Kind                DecisionCardMutationKind
+	Outcome             decisioncard.DecisionOutcome
+	Draft               decisioncard.InputDraft
+	Publication         runtimeengine.CommittedDurablePublication
+	HasPublication      bool
 }
 
 func (r CommittedDecisionCardMutation) Validate() error {

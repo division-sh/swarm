@@ -36,44 +36,45 @@ func requireCurrentActionPageTx(ctx context.Context, tx *sql.Tx, resolved render
 // AdvanceActionPageTx moves one verified tap to the next immutable page
 // and settles that tap atomically with the selected plan pointer.
 func AdvanceActionPageTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction,
-	expected render.ResolvedAction, mode render.ControlPageMode, postgres bool) error {
+	expected render.ResolvedAction, mode render.ControlPageMode, postgres bool) (bool, error) {
 	if tx == nil || expected.Action.Kind != "more_controls" ||
 		expected.Action.Token != action.Token || (mode != render.ControlPageEdit && mode != render.ControlPageFreshCopy) {
-		return fmt.Errorf("card action page requires an exact verified control")
+		return false, fmt.Errorf("card action page requires an exact verified control")
 	}
 	if err := LockPrincipalTx(ctx, tx, expected.PrincipalID, postgres); err != nil {
-		return err
+		return false, err
 	}
 	state, err := RequireActionIntentTx(ctx, tx, action, postgres, true)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if state != "pending" {
-		return fmt.Errorf("card action page tap is already settled")
+		return false, fmt.Errorf("card action page tap is already settled")
 	}
 	resolved, found, err := ResolveActionFactForMutationTx(ctx, tx, action.ActionFact, postgres)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !found || !resolved.CurrentRender || resolved != expected {
-		return fmt.Errorf("card action page tap is no longer current")
+		return false, fmt.Errorf("card action page tap is no longer current")
 	}
 	plan, found, err := LoadDestinationCurrentPlan(ctx, tx, resolved.DeliveryID, postgres)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !found || !exactSentActionPlan(plan, resolved) {
-		return fmt.Errorf("card action page has no exact sent plan")
+		return false, fmt.Errorf("card action page has no exact sent plan")
 	}
 	if err := requireCurrentActionPageTx(ctx, tx, resolved, plan, postgres); err != nil {
-		return err
+		return false, err
 	}
 	if mode == render.ControlPageFreshCopy {
 		if err := planRequestedControlCopyTx(ctx, tx, action, resolved, plan, postgres); err != nil {
 			if errors.Is(err, errControlCopySuperseded) {
-				return SettleUnappliedActionIntentTx(ctx, tx, action, render.ActionStale, postgres)
+				changed, err := SettleUnappliedActionIntentTx(ctx, tx, action, render.ActionStale, postgres)
+				return changed, err
 			}
-			return err
+			return false, err
 		}
 		return settleControlNavigationTx(ctx, tx, action, postgres)
 	}
@@ -88,26 +89,26 @@ func AdvanceActionPageTx(ctx context.Context, tx *sql.Tx, action operatorchannel
 	}
 	result, err := tx.ExecContext(ctx, query, next, plan.DeliveryID, plan.CurrentRenderID, plan.CurrentReceiptID, plan.ActionPageIndex)
 	if err != nil {
-		return err
+		return false, err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if rows != 1 {
-		return fmt.Errorf("card action page changed before navigation")
+		return false, fmt.Errorf("card action page changed before navigation")
 	}
 	plan.ActionPageIndex = next
 	frozen, err := FreezeCurrentSourceTx(ctx, tx, plan, postgres)
 	if err != nil {
-		return err
+		return false, err
 	}
 	renderID, _, err := PersistRenderTx(ctx, tx, plan.DeliveryID, frozen, postgres)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if _, err := EnsureRenderActionsTx(ctx, tx, renderID, frozen, postgres); err != nil {
-		return err
+		return false, err
 	}
 	return settleControlNavigationTx(ctx, tx, action, postgres)
 }
@@ -117,7 +118,7 @@ func exactSentActionPlan(plan Plan, resolved render.ResolvedAction) bool {
 		plan.CurrentRenderID == resolved.RenderID && plan.CurrentReceiptID == resolved.ReceiptOperationID
 }
 
-func settleControlNavigationTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction, postgres bool) error {
+func settleControlNavigationTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction, postgres bool) (bool, error) {
 	query := `UPDATE operator_channel_action_intents SET state='settled', disposition='navigation', settled_at=?
 		WHERE publication_id=? AND state='pending'`
 	if postgres {
@@ -126,16 +127,16 @@ func settleControlNavigationTx(ctx context.Context, tx *sql.Tx, action operatorc
 	}
 	result, err := tx.ExecContext(ctx, query, time.Now().UTC(), action.PublicationID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if rows != 1 {
-		return fmt.Errorf("card action page intent did not settle with navigation")
+		return false, fmt.Errorf("card action page intent did not settle with navigation")
 	}
-	return nil
+	return true, nil
 }
 
 func EnsureRenderActionsTx(ctx context.Context, tx *sql.Tx, renderID string, frozen render.Frozen, postgres bool) ([]render.Action, error) {

@@ -1,8 +1,8 @@
 # Pre-Implementation Coverage Audit: #2535 Phase0 Channel Worker
 
-Status: IMPLEMENTATION FROZEN pending the activity-dispatch owner-map delta
-gate below. Original first slice6085629534 and completion delta6086299760
-remain binding for their approved boundary; no closure claimed.
+Status: CODING APPROVED AS FIRST SLICE by6085629534, completion delta6086299760
+and activity delta6087852750. The historical stops below remain recorded;
+no closure claimed.
 Source: master2fc6a13bde271492602b7ca0ed82bfe3325280f8,
 tree206adb09324179764db0409002aef677af7f07b5. Agent-g.
 Binding review: https://github.com/division-sh/swarm/issues/2535#issuecomment-6084282948.
@@ -632,3 +632,147 @@ assignments/catalog consumption and classified persistence registry deltas
 need explicit updates. No guard is waived or weakened. The exact structural
 owner-guard unit passed independently; neither receipt is local core/full
 qualification. No server2/full run or review-ready PR has started.
+
+### Activity Delta Approval
+
+6087852750 approves P68-P71 repair and conditional P72-P73 probing/repair in
+this same PR. For fork copies, first prove a live fork-local card's exact
+dependency; do not manufacture a hint for unrelated historical evidence.
+Further same-class persisted eligibility/render producers may be absorbed
+without another per-discovery gate only after immediately numbering each
+owner/manifestation, identifying its outer native acknowledgment/change fact,
+and retaining both-store counterexample/fix and a supported worker path.
+Consolidate the reverse reader-to-writer census at the next independent
+checkpoint. Ambiguous linkage/commit ownership, second interpretation/owner,
+business/schema/transaction/startup/effect changes still require a stop.
+The existing CI full / Local core plus supplements and all other restrictions
+remain binding. The original missing-wake receipts are retained as failing
+proof, not replaced with qualification credit.
+
+### Reader-To-Writer Checkpoint And Implementation Receipts
+
+The reverse sweep starts at actual worker reads, not a list of presumed
+source tables. Every dependency below retains selected authority; hints do
+not reinterpret any gate. No additional standalone journal status writer or
+channel worker was found in this delta.
+
+| Existing reader / persisted dependency | Existing producer/finalizer consumption |
+| --- | --- |
+| CurrentActivationID; list/get destination currentness: default, binding/claimant/epoch, succeeded operation and connected activation | P01-P08/P55/P67, including the approved P06 final succeeded transition and exact process publication. |
+| CurrentCardChangeCursor/ListDecisionCardChanges; open/deferred card lists and list-triggered expiry | P19-P31/P45-P47; actual card/temporal changes, not every list success. Time passage without a commit remains the repair tick. |
+| ListCurrentPlans/GetCurrentPlan send predicate: pending notice/card or exact sent predecessor receipt | P15-P31/P39-P53/P59; accepted historical effects do not authorize redispatch. |
+| AcceptedEffectPredicate and Candidate.RecoveryPending: authorized/launched/response-observed original journal responsibility | P58 different concept with named execution: reconcileDelivery returns without rendering/dispatch when RecoveryPending; original effect recovery/terminal projection is P52/P53. This visibility predicate is not a second worker recovery executor or a new demand for another provider call. |
+| FreezeCurrentSourceTx response: exact immutable stored render plus plan pointer/bounds/page/audience | P39-P43/P47/P52; no reader-derived response or payload compatibility. |
+| Freeze summary/notice: summary count, notice type/summary/severity/payload/notified/source coordinates | Existing plan owner/P15-P18/P52/P59; source/reset deletion does not create a new surviving target. |
+| Freeze card: card row/revision, active draft/field index and proposed continuation | P19-P29/P36-P38/P45-P47; prompt expiry remains P23. |
+| Freeze proposed dispatch: exact continuation request/run/mode and journal status | P68-P71 now consume actual insert/update plus indexed exact dependency before their outer acknowledgment. P72/P73 conditional fork copy is probed separately, not notified blindly. |
+| ListPendingActions/ResolveAction/PreviewSkip; action current receipt/render/token/settled status | P34-P38/P42-P44/P48/P52; receipt-authority retirement and replay keep their original refusal. |
+| ListPendingTexts/ResolveText/PreviewInput/choice; exact current draft/answer/disposition | P34-P38/P39-P42/P49-P51; no guessed latest card/input target. |
+| Pending native inbox entries, qualified native setting/consumer, locale and exact current activation | P05-P14/P34/P39/P51-P53/P55; time-based qualification expiry and external readback still use5s repair. |
+| Selected presentation/executable provider capability and effect prelaunch currentness | P55/P56 publication and P52/P53 terminal projection; immutable boot-pinned source/provider inputs are not live hot replacement. Exact effect admission remains business authority, not wake authority. |
+
+P68-P71 preserve public results. Complete/MarkUncertain private helpers now
+return their actual UPDATE row count separately; the public methods still
+return true for acknowledged no-op. Decision persistence checks the existing
+UNIQUE reserved request/run and decodes its canonical mode; unlinked changes
+use one indexed lookup, exact mutation replay skips it. No card/destination
+scan or global notify-on-activity-write. All eight journal outer finalizers
+consume their acknowledged result before notification/error projection.
+Private fork card accumulators reset at each existing outer attempt callback;
+rolled-back facts cannot leak into a later no-op. No shared protocol change.
+
+The expanded journal before-wiring diagnostic intentionally suppresses only
+the eight scheduling hints, never the journal writes/readback/authority. On
+both stores, linked Start/Claim cases and real valid loop claims fail the new
+demand oracle; original dispatch/readback cells continue and also prove the
+dedicated MarkUncertain omission. Unlinked and hostile header/generation cases
+stay green. The candidate notifications are restored immediately afterward;
+this mutation-control receipt is not an unchanged-master or qualification
+claim. Log: channel-journal-before-wiring.log (package20.831s, three roots RED).
+
+The following intermediate candidate receipts pass:
+- TestChannelPostCommitActivityHintsBothStores:16 linked/unlinked start,
+  claim, complete and dedicated uncertainty cells, cancellation, exact replay
+  and original acknowledged-plus-synthetic-cleanup-cause controls,25.535s.
+- Existing full readback/story disposition/validation/atomicity and native
+  claim-reply-loss group,16.305s; original state, story and mode assertions retained.
+- TestActivityAdmissionConsumesConstructedHeaderBothStores:28 real current,
+  stale/foreign/missing/malformed header cells,21.738s; current linked loop
+  claim/completion hints and quiet repeated claim are added without test SQL.
+- Existing TestChannelDeliveryRealAnchorProducersPublicJourney: all six
+  original public webhook anchor cells pass with one-hour repair ticks,26.20s.
+  Its action runs inside the worker; it proves in-pass hint retention, not a
+  successful scan while that same action's provider request is blocked.
+- TestChannelDeliveryReconciliationActivityDispatchPublicJourney:20.258s on
+  both stores. Separate real public mailbox.decide HTTP request holds the
+  exact business provider call, observes started edit, drains earlier hints,
+  then releases and requires succeeded edit plus a post-cut successful pass
+  without a repair tick. All HTTP/client work is joined; no in-process dispatch.
+- Selected preparation copied-evidence and fresh pending-proposal controls:
+ 9.769s on both stores. Approved terminal copies have no fork-local card;
+  source attempts remain immutable, no hint is fabricated. The existing
+  pending-proposal materializer reserves fresh exact authority, has no attempt
+  at that request and reports held. Ordinary activation/replay P73 and a
+  reachable linked-copy control remain uncredited until execution probing.
+
+Fixture-only corrections during this work: the new public read DTO extracts
+only content hash (semanticvalue must not be decoded with encoding/json);
+new loop-linked proposal uses the fixture's exact admitted bundle/version.
+The first blocked-worker started-edit oracle was invalid because that worker
+was synchronously executing the held action; the independent RPC proof above
+supplies the discriminating completion cut. Their failed diagnostics remain
+recorded, not production failures or deadline changes.
+
+Census repair is explicit, not a registry-only permission: A10/A27's exact
+activation snapshot publication owner/callers still consume the same startup
+checks and may emit demand only after actual generation publication; A22/A24
+selected recovery retains admission/authority and carries only actual terminal
+card change. Original crash boundaries E2E14/E2E16/E2E17 and selected recovery
+controls remain required. Updated startup body hashes earn no execution credit
+by themselves. The selected-fork writer-token guard now also requires the
+exact publisher binding, alongside the unchanged mutation/acknowledgment token.
+
+The authority registry's237 new resolved signatures are classified against
+their named existing owners:141 private-backend (changed facts/native owner
+calls),80 private-runtime-adapter (existing channel/native native finalizers),
+10 private-domain-adapter (mailbox/admin/retained cleanup), two typed-process-local
+subscription interfaces and four typed-public-facade scheduling capabilities.
+187 stale signatures disappear. No new raw public carrier or classifier
+exception; the independent raw-method/debt guards remain required. No collector
+or debt baseline change is proposed. New worker/completion proof roots have one
+owner in the existing serveapp-channel-delivery lifecycle/full unit; no old root
+or assertion was removed/re-tiered. Partition/catalog and fork-writer census
+controls pass22.316s/0.460s/0.324s. Full census, native fault cuts, race repetitions,
+six channel units, ordinary fork/reset supplements, matched costs and clean-head
+local core/CI remain required. No whole-class or performance closure yet.
+
+Checkpoint receipts after this delta:
+- Journal linked/unlinked/replay/cancel/cleanup, exact rendered mode and real
+  constructed-header loop group: race3 PASS249.428s,156 leaf cells. Log
+  channel-journal-after-wiring-race.log, SHA256
+  15a38ecb2e721decce626b273fd07a090bb324611d36d6bfb22e38a7c9c0f15e.
+- Disabling ONLY both Complete notifications, leaving all earlier producer
+  hints intact: real public completion root FAILS both stores38.811s, stuck
+  at Dispatch: started after the actual provider/terminal commit. Its earlier
+  successful passes are drained. Log channel-public-completion-before-wiring.log,
+  SHA256a3b41e9f1c34947f298864390c3d964e53e51fe98647d7386759d289c1026e82.
+  Both notifications restored; race3 public root PASS170.602s, six store leaves.
+  Log channel-public-completion-after-wiring-race.log, SHA256
+  4bf1c27579f311eeea0c7575f57a9da4b9819bf078f860d3203ffe3969d47ab5.
+  Race elapsed under shared host load is not a default-run cost/savings claim.
+- Finding registry and no-raw-public-method guard PASS8.287s via swarm-test
+  after the existing shared-slot8m12 wait, not bypassed admission. Full API-spec
+  package PASS5.959s; direct primitive/managed owner controls PASS2.262s and
+  activity schema-first refusal PASS0.006s. No native/backend protocol changes.
+- Fresh all-package Census/Inventory/Registry/Guard sweep via swarm-test
+  completed PASS after shared-slot3m15 admission; the earlier owned startup,
+  signature, catalog/partition and fork-writer reds are corrected, not waived.
+  This is a diagnostic regex sweep, not the full structural unit or a local
+  tier receipt. Log channel-census-after-wiring.log.
+
+Current approved implementation, spec, tests and owned census corrections are
+preserved in one local signed implementation commit after this checkpoint.
+It is not a review-ready/pushed runtime head: ordinary fork-copy replay/linkage,
+native outcome cuts, complete P/M/Q execution and matched costs remain open.
+Next qualification stays core plus the six named channel units/supplements,
+then exact-head hosted full. No local full or server2 slot is requested.

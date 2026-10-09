@@ -80,7 +80,7 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 			var err error
 			snapshot, _, err = terminalStore.runLifecyclePostgresOwner.MarkTerminalTx(txctx, attempt, runtimerunlifecycle.TerminalRequest{
 				RunID: fixture.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
-			})
+			}, nil)
 			return struct{}{}, err
 		})
 		terminalDone <- terminalResult{status: string(snapshot.State), err: result.Err()}

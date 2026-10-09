@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	domain "github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
@@ -24,11 +26,29 @@ type schemaRequirement func() error
 type PostgresOwner struct {
 	backend        *postgresbackend.Backend
 	requireCurrent schemaRequirement
+	channelChanges *render.ReconcileSignal
 }
 
 type SQLiteOwner struct {
 	backend        *sqlitebackend.Backend
 	requireCurrent schemaRequirement
+	channelChanges *render.ReconcileSignal
+}
+
+func (s *PostgresOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return fmt.Errorf("postgres channel onboarding reconciliation requires one composition binding")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *SQLiteOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return fmt.Errorf("sqlite channel onboarding reconciliation requires one composition binding")
+	}
+	s.channelChanges = signal
+	return nil
 }
 
 func NewPostgres(backend *postgresbackend.Backend, requireCurrent schemaRequirement) (*PostgresOwner, error) {
@@ -78,6 +98,8 @@ type queryer interface {
 type runner interface {
 	require() error
 	mutate(context.Context, string, func(context.Context, *sql.Tx) error) error
+	mutateOutcome(context.Context, string, func(context.Context, *sql.Tx) error) (bool, error)
+	publishChannelChange(bool, render.ReconcileDemand) error
 	query() queryer
 	dialect() dialect
 }
@@ -91,6 +113,14 @@ func (r postgresRunner) mutate(ctx context.Context, _ string, fn func(context.Co
 	return r.owner.backend.RunTransaction(ctx, fn)
 }
 
+func (r postgresRunner) mutateOutcome(ctx context.Context, _ string, fn func(context.Context, *sql.Tx) error) (bool, error) {
+	return r.owner.backend.RunTransactionOutcome(ctx, fn)
+}
+
+func (r postgresRunner) publishChannelChange(acknowledged bool, demand render.ReconcileDemand) error {
+	return r.owner.channelChanges.PublishAcknowledged(acknowledged, demand)
+}
+
 type sqliteRunner struct{ owner *SQLiteOwner }
 
 func (r sqliteRunner) require() error   { return r.owner.requireCurrent() }
@@ -98,6 +128,14 @@ func (r sqliteRunner) query() queryer   { return r.owner.backend }
 func (r sqliteRunner) dialect() dialect { return dialectSQLite }
 func (r sqliteRunner) mutate(ctx context.Context, label string, fn func(context.Context, *sql.Tx) error) error {
 	return r.owner.backend.RunTransaction(ctx, label, fn)
+}
+
+func (r sqliteRunner) mutateOutcome(ctx context.Context, label string, fn func(context.Context, *sql.Tx) error) (bool, error) {
+	return r.owner.backend.RunTransactionOutcome(ctx, label, fn)
+}
+
+func (r sqliteRunner) publishChannelChange(acknowledged bool, demand render.ReconcileDemand) error {
+	return r.owner.channelChanges.PublishAcknowledged(acknowledged, demand)
 }
 
 func (s *PostgresOwner) ReserveChannelOnboarding(ctx context.Context, req domain.StartRequest) (domain.Operation, error) {
@@ -244,7 +282,9 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		req.RebindCoordinate = &coordinate
 	}
 	var out domain.Operation
-	err := r.mutate(ctx, "advance channel onboarding", func(txctx context.Context, tx *sql.Tx) error {
+	var changed render.ReconcileDemand
+	acknowledged, err := r.mutateOutcome(ctx, "advance channel onboarding", func(txctx context.Context, tx *sql.Tx) error {
+		changed = 0
 		op, found, err := loadOperation(txctx, tx, r.dialect(), req.OperationID, true)
 		if err != nil {
 			return err
@@ -301,6 +341,7 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			op.ConfirmationOperationID = strings.TrimSpace(req.ConfirmationOperationID)
 		}
 		wasTerminal := op.Phase.Terminal()
+		completed := op.Phase != domain.PhaseSucceeded && req.Phase == domain.PhaseSucceeded
 		op.Phase, op.Revision, op.UpdatedAt = req.Phase, op.Revision+1, canonicalTime(req.Now)
 		if op.Phase.Terminal() && !wasTerminal {
 			op.CompletedAt = op.UpdatedAt
@@ -328,11 +369,15 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			if rows != 1 {
 				return domain.ErrRevisionConflict
 			}
+			changed = render.ReconcileOrdinary | render.ReconcileNative
+		}
+		if completed {
+			changed |= render.ReconcileOrdinary | render.ReconcileNative
 		}
 		out = op
 		return nil
 	})
-	return out, err
+	return out, errors.Join(err, r.publishChannelChange(acknowledged, changed))
 }
 
 func validTransition(from, to domain.Phase) bool {
@@ -378,7 +423,9 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 	}
 	var outOp domain.Operation
 	var out domain.ConnectedChannelActivation
-	err := r.mutate(ctx, "publish connected channel activation", func(txctx context.Context, tx *sql.Tx) error {
+	var changed render.ReconcileDemand
+	acknowledged, err := r.mutateOutcome(ctx, "publish connected channel activation", func(txctx context.Context, tx *sql.Tx) error {
+		changed = 0
 		op, found, err := loadOperation(txctx, tx, r.dialect(), req.OperationID, true)
 		if err != nil {
 			return err
@@ -441,9 +488,12 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 		}
 		outOp = op
 		out, _, err = loadActivationByID(txctx, tx, r.dialect(), req.ActivationID, false)
+		if err == nil {
+			changed = render.ReconcileOrdinary | render.ReconcileNative
+		}
 		return err
 	})
-	return outOp, out, err
+	return outOp, out, errors.Join(err, r.publishChannelChange(acknowledged, changed))
 }
 
 func (s *PostgresOwner) GetConnectedChannelActivation(ctx context.Context, slotKey string) (domain.ConnectedChannelActivation, error) {
@@ -506,7 +556,9 @@ func retireActivation(ctx context.Context, r runner, req domain.RetireActivation
 		return domain.ConnectedChannelActivation{}, domain.ErrInvalidRequest
 	}
 	var out domain.ConnectedChannelActivation
-	err := r.mutate(ctx, "retire connected channel activation", func(txctx context.Context, tx *sql.Tx) error {
+	var changed render.ReconcileDemand
+	acknowledged, err := r.mutateOutcome(ctx, "retire connected channel activation", func(txctx context.Context, tx *sql.Tx) error {
+		changed = 0
 		activation, found, err := loadActivationBySlot(txctx, tx, r.dialect(), req.SlotKey, true)
 		if err != nil {
 			return err
@@ -527,9 +579,12 @@ func retireActivation(ctx context.Context, r runner, req domain.RetireActivation
 			return domain.ErrRevisionConflict
 		}
 		out, _, err = loadActivationByID(txctx, tx, r.dialect(), activation.ActivationID, false)
+		if err == nil {
+			changed = render.ReconcileOrdinary | render.ReconcileNative
+		}
 		return err
 	})
-	return out, err
+	return out, errors.Join(err, r.publishChannelChange(acknowledged, changed))
 }
 
 func (s *PostgresOwner) ReserveChannelTeardown(ctx context.Context, req domain.ReserveTeardownRequest) (domain.TeardownOperation, error) {
@@ -654,7 +709,9 @@ func retireTeardownAuthority(ctx context.Context, r runner, req domain.RetireTea
 		return domain.TeardownOperation{}, domain.ErrInvalidRequest
 	}
 	var out domain.TeardownOperation
-	err := r.mutate(ctx, "retire channel teardown authority", func(txctx context.Context, tx *sql.Tx) error {
+	var changed render.ReconcileDemand
+	acknowledged, err := r.mutateOutcome(ctx, "retire channel teardown authority", func(txctx context.Context, tx *sql.Tx) error {
+		changed = 0
 		op, found, err := loadTeardown(txctx, tx, r.dialect(), req.TeardownID, true)
 		if err != nil {
 			return err
@@ -698,9 +755,12 @@ func retireTeardownAuthority(ctx context.Context, r runner, req domain.RetireTea
 			return err
 		}
 		out, _, err = loadTeardown(txctx, tx, r.dialect(), op.TeardownID, false)
+		if err == nil && (retiredOperations > 0 || retiredActivations > 0) {
+			changed = render.ReconcileOrdinary | render.ReconcileNative
+		}
 		return err
 	})
-	return out, err
+	return out, errors.Join(err, r.publishChannelChange(acknowledged, changed))
 }
 
 func (s *PostgresOwner) CompleteChannelTeardown(ctx context.Context, req domain.CompleteTeardownRequest) (domain.TeardownOperation, error) {

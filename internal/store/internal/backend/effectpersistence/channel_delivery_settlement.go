@@ -82,25 +82,27 @@ func requireChannelSettlementRenderTx(ctx context.Context, tx *sql.Tx, authority
 
 // Project the typed effect result before committing its journal settlement.
 // The effect journal owns transport truth; this row owns delivery readback.
-func projectChannelDeliverySettlementTx(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool) error {
+func projectChannelDeliverySettlementTx(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool) (bool, error) {
 	if settlement.Authority.Kind != runtimeeffects.AuthorityChannelDelivery {
-		return nil
+		return false, nil
 	}
 	authority := settlement.Authority.ChannelDelivery
 	if !settlement.Authority.Valid() || settlement.OperationID != authority.EffectOperationID {
-		return fmt.Errorf("channel delivery settlement has contradictory authority")
+		return false, fmt.Errorf("channel delivery settlement has contradictory authority")
 	}
 	if settlement.State != runtimeeffects.StateSettled && settlement.State != runtimeeffects.StateOutcomeUncertain {
-		return nil
+		return false, nil
 	}
 	state, providerReference, err := channelDeliveryReceiptReferenceTx(ctx, tx, settlement, postgres)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if err := persistChannelDeliveryReceiptTx(ctx, tx, settlement, postgres, state, providerReference); err != nil {
-		return err
+	receiptChanged, err := persistChannelDeliveryReceiptTx(ctx, tx, settlement, postgres, state, providerReference)
+	if err != nil {
+		return false, err
 	}
-	return advanceChannelDeliveryPlanTx(ctx, tx, settlement, postgres, state)
+	planChanged, err := advanceChannelDeliveryPlanTx(ctx, tx, settlement, postgres, state)
+	return receiptChanged || planChanged, err
 }
 
 func channelDeliveryReceiptReferenceTx(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool) (string, any, error) {
@@ -158,7 +160,7 @@ func channelDeliveryReceiptReferenceTx(ctx context.Context, tx *sql.Tx, settleme
 	return state, providerReference, nil
 }
 
-func persistChannelDeliveryReceiptTx(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool, state string, providerReference any) error {
+func persistChannelDeliveryReceiptTx(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool, state string, providerReference any) (bool, error) {
 	authority := settlement.Authority.ChannelDelivery
 	query := `INSERT INTO channel_delivery_receipts
 		(effect_operation_id, attempt_id, delivery_id, render_id, state, provider_reference, settled_at)
@@ -172,11 +174,11 @@ func persistChannelDeliveryReceiptTx(ctx context.Context, tx *sql.Tx, settlement
 	result, err := tx.ExecContext(ctx, query, settlement.OperationID, settlement.AttemptID,
 		authority.DeliveryID, authority.RenderID, state, providerReference, settlement.Now.UTC())
 	if err != nil {
-		return fmt.Errorf("persist channel delivery receipt: %w", err)
+		return false, fmt.Errorf("persist channel delivery receipt: %w", err)
 	}
 	inserted, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if inserted == 0 {
 		query = `SELECT attempt_id, delivery_id, render_id, state, provider_reference FROM channel_delivery_receipts WHERE effect_operation_id=?`
@@ -186,7 +188,7 @@ func persistChannelDeliveryReceiptTx(ctx context.Context, tx *sql.Tx, settlement
 		var attemptID, deliveryID, renderID, storedState string
 		var storedReference sql.NullString
 		if err := tx.QueryRowContext(ctx, query, settlement.OperationID).Scan(&attemptID, &deliveryID, &renderID, &storedState, &storedReference); err != nil {
-			return err
+			return false, err
 		}
 		matchingReference := !storedReference.Valid && providerReference == nil
 		if storedReference.Valid && providerReference != nil {
@@ -195,15 +197,15 @@ func persistChannelDeliveryReceiptTx(ctx context.Context, tx *sql.Tx, settlement
 		}
 		if attemptID != settlement.AttemptID || deliveryID != authority.DeliveryID || renderID != authority.RenderID ||
 			storedState != state || !matchingReference {
-			return fmt.Errorf("existing channel delivery receipt contradicts settled effect")
+			return false, fmt.Errorf("existing channel delivery receipt contradicts settled effect")
 		}
 	} else if inserted != 1 {
-		return fmt.Errorf("channel delivery receipt insert affected %d rows", inserted)
+		return false, fmt.Errorf("channel delivery receipt insert affected %d rows", inserted)
 	}
-	return nil
+	return inserted == 1, nil
 }
 
-func advanceChannelDeliveryPlanTx(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool, state string) error {
+func advanceChannelDeliveryPlanTx(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool, state string) (bool, error) {
 	authority := settlement.Authority.ChannelDelivery
 	var query string
 	var result sql.Result
@@ -252,14 +254,14 @@ func advanceChannelDeliveryPlanTx(ctx context.Context, tx *sql.Tx, settlement ru
 		result, err = tx.ExecContext(ctx, query, args...)
 	}
 	if err != nil {
-		return fmt.Errorf("settle channel delivery plan: %w", err)
+		return false, fmt.Errorf("settle channel delivery plan: %w", err)
 	}
 	updated, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if updated == 1 {
-		return nil
+		return true, nil
 	}
 	query = `SELECT state, COALESCE(current_receipt_operation_id, ''), COALESCE(current_render_id, '') FROM channel_delivery_plans WHERE delivery_id=?`
 	if postgres {
@@ -267,7 +269,7 @@ func advanceChannelDeliveryPlanTx(ctx context.Context, tx *sql.Tx, settlement ru
 	}
 	var storedState, currentReceiptID, currentRenderID string
 	if err := tx.QueryRowContext(ctx, query, authority.DeliveryID).Scan(&storedState, &currentReceiptID, &currentRenderID); err != nil {
-		return err
+		return false, err
 	}
 	wantState := state
 	if state == "sent" && currentRenderID != authority.RenderID {
@@ -275,7 +277,7 @@ func advanceChannelDeliveryPlanTx(ctx context.Context, tx *sql.Tx, settlement ru
 	}
 	if storedState != wantState || (state == "sent" && currentReceiptID != settlement.OperationID) ||
 		(state == "uncertain" && currentReceiptID != authority.PreviousReceiptOperationID) {
-		return fmt.Errorf("channel delivery plan state %q contradicts settled receipt %q", storedState, state)
+		return false, fmt.Errorf("channel delivery plan state %q contradicts settled receipt %q", storedState, state)
 	}
-	return nil
+	return false, nil
 }

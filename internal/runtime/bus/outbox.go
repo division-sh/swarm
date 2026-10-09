@@ -112,6 +112,10 @@ func (p CommittedEnginePublication) WithCommitAcknowledgment() CommittedEnginePu
 	return p
 }
 
+func (p CommittedEnginePublication) ChannelCardsChanged() bool {
+	return p.committed.ChannelCardsChanged()
+}
+
 func NewCommittedEnginePublication(plan EnginePublicationPlan, committed CommittedPublication) (CommittedEnginePublication, error) {
 	if err := plan.ValidateDurablePublicationPlan(); err != nil {
 		return CommittedEnginePublication{}, err

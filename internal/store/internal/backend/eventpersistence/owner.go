@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -46,6 +47,7 @@ type operatorChannelClaimSQLiteOwner interface {
 }
 
 type EventPostgresOwner struct {
+	channelChanges *render.ReconcileSignal
 	*storeactivityjournal.ActivityPostgresOwner
 	*storerunlifecycle.RunLifecyclePostgresOwner
 	*storedelivery.DeliveryPostgresOwner
@@ -63,6 +65,7 @@ type EventPostgresOwner struct {
 }
 
 type EventSQLiteOwner struct {
+	channelChanges       *render.ReconcileSignal
 	preparedPublishEvent eventrecordsqlite.SingleEventReader
 	*storeactivityjournal.ActivitySQLiteOwner
 	*storerunlifecycle.RunLifecycleSQLiteOwner
@@ -79,6 +82,36 @@ type EventSQLiteOwner struct {
 	apiIdempotency        *storeapiidempotency.SQLiteOwner
 	operatorChannelClaims operatorChannelClaimSQLiteOwner
 	durableData           *storedurabledata.Owner
+}
+
+func (s *EventPostgresOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return errors.New("postgres event channel reconciliation requires one composition binding")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *EventSQLiteOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return errors.New("sqlite event channel reconciliation requires one composition binding")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *EventPostgresOwner) publishChannelChanges(acknowledged, changed bool) error {
+	if s == nil {
+		return nil
+	}
+	return s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary)
+}
+
+func (s *EventSQLiteOwner) publishChannelChanges(acknowledged, changed bool) error {
+	if s == nil {
+		return nil
+	}
+	return s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary)
 }
 
 func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, activity *storeactivityjournal.ActivityPostgresOwner, lifecycle *storerunlifecycle.RunLifecyclePostgresOwner, delivery *storedelivery.DeliveryPostgresOwner, reply *storereplycontext.ReplyPostgresOwner, apiIdempotency *storeapiidempotency.PostgresOwner, durableData *storedurabledata.Owner) (*EventPostgresOwner, error) {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	domain "github.com/division-sh/swarm/internal/operatorchannel"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -23,11 +24,13 @@ type schemaRequirement func() error
 type PostgresOwner struct {
 	backend        *postgresbackend.Backend
 	requireCurrent schemaRequirement
+	channelChanges *render.ReconcileSignal
 }
 
 type SQLiteOwner struct {
 	backend        *sqlitebackend.Backend
 	requireCurrent schemaRequirement
+	channelChanges *render.ReconcileSignal
 }
 
 func NewPostgres(backend *postgresbackend.Backend, requireCurrent schemaRequirement) (*PostgresOwner, error) {
@@ -46,6 +49,8 @@ func NewSQLite(backend *sqlitebackend.Backend, requireCurrent schemaRequirement)
 
 type transactionRunner interface {
 	mutate(context.Context, string, func(context.Context, *sql.Tx) error) error
+	mutateOutcome(context.Context, string, func(context.Context, *sql.Tx) error) (bool, error)
+	publishChannelChange(bool, render.ReconcileDemand) error
 	query() queryer
 	dialect() dialect
 	require() error
@@ -56,6 +61,12 @@ type postgresRunner struct{ owner *PostgresOwner }
 func (r postgresRunner) mutate(ctx context.Context, _ string, fn func(context.Context, *sql.Tx) error) error {
 	return r.owner.backend.RunTransaction(ctx, fn)
 }
+func (r postgresRunner) mutateOutcome(ctx context.Context, _ string, fn func(context.Context, *sql.Tx) error) (bool, error) {
+	return r.owner.backend.RunTransactionOutcome(ctx, fn)
+}
+func (r postgresRunner) publishChannelChange(ack bool, demand render.ReconcileDemand) error {
+	return r.owner.channelChanges.PublishAcknowledged(ack, demand)
+}
 func (r postgresRunner) query() queryer   { return r.owner.backend }
 func (r postgresRunner) dialect() dialect { return dialectPostgres }
 func (r postgresRunner) require() error   { return r.owner.requireCurrent() }
@@ -64,6 +75,28 @@ type sqliteRunner struct{ owner *SQLiteOwner }
 
 func (r sqliteRunner) mutate(ctx context.Context, label string, fn func(context.Context, *sql.Tx) error) error {
 	return r.owner.backend.RunTransaction(ctx, label, fn)
+}
+func (r sqliteRunner) mutateOutcome(ctx context.Context, label string, fn func(context.Context, *sql.Tx) error) (bool, error) {
+	return r.owner.backend.RunTransactionOutcome(ctx, label, fn)
+}
+func (r sqliteRunner) publishChannelChange(ack bool, demand render.ReconcileDemand) error {
+	return r.owner.channelChanges.PublishAcknowledged(ack, demand)
+}
+
+func (s *PostgresOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return fmt.Errorf("operator channel requires one reconciliation signal")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *SQLiteOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return fmt.Errorf("operator channel requires one reconciliation signal")
+	}
+	s.channelChanges = signal
+	return nil
 }
 func (r sqliteRunner) query() queryer   { return r.owner.backend }
 func (r sqliteRunner) dialect() dialect { return dialectSQLite }
@@ -360,7 +393,9 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 	var out domain.Operation
 	var binding domain.Binding
 	var terminalErr error
-	err := runner.mutate(ctx, "confirm operator channel binding", func(txctx context.Context, tx *sql.Tx) error {
+	var changed render.ReconcileDemand
+	acknowledged, err := runner.mutateOutcome(ctx, "confirm operator channel binding", func(txctx context.Context, tx *sql.Tx) error {
+		changed = 0
 		op, found, err := loadOperationByID(txctx, tx, runner.dialect(), req.OperationID, true)
 		if err != nil || !found {
 			if !found && err == nil {
@@ -495,8 +530,10 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 			return err
 		}
 		out = op
+		changed = render.ReconcileOrdinary | render.ReconcileNative
 		return nil
 	})
+	err = errors.Join(err, runner.publishChannelChange(acknowledged, changed))
 	if err != nil {
 		return out, binding, err
 	}
@@ -552,7 +589,9 @@ func unbind(ctx context.Context, runner transactionRunner, req domain.UnbindRequ
 	}
 	var op domain.Operation
 	var binding domain.Binding
-	err := runner.mutate(ctx, "unbind operator channel", func(txctx context.Context, tx *sql.Tx) error {
+	var changed render.ReconcileDemand
+	acknowledged, err := runner.mutateOutcome(ctx, "unbind operator channel", func(txctx context.Context, tx *sql.Tx) error {
+		changed = 0
 		existing, found, err := loadOperationByRequestKey(txctx, tx, runner.dialect(), req.RequestKeyHash, true)
 		if err != nil {
 			return err
@@ -587,8 +626,13 @@ func unbind(ctx context.Context, runner transactionRunner, req domain.UnbindRequ
 		if err := upsertBinding(txctx, tx, runner.dialect(), binding); err != nil {
 			return err
 		}
-		return channeldelivery.RetireBindingTx(txctx, tx, binding, runner.dialect() == dialectPostgres)
+		if err := channeldelivery.RetireBindingTx(txctx, tx, binding, runner.dialect() == dialectPostgres); err != nil {
+			return err
+		}
+		changed = render.ReconcileOrdinary | render.ReconcileNative
+		return nil
 	})
+	err = errors.Join(err, runner.publishChannelChange(acknowledged, changed))
 	return op, binding, err
 }
 

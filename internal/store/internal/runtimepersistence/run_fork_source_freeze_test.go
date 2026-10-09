@@ -487,7 +487,7 @@ func seedRunForkSourceFreezePair(t *testing.T, db *sql.DB, sourceStatus, forkSta
 
 func commitRunForkSourceFreezeForTest(ctx context.Context, store *PostgresStore, lineage runForkActivationLineage, now time.Time, confirmed bool) error {
 	return runSelectedFixtureMutation(ctx, store, "source freeze fixture", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		return store.runForkPostgresOwner.ApplyRunForkSourceFreezeTx(txctx, attempt, lineage, now, confirmed)
+		return store.runForkPostgresOwner.ApplyRunForkSourceFreezeTx(txctx, attempt, lineage, now, confirmed, nil)
 	})
 }
 

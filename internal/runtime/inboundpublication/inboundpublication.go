@@ -359,14 +359,27 @@ type Record struct {
 // an exact request duplicate and otherwise corresponds one-for-one with the
 // command's ordered publication plans.
 type CommitResult struct {
-	Record               Record
-	Publications         []runtimebus.CommittedPublication
-	OperatorChannelClaim *operatorchannel.ClaimSettlement
+	ChannelIntentsChanged bool `json:"-"`
+	Record                Record
+	Publications          []runtimebus.CommittedPublication
+	OperatorChannelClaim  *operatorchannel.ClaimSettlement
 	// Acknowledged is set only after the selected-store mutation result confirms commit.
 	Acknowledged bool
 	// RolledBackConstruction is present only after a typed constructor conflict
 	// before COMMIT admission with no independent transaction/cleanup failure.
 	RolledBackConstruction *flowidentity.RunScopedFlowInstance
+}
+
+func (r CommitResult) ChannelChanges() bool {
+	if r.ChannelIntentsChanged {
+		return true
+	}
+	for _, publication := range r.Publications {
+		if publication.ChannelCardsChanged() {
+			return true
+		}
+	}
+	return false
 }
 
 func (r CommitResult) CanReconcileConstruction(err error) bool {

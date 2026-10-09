@@ -50,14 +50,14 @@ func commitProposedEffectRoute(
 		if err != nil {
 			return runtimepipeline.CommittedProposedEffectRoute{}, err
 		}
-		return runtimepipeline.CommittedProposedEffectRoute{Publication: evidence}, nil
+		return runtimepipeline.CommittedProposedEffectRoute{Publication: evidence, ChannelCardsChanged: changed || committed.ChannelCardsChanged()}, nil
 	})
 	result, acknowledged := outcome.Value()
 	if !acknowledged {
 		return runtimepipeline.CommittedProposedEffectRoute{}, outcome.Err()
 	}
 	result.Publication = result.Publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()
-	return result, errors.Join(outcome.Err(), result.Validate())
+	return result, errors.Join(outcome.Err(), result.Validate(), store.publishCardChanges(acknowledged, result.ChannelCardsChanged))
 }
 
 func commitHumanTaskRoute(
@@ -92,7 +92,7 @@ func commitHumanTaskRoute(
 		return runtimepipeline.CommittedHumanTaskRoute{}, outcome.Err()
 	}
 	result.Publication = result.Publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()
-	return result, errors.Join(outcome.Err(), result.Validate())
+	return result, errors.Join(outcome.Err(), result.Validate(), store.publishCardChanges(acknowledged, result.Publication.(runtimebus.CommittedEnginePublication).ChannelCardsChanged()))
 }
 
 func (s *PipelinePostgresOwner) CommitHumanTaskDeferredRoute(ctx context.Context, command runtimepipeline.HumanTaskDeferredRouteCommand) (runtimepipeline.CommittedHumanTaskRoute, error) {

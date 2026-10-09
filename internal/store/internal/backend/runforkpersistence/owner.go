@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimerunfork "github.com/division-sh/swarm/internal/runtime/runfork"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
@@ -71,6 +72,7 @@ type RunForkPostgresOwner struct {
 	durableData    *storedurabledata.Owner
 	apiIdempotency *storeapiidempotency.PostgresOwner
 	candidates     *storerunhandoff.CandidateCoordinator
+	channelChanges *runtimechanneldelivery.ReconcileSignal
 }
 
 type RunForkSQLiteOwner struct {
@@ -89,6 +91,37 @@ type RunForkSQLiteOwner struct {
 	durableData    *storedurabledata.Owner
 	apiIdempotency *storeapiidempotency.SQLiteOwner
 	candidates     *storerunhandoff.CandidateCoordinator
+	channelChanges *runtimechanneldelivery.ReconcileSignal
+}
+
+func (s *RunForkPostgresOwner) BindChannelReconciliation(signal *runtimechanneldelivery.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return errors.New("run fork PostgreSQL channel reconciliation must be bound exactly once")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *RunForkSQLiteOwner) BindChannelReconciliation(signal *runtimechanneldelivery.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return errors.New("run fork SQLite channel reconciliation must be bound exactly once")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *RunForkPostgresOwner) publishChannelChanges(acknowledged, changed bool) error {
+	if s == nil || s.channelChanges == nil || !changed {
+		return nil
+	}
+	return s.channelChanges.PublishAcknowledged(acknowledged, runtimechanneldelivery.ReconcileOrdinary)
+}
+
+func (s *RunForkSQLiteOwner) publishChannelChanges(acknowledged, changed bool) error {
+	if s == nil || s.channelChanges == nil || !changed {
+		return nil
+	}
+	return s.channelChanges.PublishAcknowledged(acknowledged, runtimechanneldelivery.ReconcileOrdinary)
 }
 
 type lifecycleDiagnosticObservations interface {

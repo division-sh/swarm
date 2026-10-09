@@ -15,6 +15,7 @@ import (
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -22,18 +23,19 @@ import (
 // the selected-contract activation operation. Lifecycle meaning is owned by
 // activateRunForkForSelectedContractExecution below.
 type runForkSelectedContractActivationPort struct {
-	postgres       bool
-	requireCurrent func() error
-	runMutation    func(context.Context, func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error)
-	loadLineage    func(context.Context, *sql.Tx, string) (runForkActivationLineage, error)
-	lockFrontier   func(context.Context, *sql.Tx, *runForkActivationLineage) error
-	plan           func(context.Context, *sql.Tx, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
-	deliveries     *storedelivery.Adapter
-	ensureState    func(context.Context, *sql.Tx, string, []string, semanticview.Source) error
-	transition     func(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.ActiveTransitionRequest) error
-	diverge        func(context.Context, *sql.Tx, runfork.RunForkSelectedContractBranchDivergence) error
-	freeze         func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkActivationLineage, time.Time, bool) error
-	now            func() time.Time
+	postgres              bool
+	requireCurrent        func() error
+	runMutation           func(context.Context, func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error)
+	loadLineage           func(context.Context, *sql.Tx, string) (runForkActivationLineage, error)
+	lockFrontier          func(context.Context, *sql.Tx, *runForkActivationLineage) error
+	plan                  func(context.Context, *sql.Tx, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+	deliveries            *storedelivery.Adapter
+	ensureState           func(context.Context, *sql.Tx, string, []string, semanticview.Source) error
+	transition            func(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.ActiveTransitionRequest) error
+	diverge               func(context.Context, *sql.Tx, runfork.RunForkSelectedContractBranchDivergence) error
+	freeze                func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkActivationLineage, time.Time, bool, *privaterunlifecycle.ChannelCardChanges) error
+	publishChannelChanges func(bool, bool) error
+	now                   func() time.Time
 }
 
 func activateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest, port runForkSelectedContractActivationPort) (result runfork.RunForkActivation, err error) {
@@ -52,8 +54,10 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 	if err := port.requireCurrent(); err != nil {
 		return runfork.RunForkActivation{}, err
 	}
+	var changes privaterunlifecycle.ChannelCardChanges
 	var divergence *runfork.RunForkSelectedContractBranchDivergence
 	committed, err := port.runMutation(ctx, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) error {
+		changes = privaterunlifecycle.ChannelCardChanges{}
 		divergence = nil
 		lineage, err := port.loadLineage(txctx, tx, forkRunID)
 		if err != nil {
@@ -184,7 +188,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			}
 			return nil
 		}
-		if err := port.freeze(txctx, tx, attempt, lineage, now, req.AllowSourceFreeze); err != nil {
+		if err := port.freeze(txctx, tx, attempt, lineage, now, req.AllowSourceFreeze, &changes); err != nil {
 			return err
 		}
 		return completeSelectedForkOperationAtActivation(txctx, tx, req, lineage, runfork.RunForkSourceFrozenStatus, true, port.postgres)
@@ -201,6 +205,9 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 	} else {
 		result.SourceRunStatus = runfork.RunForkSourceFrozenStatus
 		result.SourceFrozen = true
+	}
+	if port.publishChannelChanges != nil {
+		err = errors.Join(err, port.publishChannelChanges(committed, changes.Changed))
 	}
 	return result, err
 }
@@ -292,9 +299,10 @@ func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runF
 			_, err := s.RunLifecyclePostgresOwner.TransitionActiveTx(ctx, attempt, req)
 			return err
 		},
-		diverge: insertRunForkSelectedContractBranchDivergence,
-		freeze:  s.applyRunForkSourceFreeze,
-		now:     func() time.Time { return time.Now().UTC() },
+		diverge:               insertRunForkSelectedContractBranchDivergence,
+		freeze:                s.applyRunForkSourceFreeze,
+		publishChannelChanges: s.publishChannelChanges,
+		now:                   func() time.Time { return time.Now().UTC() },
 	}
 }
 
@@ -326,8 +334,9 @@ func sqliteRunForkSelectedContractActivationPort(s *RunForkSQLiteOwner) runForkS
 			_, err := s.RunLifecycleSQLiteOwner.TransitionActiveTx(ctx, attempt, req)
 			return err
 		},
-		diverge: insertSQLiteRunForkSelectedContractBranchDivergence,
-		freeze:  s.applyRunForkSourceFreeze,
-		now:     s.now,
+		diverge:               insertSQLiteRunForkSelectedContractBranchDivergence,
+		freeze:                s.applyRunForkSourceFreeze,
+		publishChannelChanges: s.publishChannelChanges,
+		now:                   s.now,
 	}
 }

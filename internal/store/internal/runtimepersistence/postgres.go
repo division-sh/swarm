@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
@@ -44,6 +45,7 @@ import (
 )
 
 type PostgresStore struct {
+	channelChanges                 runtimechanneldelivery.ReconcileSignal
 	agentPostgresOwner             *storeagent.AgentPostgresOwner
 	destructiveResetPostgresOwner  *storeadmin.DestructiveResetPostgresOwner
 	activityPostgresOwner          *storeactivityjournal.ActivityPostgresOwner

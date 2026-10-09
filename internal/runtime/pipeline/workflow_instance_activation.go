@@ -113,6 +113,27 @@ type CommittedFlowInstanceActivation struct {
 	Acknowledged bool
 }
 
+func (a CommittedFlowInstanceActivation) ChannelCardsChanged() bool {
+	if a.Lifecycle.ChannelCardsChanged {
+		return true
+	}
+	for _, child := range a.Children {
+		if child.ChannelCardsChanged() {
+			return true
+		}
+	}
+	return false
+}
+
+func ChannelCardsChanged(activations []CommittedFlowInstanceActivation) bool {
+	for _, activation := range activations {
+		if activation.ChannelCardsChanged() {
+			return true
+		}
+	}
+	return false
+}
+
 // WithCommitAcknowledgment promotes the complete construction tree only after
 // its enclosing selected-store transaction has acknowledged the commit.
 func (a CommittedFlowInstanceActivation) WithCommitAcknowledgment() CommittedFlowInstanceActivation {

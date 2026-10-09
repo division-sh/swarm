@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/division-sh/swarm/internal/packs"
 	"time"
@@ -13,6 +14,36 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
+
+func (s *PostgresStore) SubscribeChannelReconciliation(ctx context.Context) (*render.ReconcileSubscription, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
+	return s.channelChanges.Subscribe(ctx)
+}
+
+func (s *SQLiteRuntimeStore) SubscribeChannelReconciliation(ctx context.Context) (*render.ReconcileSubscription, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
+	return s.channelChanges.Subscribe(ctx)
+}
+
+// Process composition calls this only after an exact executable publication.
+// This observation hint carries no selected-store mutation or send authority.
+func (s *PostgresStore) NotifyChannelPublication() error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return s.channelChanges.PublishAcknowledged(true, render.ReconcileOrdinary|render.ReconcileNative)
+}
+
+func (s *SQLiteRuntimeStore) NotifyChannelPublication() error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return s.channelChanges.PublishAcknowledged(true, render.ReconcileOrdinary|render.ReconcileNative)
+}
 
 func (s *PostgresStore) AcknowledgeChannelNotice(ctx context.Context, req apiidempotency.Request, action operatorchannel.InboundAction) (apiidempotency.Completion, bool, error) {
 	if s == nil || s.mailboxPostgresOwner == nil {
@@ -128,9 +159,13 @@ func (s *PostgresStore) PlanChangedChannelCard(ctx context.Context, sequence int
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.PlanChangedCardTx(txctx, tx, sequence, cardID, true)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.PlanChangedCardTx(txctx, tx, sequence, cardID, true)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) ResolveChannelActionFact(ctx context.Context, fact operatorchannel.ActionFact) (render.ResolvedAction, bool, error) {
@@ -159,12 +194,13 @@ func (s *PostgresStore) AdmitChannelReplyAction(ctx context.Context, text operat
 	}
 	var action render.PendingAction
 	var found bool
-	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		action, found, err = channeldelivery.AdmitReplyActionTx(txctx, tx, text, true)
+		action, found, changed, err = channeldelivery.AdmitReplyActionTx(txctx, tx, text, true)
 		return err
 	})
-	return action, found, err
+	return action, found, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) ListPendingChannelActions(ctx context.Context, cursor string, limit int) ([]render.PendingAction, error) {
@@ -190,9 +226,13 @@ func (s *PostgresStore) SettleUnappliedChannelAction(ctx context.Context, action
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.SettleUnappliedActionIntentTx(txctx, tx, action, disposition, true)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.SettleUnappliedActionIntentTx(txctx, tx, action, disposition, true)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) SettleUnsupportedChannelText(ctx context.Context, text operatorchannel.InboundText) error {
@@ -202,9 +242,13 @@ func (s *PostgresStore) SettleUnsupportedChannelText(ctx context.Context, text o
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.SettleUnsupportedTextIntentTx(txctx, tx, text, true)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.SettleUnsupportedTextIntentTx(txctx, tx, text, true)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) ListPendingChannelTexts(ctx context.Context, cursor string, limit int) ([]render.PendingText, error) {
@@ -230,9 +274,13 @@ func (s *PostgresStore) RejectUnboundChannelText(ctx context.Context, text opera
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.RejectUnboundTextTx(txctx, tx, text, true)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.RejectUnboundTextTx(txctx, tx, text, true)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) ResolveCurrentChannelText(ctx context.Context, text operatorchannel.InboundText) (render.ResolvedText, bool, error) {
@@ -310,12 +358,13 @@ func (s *PostgresStore) AdvancePartialChannelInputDraftText(ctx context.Context,
 		return decisioncard.InputFieldProgress{}, err
 	}
 	var progress decisioncard.InputFieldProgress
-	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		progress, err = channeldelivery.AdvancePartialInputDraftTextTx(txctx, tx, text, at, draftID, true)
+		progress, changed, err = channeldelivery.AdvancePartialInputDraftTextTx(txctx, tx, text, at, draftID, true)
 		return err
 	})
-	return progress, err
+	return progress, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) PreviewChosenChannelInputDraftText(ctx context.Context, action operatorchannel.InboundAction, at time.Time) (render.InputDraftCandidate, render.PendingText, decisioncard.InputFieldProgress, string, error) {
@@ -345,12 +394,13 @@ func (s *PostgresStore) AdvancePartialChosenChannelInputDraftText(ctx context.Co
 		return decisioncard.InputFieldProgress{}, err
 	}
 	var progress decisioncard.InputFieldProgress
-	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		progress, err = channeldelivery.AdvancePartialChosenInputDraftTextTx(txctx, tx, action, at, true)
+		progress, changed, err = channeldelivery.AdvancePartialChosenInputDraftTextTx(txctx, tx, action, at, true)
 		return err
 	})
-	return progress, err
+	return progress, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) PreviewChannelInputSkip(ctx context.Context, action operatorchannel.InboundAction, at time.Time) (render.ResolvedAction, decisioncard.InputFieldProgress, decisioncard.InputDraft, error) {
@@ -379,12 +429,13 @@ func (s *PostgresStore) AdvancePartialChannelInputSkip(ctx context.Context, acti
 		return decisioncard.InputFieldProgress{}, err
 	}
 	var progress decisioncard.InputFieldProgress
-	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		progress, err = channeldelivery.AdvancePartialSkipActionTx(txctx, tx, action, at, true)
+		progress, changed, err = channeldelivery.AdvancePartialSkipActionTx(txctx, tx, action, at, true)
 		return err
 	})
-	return progress, err
+	return progress, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) ResolveCurrentInboxEntry(ctx context.Context, text operatorchannel.InboundText) (render.ResolvedInboxEntry, bool, error) {
@@ -412,12 +463,13 @@ func (s *PostgresStore) PlanInboxResponse(ctx context.Context, text operatorchan
 		return "", err
 	}
 	var deliveryID string
-	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		deliveryID, err = channeldelivery.PlanInboxResponseTx(txctx, tx, text, entry, fullText, true)
+		deliveryID, changed, err = channeldelivery.PlanInboxResponseTx(txctx, tx, text, entry, fullText, true)
 		return err
 	})
-	return deliveryID, err
+	return deliveryID, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) PlanChannelTextResponse(ctx context.Context, text operatorchannel.InboundText, fullText, disposition string) (string, error) {
@@ -428,12 +480,13 @@ func (s *PostgresStore) PlanChannelTextResponse(ctx context.Context, text operat
 		return "", err
 	}
 	var deliveryID string
-	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		deliveryID, err = channeldelivery.PlanTextResponseTx(txctx, tx, text, fullText, disposition, true)
+		deliveryID, changed, err = channeldelivery.PlanTextResponseTx(txctx, tx, text, fullText, disposition, true)
 		return err
 	})
-	return deliveryID, err
+	return deliveryID, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) PlanChannelDraftChooser(ctx context.Context, text operatorchannel.InboundText, at time.Time) (string, error) {
@@ -444,12 +497,13 @@ func (s *PostgresStore) PlanChannelDraftChooser(ctx context.Context, text operat
 		return "", err
 	}
 	var deliveryID string
-	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		deliveryID, err = channeldelivery.PlanDraftChooserTx(txctx, tx, text, at, true)
+		deliveryID, changed, err = channeldelivery.PlanDraftChooserTx(txctx, tx, text, at, true)
 		return err
 	})
-	return deliveryID, err
+	return deliveryID, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) PlanChannelActionResponse(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction, inboxText string) (string, error) {
@@ -460,12 +514,13 @@ func (s *PostgresStore) PlanChannelActionResponse(ctx context.Context, action op
 		return "", err
 	}
 	var deliveryID string
-	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		deliveryID, err = channeldelivery.PlanActionResponseTx(txctx, tx, action, resolved, inboxText, true)
+		deliveryID, changed, err = channeldelivery.PlanActionResponseTx(txctx, tx, action, resolved, inboxText, true)
 		return err
 	})
-	return deliveryID, err
+	return deliveryID, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) AdvanceChannelActionPage(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction, mode render.ControlPageMode) error {
@@ -475,9 +530,13 @@ func (s *PostgresStore) AdvanceChannelActionPage(ctx context.Context, action ope
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.AdvanceActionPageTx(txctx, tx, action, resolved, mode, true)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.AdvanceActionPageTx(txctx, tx, action, resolved, mode, true)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) PlanManualChannelResend(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction) (string, error) {
@@ -488,12 +547,13 @@ func (s *PostgresStore) PlanManualChannelResend(ctx context.Context, action oper
 		return "", err
 	}
 	var deliveryID string
-	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		deliveryID, err = channeldelivery.PlanManualResendTx(txctx, tx, action, resolved, true)
+		deliveryID, changed, err = channeldelivery.PlanManualResendTx(txctx, tx, action, resolved, true)
 		return err
 	})
-	return deliveryID, err
+	return deliveryID, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) PlanOpenChannelCard(ctx context.Context, cardID string) (bool, error) {
@@ -504,12 +564,12 @@ func (s *PostgresStore) PlanOpenChannelCard(ctx context.Context, cardID string) 
 		return false, err
 	}
 	var created bool
-	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		created, err = channeldelivery.PlanOpenCardTx(txctx, tx, cardID, true)
 		return err
 	})
-	return created, err
+	return created, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && created, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) ListCurrentChannelDeliveryPlans(ctx context.Context, cursor string, limit int) ([]render.Candidate, error) {
@@ -625,12 +685,13 @@ func (s *SQLiteRuntimeStore) AdmitChannelReplyAction(ctx context.Context, text o
 	}
 	var action render.PendingAction
 	var found bool
-	err := s.backend.RunTransaction(ctx, "admit channel reply action", func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "admit channel reply action", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		action, found, err = channeldelivery.AdmitReplyActionTx(txctx, tx, text, false)
+		action, found, changed, err = channeldelivery.AdmitReplyActionTx(txctx, tx, text, false)
 		return err
 	})
-	return action, found, err
+	return action, found, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) ListPendingChannelActions(ctx context.Context, cursor string, limit int) ([]render.PendingAction, error) {
@@ -656,9 +717,13 @@ func (s *SQLiteRuntimeStore) SettleUnappliedChannelAction(ctx context.Context, a
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, "settle channel action without mutation", func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.SettleUnappliedActionIntentTx(txctx, tx, action, disposition, false)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "settle channel action without mutation", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.SettleUnappliedActionIntentTx(txctx, tx, action, disposition, false)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) SettleUnsupportedChannelText(ctx context.Context, text operatorchannel.InboundText) error {
@@ -668,9 +733,13 @@ func (s *SQLiteRuntimeStore) SettleUnsupportedChannelText(ctx context.Context, t
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, "settle unsupported channel text", func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.SettleUnsupportedTextIntentTx(txctx, tx, text, false)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "settle unsupported channel text", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.SettleUnsupportedTextIntentTx(txctx, tx, text, false)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) ListPendingChannelTexts(ctx context.Context, cursor string, limit int) ([]render.PendingText, error) {
@@ -696,9 +765,13 @@ func (s *SQLiteRuntimeStore) RejectUnboundChannelText(ctx context.Context, text 
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, "reject unbound channel text", func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.RejectUnboundTextTx(txctx, tx, text, false)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "reject unbound channel text", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.RejectUnboundTextTx(txctx, tx, text, false)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) ResolveCurrentChannelText(ctx context.Context, text operatorchannel.InboundText) (render.ResolvedText, bool, error) {
@@ -776,12 +849,13 @@ func (s *SQLiteRuntimeStore) AdvancePartialChannelInputDraftText(ctx context.Con
 		return decisioncard.InputFieldProgress{}, err
 	}
 	var progress decisioncard.InputFieldProgress
-	err := s.backend.RunTransaction(ctx, "advance channel input draft", func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "advance channel input draft", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		progress, err = channeldelivery.AdvancePartialInputDraftTextTx(txctx, tx, text, at, draftID, false)
+		progress, changed, err = channeldelivery.AdvancePartialInputDraftTextTx(txctx, tx, text, at, draftID, false)
 		return err
 	})
-	return progress, err
+	return progress, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) PreviewChosenChannelInputDraftText(ctx context.Context, action operatorchannel.InboundAction, at time.Time) (render.InputDraftCandidate, render.PendingText, decisioncard.InputFieldProgress, string, error) {
@@ -811,12 +885,13 @@ func (s *SQLiteRuntimeStore) AdvancePartialChosenChannelInputDraftText(ctx conte
 		return decisioncard.InputFieldProgress{}, err
 	}
 	var progress decisioncard.InputFieldProgress
-	err := s.backend.RunTransaction(ctx, "advance chosen channel input draft", func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "advance chosen channel input draft", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		progress, err = channeldelivery.AdvancePartialChosenInputDraftTextTx(txctx, tx, action, at, false)
+		progress, changed, err = channeldelivery.AdvancePartialChosenInputDraftTextTx(txctx, tx, action, at, false)
 		return err
 	})
-	return progress, err
+	return progress, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) PreviewChannelInputSkip(ctx context.Context, action operatorchannel.InboundAction, at time.Time) (render.ResolvedAction, decisioncard.InputFieldProgress, decisioncard.InputDraft, error) {
@@ -845,12 +920,13 @@ func (s *SQLiteRuntimeStore) AdvancePartialChannelInputSkip(ctx context.Context,
 		return decisioncard.InputFieldProgress{}, err
 	}
 	var progress decisioncard.InputFieldProgress
-	err := s.backend.RunTransaction(ctx, "advance partial channel input skip", func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "advance partial channel input skip", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		progress, err = channeldelivery.AdvancePartialSkipActionTx(txctx, tx, action, at, false)
+		progress, changed, err = channeldelivery.AdvancePartialSkipActionTx(txctx, tx, action, at, false)
 		return err
 	})
-	return progress, err
+	return progress, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) ResolveCurrentInboxEntry(ctx context.Context, text operatorchannel.InboundText) (render.ResolvedInboxEntry, bool, error) {
@@ -878,12 +954,13 @@ func (s *SQLiteRuntimeStore) PlanInboxResponse(ctx context.Context, text operato
 		return "", err
 	}
 	var deliveryID string
-	err := s.backend.RunTransaction(ctx, "plan native inbox response", func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "plan native inbox response", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		deliveryID, err = channeldelivery.PlanInboxResponseTx(txctx, tx, text, entry, fullText, false)
+		deliveryID, changed, err = channeldelivery.PlanInboxResponseTx(txctx, tx, text, entry, fullText, false)
 		return err
 	})
-	return deliveryID, err
+	return deliveryID, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) PlanChannelTextResponse(ctx context.Context, text operatorchannel.InboundText, fullText, disposition string) (string, error) {
@@ -894,12 +971,13 @@ func (s *SQLiteRuntimeStore) PlanChannelTextResponse(ctx context.Context, text o
 		return "", err
 	}
 	var deliveryID string
-	err := s.backend.RunTransaction(ctx, "plan channel text response", func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "plan channel text response", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		deliveryID, err = channeldelivery.PlanTextResponseTx(txctx, tx, text, fullText, disposition, false)
+		deliveryID, changed, err = channeldelivery.PlanTextResponseTx(txctx, tx, text, fullText, disposition, false)
 		return err
 	})
-	return deliveryID, err
+	return deliveryID, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) PlanChannelDraftChooser(ctx context.Context, text operatorchannel.InboundText, at time.Time) (string, error) {
@@ -910,12 +988,13 @@ func (s *SQLiteRuntimeStore) PlanChannelDraftChooser(ctx context.Context, text o
 		return "", err
 	}
 	var deliveryID string
-	err := s.backend.RunTransaction(ctx, "plan channel draft chooser", func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "plan channel draft chooser", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		deliveryID, err = channeldelivery.PlanDraftChooserTx(txctx, tx, text, at, false)
+		deliveryID, changed, err = channeldelivery.PlanDraftChooserTx(txctx, tx, text, at, false)
 		return err
 	})
-	return deliveryID, err
+	return deliveryID, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) PlanChannelActionResponse(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction, inboxText string) (string, error) {
@@ -926,12 +1005,13 @@ func (s *SQLiteRuntimeStore) PlanChannelActionResponse(ctx context.Context, acti
 		return "", err
 	}
 	var deliveryID string
-	err := s.backend.RunTransaction(ctx, "plan channel action response", func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "plan channel action response", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		deliveryID, err = channeldelivery.PlanActionResponseTx(txctx, tx, action, resolved, inboxText, false)
+		deliveryID, changed, err = channeldelivery.PlanActionResponseTx(txctx, tx, action, resolved, inboxText, false)
 		return err
 	})
-	return deliveryID, err
+	return deliveryID, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) AdvanceChannelActionPage(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction, mode render.ControlPageMode) error {
@@ -941,9 +1021,13 @@ func (s *SQLiteRuntimeStore) AdvanceChannelActionPage(ctx context.Context, actio
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, "advance channel card action page", func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.AdvanceActionPageTx(txctx, tx, action, resolved, mode, false)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "advance channel card action page", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.AdvanceActionPageTx(txctx, tx, action, resolved, mode, false)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) PlanManualChannelResend(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction) (string, error) {
@@ -954,12 +1038,13 @@ func (s *SQLiteRuntimeStore) PlanManualChannelResend(ctx context.Context, action
 		return "", err
 	}
 	var deliveryID string
-	err := s.backend.RunTransaction(ctx, "plan manual channel resend", func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "plan manual channel resend", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		deliveryID, err = channeldelivery.PlanManualResendTx(txctx, tx, action, resolved, false)
+		deliveryID, changed, err = channeldelivery.PlanManualResendTx(txctx, tx, action, resolved, false)
 		return err
 	})
-	return deliveryID, err
+	return deliveryID, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) PlanOpenChannelCard(ctx context.Context, cardID string) (bool, error) {
@@ -970,12 +1055,12 @@ func (s *SQLiteRuntimeStore) PlanOpenChannelCard(ctx context.Context, cardID str
 		return false, err
 	}
 	var created bool
-	err := s.backend.RunTransaction(ctx, "plan open channel card", func(txctx context.Context, tx *sql.Tx) error {
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "plan open channel card", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		created, err = channeldelivery.PlanOpenCardTx(txctx, tx, cardID, false)
 		return err
 	})
-	return created, err
+	return created, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && created, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) CurrentChannelCardChangeCursor(ctx context.Context) (int64, bool, error) {
@@ -1002,9 +1087,13 @@ func (s *SQLiteRuntimeStore) PlanChangedChannelCard(ctx context.Context, sequenc
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, "plan changed channel card", func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.PlanChangedCardTx(txctx, tx, sequence, cardID, false)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "plan changed channel card", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.PlanChangedCardTx(txctx, tx, sequence, cardID, false)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) RejectInboxEntry(ctx context.Context, text operatorchannel.InboundText) error {
@@ -1014,9 +1103,13 @@ func (s *PostgresStore) RejectInboxEntry(ctx context.Context, text operatorchann
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.RejectNativeEntryTx(txctx, tx, text, true)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.RejectNativeEntryTx(txctx, tx, text, true)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) RejectInboxEntry(ctx context.Context, text operatorchannel.InboundText) error {
@@ -1026,9 +1119,13 @@ func (s *SQLiteRuntimeStore) RejectInboxEntry(ctx context.Context, text operator
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, "reject native inbox entry", func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.RejectNativeEntryTx(txctx, tx, text, false)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "reject native inbox entry", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.RejectNativeEntryTx(txctx, tx, text, false)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) FreezeAndPersistChannelRender(ctx context.Context, deliveryID string, bounds packs.PresentationBounds) (render.PreparedRender, error) {
@@ -1039,12 +1136,13 @@ func (s *PostgresStore) FreezeAndPersistChannelRender(ctx context.Context, deliv
 		return render.PreparedRender{}, err
 	}
 	var stored render.PreparedRender
-	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		stored, err = freezeAndPersistChannelRenderTx(txctx, tx, deliveryID, bounds, true)
+		stored, changed, err = freezeAndPersistChannelRenderTx(txctx, tx, deliveryID, bounds, true)
 		return err
 	})
-	return stored, err
+	return stored, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) FreezeAndPersistChannelRender(ctx context.Context, deliveryID string, bounds packs.PresentationBounds) (render.PreparedRender, error) {
@@ -1055,40 +1153,41 @@ func (s *SQLiteRuntimeStore) FreezeAndPersistChannelRender(ctx context.Context, 
 		return render.PreparedRender{}, err
 	}
 	var stored render.PreparedRender
-	err := s.backend.RunTransaction(ctx, "freeze channel delivery render", func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "freeze channel delivery render", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		stored, err = freezeAndPersistChannelRenderTx(txctx, tx, deliveryID, bounds, false)
+		stored, changed, err = freezeAndPersistChannelRenderTx(txctx, tx, deliveryID, bounds, false)
 		return err
 	})
-	return stored, err
+	return stored, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
-func freezeAndPersistChannelRenderTx(ctx context.Context, tx *sql.Tx, deliveryID string, bounds packs.PresentationBounds, postgres bool) (render.PreparedRender, error) {
+func freezeAndPersistChannelRenderTx(ctx context.Context, tx *sql.Tx, deliveryID string, bounds packs.PresentationBounds, postgres bool) (render.PreparedRender, bool, error) {
 	if err := channeldelivery.SetPresentationBoundsTx(ctx, tx, deliveryID, bounds, postgres); err != nil {
-		return render.PreparedRender{}, err
+		return render.PreparedRender{}, false, err
 	}
 	plan, found, err := channeldelivery.LoadPlan(ctx, tx, deliveryID, postgres)
 	if err != nil {
-		return render.PreparedRender{}, err
+		return render.PreparedRender{}, false, err
 	}
 	if !found {
-		return render.PreparedRender{}, fmt.Errorf("channel delivery plan %s is missing", deliveryID)
+		return render.PreparedRender{}, false, fmt.Errorf("channel delivery plan %s is missing", deliveryID)
 	}
 	if plan.Bounds.Validate() != nil {
-		return render.PreparedRender{}, fmt.Errorf("channel card lacks selected action capacity")
+		return render.PreparedRender{}, false, fmt.Errorf("channel card lacks selected action capacity")
 	}
 	var frozen render.Frozen
 	frozen, err = channeldelivery.FreezeCurrentSourceTx(ctx, tx, plan, postgres)
 	if err != nil {
-		return render.PreparedRender{}, err
+		return render.PreparedRender{}, false, err
 	}
-	id, _, err := channeldelivery.PersistRenderTx(ctx, tx, deliveryID, frozen, postgres)
+	id, changed, err := channeldelivery.PersistRenderTx(ctx, tx, deliveryID, frozen, postgres)
 	if err != nil {
-		return render.PreparedRender{}, err
+		return render.PreparedRender{}, false, err
 	}
 	actions, err := channeldelivery.EnsureRenderActionsTx(ctx, tx, id, frozen, postgres)
 	if err != nil {
-		return render.PreparedRender{}, err
+		return render.PreparedRender{}, false, err
 	}
-	return render.PreparedRender{RenderID: id, DeliveryID: deliveryID, Frozen: frozen, Actions: actions}, nil
+	return render.PreparedRender{RenderID: id, DeliveryID: deliveryID, Frozen: frozen, Actions: actions}, changed, nil
 }

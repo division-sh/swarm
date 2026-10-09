@@ -82,22 +82,23 @@ func admitNativeSettingScopeTx(ctx context.Context, tx *sql.Tx, admission channe
 	return setting, nil
 }
 
-func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, postgres bool) (channelnative.Setting, error) {
+func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, postgres bool) (channelnative.Setting, bool, error) {
 	if tx == nil {
-		return channelnative.Setting{}, fmt.Errorf("native inbox setting requires selected transaction")
+		return channelnative.Setting{}, false, fmt.Errorf("native inbox setting requires selected transaction")
 	}
 	if err := admission.Validate(); err != nil {
-		return channelnative.Setting{}, err
+		return channelnative.Setting{}, false, err
 	}
 	if err := LockPrincipalTx(ctx, tx, admission.PrincipalID, postgres); err != nil {
-		return channelnative.Setting{}, err
+		return channelnative.Setting{}, false, err
 	}
 	setting, err := admitNativeSettingScopeTx(ctx, tx, admission, postgres)
 	if err != nil {
-		return channelnative.Setting{}, err
+		return channelnative.Setting{}, false, err
 	}
-	if err := retireStaleNativeInboxConsumersTx(ctx, tx, postgres); err != nil {
-		return channelnative.Setting{}, err
+	changed, err := retireStaleNativeInboxConsumersTx(ctx, tx, postgres)
+	if err != nil {
+		return channelnative.Setting{}, false, err
 	}
 	query := `SELECT setting_id, principal_id, pack_id, pack_version, pack_manifest_hash,
 		entry_contract_hash, entry_command, desired_commands, generation, state, COALESCE(install_operation_id, ''), readback_hash
@@ -118,26 +119,27 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	if errors.Is(err, sql.ErrNoRows) {
 		setting, err = createNativeInboxSettingTx(ctx, tx, admission, setting, postgres)
 		if err != nil {
-			return channelnative.Setting{}, err
+			return channelnative.Setting{}, false, err
 		}
+		changed = true
 	} else if err != nil {
-		return channelnative.Setting{}, err
+		return channelnative.Setting{}, false, err
 	} else {
 		setting.EntryCommand, err = channelnative.EntryCommand(setting.SettingID, setting.Generation)
 		if err != nil {
-			return channelnative.Setting{}, err
+			return channelnative.Setting{}, false, err
 		}
 		desired, err := channelnative.DesiredCommands(setting.SettingID, setting.Generation)
 		if err != nil {
-			return channelnative.Setting{}, err
+			return channelnative.Setting{}, false, err
 		}
 		unresolved, err := nativeSettingHasUnresolvedWriteTx(ctx, tx, setting.InstallOperationID, postgres)
 		if err != nil {
-			return channelnative.Setting{}, err
+			return channelnative.Setting{}, false, err
 		}
 		canonical, err := canonicaljson.Canonicalize(raw)
 		if err != nil {
-			return channelnative.Setting{}, err
+			return channelnative.Setting{}, false, err
 		}
 		compatible := existingPrincipal == admission.PrincipalID && existingPack == admission.PackID &&
 			existingVersion == admission.PackVersion && existingHash == admission.PackManifestHash &&
@@ -145,25 +147,28 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 		if unresolved && setting.State != "uncertain" {
 			setting, err = markNativeSettingUncertainTx(ctx, tx, setting, postgres)
 			if err != nil {
-				return channelnative.Setting{}, err
+				return channelnative.Setting{}, false, err
 			}
+			changed = true
 		}
 		if !compatible || (setting.State == "retired" && !readbackHash.Valid) {
 			if unresolved {
-				return channelnative.Setting{}, fmt.Errorf("native inbox setting has unresolved or foreign provider state")
+				return channelnative.Setting{}, false, fmt.Errorf("native inbox setting has unresolved or foreign provider state")
 			}
 			switch setting.State {
 			case "uncertain", "unavailable":
-				return channelnative.Setting{}, fmt.Errorf("native inbox setting has unresolved or foreign provider state")
+				return channelnative.Setting{}, false, fmt.Errorf("native inbox setting has unresolved or foreign provider state")
 			}
 			setting, err = advanceNativeSettingGenerationTx(ctx, tx, admission, setting, postgres)
 			if err != nil {
-				return channelnative.Setting{}, err
+				return channelnative.Setting{}, false, err
 			}
+			changed = true
 		}
 	}
-	setting.CurrentConsumerCount, err = attachNativeInboxConsumerTx(ctx, tx, admission, setting, postgres)
-	return setting, err
+	var consumerChanged bool
+	setting.CurrentConsumerCount, consumerChanged, err = attachNativeInboxConsumerTx(ctx, tx, admission, setting, postgres)
+	return setting, changed || consumerChanged, err
 }
 
 func markNativeSettingUncertainTx(ctx context.Context, tx *sql.Tx, setting channelnative.Setting, postgres bool) (channelnative.Setting, error) {
@@ -214,7 +219,7 @@ func createNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	return setting, nil
 }
 
-func attachNativeInboxConsumerTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, setting channelnative.Setting, postgres bool) (int64, error) {
+func attachNativeInboxConsumerTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, setting channelnative.Setting, postgres bool) (int64, bool, error) {
 	// Handoff history may survive, but an independent current connection may not
 	// acquire this setting. Retired predecessors were fenced above.
 	query := `SELECT COUNT(*) FROM channel_native_setting_consumers
@@ -225,11 +230,27 @@ func attachNativeInboxConsumerTx(ctx context.Context, tx *sql.Tx, admission chan
 	}
 	var competing int64
 	if err := tx.QueryRowContext(ctx, query, setting.SettingID, admission.ActivationID).Scan(&competing); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if competing != 0 {
-		return 0, fmt.Errorf("native inbox setting has a competing current connection")
+		return 0, false, fmt.Errorf("native inbox setting has a competing current connection")
 	}
+	query = `SELECT activation_revision, interface_key, binding_revision, context_publication_generation, state
+		FROM channel_native_setting_consumers WHERE setting_id=? AND activation_id=?`
+	if postgres {
+		query = `SELECT activation_revision, interface_key, binding_revision, context_publication_generation, state
+			FROM channel_native_setting_consumers WHERE setting_id=$1::uuid AND activation_id=$2::uuid FOR UPDATE`
+	}
+	var activationRevision, bindingRevision, contextGeneration int64
+	var interfaceKey, state string
+	err := tx.QueryRowContext(ctx, query, setting.SettingID, admission.ActivationID).
+		Scan(&activationRevision, &interfaceKey, &bindingRevision, &contextGeneration, &state)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, false, err
+	}
+	changed := errors.Is(err, sql.ErrNoRows) || activationRevision != admission.ActivationRevision ||
+		interfaceKey != admission.InterfaceKey || bindingRevision != admission.BindingRevision ||
+		contextGeneration != admission.ContextPublicationGeneration || state != "current"
 	query = `INSERT INTO channel_native_setting_consumers
 		(setting_id, activation_id, activation_revision, interface_key, binding_revision,
 		context_publication_generation, state, updated_at)
@@ -252,9 +273,10 @@ func attachNativeInboxConsumerTx(ctx context.Context, tx *sql.Tx, admission chan
 	}
 	if _, err := tx.ExecContext(ctx, query, setting.SettingID, admission.ActivationID, admission.ActivationRevision,
 		admission.InterfaceKey, admission.BindingRevision, admission.ContextPublicationGeneration, time.Now().UTC()); err != nil {
-		return 0, fmt.Errorf("attach native inbox activation consumer: %w", err)
+		return 0, false, fmt.Errorf("attach native inbox activation consumer: %w", err)
 	}
-	return currentNativeConsumersTx(ctx, tx, setting.SettingID, postgres)
+	count, err := currentNativeConsumersTx(ctx, tx, setting.SettingID, postgres)
+	return count, changed, err
 }
 
 func advanceNativeSettingGenerationTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, setting channelnative.Setting, postgres bool) (channelnative.Setting, error) {
@@ -334,9 +356,9 @@ func currentNativeConsumersTx(ctx context.Context, tx *sql.Tx, settingID string,
 	return count, err
 }
 
-func RetireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres bool) error {
+func RetireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres bool) (bool, error) {
 	if tx == nil {
-		return fmt.Errorf("native inbox retirement requires selected transaction")
+		return false, fmt.Errorf("native inbox retirement requires selected transaction")
 	}
 	return retireStaleNativeInboxConsumersTx(ctx, tx, postgres)
 }
@@ -376,7 +398,7 @@ func reactivateAcknowledgedNativeInboxSettingTx(ctx context.Context, tx *sql.Tx,
 	if err != nil {
 		return err
 	}
-	if err := retireStaleNativeInboxConsumersTx(ctx, tx, postgres); err != nil {
+	if _, err := retireStaleNativeInboxConsumersTx(ctx, tx, postgres); err != nil {
 		return err
 	}
 	query := `SELECT readback_hash, install_operation_id FROM channel_native_settings
@@ -425,7 +447,7 @@ func reactivateAcknowledgedNativeInboxSettingTx(ctx context.Context, tx *sql.Tx,
 	return nil
 }
 
-func retireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres bool) error {
+func retireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres bool) (bool, error) {
 	query := `UPDATE channel_native_setting_consumers SET state='retired', updated_at=?
 		WHERE state='current' AND NOT EXISTS (
 			SELECT 1 FROM connected_channel_activations a
@@ -458,9 +480,15 @@ func retireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres
 				AND b.conversation_reference=a.conversation_reference
 			)`
 	}
-	if _, err := tx.ExecContext(ctx, query, time.Now().UTC()); err != nil {
-		return err
+	result, err := tx.ExecContext(ctx, query, time.Now().UTC())
+	if err != nil {
+		return false, err
 	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	changed := count > 0
 	query = `UPDATE channel_native_settings SET state='uncertain', updated_at=?
 		WHERE state IN ('planned','installed') AND NOT EXISTS (
 			SELECT 1 FROM channel_native_setting_consumers c
@@ -479,9 +507,15 @@ func retireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres
 				AND o.authority_kind='channel_native_setting'
 				AND o.state IN ('launched','response_observed','outcome_uncertain'))`
 	}
-	if _, err := tx.ExecContext(ctx, query, time.Now().UTC()); err != nil {
-		return err
+	result, err = tx.ExecContext(ctx, query, time.Now().UTC())
+	if err != nil {
+		return false, err
 	}
+	count, err = result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	changed = changed || count > 0
 	query = `UPDATE channel_native_settings SET state='retired', updated_at=?
 		WHERE state IN ('planned','installed') AND NOT EXISTS (
 			SELECT 1 FROM channel_native_setting_consumers c
@@ -492,6 +526,10 @@ func retireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres
 				SELECT 1 FROM channel_native_setting_consumers c
 				WHERE c.setting_id=channel_native_settings.setting_id AND c.state='current')`
 	}
-	_, err := tx.ExecContext(ctx, query, time.Now().UTC())
-	return err
+	result, err = tx.ExecContext(ctx, query, time.Now().UTC())
+	if err != nil {
+		return false, err
+	}
+	count, err = result.RowsAffected()
+	return changed || count > 0, err
 }

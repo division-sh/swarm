@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	authoractivityadapter "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity/readadapter"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
@@ -14,17 +15,35 @@ import (
 )
 
 type ActivityPostgresOwner struct {
-	backend     *postgresbackend.Backend
-	schemaGuard func() error
-	catalogMu   sync.Mutex
-	catalog     *runtimeauthoractivity.EventCatalogRegistry
+	backend        *postgresbackend.Backend
+	schemaGuard    func() error
+	catalogMu      sync.Mutex
+	catalog        *runtimeauthoractivity.EventCatalogRegistry
+	channelChanges *render.ReconcileSignal
 }
 
 type ActivitySQLiteOwner struct {
-	backend     *sqlitebackend.Backend
-	schemaGuard func() error
-	catalogMu   sync.Mutex
-	catalog     *runtimeauthoractivity.EventCatalogRegistry
+	backend        *sqlitebackend.Backend
+	schemaGuard    func() error
+	catalogMu      sync.Mutex
+	catalog        *runtimeauthoractivity.EventCatalogRegistry
+	channelChanges *render.ReconcileSignal
+}
+
+func (s *ActivityPostgresOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return fmt.Errorf("postgres activity reconciliation requires one composition binding")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *ActivitySQLiteOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return fmt.Errorf("sqlite activity reconciliation requires one composition binding")
+	}
+	s.channelChanges = signal
+	return nil
 }
 
 func (s *ActivityPostgresOwner) ListAuthorActivity(ctx context.Context, opts runtimeauthoractivity.ListOptions) (runtimeauthoractivity.ListResult, error) {

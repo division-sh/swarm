@@ -70,26 +70,31 @@ func requireChannelNativeSettingSettlementAuthorityTx(ctx context.Context, tx *s
 	return nil
 }
 
-func projectChannelNativeSettingSettlementTx(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool) error {
+func projectChannelNativeSettingSettlementTx(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool) (bool, error) {
 	if settlement.Authority.Kind != runtimeeffects.AuthorityChannelNativeSetting {
-		return nil
+		return false, nil
 	}
 	s := settlement.Authority.ChannelNativeSetting
 	if !settlement.Authority.Valid() || settlement.OperationID != s.EffectOperationID {
-		return fmt.Errorf("native setting settlement has contradictory authority")
+		return false, fmt.Errorf("native setting settlement has contradictory authority")
 	}
 	if settlement.State == runtimeeffects.StateTerminalFailure {
-		return nil
+		return false, nil
+	}
+	beforeState, beforeHash, err := loadNativeSettlementProjectionTx(ctx, tx, s, postgres)
+	if err != nil {
+		return false, err
 	}
 	state, readbackHash := "uncertain", any(nil)
+	var result sql.Result
 	if settlement.State == runtimeeffects.StateSettled {
 		provided, ok := settlement.Evidence["readback_hash"].(string)
 		desired, err := channelnative.DesiredCommands(s.SettingID, s.SettingGeneration)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !ok || provided != runtimeeffects.Fingerprint(desired) {
-			return fmt.Errorf("native setting success lacks exact compiled readback")
+			return false, fmt.Errorf("native setting success lacks exact compiled readback")
 		}
 		query := `SELECT COUNT(*) FROM runtime_external_effect_operations prior
 			WHERE prior.authority_kind='channel_native_setting'
@@ -105,10 +110,10 @@ func projectChannelNativeSettingSettlementTx(ctx context.Context, tx *sql.Tx, se
 		}
 		var predecessors int64
 		if err := tx.QueryRowContext(ctx, query, s.SettingID, settlement.OperationID).Scan(&predecessors); err != nil {
-			return err
+			return false, err
 		}
 		if predecessors != 0 {
-			return fmt.Errorf("native setting has unresolved predecessor write")
+			return false, fmt.Errorf("native setting has unresolved predecessor write")
 		}
 		state, readbackHash = "installed", provided
 	}
@@ -133,15 +138,28 @@ func projectChannelNativeSettingSettlementTx(ctx context.Context, tx *sql.Tx, se
 				WHERE setting_id=$3::uuid AND generation=$4 AND install_operation_id=$5::uuid
 				AND state IN ('planned','uncertain','retired','installed')`
 		}
-		result, err := tx.ExecContext(ctx, query, readbackHash, settlement.Now.UTC(), s.SettingID, s.SettingGeneration, settlement.OperationID)
-		if err != nil {
-			return err
-		}
-		return requireExternalAttemptTransition(result, nil)
+		result, err = tx.ExecContext(ctx, query, readbackHash, settlement.Now.UTC(), s.SettingID, s.SettingGeneration, settlement.OperationID)
+	} else {
+		result, err = tx.ExecContext(ctx, query, state, readbackHash, settlement.Now.UTC(), s.SettingID, s.SettingGeneration, settlement.OperationID)
 	}
-	result, err := tx.ExecContext(ctx, query, state, readbackHash, settlement.Now.UTC(), s.SettingID, s.SettingGeneration, settlement.OperationID)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return requireExternalAttemptTransition(result, nil)
+	if err := requireExternalAttemptTransition(result, nil); err != nil {
+		return false, err
+	}
+	afterState, afterHash, err := loadNativeSettlementProjectionTx(ctx, tx, s, postgres)
+	return beforeState != afterState || beforeHash != afterHash, err
+}
+
+func loadNativeSettlementProjectionTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.ChannelNativeSettingAuthority, postgres bool) (string, string, error) {
+	query := `SELECT state, COALESCE(readback_hash, '') FROM channel_native_settings
+		WHERE setting_id=? AND generation=? AND install_operation_id=?`
+	if postgres {
+		query = `SELECT state, COALESCE(readback_hash, '') FROM channel_native_settings
+			WHERE setting_id=$1::uuid AND generation=$2 AND install_operation_id=$3::uuid`
+	}
+	var state, readback string
+	err := tx.QueryRowContext(ctx, query, authority.SettingID, authority.SettingGeneration, authority.EffectOperationID).Scan(&state, &readback)
+	return state, readback, err
 }

@@ -55,7 +55,9 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 	var result runfork.RunForkActivation
 	var historicalReplayExecution runfork.RunForkHistoricalReplayExecution
 	var replayResult runfork.RunForkDeliveryEventReplayResult
+	var changes privaterunlifecycle.ChannelCardChanges
 	mutation := mutationprotocol.RunPostgresWithOptions(ctx, s.backend, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		changes = privaterunlifecycle.ChannelCardChanges{}
 		err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 			lineage, err := loadRunForkActivationLineage(ctx, s.RunLifecyclePostgresOwner, tx, forkRunID)
 			if err != nil {
@@ -144,7 +146,7 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 			if err := bindRunForkFanOutPendingReplays(ctx, tx, attempt, lineage.ForkRunID, plan, now); err != nil {
 				return err
 			}
-			if err := s.applyRunForkSourceFreeze(ctx, tx, attempt, lineage, now, req.AllowSourceFreeze); err != nil {
+			if err := s.applyRunForkSourceFreeze(ctx, tx, attempt, lineage, now, req.AllowSourceFreeze, &changes); err != nil {
 				return err
 			}
 			for _, family := range []privaterunforkrevision.Family{
@@ -174,7 +176,7 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 		result.HistoricalReplayExecution = &historicalReplayExecution
 		result.DeliveryEventReplay = &replayResult
 	}
-	return result, mutation.Err()
+	return result, errors.Join(mutation.Err(), s.publishChannelChanges(mutation.Acknowledged(), changes.Changed))
 }
 
 func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.RunForkActivateRequest) (result runfork.RunForkActivation, err error) {
@@ -193,7 +195,9 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 	}
 	var historicalReplayExecution runfork.RunForkHistoricalReplayExecution
 	var replayResult runfork.RunForkDeliveryEventReplayResult
+	var changes privaterunlifecycle.ChannelCardChanges
 	mutation := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite run fork activation", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		changes = privaterunlifecycle.ChannelCardChanges{}
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			lineage, err := loadSQLiteRunForkActivationLineage(txctx, s.RunLifecycleSQLiteOwner, tx, forkRunID)
 			if err != nil {
@@ -272,7 +276,7 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 			if err := bindRunForkFanOutPendingReplays(txctx, tx, attempt, lineage.ForkRunID, plan, now); err != nil {
 				return err
 			}
-			if err := s.applyRunForkSourceFreeze(txctx, tx, attempt, lineage, now, req.AllowSourceFreeze); err != nil {
+			if err := s.applyRunForkSourceFreeze(txctx, tx, attempt, lineage, now, req.AllowSourceFreeze, &changes); err != nil {
 				return err
 			}
 			for _, family := range []privaterunforkrevision.Family{
@@ -300,7 +304,7 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 		result.HistoricalReplayExecution = &historicalReplayExecution
 		result.DeliveryEventReplay = &replayResult
 	}
-	return result, mutation.Err()
+	return result, errors.Join(mutation.Err(), s.publishChannelChanges(mutation.Acknowledged(), changes.Changed))
 }
 
 func recordRunForkActivationAuthorActivity(ctx context.Context, story runtimeauthoractivity.Mutation, lineage runForkActivationLineage, now time.Time) error {
