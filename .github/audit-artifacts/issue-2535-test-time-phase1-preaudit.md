@@ -195,7 +195,7 @@ run before activating enforcement; provide the final pushed head immediately.
 
 Reviewer-g 6075837853 settles the held ratchet and qualification parameters.
 The earlier 10% proposal and three-store-supplement wording are superseded.
-The initial immutable reference is successful hosted full run 37706007387,
+The former initial immutable reference (superseded once below) is successful hosted full run 37706007387,
 attempt 1, workflow head cbfb3e267dd48d3e880e2f96bc03e9c41633973b and actual
 execution source 5661cf9f42e443d04bfe774f8b4e87e95bea44d6. Complete original
 81-unit artifacts validate against digest
@@ -225,3 +225,41 @@ selectors and required children in the single local core. `selected-store-fast`
 is optional, not a third cache supplement. Retain focused real cold/warm/corrupt/
 foreign/fresh-head/resurrection controls, but do not rerun either core owner
 redundantly. CI full / local core remains binding; no local full is required.
+
+## Approved One-Time Initialization Amendment
+
+Reviewer-g's independent policy ruling is
+https://github.com/division-sh/swarm/issues/2535#issuecomment-6082942278,
+with PR disposition6082944094. It supersedes the former initialization anchor,
+not the five-percent AND600s growth limits, >30s placement gate or reference-era
+membership rule. The authorized reference is run37937174260 attempt1,
+workflow head a4c1027c2204063b04565102a271a90db0134029 and actual execution source
+04cd8aa0eb6e2ec77c5295b551164bf63bd4b011; their source trees are identical.
+All82 proof units/79 physical proof jobs passed. The old ratchet and consequent
+Required test summary made the overall workflow red. Preserve that failed
+historical comparison rather than describing the initialization as a fix to
+performance or a formerly green workflow.
+
+Regenerate every one of the11,556 measured cells from the exact archived plan,
+complete command evidence and execution-source policy. Freeze each cell's
+reference-era tiers and retain count/environment/build context and canonical
+digest. The inherited41.820s TestA9ReleaseKeyedIngressConstructionBothStores
+release-binary, dual-store construction journey has explicit lifecycle/full
+placement approval, not core placement. No root removal, selector change,
+extra exception engine, automatic re-pin or legacy-reference fallback is allowed.
+
+G's attribution is recorded on PR2596 comment6082884510. Against the former
+anchor, full growth was676.080s:124.280s from116 roots already on merged master,
+28.310s from26 PR roots, and523.490s of retained-cell timing movement. A re-pin
+to exact master da1cd2219/run37918260216 alone still failed:208.240s core,
+736.930s lifecycle and648.050s full growth. These observations do not prove
+zero indirect PR cost, and the one-time initialization is not a measured speed
+improvement. The original inventory remains in history and its failed report,
+master counterfactual and unresolved longitudinal debt remain under #2535.
+
+Qualification is focused timing/CLI/planner/reference/spec guards on vemew,
+then one normal exact-head hosted full including CI timing budget and Required
+test summary. The existing valid local core receipts carry for this
+reference/spec-only adjustment; no local full rerun. A new >30s root or actual
+bound failure requires attribution and review, not another anchor move.
+Future anchor changes require their own explicit independent ruling.

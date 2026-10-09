@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -126,28 +127,35 @@ func TestTestTimePinnedReferenceRejectsReplacementAndUnauthorizedException(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reference.Roots) != 11424 || reference.PlanDigest != "e1d4f6cd8fadd4feab1f7aa975600fe6d07bc39fb3943928a407c62aaf6a95b2" {
+	if len(reference.Roots) != 11556 || reference.PlanDigest != "033294796270ddff56f716548fcb53820d6f932099131202fedf44b34060f8ab" {
 		t.Fatal("incomplete reference")
 	}
 	var total float64
 	var soakCells int
+	var approvedA9 bool
 	for _, root := range reference.Roots {
 		total += root.Seconds
 		if root.Backend != "" {
 			soakCells++
 		}
+		if root.Package == "github.com/division-sh/swarm/internal/serveapp" && root.Root == "TestA9ReleaseKeyedIngressConstructionBothStores" {
+			if root.Seconds != 41.82 || root.Count != "count-1" || root.Environment != "ci-postgres-gateway-empty-v1" || !slices.Equal(root.Tiers, []string{"lifecycle", "full"}) {
+				t.Fatalf("approved A9 placement or observation changed: %+v", root)
+			}
+			approvedA9 = true
+		}
 	}
-	if math.Abs(total-15739.18) > 1e-6 || soakCells != 2 {
-		t.Fatalf("total=%f soak=%d", total, soakCells)
+	if math.Abs(total-16414.28) > 1e-6 || soakCells != 2 || !approvedA9 {
+		t.Fatalf("total=%f soak=%d approvedA9=%v", total, soakCells, approvedA9)
 	}
 	for _, want := range []struct {
 		tier    string
 		cells   int
 		seconds float64
 	}{
-		{"core", 7327, 2398.23},
-		{"lifecycle", 11323, 12337.58},
-		{"full", 11424, 15739.18},
+		{"core", 7420, 2569.89},
+		{"lifecycle", 11455, 13009.42},
+		{"full", 11556, 16414.28},
 	} {
 		roots, problems := projectReferenceTimingRoots(reference.Roots, want.tier)
 		var seconds float64
@@ -167,6 +175,24 @@ func TestTestTimePinnedReferenceRejectsReplacementAndUnauthorizedException(t *te
 	}
 	for _, edit := range []func([]byte) []byte{
 		func(raw []byte) []byte {
+			return bytes.Replace(raw, []byte(`"run_id":37937174260`), []byte(`"run_id":37706007387`), 1)
+		},
+		func(raw []byte) []byte {
+			return bytes.Replace(raw, []byte(`"attempt":1`), []byte(`"attempt":2`), 1)
+		},
+		func(raw []byte) []byte {
+			return bytes.Replace(raw, []byte(TestTimeReferenceHead), []byte("cbfb3e267dd48d3e880e2f96bc03e9c41633973b"), 1)
+		},
+		func(raw []byte) []byte {
+			return bytes.Replace(raw, []byte(TestTimeApproval), []byte("https://github.com/division-sh/swarm/issues/2535#issuecomment-6075837853"), 1)
+		},
+		func(raw []byte) []byte {
+			return bytes.Replace(raw, []byte(reference.PlanDigest), []byte("e1d4f6cd8fadd4feab1f7aa975600fe6d07bc39fb3943928a407c62aaf6a95b2"), 1)
+		},
+		func(raw []byte) []byte {
+			return bytes.Replace(raw, []byte(TestTimeReferenceSource), []byte("5661cf9f42e443d04bfe774f8b4e87e95bea44d6"), 1)
+		},
+		func(raw []byte) []byte {
 			return bytes.Replace(raw, []byte(TestTimeReferenceSource), []byte(strings.Repeat("a", 40)), 1)
 		},
 		func(raw []byte) []byte { return bytes.Replace(raw, []byte(`"seconds":0`), []byte(`"seconds":1`), 1) },
@@ -182,8 +208,21 @@ func TestTestTimePinnedReferenceRejectsReplacementAndUnauthorizedException(t *te
 		func(raw []byte) []byte {
 			return bytes.Replace(raw, []byte(`"tiers":["core","lifecycle","full"]`), []byte(`"tiers":["full"]`), 1)
 		},
+		func(raw []byte) []byte {
+			return bytes.Replace(raw, []byte(`"count":"count-1"`), []byte(`"count":"cache-default"`), 1)
+		},
+		func(raw []byte) []byte {
+			return bytes.Replace(raw, []byte(`"environment":"ci-postgres-gateway-empty-v1"`), []byte(`"environment":"foreign"`), 1)
+		},
+		func(raw []byte) []byte {
+			return bytes.Replace(raw, []byte(`"cgo_enabled":"1"`), []byte(`"cgo_enabled":"0"`), 1)
+		},
 	} {
-		if _, err := LoadTestTimeReference(bytes.NewReader(edit(raw))); err == nil {
+		changed := edit(raw)
+		if bytes.Equal(changed, raw) {
+			t.Fatal("reference tamper counterexample did not change the input")
+		}
+		if _, err := LoadTestTimeReference(bytes.NewReader(changed)); err == nil {
 			t.Fatal("replacement or author-declared exception accepted")
 		}
 	}

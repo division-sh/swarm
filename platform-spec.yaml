@@ -23640,8 +23640,16 @@ test_specification:
       timing_publication_and_cadence: >-
         PR command-latency overruns become advisory only after complete successful plan-bound proof is admitted;
         missing, failed, corrupt, duplicate or foreign evidence remains fatal. Schedule/manual/master timing stays enforced.
-        The independent test-time ratchet anchors the full hosted run 37706007387 attempt 1 and its exact execution source,
-        workflow head, plan digest, native build context, count and environment in an immutable approved inventory.
+        The independent test-time ratchet uses the one-time approved initialization anchor from full hosted proof run
+        37937174260 attempt 1, workflow head a4c1027c2204063b04565102a271a90db0134029 and exact execution source
+        04cd8aa0eb6e2ec77c5295b551164bf63bd4b011, approved by issue #2535 comment 6082942278. All 82 proof units passed,
+        while the prior anchor made that overall workflow red; that failed comparison remains recorded and is not
+        relabeled as a passing run or measured speed improvement. Retain all 11,556 measured cells, exact plan/policy
+        identity, native build context, count and environment in the immutable approved inventory.
+        The inherited TestA9ReleaseKeyedIngressConstructionBothStores root measured 41.820 seconds and has independent
+        lifecycle/full-only placement approval: its release-binary, dual-store construction journey is not core proof.
+        The original reference and exact-master counterfactual remain audit evidence, and longitudinal performance
+        debt remains open under #2535. This initialization authorizes no automatic or recurring re-pin.
         Pin each reference cell's core/lifecycle/full membership from the exact policy at that reference execution
         source. Current selectors project candidate cells only; they must never reclassify the baseline. A promotion
         into a tier counts as added cost, while a demotion remains reported removed work without granting savings.
