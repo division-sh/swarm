@@ -73,7 +73,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			entityID := uuid.NewString()
 			entity := pipeline.ScenarioSetupEntityRequest{
 				Alias: "domain", EntityID: entityID, FlowInstance: "freeze/domain", EntityType: "review_item",
-				CurrentState: "active", Fields: map[string]any{"account_id": "domain"},
+				Fields: map[string]any{"account_id": "domain"},
 			}
 			parent := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), fixture.sourceRun, fixture.sourceRun, "", "")
 			child, err := runtimeflowidentity.KeyedChild(source, parent, "freeze", "domain")

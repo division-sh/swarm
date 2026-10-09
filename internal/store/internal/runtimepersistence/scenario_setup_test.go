@@ -28,12 +28,8 @@ func TestSQLiteScenarioSetupEntitiesIdempotentExistingRows(t *testing.T) {
 			EntityID:     entityID,
 			FlowInstance: "operating",
 			EntityType:   "product",
-			CurrentState: "waiting",
 			Fields: map[string]any{
 				"note": "seeded",
-			},
-			Gates: map[string]bool{
-				"review_ready": true,
 			},
 		}},
 	}
@@ -44,7 +40,7 @@ func TestSQLiteScenarioSetupEntitiesIdempotentExistingRows(t *testing.T) {
 	if _, err := sqliteStore.SetupScenarioEntities(ctx, req); err != nil {
 		t.Fatalf("SetupScenarioEntities matching replay: %v", err)
 	}
-	assertSQLiteScenarioSetupCounts(t, ctx, sqliteStore, runID, entityID, 1, 3)
+	assertSQLiteScenarioSetupCounts(t, ctx, sqliteStore, runID, entityID, 1, 1)
 
 	changed := req
 	changed.Entities = append([]pipeline.ScenarioSetupEntityRequest(nil), req.Entities...)
@@ -52,7 +48,7 @@ func TestSQLiteScenarioSetupEntitiesIdempotentExistingRows(t *testing.T) {
 	if _, err := sqliteStore.SetupScenarioEntities(ctx, changed); err == nil || !strings.Contains(err.Error(), "already exists with different fields") {
 		t.Fatalf("SetupScenarioEntities changed replay error = %v, want different fields", err)
 	}
-	assertSQLiteScenarioSetupCounts(t, ctx, sqliteStore, runID, entityID, 1, 3)
+	assertSQLiteScenarioSetupCounts(t, ctx, sqliteStore, runID, entityID, 1, 1)
 }
 
 func TestSQLiteScenarioSetupPersistsExactExecutionProfileAtomically(t *testing.T) {
@@ -76,7 +72,7 @@ func TestSQLiteScenarioSetupPersistsExactExecutionProfileAtomically(t *testing.T
 		RunID: runID, CreatedAt: time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC),
 		ScenarioExecutionProfile: &profile,
 		Entities: []pipeline.ScenarioSetupEntityRequest{{
-			Alias: "subject", EntityID: uuid.NewString(), FlowInstance: "flow", EntityType: "default", CurrentState: "ready",
+			Alias: "subject", EntityID: uuid.NewString(), FlowInstance: "flow", EntityType: "default",
 		}},
 	}
 	if _, err := store.SetupScenarioEntities(ctx, req); err != nil {
@@ -129,7 +125,7 @@ func TestPostgresScenarioSetupPersistsExactExecutionProfileAtomically(t *testing
 		RunID: runID, CreatedAt: time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC),
 		ScenarioExecutionProfile: &profile,
 		Entities: []pipeline.ScenarioSetupEntityRequest{{
-			Alias: "subject", EntityID: uuid.NewString(), FlowInstance: "flow", EntityType: "default", CurrentState: "ready",
+			Alias: "subject", EntityID: uuid.NewString(), FlowInstance: "flow", EntityType: "default",
 		}},
 	}
 	if _, err := store.SetupScenarioEntities(ctx, req); err != nil {

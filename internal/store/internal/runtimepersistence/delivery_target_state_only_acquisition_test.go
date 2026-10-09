@@ -57,9 +57,9 @@ func TestForkedSourceCanonicalTargetOwnersExcludeAndPreserveReadbackBothStores(t
 			if err != nil {
 				t.Fatal(err)
 			}
-			record, found, err := selected.LoadWorkflowEntityState(ctx, exact, runtimeidentity.NormalizeEntityID(entityID))
-			if err != nil || !found || record.EntityID != entityID || record.CurrentState != "active" {
-				t.Fatalf("historical state must remain readable = %#v, found=%t, %v", record, found, err)
+			record, err := selected.LoadWorkflowTargetPersistence(ctx, exact, runtimeidentity.NormalizeEntityID(entityID))
+			if err != nil || record.Presence != runtimepipeline.WorkflowTargetPersistenceStateOnly || record.State.EntityID != entityID || len(record.State.Fields) == 0 || record.State.CreatedAt.IsZero() || record.State.UpdatedAt.IsZero() {
+				t.Fatalf("historical fields must remain readable without construction = %#v, %v", record, err)
 			}
 		})
 	}
@@ -391,7 +391,7 @@ func TestWorkflowEntityStateSelectionOwnerUsesExactAuthoredScope(t *testing.T) {
 
 type stateOnlyAcquisitionStore interface {
 	storeTestDurableEventBusStore
-	runtimepipeline.WorkflowEntityStatePersistenceReader
+	runtimepipeline.WorkflowTargetPersistenceReader
 }
 
 func openStateOnlyAcquisitionStore(t *testing.T, backend string) (stateOnlyAcquisitionStore, *sql.DB, context.Context, string) {

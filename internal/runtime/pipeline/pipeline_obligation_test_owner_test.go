@@ -301,7 +301,6 @@ func missingWorkflowPersistenceTestRoles(p WorkflowPersistence) []string {
 		{"standing_services", p.store.standingServices == nil},
 		{"decision_routes", p.store.decisionRoutes == nil},
 		{"instance_reader", p.store.instanceReader == nil},
-		{"entity_state_reader", p.store.entityStateReader == nil},
 		{"entity_collection_reader", p.store.entityCollectionReader == nil},
 		{"target_reader", p.store.targetReader == nil},
 	}

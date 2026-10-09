@@ -190,7 +190,7 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 					persistence.onConflict = func(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) {
 						current, err := persistence.LoadWorkflowTargetPersistence(ctx, command.State.Identity, identity.NormalizeEntityID(command.State.EntityID))
 						var fields map[string]any
-						if err != nil || json.Unmarshal(current.State.Fields, &fields) != nil || fields["case_id"] != "first" || int64(current.State.Revision) != command.State.ExpectedRevision+1 {
+						if err != nil || json.Unmarshal(current.State.Fields, &fields) != nil || fields["case_id"] != "first" || current.Lifecycle.State.Revision != command.State.ExpectedRevision+1 {
 							t.Fatalf("stale attempt changed rival state: %+v err=%v", current, err)
 						}
 						for _, publication := range command.Publications {

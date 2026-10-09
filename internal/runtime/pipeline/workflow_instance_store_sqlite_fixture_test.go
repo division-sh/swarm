@@ -51,7 +51,7 @@ func (s *workflowInstanceStore) loadTrackedEntityStateProjectionSQLite(ctx conte
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
 	return runtimemutationlog.EntityStateProjection{
-		CurrentState: strings.TrimSpace(currentState.String),
+		CurrentState: runtimemutationlog.PresentLifecycleState(currentState.String),
 		Fields:       fields,
 		Bookkeeping:  bookkeeping,
 		Gates:        workflowBoolGatesAsMap(gates),

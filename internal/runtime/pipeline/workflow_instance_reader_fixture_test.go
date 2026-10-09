@@ -51,9 +51,9 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowEntityState(ctx context.
 		return WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("workflow entity state lookup requires exact route and entity identity")
 	}
 	route, runID := identity.Route, identity.RunID
-	query := `SELECT entity_id, flow_instance, entity_type, slug, name, current_state, revision, entered_state_at, gates, fields, bookkeeping, accumulator, created_at, updated_at FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
+	query := `SELECT entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
 	if r.dialect == workflowStoreDialectPostgres {
-		query = `SELECT entity_id::text, flow_instance, entity_type, slug, name, current_state, revision, entered_state_at, gates, fields, bookkeeping, accumulator, created_at, updated_at FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3`
+		query = `SELECT entity_id::text, flow_instance, entity_type, slug, name, fields, created_at, updated_at FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3`
 	}
 	record, err := scanPipelineTestWorkflowEntityState(r.db.QueryRowContext(ctx, query, runID, entityID.String(), route.InstancePath))
 	if err == sql.ErrNoRows {
@@ -81,9 +81,9 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowTargetPersistence(ctx co
 		return WorkflowTargetPersistenceRecord{}, err
 	}
 	defer tx.Rollback()
-	stateQuery := `SELECT entity_id, flow_instance, entity_type, slug, name, current_state, revision, entered_state_at, gates, fields, bookkeeping, accumulator, created_at, updated_at FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
+	stateQuery := `SELECT entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
 	if r.dialect == workflowStoreDialectPostgres {
-		stateQuery = `SELECT entity_id::text, flow_instance, entity_type, slug, name, current_state, revision, entered_state_at, gates, fields, bookkeeping, accumulator, created_at, updated_at FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3`
+		stateQuery = `SELECT entity_id::text, flow_instance, entity_type, slug, name, fields, created_at, updated_at FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3`
 	}
 	state, stateErr := scanPipelineTestWorkflowEntityState(tx.QueryRowContext(ctx, stateQuery, runID, entityID.String(), route.InstancePath))
 	stateExists := stateErr == nil
@@ -166,7 +166,7 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowTargetPersistence(ctx co
 func (r pipelineTestWorkflowInstanceReader) QueryWorkflowEntityCollection(ctx context.Context, owner WorkflowEntityCollectionOwner) ([]WorkflowEntityStatePersistenceRecord, error) {
 	runID := owner.RunID()
 	activeStates := runtimerunlifecycle.ActiveStates()
-	query := `SELECT es.entity_id, es.flow_instance, es.entity_type, es.slug, es.name, es.current_state, es.revision, es.entered_state_at, es.gates, es.fields, es.bookkeeping, es.accumulator, es.created_at, es.updated_at
+	query := `SELECT es.entity_id, es.flow_instance, es.entity_type, es.slug, es.name, es.fields, es.created_at, es.updated_at
 		FROM entity_state es
 		LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 		WHERE es.run_id = ? AND es.entity_type = ?
@@ -176,7 +176,7 @@ func (r pipelineTestWorkflowInstanceReader) QueryWorkflowEntityCollection(ctx co
 		ORDER BY es.created_at ASC, es.entity_id ASC`
 	args := []any{runID, owner.EntityType(), string(activeStates[0]), string(activeStates[1]), owner.ScopeKey(), owner.ScopeKey() + "/%", owner.ScopeKey() == runID, runID}
 	if r.dialect == workflowStoreDialectPostgres {
-		query = `SELECT es.entity_id::text, es.flow_instance, es.entity_type, es.slug, es.name, es.current_state, es.revision, es.entered_state_at, es.gates, es.fields, es.bookkeeping, es.accumulator, es.created_at, es.updated_at
+		query = `SELECT es.entity_id::text, es.flow_instance, es.entity_type, es.slug, es.name, es.fields, es.created_at, es.updated_at
 			FROM entity_state es
 			LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 			WHERE es.run_id = $1::uuid AND es.entity_type = $2
@@ -206,10 +206,10 @@ func (r pipelineTestWorkflowInstanceReader) QueryWorkflowEntityCollection(ctx co
 func scanPipelineTestWorkflowEntityState(row interface{ Scan(...any) error }) (WorkflowEntityStatePersistenceRecord, error) {
 	var record WorkflowEntityStatePersistenceRecord
 	var slug, name sql.NullString
-	var enteredAt, gates, fields, bookkeeping, accumulator, createdAt, updatedAt any
+	var fields, createdAt, updatedAt any
 	err := row.Scan(
 		&record.EntityID, &record.FlowInstance, &record.EntityType, &slug, &name,
-		&record.CurrentState, &record.Revision, &enteredAt, &gates, &fields, &bookkeeping, &accumulator,
+		&fields,
 		&createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -217,14 +217,11 @@ func scanPipelineTestWorkflowEntityState(row interface{ Scan(...any) error }) (W
 	}
 	record.Slug = slug.String
 	record.Name = name.String
-	record.Gates = pipelineTestJSONBytes(gates)
 	record.Fields = pipelineTestJSONBytes(fields)
-	record.Bookkeeping = pipelineTestJSONBytes(bookkeeping)
-	record.Accumulator = pipelineTestJSONBytes(accumulator)
 	for _, item := range []struct {
 		raw    any
 		target *time.Time
-	}{{enteredAt, &record.EnteredStageAt}, {createdAt, &record.CreatedAt}, {updatedAt, &record.UpdatedAt}} {
+	}{{createdAt, &record.CreatedAt}, {updatedAt, &record.UpdatedAt}} {
 		if value, ok := item.raw.(time.Time); ok {
 			*item.target = value.UTC()
 			continue
@@ -353,7 +350,6 @@ func pipelineTestJSONBytes(value any) json.RawMessage {
 }
 
 var _ WorkflowInstancePersistenceReader = pipelineTestWorkflowInstanceReader{}
-var _ WorkflowEntityStatePersistenceReader = pipelineTestWorkflowInstanceReader{}
 var _ WorkflowEntityCollectionPersistenceReader = pipelineTestWorkflowInstanceReader{}
 var _ WorkflowTargetPersistenceReader = pipelineTestWorkflowInstanceReader{}
 
@@ -377,7 +373,6 @@ func (r *recordingRuntimeMutationRunner) ListWorkflowInstances(ctx context.Conte
 }
 
 var _ WorkflowInstancePersistenceReader = (*recordingRuntimeMutationRunner)(nil)
-var _ WorkflowEntityStatePersistenceReader = (*recordingRuntimeMutationRunner)(nil)
 var _ WorkflowEntityCollectionPersistenceReader = (*recordingRuntimeMutationRunner)(nil)
 var _ WorkflowTargetPersistenceReader = (*recordingRuntimeMutationRunner)(nil)
 

@@ -35,7 +35,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 			at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			if _, err := owner.SetupScenarioEntities(f.ctx, pipeline.ScenarioSetupRequest{
 				RunID: runID, CreatedAt: at,
-				Entities: []pipeline.ScenarioSetupEntityRequest{{Alias: "import", EntityID: entityID, FlowInstance: ".", EntityType: "record", CurrentState: "pending", Fields: map[string]any{"marker": "recorded"}}},
+				Entities: []pipeline.ScenarioSetupEntityRequest{{Alias: "import", EntityID: entityID, FlowInstance: ".", EntityType: "record", Fields: map[string]any{"marker": "recorded"}}},
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -44,7 +44,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 				t.Fatal(err)
 			}
 			history, err := owner.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: marker.ID()})
-			if err != nil || len(history.Entities) != 1 || history.Entities[0].EntityID != entityID || history.Entities[0].CurrentState != "pending" ||
+			if err != nil || len(history.Entities) != 1 || history.Entities[0].EntityID != entityID || history.Entities[0].CurrentState != nil || history.Entities[0].EnteredStateAt != nil || history.Entities[0].Gates != nil || history.Entities[0].Bookkeeping != nil || history.Entities[0].Accumulator != nil ||
 				history.Entities[0].Fields["marker"] != "recorded" || history.Entities[0].MaterializationMetadata == nil ||
 				history.Entities[0].MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState {
 				t.Fatalf("scenario import lost its historical meaning: %+v err=%v", history.Entities, err)
