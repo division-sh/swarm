@@ -1665,8 +1665,17 @@ func TestSelectedContractExecutionMaterializationRejectsUnversionedRouteProofRem
 	selectedEventID := seedSelectedContractLaterEventPreRevision(t, db, sourceRunID, entityID, at.Add(time.Second), "flow-a/1")
 	captureRunForkTestRevision(t, db, sourceRunID)
 	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: selectedEventID})
-	if err != nil || plan.ForkPoint.EventID != selectedEventID || len(plan.Entities) != 1 {
+	if err != nil || plan.ForkPoint.EventID != selectedEventID || len(plan.Entities) != 5 || plan.ReconstructedEntityCount != len(plan.Entities) {
 		t.Fatalf("fixed selected fixture: plan=%+v err=%v", plan, err)
+	}
+	found := false
+	for _, entity := range plan.Entities {
+		if entity.EntityID == entityID && entity.MaterializationMetadata != nil && entity.MaterializationMetadata.FlowInstance == "flow-a/1" && entity.MaterializationMetadata.Owner == runfork.RunForkMaterializedEntitySnapshotMetadataOwner {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("fixed selected fixture lost its exact constructed subject")
 	}
 	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, selectedEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
 	// Valid fixed construction does not replace the selected frontier proof.

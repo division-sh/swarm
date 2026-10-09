@@ -428,7 +428,7 @@ func TestRunForkPlanner_SystemDeliveryRowsAreNotCanonicalEventDeliveries(t *test
 	}
 }
 
-// Retain the historical regression identity while removing its obsolete refusal.
+// Current route membership cannot affect the independently blocked timer cut.
 func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentRouteRows(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
@@ -479,7 +479,7 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
-	if !plan.ExecutionReady || len(plan.UnsupportedBlockers) != 0 {
+	if plan.ExecutionReady || len(plan.UnsupportedBlockers) != 1 || plan.UnsupportedBlockers[0].Code != runfork.RunForkBlockerTimerHistoryUnproven {
 		t.Fatalf("fixed state inherited current route authority: %#v", plan.UnsupportedBlockers)
 	}
 	baseline, err := json.Marshal(plan)
@@ -512,8 +512,8 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 	if plan.ReplayResumeAdmission.Owner != runfork.RunForkReplayResumeAdmissionOwner {
 		t.Fatalf("taxonomy owner = %q, want %q", plan.ReplayResumeAdmission.Owner, runfork.RunForkReplayResumeAdmissionOwner)
 	}
-	if !plan.ReplayResumeAdmission.StateOnlyExecutionReady || plan.ReplayResumeAdmission.ReplayResumeFactsPresent || plan.ReplayResumeAdmission.BoundedReplaySupported {
-		t.Fatalf("taxonomy flags = state_only:%v historical_required:%v bounded_supported:%v, want true/false/false", plan.ReplayResumeAdmission.StateOnlyExecutionReady, plan.ReplayResumeAdmission.ReplayResumeFactsPresent, plan.ReplayResumeAdmission.BoundedReplaySupported)
+	if plan.ReplayResumeAdmission.StateOnlyExecutionReady || !plan.ReplayResumeAdmission.ReplayResumeFactsPresent || plan.ReplayResumeAdmission.BoundedReplaySupported {
+		t.Fatalf("taxonomy flags = state_only:%v historical_required:%v bounded_supported:%v, want false/true/false", plan.ReplayResumeAdmission.StateOnlyExecutionReady, plan.ReplayResumeAdmission.ReplayResumeFactsPresent, plan.ReplayResumeAdmission.BoundedReplaySupported)
 	}
 	if !runForkTestHasDisposition(plan.ReplayResumeAdmission, runfork.RunForkReplayResumeFactEntityStateSnapshot) {
 		t.Fatalf("missing entity-state taxonomy disposition; admission=%#v", plan.ReplayResumeAdmission)
