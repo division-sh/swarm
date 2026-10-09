@@ -235,7 +235,11 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 	routePlan := newRoutePlan(evt)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	ctx = withConnectRoutePlanPreview(ctx)
-	if scope, bounded := p.connectPlanner.selectedTargetScope(ctx, evt); bounded {
+	scope, bounded, err := p.connectPlanner.selectedTargetScope(ctx, evt)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	if bounded {
 		ctx = withSelectedTargetOwnerLookupScope(ctx, scope)
 	}
 	projection, err := p.recipientPolicy.loadSelectedRunTargetOwnerProjection(ctx)

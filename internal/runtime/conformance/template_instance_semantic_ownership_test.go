@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"go/types"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -355,6 +356,9 @@ func TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority(t *testing.
 	}
 
 	repoRoot := canonicalrouting.RepoRoot(t)
+	if _, err := os.Stat(filepath.Join(repoRoot, "internal/runtime/bus/template_instance_lifecycle.go")); !os.IsNotExist(err) {
+		t.Fatalf("retired template lifecycle interpreter survived or could not be checked: %v", err)
+	}
 	retiredFunctions := map[string]struct{}{
 		"connectReceiverPinCollisionIssues":       {},
 		"connectReceiverPinFact":                  {},
@@ -366,6 +370,14 @@ func TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority(t *testing.
 		"eventReferencesMatch":                    {},
 		"eventReferencesOverlap":                  {},
 		"routeFromEvent":                          {},
+		"constructedChildConnectTarget":           {},
+		"descriptorsForPlans":                     {},
+		"resolveInstanceContract":                 {},
+		"addProviderSourceLookupPaths":            {},
+		"addConnectRecipientLocked":               {},
+		"connectRecipientAdmissionsForRunLocked":  {},
+		"connectRecipientAdmissionsForRun":        {},
+		"connectRecipientAdmissionsForTargets":    {},
 	}
 	guardedFiles := []string{
 		"internal/events/types.go",
@@ -373,7 +385,8 @@ func TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority(t *testing.
 		"internal/runtime/core/pinrouting/pinrouting.go",
 		"internal/runtime/core/pinrouting/flow_input_producer.go",
 		"internal/runtime/bus/connect_route_plan_dispatch.go",
-		"internal/runtime/bus/template_instance_lifecycle.go",
+		"internal/runtime/bus/connect_instance_selection.go",
+		"internal/runtime/bus/indexed_connect_receivers.go",
 		"internal/runtime/bus/routing_derivation.go",
 		"internal/runtime/bus/eventbus.go",
 		"internal/runtime/bus/eventbus_routing.go",

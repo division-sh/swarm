@@ -109,8 +109,14 @@ func TestA9StoredReceiverSelectionPreservesIdentityAndChecksKeys(t *testing.T) {
 					indexReader.observations = append(indexReader.observations, constructionIndexObservation(t, source, busInternalTestRunID, instance, key))
 				}
 			}
-			if test.derived && len(table.evaluateConnectPlan(busInternalTestRunID, plan, []events.RouteIdentity{plan.ReceiverRoute(stored[0].InstancePath, stored[0].EntityID)}).Recipients()) != 1 {
-				t.Fatal("counterexample requires an installed routable derived address")
+			if test.derived {
+				definitions, err := table.ConnectReceiverDefinitions(busInternalTestRunID, stored[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(table.connectGraph.EvaluateMaterializedRecipients(plan, []events.RouteIdentity{plan.ReceiverRoute(stored[0].InstancePath, stored[0].EntityID)}, definitions).Recipients()) != 1 {
+					t.Fatal("counterexample requires a compiled routable derived address")
+				}
 			}
 			event := eventtest.ExistingRunRootIngress(eventtest.UUID(test.name), "producer/account.ready", "test", "", []byte(`{"account_id":"acct-1"}`), 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
 			owner := connectInstanceSelector{source: source, index: indexReader}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -38,7 +39,8 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission routes: %w", err)
 	}
-	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Source, req.Plan); err != nil {
+	instances, err := installContractFrontierFlowInstanceRoutes(routeTable, req.Source, req.Plan)
+	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
 	connectGraph := runtimepinrouting.CompileConnectGraph(req.Source)
@@ -46,7 +48,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if len(connectIssues) != 0 {
 		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission connect routes: %#v", connectIssues)
 	}
-	routeEvents, incompleteRoutes, err := selectedRouteHistoryEvents(routeTable, req.Source, connectGraph, req.Plan.SourceRunID, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
+	routeEvents, incompleteRoutes, err := selectedRouteHistoryEvents(routeTable, req.Source, connectGraph, req.Plan.SourceRunID, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission), instances)
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
@@ -171,11 +173,11 @@ func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfor
 	return out
 }
 
-func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, selectedSource semanticview.Source, graph runtimepinrouting.CompiledConnectGraph, runID string, history []selectedRouteHistoryEvent) ([]runfork.RunForkSelectedContractRouteEvent, bool, error) {
+func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, selectedSource semanticview.Source, graph runtimepinrouting.CompiledConnectGraph, runID string, history []selectedRouteHistoryEvent, instances []runtimeflowidentity.Instance) ([]runfork.RunForkSelectedContractRouteEvent, bool, error) {
 	out := make([]runfork.RunForkSelectedContractRouteEvent, 0, len(history))
 	incomplete := false
 	for _, event := range history {
-		evaluation, err := contractFrontierRouteEvaluation(routeTable, selectedSource, graph, runID, event.eventName, event.routingSource)
+		evaluation, err := contractFrontierRouteEvaluation(routeTable, selectedSource, graph, runID, event.eventName, event.routingSource, instances)
 		if err != nil {
 			return nil, false, err
 		}

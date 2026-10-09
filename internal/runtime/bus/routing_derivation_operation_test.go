@@ -129,7 +129,7 @@ func nestedTopologySink(t testing.TB, source semanticview.Source, side, revision
 	return sink
 }
 
-func TestConstructedChildConnectTargetRequiresExactInstalledParent(t *testing.T) {
+func TestConstructedChildConnectTargetRequiresExactNativeParent(t *testing.T) {
 	repo := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyLifecycleNestedTemplates(t), runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
@@ -141,52 +141,46 @@ func TestConstructedChildConnectTargetRequiresExactInstalledParent(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, variant := range []string{"exact", "absent", "foreign_run", "crossed_parent", "missing_parent", "altered_parent_entity", "retired", "replacement"} {
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, variant := range []string{"exact", "absent", "foreign_run", "crossed_parent", "missing_parent", "altered_parent_entity", "replacement"} {
 		t.Run(variant, func(t *testing.T) {
-			table, err := DeriveRouteTable(source)
-			if err != nil {
-				t.Fatal(err)
-			}
-			owner := runtimeflowidentity.RunScopedFlowInstance{RunID: busInternalTestRunID, Route: child.Route()}
+			reader := constructionIndexTestReader{}
 			if variant != "absent" {
-				if err := table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: child}); err != nil {
-					t.Fatal(err)
-				}
+				reader.observations = []runtimepipeline.FlowInstanceObservation{constructionIndexObservation(t, source, busInternalTestRunID, child, "")}
 			}
-			runID, parentRoute := busInternalTestRunID, child.ParentRoute
+			runID, selectedParent := busInternalTestRunID, parent
 			switch variant {
 			case "foreign_run":
-				runID = "foreign-run"
+				runID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 			case "crossed_parent":
-				parentRoute.FlowInstance = "outer/right/sink/same-revision"
+				selectedParent = nestedTopologySink(t, source, "right", "same-revision")
 			case "missing_parent":
-				parentRoute = runtimeflowidentity.ParentRoute{}
+				selectedParent = runtimeflowidentity.Instance{}
 			case "altered_parent_entity":
-				parentRoute.EntityID = "foreign-entity"
-			case "retired", "replacement":
-				if err := table.RemoveFlowInstanceRoute(owner); err != nil {
+				selectedParent.EntityID = "foreign-entity"
+			case "replacement":
+				other := nestedTopologySink(t, source, "left", "replacement-revision")
+				replacement, err := runtimeflowidentity.KeylessChild(source, other, child.TemplateID)
+				if err != nil {
 					t.Fatal(err)
 				}
-				if variant == "replacement" {
-					other := nestedTopologySink(t, source, "left", "replacement-revision")
-					replacement, err := runtimeflowidentity.KeylessChild(source, other, child.TemplateID)
-					if err != nil {
-						t.Fatal(err)
-					}
-					otherOwner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: replacement.Route()}
-					if err := table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: otherOwner, Instance: replacement}); err != nil {
-						t.Fatal(err)
-					}
-				}
+				reader.observations = []runtimepipeline.FlowInstanceObservation{constructionIndexObservation(t, source, runID, replacement, "")}
 			}
-			target, found, err := table.constructedChildConnectTarget(runID, child.TemplateID, parentRoute)
+			request, err := runtimepipeline.NewDeclaredFlowInstanceLookup(source, fact, runID, child.TemplateID, selectedParent, nil)
+			var observed runtimepipeline.FlowInstanceObservation
+			var found bool
+			if err == nil {
+				observed, found, err = reader.LookupFlowInstance(context.Background(), request)
+			}
 			if variant == "exact" {
-				want := events.RouteIdentity{FlowID: child.TemplateID, FlowInstance: child.InstancePath, EntityID: child.EntityID}
-				if err != nil || !found || target != want {
-					t.Fatalf("exact installed child=%+v found=%v err=%v", target, found, err)
+				if err != nil || !found || observed.Identity() != child {
+					t.Fatalf("exact native child=%+v found=%v err=%v", observed.Identity(), found, err)
 				}
-			} else if found || !target.Empty() {
-				t.Fatalf("parent context elected an unowned child: %+v found=%v err=%v", target, found, err)
+			} else if found || observed.Valid() {
+				t.Fatalf("parent context elected an unowned child: %+v found=%v err=%v", observed.Identity(), found, err)
 			}
 		})
 	}
@@ -411,7 +405,7 @@ func TestConnectPreviewUsesPairedRouteTableSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver := newConnectRoutePlanResolver(source, live, nil, nil, nil, nil)
+	resolver := newConnectRoutePlanResolver(source, live, nil, nil, nil)
 	preview := func(id string) {
 		t.Helper()
 		current := &connectRoutePlanPreviewRoutes{}
@@ -430,7 +424,7 @@ func TestConnectPreviewUsesPairedRouteTableSource(t *testing.T) {
 				OccurredAt: at,
 			}},
 		}
-		if err := resolver.installTemplateInstanceLifecyclePreview(ctx, busInternalTestRunID, decision); err != nil {
+		if err := resolver.installFlowConstructionPreview(ctx, busInternalTestRunID, *decision.Activation); err != nil {
 			t.Fatal(err)
 		}
 		identity := topologyOperationIdentity(t, id)

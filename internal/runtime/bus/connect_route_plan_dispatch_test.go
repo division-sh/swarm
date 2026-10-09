@@ -35,6 +35,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -289,38 +290,6 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 					routeTable, err := DeriveRouteTable(source)
 					if err != nil {
 						t.Fatalf("DeriveRouteTable: %v", err)
-					}
-					if rootReceiver {
-						rootReceiverNode := testRootNode(t, "receiver")
-						for _, localEvent := range []string{"work.accepted", "work.audited"} {
-							plan := agentidentity.Plan{}
-							recipient := events.MustNodeDeliveryRecipient(rootReceiverNode)
-							if subscriberType == "agent" {
-								identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, ".", "receiver", "")
-								plan, err = identity.Plan()
-								if err != nil {
-									t.Fatalf("project root agent plan: %v", err)
-								}
-								recipient = events.MustAgentDeliveryRecipient("receiver")
-							}
-							subscriber := Subscriber{
-								Recipient:    recipient,
-								MatchPattern: localEvent,
-								routeSource:  subscriberRouteSourceSubscription,
-								AgentPlan:    plan,
-							}
-							if subscriber.Recipient.IsNode() {
-								subscriber.handlerNode = rootReceiverNode
-								subscriber.targetHandler, err = runtimepipeline.AdmitDeliveryTargetHandler(source, rootReceiverNode)
-								if err != nil {
-									t.Fatalf("admit root target handler: %v", err)
-								}
-							}
-							if err := routeTable.addConnectRecipientLocked(".", nil, localEvent, subscriber, runID, ""); err != nil {
-								t.Fatalf("admit root receiver: %v", err)
-							}
-						}
-						routeTable.rebuildLocked()
 					}
 					eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: routeTable})
 					if err != nil {
@@ -700,7 +669,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsBeforeReplyContextMutation(t *
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	replyStore := &connectRoutePlanReplyMutationStore{}
-	resolver := newConnectRoutePlanResolver(source, routeTable, nil, nil, nil, replyStore)
+	resolver := newConnectRoutePlanResolver(source, routeTable, nil, nil, replyStore)
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(), "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 		Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-entity")},
 	}, time.Now().UTC())
@@ -1210,6 +1179,9 @@ func TestEventBusPublish_ConnectRoutePlanRejectsConflictingAdmittedTargetBeforeP
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID,
+		StoredFlowInstanceIdentityFixture(source, "consumer", "", busInternalTestRunID, connectRoutePlanStaticOwner().EntityID), ""))
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(
 		eventID,
@@ -1367,6 +1339,9 @@ func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, ".")
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID,
+		StoredFlowInstanceIdentityFixture(source, "consumer", "", busInternalTestRunID, connectRoutePlanStaticOwner().EntityID), ""))
 	eventID := uuid.NewString()
 	rootInstanceID := uuid.NewString()
 	evt := connectRoutePlanRootProducerEvent(eventID,
@@ -1422,7 +1397,7 @@ func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T
 func TestEventBusPublish_RootConnectToNestedStaticPersistsExactReceiverOwner(t *testing.T) {
 	source := connectRoutePlanRootProducerStaticSource(t)
 	store := newTargetRouteMemoryStore()
-	childEntity := eventtest.UUID("distinct-child-owner")
+	childEntity := runtimeflowidentity.EntityID("consumer")
 	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: childEntity})
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -1431,6 +1406,9 @@ func TestEventBusPublish_RootConnectToNestedStaticPersistsExactReceiverOwner(t *
 	rootTarget := events.RouteIdentity{
 		FlowID: ".", FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("root-source-entity"),
 	}.Normalized()
+	installConnectionSourceConstructionForRun(t, eb, source, ".", rootTarget.FlowInstance)
+	store.installIndexObservation(constructionIndexObservation(t, source, rootTarget.FlowInstance,
+		StoredFlowInstanceIdentityFixture(source, "consumer", "", rootTarget.FlowInstance, childEntity), ""))
 	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "root-dispatcher")),
 		Target:    events.MustExistingEntityTarget(rootTarget),
@@ -1491,6 +1469,7 @@ func TestEventBusPublish_RootConnectParentContextCannotSupplyMissingReceiver(t *
 	currentTarget := events.RouteIdentity{
 		FlowID: ".", FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("unrelated-current-owner"),
 	}.Normalized()
+	installConnectionSourceConstructionForRun(t, eb, source, ".", currentTarget.FlowInstance)
 	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "root-dispatcher")),
 		Target:    events.MustExistingEntityTarget(currentTarget),
@@ -1501,10 +1480,10 @@ func TestEventBusPublish_RootConnectParentContextCannotSupplyMissingReceiver(t *
 	)
 
 	preflight, err := eb.CheckPublishRecipientPlan(ctx, evt)
-	if err == nil || !strings.Contains(err.Error(), "target owner is missing") {
+	if !isolatedInstanceLookupMiss(err) {
 		t.Fatalf("CheckPublishRecipientPlan result/error = %#v/%v, want missing receiver rejection", preflight, err)
 	}
-	if err := eb.Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "target owner is missing") {
+	if err := eb.Publish(ctx, evt); !isolatedInstanceLookupMiss(err) {
 		t.Fatalf("Publish error = %v, want missing receiver rejection", err)
 	}
 	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
@@ -1524,6 +1503,9 @@ func TestEventBusPublish_RootConnectToSingletonUsesReceiverOwnedMaterializingTar
 	rootTarget := events.RouteIdentity{
 		FlowID: ".", FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("root-source-entity"),
 	}.Normalized()
+	installConnectionSourceConstructionForRun(t, eb, source, ".", rootTarget.FlowInstance)
+	store.installIndexObservation(constructionIndexObservation(t, source, rootTarget.FlowInstance,
+		StoredFlowInstanceIdentityFixture(source, "consumer", "", rootTarget.FlowInstance, runtimeflowidentity.EntityID("consumer")), ""))
 	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "root-dispatcher")),
 		Target:    events.MustExistingEntityTarget(rootTarget),
@@ -1609,9 +1591,14 @@ func TestRouteTableCompiledConnectRootInputExcludesFlattenedChildObserver(t *tes
 	if len(plans) != 1 {
 		t.Fatalf("matching connect plans = %#v, want one child-to-root plan", plans)
 	}
-	evaluation := routeTable.evaluateConnectPlan(evt.RunID(), plans[0], []events.RouteIdentity{{
-		FlowID: ".", FlowInstance: "selected-root", EntityID: eventtest.UUID("selected-root-owner"),
-	}})
+	rootInstance := ConstructedFlowInstanceIdentityFixture(source, ".", "", evt.RunID())
+	definitions, err := routeTable.ConnectReceiverDefinitions(evt.RunID(), rootInstance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evaluation := routeTable.connectGraph.EvaluateMaterializedRecipients(plans[0], []events.RouteIdentity{{
+		FlowID: ".", FlowInstance: rootInstance.InstancePath, EntityID: rootInstance.EntityID,
+	}}, definitions)
 	if !evaluation.Matched() || evaluation.RequiresRuntimeResolution() {
 		t.Fatalf("materialized connect evaluation = %#v, want one exact root receiver", evaluation)
 	}
@@ -1628,67 +1615,70 @@ func TestRouteTableCompiledConnectRootInputExcludesFlattenedChildObserver(t *tes
 }
 
 func TestConnectRecipientEvaluationRejectsSiblingRunAcrossCommittedPreviewAndRemoval(t *testing.T) {
-	const (
-		runA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-		runB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-	)
+	const runA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	const runB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 	for _, tc := range []struct {
 		name   string
 		source func(testing.TB) semanticview.Source
 		flowID string
 	}{
-		{name: "select", source: func(t testing.TB) semanticview.Source {
+		{"select", func(t testing.TB) semanticview.Source {
 			return connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelect)
-		}, flowID: "account"},
-		{name: "select_or_create", source: func(t testing.TB) semanticview.Source {
+		}, "account"},
+		{"select_or_create", func(t testing.TB) semanticview.Source {
 			return connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelectOrCreate)
-		}, flowID: "account"},
-		{name: "create", source: func(t testing.TB) semanticview.Source {
-			return connectRoutePlanPayloadCreateResolutionSource(t)
-		}, flowID: "validator"},
+		}, "account"},
+		{"create", func(t testing.TB) semanticview.Source { return connectRoutePlanPayloadCreateResolutionSource(t) }, "validator"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := tc.source(t)
 			plan := mustInstanceKeyConnectRoutePlan(t, source)
-			target := events.RouteIdentity{FlowID: tc.flowID, FlowInstance: tc.flowID + "/one", EntityID: eventtest.UUID(tc.name + "-entity")}
-			identity, err := runtimeflowidentity.NewRunScopedFlowInstance(runA, runtimeflowidentity.DeriveRoute(tc.flowID, "one"))
+			instance := StoredFlowInstanceIdentityFixture(source, tc.flowID, "one", runA, eventtest.UUID(tc.name+"-entity"))
+			target := events.RouteIdentity{FlowID: tc.flowID, FlowInstance: instance.InstancePath, EntityID: instance.EntityID}
+			observed := constructionIndexObservation(t, source, runA, instance, eventtest.UUID("selection-key"))
+			reader := &constructionIndexTestReader{observations: []runtimepipeline.FlowInstanceObservation{observed}}
+			table, err := DeriveRouteTable(source)
 			if err != nil {
 				t.Fatal(err)
 			}
-			install := func(t *testing.T) *RouteTable {
+			resolver := newConnectRoutePlanResolver(source, table, nil, reader, nil)
+			ctx := constructionIndexContext(t, source)
+			assert := func(ctx context.Context) {
 				t.Helper()
-				table, err := DeriveRouteTable(source)
-				if err != nil {
-					t.Fatal(err)
+				got, err := resolver.evaluateSelectedReceiverCarriers(ctx, runA, plan, []events.RouteIdentity{target})
+				if err != nil || len(got.Recipients()) != 1 {
+					t.Fatalf("run A exact receiver: %+v %v", got, err)
 				}
-				if err := table.AddConstructedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
-					t.Fatal(err)
-				}
-				return table
-			}
-			assertEvaluation := func(t *testing.T, resolver connectRoutePlanResolver, ctx context.Context) {
-				t.Helper()
-				if got := resolver.evaluateSelectedReceiverCarriers(ctx, runA, plan, []events.RouteIdentity{target}).Recipients(); len(got) != 1 {
-					t.Fatalf("run A recipients = %#v, want one exact owner", got)
-				}
-				if got := resolver.evaluateSelectedReceiverCarriers(ctx, runB, plan, []events.RouteIdentity{target}).Recipients(); len(got) != 0 {
-					t.Fatalf("run B recipients = %#v, want no run A owner", got)
+				foreign, err := resolver.evaluateSelectedReceiverCarriers(ctx, runB, plan, []events.RouteIdentity{target})
+				if err == nil || len(foreign.Recipients()) != 0 {
+					t.Fatalf("foreign run acquired receiver: %+v %v", foreign, err)
 				}
 			}
-
-			committed := install(t)
-			resolver := connectRoutePlanResolver{routeTable: committed, graph: runtimepinrouting.CompileConnectGraph(source)}
-			assertEvaluation(t, resolver, context.Background())
-			if err := committed.RemoveFlowInstanceRoute(identity); err != nil {
+			assert(ctx)
+			owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runA, Route: instance.Route()}
+			if err := table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: instance}); err != nil {
 				t.Fatal(err)
 			}
-			if got := resolver.evaluateSelectedReceiverCarriers(context.Background(), runA, plan, []events.RouteIdentity{target}).Recipients(); len(got) != 0 {
-				t.Fatalf("removed run A recipients = %#v, want none", got)
+			if err := table.RemoveFlowInstanceRoute(owner); err != nil {
+				t.Fatal(err)
 			}
-
-			preview := install(t)
-			previewCtx := context.WithValue(context.Background(), connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{table: preview})
-			assertEvaluation(t, connectRoutePlanResolver{graph: runtimepinrouting.CompileConnectGraph(source)}, previewCtx)
+			assert(ctx) // Process membership cannot withdraw a durable receiver.
+			reader.observations = nil
+			missing, err := resolver.evaluateSelectedReceiverCarriers(ctx, runA, plan, []events.RouteIdentity{target})
+			if err == nil || len(missing.Recipients()) != 0 {
+				t.Fatalf("absent native receiver acquired routes: %+v %v", missing, err)
+			}
+			header, err := observed.WorkflowInstance()
+			if err != nil {
+				t.Fatal(err)
+			}
+			readiness, _ := observed.Readiness()
+			proposal := runtimepipeline.FlowInstanceActivationPlan{Identity: instance, Instance: header, Readiness: readiness.Plan, OccurredAt: header.CreatedAt}
+			if err := proposal.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			preview := context.WithValue(ctx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{plans: []runtimepipeline.FlowInstanceActivationPlan{proposal}})
+			assert(preview)
 		})
 	}
 }
@@ -2136,37 +2126,6 @@ func TestEventBusConnectRecipientRegistrationExpandsWildcardOverDeclaredInputs(t
 	}
 }
 
-func TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution(t *testing.T) {
-	calls := 0
-	resolver := connectRoutePlanResolver{
-		loadDescriptors: func(context.Context) ([]runtimepinrouting.Descriptor, error) {
-			calls++
-			return []runtimepinrouting.Descriptor{{ID: "alpha", EntityID: "team-a", FlowInstance: "worker/alpha"}}, nil
-		},
-	}
-
-	staticPlans := runtimepinrouting.CompileConnectGraph(connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{
-		Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed",
-	})).Plans()
-	if len(staticPlans) != 1 {
-		t.Fatalf("static plans = %#v, want one", staticPlans)
-	}
-	if _, err := resolver.descriptorsForPlans(context.Background(), staticPlans); err != nil {
-		t.Fatalf("descriptorsForPlans static: %v", err)
-	}
-	if calls != 0 {
-		t.Fatalf("descriptor loader calls after static plan = %d, want 0", calls)
-	}
-
-	instancePlan := mustInstanceKeyConnectRoutePlan(t, connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelect))
-	if _, err := resolver.descriptorsForPlans(context.Background(), []runtimepinrouting.ConnectRoutePlan{instancePlan}); err != nil {
-		t.Fatalf("descriptorsForPlans runtime: %v", err)
-	}
-	if calls != 1 {
-		t.Fatalf("descriptor loader calls after runtime-resolution plan = %d, want 1", calls)
-	}
-}
-
 func TestEventBusPublish_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{
 		Event:  "deploy.done",
@@ -2180,6 +2139,9 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID,
+		StoredFlowInstanceIdentityFixture(source, "consumer", "", busInternalTestRunID, connectRoutePlanStaticOwner().EntityID), ""))
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -4097,6 +4059,8 @@ func TestEventBusPublish_ConnectRoutePlanRejectsCreateConflict(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID,
+		StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1")), "v-1"))
 	store.bus = eb
 	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
@@ -4143,23 +4107,23 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleUnavailableBlocksLowerPreceden
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
-	if err != nil {
-		t.Fatalf("planSubscribedRoutePlan: %v", err)
+	if err == nil {
+		t.Fatal("missing constructor owner was accepted")
 	}
 	if materializerCalled {
 		t.Fatalf("recipient plan materializer was called for lifecycle-unavailable canonical failure")
 	}
-	if got, want := routePlan.TargetFailure, runtimepinrouting.TargetFailureFromConnect(runtimepinrouting.ConnectFailureLifecycleUnavailable); got != want {
-		t.Fatalf("target failure = %q, want %q", got, want)
-	}
 	if len(routePlan.DeliveryRoutes()) != 0 {
 		t.Fatalf("delivery routes = %#v, want none on lifecycle-unavailable failure", routePlan.DeliveryRoutes())
 	}
-	if err := eb.Publish(context.Background(), evt); err != nil {
-		t.Fatalf("Publish: %v", err)
+	if err := eb.Publish(context.Background(), evt); err == nil {
+		t.Fatal("missing constructor owner publication was accepted")
 	}
 	if materializerCalled {
 		t.Fatalf("recipient plan materializer was called during publish for lifecycle-unavailable canonical failure")
+	}
+	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 {
+		t.Fatal("missing constructor owner mutated the publication store")
 	}
 }
 
@@ -4746,7 +4710,7 @@ func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventN
 		t.Fatal("provider fixture is missing its exact input pin")
 	}
 	source.input = pin
-	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil, nil)
+	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil)
 	externalSource, err := events.NewExternalIngressRoutingSource(".", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatalf("external routing source: %v", err)
@@ -4770,7 +4734,8 @@ func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver := newConnectRoutePlanResolver(source, table, nil, nil, nil, nil)
+	index := &constructionIndexTestReader{}
+	resolver := newConnectRoutePlanResolver(source, table, nil, index, nil)
 	routingSource, err := events.NewExternalIngressRoutingSource("account", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
@@ -4782,8 +4747,9 @@ func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *
 		uuid.NewString(), "account.ready", "provider", "", json.RawMessage(`{"account_id":"42"}`),
 		0, uuid.NewString(), "", events.EventEnvelope{}, routingSource, time.Now().UTC(),
 	)
-	scope, ok := resolver.selectedTargetScope(context.Background(), evt)
-	if ok || len(scope.instancePaths) != 0 || scope.sourceEntityID != "" {
+	ctx := constructionIndexContext(t, source)
+	scope, ok, err := resolver.selectedTargetScope(ctx, evt)
+	if err != nil || !ok || len(scope.instancePaths) != 0 || scope.sourceEntityID != "" {
 		t.Fatalf("declaration without construction widened its lookup: ok=%t scope=%#v", ok, scope)
 	}
 	for _, test := range []struct{ runID, id string }{{evt.RunID(), "one"}, {evt.RunID(), "two"}, {uuid.NewString(), "foreign"}} {
@@ -4793,19 +4759,32 @@ func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *
 			t.Fatal(err)
 		}
 	}
-	scope, ok = resolver.selectedTargetScope(context.Background(), evt)
-	if ok || len(scope.instancePaths) != 0 {
+	scope, ok, err = resolver.selectedTargetScope(ctx, evt)
+	if err != nil || !ok || len(scope.instancePaths) != 0 {
 		t.Fatalf("process index substituted for committed constructor evidence: ok=%t scope=%#v", ok, scope)
 	}
-	previewContext := withConnectRoutePlanPreview(context.Background())
+	previewContext := withConnectRoutePlanPreview(ctx)
 	preview, _ := previewContext.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes)
 	preview.table = table
-	scope, ok = resolver.selectedTargetScope(previewContext, evt)
-	if !ok || scope.sourceEntityID != "" || !slices.Equal(scope.instancePaths, []string{"account/one", "account/two"}) {
+	scope, ok, err = resolver.selectedTargetScope(previewContext, evt)
+	if err != nil || !ok || len(scope.instancePaths) != 0 {
+		t.Fatalf("process preview substituted for native receiver evidence: scope=%#v err=%v", scope, err)
+	}
+	for _, test := range []struct{ runID, id, key string }{{evt.RunID(), "one", "42"}, {evt.RunID(), "two", "43"}, {uuid.NewString(), "foreign", "44"}} {
+		instance := ConstructedFlowInstanceIdentityFixture(source, "account", test.id, test.runID)
+		index.observations = append(index.observations, constructionIndexObservation(t, source, test.runID, instance, test.key))
+	}
+	scope, ok, err = resolver.selectedTargetScope(previewContext, evt)
+	if err != nil || !ok || scope.sourceEntityID != "" || !slices.Equal(scope.instancePaths, []string{"account/one", "account/two"}) {
 		t.Fatalf("declaration candidate scope mixed concrete sender or foreign run: ok=%t scope=%#v", ok, scope)
 	}
+	index.err = errors.New("independent native lookup failure")
+	if _, bounded, err := resolver.selectedTargetScope(ctx, evt); bounded || !errors.Is(err, index.err) {
+		t.Fatalf("native lookup failure became absence or an unbounded fallback: bounded=%v err=%v", bounded, err)
+	}
 	keylessSource := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyStandingRootTreePublic(t))
-	keylessResolver := newConnectRoutePlanResolver(keylessSource, nil, nil, nil, nil, nil)
+	keylessIndex := &constructionIndexTestReader{}
+	keylessResolver := newConnectRoutePlanResolver(keylessSource, nil, nil, keylessIndex, nil)
 	keylessRouting, err := events.NewExternalIngressRoutingSource("beta", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
@@ -4814,9 +4793,16 @@ func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *
 		uuid.NewString(), "inbound.telegram", "provider", "", json.RawMessage(`{}`),
 		0, uuid.NewString(), "", events.EventEnvelope{}, keylessRouting, time.Now().UTC(),
 	)
-	scope, ok = keylessResolver.selectedTargetScope(context.Background(), keylessEvent)
-	if !ok || scope.sourceEntityID != "" || !slices.Equal(scope.instancePaths, []string{"beta"}) {
-		t.Fatalf("compiled keyless declaration lost its exact lookup path without a process index: ok=%t scope=%#v", ok, scope)
+	keylessContext := constructionIndexContext(t, keylessSource)
+	scope, ok, err = keylessResolver.selectedTargetScope(keylessContext, keylessEvent)
+	if err != nil || !ok || len(scope.instancePaths) != 0 {
+		t.Fatalf("keyless declaration fabricated stored existence: scope=%#v err=%v", scope, err)
+	}
+	instance := ConstructedFlowInstanceIdentityFixture(keylessSource, "beta", "", keylessEvent.RunID())
+	keylessIndex.observations = []runtimepipeline.FlowInstanceObservation{constructionIndexObservation(t, keylessSource, keylessEvent.RunID(), instance, "")}
+	scope, ok, err = keylessResolver.selectedTargetScope(keylessContext, keylessEvent)
+	if err != nil || !ok || scope.sourceEntityID != "" || !slices.Equal(scope.instancePaths, []string{"beta"}) {
+		t.Fatalf("native keyless receiver lost its exact path: scope=%#v err=%v", scope, err)
 	}
 }
 
@@ -4912,24 +4898,35 @@ func TestConnectRecipientIndexedCandidatesMatchFullGraphEvaluation(t *testing.T)
 		t.Fatalf("compiled plans = %d, want one", len(graph.Plans()))
 	}
 	plan := graph.Plans()[0]
+	reader := &constructionIndexTestReader{}
+	resolver := newConnectRoutePlanResolver(source, table, nil, reader, nil)
+	ctx := constructionIndexContext(t, source)
+	var fullDefinitions []runtimepinrouting.ConnectRecipientRegistration
 	for _, id := range []string{"first", "second"} {
-		if err := table.AddConstructedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{
-			Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", id)),
-		}); err != nil {
+		instance := ConstructedFlowInstanceIdentityFixture(source, "consumer", id, busInternalTestRunID)
+		reader.observations = append(reader.observations, constructionIndexObservation(t, source, busInternalTestRunID, instance, id))
+		definitions, err := table.ConnectReceiverDefinitions(busInternalTestRunID, instance)
+		if err != nil {
 			t.Fatal(err)
 		}
+		fullDefinitions = append(fullDefinitions, definitions...)
 	}
-	foreign, err := runtimeflowidentity.NewRunScopedFlowInstance(eventtest.UUID("foreign-run"), runtimeflowidentity.DeriveRoute("consumer", "foreign"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := table.AddConstructedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: foreign}); err != nil {
-		t.Fatal(err)
-	}
+	foreignRun := eventtest.UUID("foreign-run")
+	foreign := ConstructedFlowInstanceIdentityFixture(source, "consumer", "foreign", foreignRun)
+	reader.observations = append(reader.observations, constructionIndexObservation(t, source, foreignRun, foreign, "foreign"))
 	compare := func(label string, targets []events.RouteIdentity, wantRecipients int) {
 		t.Helper()
-		full := graph.EvaluateMaterializedRecipients(plan, targets, table.connectRecipientAdmissionsForRun(busInternalTestRunID))
-		indexed := graph.EvaluateMaterializedRecipients(plan, targets, table.connectRecipientAdmissionsForTargets(busInternalTestRunID, plan, targets))
+		full := graph.EvaluateMaterializedRecipients(plan, targets, fullDefinitions)
+		indexed, err := resolver.evaluateSelectedReceiverCarriers(ctx, busInternalTestRunID, plan, targets)
+		if len(targets) > 0 && wantRecipients == 0 {
+			if !isolatedInstanceLookupMiss(err) || len(indexed.Recipients()) != 0 {
+				t.Fatalf("%s: absent native receiver acquired recipients: %+v err=%v", label, indexed, err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("%s: native selection: %v", label, err)
+		}
 		fullLedger, fullErr := full.Ledger()
 		indexedLedger, indexedErr := indexed.Ledger()
 		if got := len(full.Recipients()); got != wantRecipients {
@@ -4939,8 +4936,8 @@ func TestConnectRecipientIndexedCandidatesMatchFullGraphEvaluation(t *testing.T)
 			t.Fatalf("%s: indexed graph evaluation differs from full: full=%#v err=%v indexed=%#v err=%v", label, fullLedger, fullErr, indexedLedger, indexedErr)
 		}
 	}
-	first := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/first", EntityID: eventtest.UUID("first-owner")}
-	second := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/second", EntityID: eventtest.UUID("second-owner")}
+	first := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/first", EntityID: reader.observations[0].Identity().EntityID}
+	second := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/second", EntityID: reader.observations[1].Identity().EntityID}
 	compare("first", []events.RouteIdentity{first}, 1)
 	compare("second", []events.RouteIdentity{second}, 1)
 	compare("both", []events.RouteIdentity{first, second}, 2)
@@ -4948,15 +4945,10 @@ func TestConnectRecipientIndexedCandidatesMatchFullGraphEvaluation(t *testing.T)
 	compare("foreign run owner", []events.RouteIdentity{{FlowID: "consumer", FlowInstance: "consumer/foreign", EntityID: eventtest.UUID("foreign-owner")}}, 0)
 	compare("missing", []events.RouteIdentity{{FlowID: "consumer", FlowInstance: "consumer/missing", EntityID: eventtest.UUID("missing-owner")}}, 0)
 	compare("targetless", nil, 0)
-	if err := table.RemoveFlowInstanceRoute(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "first"))); err != nil {
-		t.Fatal(err)
-	}
+	firstObservation := reader.observations[0]
+	reader.observations = reader.observations[1:]
 	compare("removed", []events.RouteIdentity{first}, 0)
-	if err := table.AddConstructedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{
-		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "first")),
-	}); err != nil {
-		t.Fatal(err)
-	}
+	reader.observations = append(reader.observations, firstObservation)
 	compare("re-added", []events.RouteIdentity{first}, 1)
 }
 
@@ -4972,21 +4964,26 @@ func BenchmarkConnectRecipientSelectedCandidatePopulation(b *testing.B) {
 			if len(graph.Plans()) != 1 {
 				b.Fatalf("compiled plans = %d, want one", len(graph.Plans()))
 			}
+			var full []runtimepinrouting.ConnectRecipientRegistration
+			var selected []runtimepinrouting.ConnectRecipientRegistration
+			var selectedInstance runtimeflowidentity.Instance
 			for ordinal := 0; ordinal < population; ordinal++ {
 				id := fmt.Sprintf("receiver-%04d", ordinal)
-				if err := table.AddConstructedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{
-					Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", id)),
-				}); err != nil {
+				instance := ConstructedFlowInstanceIdentityFixture(source, "consumer", id, busInternalTestRunID)
+				definitions, err := table.ConnectReceiverDefinitions(busInternalTestRunID, instance)
+				if err != nil {
 					b.Fatal(err)
+				}
+				full = append(full, definitions...)
+				if ordinal == population-1 {
+					selected, selectedInstance = definitions, instance
 				}
 			}
 			target := events.RouteIdentity{
 				FlowID: "consumer", FlowInstance: fmt.Sprintf("consumer/receiver-%04d", population-1),
-				EntityID: eventtest.UUID("selected-candidate-owner"),
+				EntityID: selectedInstance.EntityID,
 			}
 			plan := graph.Plans()[0]
-			full := table.connectRecipientAdmissionsForRun(busInternalTestRunID)
-			selected := table.connectRecipientAdmissionsForTargets(busInternalTestRunID, plan, []events.RouteIdentity{target})
 			if len(full) != population || len(selected) != 1 {
 				b.Fatalf("candidate rows: full=%d selected=%d, want %d/1", len(full), len(selected), population)
 			}
@@ -5016,7 +5013,10 @@ func BenchmarkConnectRecipientSelectedCandidatePopulation(b *testing.B) {
 					for i := 0; i < b.N; i++ {
 						rows := tc.rows
 						if tc.name == "selected_target" {
-							rows = table.connectRecipientAdmissionsForTargets(busInternalTestRunID, plan, []events.RouteIdentity{target})
+							rows, err = table.ConnectReceiverDefinitions(busInternalTestRunID, selectedInstance)
+							if err != nil {
+								b.Fatal(err)
+							}
 						}
 						if got := len(graph.EvaluateMaterializedRecipients(plan, []events.RouteIdentity{target}, rows).Recipients()); got != 1 {
 							b.Fatalf("recipients = %d, want one", got)
@@ -5196,7 +5196,9 @@ func connectRoutePlanStaticDeliveryRoute(t testing.TB) events.DeliveryRoute {
 }
 
 func connectRoutePlanStaticOwner() ActiveTargetDescriptor {
-	return testSelectedRunTargetOwner("consumer-selected-owner", "consumer", "consumer-selected-owner")
+	owner := testSelectedRunTargetOwner("consumer-selected-owner", "consumer", "consumer-selected-owner")
+	owner.EntityID = runtimeflowidentity.EntityID("consumer")
+	return owner
 }
 
 func newConnectRoutePlanStaticStore() *targetRouteMemoryStore {
@@ -5358,9 +5360,10 @@ func connectRoutePlanTestBundle(t testing.TB, flows []connectRoutePlanTestFlow, 
 	}
 	indexView(&root)
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema:   &rootSchema,
-		RootEntities: rootEntities,
-		FlowSources:  flowSources,
+		SourceArtifact: sourceartifactfixture.Artifact(),
+		RootSchema:     &rootSchema,
+		RootEntities:   rootEntities,
+		FlowSources:    flowSources,
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: agentRefs,
 			ByURI:  agentRefsByURI,
