@@ -489,7 +489,7 @@
     "owner": "internal/cliapp/verify_runtime.go::runVerifyCommandWithOutput",
     "audit_rows": "A01,A28,A29,A30",
     "proof_families": "P01,P02,P23,P24,P27,P29",
-    "body_sha256": "0fb79dd552d422aa9626721bdf89c1eda03d16a5c159fe753764f65c76a3b2e8"
+    "body_sha256": "b88fe80d441ae0598ace52d6d2b3c2ffb9961fb7558f6fded7d58e4e77240ad1"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::trimmedStringSlice",
@@ -3766,6 +3766,12 @@
     "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
     "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "b8122f466b411b1019cd0ff70d8979475c299eab96f932b223723f863379ba59"
+  },
+  {
+    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.InspectRunMutationDrift",
+    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
+    "proof_families": "P08,P18,P19,P20,P21",
+    "body_sha256": "de7bc1a9dd3af91faaf30dcdef812fa5c4334436b193d5b317bcfdc28d92b23a"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.InspectSelectedForkRecovery",

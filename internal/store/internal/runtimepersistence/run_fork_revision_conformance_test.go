@@ -198,6 +198,7 @@ func TestRunForkRevisionStateAccessorInventoryIsClosed(t *testing.T) {
 		"internal/runtime/destructivereset/cleanup_catalog.go",
 		"internal/store/internal/adminpersistence/destructive_reset_cleanup.go",
 		"internal/store/internal/backend/runforkpersistence/receiver_historical_observation.go",
+		"internal/store/internal/backend/runforkpersistence/run_drift.go", // admitted read-only drift oracle; no revision writer
 		"internal/store/internal/backend/runforkpersistence/run_fork_activation.go",
 		"internal/store/internal/backend/runforkpersistence/run_fork_planner.go",
 		"internal/store/internal/backend/runforkpersistence/run_fork_revision_snapshot.go",

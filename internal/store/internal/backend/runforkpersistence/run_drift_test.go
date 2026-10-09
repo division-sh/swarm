@@ -32,7 +32,8 @@ func runDriftDatabase(t *testing.T, backend string) (*sql.DB, string, string) {
 		}
 	}
 	run, entity := uuid.NewString(), uuid.NewString()
-	for _, query := range []string{`INSERT INTO runs VALUES($1,'event')`, `INSERT INTO run_fork_revision_heads VALUES($1,1)`, `INSERT INTO run_fork_revisions VALUES($1,1)`} {
+	requireHistoricalSnapshotRun(t, db, run)
+	for _, query := range []string{`INSERT INTO run_fork_revision_heads VALUES($1,1)`, `INSERT INTO run_fork_revisions VALUES($1,1)`} {
 		if _, err := db.Exec(query, run); err != nil {
 			t.Fatal(err)
 		}
@@ -189,9 +190,7 @@ func TestVerifyRunMissingAndEmptyExistingRunBothStores(t *testing.T) {
 			if !errors.As(err, &missing) || missing.RunID != run || len(got.Rows) != 0 {
 				t.Fatalf("missing=%+v %v", got, err)
 			}
-			if _, err := db.Exec(`INSERT INTO runs VALUES($1,'event')`, run); err != nil {
-				t.Fatal(err)
-			}
+			requireHistoricalSnapshotRun(t, db, run)
 			got, err = inspectRunDriftTest(t, db, run)
 			if err != nil || got.EntitiesChecked != 0 || len(got.Rows) != 0 {
 				t.Fatalf("empty existing run=%+v %v", got, err)
