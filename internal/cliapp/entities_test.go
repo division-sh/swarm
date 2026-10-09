@@ -378,7 +378,7 @@ func TestEntityAggregateUsesEntityAggregateDefaultsAndFilters(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 		}
 		captured = append(captured, req)
-		writeJSONRPCResult(t, w, req.ID, map[string]any{"counts": map[string]any{"collecting": 2, "reviewing": 1}})
+		writeJSONRPCResult(t, w, req.ID, map[string]any{"counts": map[string]any{"collecting": 2, "reviewing": 1}, "absent_count": 0})
 	}))
 	defer server.Close()
 
@@ -590,7 +590,7 @@ func TestEntityCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeJSONRPCResult(t, w, req.ID, map[string]any{"counts": map[string]any{"collecting": -1}})
+				writeJSONRPCResult(t, w, req.ID, map[string]any{"counts": map[string]any{"collecting": -1}, "absent_count": 0})
 			},
 			wantCode:   3,
 			wantStderr: "counts[\"collecting\"] must be non-negative",
@@ -938,7 +938,7 @@ func TestEntityListUnscopedRetainsRunColumn(t *testing.T) {
 			t.Fatalf("unscoped list missing %q:\n%s", want, stdout.String())
 		}
 	}
-	if got, want := strings.Fields(strings.Split(stdout.String(), "\n")[0]), []string{"ENTITY_ID", "RUN", "TYPE", "STATE", "FLOW", "UPDATED"}; !reflect.DeepEqual(got, want) {
+	if got, want := strings.Fields(strings.Split(stdout.String(), "\n")[0]), []string{"ENTITY_ID", "RUN", "TYPE", "STATE", "FLOW", "DATA", "UPDATED"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("unscoped columns = %v, want %v:\n%s", got, want, stdout.String())
 	}
 
@@ -948,7 +948,7 @@ func TestEntityListUnscopedRetainsRunColumn(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("scoped code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	if got, want := strings.Fields(strings.Split(stdout.String(), "\n")[0]), []string{"ENTITY_ID", "TYPE", "STATE", "FLOW", "UPDATED"}; !reflect.DeepEqual(got, want) {
+	if got, want := strings.Fields(strings.Split(stdout.String(), "\n")[0]), []string{"ENTITY_ID", "TYPE", "STATE", "FLOW", "DATA", "UPDATED"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("run-scoped columns = %v, want %v:\n%s", got, want, stdout.String())
 	}
 }
@@ -1070,16 +1070,20 @@ func TestFormatCLIRelativeTime(t *testing.T) {
 
 func validEntitySummary(entityID string) map[string]any {
 	return map[string]any{
-		"entity_id":     entityID,
-		"run_id":        "run-1",
-		"flow_instance": "review",
-		"entity_type":   "vertical",
-		"current_state": "collecting",
-		"slug":          "vertical-1",
-		"name":          "Vertical One",
-		"revision":      3,
-		"created_at":    "2026-05-20T01:00:00Z",
-		"updated_at":    "2026-05-20T01:05:00Z",
+		"entity_id":            entityID,
+		"run_id":               "run-1",
+		"flow_instance":        "review",
+		"entity_type":          "vertical",
+		"current_state":        "collecting",
+		"stage_defined":        true,
+		"slug":                 "vertical-1",
+		"name":                 "Vertical One",
+		"revision":             3,
+		"created_at":           "2026-05-20T01:00:00Z",
+		"updated_at":           "2026-05-20T01:05:00Z",
+		"entered_state_at":     "2026-05-20T01:00:00Z",
+		"lifecycle_created_at": "2026-05-20T01:00:00Z",
+		"lifecycle_updated_at": "2026-05-20T01:05:00Z",
 	}
 }
 
@@ -1089,6 +1093,7 @@ func validEntityFullResult(entityID string) map[string]any {
 		"fields":      map[string]any{"score": 7},
 		"bookkeeping": map[string]any{},
 		"gates":       map[string]any{"ready": true},
+		"loops":       []any{},
 		"accumulated": map[string]any{
 			"score":       3,
 			"accumulator": map[string]any{"count": 2},
