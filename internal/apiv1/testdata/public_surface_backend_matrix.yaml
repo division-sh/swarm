@@ -58,7 +58,7 @@ store_parity:
       close_proof_ids: [authority-maintenance-close]
     - id: admission_inspection
       constructor: OpenAdmissionInspection
-      consumers: [internal/cliapp/verify_deployment_store.go]
+      consumers: [internal/cliapp/verify_deployment_store.go, internal/cliapp/verify_run.go]
       semantic_owner: internal/store/selected.AdmissionInspection and existing canonical domain readers
       proof_ids: [admission-inspection-parity, admission-possession-public-parity]
       close_proof_ids: [admission-inspection-parity, admission-inspection-transport-close]
