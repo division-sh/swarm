@@ -2,7 +2,6 @@ package runforkexecution
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
@@ -26,21 +25,20 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 )
 
 // Real constructor preparation and tree commit establish the source history.
 // Empty route projections do not prove physical runtime attachment or public launch.
-func seedSelectedConstructedRootHistory(t *testing.T, ctx context.Context, db *sql.DB, selected *store.PostgresStore, loaded LoadedSelectedContractSource, runID, eventID, eventName string, at time.Time, mode executionmode.Mode, routes []events.DeliveryRoute, inputs ...selectedExecutionInputFixture) events.Event {
+func seedSelectedConstructedRootHistory(t *testing.T, ctx context.Context, selected *store.PostgresStore, loaded LoadedSelectedContractSource, runID, eventID, eventName string, at time.Time, mode executionmode.Mode, routes []events.DeliveryRoute, inputs ...selectedExecutionInputFixture) events.Event {
 	t.Helper()
 	bundle, found := semanticview.Bundle(loaded.Source)
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("source constructor requires its admitted artifact")
 	}
 	ctx = effects.WithExecutionMode(correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, runID), loaded.SourceArtifactFact), mode)
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
-		Source: loaded.SourceArtifactFact, Artifact: bundle.SourceArtifact,
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
+		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact,
 	})
 	payload, err := json.Marshal(map[string]any{"entity_id": runID})
 	if err != nil {
@@ -131,11 +129,11 @@ func selectedConstructedRootNodeRoute(source semanticview.Source, runID, nodeID 
 	}
 }
 
-func seedSelectedConstructedAgentRootHistory(t *testing.T, ctx context.Context, db *sql.DB, selected *store.PostgresStore, loaded LoadedSelectedContractSource, runID, eventID string, at time.Time) {
+func seedSelectedConstructedAgentRootHistory(t *testing.T, ctx context.Context, selected *store.PostgresStore, loaded LoadedSelectedContractSource, runID, eventID string, at time.Time) {
 	t.Helper()
 	route := selectedExecutionTestAgentRoute(t, runID, "test-agent", runID)
 	route.Target = events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: runID, EntityID: runID,
 	})
-	seedSelectedConstructedRootHistory(t, ctx, db, selected, loaded, runID, eventID, "task.assigned", at, executionmode.Live, []events.DeliveryRoute{route})
+	seedSelectedConstructedRootHistory(t, ctx, selected, loaded, runID, eventID, "task.assigned", at, executionmode.Live, []events.DeliveryRoute{route})
 }
