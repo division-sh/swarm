@@ -11,8 +11,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
@@ -39,6 +42,10 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 								diagnostic.entityID = entityID
 							}
 							decision := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+							_, before := requireReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, ".", seed.RunID, entityID)
+							if before.CurrentState != "review" {
+								t.Fatalf("contenders did not start at review: %+v", before)
+							}
 							// The supported untargeted publication selects this run's
 							// sole primary entity through the API route owner.
 							cancel := map[string]any{"run_id": seed.RunID, "source_event_id": seed.EventID, "event_name": "work.cancelled", "payload": map[string]any{"seed": true}, "idempotency_key": "competing-cancel"}
@@ -130,21 +137,90 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 							if deliveries != count {
 								t.Fatalf("outcome deliveries=%d, want %d", deliveries, count)
 							}
-							exits := 0
-							for _, row := range readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID) {
-								if row.From == "review" {
-									exits++
-									if row.To != target {
-										t.Fatalf("losing exit committed history: %#v", row)
-									}
-								}
+							history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
+							if len(history) != 1 {
+								t.Fatalf("winner lost bounded current transition: %+v", history)
 							}
-							if exits != 1 {
-								t.Fatalf("review committed %d exits, want exactly one", exits)
+							winner := history[0]
+							if won {
+								if winner.From != "approved" || winner.To != "done" {
+									t.Fatalf("winning verdict lost consumer transition: %+v", winner)
+								}
+								// The emitted outcome pins the gate commit before its
+								// consumer replaces the current header with approved -> done.
+								winner = readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, winner.TriggerEventID)
+							}
+							if winner.From != "review" || winner.To != target {
+								t.Fatalf("losing exit committed historical evidence: %+v", winner)
+							}
+							// Count physical state changes independently: one retained
+							// header record cannot prove exactly one historical exit.
+							mutations := storetest.ObserveEntityMutationHistory(t, t.Context(), rt.ReceiverStateReader, seed.RunID)
+							if err := lifecycleCompetingExitMutationEvidence(mutations, entityID, winner); err != nil {
+								t.Fatal(err)
 							}
 						})
 					}
 				})
+			}
+		})
+	}
+}
+
+func lifecycleCompetingExitMutationEvidence(rows []storetest.EntityMutationEvidence, entityID string, winner pipeline.WorkflowTransitionRecord) error {
+	exits := 0
+	for _, row := range rows {
+		if row.EntityID != entityID || row.Domain != string(mutationlog.DomainLifecycleState) {
+			continue
+		}
+		var from, to string
+		if err := json.Unmarshal(row.OldValue, &from); err != nil {
+			return fmt.Errorf("decode committed lifecycle source: %w", err)
+		}
+		if from != "review" {
+			continue
+		}
+		exits++
+		if err := json.Unmarshal(row.NewValue, &to); err != nil {
+			return fmt.Errorf("decode committed lifecycle target: %w", err)
+		}
+		if row.Path != "" || to != winner.To || row.CausedByEvent != winner.TriggerEventID {
+			return fmt.Errorf("losing or unattributed exit committed mutation: %+v; winner=%+v", row, winner)
+		}
+	}
+	if exits != 1 {
+		return fmt.Errorf("review committed %d exits, want exactly one", exits)
+	}
+	return nil
+}
+
+func TestLifecycleCompetingExitMutationEvidenceRequiresOneWinner(t *testing.T) {
+	winner := pipeline.WorkflowTransitionRecord{From: "review", To: "approved", TriggerEventID: "gate"}
+	row := storetest.EntityMutationEvidence{RunDebugMutation: operatorread.RunDebugMutation{
+		EntityID: "receiver", Domain: string(mutationlog.DomainLifecycleState),
+		OldValue: json.RawMessage(`"review"`), NewValue: json.RawMessage(`"approved"`), CausedByEvent: "gate",
+	}}
+	loser, foreign, wrongPath, wrongCause := row, row, row, row
+	loser.NewValue = json.RawMessage(`"cancelled"`)
+	foreign.EntityID = "other"
+	wrongPath.Path = "not-state"
+	wrongCause.CausedByEvent = "other"
+	for _, test := range []struct {
+		name string
+		rows []storetest.EntityMutationEvidence
+		ok   bool
+	}{
+		{"one", []storetest.EntityMutationEvidence{row}, true},
+		{"foreign", []storetest.EntityMutationEvidence{row, foreign}, true},
+		{"missing", nil, false},
+		{"duplicate", []storetest.EntityMutationEvidence{row, row}, false},
+		{"losing", []storetest.EntityMutationEvidence{row, loser}, false},
+		{"wrong_path", []storetest.EntityMutationEvidence{wrongPath}, false},
+		{"wrong_cause", []storetest.EntityMutationEvidence{wrongCause}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := lifecycleCompetingExitMutationEvidence(test.rows, "receiver", winner); (err == nil) != test.ok {
+				t.Fatalf("exit evidence error=%v, want accepted=%v", err, test.ok)
 			}
 		})
 	}

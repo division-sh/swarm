@@ -30,6 +30,10 @@ func startLifecycleTimerContenderDiagnostic(t *testing.T, root string) (servedCo
 	t.Helper()
 	d := &lifecycleTimerContenderDiagnostic{}
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+	var receiverReader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
+		receiverReader = requireReceiverProofStateReader(t, persistence.deps.EventStore)
+	})
 	bundleHash := servedEventPublishFixtureBundleHash(t, root)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 1)
@@ -76,6 +80,7 @@ func startLifecycleTimerContenderDiagnostic(t *testing.T, root string) (servedCo
 		t.Fatal("timed out waiting for generated serve runtime")
 	}
 	rt.Endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, d.server.String()) + "/v1/rpc"
+	rt.ReceiverStateReader = receiverReader
 	return rt, d
 }
 
