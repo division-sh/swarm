@@ -204,13 +204,14 @@ func TestCICachesSeparateModulesAndNeverRestoreAnotherProofUnit(t *testing.T) {
 }
 
 type ciWorkflowJob struct {
-	Name           string           `yaml:"name"`
-	If             string           `yaml:"if"`
-	Needs          []string         `yaml:"needs"`
-	Environment    string           `yaml:"environment"`
-	Steps          []ciWorkflowStep `yaml:"steps"`
-	TimeoutMinutes any              `yaml:"timeout-minutes"`
-	RunsOn         string           `yaml:"runs-on"`
+	Name           string            `yaml:"name"`
+	If             string            `yaml:"if"`
+	Needs          []string          `yaml:"needs"`
+	Environment    string            `yaml:"environment"`
+	Env            map[string]string `yaml:"env"`
+	Steps          []ciWorkflowStep  `yaml:"steps"`
+	TimeoutMinutes any               `yaml:"timeout-minutes"`
+	RunsOn         string            `yaml:"runs-on"`
 	Strategy       struct {
 		FailFast    *any   `yaml:"fail-fast"`
 		Matrix      string `yaml:"matrix"`

@@ -59,9 +59,18 @@ func TestDebtAnalysisCIUsesExactReadOnlyRestoreAndProtectedProducer(t *testing.T
 		t.Fatal("producer must qualify protected master and also run after proof replay")
 	}
 	proof := findWorkflowStep(job.Steps, "Analyze protected-master archive even after proof replay")
+	identity := findWorkflowStep(job.Steps, "Resolve exact protected-master cache key")
+	restore := findWorkflowStep(job.Steps, "Restore exact immutable analysis")
 	save := findWorkflowStep(job.Steps, "Publish exact immutable analysis")
 	if proof == nil || !strings.Contains(proof.Run, "TestPersistenceAuthorityDebtAnalysisCachePublishMaster") || proof.ContinueOnError || save == nil || save.Uses != "actions/cache/save@v4" || save.With["key"] != "${{ steps.identity.outputs.key }}" {
 		t.Fatal("shared publication is not bound to the successful immutable archive scan")
+	}
+	const cachePath = "${{ runner.temp }}/debt-analysis"
+	if job.Env["SWARM_DEBT_CACHE_DIR"] != "" || job.Env["SWARM_DEBT_CACHE_PUBLISH"] != "1" {
+		t.Fatal("runner-local cache path must be resolved at step scope, not unsupported job scope")
+	}
+	if identity == nil || restore == nil || identity.Env["SWARM_DEBT_CACHE_DIR"] != cachePath || proof.Env["SWARM_DEBT_CACHE_DIR"] != cachePath || restore.With["path"] != cachePath || save.With["path"] != cachePath {
+		t.Fatal("producer identity, analysis, restore and save must share one runner-local cache path")
 	}
 }
 
