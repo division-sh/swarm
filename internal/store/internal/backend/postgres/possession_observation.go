@@ -156,16 +156,20 @@ func (d *observationDialer) bind(ctx context.Context) (func() error, error) {
 		if !stop() {
 			<-finished
 		}
-		d.mu.Lock()
-		defer d.mu.Unlock()
-		result := d.phaseErr
-		for _, socket := range d.sockets {
-			socket.mu.Lock()
-			result = errors.Join(result, socket.ioErr, socket.closeErr)
-			socket.mu.Unlock()
-		}
-		return result
+		return d.phaseError()
 	}, err
+}
+
+func (d *observationDialer) phaseError() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	result := d.phaseErr
+	for _, socket := range d.sockets {
+		socket.mu.Lock()
+		result = errors.Join(result, socket.ioErr, socket.closeErr)
+		socket.mu.Unlock()
+	}
+	return result
 }
 
 func (d *observationDialer) close() error {
