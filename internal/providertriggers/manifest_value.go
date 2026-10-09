@@ -88,10 +88,8 @@ func (m Manifest) ProjectNormalizedPayload(body []byte) ([]DeliveryEvent, error)
 	if err := canonicaljson.DecodePreservingNumberLexemes(body, &payload); err != nil {
 		return nil, err
 	}
-	if m.value.definition.PayloadObjectRequired {
-		if _, ok := payload.(map[string]any); !ok {
-			return nil, badRequest(firstNonEmpty(m.value.definition.PayloadObjectError, "provider payload must be an object"))
-		}
+	if err := m.value.definition.validatePayloadObject(payload); err != nil {
+		return nil, err
 	}
 	return m.value.definition.normalizedDeliveryEvents(payload)
 }

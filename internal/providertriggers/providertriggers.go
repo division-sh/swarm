@@ -810,10 +810,24 @@ func (m manifestDefinition) admitRequest(req Request) (manifestAdmission, error)
 			return manifestAdmission{}, err
 		}
 	}
+	return m.admitAuthenticatedPayload(req)
+}
+
+func (m manifestDefinition) validatePayloadObject(payload any) error {
 	if m.PayloadObjectRequired {
-		if _, ok := req.Payload.(map[string]any); !ok {
-			return manifestAdmission{}, badRequest(firstNonEmpty(m.PayloadObjectError, provider+" payload object is required"))
+		if _, ok := payload.(map[string]any); !ok {
+			return badRequest(firstNonEmpty(m.PayloadObjectError, NormalizeProviderName(m.Provider)+" payload object is required"))
 		}
+	}
+	return nil
+}
+
+// Transport authentication precedes this shared BODY entry. It is private so
+// structural request data cannot mint an admitted request or publication grant.
+func (m manifestDefinition) admitAuthenticatedPayload(req Request) (manifestAdmission, error) {
+	provider := NormalizeProviderName(m.Provider)
+	if err := m.validatePayloadObject(req.Payload); err != nil {
+		return manifestAdmission{}, err
 	}
 	if m.Challenge != nil {
 		matched, err := m.Challenge.When.Evaluate(req.Payload)

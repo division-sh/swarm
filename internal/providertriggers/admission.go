@@ -1,6 +1,7 @@
 package providertriggers
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -97,18 +98,47 @@ type InboundAdmissionPlan struct {
 // AdmittedRequest is the authenticated, retry-stable request identity. Its
 // private projection state can only be consumed by the plan that admitted it.
 type AdmittedRequest struct {
-	ProviderEventID           string
-	ProviderEventType         string
-	SemanticContentDigest     string
-	Response                  *Response
-	AcknowledgeBeforeDispatch bool
+	semanticContentDigest string
+	generation            triggergeneration.Generation
+	provider              string
+	manifestOwner         *Manifest
+	rawOwner              *RawAdmissionPolicy
+	manifestAdmission     *manifestAdmission
+	rawAdmission          *rawRequestAdmission
+}
 
-	generation        triggergeneration.Generation
-	provider          string
-	manifestOwner     *Manifest
-	rawOwner          *RawAdmissionPolicy
-	manifestAdmission *manifestAdmission
-	rawAdmission      *rawRequestAdmission
+func (a AdmittedRequest) SemanticContentDigest() string { return a.semanticContentDigest }
+
+func (a AdmittedRequest) ProviderEventID() string {
+	if a.manifestAdmission != nil {
+		return a.manifestAdmission.deliveryID
+	}
+	if a.rawAdmission != nil {
+		return a.rawAdmission.deliveryID
+	}
+	return ""
+}
+
+func (a AdmittedRequest) ProviderEventType() string {
+	if a.manifestAdmission != nil {
+		return a.manifestAdmission.eventType
+	}
+	if a.rawAdmission != nil {
+		return a.rawAdmission.eventType
+	}
+	return ""
+}
+
+func (a AdmittedRequest) Response() *Response {
+	if a.manifestAdmission == nil {
+		return nil
+	}
+	return cloneAdmissionResponse(a.manifestAdmission.response)
+}
+
+func (a AdmittedRequest) AcknowledgeBeforeDispatch() bool {
+	return a.manifestOwner != nil && a.manifestOwner.value != nil &&
+		a.manifestOwner.value.definition.Ack.Mode == "durable_before_dispatch"
 }
 
 type rawRequestAdmission struct {
@@ -522,18 +552,15 @@ func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error)
 			return AdmittedRequest{}, badRequest("compiled pack admission requires verified pack identity")
 		}
 		admitted := AdmittedRequest{
-			ProviderEventID: manifestAdmission.deliveryID, ProviderEventType: manifestAdmission.eventType,
-			Response:                  manifestAdmission.response,
-			AcknowledgeBeforeDispatch: p.manifest.value.definition.Ack.Mode == "durable_before_dispatch",
-			generation:                p.generation, provider: p.provider, manifestOwner: p.manifest,
+			generation: p.generation, provider: p.provider, manifestOwner: p.manifest,
 			manifestAdmission: &manifestAdmission,
 		}
-		if admitted.Response == nil {
+		if manifestAdmission.response == nil {
 			semanticContent := req.Payload
 			if p.manifest.value.definition.PayloadSource == "form" {
 				semanticContent = formValuesPayload(req.Form)
 			}
-			admitted.SemanticContentDigest, err = semanticContentDigest(semanticContent)
+			admitted.semanticContentDigest, err = semanticContentDigest(semanticContent)
 			if err != nil {
 				return AdmittedRequest{}, err
 			}
@@ -549,8 +576,7 @@ func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error)
 		return AdmittedRequest{}, err
 	}
 	return AdmittedRequest{
-		ProviderEventID: rawAdmission.deliveryID, ProviderEventType: rawAdmission.eventType,
-		SemanticContentDigest: digest, generation: p.generation, provider: p.provider,
+		semanticContentDigest: digest, generation: p.generation, provider: p.provider,
 		rawOwner: p.raw, rawAdmission: &rawAdmission,
 	}, nil
 }
@@ -561,13 +587,10 @@ func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Deliver
 	if !admitted.generation.Equal(p.generation) || admitted.provider != p.provider {
 		return Delivery{}, badRequest("admitted request belongs to a different compiled admission plan")
 	}
-	if admitted.Response != nil {
-		return Delivery{Response: admitted.Response}, nil
+	if err := p.validateProjectionEvidence(admitted); err != nil {
+		return Delivery{}, err
 	}
 	if p.manifest != nil {
-		if admitted.manifestOwner != p.manifest || admitted.manifestAdmission == nil {
-			return Delivery{}, badRequest("admitted request does not belong to the compiled pack admission plan")
-		}
 		delivery, err := p.manifest.projectAdmission(*admitted.manifestAdmission)
 		if err != nil {
 			var normalizationErr NormalizationError
@@ -576,6 +599,7 @@ func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Deliver
 			}
 			return Delivery{}, err
 		}
+		delivery.Response = cloneAdmissionResponse(delivery.Response)
 		for index := range delivery.Events {
 			if delivery.Events[index].Kind != OutputKindNormalized {
 				continue
@@ -595,9 +619,6 @@ func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Deliver
 		}
 		return delivery, nil
 	}
-	if admitted.rawOwner != p.raw || admitted.rawAdmission == nil {
-		return Delivery{}, badRequest("admitted request does not belong to the compiled raw admission plan")
-	}
 	raw := admitted.rawAdmission
 	return Delivery{
 		ProviderEventID: raw.deliveryID, ProviderEventType: raw.eventType,
@@ -606,6 +627,49 @@ func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Deliver
 			"provider_event_type": raw.eventType, "data": raw.payload,
 		}}},
 	}, nil
+}
+
+func (p InboundAdmissionPlan) validateProjectionEvidence(admitted AdmittedRequest) error {
+	var payload any
+	if p.manifest != nil {
+		if admitted.manifestOwner != p.manifest || admitted.manifestAdmission == nil {
+			return badRequest("admitted request does not belong to the compiled pack admission plan")
+		}
+		original := admitted.manifestAdmission
+		if original.response != nil {
+			if admitted.semanticContentDigest != "" {
+				return badRequest("admitted challenge carries semantic delivery content")
+			}
+			return nil
+		}
+		payload = original.request.Payload
+		if p.manifest.value.definition.PayloadSource == "form" {
+			payload = formValuesPayload(original.request.Form)
+		}
+	} else {
+		if p.raw == nil || admitted.rawOwner != p.raw || admitted.rawAdmission == nil {
+			return badRequest("admitted request does not belong to the compiled raw admission plan")
+		}
+		original := admitted.rawAdmission
+		payload = original.payload
+	}
+	digest, err := semanticContentDigest(payload)
+	if err != nil {
+		return err
+	}
+	if digest != admitted.semanticContentDigest {
+		return badRequest("admitted request semantic content changed")
+	}
+	return nil
+}
+
+func cloneAdmissionResponse(response *Response) *Response {
+	if response == nil {
+		return nil
+	}
+	copy := *response
+	copy.Body = bytes.Clone(response.Body)
+	return &copy
 }
 
 func (p InboundAdmissionPlan) admitExplicitRaw(req Request) (rawRequestAdmission, error) {
