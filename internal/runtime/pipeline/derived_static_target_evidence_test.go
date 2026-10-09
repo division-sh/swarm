@@ -22,6 +22,16 @@ type derivedStaticInstanceIndex struct {
 	force       bool
 }
 
+func TestComponentFixtureInstanceIndexFailsClosed(t *testing.T) {
+	owner := unavailablePipelineTestInstanceIndex{}
+	if observation, found, err := owner.LookupFlowInstance(context.Background(), FlowInstanceLookupRequest{}); err == nil || found || observation.Valid() {
+		t.Fatalf("unsupported component fixture minted instance evidence: found=%v observation=%+v err=%v", found, observation, err)
+	}
+	if observations, err := owner.ListFlowInstances(context.Background(), FlowInstanceLookupScope{}); err == nil || len(observations) != 0 {
+		t.Fatalf("unsupported component fixture minted an inventory: observations=%+v err=%v", observations, err)
+	}
+}
+
 func (o derivedStaticInstanceIndex) LookupFlowInstance(_ context.Context, request FlowInstanceLookupRequest) (FlowInstanceObservation, bool, error) {
 	if o.err != nil {
 		return FlowInstanceObservation{}, false, o.err

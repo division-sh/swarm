@@ -294,6 +294,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	}
 	workflow = runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, runtimepipeline.PipelineCoordinatorOptions{
 		ExecutionPosture:        executionposture.Live,
+		SourceArtifactFact:      sourceFact,
 		Module:                  dynamicFlowCreationWorkflowModule{source: semanticview.Wrap(bundle)},
 		Persistence:             workflowPersistence,
 		RunLifecycle:            selected,
@@ -327,6 +328,14 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		SemanticSource: semanticview.Wrap(bundle), WorkflowInstances: workflow, DeliveryStore: selected,
 		WorkOwner: storeTestWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, selected))
+	rootPlan, err := am.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: root, OccurredAt: occurredAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootCommitted, err := eventBus.CommitFlowInstanceActivation(ctx, rootPlan)
+	if err != nil || !rootCommitted.Acknowledged {
+		t.Fatalf("construct actual structural parent: acknowledged=%v err=%v", rootCommitted.Acknowledged, err)
+	}
 	activation, err := am.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: semanticview.Wrap(bundle), Instance: identity,
 		ConstructorInput: "task.started", ResolvedKey: "alpha", TriggerEvent: parent, OccurredAt: occurredAt,
@@ -373,6 +382,17 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	binding, err := grant.ProcessExecutionBinding()
 	if err != nil {
 		t.Fatal(err)
+	}
+	rootReadiness, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, root.Route())
+	if err != nil || !found {
+		t.Fatalf("load constructed structural root: found=%v err=%v", found, err)
+	}
+	rootAdmission, err := selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(rootReadiness.Plan, rootReadiness.AttemptOrdinal, rootReadiness.AttemptState, binding))
+	if err != nil || !rootAdmission.Acknowledged {
+		t.Fatalf("admit structural root component attachment: acknowledged=%v err=%v", rootAdmission.Acknowledged, err)
+	}
+	if completed, err := completeFlowAttachmentFixture(ctx, workflow, rootAdmission.Attempt, occurredAt.Add(time.Second)); err != nil || !completed.Acknowledged {
+		t.Fatalf("complete structural root component attachment: acknowledged=%v err=%v", completed.Acknowledged, err)
 	}
 	admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(readiness.Plan, readiness.AttemptOrdinal, readiness.AttemptState, binding))
 	if err != nil || !admitted.Acknowledged {
