@@ -85,7 +85,7 @@ func seedSelectedConstructedRootHistory(t *testing.T, ctx context.Context, db *s
 		RuntimeInstanceID: runForkTestRuntimeInstanceID, DeliveryAuthority: authority, ReceiverExecution: eventreceiver.NormalExecution(),
 		Durable: bus.DurableDependencies{
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
+			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteTopology: selected,
 			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
 			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected, ConstructionPublications: selected,
 		},

@@ -364,76 +364,6 @@ func upsertSQLiteFlowInstanceRouteWithExecutor(
 	return nil
 }
 
-func (s *PipelinePostgresOwner) ReplaceFlowInstanceRouteRecords(
-	ctx context.Context,
-	identity runtimeflowidentity.RunScopedFlowInstance,
-	routes []runtimebus.FlowInstanceRouteRecord,
-) error {
-	if s == nil || s.backend == nil {
-		return fmt.Errorf("postgres store is required for exact flow instance routes")
-	}
-	identity = identity.Normalize()
-	if err := identity.Validate(); err != nil {
-		return fmt.Errorf("exact flow-instance route owner is required")
-	}
-	normalized, err := normalizeFlowInstanceRouteSet(identity, routes)
-	if err != nil {
-		return err
-	}
-	return runPostgresFlowInstanceRouteMutation(ctx, s, identity.RunID, func(sqlCtx context.Context, exec flowInstanceRouteExecutor) error {
-		if _, err := exec.ExecContext(sqlCtx, `
-			UPDATE routing_rules
-			SET status = 'inactive'
-			WHERE run_id = $1::uuid AND flow_instance = $2
-			  AND is_materialized = true
-			  AND status = 'active'
-		`, identity.RunID, identity.Route.InstancePath); err != nil {
-			return fmt.Errorf("inactivate postgres flow-instance route owner %s: %w", identity.Key(), err)
-		}
-		for _, route := range normalized {
-			if err := upsertPostgresFlowInstanceRoute(sqlCtx, exec, route); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
-func (s *PipelineSQLiteOwner) ReplaceFlowInstanceRouteRecords(
-	ctx context.Context,
-	identity runtimeflowidentity.RunScopedFlowInstance,
-	routes []runtimebus.FlowInstanceRouteRecord,
-) error {
-	if s == nil || s.backend == nil {
-		return fmt.Errorf("sqlite runtime store is required for exact flow instance routes")
-	}
-	identity = identity.Normalize()
-	if err := identity.Validate(); err != nil {
-		return fmt.Errorf("exact flow-instance route owner is required")
-	}
-	normalized, err := normalizeFlowInstanceRouteSet(identity, routes)
-	if err != nil {
-		return err
-	}
-	return s.runSQLiteFlowInstanceRouteMutation(ctx, "sqlite exact flow instance route replacement", identity.RunID, func(txctx context.Context, tx *sql.Tx) error {
-		if _, err := tx.ExecContext(txctx, `
-			UPDATE routing_rules
-			SET status = 'inactive'
-			WHERE run_id = ? AND flow_instance = ?
-			  AND is_materialized = TRUE
-			  AND status = 'active'
-		`, identity.RunID, identity.Route.InstancePath); err != nil {
-			return fmt.Errorf("inactivate sqlite flow-instance route owner %s: %w", identity.Key(), err)
-		}
-		for _, route := range normalized {
-			if err := upsertSQLiteFlowInstanceRoute(txctx, tx, route); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
 func (s *PipelinePostgresOwner) ReplaceFlowInstanceRouteTopology(
 	ctx context.Context,
 	sets []runtimebus.FlowInstanceRouteRecordSet,
@@ -722,47 +652,6 @@ func (s *PipelineSQLiteOwner) DeleteFlowInstanceRoute(ctx context.Context, ident
 			WHERE run_id = ? AND flow_instance = ? AND is_materialized = TRUE AND status = 'active'
 		`, identity.RunID, identity.Route.InstancePath); err != nil {
 			return fmt.Errorf("delete sqlite flow instance route %s: %w", identity.Key(), err)
-		}
-		return nil
-	})
-}
-
-func (s *PipelinePostgresOwner) RollbackFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	if s == nil || s.backend == nil {
-		return fmt.Errorf("postgres store is required for flow instance routes")
-	}
-	identity = identity.Normalize()
-	if err := identity.Validate(); err != nil {
-		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
-	}
-	return runPostgresFlowInstanceRouteMutation(ctx, s, identity.RunID, func(sqlCtx context.Context, exec flowInstanceRouteExecutor) error {
-		if _, err := exec.ExecContext(sqlCtx, `
-			UPDATE routing_rules
-			SET status = 'inactive'
-			WHERE run_id = $1::uuid AND flow_instance = $2
-			  AND is_materialized = true
-			  AND status = 'active'
-		`, identity.RunID, identity.Route.InstancePath); err != nil {
-			return fmt.Errorf("rollback flow instance route %s: %w", identity.Key(), err)
-		}
-		return nil
-	})
-}
-
-func (s *PipelineSQLiteOwner) RollbackFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	if s == nil || s.backend == nil {
-		return fmt.Errorf("sqlite runtime store is required for flow instance routes")
-	}
-	identity = identity.Normalize()
-	if err := identity.Validate(); err != nil {
-		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
-	}
-	return s.runSQLiteFlowInstanceRouteMutation(ctx, "sqlite flow instance route rollback", identity.RunID, func(txctx context.Context, tx *sql.Tx) error {
-		if _, err := tx.ExecContext(txctx, `
-			UPDATE routing_rules SET status = 'inactive'
-			WHERE run_id = ? AND flow_instance = ? AND is_materialized = TRUE AND status = 'active'
-		`, identity.RunID, identity.Route.InstancePath); err != nil {
-			return fmt.Errorf("rollback sqlite flow instance route %s: %w", identity.Key(), err)
 		}
 		return nil
 	})

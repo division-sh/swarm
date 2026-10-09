@@ -521,12 +521,6 @@ type FlowInstanceRoutePersistence interface {
 	ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error)
 }
 
-// FlowInstanceRouteSetPersistence replaces one materialized route owner's
-// complete active record set inside the selected mutation.
-type FlowInstanceRouteSetPersistence interface {
-	ReplaceFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, routes []FlowInstanceRouteRecord) error
-}
-
 // FlowInstanceRouteRecordSet is one exact route owner's complete materialized
 // record set within a topology replacement.
 type FlowInstanceRouteRecordSet struct {
@@ -567,10 +561,6 @@ type FlowInstanceRouteTopologyPersistence interface {
 
 type FlowInstanceRouteRecordReader interface {
 	ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]FlowInstanceRouteRecord, error)
-}
-
-type FlowInstanceRouteRollbackPersistence interface {
-	RollbackFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error
 }
 
 type ActiveAgentDescriptor struct {

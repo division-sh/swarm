@@ -108,9 +108,7 @@ func TestEventBusRoutePersistenceDependenciesAreExplicit(t *testing.T) {
 	assertOwnershipStructFields(t, root, "internal/runtime/bus/eventbus.go", "DurableDependencies", map[string]string{
 		"FlowRoutes":        "FlowInstanceRoutePersistence",
 		"FlowRouteRecords":  "FlowInstanceRouteRecordReader",
-		"FlowRouteSets":     "FlowInstanceRouteSetPersistence",
 		"FlowRouteTopology": "FlowInstanceRouteTopologyPersistence",
-		"FlowRouteRollback": "FlowInstanceRouteRollbackPersistence",
 		"ActiveAgents":      "ActiveAgentDescriptorLister",
 		"ActiveFlows":       "ActiveFlowInstanceDescriptorLister",
 	})

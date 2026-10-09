@@ -18882,6 +18882,10 @@ platform_tables:
         and rejects foreign or repeated native coordinates;
         native absence cannot borrow a process registration. Live-agent-only delivery without
         compiled flow subscriptions grants no flow receiver authority and needs no instance query.
+        The selected store exposes no standalone per-instance route-set replacement or route
+        rollback operation. EventBus has no dependency on either role, and AgentManager has no
+        instance-route persistence dependency. Construction and its rollback remain owned by the
+        original selected mutation, not a separate compensating mirror transaction.
         A source-admitted native run without constructed instances may yield genuine empty lookup
         or inventory without a construction revision. It yields no instance observation and invents
         no revision. An actual native or historical header always requires positive recorded revision

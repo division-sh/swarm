@@ -243,57 +243,6 @@ func TestPostgresStoreUpsertFlowInstanceRouteOwnsNamedTransaction(t *testing.T) 
 	}
 }
 
-func TestPostgresStoreReplaceFlowInstanceRouteRecordsIsExactAndTransactional(t *testing.T) {
-	ctx := testAuthorActivityContext()
-	_, db, _ := testutil.StartPostgres(t)
-	pg := admitTestPostgresStore(t, db)
-	ensureFlowInstanceRouteTables(t, ctx, db)
-	identity := flowRouteTestIdentity(runtimeflowidentity.DeriveRoute("review", "inst-exact"))
-	ctx = seedFlowRouteTestRun(t, ctx, db, true)
-	seedFlowRouteHeaderFixture(t, ctx, db, flowRouteTestRunID, identity.Route.InstancePath, "review", "template", "active", runtimeflowidentity.EntityID(identity.Route.InstancePath), "flow-route-test")
-	seedFlowRouteTestEntities(t, ctx, db, true, identity.Route.InstancePath)
-	first := []runtimebus.FlowInstanceRouteRecord{
-		{
-			Identity: identity, EventPattern: "review/inst-exact/task.started",
-			SubscriberType: "agent", SubscriberID: "reviewer", SourceFlow: "review",
-		},
-		{
-			Identity: identity, EventPattern: "producer/source-1/task.done",
-			SubscriberType: "node", SubscriberID: "observer", SourceFlow: "review",
-		},
-	}
-	if err := pg.ReplaceFlowInstanceRouteRecords(ctx, identity, first); err != nil {
-		t.Fatalf("ReplaceFlowInstanceRouteRecords first: %v", err)
-	}
-	if got, err := pg.ListFlowInstanceRouteRecords(ctx, identity); err != nil || len(got) != 2 {
-		t.Fatalf("first exact route set: routes=%#v err=%v", got, err)
-	}
-	if err := pg.ReplaceFlowInstanceRouteRecords(ctx, identity, first[:1]); err != nil {
-		t.Fatalf("ReplaceFlowInstanceRouteRecords second: %v", err)
-	}
-	got, err := pg.ListFlowInstanceRouteRecords(ctx, identity)
-	if err != nil || len(got) != 1 || got[0].SubscriberID != "reviewer" {
-		t.Fatalf("second exact route set: routes=%#v err=%v", got, err)
-	}
-
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("BeginTx: %v", err)
-	}
-	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
-	if err := pg.ReplaceFlowInstanceRouteRecords(txctx, identity, nil); err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("ReplaceFlowInstanceRouteRecords rollback mutation: %v", err)
-	}
-	if err := tx.Rollback(); err != nil {
-		t.Fatalf("Rollback: %v", err)
-	}
-	got, err = pg.ListFlowInstanceRouteRecords(ctx, identity)
-	if err != nil || len(got) != 0 {
-		t.Fatalf("named-operation route set after unrelated rollback: routes=%#v err=%v", got, err)
-	}
-}
-
 func TestSQLiteRuntimeStoreUpsertFlowInstanceRouteOwnsNamedTransaction(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
@@ -338,55 +287,6 @@ func TestSQLiteRuntimeStoreUpsertFlowInstanceRouteOwnsNamedTransaction(t *testin
 	}
 	if leaked != 1 {
 		t.Fatalf("sqlite named-operation routing rules after unrelated rollback = %d, want 1", leaked)
-	}
-}
-
-func TestSQLiteRuntimeStoreReplaceFlowInstanceRouteRecordsOwnsNamedTransaction(t *testing.T) {
-	ctx := context.Background()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	identity := flowRouteTestIdentity(runtimeflowidentity.DeriveRoute("review", "inst-exact"))
-	ctx = seedFlowRouteTestRun(t, ctx, store.backend.ConstructionHandle(), false)
-	seedFlowRouteHeaderFixture(t, ctx, store.backend.ConstructionHandle(), flowRouteTestRunID, identity.Route.InstancePath, "review", "template", "active", runtimeflowidentity.EntityID(identity.Route.InstancePath), "flow-route-test")
-	seedFlowRouteTestEntities(t, ctx, store.backend.ConstructionHandle(), false, identity.Route.InstancePath)
-	first := []runtimebus.FlowInstanceRouteRecord{
-		{
-			Identity: identity, EventPattern: "review/inst-exact/task.started",
-			SubscriberType: "agent", SubscriberID: "reviewer", SourceFlow: "review",
-		},
-		{
-			Identity: identity, EventPattern: "producer/source-1/task.done",
-			SubscriberType: "node", SubscriberID: "observer", SourceFlow: "review",
-		},
-	}
-	if err := store.ReplaceFlowInstanceRouteRecords(ctx, identity, first); err != nil {
-		t.Fatalf("ReplaceFlowInstanceRouteRecords first: %v", err)
-	}
-	if got, err := store.ListFlowInstanceRouteRecords(ctx, identity); err != nil || len(got) != 2 {
-		t.Fatalf("first exact route set: routes=%#v err=%v", got, err)
-	}
-	if err := store.ReplaceFlowInstanceRouteRecords(ctx, identity, first[:1]); err != nil {
-		t.Fatalf("ReplaceFlowInstanceRouteRecords second: %v", err)
-	}
-	got, err := store.ListFlowInstanceRouteRecords(ctx, identity)
-	if err != nil || len(got) != 1 || got[0].SubscriberID != "reviewer" {
-		t.Fatalf("second exact route set: routes=%#v err=%v", got, err)
-	}
-
-	tx, err := store.backend.ConstructionHandle().BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("BeginTx: %v", err)
-	}
-	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
-	if err := store.ReplaceFlowInstanceRouteRecords(txctx, identity, nil); err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("ReplaceFlowInstanceRouteRecords rollback mutation: %v", err)
-	}
-	if err := tx.Rollback(); err != nil {
-		t.Fatalf("Rollback: %v", err)
-	}
-	got, err = store.ListFlowInstanceRouteRecords(ctx, identity)
-	if err != nil || len(got) != 0 {
-		t.Fatalf("named-operation route set after unrelated rollback: routes=%#v err=%v", got, err)
 	}
 }
 
@@ -637,61 +537,6 @@ func TestPostgresStoreDeleteFlowInstanceRouteOwnsNamedTransaction(t *testing.T) 
 	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
 	if err := pg.DeleteFlowInstanceRoute(txctx, route.Identity); err != nil {
 		t.Fatalf("DeleteFlowInstanceRoute in tx: %v", err)
-	}
-	var inTxStatus string
-	if err := tx.QueryRowContext(ctx, `
-		SELECT status
-		FROM routing_rules
-		WHERE flow_instance = $1
-	`, route.Identity.Route.InstancePath).Scan(&inTxStatus); err != nil {
-		t.Fatalf("query routing_rules in tx: %v", err)
-	}
-	if strings.TrimSpace(inTxStatus) != "inactive" {
-		t.Fatalf("routing_rules status in tx = %q, want inactive", inTxStatus)
-	}
-	if err := tx.Rollback(); err != nil {
-		t.Fatalf("Rollback: %v", err)
-	}
-	var status string
-	if err := db.QueryRowContext(ctx, `
-		SELECT status
-		FROM routing_rules
-		WHERE flow_instance = $1
-	`, route.Identity.Route.InstancePath).Scan(&status); err != nil {
-		t.Fatalf("query routing_rules after rollback: %v", err)
-	}
-	if strings.TrimSpace(status) != "inactive" {
-		t.Fatalf("named-operation routing_rules status after unrelated rollback = %q, want inactive", status)
-	}
-}
-
-func TestPostgresStoreRollbackFlowInstanceRouteOwnsNamedTransaction(t *testing.T) {
-	ctx := testAuthorActivityContext()
-	_, db, _ := testutil.StartPostgres(t)
-	pg := admitTestPostgresStore(t, db)
-	ensureFlowInstanceRouteTables(t, ctx, db)
-
-	route := runtimebus.FlowInstanceRouteRecord{
-		Identity:       flowRouteTestIdentity(runtimeflowidentity.DeriveRoute("review", "inst-1")),
-		EventPattern:   "review/inst-1/task.started",
-		SubscriberType: "node",
-		SubscriberID:   "reviewer-inst-1",
-		SourceFlow:     "review",
-	}
-	ctx = seedFlowRouteTestRun(t, ctx, db, true)
-	seedFlowRouteHeaderFixture(t, ctx, db, flowRouteTestRunID, route.Identity.Route.InstancePath, "review", "template", "active", runtimeflowidentity.EntityID(route.Identity.Route.InstancePath), "flow-route-test")
-	seedFlowRouteTestEntities(t, ctx, db, true, route.Identity.Route.InstancePath)
-	if err := pg.UpsertFlowInstanceRoute(ctx, route); err != nil {
-		t.Fatalf("UpsertFlowInstanceRoute: %v", err)
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("BeginTx: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
-	if err := pg.RollbackFlowInstanceRoute(txctx, route.Identity); err != nil {
-		t.Fatalf("RollbackFlowInstanceRoute in tx: %v", err)
 	}
 	var inTxStatus string
 	if err := tx.QueryRowContext(ctx, `

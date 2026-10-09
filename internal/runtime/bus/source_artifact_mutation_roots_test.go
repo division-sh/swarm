@@ -248,29 +248,20 @@ func (s *sourceBoundaryProbeStore) DeleteFlowInstanceRoute(ctx context.Context, 
 	return nil
 }
 
-func (s *sourceBoundaryProbeStore) ReplaceFlowInstanceRouteRecords(
-	ctx context.Context,
-	identity runtimeflowidentity.RunScopedFlowInstance,
-	routes []FlowInstanceRouteRecord,
-) error {
-	if len(routes) == 0 {
-		return s.DeleteFlowInstanceRoute(ctx, identity)
-	}
-	for _, route := range routes {
-		if err := s.UpsertFlowInstanceRoute(ctx, route); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (s *sourceBoundaryProbeStore) ReplaceFlowInstanceRouteTopology(
 	ctx context.Context,
 	sets []FlowInstanceRouteRecordSet,
 ) (FlowInstanceRouteTopologyResult, error) {
 	for _, set := range sets {
-		if err := s.ReplaceFlowInstanceRouteRecords(ctx, set.Identity, set.Routes); err != nil {
-			return FlowInstanceRouteTopologyResult{}, err
+		if len(set.Routes) == 0 {
+			if err := s.DeleteFlowInstanceRoute(ctx, set.Identity); err != nil {
+				return FlowInstanceRouteTopologyResult{}, err
+			}
+		}
+		for _, route := range set.Routes {
+			if err := s.UpsertFlowInstanceRoute(ctx, route); err != nil {
+				return FlowInstanceRouteTopologyResult{}, err
+			}
 		}
 	}
 	return FlowInstanceRouteTopologyResult{Acknowledged: true}, nil

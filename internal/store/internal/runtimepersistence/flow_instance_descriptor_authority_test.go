@@ -30,7 +30,7 @@ import (
 
 type flowInstanceDescriptorAuthorityStore interface {
 	externalStoreTestDurableEventBusStore
-	runtimebus.FlowInstanceRouteSetPersistence
+	runtimebus.FlowInstanceRouteTopologyPersistence
 	runtimebus.FlowInstanceRouteRecordReader
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.ScopedActiveFlowInstanceDescriptorLister
@@ -816,7 +816,7 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 						SubscriberID:   "prior-agent",
 						SourceFlow:     notifyallchildren.ChildFlowID,
 					}
-					if err := selected.ReplaceFlowInstanceRouteRecords(ctx, flowIdentity, []runtimebus.FlowInstanceRouteRecord{prior}); err != nil {
+					if _, err := selected.ReplaceFlowInstanceRouteTopology(ctx, []runtimebus.FlowInstanceRouteRecordSet{{Identity: flowIdentity, Routes: []runtimebus.FlowInstanceRouteRecord{prior}}}); err != nil {
 						t.Fatalf("seed prior exact route set: %v", err)
 					}
 					before, err := selected.ListFlowInstanceRouteRecords(ctx, flowIdentity)

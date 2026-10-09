@@ -115,17 +115,11 @@ func (unexpectedDurableTestRoles) DeleteFlowInstanceRoute(context.Context, runti
 func (unexpectedDurableTestRoles) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
 	return nil, errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) ReplaceFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance, []FlowInstanceRouteRecord) error {
-	return errUnexpectedDurableTestRole
-}
 func (unexpectedDurableTestRoles) ReplaceFlowInstanceRouteTopology(context.Context, []FlowInstanceRouteRecordSet) (FlowInstanceRouteTopologyResult, error) {
 	return FlowInstanceRouteTopologyResult{}, errUnexpectedDurableTestRole
 }
 func (unexpectedDurableTestRoles) ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance) ([]FlowInstanceRouteRecord, error) {
 	return nil, errUnexpectedDurableTestRole
-}
-func (unexpectedDurableTestRoles) RollbackFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
-	return errUnexpectedDurableTestRole
 }
 func (unexpectedDurableTestRoles) ListActiveAgentDescriptors(context.Context, string) ([]ActiveAgentDescriptor, error) {
 	return nil, nil
@@ -197,14 +191,8 @@ func ExactDurableTestDependencies(selected any) DurableDependencies {
 	if deps.FlowRouteRecords == nil {
 		deps.FlowRouteRecords = defaults
 	}
-	if deps.FlowRouteSets == nil {
-		deps.FlowRouteSets = defaults
-	}
 	if deps.FlowRouteTopology == nil {
 		deps.FlowRouteTopology = defaults
-	}
-	if deps.FlowRouteRollback == nil {
-		deps.FlowRouteRollback = defaults
 	}
 	if deps.ActiveAgents == nil {
 		deps.ActiveAgents = defaults
@@ -258,14 +246,8 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 	if role, ok := selected.(FlowInstanceRouteRecordReader); ok {
 		deps.FlowRouteRecords = role
 	}
-	if role, ok := selected.(FlowInstanceRouteSetPersistence); ok {
-		deps.FlowRouteSets = role
-	}
 	if role, ok := selected.(FlowInstanceRouteTopologyPersistence); ok {
 		deps.FlowRouteTopology = role
-	}
-	if role, ok := selected.(FlowInstanceRouteRollbackPersistence); ok {
-		deps.FlowRouteRollback = role
 	}
 	if role, ok := selected.(ActiveAgentDescriptorLister); ok {
 		deps.ActiveAgents = role
@@ -297,8 +279,8 @@ func TestDurableDependenciesDoNotRequireReceiverElectionReader(t *testing.T) {
 	deps := DurableDependencies{
 		Instances:    roles,
 		RunLifecycle: roles, DeliveryLifecycle: roles, FlowRoutes: roles, FlowRouteRecords: roles,
-		FlowRouteSets: roles, FlowRouteTopology: roles, FlowRouteRollback: roles,
-		ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
+		FlowRouteTopology: roles,
+		ActiveAgents:      roles, ActiveFlows: roles, TargetOwners: roles,
 		PreparedEvents: roles, TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles,
 	}
 	opts := EventBusOptions{

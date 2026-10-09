@@ -1079,10 +1079,6 @@ func (s *PostgresStore) RepairAuthority(ctx context.Context, req startupownershi
 	return s.startupPostgresOwner.RepairAuthority(ctx, req)
 }
 
-func (s *PostgresStore) ReplaceFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.RunScopedFlowInstance, routes []bus.FlowInstanceRouteRecord) error {
-	return s.pipelinePostgresOwner.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
-}
-
 func (s *PostgresStore) ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []bus.FlowInstanceRouteRecordSet) (bus.FlowInstanceRouteTopologyResult, error) {
 	return s.pipelinePostgresOwner.ReplaceFlowInstanceRouteTopology(ctx, sets)
 }
@@ -1197,10 +1193,6 @@ func (s *PostgresStore) RetireDynamicFlowRuntimeActivationAttempts(ctx context.C
 
 func (s *PostgresStore) ReviseRunSource(ctx context.Context, request runlifecycle.SourceRevisionRequest) (runlifecycle.MutationDisposition, error) {
 	return s.runLifecyclePostgresOwner.ReviseRunSource(ctx, request)
-}
-
-func (s *PostgresStore) RollbackFlowInstanceRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) error {
-	return s.pipelinePostgresOwner.RollbackFlowInstanceRoute(ctx, identity)
 }
 
 func (s *PostgresStore) Rotate(ctx context.Context, leaseInput *sessions.Lease, rotation sessions.RotationMetadata) (*sessions.Lease, error) {
@@ -2339,10 +2331,6 @@ func (s *SQLiteRuntimeStore) RepairAuthority(ctx context.Context, req startupown
 	return s.startupSQLiteOwner.RepairAuthority(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.RunScopedFlowInstance, routes []bus.FlowInstanceRouteRecord) error {
-	return s.pipelineSQLiteOwner.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
-}
-
 func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []bus.FlowInstanceRouteRecordSet) (bus.FlowInstanceRouteTopologyResult, error) {
 	return s.pipelineSQLiteOwner.ReplaceFlowInstanceRouteTopology(ctx, sets)
 }
@@ -2453,10 +2441,6 @@ func (s *SQLiteRuntimeStore) RetireDynamicFlowRuntimeActivationAttempts(ctx cont
 
 func (s *SQLiteRuntimeStore) ReviseRunSource(ctx context.Context, request runlifecycle.SourceRevisionRequest) (runlifecycle.MutationDisposition, error) {
 	return s.runLifecycleSQLiteOwner.ReviseRunSource(ctx, request)
-}
-
-func (s *SQLiteRuntimeStore) RollbackFlowInstanceRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) error {
-	return s.pipelineSQLiteOwner.RollbackFlowInstanceRoute(ctx, identity)
 }
 
 func (s *SQLiteRuntimeStore) Rotate(ctx context.Context, leaseInput *sessions.Lease, rotation sessions.RotationMetadata) (*sessions.Lease, error) {

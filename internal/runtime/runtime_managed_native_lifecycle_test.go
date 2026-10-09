@@ -161,17 +161,11 @@ func (managedNativeDurableRoles) DeleteFlowInstanceRoute(context.Context, runtim
 func (managedNativeDurableRoles) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
 	return nil, nil
 }
-func (managedNativeDurableRoles) ReplaceFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance, []runtimebus.FlowInstanceRouteRecord) error {
-	return nil
-}
 func (managedNativeDurableRoles) ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) (runtimebus.FlowInstanceRouteTopologyResult, error) {
 	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
 }
 func (managedNativeDurableRoles) ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error) {
 	return nil, nil
-}
-func (managedNativeDurableRoles) RollbackFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
-	return nil
 }
 func (managedNativeDurableRoles) ListActiveAgentDescriptors(context.Context, string) ([]runtimebus.ActiveAgentDescriptor, error) {
 	return nil, nil
@@ -214,8 +208,8 @@ func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) run
 	roles := managedNativeDurableRoles{}
 	return runtimebus.DurableDependencies{
 		RunLifecycle: roles, DeliveryLifecycle: delivery,
-		FlowRoutes: roles, FlowRouteRecords: roles, FlowRouteSets: roles,
-		FlowRouteTopology: roles, FlowRouteRollback: roles, ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
+		FlowRoutes: roles, FlowRouteRecords: roles,
+		FlowRouteTopology: roles, ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
 		PreparedEvents:        roles,
 		TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles, Instances: roles,
 	}
