@@ -114,15 +114,10 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		cleanupStarted := time.Now()
 		var cleanupErr error
 		rolledBack := false
-		var rollbackErr error
 		if tx != nil {
 			probe.RollbackAttempted()
 		}
-		if stopReadRollback != nil && !stopReadRollback() {
-			rollbackErr = <-readRollbackDone
-		} else if tx != nil {
-			rollbackErr = tx.Rollback()
-		}
+		rollbackErr := joinTransactionRollback(tx, stopReadRollback, readRollbackDone)
 		releaseOrdering()
 		if tx != nil {
 			rolledBack = rollbackErr == nil
@@ -209,4 +204,14 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	probe.Committed()
 	tx = nil
 	return true, nil
+}
+
+func joinTransactionRollback(tx *sql.Tx, stopReadRollback func() bool, readRollbackDone <-chan error) error {
+	if stopReadRollback != nil && !stopReadRollback() {
+		return <-readRollbackDone
+	}
+	if tx == nil {
+		return nil
+	}
+	return tx.Rollback()
 }
