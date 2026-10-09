@@ -263,6 +263,9 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.runForkPostgresOwner = runForkOwner
+	if err := pipelineOwner.BindHistoricalFlowInstanceReader(runForkOwner); err != nil {
+		return nil, err
+	}
 	if err := agentOwner.BindLifecycleDiagnostics(eventOwner, runForkOwner); err != nil {
 		return nil, err
 	}
@@ -524,6 +527,9 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.runForkSQLiteOwner = runForkOwner
+	if err := pipelineOwner.BindHistoricalFlowInstanceReader(runForkOwner); err != nil {
+		return nil, err
+	}
 	if err := agentOwner.BindLifecycleDiagnostics(eventOwner, runForkOwner); err != nil {
 		return nil, err
 	}

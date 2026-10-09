@@ -169,6 +169,28 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 			stored.ParentFlowID != original.ParentFlowID || stored.ParentEntityID != parentEntity || stored.ParentFlowInstance != parentPath || stored.InstanceKey != original.InstanceKey {
 			t.Fatalf("historical header lost construction: stored=%+v original=%+v found=%t err=%v", stored, original, found, err)
 		}
+		fact, present := correlation.SourceArtifactFactFromContext(f.ctx)
+		if !present {
+			t.Fatal("historical lookup requires the admitted artifact")
+		}
+		lookup, err := pipeline.NewExactFlowInstanceLookup(req.ContractBundle, fact, identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observation, found, err := f.store.(pipeline.FlowInstanceIndexReader).LookupFlowInstance(f.ctx, lookup)
+		if err != nil || !found || observation.Identity().EntityID != stored.EntityID || observation.InstanceKey() != original.InstanceKey {
+			t.Fatalf("historical index discarded actual fixed construction: %+v found=%t err=%v", observation, found, err)
+		}
+		fixed, historical := observation.HistoricalConstruction()
+		if !historical || fixed.SourceOwner.RunID != runID || fixed.SourceOwner.Route.InstancePath != path || fixed.SourceRevision != history.ForkPoint.Revision {
+			t.Fatalf("index did not consume the exact admitted fork cut: %+v", fixed)
+		}
+		if _, ready := observation.Readiness(); ready {
+			t.Fatal("materialize-only lookup invented desired attachment")
+		}
+		if _, native, err := observation.NativeConstruction(); err != nil || native {
+			t.Fatalf("materialize-only lookup invented a fresh receipt: native=%t err=%v", native, err)
+		}
 	}
 	listed, err := f.workflows.ListWorkflowInstances(f.ctx, fork.ForkRunID)
 	if err != nil || len(listed) != len(originals) {
