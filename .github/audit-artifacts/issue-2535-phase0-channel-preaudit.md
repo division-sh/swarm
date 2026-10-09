@@ -1072,3 +1072,79 @@ No new producer, port, framework, vendoring or class split. Fresh complete
 guard/census/debt proof and reviewer disposition on21-unit carry precede the
 next server2 request. All six channel units and named supplements remain
 unexecuted qualification, as do hosted full and the final PR proof audit.
+
+## Completed Local Proof And Master Integration
+
+The fresh WHOLE Local core at signed frozen61e203b7e733554c24396e55f303a1c8fad1cb99
+PASSES22/22 units and7407 required roots. No carry from either failed aggregate.
+Plan dd8cc24fd36b9b61a5c9b8b398002a29a074bd7aa5f7b839f4d36b191a6d4eb9;
+server2 Go1.25.5/native PG16/normal capacity4/short disk TMPDIR. broad-01
+PASSES349.204s, including the repaired canonical empty expiry and all566
+unchanged stage-entry goldens. Fresh full guard/census/debt sweep and API spec
+pass at61e. All12 required supplemental commands ALSO PASS at that same clean
+source; all188 selected roots accounted for,186 required standalone roots.
+The existing two subprocess entry points earn no standalone credit; one is an
+expected helper skip. No unexpected skips, failed roots/children or race
+reports. Worker/signal6 roots pass race3. Exact public stage-gate and M36 pass
+both stores. This is Local core plus named supplements, NOT lifecycle/full.
+Immutable plan, primary receipts, command logs, selected-root manifest and
+validation are retained under agent-g-phase0/61e203b7e-* in local state and the
+server2 disk evidence directory. Thread receipts6090508379/6090603089 bind them.
+Server2 released immediately after joined cleanup, no runner, active0/waiting0.
+
+| Complete command | Package seconds |
+| --- | ---: |
+| serveapp-channel |205.608|
+| serveapp-channel-delivery |174.142|
+| serveapp-channel-learned |137.690|
+| serveapp-channel-lifecycle |74.860|
+| serveapp-channel-native |239.417|
+| serveapp-channel-process-temporal |202.207|
+| store-channel-native-journal |60.737|
+| store-fork-authority |19.803|
+| store-publication-reset-terminal |19.364|
+| native-transaction-protocol |0.006/0.331|
+| channel-signal-worker-race |1.021/1.029|
+| catalog-selected-root-regression |2.453|
+
+Q08's frozen61e exact unchanged8m four-root command on vemew PASSes42 test
+records, no skip/failure,166.809s versus baseline230.956s. SHA256
+c04f5c06f725bbd823c78c122f35180069a3362691b4189679d6dde454c31986.
+This single same-host sample is27.8% lower, not fleet-p90 evidence. Hosted
+before source329acf46b/full run37945884736 is downloaded; all six prior unit
+package/primary/job/queue times remain separate. Hosted after proof is pending.
+The original race publish timeout remains red/unclassified under2353 and
+disposition6089996078, NOT repaired/inherited/waived by these passing controls.
+
+PR2599 opened at61e but conflicts with master4d129afac, hence no hosted full
+could start. User requires rebase and conflict-delta guards, then push and an
+explicit reviewer carry decision. Prior green receipts remain bound to61e,
+not relabeled to the integrated source. This is not generated-only integration.
+
+The signed rebase preserves master transaction-loaned callback context and
+active-source/counter admission, all cancellation fields and per-turn commit
+acknowledgments, and selected-fork event-counter insertion. The existing new
+failure helper receives the SAME borrowed ChannelCardChanges accumulator;
+supersession preserves master's lifecycle writer while returning actual change.
+No new transaction/finalizer/worker, runtime authority, policy, schema or gate.
+Two upstream native-admission/counter fixtures receive the same private fact
+parameter without deleting their rollback, invalidation, UUID-alias or exact
+physical-counter assertions. The plan retains master's complete membership
+plus the approved three channel roots; the spec retains master's additions
+plus the approved25-line channel scheduling contract. Generated admission
+hashes and authority inventory are regenerated, never hand-merged or relaxed.
+235 exact previously reviewed registry identities transfer unchanged; the
+three composed SupersedeRunTx/recoverFailedSelectedForkTx private-backend
+identities retain the same closed owner/disposition. No debt baseline,
+collector/header/classifier exception or generic SQL port is introduced.
+
+Pre-commit integration controls: native invalidation/unbound terminal counter,
+reviewer2589 UUID snapshot, selected/ordinary fork activity dependency and
+selected projection failure both-store group PASS18.939s; exact registry plus
+no-raw-public-method controls PASS11.529s; regenerated admission census PASS.
+These are source-tree focused controls, not an integrated-head tier receipt.
+Fresh focused guards at the resulting committed head precede publication.
+Reviewer-G must decide whether61e's22 core and12 supplements carry; none is
+self-approved. Exact-head hosted full, final proof audit and formal closure
+remain pending. Parent2535 and2250 stay open; core timing environment defect
+6090327487 is the next separate item, not absorbed into this channel PR.
