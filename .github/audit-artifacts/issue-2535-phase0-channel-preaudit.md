@@ -845,7 +845,8 @@ native driver/protocol, SQL test observer port or production hook is added.
   receipt. The new native cuts and actual handoff proof do not relabel it.
 
 Normal focused fork/handoff controls PASS18.331s (32 ordinary,4 selected,4
-handoff cells); native journal cuts separately passed all48 cells. The first
+handoff cells); the native journal root passed all48 cells within the earlier
+overall failing fixture diagnostic, not credited as qualification. The first
 diagnostics correctly rejected fixture route history and a foreign authored
 bundle context. The expanded pending-card fixture then rejected expired
 historical cadence: it now uses a current fork cut, without extending any
@@ -853,6 +854,24 @@ deadline. The initial human-handoff hint expectation was wrong; exact frozen
 inputs and native readback prove the D classification above. These fixture
 counterexamples are not recorded as runtime defects or waived qualification.
 
-Race repetitions, fresh all-package guards/census and clean-head core plus
-six unchanged channel units/named supplements remain pending at this amendment.
-No PR, final audit, performance savings or whole-class closure is claimed yet.
+The seven-root native/fork/control group then PASSED race x3 at the adcf97abb
+executable source:550.585s,150 distinct leaf paths/450 passing executions,
+zero skip/failure/race reports, after normal vemew admission2m31s. Roots:
+TestOrdinaryForkActivityReplayCardDependencyBothStores,
+TestSelectedForkRecordedActivityCardDependencyBothStores,
+TestRunForkActivityTimestampRecordedReuseBothStores,
+TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority,
+TestChannelActivityNativeAcknowledgementCutsBothStores,
+TestDecisionCompletionPreservesCommittedHandoffOutcome,
+TestCompletionTransactionAcknowledgementBoundaryBothStores.
+Log channel-fork-native-cuts-race.log, SHA256
+b3adc48e5d9fa9c93ba3ab74905899345461d4547221a8622a8a098ea8f5d663.
+The original completion driver controls remain green with their unchanged
+default observed statement. The exact independent complexity comparison at
+adcf97abb also passes:261/261 cyclo and559/559 cognitive hotspots at30,
+no policy/baseline increase. This is focused checkpoint proof, not a tier run.
+
+Fresh all-package guards/census are queued through ordinary admission, and
+clean-head core plus six unchanged channel units/named supplements remain
+pending. No PR, final audit, performance savings or whole-class closure is
+claimed yet. The next commit changes this audit only, not executable proof.
