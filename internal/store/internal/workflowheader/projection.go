@@ -3,6 +3,7 @@ package workflowheader
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -143,6 +144,8 @@ func InventoryForMutation(ctx context.Context, tx *sql.Tx, postgres bool, runID 
 func requireJSONObject(name string, raw any) error {
 	var data []byte
 	switch value := raw.(type) {
+	case json.RawMessage:
+		data = value
 	case []byte:
 		data = value
 	case string:
