@@ -9537,9 +9537,18 @@
         {
           "name": "fork_event_id",
           "required": false,
-          "description": "Optional explicit fork-point event id in source_run_id. When omitted, the run-fork store owner selects the latest persisted source-run event; no CLI/current-session ambient event is allowed.",
+          "description": "Optional inclusive fork-point event in source_run_id, mutually exclusive with at_start=true. Without either selector the canonical store resolves the latest event or deployment revision once; retries reuse the permanent resolved point.",
           "schema": {
             "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "at_start",
+          "required": false,
+          "description": "Select the one immutable original start, exclusive of its creating ingress. Event evidence is absent from this point; any real first-turn intention remains a separate immutable origin/schema reference. Mutually exclusive with fork_event_id, including an explicitly empty or null value.",
+          "schema": {
+            "default": false,
+            "type": "boolean"
           }
         },
         {
@@ -21285,7 +21294,10 @@
                 "type": "integer"
               },
               "fork_point_kind": {
-                "const": "deployment_revision",
+                "enum": [
+                  "deployment_revision",
+                  "run_start"
+                ],
                 "type": "string"
               },
               "fork_revision": {

@@ -26,7 +26,6 @@ import (
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -140,6 +139,7 @@ type selectedContractWorkflowState struct {
 	Mode            string
 	Route           string
 	Agents          []runfork.RunForkSelectedContractAgentExpectation
+	OwedCreation    *runtimepipeline.DynamicFlowRuntimeCreationEventPlan
 	History         runfork.RunForkEntityState
 }
 
@@ -177,11 +177,24 @@ func selectedContractAdmittedWorkflowStates(plan runfork.RunForkPlan, forkRunID 
 		if route.InstancePath != owner.Fork.FlowInstance || state.EntityType != meta.EntityType {
 			return nil, fmt.Errorf("admitted selected-contract state disagrees with child entity projection")
 		}
+		entity := history[state.EntityID]
+		owed, err := runForkConstructionOccurrenceOwed(plan, entity)
+		if err != nil {
+			return nil, err
+		}
+		var creation *runtimepipeline.DynamicFlowRuntimeCreationEventPlan
+		if owed {
+			receipt, err := projectRunForkConstructionReceipt(plan, forkRunID, entity, entity.MaterializationMetadata.CreatedAt)
+			if err != nil {
+				return nil, err
+			}
+			creation = receipt.CreationEvent
+		}
 		out = append(out, selectedContractWorkflowState{
 			SourceRunID: plan.SourceRunID, RunID: forkRunID, EntityID: owner.Fork.EntityID, EntityType: state.EntityType,
 			WorkflowName: state.FlowID, WorkflowVersion: state.WorkflowVersion,
 			ExecutionMode: state.ExecutionMode, Mode: state.Mode, Route: route.InstancePath,
-			Agents: state.Agents, History: history[state.EntityID],
+			Agents: state.Agents, OwedCreation: creation, History: entity,
 		})
 	}
 	return out, nil
@@ -234,20 +247,26 @@ func selectedContractWorkflowIdentity(state selectedContractWorkflowState) (runt
 	if err != nil || projected.Fork.EntityID != state.EntityID || projected.Fork.FlowInstance != state.Route {
 		return runtimeflowidentity.Instance{}, fmt.Errorf("selected workflow identity disagrees with admitted entity projection")
 	}
-	route := runtimeflowidentity.StoredRoute(state.WorkflowName, runtimeflowidentity.LogicalInstanceID(state.Route), state.Route)
-	recorded, err := runtimepipeline.DecodeWorkflowInstanceRecordedHeader(runtimeflowidentity.RouteForInstancePath(metadata.FlowInstance), metadata.FlowConfig)
+	receipt, err := runtimepipeline.DecodeStoredFlowConstructionReceipt(metadata.InitialMaterialization,
+		state.SourceRunID, state.History.EntityID, metadata.FlowInstance, metadata.FlowTemplate)
 	if err != nil {
 		return runtimeflowidentity.Instance{}, err
 	}
-	parent, err := projectRunForkRecordedParent(state.SourceRunID, state.RunID, recorded.ParentRoute())
+	recorded, err := runtimepipeline.DecodeWorkflowInstanceRecordedHeader(receipt.Identity.Route(), metadata.FlowConfig)
 	if err != nil {
 		return runtimeflowidentity.Instance{}, err
 	}
-	return runtimeflowidentity.Instance{
-		TemplateID: state.WorkflowName, ScopeKey: route.ScopeKey, InstanceID: route.InstanceID,
-		InstancePath: route.InstancePath, EntityID: state.EntityID, HasStoredPath: true,
-		ParentRoute: parent, ParentEntityID: parent.EntityID,
-	}, nil
+	if recorded.ParentRoute() != receipt.Identity.ParentRoute {
+		return runtimeflowidentity.Instance{}, fmt.Errorf("selected workflow header contradicts immutable ancestry")
+	}
+	identity, err := runfork.ProjectConstructionIdentity(state.SourceRunID, state.RunID, receipt.Identity)
+	if err != nil {
+		return runtimeflowidentity.Instance{}, err
+	}
+	if identity.TemplateID != state.WorkflowName || identity.InstancePath != state.Route || identity.EntityID != state.EntityID {
+		return runtimeflowidentity.Instance{}, fmt.Errorf("selected workflow identity contradicts immutable construction")
+	}
+	return identity, nil
 }
 
 func requireSelectedContractWorkflowEntity(ctx context.Context, tx *sql.Tx, postgres bool, state selectedContractWorkflowState) error {
@@ -354,26 +373,8 @@ func materializeSelectedContractWorkflowState(ctx context.Context, tx *sql.Tx, p
 	if err != nil {
 		return nil, err
 	}
-	if found {
-		// This operation is called only inside a fresh fork's materialization
-		// commit. Existing-fork reuse uses requireSelectedContractWorkflowState
-		// and cannot repair absent readiness or install new authority.
-		if err := materializeSelectedContractWorkflowReadiness(ctx, tx, postgres, state, *plan, encoded, now); err != nil {
-			return nil, err
-		}
-		return topologies, nil
-	}
-	record, err := selectedContractHistoricalHeader(state, config, source.BundleHash(), now)
-	if err != nil {
-		return nil, err
-	}
-	if err := pipelinepersistence.CommitSelectedHistoricalWorkflowHeader(ctx, tx, postgres, record); err != nil {
-		return nil, err
-	}
-	if found, err := requireSelectedContractWorkflowCompanion(ctx, tx, postgres, state, config); err != nil {
-		return nil, err
-	} else if !found {
-		return nil, fmt.Errorf("selected-contract workflow companion %s was not created", state.Route)
+	if !found {
+		return nil, fmt.Errorf("selected-contract attachment requires the admitted historical header %s", state.Route)
 	}
 	if err := materializeSelectedContractWorkflowReadiness(ctx, tx, postgres, state, *plan, encoded, now); err != nil {
 		return nil, err
@@ -387,7 +388,11 @@ func selectedContractHistoricalHeader(state selectedContractWorkflowState, confi
 	if metadata == nil || metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance || history.EnteredStateAt == nil || history.EnteredStateAt.IsZero() || history.CurrentState == "" {
 		return runtimepipeline.WorkflowEngineStateRecord{}, fmt.Errorf("selected-contract header requires exact historical lifecycle evidence")
 	}
-	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(state.RunID, runtimeflowidentity.StoredRoute(state.WorkflowName, runtimeflowidentity.LogicalInstanceID(state.Route), state.Route))
+	constructed, err := selectedContractWorkflowIdentity(state)
+	if err != nil {
+		return runtimepipeline.WorkflowEngineStateRecord{}, err
+	}
+	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(state.RunID, constructed.Route())
 	if err != nil {
 		return runtimepipeline.WorkflowEngineStateRecord{}, err
 	}
@@ -496,7 +501,8 @@ func selectedContractWorkflowReadiness(source runtimecorrelation.SourceArtifactF
 	plan := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: identity, RunID: state.RunID, BundleHash: bundleHash,
 		WorkflowVersion: state.WorkflowVersion, ExecutionMode: state.ExecutionMode,
-		Agents: make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(state.Agents)),
+		CreationEvent: state.OwedCreation,
+		Agents:        make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(state.Agents)),
 	}
 	agentRoute, err := route.AgentIdentityRoute()
 	if err != nil {

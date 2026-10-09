@@ -94,12 +94,18 @@ func planRunForkSnapshot(
 		return runfork.RunForkPlan{}, fmt.Errorf("source run_id must be a UUID: %w", err)
 	}
 	at := strings.TrimSpace(req.At)
+	if req.AtStart && at != "" {
+		return runfork.RunForkPlan{}, fmt.Errorf("start and event fork selectors are mutually exclusive")
+	}
 	if req.ResolvedPoint != nil {
 		if err := req.ResolvedPoint.Validate(); err != nil {
 			return runfork.RunForkPlan{}, fmt.Errorf("fixed fork point: %w", err)
 		}
 		if at != "" && at != req.ResolvedPoint.Input {
 			return runfork.RunForkPlan{}, fmt.Errorf("fork selector differs from fixed revision point")
+		}
+		if req.AtStart != (req.ResolvedPoint.Kind == runfork.RunForkPointRunStart) {
+			return runfork.RunForkPlan{}, fmt.Errorf("fork start selector differs from fixed revision point")
 		}
 		at = req.ResolvedPoint.Input
 	}
@@ -126,13 +132,17 @@ func planRunForkSnapshot(
 	var err error
 	if req.ResolvedPoint != nil {
 		cursor, err = resolveFixedRunForkRevisionPoint(ctx, tx, runID, *req.ResolvedPoint, resolve)
+	} else if req.AtStart {
+		cursor, err = resolveRunForkStartPoint(ctx, tx, runID)
 	} else {
 		cursor, err = resolve(ctx, tx, runID, at)
 	}
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}
-	snapshot, err := loadRunForkRevisionSnapshot(ctx, tx, runID, cursor.Revision)
+	snapshot, err := loadRunForkPointSnapshot(ctx, tx, runID, runfork.RunForkPoint{
+		Kind: cursor.Kind, EventID: cursor.EventID, Revision: cursor.Revision,
+	})
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}
@@ -152,6 +162,11 @@ func planRunForkSnapshot(
 		}
 		if !found {
 			return runfork.RunForkPlan{}, fmt.Errorf("deployment fork revision %d has no admitted deployment feed", cursor.Revision)
+		}
+	} else if cursor.Kind == runfork.RunForkPointRunStart {
+		plan.StartFirstTurn, err = loadRunForkStartFirstTurn(ctx, tx, snapshot)
+		if err != nil {
+			return runfork.RunForkPlan{}, err
 		}
 	} else {
 		return runfork.RunForkPlan{}, fmt.Errorf("unsupported fork revision point kind %q", cursor.Kind)
@@ -188,6 +203,22 @@ func planRunForkSnapshot(
 		return runfork.RunForkPlan{}, fmt.Errorf("fixed fork point contradicts its historical revision")
 	}
 	plan.EventCountAtFork = len(snapshot.Events)
+	for _, reply := range snapshot.ReplyContexts {
+		plan.ReplyContexts = append(plan.ReplyContexts, reply.Record)
+	}
+	for _, timer := range snapshot.Timers {
+		if timer.TaskType != "workflow_timer" {
+			continue
+		}
+		activation, err := workflowTimerActivationFromSnapshot(timer.TimerSnapshot)
+		if err != nil {
+			return runfork.RunForkPlan{}, err
+		}
+		if activation.RunID != runID {
+			return runfork.RunForkPlan{}, fmt.Errorf("workflow timer disagrees with fixed-cut run")
+		}
+		plan.WorkflowTimers = append(plan.WorkflowTimers, activation.PersistenceRecord())
+	}
 
 	entities, err := loadRunForkEntityStates(snapshot)
 	if err != nil {
@@ -239,6 +270,16 @@ func resolveFixedRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID str
 		}
 		if cursor.Kind != point.Kind || cursor.Revision != point.Revision {
 			return runForkEventCursor{}, fmt.Errorf("fixed event point is not its first committed revision")
+		}
+		return cursor, nil
+	}
+	if point.Kind == runfork.RunForkPointRunStart {
+		cursor, err := resolveRunForkStartPoint(ctx, tx, runID)
+		if err != nil {
+			return runForkEventCursor{}, err
+		}
+		if cursor.Revision != point.Revision {
+			return runForkEventCursor{}, fmt.Errorf("fixed start point is not original creation revision")
 		}
 		return cursor, nil
 	}

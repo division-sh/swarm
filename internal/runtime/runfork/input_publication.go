@@ -96,6 +96,50 @@ func (p RunForkPlan) HistoricalInputPublication(eventID string) (InputPublicatio
 	return input, ok
 }
 
+// OriginalStartFirstTurn is a creation intention, not an event in the cut.
+// It cannot add historical deliveries or authorize an arbitrary later ingress.
+func (p RunForkPlan) OriginalStartFirstTurn() (InputPublication, bool, error) {
+	if p.StartFirstTurn == nil {
+		return InputPublication{}, false, nil
+	}
+	if p.ForkPoint.Kind != RunForkPointRunStart || p.ForkPoint.Validate() != nil {
+		return InputPublication{}, false, fmt.Errorf("original first turn requires the exact run-start point")
+	}
+	event, present := p.StartFirstTurn.Event()
+	if !present || event.RunID() != p.SourceRunID {
+		return InputPublication{}, false, fmt.Errorf("original first turn contradicts source creation")
+	}
+	admitted, err := InputPublicationFromEvent(event)
+	if err != nil {
+		return InputPublication{}, false, err
+	}
+	if _, present := admitted.Event(); !present {
+		return InputPublication{}, false, fmt.Errorf("original first turn is not admitted ingress")
+	}
+	if ids, known := p.HistoricalEventIDs(p.ForkPoint.Revision); known {
+		for _, id := range ids {
+			if id == event.ID() {
+				return InputPublication{}, false, fmt.Errorf("original first turn must be outside the exclusive start cut")
+			}
+		}
+	}
+	return admitted, true, nil
+}
+
+// ExecutionInputPublication keeps the exclusive first-turn intention distinct
+// from historical input evidence while sharing selected root admission.
+func (p RunForkPlan) ExecutionInputPublication(eventID string) (InputPublication, bool) {
+	if input, present := p.HistoricalInputPublication(eventID); present {
+		return input, true
+	}
+	input, present, err := p.OriginalStartFirstTurn()
+	if err != nil || !present {
+		return InputPublication{}, false
+	}
+	event, _ := input.Event()
+	return input, event.ID() == eventID
+}
+
 func (p RunForkPlan) HistoricalInputCoordinates() []InputPublicationCoordinates {
 	ids := make([]string, 0, len(p.historicalInputs))
 	for id := range p.historicalInputs {

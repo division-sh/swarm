@@ -20,6 +20,7 @@ type ForkOperationRequest struct {
 	TransportHash     string                    `json:"transport_hash"`
 	SourceRunID       string                    `json:"source_run_id"`
 	ForkEventID       string                    `json:"fork_event_id"`
+	AtStart           bool                      `json:"at_start,omitempty"`
 	ResolvedPoint     *RunForkPoint             `json:"resolved_point,omitempty"`
 	TargetBundleHash  string                    `json:"target_bundle_hash"`
 	AllowSourceFreeze bool                      `json:"allow_source_freeze"`
@@ -28,6 +29,9 @@ type ForkOperationRequest struct {
 }
 
 func (r ForkOperationRequest) Canonical() (ForkOperationRequest, string, error) {
+	if r.AtStart && r.ForkEventID != "" {
+		return ForkOperationRequest{}, "", fmt.Errorf("fork operation start and event selectors are mutually exclusive")
+	}
 	for _, id := range []string{r.OperationID, r.SourceRunID} {
 		parsed, err := uuid.Parse(id)
 		if err != nil || parsed == uuid.Nil || parsed.String() != id {
@@ -43,6 +47,9 @@ func (r ForkOperationRequest) Canonical() (ForkOperationRequest, string, error) 
 	if r.ResolvedPoint != nil {
 		if err := r.ResolvedPoint.Validate(); err != nil {
 			return ForkOperationRequest{}, "", fmt.Errorf("fork operation resolved point: %w", err)
+		}
+		if r.AtStart != (r.ResolvedPoint.Kind == RunForkPointRunStart) {
+			return ForkOperationRequest{}, "", fmt.Errorf("fork operation resolved point disagrees with start selector")
 		}
 		if r.ResolvedPoint.EventID != r.ForkEventID && r.ForkEventID != "" {
 			return ForkOperationRequest{}, "", fmt.Errorf("fork operation resolved point disagrees with event selector")
@@ -72,11 +79,12 @@ func (r ForkOperationRequest) Canonical() (ForkOperationRequest, string, error) 
 	semantic := struct {
 		SourceRunID       string                    `json:"source_run_id"`
 		ForkEventID       string                    `json:"fork_event_id"`
+		AtStart           bool                      `json:"at_start,omitempty"`
 		TargetBundleHash  string                    `json:"target_bundle_hash"`
 		AllowSourceFreeze bool                      `json:"allow_source_freeze"`
 		ContractSelection RunForkContractSelection  `json:"contract_selection"`
 		DataPinOverrides  []durabledata.ExplicitPin `json:"data_pin_overrides"`
-	}{r.SourceRunID, r.ForkEventID, r.TargetBundleHash, r.AllowSourceFreeze, r.ContractSelection, r.DataPinOverrides}
+	}{r.SourceRunID, r.ForkEventID, r.AtStart, r.TargetBundleHash, r.AllowSourceFreeze, r.ContractSelection, r.DataPinOverrides}
 	hash, err := canonicaljson.Hash(semantic)
 	if err != nil {
 		return ForkOperationRequest{}, "", err

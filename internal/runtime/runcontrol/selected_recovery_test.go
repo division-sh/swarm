@@ -43,12 +43,16 @@ func TestSelectedRecoveryRequestAdmitsExactTypedForkPoint(t *testing.T) {
 	deployment := selectedRecoveryRequestForPoint(t, runfork.RunForkPoint{
 		Kind: runfork.RunForkPointDeploymentRevision, Revision: 2,
 	})
+	start := selectedRecoveryRequestForPoint(t, runfork.RunForkPoint{
+		Kind: runfork.RunForkPointRunStart, Revision: 1,
+	})
 	for _, tc := range []struct {
 		name string
 		req  SelectedForkRecoveryRequest
 	}{
 		{"event", event},
 		{"deployment_revision_without_event", deployment},
+		{"original_start_without_event", start},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := tc.req.Validate(); err != nil {
@@ -65,6 +69,9 @@ func TestSelectedRecoveryRequestRejectsContradictoryForkPoint(t *testing.T) {
 	deployment := selectedRecoveryRequestForPoint(t, runfork.RunForkPoint{
 		Kind: runfork.RunForkPointDeploymentRevision, Revision: 2,
 	})
+	start := selectedRecoveryRequestForPoint(t, runfork.RunForkPoint{
+		Kind: runfork.RunForkPointRunStart, Revision: 1,
+	})
 	for _, tc := range []struct {
 		name   string
 		base   SelectedForkRecoveryRequest
@@ -80,6 +87,9 @@ func TestSelectedRecoveryRequestRejectsContradictoryForkPoint(t *testing.T) {
 		{"deployment_alias_invented", deployment, func(r *SelectedForkRecoveryRequest) { r.Entry.Binding.ForkEventID = uuid.NewString() }},
 		{"deployment_point_event_invented", deployment, func(r *SelectedForkRecoveryRequest) { r.Entry.Binding.ForkPoint.EventID = uuid.NewString() }},
 		{"deployment_event_evidence_invented", deployment, func(r *SelectedForkRecoveryRequest) { r.Entry.Binding.ForkPoint.EventName = "root.ready" }},
+		{"start_alias_invented", start, func(r *SelectedForkRecoveryRequest) { r.Entry.Binding.ForkEventID = uuid.NewString() }},
+		{"start_point_event_invented", start, func(r *SelectedForkRecoveryRequest) { r.Entry.Binding.ForkPoint.EventID = uuid.NewString() }},
+		{"start_event_evidence_invented", start, func(r *SelectedForkRecoveryRequest) { r.Entry.Binding.ForkPoint.EventName = "root.ready" }},
 		{"zero_revision", deployment, func(r *SelectedForkRecoveryRequest) { r.Entry.Binding.ForkPoint.Revision = 0 }},
 		{"unknown_kind", deployment, func(r *SelectedForkRecoveryRequest) { r.Entry.Binding.ForkPoint.Kind = "unknown" }},
 		{"crossed_run", deployment, func(r *SelectedForkRecoveryRequest) { r.Entry.Binding.ForkRunID = r.Entry.Binding.SourceRunID }},

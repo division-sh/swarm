@@ -29,6 +29,7 @@ type ledgerAdapter interface {
 	latestFacts(context.Context, string, []Family) (ledgerFactsByFamily, error)
 	allocate(context.Context, string) (int64, error)
 	insertFacts(context.Context, string, int64, []revisionFactInsert) error
+	publishStart(context.Context, string, int64, StartProjection) error
 }
 
 func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects) (map[string]Result, error) {
@@ -67,9 +68,13 @@ func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects) (map
 	}
 	effects.pendingEventCounts = nil
 	for _, change := range changes {
-		latestByFamily, err := readSelectedLatestFacts(ctx, adapter.projectionQueryer(), change)
-		if err != nil {
-			return nil, fmt.Errorf("load latest revision facts: %w", err)
+		latestByFamily := make(ledgerFactsByFamily)
+		if len(change.families) != 0 {
+			var err error
+			latestByFamily, err = readSelectedLatestFacts(ctx, adapter.projectionQueryer(), change)
+			if err != nil {
+				return nil, fmt.Errorf("load latest revision facts: %w", err)
+			}
 		}
 		type familyChange struct {
 			family         Family
@@ -98,7 +103,17 @@ func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects) (map
 			}
 			changed = append(changed, familyChange{family: family, current: current, latest: latest, comparedPrefix: comparedPrefix})
 		}
-		if len(changed) == 0 {
+		start, hasStart := effects.starts[change.runID]
+		if hasStart {
+			current, _, err := adapter.latestRevision(ctx, change.runID)
+			if err != nil {
+				return nil, err
+			}
+			if current != 0 {
+				return nil, fmt.Errorf("run start must be published by the original creation attempt")
+			}
+		}
+		if len(changed) == 0 && !hasStart {
 			revision, ok, err := adapter.latestRevision(ctx, change.runID)
 			if err != nil {
 				return nil, err
@@ -158,6 +173,11 @@ func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects) (map
 		}
 		if err := flush(); err != nil {
 			return nil, err
+		}
+		if hasStart {
+			if err := adapter.publishStart(ctx, change.runID, revision, start); err != nil {
+				return nil, err
+			}
 		}
 		results[change.runID] = Result{Revision: revision, Changed: true}
 	}

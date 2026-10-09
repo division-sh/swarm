@@ -125,6 +125,37 @@ func ProjectParentRoute(sourceRunID, forkRunID string, parent flowidentity.Paren
 	return parent, nil
 }
 
+// ProjectConstructionIdentity retains the recorded declaration and ancestry.
+// Only the admitted root coordinates change; a path tail is not an identity.
+func ProjectConstructionIdentity(sourceRunID, forkRunID string, source flowidentity.Instance) (flowidentity.Instance, error) {
+	if !source.HasStoredPath || source.TemplateID == "" || source.ScopeKey == "" || source.InstanceID == "" ||
+		source.EntityID == "" || !source.Route().Valid() || source.Route().InstanceID != source.InstanceID {
+		return flowidentity.Instance{}, fmt.Errorf("fork construction requires complete recorded identity")
+	}
+	owner, err := ProjectEntityOwnership(sourceRunID, forkRunID, source.EntityID, source.InstancePath)
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	route, err := ProjectExecutionRoute(sourceRunID, forkRunID, source.ScopeKey, source.Route())
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	if route.InstancePath != owner.Fork.FlowInstance {
+		return flowidentity.Instance{}, fmt.Errorf("fork construction route contradicts admitted ownership")
+	}
+	parent, err := ProjectParentRoute(sourceRunID, forkRunID, source.ParentRoute)
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	if source.ParentEntityID != source.ParentRoute.EntityID {
+		return flowidentity.Instance{}, fmt.Errorf("fork construction parent contradicts recorded ancestry")
+	}
+	child := source
+	child.EntityID, child.InstanceID, child.InstancePath = owner.Fork.EntityID, route.InstanceID, route.InstancePath
+	child.ParentRoute, child.ParentEntityID = parent, parent.EntityID
+	return child, nil
+}
+
 // ProjectSelectedContractSourceEvent is shared by persistent preparation and the
 // runtime container. It projects producer coordinates, never receiver state.
 // Calling it on an already child-projected event validates without reminting.

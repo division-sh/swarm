@@ -98,6 +98,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			planRequest.At = lineage.ForkPoint.EventID
 		} else {
 			planRequest.ResolvedPoint = &lineage.ForkPoint
+			planRequest.AtStart = lineage.ForkPoint.Kind == runfork.RunForkPointRunStart
 		}
 		plan, err := port.plan(txctx, tx, planRequest)
 		if err != nil {

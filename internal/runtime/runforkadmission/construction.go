@@ -38,10 +38,13 @@ func FixedConstructionForRoute(source semanticview.Source, plan runfork.RunForkP
 		if err != nil {
 			return flowidentity.Instance{}, matched, false, err
 		}
-		constructed = flowidentity.Instance{
-			TemplateID: metadata.FlowTemplate, ScopeKey: route.ScopeKey, InstanceID: route.InstanceID,
-			InstancePath: route.InstancePath, EntityID: entity.EntityID, ParentRoute: config.ParentRoute(),
-			ParentEntityID: config.ParentRoute().EntityID, HasStoredPath: true,
+		receipt, err := fixedConstructionReceipt(plan, entity)
+		if err != nil {
+			return flowidentity.Instance{}, matched, false, err
+		}
+		constructed = receipt.Identity
+		if constructed.Route() != route || config.ParentRoute() != constructed.ParentRoute {
+			return flowidentity.Instance{}, matched, false, fmt.Errorf("fixed header/config contradicts immutable construction identity")
 		}
 		if err := constructed.ValidateConstruction(source, plan.SourceRunID); err != nil {
 			return flowidentity.Instance{}, matched, false, fmt.Errorf("selected fixed-revision construction: %w", err)
@@ -72,7 +75,11 @@ func ConstructedInstances(source semanticview.Source, plan runfork.RunForkPlan) 
 	var instances []flowidentity.Instance
 	for _, entity := range plan.Entities {
 		meta := entity.MaterializationMetadata
-		route := flowidentity.StoredRoute(flowidentity.ScopeKey(source, meta.FlowTemplate), flowidentity.LogicalInstanceID(meta.FlowInstance), meta.FlowInstance)
+		receipt, err := fixedConstructionReceipt(plan, entity)
+		if err != nil {
+			return nil, err
+		}
+		route := receipt.Identity.Route()
 		instance, _, found, err := FixedConstructionForRoute(source, plan, route)
 		if err != nil {
 			return nil, err
@@ -89,6 +96,59 @@ func ConstructedInstances(source semanticview.Source, plan runfork.RunForkPlan) 
 	return instances, nil
 }
 
+func fixedConstructionReceipt(plan runfork.RunForkPlan, entity runfork.RunForkEntityState) (pipeline.FlowConstructionReceipt, error) {
+	meta := entity.MaterializationMetadata
+	if meta == nil || meta.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance {
+		return pipeline.FlowConstructionReceipt{}, fmt.Errorf("fixed construction requires its captured constructor receipt")
+	}
+	return pipeline.DecodeStoredFlowConstructionReceipt(meta.InitialMaterialization,
+		plan.SourceRunID, entity.EntityID, meta.FlowInstance, meta.FlowTemplate)
+}
+
+// ValidateFixedConstructionTree checks the original source's atomic keyless
+// construction, not future keyed instances or the selected target's new graph.
+func ValidateFixedConstructionTree(original semanticview.Source, plan runfork.RunForkPlan) error {
+	if original == nil {
+		return fmt.Errorf("fixed construction tree requires its original immutable source")
+	}
+	if err := validateFixedConstructionMetadata(plan.Entities); err != nil {
+		return err
+	}
+	instances := make(map[string]flowidentity.Instance, len(plan.Entities))
+	for _, entity := range plan.Entities {
+		receipt, err := fixedConstructionReceipt(plan, entity)
+		if err != nil {
+			return err
+		}
+		if err := receipt.Identity.ValidateConstruction(original, plan.SourceRunID); err != nil {
+			return err
+		}
+		instances[receipt.Identity.InstancePath] = receipt.Identity
+	}
+	for _, instance := range instances {
+		if parent := instance.ParentRoute; !parent.Empty() {
+			owner, present := instances[parent.FlowInstance]
+			if !present || owner.TemplateID != parent.FlowID || owner.EntityID != parent.EntityID {
+				return fmt.Errorf("captured constructor has missing or conflicting exact parent %s", parent.FlowInstance)
+			}
+		}
+		children, err := flowidentity.KeylessChildFlowIDs(original, instance.TemplateID)
+		if err != nil {
+			return err
+		}
+		for _, flowID := range children {
+			expected, err := flowidentity.KeylessChild(original, instance, flowID)
+			if err != nil {
+				return err
+			}
+			if actual, present := instances[expected.InstancePath]; !present || actual != expected {
+				return fmt.Errorf("captured atomic constructor tree lacks exact keyless descendant %s", expected.InstancePath)
+			}
+		}
+	}
+	return nil
+}
+
 func validateFixedConstructionMetadata(entities []runfork.RunForkEntityState) error {
 	seen := make(map[string]struct{}, len(entities))
 	routes := make(map[string]struct{}, len(entities))
@@ -100,7 +160,7 @@ func validateFixedConstructionMetadata(entities []runfork.RunForkEntityState) er
 		metadata := entity.MaterializationMetadata
 		if id == "" || id != entity.EntityID || metadata == nil || metadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner ||
 			metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance ||
-			metadata.FlowTemplate == "" || (metadata.Mode != "static" && metadata.Mode != "template") || len(metadata.FlowConfig) == 0 ||
+			metadata.FlowTemplate == "" || (metadata.Mode != "static" && metadata.Mode != "template") || len(metadata.FlowConfig) == 0 || len(metadata.InitialMaterialization) == 0 ||
 			strings.TrimSpace(metadata.FlowInstance) == "" || strings.TrimSpace(entity.CurrentState) == "" ||
 			entity.EnteredStateAt == nil || entity.EnteredStateAt.IsZero() {
 			return fmt.Errorf("%s: entity %s requires exact fixed-revision owner metadata", runfork.RunForkMaterializedEntitySnapshotMetadataOwner, id)

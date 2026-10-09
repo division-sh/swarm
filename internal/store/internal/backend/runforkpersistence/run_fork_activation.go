@@ -543,13 +543,35 @@ func lockSQLiteRunForkSourceRevisionFrontier(ctx context.Context, tx *sql.Tx, li
 }
 
 func collectRunForkSourceAdvancedFacts(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage) ([]string, error) {
+	where := "revision > $2"
+	args := []any{lineage.SourceRunID, lineage.ForkEventRevision}
+	if lineage.ForkPoint.Kind == runfork.RunForkPointRunStart {
+		revision, projection, err := privaterunforkrevision.LoadStartProjection(ctx, tx, lineage.SourceRunID)
+		if err != nil {
+			return nil, err
+		}
+		if revision != lineage.ForkEventRevision {
+			return nil, fmt.Errorf("source advancement requires the original start revision")
+		}
+		// An exclusive start and its creating ingress share an atomic commit.
+		// Facts outside the immutable initial membership are still post-cut work.
+		initial := make([]string, 0, len(projection.Facts))
+		for _, fact := range projection.Facts {
+			args = append(args, string(fact.Family), fact.Key)
+			initial = append(initial, fmt.Sprintf("(family=$%d AND fact_key=$%d)", len(args)-1, len(args)))
+		}
+		where = "revision >= $2"
+		if len(initial) != 0 {
+			where = "(revision > $2 OR (revision = $2 AND NOT (" + strings.Join(initial, " OR ") + ")))"
+		}
+	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT DISTINCT family
 		FROM run_fork_fact_revisions
 		WHERE run_id = $1
-		  AND revision > $2
+		  AND `+where+`
 		ORDER BY family
-	`, lineage.SourceRunID, lineage.ForkEventRevision)
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read source revisions after fork point: %w", err)
 	}

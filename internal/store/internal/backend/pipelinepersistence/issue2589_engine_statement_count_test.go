@@ -213,14 +213,14 @@ func issue2589ExpectTimerCancellation(mock sqlmock.Sqlmock, postgres bool, timer
 		query = `(?s)^SELECT\s+timer_name, .* FROM timers WHERE timer_id = \$1::uuid AND task_type = 'workflow_timer' FOR UPDATE$`
 	}
 	mock.ExpectQuery(query).WithArgs(timer.Ref.ActivationID).WillReturnRows(issue2589Rows(
-		"timer_name run_id entity_id flow_scope_key flow_instance_id flow_instance fire_event fire_payload routing_source execution_mode fire_at recurring recurrence_interval owner_agent status fired_at created_at source_timer_id forked_from_run_id forked_from_event_id reconstruction_owner",
+		"timer_name run_id entity_id flow_scope_key flow_instance_id flow_instance fire_event fire_payload routing_source execution_mode fire_at recurring recurrence_interval owner_agent status fired_at created_at source_timer_id forked_from_run_id forked_from_event_id reconstruction_owner forked_from_point_kind forked_from_point_revision source_armed_at cancel_cause cancelled_at",
 		timer.Ref.TaskID(), timer.RunID, timer.EntityID, timer.Route.ScopeKey, timer.Route.InstanceID, timer.Route.InstancePath,
-		timer.EventType, string(timer.Payload), string(routing), string(timer.ExecutionMode), timer.FireAt, false, "", timer.OwnerAgent, "active", nil, timer.CreatedAt, "", "", "", "",
+		timer.EventType, string(timer.Payload), string(routing), string(timer.ExecutionMode), timer.FireAt, false, "", timer.OwnerAgent, "active", nil, timer.CreatedAt, "", "", "", "", "", int64(0), nil, "", nil,
 	))
 	if postgres {
-		mock.ExpectQuery(`^UPDATE\s+timers SET status = 'cancelled' WHERE timer_id = \$1::uuid AND task_type = 'workflow_timer' AND status = 'active' RETURNING CAST\(run_id AS TEXT\), CAST\(timer_id AS TEXT\)$`).WithArgs(timer.Ref.ActivationID).WillReturnRows(issue2589Rows("run_id timer_id", timer.RunID, timer.Ref.ActivationID))
+		mock.ExpectQuery(`^UPDATE\s+timers SET status = 'cancelled', cancel_cause = NULLIF\(\$1, ''\), cancelled_at = \$2 WHERE timer_id = \$3::uuid AND task_type = 'workflow_timer' AND status = 'active' RETURNING CAST\(run_id AS TEXT\), CAST\(timer_id AS TEXT\)$`).WithArgs("", nil, timer.Ref.ActivationID).WillReturnRows(issue2589Rows("run_id timer_id", timer.RunID, timer.Ref.ActivationID))
 	} else {
-		mock.ExpectExec(`^UPDATE\s+timers SET status = 'cancelled' WHERE timer_id = \? AND task_type = 'workflow_timer' AND status = 'active'$`).WithArgs(timer.Ref.ActivationID).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(`^UPDATE\s+timers SET status = 'cancelled', cancel_cause = NULLIF\(\?, ''\), cancelled_at = \? WHERE timer_id = \? AND task_type = 'workflow_timer' AND status = 'active'$`).WithArgs("", nil, timer.Ref.ActivationID).WillReturnResult(sqlmock.NewResult(0, 1))
 	}
 }
 
@@ -241,7 +241,7 @@ func issue2589ExpectEngineRevision(mock sqlmock.Sqlmock, postgres bool, state pi
 	))
 	mock.ExpectQuery(`(?s)^SELECT\s+CAST\(m.mutation_id AS TEXT\).*FROM entity_mutations m WHERE m.run_id = .*`).WillReturnRows(mutations)
 	routing, _ := json.Marshal(timer.RoutingSource)
-	columns := strings.Fields("timer_id timer_name schedule_scope schedule_key immutable_hash run_id source_timer_id forked_from_run_id forked_from_event_id reconstruction_owner entity_id flow_scope_key flow_instance_id flow_instance fire_event fire_payload routing_source execution_mode fire_at initial_fire_at recurring recurrence_interval owner_node owner_agent owner_kind agent_name_owner agent_name_source agent_route_presence agent_flow_scope_key agent_flow_instance_id reply_context_id task_id due_basis_kind due_basis_absolute due_basis_duration due_basis_cron occurrence_event_id occurrence_admitted_at accepted_at cancel_cause cancelled_at failure_code failure_message failed_at clock_suspension task_type status fired_at created_at")
+	columns := strings.Fields("timer_id timer_name schedule_scope schedule_key immutable_hash run_id source_timer_id forked_from_run_id forked_from_event_id reconstruction_owner entity_id flow_scope_key flow_instance_id flow_instance fire_event fire_payload routing_source execution_mode fire_at initial_fire_at recurring recurrence_interval owner_node owner_agent owner_kind agent_name_owner agent_name_source agent_route_presence agent_flow_scope_key agent_flow_instance_id reply_context_id task_id due_basis_kind due_basis_absolute due_basis_duration due_basis_cron occurrence_event_id occurrence_admitted_at accepted_at cancel_cause cancelled_at failure_code failure_message failed_at clock_suspension task_type status fired_at created_at forked_from_point_kind forked_from_point_revision source_armed_at")
 	values := map[string]driver.Value{"timer_id": timer.Ref.ActivationID, "timer_name": timer.Ref.TaskID(), "run_id": timer.RunID, "entity_id": timer.EntityID, "flow_scope_key": timer.Route.ScopeKey, "flow_instance_id": timer.Route.InstanceID, "flow_instance": timer.Route.InstancePath, "fire_event": timer.EventType, "fire_payload": string(timer.Payload), "routing_source": string(routing), "execution_mode": string(timer.ExecutionMode), "fire_at": timer.FireAt, "recurring": false, "owner_agent": timer.OwnerAgent, "owner_kind": "system", "task_type": "workflow_timer", "status": "cancelled", "created_at": timer.CreatedAt}
 	row := make([]driver.Value, len(columns))
 	for i, column := range columns {

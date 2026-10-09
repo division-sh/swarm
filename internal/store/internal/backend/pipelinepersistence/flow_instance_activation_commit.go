@@ -32,9 +32,21 @@ func commitFlowInstanceActivations(
 	seen := make(map[string]struct{}, len(plans))
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		for index, plan := range plans {
+			if err := plan.Validate(); err != nil {
+				return err
+			}
+			initial, err := attempt.BeginInitialRunConstruction(ctx, plan.Readiness.RunID, plan.Identity, plan.CreatingInput.EventID)
+			if err != nil {
+				return err
+			}
 			result, err := commitFlowConstructionTree(ctx, tx, attempt, store, postgres, plan, true, seen)
 			if err != nil {
 				return fmt.Errorf("commit flow activation %d: %w", index, err)
+			}
+			if initial {
+				if err := attempt.EndInitialRunProjection(ctx, plan.Readiness.RunID); err != nil {
+					return err
+				}
 			}
 			committed = append(committed, result)
 		}
@@ -314,14 +326,11 @@ func insertFlowInstanceActivation(
 	if err := commitWorkflowEngineState(ctx, attempt, postgres, record.State); err != nil {
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
+	if err := insertFlowConstructionReceipt(ctx, tx, postgres, record.Identity.RunID, record.EntityID,
+		record.Identity.Route.InstancePath, record.InitialMaterialization, record.CreatedAt); err != nil {
+		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
+	}
 	if postgres {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO workflow_instance_initial_materializations (
-				run_id, entity_id, instance_path, projection_version, projection, occurred_at
-			) VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb, $6)
-		`, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.InitialProjectionVersion, record.InitialMaterialization, record.CreatedAt); err != nil {
-			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert flow initial materialization: %w", err)
-		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO flow_instance_runtime_readiness (
 				run_id, instance_path, plan, plan_hash, activation_attempt_id, phase, creation_event_emitted_at, created_at, updated_at
@@ -330,13 +339,6 @@ func insertFlowInstanceActivation(
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert flow runtime readiness: %w", err)
 		}
 	} else {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO workflow_instance_initial_materializations (
-				run_id, entity_id, instance_path, projection_version, projection, occurred_at
-			) VALUES (?, ?, ?, ?, ?, ?)
-		`, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.InitialProjectionVersion, record.InitialMaterialization, record.CreatedAt); err != nil {
-			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert sqlite flow initial materialization: %w", err)
-		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO flow_instance_runtime_readiness (
 				run_id, instance_path, plan, plan_hash, activation_attempt_id, phase, creation_event_emitted_at, created_at, updated_at
@@ -357,6 +359,22 @@ func insertFlowInstanceActivation(
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
 	return lifecycle, nil
+}
+
+func insertFlowConstructionReceipt(ctx context.Context, tx *sql.Tx, postgres bool, runID, entityID, path string, raw []byte, occurredAt time.Time) error {
+	query := `INSERT INTO workflow_instance_initial_materializations
+		(run_id, entity_id, instance_path, projection_version, projection, occurred_at)
+		VALUES (?, ?, ?, ?, ?, ?)`
+	if postgres {
+		query = `INSERT INTO workflow_instance_initial_materializations
+			(run_id, entity_id, instance_path, projection_version, projection, occurred_at)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb, $6)`
+	}
+	_, err := tx.ExecContext(ctx, query, runID, entityID, path, runtimepipeline.FlowConstructionReceiptVersion, raw, occurredAt)
+	if err != nil {
+		return fmt.Errorf("insert flow initial materialization: %w", err)
+	}
+	return nil
 }
 
 func canonicalActivationTime(value time.Time) time.Time {

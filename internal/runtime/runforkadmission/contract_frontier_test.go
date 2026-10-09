@@ -1,6 +1,8 @@
 package runforkadmission
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -669,40 +671,24 @@ func testContractFrontierSource(nodeID string) semanticview.Source {
 }
 
 func testContractFrontierTemplateSource(t testing.TB) semanticview.Source {
-	review := runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "review"},
-		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.InstanceField("instance_key")},
-		Path:   "review",
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"reviewer": {
-				SubscribesTo: []string{"task.started"},
-				Produces:     []string{"task.started"},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"task.started": {},
-		},
+	t.Helper()
+	root := canonicalrouting.CopyInstanceDeclarations(t, "review")
+	for path, body := range map[string]string{
+		"schema.yaml":        "name: test-workflow\n",
+		"review/schema.yaml": "instance: instance_key\n",
+		"review/events.yaml": "task.started:\n",
+		"review/nodes.yaml":  "reviewer:\n  execution_type: system_node\n  subscribes_to: [task.started]\n  produces: [task.started]\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, path), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{review}}
-	root.Children[0].Parent = &root
-	return semanticview.Wrap(mustCompileContractFrontierBundle(semanticviewtest.WithInstanceDeclarations(t, &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:    "test-workflow",
-			Version: "v-test",
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"review": review.Schema},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByPath: map[string]*runtimecontracts.FlowContractView{
-				".":      &root,
-				"review": &root.Children[0],
-			},
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				".":      &root,
-				"review": &root.Children[0],
-			},
-		},
-	}, canonicalrouting.CopyInstanceDeclarations(t, "review"))))
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func testContractFrontierTemplateConnectSource(t testing.TB) semanticview.Source {

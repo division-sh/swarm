@@ -420,6 +420,9 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 				if err := commitRunCreationFeedsTx(txctx, tx, plan, s.PipelinePostgresOwner); err != nil {
 					return err
 				}
+				if err := recordDeploymentRunFeedFactsTx(txctx, tx, attempt, plan.DeploymentFeeds()); err != nil {
+					return err
+				}
 				completion, completeErr = bindRunCreationCompletion(completion, record)
 				if completeErr != nil {
 					return completeErr
@@ -516,6 +519,9 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 					return completeErr
 				}
 				if err := commitRunCreationFeedsTx(txctx, tx, plan, s.PipelineSQLiteOwner); err != nil {
+					return err
+				}
+				if err := recordDeploymentRunFeedFactsTx(txctx, tx, attempt, plan.DeploymentFeeds()); err != nil {
 					return err
 				}
 				completion, completeErr = bindRunCreationCompletion(completion, record)

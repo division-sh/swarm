@@ -15946,11 +15946,23 @@ platform_tables:
         transaction MUST collect all affected run IDs and lock their parent runs rows in stable run-ID
         order before owning a corresponding revision head or revision ledger row. The shared allocator
         uses the minimum foreign-key-compatible parent lock; destructive owners MAY retain a stronger lock.
+        Canonical run creation also publishes one immutable start_revision and version-1 start_projection in
+        this same transaction. The projection retains the original source hash, the actual creating-ingress
+        event reference when present, and the exact family/key membership contributed by initial root/keyless
+        construction and deployment work. It contains no payload copy or process execution state. The start
+        excludes that ingress and its routed receivers/effects even when they share its creation revision.
+        Eventless creation records an explicit empty set. Start lookup reads only this membership and never
+        infers a cut from the first event, a timestamp, revision-minus-one or the current head. Inclusive event
+        lookup stays distinct; source work outside initial membership is advanced beyond the exclusive start
+        even at the same revision. Rollback/retry discards the uncommitted start alongside ordinary effects.
       ddl: |
         CREATE TABLE run_fork_revision_heads (
             run_id        UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,
             last_revision BIGINT NOT NULL DEFAULT 0 CHECK (last_revision >= 0),
-            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            start_revision BIGINT CHECK (start_revision > 0 AND start_revision <= last_revision),
+            start_projection JSONB,
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK ((start_revision IS NULL) = (start_projection IS NULL))
         );
     run_fork_revisions:
       description: >-
@@ -17502,7 +17514,7 @@ platform_tables:
         split/fail-closed.'
       ddl: "CREATE TABLE activity_attempts (\n    request_event_id UUID PRIMARY KEY,\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    execution_mode    TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),\n    source_event_id   UUID,\n    parent_event_id   UUID,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    node_id           TEXT NOT NULL,\n    handler_event_key TEXT NOT NULL,\n    activity_id       TEXT NOT NULL,\n    tool              TEXT NOT NULL,\n    effect_class      TEXT NOT NULL CHECK (effect_class = 'non_idempotent_write'),\n    attempt           INTEGER NOT NULL DEFAULT 1 CHECK (attempt = 1),\n    status            TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'uncertain')),\n    success_event     TEXT NOT NULL,\n    failure_event     TEXT NOT NULL,\n    result_event_id   UUID,\n    result_event_type TEXT,\n    result_payload    JSONB,\n    failure           JSONB,\n    input_hash        TEXT NOT NULL,\n    loop_generation   JSONB NOT NULL DEFAULT '{}'::jsonb,\n    loop_stage        TEXT,\n    reply_context_id  TEXT REFERENCES reply_contexts(reply_context_id),\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    completed_at      TIMESTAMPTZ,\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND failure IS NULL AND completed_at IS NULL) OR (status = 'succeeded' AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NULL AND completed_at IS NOT NULL) OR (status IN ('failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NOT NULL AND completed_at IS NOT NULL)),\n    INDEX idx_activity_attempts_run (run_id, started_at),\n    INDEX idx_activity_attempts_activity (run_id, activity_id, tool),\n    INDEX idx_activity_attempts_result_event (result_event_id) WHERE result_event_id IS NOT NULL\n);"
     run_fork_selected_contract_bindings:
-      description: Durable selected-contract source binding for event or deployment-revision forks. One row binds a fork run to the selected
+      description: Durable selected-contract source binding for event, original-start or deployment-revision forks. One row binds a fork run to the selected
         contract source identity that was admitted before materialization. This is prerequisite fork-run state for future
         selected-contract execution; CLI/API arguments, dry-run JSON, and local model output are not semantic owners. It
         does not authorize handler execution, event/delivery replay, timer, route, session, turn, source-advanced, or
@@ -17512,14 +17524,14 @@ platform_tables:
             binding_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             fork_run_id      UUID NOT NULL REFERENCES runs(run_id),
             source_run_id    UUID NOT NULL REFERENCES runs(run_id),
-            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision')),
+            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
             fork_revision   BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id    UUID REFERENCES events(event_id),
             mode             TEXT NOT NULL CHECK (mode IN ('selected_contracts', 'bundle_hash')),
             bundle_hash      TEXT CHECK (bundle_hash IS NULL OR bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
             created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK ((mode = 'selected_contracts' AND bundle_hash IS NULL) OR (mode = 'bundle_hash' AND bundle_hash IS NOT NULL)),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
             UNIQUE (fork_run_id),
             INDEX idx_run_fork_selected_contract_bindings_source (source_run_id, fork_point_kind, fork_revision),
             INDEX idx_run_fork_selected_contract_bindings_event (source_run_id, fork_event_id) WHERE fork_event_id IS NOT NULL
@@ -17543,7 +17555,7 @@ platform_tables:
             semantic_hash TEXT NOT NULL,
             request_json JSONB NOT NULL,
             source_run_id UUID NOT NULL REFERENCES runs(run_id),
-            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision')),
+            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
             fork_revision BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id UUID REFERENCES events(event_id),
             fork_run_id UUID NOT NULL REFERENCES runs(run_id),
@@ -17555,7 +17567,7 @@ platform_tables:
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK (NULLIF(TRIM(actor), '') IS NOT NULL),
             CHECK (idempotency_key IS NULL OR NULLIF(TRIM(idempotency_key), '') IS NOT NULL),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
             CHECK ((state = 'activated' AND result_json IS NOT NULL AND failure_json IS NULL) OR (state = 'materialized' AND result_json IS NULL AND failure_json IS NULL) OR (state IN ('failed', 'uncertain') AND result_json IS NULL AND failure_json IS NOT NULL)),
             UNIQUE (fork_run_id),
             UNIQUE (selected_binding_id)
@@ -17578,7 +17590,7 @@ platform_tables:
             fork_run_id                    UUID NOT NULL REFERENCES runs(run_id),
             source_run_id                  UUID NOT NULL REFERENCES runs(run_id),
             binding_id                     UUID NOT NULL REFERENCES run_fork_selected_contract_bindings(binding_id),
-            fork_point_kind                TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision')),
+            fork_point_kind                TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
             fork_revision                  BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id                  UUID REFERENCES events(event_id),
             generation                     BIGINT NOT NULL CHECK (generation > 0),
@@ -17601,7 +17613,7 @@ platform_tables:
             updated_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             terminal_at                     TIMESTAMPTZ,
             CHECK ((state IN ('prepared', 'running') AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND lease_expires_at IS NOT NULL AND terminal_at IS NULL) OR (state = 'quiesced' AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND terminal_at IS NOT NULL) OR (state IN ('failed', 'closed') AND terminal_at IS NOT NULL)),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
             UNIQUE (execution_id, fork_run_id, generation),
             UNIQUE (fork_run_id, generation),
             UNIQUE (fork_run_id, executable_coordinate_fingerprint, generation),
@@ -17631,20 +17643,20 @@ platform_tables:
             INDEX idx_run_fork_selected_contract_executions_source (source_run_id, source_event_id)
         );
     run_fork_selected_contract_branch_divergences:
-      description: Durable source/fork branch divergence evidence for selected-contract event or deployment-revision fork execution. This
+      description: Durable source/fork branch divergence evidence for selected-contract event, original-start or deployment-revision fork execution. This
         table is written only by the selected-contract execution owner when the source has advanced after the fork point
         and selected execution proceeds as a branch rather than freezing or rewinding the source. Source post-fork facts
         remain source-run evidence only; fork-local work is regenerated under the fork run_id. The typed point must match
         the child origin, selected binding and source ledger. Its event projection is derived, not a second authority.
         Activation, divergence, author activity and permanent operation completion commit atomically. Exact retries retain
         the first committed evidence and timestamp; conflicting identity or evidence fails closed. Source/fork lineage
-        cleanup applies to both variants, including deployment-revision rows with no event.
+        cleanup applies to every variant, including original-start and deployment-revision rows with no event.
       ddl: |-
         CREATE TABLE run_fork_selected_contract_branch_divergences (
             divergence_id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             fork_run_id                     UUID NOT NULL REFERENCES runs(run_id),
             source_run_id                   UUID NOT NULL REFERENCES runs(run_id),
-            fork_point_kind                 TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision')),
+            fork_point_kind                 TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
             fork_revision                   BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id                   UUID REFERENCES events(event_id),
             owner                           TEXT NOT NULL,
@@ -17654,7 +17666,7 @@ platform_tables:
             source_frozen                   BOOLEAN NOT NULL DEFAULT FALSE,
             source_advanced_facts           TEXT[] NOT NULL DEFAULT '{}',
             created_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
             UNIQUE (fork_run_id),
             INDEX idx_run_fork_selected_contract_branch_divergences_source (source_run_id, fork_point_kind, fork_revision),
             INDEX idx_run_fork_selected_contract_branch_divergences_event (source_run_id, fork_event_id) WHERE fork_event_id IS NOT NULL
@@ -17675,7 +17687,7 @@ platform_tables:
             recovery_id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             fork_run_id                    UUID NOT NULL REFERENCES runs(run_id),
             source_run_id                  UUID NOT NULL REFERENCES runs(run_id),
-            fork_point_kind                TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision')),
+            fork_point_kind                TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
             fork_revision                  BIGINT NOT NULL CHECK (fork_revision > 0),
             fork_event_id                  UUID REFERENCES events(event_id),
             owner                          TEXT NOT NULL,
@@ -17695,7 +17707,7 @@ platform_tables:
             recipient_planning             JSONB NOT NULL,
             created_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK ((mode = 'selected_contracts' AND bundle_hash IS NULL) OR (mode = 'bundle_hash' AND bundle_hash IS NOT NULL)),
-            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
             UNIQUE (fork_run_id),
             INDEX idx_run_fork_selected_contract_route_recoveries_source (source_run_id, fork_point_kind, fork_revision),
             INDEX idx_run_fork_selected_contract_route_recoveries_owner (owner, runtime_recovery_owner)
@@ -17988,12 +18000,24 @@ platform_tables:
         changing immutable construction identity. Fresh normal construction without this receipt is invalid; historical
         import/selected projection retains its separately named fixed-revision authority and cannot acquire ordinary
         construction permission. No migration, fallback, inference or compatibility reader is supported.
+        Version 3 carries the exact typed construction identity and full structural parent independently of readiness,
+        the original bundle/mode, explicit incoming creating_input (including explicit no-publication), and a separate
+        outgoing creation occurrence or explicit absence. Initial fields/control remain immutable and distinct from
+        current-at-cut state. Historical metadata captures this same receipt, without attachment progress, actor census,
+        attempt, lease or grant. Selected child reconstruction maps its admitted identity and publication references
+        through this codec, then derives fresh attachment; it never reruns construction or initial-entry lifecycle.
+        The child receipt records its own materialization birth while retaining original initialized values separately
+        from current-at-cut fields. Exact recorded instance IDs and parents are projected, never derived from path tails.
+        An outgoing creation occurrence absent from the fixed cut is owed work under fresh child readiness. An occurrence
+        already published at the cut is never re-emitted by attachment; its admitted pending deliveries resume separately.
+        Historical header installation commits the projected receipt atomically. Selected attachment requires that header
+        and cannot create a missing companion or reconstruct immutable initialization from current fields.
       ddl: |
         CREATE TABLE workflow_instance_initial_materializations (
             run_id             UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
             entity_id          UUID NOT NULL,
             instance_path      TEXT NOT NULL,
-            projection_version INTEGER NOT NULL CHECK (projection_version = 2),
+            projection_version INTEGER NOT NULL CHECK (projection_version = 3),
             projection         JSONB NOT NULL,
             occurred_at        TIMESTAMPTZ NOT NULL,
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -19083,6 +19107,9 @@ platform_tables:
             forked_from_run_id     UUID REFERENCES runs(run_id),
             forked_from_event_id   UUID REFERENCES events(event_id),
             reconstruction_owner  TEXT,
+            forked_from_point_kind TEXT,
+            forked_from_point_revision BIGINT,
+            source_armed_at       TIMESTAMPTZ,
             entity_id             UUID,
             flow_scope_key        TEXT,
             flow_instance_id      TEXT,
@@ -19122,7 +19149,7 @@ platform_tables:
             status                TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'parked', 'fired', 'cancelled', 'failed')),
             fired_at              TIMESTAMPTZ,
             created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            CHECK ((task_type = 'workflow_timer' AND schedule_scope IS NULL AND schedule_key IS NULL AND immutable_hash IS NULL AND initial_fire_at IS NULL AND task_id IS NULL AND due_basis_kind IS NULL AND due_basis_absolute IS NULL AND due_basis_duration IS NULL AND due_basis_cron IS NULL AND occurrence_event_id IS NULL AND occurrence_admitted_at IS NULL AND accepted_at IS NULL AND cancel_cause IS NULL AND cancelled_at IS NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL AND clock_suspension IS NULL) OR (task_type IN ('timer', 'scheduled_task', 'global_recurring') AND schedule_scope = TRIM(schedule_scope) AND NULLIF(schedule_scope, '') IS NOT NULL AND schedule_key = TRIM(schedule_key) AND NULLIF(schedule_key, '') IS NOT NULL AND immutable_hash = TRIM(immutable_hash) AND NULLIF(immutable_hash, '') IS NOT NULL AND initial_fire_at IS NOT NULL AND due_basis_kind IN ('absolute', 'delay', 'cron', 'every'))),
+            CHECK ((task_type = 'workflow_timer' AND schedule_scope IS NULL AND schedule_key IS NULL AND immutable_hash IS NULL AND initial_fire_at IS NULL AND task_id IS NULL AND due_basis_kind IS NULL AND due_basis_absolute IS NULL AND due_basis_duration IS NULL AND due_basis_cron IS NULL AND occurrence_event_id IS NULL AND occurrence_admitted_at IS NULL AND accepted_at IS NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL AND clock_suspension IS NULL) OR (task_type IN ('timer', 'scheduled_task', 'global_recurring') AND schedule_scope = TRIM(schedule_scope) AND NULLIF(schedule_scope, '') IS NOT NULL AND schedule_key = TRIM(schedule_key) AND NULLIF(schedule_key, '') IS NOT NULL AND immutable_hash = TRIM(immutable_hash) AND NULLIF(immutable_hash, '') IS NOT NULL AND initial_fire_at IS NOT NULL AND due_basis_kind IN ('absolute', 'delay', 'cron', 'every'))),
             CHECK (task_type = 'workflow_timer' OR ((due_basis_kind = 'absolute' AND due_basis_absolute IS NOT NULL AND due_basis_duration IS NULL AND due_basis_cron IS NULL) OR (due_basis_kind = 'delay' AND due_basis_absolute IS NULL AND due_basis_duration IS NOT NULL AND due_basis_cron IS NULL) OR (due_basis_kind = 'cron' AND due_basis_absolute IS NULL AND due_basis_duration IS NULL AND due_basis_cron IS NOT NULL) OR (due_basis_kind = 'every' AND due_basis_absolute IS NULL AND due_basis_duration IS NOT NULL AND due_basis_cron IS NULL))),
             CHECK (task_type = 'workflow_timer' OR ((recurring = FALSE AND due_basis_kind IN ('absolute', 'delay') AND task_type = 'timer') OR (recurring = TRUE AND due_basis_kind IN ('cron', 'every') AND task_type IN ('scheduled_task', 'global_recurring')))),
             CHECK (task_type = 'workflow_timer' OR ((occurrence_event_id IS NULL AND occurrence_admitted_at IS NULL) OR (occurrence_event_id IS NOT NULL AND occurrence_admitted_at IS NOT NULL))),
@@ -19140,10 +19167,11 @@ platform_tables:
             CHECK (task_type <> 'workflow_timer' OR reply_context_id IS NULL),
             CHECK ((owner_kind = 'instance' AND (routing_source->>'kind') = 'static_flow') OR (owner_kind <> 'instance' AND (routing_source->>'kind') IN ('root', 'flow_owned_control', 'platform_control'))),
             CHECK (task_type <> 'workflow_timer' OR (SUBSTR(CAST(fire_payload AS TEXT), 1, 1) = '{' AND SUBSTR(CAST(fire_payload AS TEXT), LENGTH(CAST(fire_payload AS TEXT)), 1) = '}')),
-            CHECK (task_type <> 'workflow_timer' OR fire_at >= created_at),
-            CHECK (task_type <> 'workflow_timer' OR ((source_timer_id IS NULL AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL AND reconstruction_owner IS NULL) OR (source_timer_id IS NOT NULL AND forked_from_run_id IS NOT NULL AND forked_from_event_id IS NOT NULL AND reconstruction_owner = TRIM(reconstruction_owner) AND NULLIF(reconstruction_owner, '') IS NOT NULL))),
+            CHECK (task_type <> 'workflow_timer' OR fire_at >= COALESCE(source_armed_at, created_at)),
+            CHECK (task_type <> 'workflow_timer' OR ((source_timer_id IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_point_revision IS NULL AND forked_from_event_id IS NULL AND reconstruction_owner IS NULL AND source_armed_at IS NULL) OR (source_timer_id IS NOT NULL AND source_timer_id <> timer_id AND forked_from_run_id IS NOT NULL AND forked_from_run_id <> run_id AND forked_from_point_kind IS NOT NULL AND forked_from_point_kind IN ('event', 'deployment_revision', 'run_start') AND forked_from_point_revision IS NOT NULL AND forked_from_point_revision > 0 AND ((forked_from_point_kind = 'event' AND forked_from_event_id IS NOT NULL) OR (forked_from_point_kind IN ('deployment_revision', 'run_start') AND forked_from_event_id IS NULL)) AND reconstruction_owner IS NOT NULL AND reconstruction_owner = TRIM(reconstruction_owner) AND NULLIF(reconstruction_owner, '') IS NOT NULL AND source_armed_at IS NOT NULL AND source_armed_at <= created_at))),
             CHECK (task_type <> 'workflow_timer' OR ((recurring = FALSE AND recurrence_interval IS NULL) OR (recurring = TRUE AND recurrence_interval = TRIM(recurrence_interval) AND NULLIF(recurrence_interval, '') IS NOT NULL))),
-            CHECK (task_type <> 'workflow_timer' OR ((recurring = FALSE AND ((status IN ('active', 'cancelled') AND fired_at IS NULL) OR (status = 'fired' AND fired_at IS NOT NULL AND fired_at >= fire_at))) OR (recurring = TRUE AND status IN ('active', 'cancelled') AND (fired_at IS NULL OR fired_at >= created_at)))),
+            CHECK (task_type <> 'workflow_timer' OR ((recurring = FALSE AND ((status IN ('active', 'cancelled') AND fired_at IS NULL) OR (status = 'fired' AND fired_at IS NOT NULL AND fired_at >= fire_at))) OR (recurring = TRUE AND status IN ('active', 'cancelled') AND (fired_at IS NULL OR fired_at >= COALESCE(source_armed_at, created_at))))),
+            CHECK (task_type <> 'workflow_timer' OR ((status IN ('active', 'fired') AND cancel_cause IS NULL AND cancelled_at IS NULL) OR (status = 'cancelled' AND ((cancel_cause IS NULL AND cancelled_at IS NULL) OR (cancel_cause IS NOT NULL AND cancel_cause = 'rule_removed' AND cancelled_at IS NOT NULL AND cancelled_at >= created_at AND (fired_at IS NULL OR cancelled_at >= fired_at) AND source_timer_id IS NOT NULL))))),
             INDEX idx_timers_run (run_id, status, fire_at) WHERE run_id IS NOT NULL,
             INDEX idx_timers_source_lineage (source_timer_id) WHERE source_timer_id IS NOT NULL,
             INDEX idx_timers_fire (status, fire_at),
@@ -19232,7 +19260,7 @@ platform_tables:
             completion_due_at TIMESTAMPTZ,
             completion_revision BIGINT NOT NULL DEFAULT 0 CHECK (completion_revision >= 0),
             forked_from_run_id UUID REFERENCES runs(run_id),
-            forked_from_point_kind TEXT CHECK (forked_from_point_kind IN ('event', 'deployment_revision')),
+            forked_from_point_kind TEXT CHECK (forked_from_point_kind IN ('event', 'deployment_revision', 'run_start')),
             forked_from_revision BIGINT CHECK (forked_from_revision > 0),
             forked_from_event_id UUID,
             continued_as_run_id UUID REFERENCES runs(run_id),
@@ -19240,7 +19268,7 @@ platform_tables:
             failure           JSONB,
             started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             ended_at          TIMESTAMPTZ,
-            CHECK ((origin_kind = 'event' AND trigger_event_id IS NOT NULL AND NULLIF(TRIM(trigger_event_type), '') IS NOT NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'deployment' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'scenario_setup' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'standing_generation' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NOT NULL AND origin_generation IS NOT NULL AND origin_generation > 0 AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'fork_materialization' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NOT NULL AND forked_from_point_kind IN ('event', 'deployment_revision') AND forked_from_revision > 0 AND ((forked_from_point_kind = 'event' AND forked_from_event_id IS NOT NULL) OR (forked_from_point_kind = 'deployment_revision' AND forked_from_event_id IS NULL)))),
+            CHECK ((origin_kind = 'event' AND trigger_event_id IS NOT NULL AND NULLIF(TRIM(trigger_event_type), '') IS NOT NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'deployment' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'scenario_setup' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'standing_generation' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NOT NULL AND origin_generation IS NOT NULL AND origin_generation > 0 AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'fork_materialization' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NOT NULL AND forked_from_point_kind IN ('event', 'deployment_revision', 'run_start') AND forked_from_revision > 0 AND ((forked_from_point_kind = 'event' AND forked_from_event_id IS NOT NULL) OR (forked_from_point_kind IN ('deployment_revision', 'run_start') AND forked_from_event_id IS NULL)))),
             CHECK (continued_as_run_id IS NULL OR continued_as_run_id <> run_id),
             CHECK ((status = 'forked') = (continued_as_run_id IS NOT NULL)),
             CHECK (completion_due_at IS NULL OR completion_revision > 0),
@@ -29945,7 +29973,7 @@ cli_specification:
       - SESSION_NOT_FOUND, TURN_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, runtime.logs, run.trace, or forkchat usage
     run_fork:
-      command: swarm run fork <source-run-id> [--source <directory>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
+      command: swarm run fork <source-run-id> [--source <directory>] [--at-start | --at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
       group: run_operate
       tier: should_have
       implementation_status: implemented_public_cli_consumer
@@ -30514,7 +30542,7 @@ cli_specification:
         group: run_operate
         inherits_contract: cli_specification.command_catalog.trace
       run_fork:
-        command: swarm run fork <source-run-id> [--source <directory>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
+        command: swarm run fork <source-run-id> [--source <directory>] [--at-start | --at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]
         group: run_operate
         inherits_contract: cli_specification.command_catalog.run_fork
         supersession_scope: >
@@ -32433,7 +32461,7 @@ api_specification:
               type: boolean
               description: True only when activation permanently froze the source; false when source advancement selected branch divergence and preserved the source.
             fork_run_id: {$ref: '#/components/schemas/OpaqueId'}
-            fork_point_kind: {type: string, const: deployment_revision}
+            fork_point_kind: {type: string, enum: [deployment_revision, run_start]}
             fork_revision: {type: integer, minimum: 1}
             fork_run_status: {$ref: '#/components/schemas/RunStatus'}
             bundle_hash: {$ref: '#/components/schemas/BundleHash'}
@@ -37293,9 +37321,15 @@ api_specification:
           $ref: '#/components/schemas/OpaqueId'
       - name: fork_event_id
         required: false
-        description: Optional explicit fork-point event id in source_run_id. When omitted, the run-fork store owner selects the latest persisted source-run event; no CLI/current-session ambient event is allowed.
+        description: Optional inclusive fork-point event in source_run_id, mutually exclusive with at_start=true. Without either selector the canonical store resolves the latest event or deployment revision once; retries reuse the permanent resolved point.
         schema:
           $ref: '#/components/schemas/OpaqueId'
+      - name: at_start
+        required: false
+        description: Select the one immutable original start, exclusive of its creating ingress. Event evidence is absent from this point; any real first-turn intention remains a separate immutable origin/schema reference. Mutually exclusive with fork_event_id, including an explicitly empty or null value.
+        schema:
+          type: boolean
+          default: false
       - name: bundle_hash
         required: false
         description: "Optional target/source bundle selector. Equal or omitted values use same-bundle selected_contracts semantics. A differing value selects the exact retained target artifact for independent process-owned selected preparation. Loaded normal runtime membership is irrelevant; missing target artifacts fail with BUNDLE_UNAVAILABLE and corrupt or mismatched artifact bytes fail with BUNDLE_DATA_INTEGRITY_ERROR."

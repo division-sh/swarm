@@ -93,3 +93,7 @@ func (a *sqliteAdapter) allocate(ctx context.Context, runID string) (int64, erro
 func (a *sqliteAdapter) insertFacts(ctx context.Context, runID string, revision int64, facts []revisionFactInsert) error {
 	return insertRevisionFacts(ctx, a.tx, false, runID, revision, facts)
 }
+
+func (a *sqliteAdapter) publishStart(ctx context.Context, runID string, revision int64, projection StartProjection) error {
+	return publishStart(ctx, a.tx, false, runID, revision, projection)
+}

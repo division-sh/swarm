@@ -41,6 +41,7 @@ type RunForkExecutionRequest struct {
 	ForkOperation     *runfork.ForkOperationRequest
 	SourceRunID       string
 	ForkEventID       string
+	AtStart           bool `json:"at_start,omitempty"`
 	BundleHash        string
 	AllowSourceFreeze bool
 	DataPinOverrides  []durabledata.ExplicitPin
@@ -73,6 +74,9 @@ type SelectedContractRunForkExecutor struct {
 }
 
 func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req RunForkExecutionRequest) (RunForkExecutionResult, error) {
+	if req.AtStart && req.ForkEventID != "" {
+		return RunForkExecutionResult{}, fmt.Errorf("run.fork at_start and fork_event_id are mutually exclusive")
+	}
 	if e.ExecuteSelectedContractRunFork == nil {
 		return RunForkExecutionResult{}, fmt.Errorf("run.fork requires selected-contract executor")
 	}
@@ -80,6 +84,7 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		ForkOperation:      req.ForkOperation,
 		SourceRunID:        strings.TrimSpace(req.SourceRunID),
 		At:                 strings.TrimSpace(req.ForkEventID),
+		AtStart:            req.AtStart,
 		ExpectedBundleHash: strings.TrimSpace(req.BundleHash),
 		AllowSourceFreeze:  req.AllowSourceFreeze,
 		DataPinOverrides:   req.DataPinOverrides,
@@ -126,6 +131,12 @@ func exactSelectedForkActivation(req RunForkExecutionRequest, result runtimerunf
 		return false
 	}
 	if err := activation.ForkPoint.Validate(); err != nil {
+		return false
+	}
+	if req.AtStart != (materialization.ForkPoint.Kind == runfork.RunForkPointRunStart) {
+		return false
+	}
+	if req.ForkOperation != nil && req.ForkOperation.ResolvedPoint != nil && materialization.ForkPoint != *req.ForkOperation.ResolvedPoint {
 		return false
 	}
 	return result.Owner == runfork.RunForkSelectedContractExecutionOwner && activation.Activated &&
@@ -175,7 +186,7 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 			return nil, runForkError(params.SourceRunID, params.ForkEventID, err)
 		}
 		if found {
-			if stored.Request.SourceRunID != params.SourceRunID || stored.Request.ForkEventID != params.ForkEventID {
+			if stored.Request.SourceRunID != params.SourceRunID || stored.Request.ForkEventID != params.ForkEventID || stored.Request.AtStart != params.AtStart {
 				return nil, runForkError(params.SourceRunID, params.ForkEventID, fmt.Errorf("durable fork operation disagrees with request coordinates"))
 			}
 			if stored.Status == runfork.ForkOperationActivated {
@@ -222,6 +233,7 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 		operation = runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: actorKey, IdempotencyKey: params.IdempotencyKey,
 			TransportHash: req.RequestHash, SourceRunID: params.SourceRunID, ForkEventID: params.ForkEventID,
+			AtStart:          params.AtStart,
 			TargetBundleHash: targetBundleHash, AllowSourceFreeze: params.AllowSourceFreeze,
 			ContractSelection: selection, DataPinOverrides: params.DataPinOverrides,
 		}
@@ -232,6 +244,7 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 	}
 	_, executionErr := opts.Executor.ExecuteRunFork(ctx, RunForkExecutionRequest{
 		ForkOperation: &canonical, SourceRunID: canonical.SourceRunID, ForkEventID: canonical.ForkEventID,
+		AtStart:    canonical.AtStart,
 		BundleHash: canonical.TargetBundleHash, AllowSourceFreeze: canonical.AllowSourceFreeze,
 		DataPinOverrides: canonical.DataPinOverrides, ContractSelection: canonical.ContractSelection,
 	})
@@ -298,6 +311,10 @@ func validateRunForkExecutionResult(result RunForkExecutionResult) error {
 		if result.ForkEventID != "" {
 			return fmt.Errorf("deployment revision run.fork result invented an event identity")
 		}
+	case string(runfork.RunForkPointRunStart):
+		if result.ForkEventID != "" {
+			return fmt.Errorf("run start run.fork result invented an event identity")
+		}
 	default:
 		return fmt.Errorf("run.fork result has invalid point kind %q", result.ForkPointKind)
 	}
@@ -314,6 +331,7 @@ func validateRunForkExecutionResult(result RunForkExecutionResult) error {
 type runForkParams struct {
 	SourceRunID       string
 	ForkEventID       string
+	AtStart           bool
 	BundleHash        string
 	AllowSourceFreeze bool
 	DataPinOverrides  []durabledata.ExplicitPin
@@ -324,6 +342,17 @@ func runForkParamsFromRequest(params map[string]any) (runForkParams, error) {
 	sourceRunID, err := requiredUUIDParam(params, "source_run_id")
 	if err != nil {
 		return runForkParams{}, err
+	}
+	var atStart bool
+	if raw, present := params["at_start"]; present {
+		var valid bool
+		atStart, valid = raw.(bool)
+		if !valid {
+			return runForkParams{}, NewInvalidParamsError(map[string]any{"field": "at_start", "reason": "must be a boolean"})
+		}
+	}
+	if _, eventSelectorPresent := params["fork_event_id"]; atStart && eventSelectorPresent {
+		return runForkParams{}, NewInvalidParamsError(map[string]any{"field": "at_start", "reason": "at_start and fork_event_id are mutually exclusive"})
 	}
 	forkEventID, _, err := optionalUUIDParam(params, "fork_event_id")
 	if err != nil {
@@ -353,6 +382,7 @@ func runForkParamsFromRequest(params map[string]any) (runForkParams, error) {
 	return runForkParams{
 		SourceRunID:       sourceRunID,
 		ForkEventID:       forkEventID,
+		AtStart:           atStart,
 		BundleHash:        bundleHash,
 		AllowSourceFreeze: allowSourceFreeze,
 		DataPinOverrides:  dataPinOverrides,

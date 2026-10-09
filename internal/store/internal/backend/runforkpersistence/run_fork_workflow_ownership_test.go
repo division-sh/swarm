@@ -252,6 +252,16 @@ func TestSelectedForkHistoricalFieldlessHeaderBothStores(t *testing.T) {
 						if err != nil {
 							t.Fatal(err)
 						}
+						original := flowidentity.Instance{
+							TemplateID: "receiver", ScopeKey: "receiver", InstanceID: "receiver", InstancePath: "receiver",
+							EntityID: sourceEntity, HasStoredPath: true,
+						}
+						construction := selectedWorkflowConstructionRecordFixture(t, sourceRun, "bundle-v2:sha256:"+strings.Repeat("a", 64), original, pipeline.WorkflowInstance{
+							WorkflowVersion: state.WorkflowVersion, Mode: state.Mode, Status: "active",
+							CurrentState: "pending", StageDefined: staged, EnteredStageAt: entered, CreatedAt: entered,
+						}, executionmode.Mock)
+						metadata.FlowTemplate, metadata.Mode = original.TemplateID, state.Mode
+						metadata.InitialMaterialization = construction.InitialMaterialization
 						fact, err := correlation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
 						if err != nil {
 							t.Fatal(err)
@@ -396,9 +406,22 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 	if err != nil {
 		t.Fatal(err)
 	}
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("ownership construction requires its admitted source bundle")
+	}
+	bundleHash, err := contracts.BundleHash(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	construction := selectedWorkflowConstructionRecordFixture(t, runID, bundleHash, instance, pipeline.WorkflowInstance{
+		WorkflowVersion: source.WorkflowVersion(), Mode: mode, Status: "active", EntityType: entityType,
+		CurrentState: initial.ID(), StageDefined: graph.StageCount() != 0, EnteredStageAt: enteredAt, CreatedAt: enteredAt,
+	}, executionmode.Live)
 	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{Revision: 7}, Entities: []runfork.RunForkEntityState{{EntityID: entityID, CurrentState: initial.ID(), EnteredStateAt: &enteredAt, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 		Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: path, EntityType: entityType, StageDefined: graph.StageCount() != 0,
 		FlowTemplate: flow, Mode: mode, FlowConfig: config,
+		InitialMaterialization: construction.InitialMaterialization,
 	}}}}
 	if flow == "branch/left" || flow == "branch/right" {
 		sibling := "branch/right"
@@ -419,6 +442,19 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 		if err != nil {
 			t.Fatal(err)
 		}
+		otherGraph, found := semanticview.WorkflowStageTopology(source, sibling)
+		if !found {
+			t.Fatal("sibling construction requires its compiled lifecycle")
+		}
+		otherInitial, err := otherGraph.InitialStoredStage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		otherConstruction := selectedWorkflowConstructionRecordFixture(t, runID, bundleHash, otherInstance, pipeline.WorkflowInstance{
+			WorkflowVersion: source.WorkflowVersion(), Mode: mode, Status: "active", EntityType: entityType,
+			CurrentState: otherInitial.ID(), StageDefined: otherGraph.StageCount() != 0, EnteredStageAt: enteredAt, CreatedAt: enteredAt,
+		}, executionmode.Live)
+		metadata.InitialMaterialization = otherConstruction.InitialMaterialization
 		other.MaterializationMetadata = &metadata
 		plan.Entities = append(plan.Entities, other)
 	}

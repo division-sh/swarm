@@ -104,6 +104,7 @@ func TestSelectedConstructedActorProjectionCompleteCensus(t *testing.T) {
 							row.MaterializationMetadata.EntityType = "child_state"
 							row.Fields = map[string]any{"value": key}
 						}
+						row.MaterializationMetadata.InitialMaterialization = selectedConstructionReceipt(t, source, runID, child, row.Fields, entered)
 						plan.Entities = append(plan.Entities, row)
 						if _, err := AgentConstruction(source, plan, actor); err != nil {
 							t.Fatalf("fixture fixed header %s: %v", child.InstancePath, err)

@@ -1,11 +1,109 @@
 package runfork
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/google/uuid"
 )
+
+func TestForkOperationRunStartHashAndResolvedRetry(t *testing.T) {
+	request := ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "bearer:operator", TransportHash: "exact-wire-request",
+		SourceRunID: uuid.NewString(), TargetBundleHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ContractSelection: RunForkContractSelection{Mode: RunForkContractSelectionModeSelectedContracts},
+	}
+	canonical, latestHash, err := request.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyMeaning := struct {
+		SourceRunID       string                    `json:"source_run_id"`
+		ForkEventID       string                    `json:"fork_event_id"`
+		TargetBundleHash  string                    `json:"target_bundle_hash"`
+		AllowSourceFreeze bool                      `json:"allow_source_freeze"`
+		ContractSelection RunForkContractSelection  `json:"contract_selection"`
+		DataPinOverrides  []durabledata.ExplicitPin `json:"data_pin_overrides"`
+	}{canonical.SourceRunID, canonical.ForkEventID, canonical.TargetBundleHash, canonical.AllowSourceFreeze, canonical.ContractSelection, canonical.DataPinOverrides}
+	legacyHash, err := canonicaljson.Hash(legacyMeaning)
+	if err != nil || latestHash != legacyHash {
+		t.Fatalf("default selector changed request hash: %s/%s %v", latestHash, legacyHash, err)
+	}
+	raw, err := json.Marshal(canonical)
+	if err != nil || strings.Contains(string(raw), "at_start") {
+		t.Fatalf("default request changed encoding: %s, %v", raw, err)
+	}
+	request.AtStart = true
+	_, startHash, err := request.Canonical()
+	if err != nil || startHash == latestHash {
+		t.Fatalf("start aliased latest: %s/%s %v", startHash, latestHash, err)
+	}
+	point := RunForkPoint{Kind: RunForkPointRunStart, Revision: 7}
+	request.ResolvedPoint = &point
+	canonical, resolvedHash, err := request.Canonical()
+	if err != nil || resolvedHash != startHash || *canonical.ResolvedPoint != point {
+		t.Fatalf("start resolution changed request meaning: %+v hash=%s/%s %v", canonical, resolvedHash, startHash, err)
+	}
+	record := ForkOperationRecord{
+		Request: canonical, SemanticHash: startHash, ForkRunID: uuid.NewString(), BindingID: uuid.NewString(), Status: ForkOperationMaterialized,
+	}
+	raw, err = json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var retry ForkOperationRecord
+	if err := json.Unmarshal(raw, &retry); err != nil || retry.Validate() != nil || !retry.Request.AtStart || *retry.Request.ResolvedPoint != point {
+		t.Fatalf("durable retry lost original start: %+v, %v", retry, err)
+	}
+	retry.Status = ForkOperationActivated
+	retry.Result = &ForkOperationResult{
+		SourceRunID: request.SourceRunID, SourceRunStatus: "running", ForkRunID: retry.ForkRunID,
+		ForkPoint: point, ForkRunStatus: RunForkActivatedStatus, BundleHash: request.TargetBundleHash,
+	}
+	if err := retry.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	retry.Result.ForkPoint.Revision++
+	if err := retry.Validate(); err == nil {
+		t.Fatal("activated retry replaced the permanently resolved start revision")
+	}
+}
+
+func TestForkOperationRunStartRejectsContradictorySelectors(t *testing.T) {
+	base := ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "bearer:operator", TransportHash: "exact-wire-request",
+		SourceRunID: uuid.NewString(), AtStart: true, TargetBundleHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ContractSelection: RunForkContractSelection{Mode: RunForkContractSelectionModeSelectedContracts},
+	}
+	for _, tc := range []struct {
+		name   string
+		change func(*ForkOperationRequest)
+	}{
+		{"event_selector", func(r *ForkOperationRequest) { r.ForkEventID = uuid.NewString() }},
+		{"deployment_resolution", func(r *ForkOperationRequest) {
+			r.ResolvedPoint = &RunForkPoint{Kind: RunForkPointDeploymentRevision, Revision: 7}
+		}},
+		{"event_resolution", func(r *ForkOperationRequest) {
+			r.ResolvedPoint = &RunForkPoint{Kind: RunForkPointEvent, Revision: 7, EventID: uuid.NewString()}
+		}},
+		{"implicit_start", func(r *ForkOperationRequest) {
+			r.AtStart = false
+			r.ResolvedPoint = &RunForkPoint{Kind: RunForkPointRunStart, Revision: 7}
+		}},
+		{"missing_revision", func(r *ForkOperationRequest) { r.ResolvedPoint = &RunForkPoint{Kind: RunForkPointRunStart} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := base
+			tc.change(&request)
+			if _, _, err := request.Canonical(); err == nil {
+				t.Fatalf("contradictory start operation admitted: %+v", request)
+			}
+		})
+	}
+}
 
 func TestForkOperationCanonicalIdentityBindsSelectedMeaning(t *testing.T) {
 	first := ForkOperationRequest{

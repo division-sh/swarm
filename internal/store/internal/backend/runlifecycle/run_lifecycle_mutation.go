@@ -569,6 +569,9 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 		if err := mutationprotocol.InvalidateActiveRunSource(ctx, tx, forkRunID); err != nil {
 			return err
 		}
+		if err := attempt.DeclareRunStart(ctx, forkRunID, bundleHash, ""); err != nil {
+			return err
+		}
 		scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
 		if err != nil {
 			return err
@@ -617,6 +620,9 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 			return fmt.Errorf("insert fork run lifecycle: %w", err)
 		}
 		if err := mutationprotocol.InvalidateActiveRunSource(ctx, tx, forkRunID); err != nil {
+			return err
+		}
+		if err := attempt.DeclareRunStart(ctx, forkRunID, bundleHash, ""); err != nil {
 			return err
 		}
 		scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
@@ -858,6 +864,9 @@ func recordRunStarted(ctx context.Context, attempt *mutationprotocol.Attempt, re
 		},
 	}
 	if attempt != nil {
+		if err := attempt.DeclareRunStart(ctx, request.RunID, request.Source.BundleHash(), request.Origin.EventID()); err != nil {
+			return err
+		}
 		return attempt.Record(ctx, draft)
 	}
 	return errors.New("run lifecycle creation requires attempt")

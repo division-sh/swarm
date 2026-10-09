@@ -29,6 +29,10 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 	if req.Source == nil {
 		return runfork.RunForkContractFrontierAdmission{}, fmt.Errorf("selected contract semantic source is required")
 	}
+	firstTurn, firstTurnPresent, err := req.Plan.OriginalStartFirstTurn()
+	if err != nil {
+		return runfork.RunForkContractFrontierAdmission{}, err
+	}
 	selection := req.ContractSelection
 	if strings.TrimSpace(selection.Mode) == "" {
 		selection = SelectedContractSelection(req.Source)
@@ -50,6 +54,18 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 		return runfork.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract connect routes: %#v", connectIssues)
 	}
 	frontier, lineageOnly := runForkFrontierEvents(req.Plan.PendingWork)
+	if firstTurnPresent {
+		event, _ := firstTurn.Event()
+		for _, existing := range frontier {
+			if existing.SourceEventID == event.ID() {
+				return runfork.RunForkContractFrontierAdmission{}, fmt.Errorf("original first turn cannot copy a historical frontier")
+			}
+		}
+		frontier = append(frontier, runfork.RunForkContractFrontierEvent{
+			SourceEventID: event.ID(), EventName: string(event.Type()),
+			SourceClassifications: []string{"start_first_turn"}, SourceFlowInstances: []string{"."},
+		})
+	}
 	if err := completeContractFrontierFlowInstances(req.Plan.SourceRunID, req.Source, req.Plan.PendingWork, frontier); err != nil {
 		return runfork.RunForkContractFrontierAdmission{}, err
 	}
@@ -64,6 +80,12 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 			runtimeOwners = append(runtimeOwners, owner)
 		}
 		source := contractFrontierRoutingSource(req.Plan.PendingWork, frontier[i].SourceEventID)
+		if firstTurnPresent {
+			event, _ := firstTurn.Event()
+			if event.ID() == frontier[i].SourceEventID {
+				source = event.RoutingSource()
+			}
+		}
 		evaluation, err := contractFrontierRouteEvaluation(routeTable, req.Source, connectGraph, req.Plan.SourceRunID, eventName, source)
 		if err != nil {
 			return runfork.RunForkContractFrontierAdmission{}, err
@@ -71,7 +93,7 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 		incompleteRoutes[frontier[i].SourceEventID] = incompleteRoutes[frontier[i].SourceEventID] || evaluation.requiresRuntimeResolution
 		frontier[i].RuntimeEventOwners = sortedUnique(runtimeOwners)
 		localSubscribers := routeTable.ResolveIndependentPubsubFromSource(req.Plan.SourceRunID, events.EventType(eventName), source)
-		if publication, ok := req.Plan.HistoricalInputPublication(frontier[i].SourceEventID); ok {
+		if publication, ok := req.Plan.ExecutionInputPublication(frontier[i].SourceEventID); ok {
 			original, _ := publication.Event()
 			input, err := runtimebus.RevalidateSelectedInput(req.Source, original)
 			if err != nil {
@@ -87,7 +109,7 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 		if err != nil {
 			return runfork.RunForkContractFrontierAdmission{}, err
 		}
-		if _, ok := req.Plan.HistoricalInputPublication(frontier[i].SourceEventID); ok {
+		if _, ok := req.Plan.ExecutionInputPublication(frontier[i].SourceEventID); ok {
 			pendingRecipients := frontier[i].DerivedRecipients[:0]
 			for _, recipient := range frontier[i].DerivedRecipients {
 				completed := false
@@ -103,7 +125,7 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 			}
 			frontier[i].DerivedRecipients = pendingRecipients
 		}
-		if _, ok := req.Plan.HistoricalInputPublication(frontier[i].SourceEventID); ok {
+		if _, ok := req.Plan.ExecutionInputPublication(frontier[i].SourceEventID); ok {
 			for _, recipient := range frontier[i].DerivedRecipients {
 				if recipient.Recipient.IsNode() {
 					frontier[i].WorkflowNodeSubscribers = append(frontier[i].WorkflowNodeSubscribers, recipient.HandlerNode().Key())

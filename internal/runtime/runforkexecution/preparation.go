@@ -220,6 +220,7 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 	planRequest := runfork.RunForkPlanRequest{
 		SourceRunID: strings.TrimSpace(req.SourceRunID),
 		At:          strings.TrimSpace(req.At),
+		AtStart:     req.AtStart,
 	}
 	if req.ForkOperation != nil && req.ForkOperation.ResolvedPoint != nil {
 		planRequest.ResolvedPoint = req.ForkOperation.ResolvedPoint
@@ -227,6 +228,9 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 	plan, err := ports.fork.PlanRunFork(ctx, planRequest)
 	if err != nil {
 		return nil, fmt.Errorf("plan selected-contract execution: %w", err)
+	}
+	if err := runforkadmission.ValidateFixedConstructionTree(owned.originalSource.Source, plan); err != nil {
+		return nil, fmt.Errorf("admit original atomic construction tree: %w", err)
 	}
 	deferredWorkAdmission, err := admitSelectedContractDeferredWork(plan, loadedSource.Source)
 	if err != nil {
@@ -463,7 +467,7 @@ func prepareSelectedFork(ctx context.Context, operation *selectedContractOperati
 	p.inputCoordinates = make(map[string]string)
 	admitPayload := runtimepkg.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)
 	for _, event := range planning.RecipientPlanEvents {
-		publication, ok := plan.HistoricalInputPublication(event.SourceEventID)
+		publication, ok := plan.ExecutionInputPublication(event.SourceEventID)
 		if !ok {
 			continue
 		}

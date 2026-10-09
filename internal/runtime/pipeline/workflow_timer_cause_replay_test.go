@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
@@ -70,6 +71,7 @@ func TestWorkflowTimerCauseReplayPreservesImmutableFacts(t *testing.T) {
 		{"due_at", func(a *WorkflowTimerActivation) { a.FireAt = a.FireAt.Add(time.Microsecond) }},
 		{"lineage", func(a *WorkflowTimerActivation) {
 			a.SourceTimerID, a.ForkedFromRunID, a.ForkedFromEventID, a.ReconstructionOwner = uuid.NewString(), uuid.NewString(), uuid.NewString(), "fork-owner"
+			a.ForkedFromPointKind, a.ForkedFromPointRevision, a.SourceArmedAt = forkpoint.Event, 1, a.CreatedAt
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
