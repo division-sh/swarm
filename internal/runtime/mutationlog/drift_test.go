@@ -3,8 +3,37 @@ package mutationlog
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestVerifyRunJSONPreservesAtomicNumericEvidence(t *testing.T) {
+	for _, values := range [][2]any{
+		{int64(7), float64(7)},
+		{map[string]any{"count": int64(7)}, map[string]any{"count": float64(7)}},
+		{[]any{int64(7)}, []any{float64(7)}},
+	} {
+		path := "node.count"
+		row := DriftRow{Kind: "value", EntityID: "entity", Domain: DomainAccumulator, Path: &path,
+			FoldedPresent: true, StoredPresent: true, FoldedValue: values[0], StoredValue: values[1]}
+		wire, err := json.Marshal(DriftReport{RunID: "run", Rows: []DriftRow{row}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var readback struct {
+			Rows []struct {
+				Folded json.RawMessage `json:"folded_value"`
+				Stored json.RawMessage `json:"stored_value"`
+			} `json:"rows"`
+		}
+		if err := json.Unmarshal(wire, &readback); err != nil {
+			t.Fatal(err)
+		}
+		if len(readback.Rows) != 1 || strings.Contains(string(readback.Rows[0].Folded), "7.0") || !strings.Contains(string(readback.Rows[0].Stored), "7.0") {
+			t.Fatalf("numeric disagreement vanished from JSON: %s", wire)
+		}
+	}
+}
 
 func TestVerifyRunProjectionDomainComparison(t *testing.T) {
 	for _, tc := range []struct {
