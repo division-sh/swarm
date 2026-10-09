@@ -59,14 +59,20 @@ func (r connectRoutePlanResolver) resolvePubsubSubscribers(ctx context.Context, 
 }
 
 func (r connectRoutePlanResolver) pubsubInstanceData(ctx context.Context, scope pipeline.FlowInstanceLookupScope) (map[string]flowidentity.Instance, error) {
-	observations, err := r.indexedInstances(ctx, scope)
-	if err != nil {
-		return nil, err
-	}
-	instances := make(map[string]flowidentity.Instance, len(observations))
-	for _, instance := range observations {
-		owner := flowidentity.RunScopedFlowInstance{RunID: scope.RunID(), Route: instance.Route()}
-		instances[owner.Key()] = instance
+	instances := make(map[string]flowidentity.Instance)
+	if r.lifecycle.runProposal.Present() {
+		if err := r.lifecycle.runProposal.Validate(scope.RunID(), scope.SourceFact()); err != nil {
+			return nil, err
+		}
+	} else {
+		observations, err := r.indexedInstances(ctx, scope)
+		if err != nil {
+			return nil, err
+		}
+		for _, instance := range observations {
+			owner := flowidentity.RunScopedFlowInstance{RunID: scope.RunID(), Route: instance.Route()}
+			instances[owner.Key()] = instance
+		}
 	}
 	proposals, err := r.prospectiveConnectInstances(ctx, scope.RunID(), scope.SourceFact())
 	if err != nil {

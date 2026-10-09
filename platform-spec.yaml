@@ -18891,7 +18891,15 @@ platform_tables:
         cancellation or independent store error cannot be interpreted as ordinary lookup absence.
         A later edge may select an exact pure
         construction plan in the same operation without fabricating a native observation or
-        repeating construction. Native commit rechecks declaration/parent/key occupancy as well
+        repeating construction. Before the run-creation mutation, a create-authorized admitted
+        publication and an isolated native missing-run preflight may select a pure R5.1
+        construction proposal for that exact source and run. This proposed namespace contains
+        only the operation's construction plans, not native observations or commit permission.
+        Existing runs still require admitted native evidence; unknown run presence, cancellation,
+        independent store failures and joined errors cannot supply an empty proposed namespace.
+        Authenticated sibling publications in the same closed inbound batch consume the original
+        run proposal and exact prepared constructions, never a second construction authority.
+        Native commit rechecks declaration/parent/key occupancy as well
         as the proposed path inside the existing fenced mutation; stale absent selection cannot
         construct a second receiver at another path. Explicit create remains a conflict, not reuse.
         Historical header projection carries these fixed-revision facts without manufacturing

@@ -52,9 +52,33 @@ func (p deliveryPlanner) prepareRootConstruction(ctx context.Context, event even
 	if err != nil {
 		return nil, err
 	}
-	observed, exists, err := p.connectPlanner.lifecycle.index.LookupFlowInstance(ctx, lookup)
+	_, err = p.connectPlanner.prospectiveConnectInstances(ctx, event.RunID(), fact)
 	if err != nil {
 		return nil, err
+	}
+	for _, tree := range preparedConnectPlans(ctx) {
+		if tree.Identity.Route() != owner.Route {
+			continue
+		}
+		if err := p.validateRootConstructorKey(event, schema.Instance.Path(), tree.Instance.InstanceKey); err != nil {
+			return nil, err
+		}
+		if err := selectConnectionConstruction(ctx, tree.Identity); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	var observed pipeline.FlowInstanceObservation
+	var exists bool
+	if proposal := p.connectPlanner.lifecycle.runProposal; proposal.Present() {
+		if err := proposal.Validate(event.RunID(), fact); err != nil {
+			return nil, err
+		}
+	} else {
+		observed, exists, err = p.connectPlanner.lifecycle.index.LookupFlowInstance(ctx, lookup)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if exists {
 		if err := observed.ValidateSelection(lookup); err != nil {
@@ -121,11 +145,16 @@ func (p deliveryPlanner) validateRootConstructionReuse(ctx context.Context, even
 	if err := pipeline.NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(p.recipientPolicy.semanticSource, observed.Identity().TemplateID); err != nil {
 		return err
 	}
+	return p.validateRootConstructorKey(event, key, observed.InstanceKey())
+}
+
+func (p deliveryPlanner) validateRootConstructorKey(event events.Event, key, instanceKey string) error {
 	if key == "" {
 		return nil
 	}
-	contract, found := entityruntime.ResolveForFlow(p.recipientPolicy.semanticSource, observed.Identity().TemplateID)
-	if !found || observed.InstanceKey() == "" {
+	flowID := semanticview.RootExecutionFlowID(p.recipientPolicy.semanticSource)
+	contract, found := entityruntime.ResolveForFlow(p.recipientPolicy.semanticSource, flowID)
+	if !found || instanceKey == "" {
 		return fmt.Errorf("keyed root reuse requires its admitted immutable key")
 	}
 	var payload map[string]any
@@ -137,8 +166,8 @@ func (p deliveryPlanner) validateRootConstructionReuse(ctx context.Context, even
 		if err != nil {
 			return err
 		}
-		keys, err := pipeline.AdmitFlowInstanceKeyMaterial(p.recipientPolicy.semanticSource, observed.Identity().TemplateID, candidate)
-		if err != nil || len(keys) != 1 || keys[0].Value != observed.InstanceKey() {
+		keys, err := pipeline.AdmitFlowInstanceKeyMaterial(p.recipientPolicy.semanticSource, flowID, candidate)
+		if err != nil || len(keys) != 1 || keys[0].Value != instanceKey {
 			return fmt.Errorf("root input key %s contradicts its immutable constructor key", key)
 		}
 	}

@@ -128,6 +128,7 @@ type deliveryRecipientPolicy struct {
 	loadActiveTargetDescriptors func(context.Context) ([]ActiveTargetDescriptor, bool, error)
 	semanticSource              semanticview.Source
 	requireTargetOwners         bool
+	runProposal                 runtimepipeline.FlowInstanceRunProposal
 }
 
 func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event, recipients []deliveryRecipientCandidate) (deliveryRecipientManifest, error) {
@@ -228,6 +229,14 @@ func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (
 	routePlan := newRoutePlan(evt)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	ctx = withConnectRoutePlanPreview(ctx)
+	rootPlans, err := p.prepareRootConstruction(ctx, evt)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	ctx, err = p.previewPreparedConstructions(ctx, evt.RunID(), rootPlans)
+	if err != nil {
+		return RoutePlan{}, err
+	}
 	scope, bounded, err := p.connectPlanner.selectedTargetScope(ctx, evt)
 	if err != nil {
 		return RoutePlan{}, err
@@ -253,15 +262,7 @@ func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (
 		})
 		return projection.resolveRoutePlan(routePlan)
 	}
-	rootPlans, err := p.prepareRootConstruction(ctx, evt)
-	if err != nil {
-		return RoutePlan{}, err
-	}
-	ctx, err = p.previewPreparedConstructions(ctx, evt.RunID(), rootPlans)
-	if err != nil {
-		return RoutePlan{}, err
-	}
-	projection, err = projection.withActivationPlans(rootPlans)
+	projection, err = projection.withActivationPlans(preparedConnectPlans(ctx))
 	if err != nil {
 		return RoutePlan{}, err
 	}
