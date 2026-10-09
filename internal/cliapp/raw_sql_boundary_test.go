@@ -103,19 +103,19 @@ func unclassifiedConcreteStoreProducer(pg *store.PostgresStore) *pipeline.Pipeli
 
 func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 	return map[string]rawSQLBoundaryEntry{
-		"internal/whatsapp/capture.go": {
+		"internal/sessionprovider/capture.go": {
 			Classification: rawSQLProviderStateBoundary,
 			Issue:          2577,
 			SpecRef:        "platform-spec.yaml#tool_model.hitl_channel_pack_interface.capability_model.session_incoming_capture",
 			Reason:         "connection-private bounded provider handoff owns only incoming capture and callback failure evidence; it is not a selected-store execution or effect journal",
 		},
-		"internal/whatsapp/publication.go": {
+		"internal/sessionprovider/publication.go": {
 			Classification: rawSQLProviderStateBoundary,
 			Issue:          2577,
 			SpecRef:        "platform-spec.yaml#tool_model.hitl_channel_pack_interface.capability_model.session_capture_publication",
 			Reason:         "connection-private capture staging and retirement mutate only whatsapp_incoming_capture; executable publication and committed receipt verification remain selected-store owner calls",
 		},
-		"internal/whatsapp/session_state_unix.go": {
+		"internal/sessionprovider/session_state_unix.go": {
 			Classification: rawSQLProviderStateBoundary,
 			Issue:          2577,
 			SpecRef:        "platform-spec.yaml#tool_model.hitl_channel_pack_interface.capability_model.session_provider_state_lifetime",

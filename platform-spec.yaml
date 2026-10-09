@@ -11303,21 +11303,30 @@ tool_model:
         Provider transport acknowledgment, local capture commit and selected-store atomic publication remain
         separate boundaries; a local capture fixture alone does not establish supported end-to-end delivery.
       session_input_admission: >
-        SessionInputOwner composes the concrete native capture reader and the existing selected-store
-        AdmissionResponsibilityCurrent owner. For fresh input the reader holds the actual connected SDK occurrence
+        The concrete sessionprovider lifecycle/capture owner privately issues input facts and composes the existing
+        selected-store AdmissionResponsibilityCurrent owner. There is no exported raw reader, reader-injection
+        constructor or DTO-to-input constructor. Go internal visibility restricts sealing to the native owner's
+        subtree; its read-only input facade exposes only the opaque Admission type, not sealers or writable capture
+        records. The closed issuer census admits only the concrete native issuer and rejects raw-data/constructor
+        reexports. For fresh input the reader holds the actual connected SDK occurrence
         and private database possession, verifies the paired account against that database, and consumes the complete
         retained capture validator. The selected currentness owner consumes the original responsibility's operation
         revision: exact for pending onboarding, or the activation's frozen operation revision for active input, never
         today's completion-progress revision. It requires the same activation revision,
         declaration coordinate, target selector, provider account admission, source/inventory/plan generation,
         principal and binding revision. A later onboarding revision cannot adopt an earlier capture. Its issued
-        SessionInputAdmission is process-local, closed and non-serializable; caller payloads, descriptors and booleans
+        Admission is process-local, closed and non-serializable; caller payloads, descriptors and booleans
         cannot construct it. Copies share one owned lease, and release, cancellation or retirement invalidates their
         later projections. AdmitSessionInput consumes its defensive bytes and frozen receipt time through the existing
         trigger BODY, delivery identity, normalization and output authorization owners. Session input rejects HTTP
-        admission, and webhook admission does not accept this fact. Runless onboarding input may reach authenticated
-        operator delivery projection but cannot mint business PublicationAdmission; that additionally requires the exact
-        positive executable source/target and current activation responsibility. Fresh input is not unfinished recovery:
+        admission, and webhook admission does not accept this fact. Explicit onboarding scope may reach authenticated
+        operator delivery projection with a zero or positive target and zero or positive identity-binding revision,
+        but can never mint business PublicationAdmission. Business sealing requires the retained explicit business
+        scope, positive exact activation and binding revisions, original validated publication run, exact executable
+        source/target and current activation responsibility; target positivity or onboarding phase is not that scope.
+        The complete declaration coordinate and catalog generation are frozen by capture before SDK acknowledgment;
+        input issuance consumes those originals and accepts no replacement source or generation from a caller factory.
+        Fresh input is not unfinished recovery:
         original recovery must verify resumable retained authority without requiring a dead process occurrence or
         adopting replacement context. Native and selected-owner component fixtures do not alone establish supported
         public dispatch, acknowledgment ordering or capture-to-publication closure.

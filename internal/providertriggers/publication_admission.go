@@ -7,15 +7,19 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	nativeinput "github.com/division-sh/swarm/internal/sessionprovider/input"
 )
 
 // PublicationAdmission transfers an authenticated plan's exact outputs. It is
 // neither receiver permission nor a provider-delivery receipt identity.
 type PublicationAdmission struct {
-	bundleHash string
-	flowID     string
-	provider   string
-	outputs    []admittedPublicationOutput
+	bundleHash  string
+	flowID      string
+	provider    string
+	outputs     []admittedPublicationOutput
+	nativeInput *nativeinput.Admission
+	generation  triggergeneration.Generation
 }
 
 type admittedPublicationOutput struct {
@@ -27,6 +31,9 @@ type admittedPublicationOutput struct {
 
 func (p InboundAdmissionPlan) ProjectPublication(admitted AdmittedRequest, bundleHash, flowID string) (Delivery, PublicationAdmission, error) {
 	if admitted.sessionInput != nil {
+		if err := admitted.sessionInput.RequireBusiness(admitted.sessionInput.Context(), p.provider, p.generation); err != nil {
+			return Delivery{}, PublicationAdmission{}, err
+		}
 		coordinate := admitted.sessionInput.Coordinate()
 		target, err := packs.ParseChannelRegistrationTarget(admitted.sessionInput.TargetSelector())
 		if err != nil || coordinate.Validate() != nil || coordinate.BundleHash != bundleHash || target.FlowPath != flowID || target.Provider != p.provider {
@@ -43,7 +50,8 @@ func (p InboundAdmissionPlan) ProjectPublication(admitted AdmittedRequest, bundl
 	if delivery.Response != nil || delivery.ProviderEventID != admitted.ProviderEventID() || delivery.ProviderEventType != admitted.ProviderEventType() {
 		return Delivery{}, PublicationAdmission{}, fmt.Errorf("publication requires the exact admitted delivery, not a challenge or changed identity")
 	}
-	admission := PublicationAdmission{bundleHash: bundleHash, flowID: flowID, provider: p.provider}
+	admission := PublicationAdmission{bundleHash: bundleHash, flowID: flowID, provider: p.provider,
+		nativeInput: admitted.sessionInput, generation: p.generation}
 	for _, output := range delivery.Events {
 		payload, err := canonicaljson.Bytes(output.Payload)
 		if err != nil {
@@ -58,6 +66,14 @@ func (p InboundAdmissionPlan) ProjectPublication(admitted AdmittedRequest, bundl
 }
 
 func (a PublicationAdmission) ValidateOutput(bundleHash, provider string, ordinal, count int, event events.Event, kind provideroutput.Kind, authorization provideroutput.Authorization) error {
+	if a.nativeInput != nil {
+		if err := a.nativeInput.RequireBusiness(a.nativeInput.Context(), provider, a.generation); err != nil {
+			return err
+		}
+		if event.RunID() != a.nativeInput.PublicationRunID() {
+			return fmt.Errorf("native publication changed its admitted run")
+		}
+	}
 	if a.bundleHash == "" || a.bundleHash != bundleHash || a.provider != provider || len(a.outputs) != count || ordinal < 0 || ordinal >= count {
 		return fmt.Errorf("provider publication requires its exact authenticated output admission")
 	}
