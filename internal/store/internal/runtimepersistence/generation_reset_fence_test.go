@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -28,35 +29,36 @@ func TestGenerationMutationFenceRetainedResetBothStores(t *testing.T) {
 				if err := db.QueryRowContext(ctx, `SELECT last_sequence FROM author_activity_order WHERE singleton_id=1`).Scan(&sequence); err != nil {
 					t.Fatal(err)
 				}
-				tx, err := db.BeginTx(ctx, nil)
-				if err != nil {
-					t.Fatal(err)
+				mutationStore := selected
+				if sqlite {
+					mutationStore = NewSQLiteRuntimeStoreForTest(db)
 				}
-				defer tx.Rollback()
-				if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
-					t.Fatal(err)
-				}
-				// Only the transaction lifetime is held. Cleanup uses the same
-				// retained process operation as the production serve composition.
-				waiting, stop := context.WithTimeout(ctx, time.Second)
+				rolledBack := errors.New("release reset mutation fence by rollback")
 				reset := make(chan error, 1)
-				go func() {
-					_, err := process.ApplyDestructiveResetCleanup(waiting, request, nil)
-					reset <- err
-				}()
-				<-waiting.Done()
-				if completion == "commit" {
-					err = tx.Commit()
-				} else {
-					err = tx.Rollback()
-				}
-				if err != nil {
-					t.Fatal(err)
+				err := runUnrevisionedEventFixtureTransactionForTest(ctx, mutationStore, func(txctx context.Context, tx *sql.Tx) error {
+					if err := generationauthority.FenceMutation(txctx, tx, sqlite); err != nil {
+						return err
+					}
+					// Cleanup uses the retained production operation; the independent
+					// native mutation keeps its database fence until settlement.
+					waiting, stop := context.WithTimeout(ctx, time.Second)
+					defer stop()
+					go func() {
+						_, err := process.ApplyDestructiveResetCleanup(waiting, request, nil)
+						reset <- err
+					}()
+					<-waiting.Done()
+					if completion == "rollback" {
+						return rolledBack
+					}
+					return nil
+				})
+				if (completion == "commit" && err != nil) || (completion == "rollback" && !errors.Is(err, rolledBack)) {
+					t.Fatalf("reset mutation fence %s: %v", completion, err)
 				}
 				if err := <-reset; !errors.Is(err, context.DeadlineExceeded) {
 					t.Fatalf("reset crossed held generation mutation fence: %v", err)
 				}
-				stop()
 				var runs int
 				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE run_id IN ($1,$2)`, runA, runB).Scan(&runs); err != nil || runs != 2 {
 					t.Fatalf("blocked/refused cleanup mutated runs: count=%d err=%v", runs, err)
