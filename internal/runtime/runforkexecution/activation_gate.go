@@ -156,6 +156,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		planRequest.At = binding.ForkPoint.EventID
 	} else {
 		planRequest.ResolvedPoint = &binding.ForkPoint
+		planRequest.AtStart = binding.ForkPoint.Kind == runfork.RunForkPointRunStart
 	}
 	plan, err := req.Store.PlanRunFork(ctx, planRequest)
 	if err != nil {

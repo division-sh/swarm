@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -199,7 +200,7 @@ func barrierScheduleProjectionFixture(t *testing.T) (*runForkRevisionSnapshot, [
 		t.Fatal(err)
 	}
 	id := uuid.NewString()
-	timer := runForkRevisionTimer{TimerID: id, TimerName: command.ScheduleKey, ScheduleKey: command.ScheduleKey, ScheduleScope: scope, ImmutableHash: hash, RunID: runID, EntityID: runID, FireEvent: command.EventType, FirePayload: payload, RoutingSource: source, ExecutionMode: string(command.ExecutionMode), FireAt: at, InitialFireAt: &at, OwnerAgent: command.OwnerID, OwnerKind: string(command.OwnerKind), TaskID: command.TaskID, DueBasisKind: string(genericschedule.DueAbsolute), DueBasisAbsolute: &at, TaskType: "timer", Status: "active", CreatedAt: at}
+	timer := runForkRevisionTimer{TimerSnapshot: runforkrevision.TimerSnapshot{TimerID: id, TimerName: command.ScheduleKey, ScheduleKey: command.ScheduleKey, ScheduleScope: scope, ImmutableHash: hash, RunID: runID, EntityID: runID, FireEvent: command.EventType, FirePayload: payload, RoutingSource: source, ExecutionMode: string(command.ExecutionMode), FireAt: at, InitialFireAt: &at, OwnerAgent: command.OwnerID, OwnerKind: string(command.OwnerKind), TaskID: command.TaskID, DueBasisKind: string(genericschedule.DueAbsolute), DueBasisAbsolute: &at, TaskType: "timer", Status: "active", CreatedAt: at}}
 	barrier := &fanoutbarrier.Barrier{Registration: registration, Status: fanoutbarrier.StatusClosedPending, ScheduleKey: command.ScheduleKey, ScheduleActivationID: id, Summary: &summary, UpdatedAt: at}
 	obligations := []runfork.RunForkFanOutObligation{{Intent: fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{Key: key, PlanRef: plan}}, Barrier: barrier}}
 	return &runForkRevisionSnapshot{RunID: runID, Timers: []runForkRevisionTimer{timer}}, obligations

@@ -13,7 +13,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/google/uuid"
 )
 
@@ -139,14 +141,26 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 	if !ok {
 		return "", fmt.Errorf("selected preparation requires admitted fixed-revision history")
 	}
+	var firstTurn *InputPublicationCoordinates
+	input, present, err := plan.OriginalStartFirstTurn()
+	if err != nil {
+		return "", err
+	}
+	if present {
+		coordinates := input.Coordinates()
+		firstTurn = &coordinates
+	}
 	raw, err := canonicaljson.Bytes(struct {
 		Plan         RunForkPlan
 		History      []string
 		Inputs       []InputPublicationCoordinates
+		FirstTurn    *InputPublicationCoordinates
+		Replies      []replycontext.Record
+		Timers       []timerobligation.WorkflowTimerActivationRecord
 		Frontier     RunForkContractFrontierAdmission
 		Recipients   RunForkSelectedContractRecipientPlanning
 		Declarations string
-	}{plan, history, plan.HistoricalInputCoordinates(), frontier, planning, declarationRevision})
+	}{plan, history, plan.HistoricalInputCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, frontier, planning, declarationRevision})
 	if err != nil {
 		return "", err
 	}

@@ -45,10 +45,11 @@ func (s *PipelinePostgresOwner) CommitScenarioSetup(ctx context.Context, command
 			if !ok {
 				return fmt.Errorf("postgres scenario setup requires executable bundle source fact")
 			}
-			if _, err := s.RunLifecyclePostgresOwner.CreateRunTx(txctx, attempt, runtimerunlifecycle.CreateRequest{
+			disposition, err := s.RunLifecyclePostgresOwner.CreateRunTx(txctx, attempt, runtimerunlifecycle.CreateRequest{
 				RunID: req.RunID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
 				Source: fact, StartedAt: req.CreatedAt,
-			}); err != nil {
+			})
+			if err != nil {
 				return err
 			}
 			if req.ScenarioExecutionProfile != nil {
@@ -63,6 +64,11 @@ func (s *PipelinePostgresOwner) CommitScenarioSetup(ctx context.Context, command
 					return err
 				}
 				if _, err := s.ReplaceFlowInstanceRouteTopologyTx(txctx, tx, topology); err != nil {
+					return err
+				}
+			}
+			if disposition == runtimerunlifecycle.MutationApplied {
+				if err := attempt.BeginInitialRunProjection(txctx, req.RunID); err != nil {
 					return err
 				}
 			}
@@ -111,6 +117,9 @@ func (s *PipelinePostgresOwner) CommitScenarioSetup(ctx context.Context, command
 					return fmt.Errorf("record postgres scenario setup entity mutation %s: %w", entity.Alias, err)
 				}
 			}
+			if disposition == runtimerunlifecycle.MutationApplied {
+				return attempt.EndInitialRunProjection(txctx, req.RunID)
+			}
 			return nil
 		})
 		if err != nil {
@@ -149,10 +158,11 @@ func (s *PipelineSQLiteOwner) CommitScenarioSetup(ctx context.Context, command r
 			if !ok {
 				return fmt.Errorf("sqlite scenario setup requires executable bundle source fact")
 			}
-			if _, err := s.RunLifecycleSQLiteOwner.CreateRunTx(txctx, attempt, runtimerunlifecycle.CreateRequest{
+			disposition, err := s.RunLifecycleSQLiteOwner.CreateRunTx(txctx, attempt, runtimerunlifecycle.CreateRequest{
 				RunID: req.RunID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
 				Source: fact, StartedAt: req.CreatedAt,
-			}); err != nil {
+			})
+			if err != nil {
 				return err
 			}
 			if req.ScenarioExecutionProfile != nil {
@@ -167,6 +177,11 @@ func (s *PipelineSQLiteOwner) CommitScenarioSetup(ctx context.Context, command r
 					return err
 				}
 				if _, err := s.ReplaceFlowInstanceRouteTopologyTx(txctx, tx, topology); err != nil {
+					return err
+				}
+			}
+			if disposition == runtimerunlifecycle.MutationApplied {
+				if err := attempt.BeginInitialRunProjection(txctx, req.RunID); err != nil {
 					return err
 				}
 			}
@@ -213,6 +228,9 @@ func (s *PipelineSQLiteOwner) CommitScenarioSetup(ctx context.Context, command r
 				}, scenarioSetupMutationWriter(), req.CreatedAt); err != nil {
 					return fmt.Errorf("record sqlite scenario setup entity mutation %s: %w", entity.Alias, err)
 				}
+			}
+			if disposition == runtimerunlifecycle.MutationApplied {
+				return attempt.EndInitialRunProjection(txctx, req.RunID)
 			}
 			return nil
 		})

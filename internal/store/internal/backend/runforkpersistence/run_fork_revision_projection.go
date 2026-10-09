@@ -168,7 +168,7 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	}
 	openReplyContext := false
 	for _, replyContext := range snapshot.ReplyContexts {
-		if strings.TrimSpace(replyContext.State) == "open" {
+		if replyContext.Record.State == "open" {
 			openReplyContext = true
 			break
 		}

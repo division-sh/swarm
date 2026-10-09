@@ -92,6 +92,10 @@ func (a *postgresAdapter) insertFacts(ctx context.Context, runID string, revisio
 	return insertRevisionFacts(ctx, a.tx, true, runID, revision, facts)
 }
 
+func (a *postgresAdapter) publishStart(ctx context.Context, runID string, revision int64, projection StartProjection) error {
+	return publishStart(ctx, a.tx, true, runID, revision, projection)
+}
+
 // Physical cardinality is not historical payload admission. This portable read
 // uses the caller's original selected transaction on either native backend.
 func CountNotifyFanOutRevisionStorageForTest(ctx context.Context, tx *sql.Tx, runID string) (revisions, facts int64, err error) {

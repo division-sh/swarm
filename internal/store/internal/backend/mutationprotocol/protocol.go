@@ -97,24 +97,25 @@ type ClaimRetirement interface {
 }
 
 type Attempt struct {
-	tx              *sql.Tx
-	dialect         privateactivity.Dialect
-	evidence        Evidence
-	kind            Kind
-	story           *privateactivity.Mutation
-	effects         *privatefork.Effects
-	handoff         *runhandoff.CandidateHandoff
-	candidates      *runhandoff.CandidateCoordinator
-	active          bool
-	cleanup         bool
-	discardRunID    string
-	discardRetained bool
-	discardSelected bool
-	claimRetirement ClaimRetirement
-	eventCounts     map[string]int64
-	eventCountOrder []string
-	callerCtx       context.Context
-	runAdmissions   activeRunSources
+	tx                     *sql.Tx
+	dialect                privateactivity.Dialect
+	evidence               Evidence
+	kind                   Kind
+	story                  *privateactivity.Mutation
+	effects                *privatefork.Effects
+	handoff                *runhandoff.CandidateHandoff
+	candidates             *runhandoff.CandidateCoordinator
+	active                 bool
+	cleanup                bool
+	discardRunID           string
+	discardRetained        bool
+	discardSelected        bool
+	claimRetirement        ClaimRetirement
+	eventCounts            map[string]int64
+	eventCountOrder        []string
+	callerCtx              context.Context
+	runAdmissions          activeRunSources
+	initialRunConstruction string
 }
 
 var _ runtimeactivity.Mutation = (*Attempt)(nil)
@@ -167,7 +168,11 @@ func (a *Attempt) AddFact(runID string, family privatefork.Family, key string) e
 	if a.kind == WholeParentDeletion {
 		return errors.New("whole-parent deletion does not publish revision facts")
 	}
-	return a.effects.AddFact(runID, family, key)
+	ref, err := privatefork.NewFactRef(family, key)
+	if err != nil {
+		return err
+	}
+	return a.AddFacts(runID, ref)
 }
 
 func (a *Attempt) AddFacts(runID string, refs ...privatefork.FactRef) error {
@@ -176,6 +181,18 @@ func (a *Attempt) AddFacts(runID string, refs ...privatefork.FactRef) error {
 	}
 	if a.kind == WholeParentDeletion {
 		return errors.New("whole-parent deletion does not publish revision facts")
+	}
+	if a.initialRunConstruction != "" {
+		key, valid := physicalRunKey(a.dialect, runID)
+		if !valid || key != a.initialRunConstruction {
+			return errors.New("initial construction contributed facts for another run")
+		}
+		return a.effects.AddStartFacts(key, refs...)
+	}
+	if key, valid := physicalRunKey(a.dialect, runID); valid {
+		if err := a.effects.RequireOutsideStart(key, refs...); err != nil {
+			return err
+		}
 	}
 	return a.effects.AddFacts(runID, refs...)
 }
@@ -186,6 +203,14 @@ func (a *Attempt) AddWholeFamily(runID string, family privatefork.Family) error 
 	}
 	if a.kind == WholeParentDeletion {
 		return errors.New("whole-parent deletion does not publish revision facts")
+	}
+	if a.initialRunConstruction != "" {
+		return errors.New("initial construction requires exact fact coordinates, not a whole family")
+	}
+	if key, valid := physicalRunKey(a.dialect, runID); valid {
+		if err := a.effects.RequireWholeFamilyOutsideStart(key, family); err != nil {
+			return err
+		}
 	}
 	return a.effects.Add(runID, family)
 }
@@ -295,6 +320,9 @@ func (a *Attempt) requireActive() error {
 func (a *Attempt) finalize(ctx context.Context, phase *Phase) error {
 	if err := a.requireActive(); err != nil {
 		return err
+	}
+	if a.initialRunConstruction != "" {
+		return errors.New("initial construction did not finish its semantic contribution before finalization")
 	}
 	if a.kind == WholeParentDeletion {
 		if !a.cleanup {

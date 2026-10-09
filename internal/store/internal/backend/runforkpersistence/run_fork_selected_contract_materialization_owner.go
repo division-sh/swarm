@@ -35,14 +35,14 @@ func selectedRunForkMaterializationID(sourceRunID string, point runfork.RunForkP
 		return deterministicRunForkMaterializationID(sourceRunID, point.EventID), nil
 	}
 	if operation == nil {
-		return "", fmt.Errorf("deployment revision fork requires a durable invocation")
+		return "", fmt.Errorf("non-event fork point requires a durable invocation")
 	}
 	id, err := uuid.Parse(operation.OperationID)
 	if err != nil || id == uuid.Nil || id.String() != operation.OperationID {
-		return "", fmt.Errorf("deployment revision fork requires a canonical operation ID")
+		return "", fmt.Errorf("non-event fork point requires a canonical operation ID")
 	}
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("swarm:run-fork-deployment-materialization:%s:%d:%s",
-		sourceRunID, point.Revision, operation.OperationID))).String(), nil
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("swarm:run-fork-materialization:%s:%s:%d:%s",
+		sourceRunID, point.Kind, point.Revision, operation.OperationID))).String(), nil
 }
 
 // runForkSelectedContractMaterializationPort is deliberately operation-specific.
@@ -102,7 +102,10 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			}
 			return fmt.Errorf("selected-contract fork source state %s is unsupported", state)
 		}
-		planRequest := runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: strings.TrimSpace(req.At)}
+		planRequest := runfork.RunForkPlanRequest{
+			SourceRunID: sourceRunID, At: strings.TrimSpace(req.At),
+			AtStart: req.Preparation.ForkPoint.Kind == runfork.RunForkPointRunStart,
+		}
 		if req.ForkOperation != nil {
 			planRequest.ResolvedPoint = req.ForkOperation.ResolvedPoint
 		}
@@ -277,6 +280,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			}
 		}
 		forkCtx := runtimecorrelation.WithRunID(txctx, forkRunID)
+		if err := attempt.BeginInitialRunProjection(forkCtx, forkRunID); err != nil {
+			return err
+		}
 		forkMutationSource := activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 			return port.activeForkSource(ctx, tx, runID)
 		})
@@ -308,6 +314,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 				return err
 			}
 			materialization.AgentTopologies = append(materialization.AgentTopologies, topologies...)
+		}
+		if err := attempt.EndInitialRunProjection(forkCtx, forkRunID); err != nil {
+			return err
 		}
 		binding, err := insertRunForkSelectedContractBinding(txctx, tx, runfork.RunForkSelectedContractBindingRequest{
 			ForkRunID: forkRunID, SourceRunID: plan.SourceRunID, ForkPoint: plan.ForkPoint, ContractSelection: selection,
