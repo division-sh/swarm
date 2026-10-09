@@ -21166,8 +21166,16 @@ run_model:
       removal use that same domain law. Run-fork and conversation-fork reconstruction consume this owner in chronological
       mutation order for the exact source run and revision; neither installs its own key parser or compatibility behavior.
     drift_detection: >-
-      swarm verify --run <run_id> reads the physical entity_mutations and entity_state rows for one run in one
-      selected-store read-only snapshot. Mutation ordering shares the run-fork committed-revision owner: first
+      swarm verify --run <run_id> reads physical entity_mutations and canonical current state for one run in one
+      selected-store read-only snapshot. The shared constructed-header projection owns exact membership and pairing:
+      flow_instances supplies lifecycle, bookkeeping, gates and accumulator; an optional correctly paired entity_state
+      row supplies declared business fields only. Fieldless headers are complete members without field rows; stale
+      non-authoritative field-row lifecycle copies cannot override or veto header progress. Inventory includes final
+      and non-active constructed members and separately admitted non-executable state-only/imported members; history-only
+      and current-only members remain explicit drift. Missing required fields, fabricated fieldless fields and conflicting
+      entity/route/type pairing fail closed with coordinates. Read-only projection access shares mutation admission
+      without acquiring mutation locks or promoting state-only evidence to construction authority.
+      Mutation ordering shares the run-fork committed-revision owner: first
       revision, then mutation ID within a revision. This UUID tie-break is deterministic, not an intra-transaction
       chronology. Revision facts supply validated ordering coordinates, never replacement mutation values.
       The shared reconstruction owner folds all five domains; the comparison preserves entity and field presence,
