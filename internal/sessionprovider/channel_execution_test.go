@@ -388,7 +388,8 @@ func TestWhatsAppChannelPrelaunchResumeAndRecoveryBothStores(t *testing.T) {
 						t.Fatal("prelaunch rejection lost its failure")
 					}
 				} else if boundary == "startup_reconciled" {
-					if _, err := f.selected.(runtimeeffects.ChannelOnboardingOutcomeStore).ReconcileChannelOnboardingEffectOutcomes(ctx, f.operation.OperationID, time.Now().UTC()); err != nil {
+					if _, err := f.selected.(runtimeeffects.RecoveryStore).ReconcileExternalEffectAttempts(ctx,
+						runtimeeffects.NewRecoveryRequest(time.Now().UTC().Add(time.Hour), executionposture.Live)); err != nil {
 						t.Fatal(err)
 					}
 				}
