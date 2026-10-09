@@ -353,15 +353,6 @@ func DecodeJSONMap(raw any) (map[string]any, error) {
 	return out, nil
 }
 
-func toolTimeString(raw any) (string, error) {
-	if at, ok, err := DecodeEntityTime(raw); err != nil {
-		return "", err
-	} else if ok {
-		return at.Format(time.RFC3339Nano), nil
-	}
-	return "", nil
-}
-
 func jsonRawMessageValue(raw any) json.RawMessage {
 	switch value := raw.(type) {
 	case nil:
