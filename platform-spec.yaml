@@ -11378,12 +11378,23 @@ tool_model:
         admit the exact operation at launch. Without those owners, discovery and invocation fail closed.
         These provider operations are private activities, never agent grants or LLM tool definitions. A nearest
         native declaration blocks same-name builtin fallback and discovered MCP substitution without losing its
-        immutable intent projection. SDK channel confirmation/delivery use the existing channel effect kinds and
+        immutable intent projection. Before alias normalization or emit routing, dispatch retains the exact
+        requested declaration, the runtime-tools wrapper's declaration, and the canonical identity from the
+        shared tool-name owner. The nearest private declaration at any traversed identity refuses alternate
+        handler routing; public execution and output-event wrappers consume the same refusal before discarding
+        the requested identity. This does not rename authored declarations or change ordinary public precedence.
+        SDK channel confirmation/delivery use the existing channel effect kinds and
         selected-store settlement owners with a concrete in-process transport adapter. The exact connection/account,
         activation, principal binding, destination and source occurrence must remain current before authorization
         and after the committed launch marker, before the SDK send. A provider acknowledgment is observed and
         schema-checked; delivery then consumes the compiled receipt projection. A launched send without an exact
         acknowledgment stays outcome_uncertain and cannot be automatically redispatched, including after restart.
+        Served confirmation and delivery dispatch consume a constructor-free execution facade issued only by
+        the private session owner for its original onboarding operation. The facade reselects the exact compiled
+        operation and verifies the selected tool's canonical identity before journal authorization. A missing,
+        foreign, canceled or reconstructed handle cannot execute and never falls back to HTTP or static credentials.
+        Runtime installation must supply these owned handles; the declaration or facade type alone does not
+        establish supported provider readiness or bypass activation admission.
       session_private_persistence: >
         The connection-private SDK and incoming-capture database is owned by the private store session persistence
         implementation and consumed through typed SDK storage and capture operations. It is not the selected runtime

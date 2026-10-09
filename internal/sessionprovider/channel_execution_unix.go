@@ -15,6 +15,8 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/registration"
+	"github.com/division-sh/swarm/internal/sessionprovider/execution"
+	"github.com/division-sh/swarm/internal/sessionprovider/internal/executionfact"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -25,12 +27,52 @@ type sessionChannelExecutor struct {
 	plan  packs.SatisfactionPlan
 }
 
+func (e sessionChannelExecutor) channelExecution() execution.Channel {
+	if e.owner == nil {
+		return execution.Channel{}
+	}
+	return executionfact.SealOwnedChannel(e.owner.operation.OperationID, e)
+}
+
+func (e sessionChannelExecutor) ExecuteChannelWrite(ctx context.Context, operation, toolID string, tool runtimecontracts.ToolSchemaEntry, input map[string]any, lineage map[string]string, kind runtimeeffects.AuthorityKind) (registration.DeliveryResult, error) {
+	if kind != runtimeeffects.AuthorityChannelConfirmation && kind != runtimeeffects.AuthorityChannelDelivery {
+		return registration.DeliveryResult{}, fmt.Errorf("native channel write has an unsupported effect authority")
+	}
+	ownedID, owned, err := e.plan.ConnectorOperation(operation)
+	if err != nil {
+		return registration.DeliveryResult{}, err
+	}
+	ownedHash, err := owned.CanonicalHash()
+	if err != nil {
+		return registration.DeliveryResult{}, err
+	}
+	selectedHash, err := tool.CanonicalHash()
+	if err != nil || ownedID != toolID || ownedHash != selectedHash {
+		return registration.DeliveryResult{}, fmt.Errorf("native channel write contradicts its compiled operation")
+	}
+	return e.deliver(ctx, operation, input, lineage, kind)
+}
+
 func (e sessionChannelExecutor) DeliverChannelConfirmation(ctx context.Context, operation string, input map[string]any, lineage map[string]string) (registration.DeliveryResult, error) {
-	return e.deliver(ctx, operation, input, lineage, runtimeeffects.AuthorityChannelConfirmation)
+	if e.owner == nil {
+		return registration.DeliveryResult{}, fmt.Errorf("native channel confirmation owner is unavailable")
+	}
+	id, tool, err := e.plan.ConnectorOperation(operation)
+	if err != nil {
+		return registration.DeliveryResult{}, err
+	}
+	return e.channelExecution().DeliverChannelConfirmation(ctx, e.owner.operation.OperationID, operation, id, tool, input, lineage)
 }
 
 func (e sessionChannelExecutor) DeliverChannelMessage(ctx context.Context, operation string, input map[string]any, lineage map[string]string) (registration.DeliveryResult, error) {
-	return e.deliver(ctx, operation, input, lineage, runtimeeffects.AuthorityChannelDelivery)
+	if e.owner == nil {
+		return registration.DeliveryResult{}, fmt.Errorf("native channel delivery owner is unavailable")
+	}
+	id, tool, err := e.plan.ConnectorOperation(operation)
+	if err != nil {
+		return registration.DeliveryResult{}, err
+	}
+	return e.channelExecution().DeliverChannelMessage(ctx, e.owner.operation.OperationID, operation, id, tool, input, lineage)
 }
 
 func (e sessionChannelExecutor) deliver(ctx context.Context, operation string, input map[string]any, lineage map[string]string, kind runtimeeffects.AuthorityKind) (registration.DeliveryResult, error) {

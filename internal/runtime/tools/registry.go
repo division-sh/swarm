@@ -8,6 +8,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -334,6 +335,11 @@ func executionToolsForRuntime(source semanticview.Source, discovered map[string]
 }
 
 func executionToolsForActor(source semanticview.Source, actor models.AgentConfig, discovered map[string]runtimemcp.DiscoveredTool) (map[string]ExecutionTool, error) {
+	for _, name := range actor.Tools {
+		if err := privateToolRoutingError(source, actor, name); err != nil {
+			return nil, fmt.Errorf("private tool %s cannot be granted to an agent: %w", name, err)
+		}
+	}
 	entries, err := executionToolsForRuntime(source, discovered)
 	if err != nil {
 		return nil, err
@@ -423,6 +429,9 @@ func resolveExecutionToolForActor(source semanticview.Source, actor models.Agent
 	if toolName == "" {
 		return ExecutionTool{}, false, nil
 	}
+	if err := privateToolRoutingError(source, actor, toolName); err != nil {
+		return ExecutionTool{}, false, err
+	}
 	entries, err := executionToolsForActor(source, actor, discovered)
 	if err != nil {
 		return ExecutionTool{}, false, err
@@ -432,6 +441,24 @@ func resolveExecutionToolForActor(source semanticview.Source, actor models.Agent
 		return ExecutionTool{}, false, nil
 	}
 	return tool, true, nil
+}
+
+func privateToolRoutingError(source semanticview.Source, actor models.AgentConfig, name string) error {
+	if source == nil {
+		return nil
+	}
+	projection, projected := semanticview.ResolveAgentContractProjection(source, actor)
+	declarations := source.ToolEntries()
+	for _, candidate := range toolidentity.DeclarationNames(name) {
+		entry, found := declarations[candidate]
+		if projected {
+			entry, found = projection.ToolEntry(candidate)
+		}
+		if found && !entry.AgentExposable() {
+			return fmt.Errorf("private tool %s cannot route to an agent handler", candidate)
+		}
+	}
+	return nil
 }
 
 func executionToolFromAdmitted(name string, entry runtimecontracts.ToolSchemaEntry) (ExecutionTool, bool) {
