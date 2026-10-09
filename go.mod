@@ -4,6 +4,10 @@ go 1.26.0
 
 toolchain go1.26.8
 
+// Upstream PR pending human coordination; ruling: https://github.com/division-sh/swarm/issues/2577#issuecomment-6074737709
+// When it merges, remove this replace and re-pin upstream to a version containing the callback synchronization fix.
+replace go.mau.fi/whatsmeow => github.com/division-sh/whatsmeow v0.0.0-20261009045749-01ff3e9474e8
+
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/Masterminds/semver/v3 v3.3.1
