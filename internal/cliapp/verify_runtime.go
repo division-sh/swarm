@@ -52,6 +52,8 @@ type verifyCommandOptions struct {
 	configPath       string
 	swarmDir         cliSwarmDirOptions
 	portable         bool
+	runID            string
+	runRequested     bool
 	output           cliOutputOptions
 	logging          cliLoggingOptions
 }
@@ -70,6 +72,9 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 			fmt.Fprintf(errOut, "verify failed: %v\n", err)
 		}
 		return 2
+	}
+	if opts.runRequested {
+		return runVerifyRunCommand(ctx, repo, opts, out, errOut)
 	}
 	purpose := runtimebootverify.StructuralValidation
 	if opts.configPath != "" && !opts.portable {

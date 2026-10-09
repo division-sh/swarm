@@ -363,6 +363,12 @@ func resolveSQLiteRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID, a
 }
 
 func loadRunForkRevisionSnapshot(ctx context.Context, tx *sql.Tx, runID string, revision int64) (*runForkRevisionSnapshot, error) {
+	return loadRunForkRevisionSnapshotScope(ctx, tx, runID, revision, false)
+}
+
+// The oracle shares fork admission and ordering, but needs only mutation
+// coordinates; unrelated historical families are not its evidence operands.
+func loadRunForkRevisionSnapshotScope(ctx context.Context, tx *sql.Tx, runID string, revision int64, mutationsOnly bool) (*runForkRevisionSnapshot, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("run fork revision snapshot requires a database transaction")
 	}
@@ -375,13 +381,13 @@ func loadRunForkRevisionSnapshot(ctx context.Context, tx *sql.Tx, runID string, 
 			       MIN(revision) OVER (PARTITION BY family, fact_key) AS first_revision,
 			       ROW_NUMBER() OVER (PARTITION BY family, fact_key ORDER BY revision DESC) AS latest_rank
 			FROM run_fork_fact_revisions
-			WHERE run_id = $1 AND revision <= $2
+			WHERE run_id = $1 AND revision <= $2 AND (NOT $3 OR family = 'entity_mutations')
 		)
 		SELECT run_id, family, fact_key, first_revision, revision, fact
 		FROM bounded
 		WHERE latest_rank = 1 AND present
 		ORDER BY family, first_revision, fact_key
-	`, runID, revision)
+	`, runID, revision, mutationsOnly)
 	if err != nil {
 		return nil, fmt.Errorf("load run fork revision snapshot: %w", err)
 	}

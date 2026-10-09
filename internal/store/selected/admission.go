@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
@@ -30,6 +31,7 @@ type admissionInspectionPort interface {
 	Ping(context.Context) error
 	Close() error
 	InspectSnapshot(context.Context, func(context.Context) error) error
+	InspectRunMutationDrift(context.Context, string) (mutationlog.DriftReport, error)
 	InspectSchema(context.Context, store.SchemaBootstrapRequest) (store.SchemaInspection, error)
 	ProbePossession(context.Context) (startupownership.PossessionObservation, error)
 	authorityInspectionPort
@@ -149,6 +151,15 @@ type AdmissionSnapshot struct {
 	ctx   context.Context
 	store admissionInspectionPort
 	fresh bool
+}
+
+func (s *AdmissionSnapshot) InspectRunMutationDrift(ctx context.Context, runID string) (mutationlog.DriftReport, error) {
+	ctx, done, err := s.readContext(ctx)
+	if err != nil {
+		return mutationlog.DriftReport{}, err
+	}
+	defer done()
+	return s.store.InspectRunMutationDrift(ctx, runID)
 }
 
 func (s *AdmissionSnapshot) RequiresSchemaPreparation() (bool, error) {
