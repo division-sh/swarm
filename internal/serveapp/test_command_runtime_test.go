@@ -411,17 +411,16 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcrossSelectedStores(t *testing.T) {
 	stages := []struct {
 		name    string
-		cause   string
 		install func(testing.TB, context.Context, *sql.DB, testsql.EventCorruptionClaim, string, servedparity.Backend)
 	}{
-		{name: "replay_scope", cause: "injected committed replay-scope persistence failure", install: func(t testing.TB, ctx context.Context, db *sql.DB, claim testsql.EventCorruptionClaim, flow string, backend servedparity.Backend) {
+		{name: "replay_scope", install: func(t testing.TB, ctx context.Context, db *sql.DB, claim testsql.EventCorruptionClaim, flow string, backend servedparity.Backend) {
 			if backend == servedparity.BackendExplicitPostgres {
 				testsql.InstallPostgresReplayScopeFailureAfterDelivery(t, ctx, db, claim, flow)
 			} else {
 				testsql.InstallSQLiteReplayScopeFailureAfterDelivery(t, ctx, db, claim, flow)
 			}
 		}},
-		{name: "api_completion", cause: "injected API idempotency completion persistence failure", install: func(t testing.TB, ctx context.Context, db *sql.DB, claim testsql.EventCorruptionClaim, flow string, backend servedparity.Backend) {
+		{name: "api_completion", install: func(t testing.TB, ctx context.Context, db *sql.DB, claim testsql.EventCorruptionClaim, flow string, backend servedparity.Backend) {
 			if backend == servedparity.BackendExplicitPostgres {
 				testsql.InstallPostgresAPICompletionFailureAfterPublication(t, ctx, db, claim, flow)
 			} else {
@@ -445,7 +444,11 @@ func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcro
 				if code, _ := rpcErr.Data["code"].(string); code != apiv1.EventPublishFailedCode {
 					t.Fatalf("%s/%s event.publish error = %#v, want %s", backend, stage.name, rpcErr, apiv1.EventPublishFailedCode)
 				}
-				requirePublicInputFailureCause(t, rpcErr, stage.cause)
+				cause := "injected committed replay-scope persistence failure"
+				if stage.name == "api_completion" {
+					cause = "injected API idempotency completion persistence failure"
+				}
+				requirePublicInputFailureCause(t, rpcErr, cause)
 				eventID, runID := publicInputFailureIdentity(t, rpcErr)
 				requirePublicInputRollbackNoResidue(t, db, backend, idempotencyKey, eventID, runID)
 			})

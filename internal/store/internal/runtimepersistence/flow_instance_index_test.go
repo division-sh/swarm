@@ -312,6 +312,55 @@ func newR7KeylessIndexProof(t *testing.T, backend string) (receiverConfigActivat
 	return f, plan
 }
 
+func TestR7DirectoryUnconstructedStandingRunHasNoObservationBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
+				"schema.yaml":        "name: unconstructed-standing-run\n",
+				"detail/schema.yaml": "name: detail\n",
+			}, nil)
+			source := semanticview.Wrap(f.bundle)
+			fact, _ := correlation.SourceArtifactFactFromContext(f.ctx)
+			standing, err := f.workflows.ReconcileStandingService(f.ctx, pipeline.StandingServiceCandidate{
+				BindingEnabled: true, ServiceID: flowidentity.StandingServiceID("."), FlowPath: ".", Source: fact,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := correlation.WithRunID(f.ctx, standing.RunID)
+			owner := flowidentity.RunScopedFlowInstance{RunID: standing.RunID, Route: flowidentity.StoredRoute(".", standing.RunID, standing.RunID)}
+			lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			index := f.store.(pipeline.FlowInstanceIndexReader)
+			if observed, found, err := index.LookupFlowInstance(ctx, lookup); err != nil || found || observed.Valid() {
+				t.Fatalf("unconstructed run became an observation or corruption: found=%t observed=%+v err=%v", found, observed, err)
+			}
+			scope, err := pipeline.NewFlowInstanceLookupScope(source, fact, standing.RunID, []string{".", "detail"}, []flowidentity.RunScopedFlowInstance{owner})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if observations, err := index.ListFlowInstances(ctx, scope); err != nil || len(observations) != 0 {
+				t.Fatalf("empty inventory fabricated construction or revision: %+v %v", observations, err)
+			}
+			request := sqliteFlowActivationRequest(f.bundle, ".", standing.RunID, "", standing.RunID)
+			request.Instance = flowidentity.Stored(source, ".", standing.RunID, standing.RunID, standing.RunID, "")
+			plan, err := f.manager.PrepareFlowInstanceActivation(ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(ctx, plan); err != nil {
+				t.Fatal(err)
+			}
+			observed, found, err := index.LookupFlowInstance(ctx, lookup)
+			if err != nil || !found || observed.Identity() != plan.Identity || observed.RunRevision() <= 0 {
+				t.Fatalf("constructed run lost its recorded revision: %+v found=%t err=%v", observed, found, err)
+			}
+		})
+	}
+}
+
 func TestR7DirectoryCanceledLookupIsNotConstructionCorruptionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

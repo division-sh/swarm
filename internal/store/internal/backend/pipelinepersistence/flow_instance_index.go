@@ -158,14 +158,23 @@ func newFlowInstanceIndexSnapshot(ctx context.Context, tx *sql.Tx, postgres bool
 	if tx == nil || source == nil || historical == nil || run.Validate() != nil || run.BundleHash != hash {
 		return nil, fmt.Errorf("instance snapshot requires its exact admitted source, lineage and read owner")
 	}
-	var revision int64
-	if err := tx.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1`, run.RunID).Scan(&revision); err != nil {
-		return nil, fmt.Errorf("read instance snapshot revision: %w", err)
+	return &flowInstanceIndexSnapshot{tx: tx, postgres: postgres, source: source, run: run, historical: historical, observed: make(map[string]pipeline.FlowInstanceObservation)}, nil
+}
+
+func (s *flowInstanceIndexSnapshot) requireRecordedRevision(ctx context.Context) error {
+	if s.revision > 0 {
+		return nil
 	}
-	if revision <= 0 {
-		return nil, fmt.Errorf("instance snapshot requires a recorded revision")
+	if err := s.tx.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1`, s.run.RunID).Scan(&s.revision); err != nil {
+		if err == sql.ErrNoRows {
+			return &pipeline.FlowInstanceConstructionCorruption{RunID: s.run.RunID, Cause: fmt.Errorf("constructed instance has no recorded revision: %w", err)}
+		}
+		return fmt.Errorf("read instance snapshot revision: %w", err)
 	}
-	return &flowInstanceIndexSnapshot{tx: tx, postgres: postgres, source: source, run: run, revision: revision, historical: historical, observed: make(map[string]pipeline.FlowInstanceObservation)}, nil
+	if s.revision <= 0 {
+		return &pipeline.FlowInstanceConstructionCorruption{RunID: s.run.RunID, Cause: fmt.Errorf("instance observation requires a recorded revision")}
+	}
+	return nil
 }
 
 func (s *flowInstanceIndexSnapshot) lookup(ctx context.Context, request pipeline.FlowInstanceLookupRequest) (pipeline.FlowInstanceObservation, bool, error) {
@@ -264,6 +273,9 @@ func requireFlowInstanceConstructionSelector(ctx context.Context, tx *sql.Tx, po
 }
 
 func (s *flowInstanceIndexSnapshot) observe(ctx context.Context, request pipeline.FlowInstanceLookupRequest, header pipeline.WorkflowInstance) (pipeline.FlowInstanceObservation, error) {
+	if err := s.requireRecordedRevision(ctx); err != nil {
+		return pipeline.FlowInstanceObservation{}, err
+	}
 	historical, projected, err := s.historical.ReadHistoricalFlowInstanceConstructionTx(ctx, s.tx, s.source, s.run, header)
 	if err != nil {
 		return pipeline.FlowInstanceObservation{}, err
