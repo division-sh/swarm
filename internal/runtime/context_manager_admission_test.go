@@ -567,7 +567,7 @@ func runtimeAdmissionTestContext(t *testing.T, hash, alias string, catalog *prov
 	}
 	contextDef.StandingTargets = []StandingTarget{{
 		BundleHash: hash, ServiceID: runtimeflowidentity.StandingServiceID("acme-flow"), FlowPath: "acme-flow", Alias: alias, Provider: "acme", RunID: "run-" + alias,
-		Generation: 1,
+		Generation:    1,
 		SigningSecret: "webhook_signing.acme", AdmissionPlan: plan,
 	}}
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
