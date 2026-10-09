@@ -34,6 +34,7 @@ type executionToolValue struct {
 	hasManagedCredential bool
 	ratePolicy           runtimecontracts.ToolRatePolicy
 	mcp                  runtimecontracts.ToolMCPBinding
+	inProcess            runtimecontracts.ToolInProcessTarget
 }
 
 // ExecutionTool is an immutable runtime view derived from one admitted owner.
@@ -105,6 +106,13 @@ func (t ExecutionTool) HTTPExecution() (runtimecontracts.ToolHTTPExecution, bool
 		return runtimecontracts.ToolHTTPExecution{}, false
 	}
 	return t.value.http, true
+}
+
+func (t ExecutionTool) InProcess() (runtimecontracts.ToolInProcessTarget, bool) {
+	if t.value == nil || t.value.inProcess == runtimecontracts.ToolInProcessUnspecified {
+		return runtimecontracts.ToolInProcessUnspecified, false
+	}
+	return t.value.inProcess, true
 }
 func (t ExecutionTool) ResponseMapping() map[string]any {
 	if t.value == nil || !t.value.hasResponseMapping {
@@ -439,6 +447,7 @@ func executionToolFromAdmitted(name string, entry runtimecontracts.ToolSchemaEnt
 	responseMapping, hasResponseMapping := entry.CompiledResponseMapping()
 	responseSuccess, hasResponseSuccess := entry.ResponseSuccessPolicy()
 	managed, hasManaged := entry.ManagedCredentialExecution()
+	inProcess, _ := entry.InProcess()
 	value := executionToolValue{
 		name: name, category: entry.Category(), description: entry.Description(),
 		usage: runtimeOwnedToolUsage(name), requiredPermission: entry.Permission(),
@@ -450,6 +459,7 @@ func executionToolFromAdmitted(name string, entry runtimecontracts.ToolSchemaEnt
 		credentials: entry.Credentials(), managedCredential: managed, hasManagedCredential: hasManaged,
 		ratePolicy: entry.RatePolicy(),
 		mcp:        mcpBinding,
+		inProcess:  inProcess,
 	}
 	return ExecutionTool{value: &value}, true
 }

@@ -11366,6 +11366,16 @@ tool_model:
         not redispatch. Verified historical receipt reconciliation may retire the original private capture after
         SDK retirement without reissuing execution authority. This does not make unfinished recovery, provider
         installation, served operator controls or physical interoperability implicit in a component fixture.
+      session_outbound_tool_target: >
+        The canonical ToolSchemaEntry owner admits handler_type in_process with one exact in_process target.
+        Initial targets are whatsapp.read_account (provider_registration, read_only) and whatsapp.send_text
+        (provider_connector, non_idempotent_write). These select shipped provider operations, not Go functions,
+        executable paths, callbacks or a provider registry. The target participates in canonical tool identity
+        and survives source serialization, scoped lookup and schema refinement. Native targets cannot mix HTTP,
+        MCP, module or HTTP response semantics, and these WhatsApp targets cannot substitute authored credentials
+        for exact retained session authority. Admitted tool intent does not establish connection readiness or
+        authorize execution: the existing selected activation, owned native connection and effect owners must
+        admit the exact operation at launch. Without those owners, discovery and invocation fail closed.
       session_private_persistence: >
         The connection-private SDK and incoming-capture database is owned by the private store session persistence
         implementation and consumed through typed SDK storage and capture operations. It is not the selected runtime
