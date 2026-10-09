@@ -8,10 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
-	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runquiescence"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -23,7 +21,7 @@ import (
 // still running. A healthy rollback must drain that SQL and retain the PID.
 func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 	for _, name := range []string{
-		"ingress_ensure", "ingress_event", "routing_active", "routing_deactivate", "routing_insert_inactive",
+		"ingress_ensure", "ingress_event",
 		"mailbox_insert", "mailbox_notify", "mailbox_expire", "quiescence", "quiescence_preview", "reset_cleanup",
 	} {
 		for _, phase := range []string{"before_admission", "during_sql", "independent_error"} {
@@ -63,23 +61,6 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 							return err
 						}
 					}
-				case strings.HasPrefix(name, "routing_"):
-					base = correlation.WithRunID(base, specEntityStateRunID)
-					entityID := uuid.NewString()
-					seedSpecEntityState(t, base, db, entityID, "bounded-writer-flow", "bounded", "B", "operating")
-					rule := runtimemanager.PersistedRoutingRule{EntityID: entityID, EventPattern: "bounded.*", SubscriberID: "subscriber", InstalledBy: "test", Status: "active"}
-					table, event = "routing_rules", "INSERT"
-					observe = `SELECT COALESCE(string_agg(status, ',' ORDER BY rule_id), '') FROM routing_rules`
-					if name == "routing_deactivate" {
-						if err := pg.UpsertRoutingRule(base, rule); err != nil {
-							t.Fatal(err)
-						}
-						event = "UPDATE"
-					}
-					if name != "routing_active" {
-						rule.Status = "inactive"
-					}
-					invoke = func(ctx context.Context) error { return pg.UpsertRoutingRule(ctx, rule) }
 				case strings.HasPrefix(name, "mailbox_"):
 					table, event = "mailbox", "INSERT"
 					observe = `SELECT COALESCE(string_agg(status || ':' || notified::text, ',' ORDER BY item_id), '') FROM mailbox`

@@ -18883,6 +18883,8 @@ platform_tables:
         derives a new identity only after genuine absence. EventBus connection and root selection
         consume the same typed index; current field descriptors, constructor-receipt-only readers,
         and process route registrations cannot substitute for admitted instance observations.
+        Authored subscriptions and connections remain source-owned compiled definitions; the
+        selected store exposes no authored routing-rule upsert or load API.
         Root reuse validates its immutable key independently of current business fields. A joined
         cancellation or independent store error cannot be interpreted as ordinary lookup absence.
         A later edge may select an exact pure
