@@ -465,6 +465,8 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 			name:           "state only workflow join timeout",
 			fixture:        "examples/routing/fan-in/barrier",
 			eventName:      "portfolio.setup",
+			inputFlow:      "portfolio",
+			inputPayload:   `{"portfolio_id":"portfolio","expected_operating_ids":["op-a","op-b"],"period_id":"2026-Q1"}`,
 			stateOnly:      true,
 			wantCapability: selectedContractDeferredWorkWorkflowJoinTimeout,
 		},
@@ -517,7 +519,23 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 			sourceRunID := uuid.NewString()
 			sourceEventID := uuid.NewString()
 			at := time.Unix(1700002215, 0).UTC()
-			if test.stateOnly {
+			if test.stateOnly && test.inputFlow != "" {
+				// The state-only cut still needs the actual constructed receiver
+				// of its connected event; a bare event is not topology evidence.
+				event := seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, test.eventName, at,
+					executionmode.Live, nil, selectedExecutionInputFixture{flow: test.inputFlow, payload: []byte(test.inputPayload)})
+				parent := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), sourceRunID, sourceRunID, sourceRunID, "")
+				child, err := flowidentity.KeyedChild(loaded.Source, parent, test.inputFlow, "portfolio")
+				if err != nil {
+					t.Fatal(err)
+				}
+				command := selectedExecutionSourceFlowCommand(t, ctx, loaded, event, child, test.eventName)
+				writeCtx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), sourceRunID)
+				committed, err := pg.CommitFlowInstanceActivation(writeCtx, command)
+				if err != nil || !committed.Acknowledged || !committed.Created {
+					t.Fatalf("construct state-only joined receiver: %+v %v", committed, err)
+				}
+			} else if test.stateOnly {
 				seedSelectedExecutionStateOnlySourceRun(t, db, sourceRunID, sourceEventID, test.eventName, at, loaded.SourceArtifactFact)
 			} else {
 				route := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", sourceRunID)
@@ -533,9 +551,7 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 			if err != nil {
 				t.Fatalf("PlanRunFork: %v", err)
 			}
-			replayAdmission := runfork.RunForkReplayResumeAdmissionWithSelectedRouteResolution(
-				runfork.RunForkSelectedContractReplayResumeAdmission(plan),
-			)
+			replayAdmission := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
 			if test.stateOnly {
 				if !replayAdmission.StateOnlyExecutionReady || replayAdmission.DeliveryEventReplayReady {
 					t.Fatalf("state-only replay admission = %#v", replayAdmission)

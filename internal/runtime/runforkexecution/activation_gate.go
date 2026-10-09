@@ -232,11 +232,6 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		if err := validateContractSwapRouteRecovery(admission, recoveredRoute); err != nil {
 			return SelectedContractActivationGateResult{}, err
 		}
-		replayAdmission = runfork.RunForkReplayResumeAdmissionWithSelectedRouteResolution(replayAdmission)
-		plan.ReplayResumeAdmission = replayAdmission
-		plan.UnsupportedBlockers = replayAdmission.UnsupportedBlockers
-		plan.UnsupportedBlockerCount = len(replayAdmission.UnsupportedBlockers)
-		plan.ExecutionReady = replayAdmission.StateOnlyExecutionReady || replayAdmission.DeliveryEventReplayReady
 	}
 	contractSwapAdmission, err := BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
 		SelectedExecutionAdmission: admission,

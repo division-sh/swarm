@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,18 +125,8 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 					}
 					beforePlan := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					plan, err := owner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: event.ID()})
-					if isExternal {
-						refused := false
-						for _, blocker := range plan.UnsupportedBlockers {
-							refused = refused || blocker.Code == runfork.RunForkBlockerFlowRouteHistoryUnproven
-						}
-						if err != nil || plan.ExecutionReady || !refused {
-							t.Fatalf("scoped opaque-ingress historical refusal changed: %+v %v", plan.UnsupportedBlockers, err)
-						}
-						if !reflect.DeepEqual(beforePlan, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
-							t.Fatal("unsupported scoped ingress planning mutated persistence")
-						}
-						return
+					if !reflect.DeepEqual(beforePlan, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+						t.Fatal("historical ingress planning mutated persistence")
 					}
 					if err != nil || !plan.ExecutionReady || !plan.ReplayResumeAdmission.DeliveryEventReplayReady {
 						t.Fatalf("historical agent policy not admitted: %+v %v", plan.UnsupportedBlockers, err)
@@ -161,6 +152,17 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					request := runfork.RunForkActivateRequest{ForkRunID: child.ForkRunID, AllowSourceFreeze: true, OriginalLoopCarriage: original, HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{}}
 					activated, err := owner.ActivateRunFork(ctx, request)
+					if isExternal {
+						// A declaration-owned carrier has no instance source for
+						// this revision role; matching a receiver cannot invent one.
+						if err == nil || !strings.Contains(err.Error(), "declared revision event requires exact source state") || activated.Activated {
+							t.Fatalf("scoped ingress borrowed receiver revision authority: %+v %v", activated, err)
+						}
+						if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+							t.Fatal("scoped ingress activation refusal mutated persistence")
+						}
+						return
+					}
 					if cell == "missing_original" || cell == "foreign_original" || cell == "unknown_revision" {
 						if err == nil {
 							t.Fatalf("historical %s was admitted", cell)
@@ -187,7 +189,11 @@ func TestForkHistoricalAgentGenerationBothStores(t *testing.T) {
 					}
 					readback := prepared.Event.Event()
 					wantEnvelopeSource := readback.RoutingSource().Route()
-					if readback.RunID() != child.ForkRunID || readback.RoutingSource().Kind() != routingSource.Kind() || readback.RoutingSource().Route().EntityID != child.ForkRunID || readback.Envelope().Source != wantEnvelopeSource || len(prepared.DeliveryRoutes) != 1 || prepared.DeliveryRoutes[0].AgentIdentity.RunID != child.ForkRunID {
+					wantSourceEntity := child.ForkRunID
+					if isExternal {
+						wantSourceEntity = ""
+					}
+					if readback.RunID() != child.ForkRunID || readback.RoutingSource().Kind() != routingSource.Kind() || readback.RoutingSource().Route().EntityID != wantSourceEntity || readback.Envelope().Source != wantEnvelopeSource || len(prepared.DeliveryRoutes) != 1 || prepared.DeliveryRoutes[0].AgentIdentity.RunID != child.ForkRunID {
 						t.Fatalf("historical aggregate retained source ownership: %+v", prepared)
 					}
 					var raw []byte

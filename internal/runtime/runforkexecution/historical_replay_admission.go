@@ -257,7 +257,12 @@ func historicalReplayFactAdmissions(replay runfork.RunForkReplayResumeAdmission)
 		historicalReplaySplitFact(runfork.RunForkHistoricalReplayFactRetryIdempotency, "runtime idempotency and retry state must be owned by a later mutating replay child; source state cannot suppress fork work", "#564"),
 		historicalReplaySplitFact(runfork.RunForkHistoricalReplayFactEmittedFollowUps, "emitted follow-up regeneration belongs to the future mutating replay owner; source follow-up rows are not copied", "#564"),
 		historicalReplayTimersAdmission(replay),
-		historicalReplayFactFromReplay(replay, runfork.RunForkHistoricalReplayFactRoutes, []string{runfork.RunForkReplayResumeFactRouteHistory}, runfork.RunForkHistoricalReplayAdmissionSplitSibling, "route and route-recovery truth remains split under fork-local route persistence/runtime recovery", "#618"),
+		{
+			Fact:        runfork.RunForkHistoricalReplayFactRoutes,
+			Admission:   runfork.RunForkHistoricalReplayAdmissionReconstructedForkState,
+			SourceOwner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
+			Message:     "instance identity comes from admitted fixed construction and source declarations, never source route membership; selected execution separately requires its exact fork-local binding and recovery",
+		},
 		historicalReplayConversationFactAdmission(replay, runfork.RunForkHistoricalReplayFactSessions, runfork.RunForkReplayResumeFactSessionHistory, "source session rows admitted by the selected-contract lineage policy are lineage/no-action evidence only; fresh fork-local sessions must be created by normal runtime execution"),
 		historicalReplayConversationFactAdmission(replay, runfork.RunForkHistoricalReplayFactTurns, runfork.RunForkReplayResumeFactActiveTurnHistory, "source turn rows admitted by the selected-contract lineage policy are lineage/no-action evidence only; fresh fork-local turns must be created by normal runtime execution"),
 		historicalReplayConversationFactAdmission(replay, runfork.RunForkHistoricalReplayFactAudits, runfork.RunForkReplayResumeFactConversationAuditHistory, "source task conversation audit rows admitted by the selected-contract lineage policy are lineage/no-action evidence only; fresh fork-local audits must be created by normal runtime execution"),

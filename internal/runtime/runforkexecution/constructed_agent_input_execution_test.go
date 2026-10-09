@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -144,10 +145,21 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 	writeCtx := effects.WithExecutionMode(correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, runID), loaded.SourceArtifactFact), input.ExecutionMode())
 	for _, identity := range instances {
 		var constructorInput []string
+		constructorEvent := input
 		if nested && identity.TemplateID == "templ" {
 			constructorInput = []string{string(anchorType)}
+			payload, err := json.Marshal(map[string]any{"work_id": identity.InstanceID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			constructorEvent = eventtest.OperatorInjectedWithRoutingSource(uuid.NewString(), anchorType, "operator", "", payload, 0, runID, nil,
+				events.EventEnvelope{}, eventtest.RootRoutingSource(runID), at)
+			constructorEvent, err = eventtest.AdmitPayload(constructorEvent, ".", string(anchorType))
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
-		command := selectedExecutionSourceFlowCommand(t, writeCtx, loaded, input, identity, constructorInput...)
+		command := selectedExecutionSourceFlowCommand(t, writeCtx, loaded, constructorEvent, identity, constructorInput...)
 		result, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(writeCtx, command)
 		if err != nil || !result.Acknowledged || !result.Created {
 			t.Fatalf("component source construction: result=%#v err=%v", result, err)

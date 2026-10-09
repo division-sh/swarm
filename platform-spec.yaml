@@ -20367,15 +20367,18 @@ run_model:
         frozen business data and fork admission/refusal policy remain unchanged; final-row equality alone does not
         prove this transaction/history contract.
       route_projection: >-
-        Global routing_rules are current unversioned state and are never queried as historical authority. The fixed
-        projection emits not_applicable when no route-relevant source fact exists and unknown_unversioned otherwise.
-        Generic materialization and activation preserve flow_route_history_unproven. Selected execution may discharge
-        unknown_unversioned only with matching selected binding, frontier, static/dynamic topology, and recipient proof;
-        activation revalidates the persisted selected route recovery and never queries current routing_rules.
+        Historical instance existence is the admitted fixed-revision construction/header family, including its immutable
+        parent and key facts; admitted source declarations supply topology. Current route membership is not a historical
+        family, readiness predicate or permission. The planner emits no unversioned route-history projection or blocker.
+        Generic planning consumes its existing fixed state and delivery admission. Selected execution requires matching
+        selected binding, frontier, static/dynamic topology and recipient proof; every selected materialization persists
+        that exact fork-local recovery, and exact replay and activation revalidate it. Missing or conflicting recovery
+        fails closed. Historical headers intentionally lack fresh native construction receipts and attachment readiness;
+        their admitted historical provenance never substitutes for fork-local execution authority.
       completed_arrival_join_history_scope: >-
         Completed ordinary arrival-join history does not establish generic fork execution readiness merely because
         its timers are cancelled and its outcomes are complete. When the fixed-revision planner reports
-        timer_history_unproven and flow_route_history_unproven, materialization preserves both blockers and refuses
+        timer_history_unproven, materialization preserves that blocker and refuses
         without source or child mutation. Future admission of this inert history is tracked under #642, separately
         from selected pending timer, join, and fan-out execution. This scope does not narrow already-supported
         ordinary fan-out child/fork-of-fork completion or permit deriving authority from status or root-shaped path text.
@@ -20384,7 +20387,8 @@ run_model:
         connection ancestor. When selected route-history evaluation cannot prove that ancestor's dynamic receiver,
         the topology summary must retain its dynamic-topology blocker even when every frontier instance has local
         recipient evidence; that evidence cannot promote historical topology to supported.
-        Materialization preserves flow_route_history_unproven and refuses without source or child mutation, including
+        Materialization requires complete selected static/dynamic topology proof and refuses with
+        selected_contract_route_recovery_unproven without source or child mutation, including
         repeated requests. Future admission of this completed history is tracked under #642; source delivery targets
         are not copied as authority and completed events are not dropped merely to obtain admission. This limitation
         does not declare every dynamic fork unsupported, waive independently admitted local receiver-readiness proof,
@@ -20521,10 +20525,9 @@ run_model:
       fork-local pre-existing conversation rows, post-revision source conversation facts outside the source-advanced
       conversation-history owner, non-agent replay, timers, routes, retry/idempotency, follow-up policy, restart recovery,
       and operator surfaces remain fail-closed or split siblings unless separately approved.'
-    selected_contract_timer_route_policy: 'Mutating selected-contract fixed-event execution consumes a typed route-history
-      projection rather than current routing_rules. not_applicable adds no route blocker; unknown_unversioned remains
-      flow_route_history_unproven for generic execution and may be discharged for selected execution only by matching
-      selected binding, frontier, static/dynamic topology, recipient, and persisted route-recovery proof. Active source
+    selected_contract_timer_route_policy: 'Mutating selected-contract fixed-event execution consumes admitted fixed
+      construction and source declarations rather than current route membership. Matching selected binding, frontier,
+      static/dynamic topology, recipient and persisted route-recovery proof remain required. Active source
       timers remain fail-closed under #642. runtime.run_fork.selected_contract_deferred_work_admission is the one
       selected-fork capability owner for work that would outlive the ephemeral selected-fork container. It classifies
       relevant timer history in the selected revision, selected semantic workflow-timer declarations, selected semantic
@@ -20540,7 +20543,7 @@ run_model:
       executor has no scheduler, while boot/global schedules are not executed by the ephemeral container. Timer facts
       committed after the selected revision remain fail-closed. The
       runtime.run_fork.selected_contract_execution owner must continue to
-      consume unresolved flow_route_history blockers and MUST NOT copy or query current routing_rules as historical truth, persist fork-local route rows, derive
+      consume actual fixed-construction and selected topology/recovery guards and MUST NOT copy or query current route membership as historical truth, persist fork-local route rows, derive
       selected-source recipients for execution outside recipient planning, or use source route outcomes as selected-fork
       suppressors.'
     selected_contract_session_turn_audit_lineage_policy: 'Mutating selected-contract fixed-event execution may consume
@@ -20591,14 +20594,12 @@ run_model:
       fork execution truth.'
     selected_contract_route_admission: 'Selected-contract route/subscription reconstruction admission is a
       non-mutating prerequisite owned by runtime.run_fork.selected_contract_route_admission. It consumes
-      runtime.run_fork.contract_frontier_admission for selected frontier work, consumes the fixed planner route state,
+      runtime.run_fork.contract_frontier_admission for selected frontier work, consumes admitted fixed construction,
       consumes the selected RunForkPoint source_route directly for historical event lookup and dynamic instance evidence
       when the fork-point event has no delivery row, and consumes selected-source static route derivation through
       internal/runtime/bus.DeriveRouteTable. Completed PendingWork for the same event remains deterministic duplicate
       evidence and frontier PendingWork remains frontier-owned; neither is required to recover the fork-point source.
-      A planner
-      unknown_unversioned state is carried as an unresolved requirement with SourceRouteFactsPresent=true; admission
-      does not claim source route history and does not clear flow_route_history_unproven. It MUST NOT read or copy
+      Admission carries no source-membership flag or synthetic unversioned-history requirement. It MUST NOT read or copy
       current/source routing_rules or flow_instance_routes as historical evidence,
       persist fork-local route rows, derive executable recipients, create event_deliveries, run handlers, or absorb
       timer reconstruction, session/turn reconstruction, source-advanced policy, contract-swap ownership, or UI/API
@@ -20609,8 +20610,8 @@ run_model:
       route topology as fork-local truth only through internal/runtime/bus.DeriveRouteTable and the durable selected
       contract/frontier binding, and classifies dynamic flow-instance topology as fork-local-proven or fail-closed with
       a named blocker. Receiver-carrier selection consumes the route table''s private typed carrier projection; display
-      RouteSource text cannot create or suppress selected recipient authority. It is the only selected owner allowed to discharge unknown_unversioned, and only when selected
-      owner identity, binding, frontier IDs/fingerprint, and complete static/dynamic topology all match. It MUST NOT
+      RouteSource text cannot create or suppress selected recipient authority. Selected owner identity, binding,
+      frontier IDs/fingerprint and complete static/dynamic topology must all match. It MUST NOT
       read or copy source/current routing_rules or materialized flow-instance route rows, persist
       fork-local route rows, derive executable recipients, invoke the delivery planner for fork work, create
       event_deliveries, run handlers, or absorb timer/session/turn/source-advanced/contract-swap/UI ownership.'
@@ -20629,9 +20630,9 @@ run_model:
       topology proof or fail-closed state, recipient-plan evidence, selected binding identity, and evidence
       fingerprints under the fork run_id. Topology and recipient-planning fingerprints MUST be computed and verified
       over canonical JSON semantics rather than raw JSONB storage bytes. Runtime recovery MUST read this owner after restart for selected-contract
-      fork route truth, revalidate the selected frontier/binding/topology fingerprint before clearing the planner''s
-      unknown_unversioned requirement, and MUST NOT read source/current routing_rules, source flow_instance_routes, current
-      ListFlowInstanceRoutes output, or source event_deliveries as executable fork route or recipient truth. Recipient
+      fork route truth and revalidate the selected frontier/binding/topology fingerprint. Exact selected replay and
+      activation require matching recovery even when the source has no concrete child. This owner MUST NOT read
+      source/current route membership or source event_deliveries as executable fork route or recipient truth. Recipient
       planning and EventBus.Publish recipient-plan guards remain authoritative before publish. This owner MUST NOT write
       event_deliveries, run handlers, replay timers, reconstruct sessions/turns/audits, replay non-agent work,
       implement contract-swap boot/resume, or own UI/API behavior.'
@@ -20968,24 +20969,23 @@ run_model:
         executable event, delivery, workflow, join, generic schedule, timer, dynamic readiness, agent, materialized route,
         lineage, or runtime-execution state. Agent
         scheduling remains fail-closed without a selected scheduler; boot/global schedules are not executed by this
-        container. Route history is projected as
-        not_applicable or unknown_unversioned without querying current routing_rules. Generic execution preserves
-        flow_route_history_unproven. Selected execution may clear unknown_unversioned only through matching selected
-        frontier/binding/static-dynamic topology/recipient proof and persisted route recovery, before materialization,
-        publish, or activation. Feature-preserving timer and dynamic-flow readiness ownership remains gated by #642.'
+        container. Historical instance evidence comes from the admitted fixed construction/header family, not a
+        current membership mirror or synthetic route-history state. Selected execution requires matching selected
+        frontier/binding/static-dynamic topology/recipient proof and persisted fork-local recovery before exact replay,
+        publish or activation. Feature-preserving timer and dynamic-flow readiness ownership remains gated by #642.'
       3e_selected_contract_route_admission: 'For selected-contract mutating fork execution, selected route/subscription
         admission is evidence-only and non-mutating. It distinguishes frontier recipient admission from historical
-        route reconstruction, carries unknown_unversioned as an unresolved requirement, and uses the selected contract
-        route table only as selected-source evidence. Only the matching selected topology owner may discharge that
-        requirement. Source/current routing_rules, source flow-instance routes, and source recipients are neither read
+        route reconstruction, consumes admitted fixed construction, and uses the selected contract route table only
+        as selected-source evidence. No source-membership flag or unversioned-history requirement is carried.
+        Source/current routing_rules, source flow-instance routes, and source recipients are neither read
         as historical authority nor copied into the fork.'
       3f_selected_contract_route_topology: 'For selected-contract mutating fork execution, fork-local route/topology
         truth is a separate owner beyond route admission. The selected execution model and admission consume
         runtime.run_fork.selected_contract_route_topology rather than treating route admission as final truth. Static
         selected-source topology is classified from selected-source route derivation and selected binding/frontier
         evidence only. Dynamic flow-instance topology requires explicit fork-local topology proof and otherwise
-        remains fail-closed. A matching complete topology is the only authority that may discharge the planner''s
-        unknown_unversioned route requirement for selected execution. This owner is still non-mutating: it does not persist route rows, derive executable
+        remains fail-closed. Complete topology must match the selected owner, binding and frontier evidence.
+        This owner is still non-mutating: it does not persist route rows, derive executable
         recipients, write deliveries, or run handlers.'
       3f1_selected_contract_dynamic_route_topology: 'For selected-contract mutating fork execution, dynamic
         flow-instance route topology is proven by runtime.run_fork.selected_contract_dynamic_route_topology as a
@@ -35957,6 +35957,10 @@ api_specification:
         '
       root_input_rejection_contract:
         canonical_owner: internal/runtime/runstart.RootInputSet, DeriveRootInputSet, ValidateInputEvents, and RootInputValidationError
+        routability_authority: >-
+          Root-local consumers are admitted compiled pubsub declarations; explicit child receivers come from compiled
+          connection topology. Declaration admission does not require a concrete receiver or consult mutable route
+          membership. A keyed selected root can therefore admit its declared input before its receiver is constructed.
         reasons:
           not_declared_root_input: The requested run-start event is absent from the root flow pins.inputs declaration.
           declared_root_input_not_routable: The requested event is declared as a root input but has no derived runtime route.

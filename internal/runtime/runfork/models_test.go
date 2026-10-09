@@ -13,6 +13,34 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 )
 
+func TestRunForkHistoryHasNoUnversionedRouteMembershipProjection(t *testing.T) {
+	for _, tc := range []struct {
+		value any
+		field string
+	}{
+		{RunForkPlan{}, "RouteHistory"},
+		{RunForkSelectedContractRouteAdmission{}, "SourceRouteFactsPresent"},
+		{RunForkSelectedContractRouteTopology{}, "SourceRouteFactsPresent"},
+	} {
+		t.Run(reflect.TypeOf(tc.value).Name()+"/"+tc.field, func(t *testing.T) {
+			if _, exists := reflect.TypeOf(tc.value).FieldByName(tc.field); exists {
+				t.Fatalf("%T restored non-authoritative field %s", tc.value, tc.field)
+			}
+		})
+	}
+	raw, err := json.Marshal(RunForkPlan{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := fields["route_history"]; exists {
+		t.Fatal("fork plan restored unversioned membership on the wire")
+	}
+}
+
 func TestRunForkContractFrontierRecipientUsesPrivateTypedWireCodec(t *testing.T) {
 	want := frontierModelEvidence(t, frontierModelNodeInput(t), "edge", "pin")
 	raw, err := json.Marshal(want)
