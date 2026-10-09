@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 )
 
 func requireForkOperationMaterializationRequest(operation *runfork.ForkOperationRequest, sourceRunID string, point runfork.RunForkPoint, targetBundleHash string, selection runfork.RunForkContractSelection, overrides []durabledata.ExplicitPin) error {
@@ -417,14 +418,16 @@ func (s *RunForkPostgresOwner) FailMaterializedSelectedContractExecutionFork(ctx
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
+	var changes privaterunlifecycle.ChannelCardChanges
 	return failMaterializedForkOperation(ctx, forkRunID, failure, failedForkOperationPort{
 		postgres: true,
 		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) error {
 			result := mutationprotocol.RunPostgresWithOptions(ctx, s.backend, &sql.TxOptions{Isolation: sql.LevelSerializable}, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates,
 				func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+					changes = privaterunlifecycle.ChannelCardChanges{}
 					return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error { return operation(txctx, tx, attempt) })
 				})
-			return result.Err()
+			return errors.Join(result.Err(), s.publishChannelChanges(result.Acknowledged(), changes.Changed))
 		},
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {
 			return s.RunLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, runID, true)
@@ -434,7 +437,7 @@ func (s *RunForkPostgresOwner) FailMaterializedSelectedContractExecutionFork(ctx
 			return err
 		},
 		markTerminal: func(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimerunlifecycle.TerminalRequest) error {
-			_, _, err := s.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, attempt, req)
+			_, _, err := s.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, attempt, req, &changes)
 			return err
 		},
 	})
@@ -447,14 +450,16 @@ func (s *RunForkSQLiteOwner) FailMaterializedSelectedContractExecutionFork(ctx c
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
+	var changes privaterunlifecycle.ChannelCardChanges
 	return failMaterializedForkOperation(ctx, forkRunID, failure, failedForkOperationPort{
 		postgres: false,
 		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) error {
 			result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite selected fork operation failure", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates,
 				func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+					changes = privaterunlifecycle.ChannelCardChanges{}
 					return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error { return operation(txctx, tx, attempt) })
 				})
-			return result.Err()
+			return errors.Join(result.Err(), s.publishChannelChanges(result.Acknowledged(), changes.Changed))
 		},
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {
 			return s.RunLifecycleSQLiteOwner.LoadSnapshotTx(ctx, tx, runID)
@@ -464,7 +469,7 @@ func (s *RunForkSQLiteOwner) FailMaterializedSelectedContractExecutionFork(ctx c
 			return err
 		},
 		markTerminal: func(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimerunlifecycle.TerminalRequest) error {
-			_, _, err := s.RunLifecycleSQLiteOwner.MarkTerminalTx(ctx, attempt, req)
+			_, _, err := s.RunLifecycleSQLiteOwner.MarkTerminalTx(ctx, attempt, req, &changes)
 			return err
 		},
 	})

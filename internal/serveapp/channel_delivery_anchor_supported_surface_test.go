@@ -13,9 +13,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -78,7 +80,11 @@ func (r channelAnchorLLMRuntime) ContinueManagedSession(ctx context.Context, ses
 func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
-			h, db, bundleHash := startChannelAnchorJourney(t, backend, "anchor-token", false)
+			observation := &channelReconcileObservation{}
+			h, db, bundleHash := startChannelAnchorJourneyWithDraftTTL(t, backend, "anchor-token", false, 0, func(opts *cliapp.ServeOptions) {
+				observation.configure(opts)
+				opts.TestChannelReconcileCadence = render.ReconcileCadence{Ordinary: time.Hour, Native: time.Hour}
+			})
 			for _, kind := range []decisioncard.AnchorKind{decisioncard.AnchorKindStageGate, decisioncard.AnchorKindHumanTask, decisioncard.AnchorKindProposedEffect} {
 				t.Run(string(kind), func(t *testing.T) {
 					flowInstance := "reviews"
@@ -114,6 +120,7 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 					}
 					var arrived <-chan struct{}
 					var release func()
+					var dispatchCut render.ReconcileMark
 					if kind == decisioncard.AnchorKindProposedEffect {
 						arrived, release = h.provider.PauseNextDeliveryResponse()
 						t.Cleanup(release)
@@ -150,6 +157,16 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 						if readback.Card.Verdict != "approve" || readback.Effect.DispatchState == "" || readback.Effect.DispatchState == "succeeded" {
 							t.Fatalf("approval inferred completed dispatch while provider response is blocked: %+v", readback)
 						}
+						// This action is running inside the worker's current pass;
+						// post-commit demand must survive until that pass returns.
+						observation.mu.Lock()
+						mark := observation.mark
+						observation.mu.Unlock()
+						var active bool
+						dispatchCut, active = mark()
+						if !active {
+							t.Fatal("activity cut lost its exact channel Process")
+						}
 						release()
 						deadline := time.Now().Add(15 * time.Second)
 						for {
@@ -178,20 +195,8 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 					}
 					waitChannelAnchorTerminalEdit(t, h, messageID)
 					if kind == decisioncard.AnchorKindProposedEffect {
-						deadline := time.Now().Add(15 * time.Second)
-						for {
-							found := false
-							for _, edit := range h.provider.Edits() {
-								found = found || (fmt.Sprint(edit["message_id"]) == fmt.Sprint(messageID) && strings.Contains(fmt.Sprint(edit["text"]), "Dispatch: succeeded"))
-							}
-							if found {
-								break
-							}
-							if time.Now().After(deadline) {
-								t.Fatalf("actual receipt did not reflect completed dispatch: %v", h.provider.Edits())
-							}
-							time.Sleep(20 * time.Millisecond)
-						}
+						waitChannelAnchorDispatchEdit(t, h, messageID, "succeeded")
+						observation.oneAfter(t, dispatchCut, render.ReconcileOrdinary)
 					}
 					post(838000+messageID, "double-tap-"+cardID)
 					waitChannelRejectedCallback(t, db, token)
@@ -205,17 +210,98 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 	}
 }
 
-func startChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool) (*channelOnboardingE2EHarness, *sql.DB, string) {
-	t.Helper()
-	return startChannelAnchorJourneyWithDraftTTL(t, backend, token, withSummary, 0)
+func TestChannelDeliveryReconciliationActivityDispatchPublicJourney(t *testing.T) {
+	for _, backend := range servedparity.RequiredBackends {
+		t.Run(string(backend), func(t *testing.T) {
+			observation := &channelReconcileObservation{}
+			h, db, hash := startChannelAnchorJourneyWithDraftTTL(t, backend, "activity-wake-token", false, 0, func(opts *cliapp.ServeOptions) {
+				observation.configure(opts)
+				opts.TestChannelReconcileCadence = render.ReconcileCadence{Ordinary: time.Hour, Native: time.Hour}
+			})
+			seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+				"event_name": "work.requested", "bundle_hash": hash,
+				"payload": map[string]any{"seed": true}, "idempotency_key": "isolated-activity-wake",
+			})
+			requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
+				"event_name": "effect.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
+				"payload": map[string]any{"seed": true}, "idempotency_key": "isolated-proposal-wake",
+			})
+			cardID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindProposedEffect, "reviews")
+			messageID := waitChannelAnchorReceipt(t, db, cardID)
+			var item struct {
+				Card struct {
+					CardContentHash string `json:"card_content_hash"`
+				} `json:"decision_card"`
+			}
+			requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": cardID}, &item)
+			arrived, release := h.provider.PauseDeliveryResponseMatching(func(message map[string]any) bool {
+				return message["text"] == "review" && fmt.Sprint(message["chat_id"]) == "42"
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() {
+				response, status, err := mailboxTransportRequest(ctx, h.rpcEndpoint(), "http", apiv1.DefaultLoopbackAPIToken, "mailbox.decide", map[string]any{
+					"card_id": cardID, "verdict": "approve", "observed_content_hash": item.Card.CardContentHash,
+					"idempotency_key": "isolated-activity-decision",
+				})
+				if err == nil && (status != 200 || response.Error != nil) {
+					err = fmt.Errorf("public decision status=%d error=%+v", status, response.Error)
+				}
+				done <- err
+			}()
+			defer cancel()
+			defer func() {
+				release()
+				if err := <-done; err != nil {
+					t.Error(err)
+				}
+			}()
+			select {
+			case <-arrived:
+			case <-time.After(15 * time.Second):
+				t.Fatal("approved activity did not reach the exact held provider call")
+			}
+			waitChannelAnchorDispatchEdit(t, h, messageID, "started")
+			// Earlier decision/start hints have all been consumed. With no repair
+			// tick, only the subsequent completion can release this card edit.
+			_, cut := observation.completedCurrentOrdinary(t)
+			release()
+			waitChannelAnchorDispatchEdit(t, h, messageID, "succeeded")
+			observation.oneAfter(t, cut, render.ReconcileOrdinary)
+		})
+	}
 }
 
-func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration) (*channelOnboardingE2EHarness, *sql.DB, string) {
+func waitChannelAnchorDispatchEdit(t *testing.T, h *channelOnboardingE2EHarness, messageID int, dispatch string) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		for _, edit := range h.provider.Edits() {
+			if fmt.Sprint(edit["message_id"]) == fmt.Sprint(messageID) && strings.Contains(fmt.Sprint(edit["text"]), "Dispatch: "+dispatch) {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("actual receipt did not reflect dispatch %s: %v", dispatch, h.provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func startChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool) (*channelOnboardingE2EHarness, *sql.DB, string) {
+	t.Helper()
+	return startChannelAnchorJourneyWithDraftTTL(t, backend, token, withSummary, 0, nil)
+}
+
+func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration, configure func(*cliapp.ServeOptions)) (*channelOnboardingE2EHarness, *sql.DB, string) {
 	t.Helper()
 	h := newChannelOnboardingE2EHarness(t, backend, true)
 	h.opts.AbandonActiveRuns = false
 	writeChannelAnchorJourneySource(t, h.opts.SourceRoot, withSummary)
 	h.opts.TestLLMRuntime = channelAnchorLLMRuntime{}
+	if configure != nil {
+		configure(&h.opts)
+	}
 	if draftTTL > 0 {
 		body, err := os.ReadFile(h.opts.ConfigPath)
 		if err != nil {

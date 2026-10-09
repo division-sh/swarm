@@ -92,10 +92,11 @@ func (s *RunLifecyclePostgresOwner) applyActiveRunQuiescence(ctx context.Context
 	}
 	emptySelection := errors.New("active run quiescence selected no runs")
 	var emptyResult runtimerunquiescence.Result
+	var changes ChannelCardChanges
 	result := mutationprotocol.RunPostgres(ctx, s.backend, evidence, mutationprotocol.Ordinary, nil, nil, func(sqlCtx context.Context, attempt *mutationprotocol.Attempt) (runtimerunquiescence.Result, error) {
 		var value runtimerunquiescence.Result
 		err := attempt.WithSQL(sqlCtx, func(sqlCtx context.Context, tx *sql.Tx) (err error) {
-			value, err = s.applyActiveRunQuiescenceTx(sqlCtx, tx, attempt, req, reset, out, runIDs, now)
+			value, err = s.applyActiveRunQuiescenceTx(sqlCtx, tx, attempt, req, reset, out, runIDs, now, &changes)
 			return err
 		})
 		if err == nil && !req.DryRun && len(value.Runs) == 0 && reset == nil {
@@ -112,10 +113,10 @@ func (s *RunLifecyclePostgresOwner) applyActiveRunQuiescence(ctx context.Context
 		return runtimerunquiescence.Result{}, result.Err()
 	}
 	value.Acknowledged = true
-	return value, result.Err()
+	return value, errors.Join(result.Err(), s.publishChannelChanges(committed, changes))
 }
 
-func (s *RunLifecyclePostgresOwner) applyActiveRunQuiescenceTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, req runtimerunquiescence.Request, reset *runtimedestructivereset.QuiescenceRequest, out runtimerunquiescence.Result, runIDs []string, now time.Time) (runtimerunquiescence.Result, error) {
+func (s *RunLifecyclePostgresOwner) applyActiveRunQuiescenceTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, req runtimerunquiescence.Request, reset *runtimedestructivereset.QuiescenceRequest, out runtimerunquiescence.Result, runIDs []string, now time.Time, changes *ChannelCardChanges) (runtimerunquiescence.Result, error) {
 	var runs []runtimerunquiescence.QuiescedRun
 	var err error
 	if req.AllActiveRuns {
@@ -195,7 +196,7 @@ func (s *RunLifecyclePostgresOwner) applyActiveRunQuiescenceTx(ctx context.Conte
 		if !activeRunQuiescenceRunStatusActive(run.Status) {
 			continue
 		}
-		if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+		if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx, attempt: attempt, channelCardChanges: changes}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
 			RunID: run.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: now,
 		}); err != nil {
 			return runtimerunquiescence.Result{}, fmt.Errorf("mark active run quiescence run terminal: %w", err)
@@ -259,6 +260,7 @@ func (s *RunLifecycleSQLiteOwner) applyActiveRunQuiescence(ctx context.Context, 
 	}
 	emptySelection := errors.New("active run quiescence selected no runs")
 	var emptyResult runtimerunquiescence.Result
+	var changes ChannelCardChanges
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite active run quiescence", evidence, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimerunquiescence.Result, error) {
 		attemptOut := out
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -341,7 +343,7 @@ func (s *RunLifecycleSQLiteOwner) applyActiveRunQuiescence(ctx context.Context, 
 				if !activeRunQuiescenceRunStatusActive(run.Status) {
 					continue
 				}
-				if _, _, err := (sqliteRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).MarkTerminal(txctx, runtimerunlifecycle.TerminalRequest{
+				if _, _, err := (sqliteRunLifecycleMutation{store: s, tx: tx, attempt: attempt, channelCardChanges: &changes}).MarkTerminal(txctx, runtimerunlifecycle.TerminalRequest{
 					RunID: run.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: now,
 				}); err != nil {
 					return err
@@ -369,7 +371,7 @@ func (s *RunLifecycleSQLiteOwner) applyActiveRunQuiescence(ctx context.Context, 
 		return runtimerunquiescence.Result{}, result.Err()
 	}
 	value.Acknowledged = true
-	return value, result.Err()
+	return value, errors.Join(result.Err(), s.publishChannelChanges(committed, changes))
 }
 
 func normalizeQuiescenceRunIDs(runIDs []string) []string {

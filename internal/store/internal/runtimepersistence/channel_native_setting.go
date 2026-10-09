@@ -3,8 +3,10 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
@@ -17,12 +19,13 @@ func (s *PostgresStore) AttachNativeInboxSetting(ctx context.Context, admission 
 		return channelnative.Setting{}, err
 	}
 	var setting channelnative.Setting
-	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		setting, err = channeldelivery.AttachNativeInboxSettingTx(txctx, tx, admission, true)
+		setting, changed, err = channeldelivery.AttachNativeInboxSettingTx(txctx, tx, admission, true)
 		return err
 	})
-	return setting, err
+	return setting, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary|render.ReconcileNative))
 }
 
 func (s *SQLiteRuntimeStore) AttachNativeInboxSetting(ctx context.Context, admission channelnative.Admission) (channelnative.Setting, error) {
@@ -33,12 +36,13 @@ func (s *SQLiteRuntimeStore) AttachNativeInboxSetting(ctx context.Context, admis
 		return channelnative.Setting{}, err
 	}
 	var setting channelnative.Setting
-	err := s.backend.RunTransaction(ctx, "attach native inbox setting", func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "attach native inbox setting", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		setting, err = channeldelivery.AttachNativeInboxSettingTx(txctx, tx, admission, false)
+		setting, changed, err = channeldelivery.AttachNativeInboxSettingTx(txctx, tx, admission, false)
 		return err
 	})
-	return setting, err
+	return setting, errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary|render.ReconcileNative))
 }
 
 func (s *PostgresStore) RetireStaleNativeInboxConsumers(ctx context.Context) error {
@@ -48,9 +52,13 @@ func (s *PostgresStore) RetireStaleNativeInboxConsumers(ctx context.Context) err
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.RetireStaleNativeInboxConsumersTx(txctx, tx, true)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.RetireStaleNativeInboxConsumersTx(txctx, tx, true)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary|render.ReconcileNative))
 }
 
 func (s *SQLiteRuntimeStore) RetireStaleNativeInboxConsumers(ctx context.Context) error {
@@ -60,9 +68,13 @@ func (s *SQLiteRuntimeStore) RetireStaleNativeInboxConsumers(ctx context.Context
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, "retire native inbox setting consumers", func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.RetireStaleNativeInboxConsumersTx(txctx, tx, false)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "retire native inbox setting consumers", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.RetireStaleNativeInboxConsumersTx(txctx, tx, false)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary|render.ReconcileNative))
 }
 
 func (s *PostgresStore) MarkNativeInboxSettingUnavailable(ctx context.Context, settingID string, generation int64) error {
@@ -72,9 +84,10 @@ func (s *PostgresStore) MarkNativeInboxSettingUnavailable(ctx context.Context, s
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		return channeldelivery.MarkNativeInboxSettingUnavailableTx(txctx, tx, settingID, generation, true)
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) MarkNativeInboxSettingUnavailable(ctx context.Context, settingID string, generation int64) error {
@@ -84,9 +97,10 @@ func (s *SQLiteRuntimeStore) MarkNativeInboxSettingUnavailable(ctx context.Conte
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, "mark native inbox setting unavailable", func(txctx context.Context, tx *sql.Tx) error {
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "mark native inbox setting unavailable", func(txctx context.Context, tx *sql.Tx) error {
 		return channeldelivery.MarkNativeInboxSettingUnavailableTx(txctx, tx, settingID, generation, false)
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) RecordNativeInboxQualification(ctx context.Context, req channelnative.QualificationRequest) error {
@@ -96,9 +110,13 @@ func (s *PostgresStore) RecordNativeInboxQualification(ctx context.Context, req 
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.RecordNativeInboxQualificationTx(txctx, tx, req, true)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.RecordNativeInboxQualificationTx(txctx, tx, req, true)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *SQLiteRuntimeStore) RecordNativeInboxQualification(ctx context.Context, req channelnative.QualificationRequest) error {
@@ -108,9 +126,13 @@ func (s *SQLiteRuntimeStore) RecordNativeInboxQualification(ctx context.Context,
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, "record native inbox qualification", func(txctx context.Context, tx *sql.Tx) error {
-		return channeldelivery.RecordNativeInboxQualificationTx(txctx, tx, req, false)
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "record native inbox qualification", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = channeldelivery.RecordNativeInboxQualificationTx(txctx, tx, req, false)
+		return err
 	})
+	return errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
 }
 
 func (s *PostgresStore) ReadNativeInboxQualification(ctx context.Context, activationID string) (channelnative.Qualification, error) {

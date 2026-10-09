@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -48,8 +49,12 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 						child, event, sourceRecord := seedActivityTimestampReuse(t, fixture, backend.name == "postgres", approved, status)
 						store := fixture.store.(selectedActivityProjectionStore)
 						journal := fixture.store.(activityTimestampJournal)
+						hints := observeChannelHints(t, fixture.store.(interface {
+							SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
+						}))
 						before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID()))
+						hints.expect(t, 0)
 						wantErr := ""
 						if status == "started" {
 							wantErr = "recorded evidence is not terminal"
@@ -82,6 +87,10 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 						copied, found, err := journal.LoadActivityAttempt(ctx, activityidentity.RequestEventID(fact))
 						if err != nil || !found {
 							t.Fatalf("read copied terminal attempt: found=%v err=%v", found, err)
+						}
+						cards, cursor, err := fixture.store.(decisioncard.Store).ListDecisionCards(ctx, decisioncard.ListOptions{RunID: child.ForkRunID, Limit: 10})
+						if err != nil || cursor != "" || len(cards) != 0 {
+							t.Fatalf("recorded copy unexpectedly has a live fork-local card: %+v cursor=%q error=%v", cards, cursor, err)
 						}
 						if copied.RunID != child.ForkRunID || copied.Status != status || copied.ExecutionMode != sourceRecord.ExecutionMode || copied.InputHash != sourceRecord.InputHash || copied.ResultEventType != sourceRecord.ResultEventType || copied.ResultEventID != activityidentity.ResultEventID(fact, sourceRecord.ResultEventType) || copied.ResultEventID == sourceRecord.ResultEventID {
 							t.Fatalf("copied attempt lost exact identity/terminal evidence: %#v", copied)

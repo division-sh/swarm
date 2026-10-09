@@ -216,15 +216,15 @@ func materializeRunForkGateAuthoritiesForTest(ctx context.Context, selected runF
 		bindings := []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}
 		switch store := selected.(type) {
 		case *PostgresStore:
-			if err := store.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, target, decisionProjection, bindings, now); err != nil {
+			if err := store.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, target, decisionProjection, bindings, now, nil); err != nil {
 				return err
 			}
-			return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, effectProjection, point, correspondence, now)
+			return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, effectProjection, point, correspondence, now, nil)
 		case *SQLiteRuntimeStore:
-			if err := store.runForkSQLiteOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, target, decisionProjection, bindings, now); err != nil {
+			if err := store.runForkSQLiteOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, target, decisionProjection, bindings, now, nil); err != nil {
 				return err
 			}
-			return store.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, effectProjection, point, correspondence, now)
+			return store.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, effectProjection, point, correspondence, now, nil)
 		default:
 			return fmt.Errorf("unsupported selected-store gate test owner %T", selected)
 		}
@@ -562,7 +562,7 @@ func TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority(t *test
 		t.Fatal(err)
 	}
 	if err := runSelectedFixtureMutation(ctx, cardStore, "materialize decision cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		return cardStore.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, runtimecontracts.BundleIdentity{BundleHash: sourceActivation.BundleHash, WorkflowVersion: "1"}, projection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(time.Minute))
+		return cardStore.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, runtimecontracts.BundleIdentity{BundleHash: sourceActivation.BundleHash, WorkflowVersion: "1"}, projection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(time.Minute), nil)
 	}); err != nil {
 		t.Fatalf("materialize fork cards: %v", err)
 	}
@@ -643,7 +643,7 @@ func TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields(t *test
 		t.Fatal(err)
 	}
 	if err := runSelectedFixtureMutation(ctx, cardStore, "materialize committed decision cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		return cardStore.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, runtimecontracts.BundleIdentity{BundleHash: sourceActivation.BundleHash, WorkflowVersion: "1"}, projection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(2*time.Minute))
+		return cardStore.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, runtimecontracts.BundleIdentity{BundleHash: sourceActivation.BundleHash, WorkflowVersion: "1"}, projection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(2*time.Minute), nil)
 	}); err != nil {
 		t.Fatalf("materialize committed fork card: %v", err)
 	}
@@ -727,9 +727,9 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 				}
 				if err := runSelectedFixtureMutation(ctx, opened.store, "materialize proposed effect cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 					if store, ok := opened.store.(*PostgresStore); ok {
-						return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, projection, point, correspondence, now.Add(2*time.Minute))
+						return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, projection, point, correspondence, now.Add(2*time.Minute), nil)
 					}
-					return opened.store.(*SQLiteRuntimeStore).runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, projection, point, correspondence, now.Add(2*time.Minute))
+					return opened.store.(*SQLiteRuntimeStore).runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, projection, point, correspondence, now.Add(2*time.Minute), nil)
 				}); err != nil {
 					t.Fatal(err)
 				}
@@ -753,6 +753,13 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 				}
 				if forkContinuation.Input.Equal(sourceContinuation.Input) == false || forkContinuation.EffectContentHash == sourceContinuation.EffectContentHash {
 					t.Fatalf("fork effect content = source:%#v fork:%#v", sourceContinuation, forkContinuation)
+				}
+				if attempt, found, err := opened.store.(activityTimestampJournal).LoadActivityAttempt(ctx, forkContinuation.RequestEventID); err != nil || found {
+					t.Fatalf("fresh pending fork card borrowed historical dispatch: %+v found=%t error=%v", attempt, found, err)
+				}
+				readback, err := cards.ProposedEffectReadback(ctx, forkCard.CardID)
+				if err != nil || readback.DispatchState != "held" || readback.RequestEventID != forkContinuation.RequestEventID {
+					t.Fatalf("fresh fork-card dispatch depends on copied evidence: %+v error=%v", readback, err)
 				}
 				forkedFrom, ok := forkCard.Provenance.Lookup("forked_from_card_id")
 				if value, stringOK := forkedFrom.String(); !ok || !stringOK || value != sourceCard.CardID {

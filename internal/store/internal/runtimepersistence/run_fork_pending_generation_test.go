@@ -160,9 +160,9 @@ func TestForkPendingGenerationCorrespondenceBothStores(t *testing.T) {
 						return runSelectedFixtureMutation(ctx, fixture.store, "test exact pending generation", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 							switch s := fixture.store.(type) {
 							case *PostgresStore:
-								return s.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRun, childRun, runtimecontracts.BundleIdentity{BundleHash: effect.BundleHash, WorkflowVersion: effect.WorkflowVersion}, projection, point, c, now.Add(2*time.Minute))
+								return s.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRun, childRun, runtimecontracts.BundleIdentity{BundleHash: effect.BundleHash, WorkflowVersion: effect.WorkflowVersion}, projection, point, c, now.Add(2*time.Minute), nil)
 							case *SQLiteRuntimeStore:
-								return s.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRun, childRun, runtimecontracts.BundleIdentity{BundleHash: effect.BundleHash, WorkflowVersion: effect.WorkflowVersion}, projection, point, c, now.Add(2*time.Minute))
+								return s.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRun, childRun, runtimecontracts.BundleIdentity{BundleHash: effect.BundleHash, WorkflowVersion: effect.WorkflowVersion}, projection, point, c, now.Add(2*time.Minute), nil)
 							default:
 								return fmt.Errorf("unsupported store %T", fixture.store)
 							}

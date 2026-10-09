@@ -436,6 +436,10 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	} else if scenario == "view_full" {
 		opts.TestLLMRuntime = telegramLongNoticeLLMRuntime{}
 	}
+	observation := &channelReconcileObservation{}
+	if scenario == "delivery_loss_resend" || scenario == "edit_loss_resend" || scenario == "notice_uncertainty_readback" {
+		observation.configure(&opts)
+	}
 	process := startServeRuntimeTestProcess(t, opts)
 	t.Cleanup(func() { _ = process.stop() })
 	process.waitForReadyLine()
@@ -791,14 +795,14 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		if len(admitted.EventNames) == 0 {
 			t.Fatal("lost-response notice source did not enter the business flow")
 		}
-		proveChannelManualResendAfterLostNotice(t, provider, callbackURL, signing)
+		proveChannelManualResendAfterLostNotice(t, provider, callbackURL, signing, observation)
 		return
 	}
 	if scenario == "notice_uncertainty_readback" {
 		if len(admitted.EventNames) == 0 {
 			t.Fatal("uncertain notice source did not enter the business flow")
 		}
-		proveChannelUncertainNoticeReadback(t, provider, backend, observerDSN, endpoint+"/v1/rpc", preconnectionNoticeID, func() {
+		proveChannelUncertainNoticeReadback(t, provider, backend, observerDSN, endpoint+"/v1/rpc", preconnectionNoticeID, observation, func() {
 			if code := process.stop(); code != 0 {
 				t.Fatalf("uncertain notice restart exited %d: %s", code, process.outputString())
 			}
@@ -811,7 +815,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		if len(admitted.EventNames) != 0 {
 			t.Fatalf("lost prompt edit callback escaped into business events: %v", admitted.EventNames)
 		}
-		proveChannelEditLossResendQuotedInput(t, provider, callbackURL, signing)
+		proveChannelEditLossResendQuotedInput(t, provider, callbackURL, signing, observation)
 		return
 	}
 	if scenario == "required_input" {
@@ -1420,7 +1424,7 @@ func proveChannelQuotedTwoDrafts(t *testing.T, provider *telegramapi.Double, cal
 	}
 }
 
-func proveChannelManualResendAfterLostNotice(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+func proveChannelManualResendAfterLostNotice(t *testing.T, provider *telegramapi.Double, callbackURL, signing string, observation *channelReconcileObservation) {
 	t.Helper()
 	deadline := time.Now().Add(25 * time.Second)
 	countNotice := func() int {
@@ -1442,7 +1446,15 @@ func proveChannelManualResendAfterLostNotice(t *testing.T, provider *telegramapi
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	time.Sleep(2200 * time.Millisecond)
+	var original render.Candidate
+	cut := observation.planCut(t, func(plan render.Candidate) bool {
+		if plan.SourceKind != "notice" || plan.State != "uncertain" || plan.RecoveryPending {
+			return false
+		}
+		original = plan
+		return true
+	})
+	observation.twoAfter(t, cut, render.ReconcileOrdinary)
 	if got := countNotice(); got != 1 {
 		t.Fatalf("uncertain notice was resent without consent %d times", got)
 	}
@@ -1465,7 +1477,11 @@ func proveChannelManualResendAfterLostNotice(t *testing.T, provider *telegramapi
 		time.Sleep(20 * time.Millisecond)
 	}
 	postChannelTelegramUpdateStatus(t, callbackURL, signing, update, http.StatusOK)
-	time.Sleep(2200 * time.Millisecond)
+	cut = observation.planCut(t, func(plan render.Candidate) bool {
+		return plan.SourceKind == "notice" && plan.SourceID == original.SourceID && plan.DeliveryID != original.DeliveryID &&
+			plan.State == "sent" && plan.CurrentReceiptID != "" && !plan.RecoveryPending
+	})
+	observation.twoAfter(t, cut, render.ReconcileOrdinary)
 	if got := countNotice(); got != 2 {
 		t.Fatalf("duplicate manual resend created %d notice deliveries, want 2", got)
 	}
@@ -1528,7 +1544,7 @@ func requestChannelRecoveryAction(t *testing.T, provider *telegramapi.Double, ca
 	}
 }
 
-func proveChannelEditLossResendQuotedInput(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+func proveChannelEditLossResendQuotedInput(t *testing.T, provider *telegramapi.Double, callbackURL, signing string, observation *channelReconcileObservation) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	lostPromptText := ""
@@ -1548,7 +1564,10 @@ func proveChannelEditLossResendQuotedInput(t *testing.T, provider *telegramapi.D
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	time.Sleep(2200 * time.Millisecond)
+	cut := observation.planCut(t, func(plan render.Candidate) bool {
+		return plan.SourceKind == "card" && plan.State == "uncertain" && plan.CurrentReceiptID != "" && !plan.RecoveryPending
+	})
+	observation.twoAfter(t, cut, render.ReconcileOrdinary)
 	if got := countPromptEdits(); got != 1 {
 		t.Fatalf("uncertain prompt edit retried without consent %d times", got)
 	}
