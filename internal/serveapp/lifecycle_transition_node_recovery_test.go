@@ -181,10 +181,10 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 				requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, target)
 				waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
 				after := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
-				if len(after) != len(before)+1 || !reflect.DeepEqual(after[:len(before)], before) {
+				if len(after) != 1 || len(before) != 1 || after[0].TriggerEventID == before[0].TriggerEventID {
 					t.Fatal("reexecuted node lost or duplicated prior history")
 				}
-				last := after[len(before)]
+				last := after[0]
 				compiled, ok := last.Evidence.Compiled()
 				if !ok || !reflect.DeepEqual(compiled, expected) || last.TriggerEventID != published.EventID {
 					t.Fatalf("reexecuted node did not preserve exact compiled identity: %#v", last)

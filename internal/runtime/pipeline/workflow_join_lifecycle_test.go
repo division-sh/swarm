@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -809,6 +810,10 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			if err := persistAdmittedJoinTransitionForTest(t, pc, transitionCtx, testWorkflowInstanceRoute(path), entityID, "awaiting", "dispatch.completed"); err != nil {
 				t.Fatal(err)
 			}
+			dispatched, found, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, path))
+			if err != nil || !found || len(dispatched.TransitionHistory) != 1 || dispatched.TransitionHistory[0].From != "dispatching" || dispatched.TransitionHistory[0].To != "awaiting" {
+				t.Fatalf("dispatch transition evidence = %+v, %v", dispatched, err)
+			}
 			assertClass(deliver(pc, "unexpected", "c", "other"), runtimefailures.ClassUnexpectedArrival)
 			if err := deliver(pc, "a-first", "a", "one"); err != nil {
 				t.Fatal(err)
@@ -857,7 +862,7 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			if err != nil || facts["completed"] != 2 {
 				t.Fatalf("persisted join context = %#v err=%v", facts, err)
 			}
-			if instance.CurrentState != "ready" || len(instance.TransitionHistory) != 2 {
+			if instance.CurrentState != "ready" || len(instance.TransitionHistory) != 1 || instance.Revision <= dispatched.Revision || instance.TransitionHistory[0].From != "awaiting" || instance.TransitionHistory[0].To != "ready" {
 				t.Fatalf("final lifecycle = state:%s history:%#v", instance.CurrentState, instance.TransitionHistory)
 			}
 			runner := store.engineMutations.(*recordingRuntimeMutationRunner)
@@ -925,6 +930,9 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			if err != nil || !ok {
 				t.Fatalf("load armed zero join = %v, %v", ok, err)
 			}
+			if len(armed.TransitionHistory) != 1 || armed.TransitionHistory[0].TriggerEventID != dispatch.ID() || armed.TransitionHistory[0].From != "dispatching" || armed.TransitionHistory[0].To != "awaiting" {
+				t.Fatalf("empty dispatch lost exact transition: %+v", armed)
+			}
 			armedCarrier, err := workflowInstanceStateCarrier(armed)
 			if err != nil {
 				t.Fatal(err)
@@ -938,6 +946,10 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			result, err := executeResolvedJoinForTest(t, pc, ctx, fire, workflowTriggerContext{Event: fire, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID)})
 			if err != nil || !result.Handled {
 				t.Fatalf("completion fire = handled:%v err:%v", result.Handled, err)
+			}
+			fired, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, path))
+			if err != nil || !ok || len(fired.TransitionHistory) != 1 || fired.TransitionHistory[0].TriggerEventID != fire.ID() {
+				t.Fatalf("completion lost its exact occurrence: %+v, %v", fired, err)
 			}
 			if _, err := executeResolvedJoinForTest(t, pc, ctx, fire, workflowTriggerContext{Event: fire, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID)}); err != nil {
 				t.Fatalf("duplicate completion fire: %v", err)
@@ -954,8 +966,8 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			if err != nil || !ok || !activation.OutcomeFired || activation.OutcomePending || !activation.TimerCancelled {
 				t.Fatalf("zero activation = %#v, %v, %v", activation, ok, err)
 			}
-			if instance.CurrentState != "ready" || len(instance.TransitionHistory) != 2 {
-				t.Fatalf("zero completion lifecycle = state:%s history:%#v", instance.CurrentState, instance.TransitionHistory)
+			if instance.CurrentState != "ready" || !reflect.DeepEqual(instance.TransitionHistory, fired.TransitionHistory) || instance.TransitionHistory[0].From != "awaiting" || instance.TransitionHistory[0].To != "ready" {
+				t.Fatalf("zero completion lifecycle = state:%s revision:%d armed:%d fire:%s history:%#v", instance.CurrentState, instance.Revision, armed.Revision, fire.ID(), instance.TransitionHistory)
 			}
 			runner.mu.Lock()
 			cancellations := append([]runtimegenericschedule.Activation(nil), runner.committedGenericScheduleCancellations...)

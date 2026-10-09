@@ -44,6 +44,10 @@ func TestA2NonLoopStageReentryOnBothStores(t *testing.T) {
 					if err := persistAdmittedJoinTransitionForTest(t, h.pc, ctx, h.route, h.entityID, next, name); err != nil {
 						t.Fatal(err)
 					}
+					committed := h.instance()
+					if len(committed.TransitionHistory) != 1 || committed.TransitionHistory[0].TriggerEventID != event.ID() || committed.TransitionHistory[0].To != next {
+						t.Fatalf("entry lost the exact transition: %+v", committed)
+					}
 				}
 				transition("dispatching", "manual.abort")
 				if err := h.store.mutate(h.ctx, owner, func(instance *WorkflowInstance) {
@@ -95,7 +99,7 @@ func TestA2NonLoopStageReentryOnBothStores(t *testing.T) {
 					}
 				}
 				final := h.instance()
-				if final.CurrentState != "ready" || len(final.TransitionHistory) != 3 {
+				if final.CurrentState != "ready" || len(final.TransitionHistory) != 1 || final.Revision <= secondInstance.Revision || final.TransitionHistory[0].From != "awaiting" || final.TransitionHistory[0].To != "ready" {
 					t.Fatalf("second entry completion = %q history=%#v", final.CurrentState, final.TransitionHistory)
 				}
 			})

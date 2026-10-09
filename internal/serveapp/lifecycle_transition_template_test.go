@@ -148,6 +148,7 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 		}
 		runID, sourceEvent = seed.RunID, seed.EventID
 		s.entity, s.instance = requireLifecycleTemplateEntity(t, rt, runID, s.flow, "drafting")
+		requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, runID, s.entity), seed.EventID, "waiting", "drafting")
 		requireLifecycleTemplateInstance(t, rt, runID, s.instance, s.flow)
 		var keyed operatorread.OperatorEntityFull
 		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": s.entity}, &keyed)
@@ -159,14 +160,24 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 			if loop.Attempt != attempt {
 				t.Fatalf("%s loop attempt=%d want=%d", side, loop.Attempt, attempt)
 			}
-			publish("admit", fmt.Sprintf("admit-%d", attempt), map[string]any{"revision_id": loop.RevisionID})
+			admit := publish("admit", fmt.Sprintf("admit-%d", attempt), map[string]any{"revision_id": loop.RevisionID})
 			requireLifecycleTemplateEntity(t, rt, runID, s.flow, "review")
-			publish("repeat", fmt.Sprintf("repeat-%d", attempt), map[string]any{"revision_id": loop.RevisionID})
+			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, runID, s.entity), admit.EventID, "drafting", "review")
+			repeat := publish("repeat", fmt.Sprintf("repeat-%d", attempt), map[string]any{"revision_id": loop.RevisionID})
 			state := "drafting"
 			if attempt == 2 {
 				state = "escaped"
 			}
 			requireLifecycleTemplateEntity(t, rt, runID, s.flow, state)
+			record := requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, runID, s.entity), repeat.EventID, "review", state)
+			compiled, ok := record.Evidence.Compiled()
+			wantSource := "loop.repeat"
+			if attempt == 2 {
+				wantSource = "loop.escape"
+			}
+			if !ok || compiled.FlowID() != s.flow || compiled.Edge().LoopID != "revision" || compiled.Edge().Source != wantSource {
+				t.Fatalf("%s ordinary/cap transition borrowed another template/carrier: %+v", side, record)
+			}
 		}
 		s.revision = readLifecycleLoop(t, rt, runID, s.entity).RevisionID
 		s.gateEntity, s.gateInstance = requireLifecycleTemplateEntity(t, rt, runID, s.flow+"/sink", "review")
@@ -188,7 +199,7 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 			t.Fatalf("%s nested gate consumed wrong revision: %#v", side, entity)
 		}
 		history := readLifecycleTransitionHistory(t, rt, runID, s.entity)
-		if len(history) != 5 {
+		if len(history) != 1 {
 			t.Fatalf("%s loop history=%#v", side, history)
 		}
 		for i, record := range history {
@@ -196,7 +207,7 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 			if !ok || compiled.FlowID() != s.flow || compiled.Edge().LoopID != "revision" {
 				t.Fatalf("%s history[%d] borrowed template identity: %#v", side, i, record)
 			}
-			if i == 2 && compiled.Edge().Source != "loop.repeat" || i == 4 && compiled.Edge().Source != "loop.escape" {
+			if compiled.Edge().Source != "loop.escape" {
 				t.Fatalf("%s ordinary/cap selection history[%d]=%#v", side, i, compiled)
 			}
 		}
@@ -233,19 +244,19 @@ func requireLifecycleTemplateVerdict(t *testing.T, rt servedControlProofRuntime,
 		t.Fatalf("%s verdict reached wrong concrete consumer: %#v", s.side, entity)
 	}
 	history := readLifecycleTransitionHistory(t, rt, runID, s.gateEntity)
-	if len(history) != 2 {
+	if len(history) != 1 {
 		t.Fatalf("%s gate history=%#v", s.side, history)
 	}
 	frozen, err := gateruntime.RouteFor(s.gate.RoutesJSON, "approve")
 	if err != nil {
 		t.Fatal(err)
 	}
-	compiled, ok := history[1].Evidence.Compiled()
+	compiled, ok := history[0].Evidence.Compiled()
 	if !ok || !reflect.DeepEqual(compiled, frozen.Transition) || compiled.FlowID() != s.flow+"/sink" || compiled.Edge().DecisionID != "review_decision" || compiled.Edge().Verdict != "approve" {
 		t.Fatalf("%s gate lost exact frozen source: history=%#v frozen=%#v", s.side, history, frozen)
 	}
 	gate := readLifecycleTemplateGate(t, rt, runID, s.gateEntity, s.flow+"/sink")
-	if gate.CardID != s.gate.CardID || gate.ActivationID != s.gate.ActivationID || gate.RoutesJSON != s.gate.RoutesJSON || gate.DecisionEventID != history[1].TriggerEventID {
+	if gate.CardID != s.gate.CardID || gate.ActivationID != s.gate.ActivationID || gate.RoutesJSON != s.gate.RoutesJSON || gate.DecisionEventID != history[0].TriggerEventID {
 		t.Fatalf("%s gate receipt split activation/history: %#v", s.side, gate)
 	}
 	requireLifecycleEventCount(t, rt, runID, s.gateInstance+"/work.completed", 1)

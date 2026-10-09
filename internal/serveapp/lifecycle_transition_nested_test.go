@@ -123,22 +123,25 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			for _, side := range []string{"left", "right"} {
 				prefix := "outer/" + side + "/"
 				entityID := requireLifecycleFlowEntity(t, rt, runID, prefix, "waiting")
-				publish := func(event, key string, payload map[string]any) {
-					requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": side + "." + event, "run_id": runID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": side + "-" + key})
+				publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
+					return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": side + "." + event, "run_id": runID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": side + "-" + key})
 				}
-				publish("loop.start", "start", map[string]any{"seed": true})
+				started := publish("loop.start", "start", map[string]any{"seed": true})
 				requireLifecycleFlowEntity(t, rt, runID, prefix, "drafting")
+				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, runID, entityID), started.EventID, "waiting", "drafting")
 				for attempt := 1; attempt <= 2; attempt++ {
 					loop := readLifecycleLoop(t, rt, runID, entityID)
 					payload := map[string]any{"revision_id": loop.RevisionID}
-					publish("loop.admit", fmt.Sprintf("admit-%d", attempt), payload)
+					admit := publish("loop.admit", fmt.Sprintf("admit-%d", attempt), payload)
 					requireLifecycleFlowEntity(t, rt, runID, prefix, "review")
-					publish("loop.repeat", fmt.Sprintf("repeat-%d", attempt), payload)
+					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, runID, entityID), admit.EventID, "drafting", "review")
+					repeated := publish("loop.repeat", fmt.Sprintf("repeat-%d", attempt), payload)
 					state := "drafting"
 					if attempt == 2 {
 						state = "escaped"
 					}
 					requireLifecycleFlowEntity(t, rt, runID, prefix, state)
+					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, runID, entityID), repeated.EventID, "review", state)
 				}
 				closed := readLifecycleLoop(t, rt, runID, entityID)
 				gateEntity := requireLifecycleFlowEntity(t, rt, runID, prefix+"sink/", "review")
@@ -149,10 +152,10 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 					t.Fatalf("sibling gate consumed wrong revision: %#v loop=%#v", entity, closed)
 				}
 				history := readLifecycleTransitionHistory(t, rt, runID, entityID)
-				if len(history) != 5 {
+				if len(history) != 1 {
 					t.Fatalf("nested loop history=%#v", history)
 				}
-				compiled, ok := history[4].Evidence.Compiled()
+				compiled, ok := history[0].Evidence.Compiled()
 				if !ok || compiled.FlowID() != "outer/"+side || compiled.Edge().Source != "loop.escape" || compiled.Edge().LoopID != "revision" {
 					t.Fatalf("nested escape borrowed sibling cause=%#v", compiled)
 				}
@@ -200,10 +203,10 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 					t.Fatalf("sibling verdict reached wrong third flow=%#v", entity)
 				}
 				history := readLifecycleTransitionHistory(t, rt, runID, gateEntities[index])
-				if len(history) != 2 {
+				if len(history) != 1 {
 					t.Fatalf("nested gate history=%#v", history)
 				}
-				compiled, ok := history[1].Evidence.Compiled()
+				compiled, ok := history[0].Evidence.Compiled()
 				if !ok || compiled.FlowID() != prefix+"sink" || compiled.Edge().DecisionID != "review_decision" || compiled.Edge().Verdict != "approve" {
 					t.Fatalf("nested gate borrowed sibling cause=%#v", compiled)
 				}

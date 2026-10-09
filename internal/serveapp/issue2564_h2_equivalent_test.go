@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -237,6 +238,7 @@ type issue2564H2Hub struct {
 	ID, Entity, Instance, Stage string
 	Count, C1, C2, Revision     int64
 	History                     []pipeline.WorkflowTransitionRecord
+	Cuts                        map[string]pipeline.WorkflowTransitionRecord
 }
 
 type issue2564H2Timer struct {
@@ -320,7 +322,119 @@ func issue2564H2Read(ctx context.Context, rt issue2564H2Fixture, run string) (is
 		}
 		snapshot.Events[event.ID] = event
 	}
+	if err := issue2564H2BindFixedCuts(ctx, rt, run, &snapshot); err != nil {
+		return issue2564H2Snapshot{}, err
+	}
 	return snapshot, nil
+}
+
+// This witnesses the known H2 occurrences at immutable metadata cuts; it does
+// not restore an accumulated header trajectory or implement historical folding.
+func issue2564H2BindFixedCuts(ctx context.Context, rt issue2564H2Fixture, run string, snapshot *issue2564H2Snapshot) error {
+	physical, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, rt.selected)
+	if err != nil {
+		return err
+	}
+	table := physical["run_fork_fact_revisions"]
+	columns := map[string]int{}
+	for index, name := range table.Columns {
+		columns[name] = index
+	}
+	for _, name := range []string{"run_id", "family", "fact_key", "fact", "revision", "present"} {
+		if _, found := columns[name]; !found {
+			return fmt.Errorf("H2 fixed-cut witness omitted %s", name)
+		}
+	}
+	byEntity := map[string]string{}
+	for id, hub := range snapshot.Hubs {
+		byEntity[hub.Entity] = id
+		hub.Cuts = map[string]pipeline.WorkflowTransitionRecord{}
+		snapshot.Hubs[id] = hub
+	}
+	checked := map[string]bool{}
+	for _, row := range table.Rows {
+		var values []any
+		decoder := json.NewDecoder(strings.NewReader(row))
+		decoder.UseNumber()
+		if err := decoder.Decode(&values); err != nil {
+			return err
+		}
+		if values[columns["run_id"]] != run || values[columns["family"]] != "entity_metadata" {
+			continue
+		}
+		present := values[columns["present"]]
+		if present == false || present == json.Number("0") {
+			continue
+		}
+		if present != true && present != json.Number("1") {
+			return fmt.Errorf("H2 metadata witness has invalid native presence")
+		}
+		entity, _ := values[columns["fact_key"]].(string)
+		id, found := byEntity[entity]
+		if !found {
+			continue
+		}
+		raw, ok := values[columns["fact"]].(string)
+		if !ok {
+			return fmt.Errorf("H2 fixed-cut metadata bytes are missing")
+		}
+		var metadata struct {
+			Config json.RawMessage `json:"flow_config"`
+		}
+		if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+			return err
+		}
+		hub := snapshot.Hubs[id]
+		owner := flowidentity.RunScopedFlowInstance{RunID: run, Route: flowidentity.StoredRoute("hub", flowidentity.LogicalInstanceID(hub.Instance), hub.Instance)}
+		if _, err := pipeline.DecodeWorkflowInstanceRecordedHeader(owner.Route, metadata.Config); err != nil {
+			return err
+		}
+		var header struct {
+			History []pipeline.WorkflowTransitionRecord `json:"transition_history"`
+		}
+		if err := json.Unmarshal(metadata.Config, &header); err != nil {
+			return err
+		}
+		if len(header.History) == 0 {
+			continue
+		}
+		record := header.History[0]
+		if _, known := snapshot.Events[record.TriggerEventID]; !known {
+			continue
+		}
+		if previous, found := hub.Cuts[record.TriggerEventID]; found && !reflect.DeepEqual(previous, record) {
+			return fmt.Errorf("H2 immutable cuts disagree for occurrence %s", record.TriggerEventID)
+		}
+		// Exercise canonical reconstruction at an actual fixed metadata revision
+		// for each hub, including after the live source has progressed.
+		if !checked[id] {
+			revision, ok := values[columns["revision"]].(json.Number)
+			if !ok {
+				return fmt.Errorf("H2 fixed metadata revision is missing")
+			}
+			cut, err := revision.Int64()
+			if err != nil {
+				return err
+			}
+			historical, err := storetest.ReadReceiverHistoricalEntityState(ctx, rt.selected, owner, entity, cut)
+			if err != nil {
+				return err
+			}
+			var projected struct {
+				History []pipeline.WorkflowTransitionRecord `json:"transition_history"`
+			}
+			if historical.MaterializationMetadata == nil {
+				return fmt.Errorf("H2 canonical cut omitted the construction header")
+			}
+			if err := json.Unmarshal(historical.MaterializationMetadata.FlowConfig, &projected); err != nil || !reflect.DeepEqual(header.History, projected.History) {
+				return fmt.Errorf("H2 canonical cut changed exact transition evidence: %v", err)
+			}
+			checked[id] = true
+		}
+		hub.Cuts[record.TriggerEventID] = record
+		snapshot.Hubs[id] = hub
+	}
+	return nil
 }
 
 func issue2564H2DeclarationKeys(t *testing.T, root string) map[string]string {
@@ -362,6 +476,7 @@ func issue2564H2Accounting(run string, snapshot issue2564H2Snapshot, closed bool
 	seen := map[string]bool{}
 	for _, hub := range snapshot.Hubs {
 		stage, initial, transitions, active, timerRows := "s1", 0, 0, 0, 0
+		var cursor issue2564H2Timer
 		for _, timer := range snapshot.Timers {
 			if timer.Entity != hub.Entity {
 				continue
@@ -375,6 +490,7 @@ func issue2564H2Accounting(run string, snapshot issue2564H2Snapshot, closed bool
 			}
 			if timer.Ref.Cause == timeridentity.WorkflowTimerActivationCauseInitial {
 				initial++
+				cursor = timer
 				if timer.Ref.DeclarationKey != keys["s1"] {
 					return fmt.Errorf("H2 wrong initial entry: %+v", timer)
 				}
@@ -386,6 +502,9 @@ func issue2564H2Accounting(run string, snapshot issue2564H2Snapshot, closed bool
 				}
 			}
 		}
+		if len(hub.History) > 1 {
+			return fmt.Errorf("H2 persisted header retained cumulative transition evidence")
+		}
 		for _, record := range hub.History {
 			if err := record.Evidence.Validate(); err != nil {
 				return err
@@ -395,10 +514,31 @@ func issue2564H2Accounting(run string, snapshot issue2564H2Snapshot, closed bool
 				if !(record.From == "" && record.To == "s1") && !(closed && record.To == "closed") {
 					return fmt.Errorf("H2 unexpected non-timer transition: hub=%s record=%+v", hub.ID, record)
 				}
-				continue
+			}
+		}
+		for {
+			var event issue2564H2Event
+			for _, candidate := range snapshot.Events {
+				if candidate.Occurrence.Activation == cursor.Ref {
+					if event.ID != "" {
+						return fmt.Errorf("H2 activation has duplicate accepted occurrences")
+					}
+					event = candidate
+				}
+			}
+			if event.ID == "" {
+				break
+			}
+			record, found := hub.Cuts[event.ID]
+			if !found {
+				return fmt.Errorf("H2 accepted occurrence %s lacks its exact committed cut", event.ID)
+			}
+			compiled, ok := record.Evidence.Compiled()
+			if err := record.Evidence.Validate(); err != nil || !ok || compiled.Edge().Source != "timer" {
+				return fmt.Errorf("H2 fixed cut lost its compiled timer cause: %v", err)
 			}
 			transitions++
-			event, found := snapshot.Events[record.TriggerEventID]
+			_, found = snapshot.Events[record.TriggerEventID]
 			timer := snapshot.Timers[event.Occurrence.Activation.ActivationID]
 			next := "s2"
 			if stage == "s2" {
@@ -409,6 +549,7 @@ func issue2564H2Accounting(run string, snapshot issue2564H2Snapshot, closed bool
 			}
 			seen[event.ID] = true
 			successors := 0
+			var nextTimer issue2564H2Timer
 			for _, successor := range snapshot.Timers {
 				if successor.Entity != hub.Entity || successor.Ref.DeclarationKey != keys[next] {
 					continue
@@ -416,12 +557,14 @@ func issue2564H2Accounting(run string, snapshot issue2564H2Snapshot, closed bool
 				want := timeridentity.WorkflowTimerActivationID(run, hub.Entity, hub.Instance, successor.Ref.DeclarationKey, successor.Ref.DeclarationRevision, string(timeridentity.WorkflowTimerActivationCauseTransition), successor.Ref.Generation.KeySuffix(), event.ID, "platform.stage_timer", record.TransitionID, stage, next)
 				if successor.ID == want && successor.Ref.Cause == timeridentity.WorkflowTimerActivationCauseTransition && successor.Created.Equal(record.FiredAt) {
 					successors++
+					nextTimer = successor
 				}
 			}
 			if successors != 1 {
 				return fmt.Errorf("H2 occurrence %s has %d exact entry successors, want one", event.ID, successors)
 			}
 			stage = next
+			cursor = nextTimer
 		}
 		if initial != 1 || transitions == 0 || timerRows != transitions+1 || (!closed && (hub.Stage != stage || active != 1)) || (closed && (hub.Stage != "closed" || active != 0)) {
 			return fmt.Errorf("H2 initial/current entry not exact: hub=%s stage=%s expected=%s initial=%d transitions=%d active=%d closed=%v", hub.ID, hub.Stage, stage, initial, transitions, active, closed)
@@ -431,6 +574,54 @@ func issue2564H2Accounting(run string, snapshot issue2564H2Snapshot, closed bool
 		return fmt.Errorf("H2 accepted occurrences=%d, exactly applied transitions=%d (unadvanced/stale timer forbidden)", len(snapshot.Events), len(seen))
 	}
 	return nil
+}
+
+func issue2564H2CutsPreserved(before, after map[string]pipeline.WorkflowTransitionRecord) bool {
+	for eventID, record := range before {
+		if next, found := after[eventID]; !found || !reflect.DeepEqual(record, next) {
+			return false
+		}
+	}
+	return true
+}
+
+func TestIssue2564H2FixedCutTimerPrefixBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root := issue2564H2Source(t)
+			keys := issue2564H2DeclarationKeys(t, root)
+			start, _, _ := issue2564H2Harness(t, backend, root)
+			process, rt := start(false)
+			t.Cleanup(func() {
+				if err := process.stop(); err != nil {
+					t.Error(err)
+				}
+			})
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h01"}, "idempotency_key": "q6-hub-1"})
+			for hub := 2; hub <= 6; hub++ {
+				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "run_id": seed.RunID, "payload": map[string]any{"hub_id": fmt.Sprintf("h%02d", hub)}, "idempotency_key": fmt.Sprintf("q6-hub-%d", hub)})
+			}
+			var before issue2564H2Snapshot
+			for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
+				candidate := issue2564H2WaitAccounting(t, rt, seed.RunID, false, keys)
+				if len(candidate.Events) >= 12 {
+					before = candidate
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+			if len(before.Events) < 12 {
+				t.Fatal("Q6 H2 proof never reached two exact transitions per hub")
+			}
+			after := issue2564H2WaitAccounting(t, rt, seed.RunID, false, keys)
+			for id, hub := range before.Hubs {
+				current := after.Hubs[id]
+				if len(current.History) != 1 || !issue2564H2CutsPreserved(hub.Cuts, current.Cuts) {
+					t.Fatalf("later H2 source progression changed fixed cut evidence for %s", id)
+				}
+			}
+		})
+	}
 }
 
 func issue2564H2WaitAccounting(t *testing.T, rt issue2564H2Fixture, run string, closed bool, keys map[string]string) issue2564H2Snapshot {
@@ -957,7 +1148,7 @@ func TestIssue2564ReconstructedEquivalentH2BothStores(t *testing.T) {
 				}
 				for id, old := range interrupted.Hubs {
 					next := recovered.Hubs[id]
-					if old.Entity != next.Entity || old.Instance != next.Instance || old.Count != next.Count || old.C1 != next.C1 || old.C2 != next.C2 || len(next.History) < len(old.History) || !reflect.DeepEqual(old.History, next.History[:len(old.History)]) {
+					if old.Entity != next.Entity || old.Instance != next.Instance || old.Count != next.Count || old.C1 != next.C1 || old.C2 != next.C2 || !issue2564H2CutsPreserved(old.Cuts, next.Cuts) {
 						t.Fatalf("H2 non-dev restart reverted/reminted a hub: before=%+v after=%+v", old, next)
 					}
 				}
@@ -992,7 +1183,7 @@ func TestIssue2564ReconstructedEquivalentH2BothStores(t *testing.T) {
 				}
 				for id, old := range recovered.Hubs {
 					next := closed.Hubs[id]
-					if next.Stage != "closed" || old.Entity != next.Entity || old.Instance != next.Instance || old.Count != next.Count || old.C1 != next.C1 || old.C2 != next.C2 || len(next.History) < len(old.History) || !reflect.DeepEqual(old.History, next.History[:len(old.History)]) {
+					if next.Stage != "closed" || old.Entity != next.Entity || old.Instance != next.Instance || old.Count != next.Count || old.C1 != next.C1 || old.C2 != next.C2 || !issue2564H2CutsPreserved(old.Cuts, next.Cuts) {
 						t.Fatalf("H2 explicit cleanup changed verified hub prefix: before=%+v after=%+v", old, next)
 					}
 				}

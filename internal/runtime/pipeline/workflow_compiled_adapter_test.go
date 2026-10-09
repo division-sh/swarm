@@ -1086,8 +1086,8 @@ func requireCompiledPreviewAgreement(t *testing.T, f *compiledAdapterFixture, ev
 			t.Fatal("absent cause changed durable transition history")
 		}
 	} else {
-		if len(after.TransitionHistory) != len(before.TransitionHistory)+1 {
-			t.Fatal("selected cause did not create exactly one history record")
+		if len(after.TransitionHistory) != 1 || after.Revision != before.Revision+1 {
+			t.Fatal("selected cause did not commit exactly one current transition")
 		}
 		record := after.TransitionHistory[len(after.TransitionHistory)-1]
 		if record.Evidence.ID() != preview.Transition.ID() || !record.Evidence.RuleSelection().Equal(requireResolvedSelection(t, preview.RuleSelection)) ||
@@ -1322,7 +1322,7 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			after, _ := f.load()
-			if (previewErr == nil && string(preview.Stage) != "escaped") || after.CurrentState != "escaped" || len(after.TransitionHistory) != len(before.TransitionHistory)+1 {
+			if (previewErr == nil && string(preview.Stage) != "escaped") || after.CurrentState != "escaped" || len(after.TransitionHistory) != 1 || after.Revision != before.Revision+1 {
 				t.Fatalf("loop preview/execution disagreed: %#v %#v", preview, after)
 			}
 			compiled, ok := after.TransitionHistory[len(after.TransitionHistory)-1].Evidence.Compiled()
