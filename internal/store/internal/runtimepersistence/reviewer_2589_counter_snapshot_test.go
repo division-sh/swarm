@@ -136,5 +136,30 @@ func TestIssue2589StagedEventFixturesMaintainPhysicalCountersBothStores(t *testi
 			}
 		})
 		readCount(1)
+		nativeRecord := recordFor(eventtest.ExistingRunRootIngress(uuid.NewString(), "matrix.event", "staged", "", []byte(`{"value":3}`), 0, f.runID, events.EventEnvelope{Scope: events.EventScopeGlobal}, f.at))
+		err = runSelectedFixtureMutation(ctx, s.selected, "native staged rollback", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+			inserted, err := staged.InsertWithinAttempt(txctx, attempt, dialect, nativeRecord)
+			if err != nil || !inserted {
+				return fmt.Errorf("native staged rollback insert=%v err=%v", inserted, err)
+			}
+			return rollback
+		})
+		if !errors.Is(err, rollback) {
+			t.Fatal(err)
+		}
+		readCount(1)
+		err = runSelectedFixtureMutation(ctx, s.selected, "native staged commit", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+			for _, want := range []bool{true, false} {
+				inserted, err := staged.InsertWithinAttempt(txctx, attempt, dialect, nativeRecord)
+				if err != nil || inserted != want {
+					return fmt.Errorf("native staged insert=%v, want %v; err=%v", inserted, want, err)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		readCount(2)
 	})
 }
