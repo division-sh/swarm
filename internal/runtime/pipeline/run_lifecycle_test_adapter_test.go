@@ -11,20 +11,22 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 )
 
 type testRunLifecycleMutation struct {
 	tx      *sql.Tx
 	dialect workflowStoreDialect
+	source  eventfixture.RunSourceMutation
 }
 
 func (m testRunLifecycleMutation) RequirePresent(ctx context.Context, runID string) error {
-	_, _, err := m.load(ctx, runID, false)
+	_, err := m.RequirePresentSource(ctx, runID)
 	return err
 }
 
 func (m testRunLifecycleMutation) RequireActive(ctx context.Context, runID string) error {
-	_, _, err := m.load(ctx, runID, true)
+	_, err := m.RequireActiveSource(ctx, runID)
 	return err
 }
 
@@ -32,16 +34,45 @@ func (m testRunLifecycleMutation) RequirePresentSource(
 	ctx context.Context,
 	runID string,
 ) (runtimecorrelation.SourceArtifactFact, error) {
-	_, source, err := m.load(ctx, runID, false)
-	return source, err
+	source, err := m.sourceMutation(ctx)
+	if err != nil {
+		return runtimecorrelation.SourceArtifactFact{}, err
+	}
+	return source.RequirePresent(ctx, runID)
 }
 
 func (m testRunLifecycleMutation) RequireActiveSource(
 	ctx context.Context,
 	runID string,
 ) (runtimecorrelation.SourceArtifactFact, error) {
-	_, source, err := m.load(ctx, runID, true)
-	return source, err
+	source, err := m.sourceMutation(ctx)
+	if err != nil {
+		return runtimecorrelation.SourceArtifactFact{}, err
+	}
+	return source.RequireActive(ctx, runID)
+}
+
+func (m testRunLifecycleMutation) sourceMutation(context.Context) (eventfixture.RunSourceMutation, error) {
+	if m.source == (eventfixture.RunSourceMutation{}) {
+		return eventfixture.RunSourceMutation{}, errors.New("pipeline test lifecycle requires a bound native source mutation")
+	}
+	return m.source, nil
+}
+
+func (m testRunLifecycleMutation) invalidateSource(ctx context.Context, runID string) error {
+	source, err := m.sourceMutation(ctx)
+	if err != nil {
+		return err
+	}
+	return source.Invalidate(ctx, runID)
+}
+
+func (m testRunLifecycleMutation) requireSourceWriteFrame(ctx context.Context) error {
+	source, err := m.sourceMutation(ctx)
+	if err != nil {
+		return err
+	}
+	return source.RequireWriteFrame(ctx)
 }
 
 func (m testRunLifecycleMutation) Create(
@@ -49,6 +80,9 @@ func (m testRunLifecycleMutation) Create(
 	request runtimerunlifecycle.CreateRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
 	if err := request.Validate(); err != nil {
+		return "", err
+	}
+	if err := m.requireSourceWriteFrame(ctx); err != nil {
 		return "", err
 	}
 	bundleHash := request.Source.BundleHash()
@@ -97,13 +131,16 @@ func (m testRunLifecycleMutation) Create(
 		return "", err
 	}
 	if rows == 1 {
+		if err := m.invalidateSource(ctx, request.RunID); err != nil {
+			return "", err
+		}
 		return runtimerunlifecycle.MutationApplied, nil
 	}
-	state, source, err := m.load(ctx, request.RunID, true)
+	source, err := m.RequireActiveSource(ctx, request.RunID)
 	if err != nil {
 		return "", err
 	}
-	if !state.Active() || source != request.Source {
+	if source != request.Source {
 		return "", errors.New("pipeline test lifecycle run creation conflicts with existing run")
 	}
 	snapshot, err := m.loadSnapshot(ctx, request.RunID)
@@ -123,10 +160,17 @@ func (m testRunLifecycleMutation) TransitionActive(
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
-	state, _, err := m.load(ctx, request.RunID, false)
+	if err := m.requireSourceWriteFrame(ctx); err != nil {
+		return "", err
+	}
+	if _, err := m.RequirePresentSource(ctx, request.RunID); err != nil {
+		return "", err
+	}
+	current, err := m.loadSnapshot(ctx, request.RunID)
 	if err != nil {
 		return "", err
 	}
+	state := current.State
 	if state == request.State {
 		return runtimerunlifecycle.MutationExactNoop, nil
 	}
@@ -143,7 +187,11 @@ func (m testRunLifecycleMutation) TransitionActive(
 	if err != nil {
 		return "", err
 	}
-	return testRunLifecycleAffected(result)
+	disposition, err := testRunLifecycleAffected(result)
+	if err == nil {
+		err = m.invalidateSource(ctx, request.RunID)
+	}
+	return disposition, err
 }
 
 func (m testRunLifecycleMutation) MarkTerminal(
@@ -151,6 +199,9 @@ func (m testRunLifecycleMutation) MarkTerminal(
 	request runtimerunlifecycle.TerminalRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	if err := request.Validate(); err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
+	if err := m.requireSourceWriteFrame(ctx); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	current, err := m.loadSnapshot(ctx, request.RunID)
@@ -192,6 +243,9 @@ func (m testRunLifecycleMutation) MarkTerminal(
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
+	if err := m.invalidateSource(ctx, request.RunID); err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
 	snapshot, err := m.loadSnapshot(ctx, request.RunID)
 	return snapshot, disposition, err
 }
@@ -201,6 +255,9 @@ func (m testRunLifecycleMutation) ForkSource(
 	request runtimerunlifecycle.ForkSourceRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	if err := request.Validate(); err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
+	if err := m.requireSourceWriteFrame(ctx); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	current, err := m.loadSnapshot(ctx, request.RunID)
@@ -239,6 +296,9 @@ func (m testRunLifecycleMutation) ForkSource(
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
+	if err := m.invalidateSource(ctx, request.RunID); err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
 	snapshot, err := m.loadSnapshot(ctx, request.RunID)
 	return snapshot, disposition, err
 }
@@ -250,7 +310,10 @@ func (m testRunLifecycleMutation) ReviseSource(
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
-	_, current, err := m.load(ctx, request.RunID, true)
+	if err := m.requireSourceWriteFrame(ctx); err != nil {
+		return "", err
+	}
+	current, err := m.RequireActiveSource(ctx, request.RunID)
 	if err != nil {
 		return "", err
 	}
@@ -274,7 +337,11 @@ func (m testRunLifecycleMutation) ReviseSource(
 	if err != nil {
 		return "", err
 	}
-	return testRunLifecycleAffected(result)
+	disposition, err := testRunLifecycleAffected(result)
+	if err == nil {
+		err = m.invalidateSource(ctx, request.RunID)
+	}
+	return disposition, err
 }
 
 func (m testRunLifecycleMutation) RequirePresentRun(ctx context.Context, runID string) error {
@@ -435,43 +502,6 @@ func testRunLifecycleFailuresEqual(left, right *runtimefailures.Envelope) bool {
 	leftRaw, leftErr := runtimefailures.MarshalEnvelope(*left)
 	rightRaw, rightErr := runtimefailures.MarshalEnvelope(*right)
 	return leftErr == nil && rightErr == nil && bytes.Equal(leftRaw, rightRaw)
-}
-
-func (m testRunLifecycleMutation) load(
-	ctx context.Context,
-	runID string,
-	requireActive bool,
-) (runtimerunlifecycle.State, runtimecorrelation.SourceArtifactFact, error) {
-	if m.tx == nil {
-		return "", runtimecorrelation.SourceArtifactFact{}, errors.New("pipeline test lifecycle transaction is required")
-	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return "", runtimecorrelation.SourceArtifactFact{}, errors.New("pipeline test lifecycle run_id is required")
-	}
-	query := `SELECT status, bundle_hash FROM runs WHERE run_id = ?`
-	if m.dialect == workflowStoreDialectPostgres {
-		query = `SELECT status, bundle_hash FROM runs WHERE run_id = $1::uuid FOR UPDATE`
-	}
-	var statusRaw, bundleHash string
-	if err := m.tx.QueryRowContext(ctx, query, runID).Scan(&statusRaw, &bundleHash); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
-		}
-		return "", runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("load pipeline test run lifecycle: %w", err)
-	}
-	state, err := runtimerunlifecycle.ParseState(statusRaw)
-	if err != nil {
-		return "", runtimecorrelation.SourceArtifactFact{}, err
-	}
-	if requireActive && !state.Active() {
-		return "", runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: state}
-	}
-	source, err := runtimecorrelation.NewSourceArtifactFact(strings.TrimSpace(bundleHash))
-	if err != nil {
-		return "", runtimecorrelation.SourceArtifactFact{}, err
-	}
-	return state, source, nil
 }
 
 func newPostgresWorkflowInstanceStoreForTest(db *sql.DB) *workflowInstanceStore {

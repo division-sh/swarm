@@ -91,6 +91,7 @@ func TestActiveRunAdmissionHasClosedOwners(t *testing.T) {
 		expected[statePath+":RunLifecycle"+backend+"Owner.markRunTerminalStateTx:InvalidateActiveRunSource"] = 1
 	}
 	expected[mutationPath+":deleteMaterializedForkRunTx:InvalidateActiveRunSource"] = 1
+	expected["internal/store/internal/backend/runlifecycle/sourceadmission/test_fixture.go:FixtureSourceMutation.Invalidate:InvalidateActiveRunSource"] = 1
 	root, err := filepath.Abs("../../../../..")
 	if err != nil {
 		t.Fatal(err)
