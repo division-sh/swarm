@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,8 +14,77 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
+
+func TestVerifyRunPublicAdmissionBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			ctx := context.Background()
+			root := issue2567VerifySource(t)
+			config := filepath.Join(t.TempDir(), "swarm.yaml")
+			_, bundle, err := NewSwarmWorkflowModule(RepoRoot(), root, filepath.Join(RepoRoot(), "platform-spec.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			plans, err := StateStoreSchemaPlans(bundle)
+			if err != nil {
+				t.Fatal(err)
+			}
+			schema, err := SchemaBootstrapRequest(bundle.Platform, plans.Platform, plans.State)
+			if err != nil {
+				t.Fatal(err)
+			}
+			selected, configText := newVerifyCompositionBootStore(t, backend, root, schema)
+			writeRuntimeConfigText(t, config, configText)
+			runID := uuid.NewString()
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact})
+			for _, missing := range []bool{false, true} {
+				id := runID
+				if missing {
+					id = uuid.NewString()
+				}
+				for _, mode := range []string{"json", "text", "quiet"} {
+					t.Run(fmt.Sprintf("missing_%t/%s", missing, mode), func(t *testing.T) {
+						args := []string{"verify", root, "--config", config, "--run", id}
+						if mode != "text" {
+							args = append(args, "--"+mode)
+						}
+						var out, errOut bytes.Buffer
+						code := executeRootCommand(ctx, RepoRoot(), args, &out, &errOut)
+						if (code != 0) != missing || errOut.Len() != 0 {
+							t.Fatalf("wrong exit: missing=%t code=%d stdout=%s stderr=%s", missing, code, &out, &errOut)
+						}
+						if mode == "json" {
+							var result verifyRunCommandResult
+							if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+								t.Fatal(err)
+							}
+							if result.RunID != id || result.EntitiesChecked != 0 || len(result.Rows) != 0 || result.OK == missing {
+								t.Fatalf("wrong result: %+v", result)
+							}
+							if missing {
+								if result.Status != "failed" || len(result.Errors) != 1 || result.Errors[0].Detail.Code != "run_not_found" || result.Errors[0].Retryable {
+									t.Fatalf("missing run lost typed refusal: %+v", result)
+								}
+							} else if result.Status != "passed" || len(result.Errors) != 0 {
+								t.Fatalf("empty existing run refused: %+v", result)
+							}
+						} else if missing {
+							if !strings.Contains(out.String(), "run_not_found") || strings.Contains(out.String(), "no drift") {
+								t.Fatalf("missing run reported clean: %s", &out)
+							}
+						} else if !strings.Contains(out.String(), "0 entities checked, no drift") {
+							t.Fatalf("missing clean transcript: %s", &out)
+						}
+					})
+				}
+			}
+		})
+	}
+}
 
 func TestVerifyRunPublicFlagAndAbsentStoreAdmission(t *testing.T) {
 	for _, tc := range []struct {
