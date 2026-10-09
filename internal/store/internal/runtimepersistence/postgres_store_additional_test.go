@@ -1257,11 +1257,12 @@ func TestNormalizeJSONPayload_RedactsSensitiveText(t *testing.T) {
 }
 
 func TestManagerStore_RejectsIncompleteLifecycleTransition(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := newTestPostgresStore(t, db)
+	_, pg := newAgentFixtureAuthorityStore(t, "postgres")
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), specEntityStateRunID)
 	if _, err := agentfixture.CommitExact(t, ctx, pg, runtimemanager.AgentLifecycleTransition{}); err == nil {
 		t.Fatal("expected lifecycle transition fields required")
+	} else if !strings.HasPrefix(err.Error(), "exact lifecycle fixture topology:") {
+		t.Fatalf("incomplete transition rejected at an unrelated boundary: %v", err)
 	}
 }
 
