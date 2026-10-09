@@ -958,3 +958,51 @@ diagnostic all-package sweep expands go list's package set explicitly because
 the runner correctly refuses raw ./... passthrough; this is not completion
 credit, does not change root selection, and leaves the refused invocation
 recorded rather than weakening the runner.
+
+The repair is signed commit74b05a81613ca7fa72ee76a83a0eb7e0c624eac0.
+Fresh complete core-structural selection PASSES through ordinary admission
+12m37s: releasee2e0.069s/runtime10.085s/serveapp6.867s/runtimepersistence17.252s.
+Fresh all-package Census/Inventory/Registry/Guard plus native-fixture refusal
+sweep PASSES. Both run on the frozen clean74b source. Logs/checksums:
+channel-structural-repair.log SHA256
+3b9f156e670a735d0e258c933dc0e7d40f1266d8ef88aaa7c150ed867af7278b;
+channel-census-repair-expanded.log SHA256
+2768f7c076c15950f55137cbf976f5e8fc10d822a17f19893a33d43b151c97f1.
+
+The additional two-public-root race3 aggregate FAILED317.093s and is retained
+as failed, NOT a tier or all-green race receipt. Its M36 completion-only root
+passes all3 repetitions/6 store leaves (37.24/31.00/39.69s), zero skip/failure.
+Across the whole group23/24 terminal leaf executions passed. The third SQLite
+stage-gate leaf fails in the ORIGINAL five-second event.publish HTTP helper,
+before any migrated card/receipt read. Subsequent telemetry identifies
+api_event_publication_finalize_failed, committed event
+e9314005-62c1-5006-9100-df2d9c9ed147 and flow activation
+77ba949f-6b56-4bc8-9512-c7c70ca17996, with context canceled. No failure-time
+stack was captured; commit evidence alone does not establish the delay cause.
+Log channel-authority-repair-race.jsonl SHA256
+b38fdc03d56a43e8bacfc82800c17e1bc0c62558234236e99a67bc79eeb48b6e.
+
+Targeted attribution controls use the exact original root/SQLite/stage-gate
+selection, race3, unchanged five-second HTTP bound and assertions, through
+normal vemew admission. They run serially (candidate before base due admission
+arrival), not in a deliberately quiet cost-comparison window:
+
+- Clean candidate74b05a816: PASS74.334s, all3 leaves, no skip/failure.
+  channel-seed-timeout-head-race.jsonl SHA256
+  3da0d56dfa316a5f722dcfe82dcb6b0b3dd4c7eda29a18c75c9ea4135cafc1e0.
+- Clean integration base2fc6a13bd: PASS52.161s, all3 leaves, no skip/failure.
+  channel-seed-timeout-base-race.jsonl SHA256
+  1bdfbfaa91ea2ee53dd26f890f40b0c8efd203f8bc921e7c0c0ff049cabb81c3.
+
+Classification is OBSERVED/UNCLASSIFIED/UNREPRODUCED, NOT inherited, fixed,
+waived or a demonstrated performance regression. The candidate includes
+additional public/pass assertions absent from base, and host load was not
+controlled; those total elapsed times cannot be claimed as matched cost.
+Existing #2353 owns the test-health record; no new issue, runtime repair,
+deadline extension or assertion change is proposed. No production/spec/policy
+bytes changed from reviewed e7ec69633 in this fixture/receipt amendment.
+
+The raw-authority repair and fresh guard/census proof are complete; clean-head
+Local core, six COMPLETE channel units/named supplements, matched cost and
+hosted full still remain. Server2 is released and must be allocated again
+before any fresh tier run. There is no PR or chosen-class closure claim.
