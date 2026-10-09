@@ -984,6 +984,16 @@ func (c selectedContractForkLocalRuntimeContainer) FailActivated(ctx context.Con
 	return c.ports.runtimeExecution.FailActivatedRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority, raw)
 }
 
+func (c selectedContractForkLocalRuntimeContainer) failureDispositionContext(ctx context.Context) context.Context {
+	// Disposition retains preparation's process work, not the retired serving
+	// occurrence. Semantic attribution still belongs to the exact selected child.
+	fact := c.req.LoadedSource.SourceArtifactFact
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(c.runtimeInstanceID, fact.BundleHash()))
+	ctx = selectedContractRuntimeContainerLineageContext(ctx, c.proof)
+	return runtimeeffects.WithAuthority(ctx, c.authority)
+}
+
 type selectedContractRuntimeContainerLoggerHook struct {
 	logger *runtimepkg.RuntimeLogger
 }
