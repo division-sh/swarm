@@ -115,13 +115,17 @@ func TestVerifyRunCanonicalHeaderDomainsBothStores(t *testing.T) {
 func TestVerifyRunConstructedPairAdmissionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			for _, cut := range []string{"missing_fields", "fieldless_fields", "wrong_entity", "wrong_path", "wrong_type", "conflicting_fields", "invalid_header_json", "invalid_fields_json", "invalid_revision", "empty_declared_type"} {
+			for _, cut := range []string{"missing_fields", "fieldless_fields", "foreign_run", "wrong_entity", "wrong_path", "wrong_type", "conflicting_fields", "invalid_header_json", "invalid_fields_json", "invalid_revision", "empty_declared_type"} {
 				t.Run(cut, func(t *testing.T) {
 					db, run, entity := runDriftDatabase(t, backend)
 					insertRunDriftHeader(t, db, run, entity, entity, "company", "queued")
+					if cut == "foreign_run" {
+						requireHistoricalSnapshotRun(t, db, "00000000-0000-0000-0000-000000000098")
+					}
 					query := map[string]string{
 						"missing_fields":      `DELETE FROM entity_state WHERE run_id=$1`,
 						"fieldless_fields":    `UPDATE flow_instances SET entity_type=NULL WHERE run_id=$1`,
+						"foreign_run":         `UPDATE entity_state SET run_id='00000000-0000-0000-0000-000000000098' WHERE run_id=$1`,
 						"wrong_entity":        `UPDATE entity_state SET entity_id='00000000-0000-0000-0000-000000000099' WHERE run_id=$1`,
 						"wrong_path":          `UPDATE entity_state SET flow_instance='foreign/route' WHERE run_id=$1`,
 						"wrong_type":          `UPDATE entity_state SET entity_type='foreign' WHERE run_id=$1`,
