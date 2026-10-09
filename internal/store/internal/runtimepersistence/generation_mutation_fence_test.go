@@ -19,24 +19,28 @@ import (
 
 // The caller supplies the real takeover/repair operation. No grant transition or
 // authorization result is replaced; only the outer mutation lifetime is held.
-func proveBulkRetirementWaitsForMutation(t *testing.T, db *sql.DB, backend string, evidence startupownership.GrantEvidence, retire func(context.Context) error) {
+func proveBulkRetirementWaitsForMutation(t *testing.T, selected any, db *sql.DB, backend string, evidence startupownership.GrantEvidence, retire func(context.Context) error) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
+	if backend == "sqlite" {
+		// An independent native owner must contend on the database fence, not
+		// the retiring owner's in-process writer permit.
+		selected = NewSQLiteRuntimeStoreForTest(db)
 	}
-	defer tx.Rollback()
-	if err := generationauthority.FenceMutation(ctx, tx, backend == "sqlite"); err != nil {
-		t.Fatal(err)
-	}
-	waiting, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
+	rolledBack := errors.New("release bulk retirement fence by rollback")
 	retired := make(chan error, 1)
-	go func() { retired <- retire(waiting) }()
-	<-waiting.Done()
-	if err := tx.Rollback(); err != nil {
-		t.Fatal(err)
+	err := runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(txctx context.Context, tx *sql.Tx) error {
+		if err := generationauthority.FenceMutation(txctx, tx, backend == "sqlite"); err != nil {
+			return err
+		}
+		waiting, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		go func() { retired <- retire(waiting) }()
+		<-waiting.Done()
+		return rolledBack
+	})
+	if !errors.Is(err, rolledBack) {
+		t.Fatalf("bulk retirement fence rollback: %v", err)
 	}
 	if err := <-retired; !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("bulk retirement must wait for held mutation fence until cancelled: %v", err)
@@ -57,6 +61,10 @@ func TestGenerationMutationFenceBothStores(t *testing.T) {
 			for _, finish := range []string{"commit", "rollback"} {
 				t.Run(backend+"/"+kind+"/"+finish, func(t *testing.T) {
 					store, db, sqlite := selectedForkDiscardTestStore(t, backend)
+					mutationStore := store
+					if sqlite {
+						mutationStore = NewSQLiteRuntimeStoreForTest(db)
+					}
 					ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 20*time.Second)
 					defer cancel()
 					var grant startupownership.GenerationGrant
@@ -94,32 +102,29 @@ func TestGenerationMutationFenceBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					req := manager.AgentLifecycleTransition{Identity: mustTestAgentIdentityForRun(runID, "fence-owner", "global"), ProcessBinding: binding}
-					tx, err := db.BeginTx(ctx, nil)
-					if err != nil {
-						t.Fatal(err)
-					}
-					defer tx.Rollback()
-					if err := agentpersistence.AuthorizeGenerationMutationTx(ctx, tx, req, sqlite); err != nil {
-						t.Fatalf("exact pooled mutation authorization: %v", err)
-					}
-					// The authorizer is the production one; only the outer transaction's
-					// completion is held. Selected execution/run/FK locks are real.
-					waiting, stop := context.WithTimeout(ctx, time.Second)
+					rolledBack := errors.New("release generation mutation fence by rollback")
 					retired := make(chan error, 1)
-					go func() { retired <- grant.Retire(waiting) }()
-					<-waiting.Done()
-					if finish == "commit" {
-						err = tx.Commit()
-					} else {
-						err = tx.Rollback()
-					}
-					if err != nil {
-						t.Fatal(err)
+					err = runUnrevisionedEventFixtureTransactionForTest(ctx, mutationStore, func(txctx context.Context, tx *sql.Tx) error {
+						if err := agentpersistence.AuthorizeGenerationMutationTx(txctx, tx, req, sqlite); err != nil {
+							return err
+						}
+						// Only the native transaction's completion is held. Selected
+						// execution/run/FK locks and grant authorization are real.
+						waiting, stop := context.WithTimeout(ctx, time.Second)
+						defer stop()
+						go func() { retired <- grant.Retire(waiting) }()
+						<-waiting.Done()
+						if finish == "rollback" {
+							return rolledBack
+						}
+						return nil
+					})
+					if (finish == "commit" && err != nil) || (finish == "rollback" && !errors.Is(err, rolledBack)) {
+						t.Fatalf("exact pooled mutation authorization and %s: %v", finish, err)
 					}
 					if err := <-retired; !errors.Is(err, context.DeadlineExceeded) {
 						t.Fatalf("retirement crossed accepted mutation: %v", err)
 					}
-					stop()
 					var state string
 					var version uint64
 					if err := db.QueryRowContext(ctx, `SELECT state,state_version FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, evidence.GrantID).Scan(&state, &version); err != nil {
@@ -130,19 +135,28 @@ func TestGenerationMutationFenceBothStores(t *testing.T) {
 					}
 					// A transaction that observed the old head must reread after taking
 					// the fence, not authorize its stale append-only predecessor.
-					late, err := db.BeginTx(ctx, nil)
-					if err != nil {
-						t.Fatal(err)
-					}
-					defer late.Rollback()
-					if err := late.QueryRowContext(ctx, `SELECT state FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, evidence.GrantID).Scan(&state); err != nil {
-						t.Fatal(err)
-					}
-					if err := grant.Retire(ctx); err != nil {
-						t.Fatalf("retire after mutation releases dependency: %v", err)
-					}
-					if err := agentpersistence.AuthorizeGenerationMutationTx(ctx, late, req, sqlite); err == nil {
+					retiredGrant := false
+					err = runUnrevisionedEventFixtureTransactionForTest(ctx, mutationStore, func(txctx context.Context, late *sql.Tx) error {
+						if err := late.QueryRowContext(txctx, `SELECT state FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, evidence.GrantID).Scan(&state); err != nil {
+							return err
+						}
+						if !retiredGrant {
+							if state != string(evidence.State) {
+								t.Fatalf("stale-head setup did not observe the admitted grant: %s", state)
+							}
+							if err := grant.Retire(ctx); err != nil {
+								t.Fatalf("retire after mutation releases dependency: %v", err)
+							}
+							retiredGrant = true
+						}
+						if err := agentpersistence.AuthorizeGenerationMutationTx(txctx, late, req, sqlite); err != nil {
+							return err
+						}
 						t.Fatal("stale-head transaction authorized retired grant")
+						return nil
+					})
+					if err == nil || !strings.Contains(err.Error(), "lifecycle generation grant is retired") {
+						t.Fatalf("stale-head refusal must use current grant, not a missing ordering scope: %v", err)
 					}
 				})
 			}
