@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -186,10 +185,7 @@ func writeVerifyRunResult(w io.Writer, result verifyRunCommandResult) error {
 	if _, err := fmt.Fprintf(w, "%d entities checked, %d mismatches\n", result.EntitiesChecked, len(result.Rows)); err != nil {
 		return err
 	}
-	table := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(table, "ENTITY\tKIND\tDOMAIN\tPATH\tFOLDED\tSTORED"); err != nil {
-		return err
-	}
+	rows := make([][]string, 0, len(result.Rows))
 	for _, row := range result.Rows {
 		path := ""
 		if row.Path != nil {
@@ -203,9 +199,17 @@ func writeVerifyRunResult(w io.Writer, result verifyRunCommandResult) error {
 		if err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s:%s (present=%t)\t%s:%s (present=%t)\n", row.EntityID, row.Kind, row.Domain, path, row.FoldedType, left, row.FoldedPresent, row.StoredType, right, row.StoredPresent); err != nil {
-			return err
-		}
+		rows = append(rows, []string{row.EntityID, row.Kind, string(row.Domain), path,
+			fmt.Sprintf("%s:%s (present=%t)", row.FoldedType, left, row.FoldedPresent),
+			fmt.Sprintf("%s:%s (present=%t)", row.StoredType, right, row.StoredPresent)})
 	}
-	return table.Flush()
+	var table strings.Builder
+	// Evidence identifiers remain full; resource-ID display shortening does not
+	// alter this mismatch report. The canonical renderer still owns the layout.
+	writeCLITable(&table, cliTable{Columns: []cliTableColumn{
+		{Header: "ENTITY"}, {Header: "KIND"}, {Header: "DOMAIN"},
+		{Header: "PATH"}, {Header: "FOLDED"}, {Header: "STORED"},
+	}, Rows: rows})
+	_, err := io.WriteString(w, table.String())
+	return err
 }
