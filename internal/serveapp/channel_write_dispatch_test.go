@@ -39,6 +39,7 @@ func TestNativeChannelWriteDispatchNeverFallsBackToHTTP(t *testing.T) {
 	tool := runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"),
 		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerInProcess),
 		runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
 		runtimecontracts.WithToolInProcessTarget(runtimecontracts.ToolInProcessWhatsAppSendText))
 	var requests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
