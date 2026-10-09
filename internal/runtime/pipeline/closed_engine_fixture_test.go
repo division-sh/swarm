@@ -731,7 +731,7 @@ func commitPipelineTestWorkflowMutationLog(
 		return err
 	}
 	after := runtimemutationlog.EntityStateProjection{
-		CurrentState: record.CurrentState,
+		CurrentState: runtimemutationlog.PresentLifecycleState(record.CurrentState),
 		Fields:       fields,
 		Gates:        gates,
 		Accumulator:  accumulator,

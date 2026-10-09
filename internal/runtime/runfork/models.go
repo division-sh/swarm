@@ -207,6 +207,8 @@ type RunForkMaterializedEntitySnapshotMetadata struct {
 	UpdatedAt      time.Time       `json:"updated_at,omitempty"`
 	TerminatedAt   time.Time       `json:"terminated_at,omitempty"`
 	EnteredStateAt time.Time       `json:"entered_state_at,omitempty"`
+	DataCreatedAt  *time.Time      `json:"data_created_at"`
+	DataUpdatedAt  *time.Time      `json:"data_updated_at"`
 }
 
 const (
@@ -533,7 +535,7 @@ type RunForkRouteHistoryProjection struct {
 
 type RunForkEntityState struct {
 	EntityID                string                                     `json:"entity_id"`
-	CurrentState            string                                     `json:"current_state,omitempty"`
+	CurrentState            *string                                    `json:"current_state,omitempty"`
 	EnteredStateAt          *time.Time                                 `json:"entered_state_at,omitempty"`
 	Fields                  map[string]any                             `json:"fields,omitempty"`
 	Bookkeeping             map[string]any                             `json:"bookkeeping,omitempty"`

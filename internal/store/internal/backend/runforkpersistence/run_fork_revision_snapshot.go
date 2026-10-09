@@ -83,6 +83,8 @@ type runForkRevisionEntityMetadata struct {
 	EnteredStateAt   time.Time       `json:"entered_state_at"`
 	UpdatedAt        time.Time       `json:"updated_at"`
 	TerminatedAt     time.Time       `json:"terminated_at"`
+	DataCreatedAt    *time.Time      `json:"data_created_at"`
+	DataUpdatedAt    *time.Time      `json:"data_updated_at"`
 }
 
 type runForkRevisionDelivery struct {

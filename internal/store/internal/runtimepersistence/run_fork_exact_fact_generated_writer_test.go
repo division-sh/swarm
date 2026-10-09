@@ -85,7 +85,7 @@ func proveExactEntityProducerSpelling(t *testing.T, backend, producer, spelling 
 		})
 	}
 	if producer == "scenario_setup" {
-		req := pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at, Entities: []pipeline.ScenarioSetupEntityRequest{{Alias: "receiver", EntityID: input, FlowInstance: instance, EntityType: "review_item", CurrentState: "active", Fields: map[string]any{"account_id": "preserved"}}}}
+		req := pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at, Entities: []pipeline.ScenarioSetupEntityRequest{{Alias: "receiver", EntityID: input, FlowInstance: instance, EntityType: "review_item", Fields: map[string]any{"account_id": "preserved"}}}}
 		if _, err := owner.SetupScenarioEntities(ctx, req); err != nil {
 			t.Fatalf("actual scenario insertion (%s): %v", spelling, err)
 		}

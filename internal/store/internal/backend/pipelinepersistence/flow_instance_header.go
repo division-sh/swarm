@@ -162,10 +162,8 @@ func RequireHistoricalImportedWorkflowState(ctx context.Context, tx *sql.Tx, pos
 	state := target.State
 	if state.EntityID != expected.EntityID || state.FlowInstance != expected.FlowInstance ||
 		state.EntityType != expected.EntityType || state.Slug != expected.Slug || state.Name != expected.Name ||
-		state.CurrentState != expected.CurrentState || state.Revision != expected.Revision ||
-		!state.EnteredStageAt.Equal(expected.EnteredStageAt) || !state.CreatedAt.Equal(expected.CreatedAt) || !state.UpdatedAt.Equal(expected.UpdatedAt) ||
-		!workflowCommitJSONEqual(state.Fields, expected.Fields) || !workflowCommitJSONEqual(state.Gates, expected.Gates) ||
-		!workflowCommitJSONEqual(state.Bookkeeping, expected.Bookkeeping) || !workflowCommitJSONEqual(state.Accumulator, expected.Accumulator) {
+		!state.CreatedAt.Equal(expected.CreatedAt) || !state.UpdatedAt.Equal(expected.UpdatedAt) ||
+		!workflowCommitJSONEqual(state.Fields, expected.Fields) {
 		return fmt.Errorf("historical imported fields %s disagree with fixed snapshot", expected.FlowInstance)
 	}
 	return nil

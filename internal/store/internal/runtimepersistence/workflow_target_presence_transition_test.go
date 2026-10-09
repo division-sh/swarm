@@ -138,7 +138,7 @@ func TestWorkflowEngineConstructedTransitionAtomicOnBothStores(t *testing.T) {
 					if err != nil || transition != runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion {
 						t.Fatalf("constructed reload lost paired transition: %d %v", transition, err)
 					}
-					record.ExpectedState, record.ExpectedRevision = target.State.CurrentState, target.State.Revision
+					record.ExpectedState, record.ExpectedRevision = target.Lifecycle.State.CurrentState, target.Lifecycle.State.Revision
 					record.CurrentState = "settled"
 					record.EnteredStageAt, record.UpdatedAt = record.UpdatedAt.Add(time.Minute), record.UpdatedAt.Add(time.Minute)
 					record = workflowTargetMutationEntry(t, f, record, "settle.requested")
@@ -364,7 +364,7 @@ func TestSupportedStateOnlyProducersCannotAcquireWorkflowConstructionOnBothStore
 							RunID: runID, CreatedAt: createdAt,
 							Entities: []runtimepipeline.ScenarioSetupEntityRequest{{
 								Alias: "receiver", EntityID: entityID, FlowInstance: instancePath,
-								EntityType: "review_item", CurrentState: "active", Fields: map[string]any{"account_id": "preserved"},
+								EntityType: "review_item", Fields: map[string]any{"account_id": "preserved"},
 							}},
 						})
 						if err != nil {
