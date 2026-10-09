@@ -146,10 +146,6 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 			break
 		}
 	}
-	routeState := runfork.RunForkRouteHistoryNotApplicable
-	if len(facts.FlowInstances) > 0 || len(facts.SourceFlows) > 0 {
-		routeState = runfork.RunForkRouteHistoryUnknownUnversioned
-	}
 	activeSessions := map[string]struct{}{}
 	for _, session := range snapshot.Sessions {
 		if session.Status == "active" || session.Status == "suspended" {
@@ -176,7 +172,6 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	return runForkAdmissionEvidence{
 		Pending:                 pending,
 		RelevantTimer:           relevantTimer,
-		RouteHistory:            runfork.RunForkRouteHistoryProjection{State: routeState},
 		ActiveSession:           activeSession,
 		ActiveConversationAudit: len(snapshot.ConversationAudits) > 0,
 		ActiveTurn:              activeTurn,

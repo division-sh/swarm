@@ -128,12 +128,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return err
 		}
-		routeRecovery, routeResolved, err := prepareRunForkSelectedContractRouteResolution(plan, forkRunID, selection, req.FrontierAdmission, req.RouteTopology, req.RecipientPlanning)
+		routeRecovery, err := prepareRunForkSelectedContractRouteResolution(plan, forkRunID, selection, req.FrontierAdmission, req.RouteTopology, req.RecipientPlanning)
 		if err != nil {
 			return err
-		}
-		if routeResolved {
-			replayAdmission = runfork.RunForkReplayResumeAdmissionWithSelectedRouteResolution(replayAdmission)
 		}
 		if blockers := runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, replayAdmission, nil); len(blockers) > 0 {
 			blocked := runfork.RunForkMaterialization{
@@ -230,18 +227,8 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			}
 			existing.DataPins = pins
 			existing.MaterializedFanOutCount = len(plan.FanOutObligations) - countRunForkSourceDeploymentFeeds(plan) + len(pins)
-			if routeResolved {
-				if err := validateRunForkSelectedContractRouteRecoveryAtActivation(txctx, tx, routeRecovery); err != nil {
-					return err
-				}
-			} else {
-				var count int
-				if err := tx.QueryRowContext(txctx, `SELECT COUNT(*) FROM run_fork_selected_contract_route_recoveries WHERE fork_run_id = $1`, forkRunID).Scan(&count); err != nil {
-					return fmt.Errorf("count existing selected-contract route recovery: %w", err)
-				}
-				if count != 0 {
-					return fmt.Errorf("fork materialization %s has unexpected selected-contract route recovery", forkRunID)
-				}
+			if err := validateRunForkSelectedContractRouteRecoveryAtActivation(txctx, tx, routeRecovery); err != nil {
+				return err
 			}
 			existing.ExecutionReady = false
 			existing.ReplayResumeAdmission = replayAdmission
@@ -326,10 +313,8 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 				return fmt.Errorf("new fork materialization encountered an already-bound operation")
 			}
 		}
-		if routeResolved {
-			if err := insertRunForkSelectedContractRouteRecovery(txctx, tx, routeRecovery); err != nil {
-				return err
-			}
+		if err := insertRunForkSelectedContractRouteRecovery(txctx, tx, routeRecovery); err != nil {
+			return err
 		}
 		materialization = runfork.RunForkMaterialization{
 			SourceRunID: plan.SourceRunID, ForkRunID: forkRunID, ForkRunStatus: runfork.RunForkMaterializedStatus,

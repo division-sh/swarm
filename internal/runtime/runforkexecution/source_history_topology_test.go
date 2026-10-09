@@ -8,9 +8,7 @@ import (
 
 func TestLocalFrontierProofCannotOverrideUnresolvedHistoricalTopology(t *testing.T) {
 	f := newRecipientModelEqualityValidatorFixture(t)
-	f.routeAdmission.SourceRouteFactsPresent = true
 	f.routeAdmission.UnsupportedBlockers = append(f.routeAdmission.UnsupportedBlockers,
-		runfork.RunForkUnsupportedBlocker{Code: runfork.RunForkBlockerFlowRouteHistoryUnproven},
 		runfork.RunForkUnsupportedBlocker{Code: runfork.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven},
 	)
 	for _, instances := range [][]string{f.routeAdmission.DynamicFlowInstances, nil} {
@@ -22,10 +20,8 @@ func TestLocalFrontierProofCannotOverrideUnresolvedHistoricalTopology(t *testing
 		if topology.DynamicTopologySupported || topology.DynamicTopologyDisposition != runfork.RunForkSelectedContractDispositionFailClosed {
 			t.Fatalf("local frontier overrode historical refusal: %+v", topology)
 		}
-		for _, code := range []string{runfork.RunForkBlockerFlowRouteHistoryUnproven, runfork.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven} {
-			if !unsupportedBlockerHas(topology.UnsupportedBlockers, code) {
-				t.Fatalf("topology lost historical blocker %s: %+v", code, topology)
-			}
+		if !unsupportedBlockerHas(topology.UnsupportedBlockers, runfork.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven) {
+			t.Fatalf("topology lost historical receiver-proof blocker: %+v", topology)
 		}
 		model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{Admission: f.frontier, RouteAdmission: f.routeAdmission, RouteTopology: topology})
 		if err != nil {

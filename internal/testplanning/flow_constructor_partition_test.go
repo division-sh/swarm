@@ -69,7 +69,7 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 			"TestOrdinaryHandlerRequiresCanonicalConstructionBothStores",
 			"TestOrdinaryWorkflowMutationCannotConstructOrRepairBothStores",
 		},
-		"store-runtime-full-03": {"TestGenericConstructedGateForkPreservesRouteHistoryRefusalBothStores"},
+		"store-runtime-full-03": {"TestGenericConstructedGateForkUsesFixedSnapshotBothStores"},
 		"store-runtime-full-05": {"TestReceiverConfigActivationRaceAndRollbackBothStores"},
 		"store-runtime-full-06": {
 			"TestSelectedRunTargetOwnersUseConstructedHeadersBothStores",

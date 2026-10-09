@@ -229,7 +229,6 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	}
 	for _, code := range []string{
 		"delivery_history_unproven",
-		runfork.RunForkBlockerFlowRouteHistoryUnproven,
 	} {
 		if !blockers[code] {
 			t.Fatalf("missing blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
@@ -278,9 +277,6 @@ func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *te
 	}
 	if !plan.ReplayResumeAdmission.DeliveryEventReplayReady || !plan.ReplayResumeAdmission.ReplayResumeFactsPresent || !plan.ReplayResumeAdmission.BoundedReplaySupported {
 		t.Fatalf("replay flags = %#v, want delivery-event replay ready and supported", plan.ReplayResumeAdmission)
-	}
-	if plan.RouteHistory.State != runfork.RunForkRouteHistoryNotApplicable {
-		t.Fatalf("route history = %#v, want %s", plan.RouteHistory, runfork.RunForkRouteHistoryNotApplicable)
 	}
 	for _, disposition := range plan.ReplayResumeAdmission.Dispositions {
 		if disposition.Fact == runfork.RunForkReplayResumeFactDeliveryPendingHistory && disposition.Disposition == runfork.RunForkReplayResumeDispositionForkReplay {
@@ -432,6 +428,7 @@ func TestRunForkPlanner_SystemDeliveryRowsAreNotCanonicalEventDeliveries(t *test
 	}
 }
 
+// Retain the historical regression identity while removing its obsolete refusal.
 func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentRouteRows(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
@@ -482,14 +479,8 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
-	if plan.ExecutionReady {
-		t.Fatalf("ExecutionReady = true, want route-history blocker; blockers=%#v", plan.UnsupportedBlockers)
-	}
-	if !runForkTestHasBlocker(plan, runfork.RunForkBlockerFlowRouteHistoryUnproven) {
-		t.Fatalf("blockers=%#v, want %s", plan.UnsupportedBlockers, runfork.RunForkBlockerFlowRouteHistoryUnproven)
-	}
-	if plan.RouteHistory.State != runfork.RunForkRouteHistoryUnknownUnversioned {
-		t.Fatalf("route history = %#v, want %s", plan.RouteHistory, runfork.RunForkRouteHistoryUnknownUnversioned)
+	if !plan.ExecutionReady || len(plan.UnsupportedBlockers) != 0 {
+		t.Fatalf("fixed state inherited current route authority: %#v", plan.UnsupportedBlockers)
 	}
 	baseline, err := json.Marshal(plan)
 	if err != nil {
@@ -521,8 +512,8 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 	if plan.ReplayResumeAdmission.Owner != runfork.RunForkReplayResumeAdmissionOwner {
 		t.Fatalf("taxonomy owner = %q, want %q", plan.ReplayResumeAdmission.Owner, runfork.RunForkReplayResumeAdmissionOwner)
 	}
-	if plan.ReplayResumeAdmission.StateOnlyExecutionReady || !plan.ReplayResumeAdmission.ReplayResumeFactsPresent || plan.ReplayResumeAdmission.BoundedReplaySupported {
-		t.Fatalf("taxonomy flags = state_only:%v historical_required:%v bounded_supported:%v, want false/true/false", plan.ReplayResumeAdmission.StateOnlyExecutionReady, plan.ReplayResumeAdmission.ReplayResumeFactsPresent, plan.ReplayResumeAdmission.BoundedReplaySupported)
+	if !plan.ReplayResumeAdmission.StateOnlyExecutionReady || plan.ReplayResumeAdmission.ReplayResumeFactsPresent || plan.ReplayResumeAdmission.BoundedReplaySupported {
+		t.Fatalf("taxonomy flags = state_only:%v historical_required:%v bounded_supported:%v, want true/false/false", plan.ReplayResumeAdmission.StateOnlyExecutionReady, plan.ReplayResumeAdmission.ReplayResumeFactsPresent, plan.ReplayResumeAdmission.BoundedReplaySupported)
 	}
 	if !runForkTestHasDisposition(plan.ReplayResumeAdmission, runfork.RunForkReplayResumeFactEntityStateSnapshot) {
 		t.Fatalf("missing entity-state taxonomy disposition; admission=%#v", plan.ReplayResumeAdmission)
@@ -573,14 +564,14 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
 	if plan.ExecutionReady {
-		t.Fatal("ExecutionReady = true, want false for relevant timer/route facts")
+		t.Fatal("ExecutionReady = true, want false for relevant timer history")
 	}
-	for _, code := range []string{"timer_history_unproven", "flow_route_history_unproven"} {
+	for _, code := range []string{"timer_history_unproven"} {
 		if !runForkTestHasBlocker(plan, code) {
 			t.Fatalf("missing blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
 		}
 	}
-	for _, fact := range []string{runfork.RunForkReplayResumeFactTimerHistory, runfork.RunForkReplayResumeFactRouteHistory} {
+	for _, fact := range []string{runfork.RunForkReplayResumeFactTimerHistory} {
 		if !runForkTestHasDisposition(plan.ReplayResumeAdmission, fact) {
 			t.Fatalf("missing taxonomy disposition for %s; admission=%#v", fact, plan.ReplayResumeAdmission)
 		}

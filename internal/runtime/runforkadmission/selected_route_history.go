@@ -60,12 +60,6 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 		Code:    runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
 		Message: "selected-contract route admission is non-mutating; route persistence, recipient delivery writes, and handler execution remain separately gated",
 	}}
-	if selectedRouteHistoryHasSourceRouteFacts(req.Plan) {
-		blockers = appendRunForkBlocker(blockers, runfork.RunForkUnsupportedBlocker{
-			Code:    runfork.RunForkBlockerFlowRouteHistoryUnproven,
-			Message: "source route rows are current operational state and remain evidence-only until selected route reconstruction is separately approved",
-		})
-	}
 	if incompleteRoutes {
 		blockers = appendRunForkBlocker(blockers, runfork.RunForkUnsupportedBlocker{
 			Code:    runfork.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven,
@@ -83,7 +77,6 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 		NonMutating:                    true,
 		RouteReconstructionSupported:   false,
 		ContractSelection:              selection,
-		SourceRouteFactsPresent:        selectedRouteHistoryHasSourceRouteFacts(req.Plan),
 		SelectedRouteEvents:            routeEvents,
 		DynamicFlowInstances:           dynamicFlowInstances,
 		FrontierAdmissionOwner:         req.FrontierAdmission.Owner,
@@ -95,24 +88,6 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 		InvalidPaths:                   selectedRouteHistoryInvalidPaths(),
 		UnsupportedBlockers:            blockers,
 	}, nil
-}
-
-func selectedRouteHistoryHasSourceRouteFacts(plan runfork.RunForkPlan) bool {
-	if hasUnsupportedBlocker(plan.UnsupportedBlockers, runfork.RunForkBlockerFlowRouteHistoryUnproven) {
-		return true
-	}
-	for _, blocker := range plan.ReplayResumeAdmission.UnsupportedBlockers {
-		if strings.TrimSpace(blocker.Code) == runfork.RunForkBlockerFlowRouteHistoryUnproven {
-			return true
-		}
-	}
-	for _, disposition := range plan.ReplayResumeAdmission.Dispositions {
-		if strings.TrimSpace(disposition.Fact) == runfork.RunForkReplayResumeFactRouteHistory &&
-			strings.TrimSpace(disposition.Disposition) == runfork.RunForkReplayResumeDispositionFailClosedBlocker {
-			return true
-		}
-	}
-	return false
 }
 
 type selectedRouteHistoryEvent struct {

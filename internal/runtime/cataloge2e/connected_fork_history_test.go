@@ -83,7 +83,7 @@ func TestConnectedForkCompletedDynamicHistoryRefusalBothStores(t *testing.T) {
 					SourceRunID: catalogRuntimeRunID, At: frontier, AllowSourceFreeze: true,
 					Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 				})
-				storetest.RequireRunForkReplayResumeBlocker(t, err, runfork.RunForkBlockerFlowRouteHistoryUnproven, runfork.RunForkReplayResumeFactRouteHistory)
+				storetest.RequireRunForkReplayResumeBlocker(t, err, runfork.RunForkBlockerSelectedContractRouteRecoveryUnproven, runfork.RunForkHistoricalReplayFactRoutes)
 				if err.Error() != "selected-contract route resolution requires complete static and dynamic topology proof" {
 					t.Fatalf("different route-history manifestation: %v", err)
 				}

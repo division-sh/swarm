@@ -547,18 +547,32 @@ func TestRunForkActivationContentionFixtureControlBothStores(t *testing.T) {
 	}
 }
 
-func TestGenericConstructedGateForkPreservesRouteHistoryRefusalBothStores(t *testing.T) {
+func TestGenericConstructedGateForkUsesFixedSnapshotBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			f := newForkContentionFixture(t, backend)
 			before := snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")
+			plan := f.plan(t)
+			if !plan.ExecutionReady || !plan.ReplayResumeAdmission.StateOnlyExecutionReady || len(plan.Entities) != 1 {
+				t.Fatalf("constructed gate must consume its fixed snapshot: %+v", plan)
+			}
+			if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")) {
+				t.Fatal("fixed gate planning changed source or child state")
+			}
+			var first runfork.RunForkMaterialization
 			for attempt := 0; attempt < 2; attempt++ {
 				result, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
-				if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerFlowRouteHistoryUnproven) || result.ForkRunID != "" {
-					t.Fatalf("generic flow-owned gate history escaped its replay boundary: %+v %v", result, err)
+				if err != nil || result.ForkRunID == "" {
+					t.Fatalf("fixed gate materialization: %+v %v", result, err)
 				}
-				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")) {
-					t.Fatal("generic gate history refusal changed source or child state")
+				after := snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")
+				if !reflect.DeepEqual(forkContentionRowsForRun(t, before, f.runID), forkContentionRowsForRun(t, after, f.runID)) {
+					t.Fatal("fixed gate materialization changed source state")
+				}
+				if attempt == 0 {
+					first, before = result, after
+				} else if result.ForkRunID != first.ForkRunID || !reflect.DeepEqual(before, after) {
+					t.Fatal("exact fixed gate replay changed durable evidence")
 				}
 			}
 		})

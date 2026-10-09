@@ -110,18 +110,15 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		lineage.ForkPoint = plan.ForkPoint
 		result.ForkPoint = plan.ForkPoint
 		result.ReplayResumeAdmission = runfork.RunForkSelectedContractReplayResumeAdmission(plan)
-		expectedRouteRecovery, routeResolved, err := prepareRunForkSelectedContractRouteResolution(
+		expectedRouteRecovery, err := prepareRunForkSelectedContractRouteResolution(
 			plan, lineage.ForkRunID, binding.ContractSelection,
 			req.FrontierAdmission, req.RouteTopology, req.RecipientPlanning,
 		)
 		if err != nil {
 			return err
 		}
-		if routeResolved {
-			if err := validateRunForkSelectedContractRouteRecoveryAtActivation(txctx, tx, expectedRouteRecovery); err != nil {
-				return err
-			}
-			result.ReplayResumeAdmission = runfork.RunForkReplayResumeAdmissionWithSelectedRouteResolution(result.ReplayResumeAdmission)
+		if err := validateRunForkSelectedContractRouteRecoveryAtActivation(txctx, tx, expectedRouteRecovery); err != nil {
+			return err
 		}
 		if blockers := runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, result.ReplayResumeAdmission, req.AllowedSourceEventIDs); len(blockers) > 0 {
 			result.UnsupportedBlockers = blockers

@@ -30,7 +30,6 @@ type runForkAdmissionEvidence struct {
 	Pending                 []runfork.RunForkPendingWork
 	RelevantTimer           bool
 	RelevantRoute           bool
-	RouteHistory            runfork.RunForkRouteHistoryProjection
 	ActiveSession           bool
 	ActiveConversationAudit bool
 	ActiveTurn              bool
@@ -220,7 +219,6 @@ func planRunForkSnapshot(
 		return runfork.RunForkPlan{}, err
 	}
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmission(evidence)
-	plan.RouteHistory = evidence.RouteHistory
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmissionWithMaterializedEntitySnapshotMetadata(plan.ReplayResumeAdmission, entitySnapshotMetadataAdmission)
 	plan.UnsupportedBlockers = plan.ReplayResumeAdmission.UnsupportedBlockers
 	plan.UnsupportedBlockerCount = len(plan.UnsupportedBlockers)
