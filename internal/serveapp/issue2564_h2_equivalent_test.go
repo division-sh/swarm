@@ -239,6 +239,7 @@ type issue2564H2Hub struct {
 	Count, C1, C2, Revision     int64
 	History                     []pipeline.WorkflowTransitionRecord
 	Cuts                        map[string]pipeline.WorkflowTransitionRecord
+	CutRevisions                map[string]int64
 }
 
 type issue2564H2Timer struct {
@@ -349,9 +350,9 @@ func issue2564H2BindFixedCuts(ctx context.Context, rt issue2564H2Fixture, run st
 	for id, hub := range snapshot.Hubs {
 		byEntity[hub.Entity] = id
 		hub.Cuts = map[string]pipeline.WorkflowTransitionRecord{}
+		hub.CutRevisions = map[string]int64{}
 		snapshot.Hubs[id] = hub
 	}
-	checked := map[string]bool{}
 	for _, row := range table.Rows {
 		var values []any
 		decoder := json.NewDecoder(strings.NewReader(row))
@@ -405,31 +406,16 @@ func issue2564H2BindFixedCuts(ctx context.Context, rt issue2564H2Fixture, run st
 		if previous, found := hub.Cuts[record.TriggerEventID]; found && !reflect.DeepEqual(previous, record) {
 			return fmt.Errorf("H2 immutable cuts disagree for occurrence %s", record.TriggerEventID)
 		}
-		// Exercise canonical reconstruction at an actual fixed metadata revision
-		// for each hub, including after the live source has progressed.
-		if !checked[id] {
+		if _, found := hub.CutRevisions[record.TriggerEventID]; !found {
 			revision, ok := values[columns["revision"]].(json.Number)
 			if !ok {
 				return fmt.Errorf("H2 fixed metadata revision is missing")
 			}
 			cut, err := revision.Int64()
-			if err != nil {
-				return err
+			if err != nil || cut <= 0 {
+				return fmt.Errorf("H2 fixed metadata revision is invalid: %v", err)
 			}
-			historical, err := storetest.ReadReceiverHistoricalEntityState(ctx, rt.selected, owner, entity, cut)
-			if err != nil {
-				return err
-			}
-			var projected struct {
-				History []pipeline.WorkflowTransitionRecord `json:"transition_history"`
-			}
-			if historical.MaterializationMetadata == nil {
-				return fmt.Errorf("H2 canonical cut omitted the construction header")
-			}
-			if err := json.Unmarshal(historical.MaterializationMetadata.FlowConfig, &projected); err != nil || !reflect.DeepEqual(header.History, projected.History) {
-				return fmt.Errorf("H2 canonical cut changed exact transition evidence: %v", err)
-			}
-			checked[id] = true
+			hub.CutRevisions[record.TriggerEventID] = cut
 		}
 		hub.Cuts[record.TriggerEventID] = record
 		snapshot.Hubs[id] = hub
@@ -612,6 +598,23 @@ func TestIssue2564H2FixedCutTimerPrefixBothStores(t *testing.T) {
 			}
 			if len(before.Events) < 12 {
 				t.Fatal("Q6 H2 proof never reached two exact transitions per hub")
+			}
+			// Reconstruct explicit recorded cuts once, not in the polling loop.
+			// The pressure journey's repeated snapshots bind immutable copies;
+			// canonical historical execution has this separate named proof.
+			for _, hub := range before.Hubs {
+				for eventID, revision := range hub.CutRevisions {
+					owner := flowidentity.RunScopedFlowInstance{RunID: seed.RunID, Route: flowidentity.StoredRoute("hub", flowidentity.LogicalInstanceID(hub.Instance), hub.Instance)}
+					historical, err := storetest.ReadReceiverHistoricalEntityState(t.Context(), rt.selected, owner, hub.Entity, revision)
+					if err != nil || historical.MaterializationMetadata == nil {
+						t.Fatalf("H2 canonical cut omitted construction: %v", err)
+					}
+					history := decodeLifecycleTransitionHistory(t, historical.MaterializationMetadata.FlowConfig)
+					if len(history) != 1 || !reflect.DeepEqual(history[0], hub.Cuts[eventID]) {
+						t.Fatal("H2 canonical cut changed exact transition evidence")
+					}
+					break
+				}
 			}
 			after := issue2564H2WaitAccounting(t, rt, seed.RunID, false, keys)
 			for id, hub := range before.Hubs {
