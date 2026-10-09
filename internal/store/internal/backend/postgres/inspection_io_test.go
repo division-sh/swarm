@@ -3,37 +3,168 @@ package postgres
 import (
 	"context"
 	"errors"
+	"net"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/lib/pq"
 )
 
 func TestInspectionSemanticRefusalDoesNotFabricateTransportFailure(t *testing.T) {
-	dsn, _, _ := testutil.StartEmptyPostgres(t)
-	cfg, err := pq.NewConfig(dsn)
-	if err != nil {
-		t.Fatal(err)
+	for _, refusal := range []error{
+		&runlifecycle.RunNotFoundError{RunID: "00000000-0000-0000-0000-000000000001"},
+		errors.New("semantic contract refusal"),
+	} {
+		t.Run(refusal.Error(), func(t *testing.T) {
+			dsn, _, _ := testutil.StartEmptyPostgres(t)
+			cfg, err := pq.NewConfig(dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := OpenForInspection(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			var firstPID, secondPID int
+			readErr := b.InspectSnapshot(ctx, func(snapshot context.Context) error {
+				var value int
+				if err := b.QueryRowContext(snapshot, `SELECT 1, pg_backend_pid()`).Scan(&value, &firstPID); err != nil {
+					return err
+				}
+				return refusal
+			})
+			nextErr := b.InspectSnapshot(ctx, func(snapshot context.Context) error {
+				var value int
+				if err := b.QueryRowContext(snapshot, `SELECT 2, pg_backend_pid()`).Scan(&value, &secondPID); err != nil {
+					return err
+				}
+				if value != 2 || firstPID != secondPID {
+					return errors.New("healthy refusal replaced its native session")
+				}
+				return nil
+			})
+			closeErr := b.Close()
+			if !errors.Is(readErr, refusal) || !failures.OnlyBranches(readErr, func(branch error) bool { return errors.Is(refusal, branch) }) || nextErr != nil || closeErr != nil {
+				t.Fatalf("healthy semantic refusal fabricated a transport error: read=%v next=%v close=%v", readErr, nextErr, closeErr)
+			}
+		})
 	}
-	b, err := OpenForInspection(cfg)
-	if err != nil {
-		t.Fatal(err)
+}
+
+func TestInspectionNativeFailureDisposesReadPool(t *testing.T) {
+	for _, boundary := range []string{"query_read", "query_write", "rollback_read", "rollback_write", "cleanup_bind", "close"} {
+		t.Run(boundary, func(t *testing.T) {
+			dsn, _, _ := testutil.StartEmptyPostgres(t)
+			cfg, err := pq.NewConfig(dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := OpenForInspection(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			witness := errors.New("native inspection " + boundary)
+			b.inspectionDialer.dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+				conn, err := (&net.Dialer{}).DialContext(ctx, network, address)
+				if err != nil {
+					return nil, err
+				}
+				return &possessionFailureSocket{Conn: conn, boundary: boundary, witness: witness}, nil
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			semantic := errors.New("semantic observation refused")
+			err = b.InspectSnapshot(ctx, func(snapshot context.Context) error {
+				var value int
+				if err := b.QueryRowContext(snapshot, `SELECT 1`).Scan(&value); err != nil {
+					return errors.Join(semantic, err)
+				}
+				if boundary == "rollback_read" || boundary == "rollback_write" {
+					return semantic
+				}
+				return nil
+			})
+			if boundary == "close" {
+				err = errors.Join(err, b.Close())
+			}
+			if !errors.Is(err, witness) {
+				t.Fatalf("native cause lost: %v", err)
+			}
+			if (boundary == "query_read" || boundary == "query_write" || boundary == "rollback_read" || boundary == "rollback_write") && !errors.Is(err, semantic) {
+				t.Fatalf("mixed semantic cause lost: %v", err)
+			}
+			if stats := b.db.Stats(); stats.OpenConnections != 0 || stats.InUse != 0 || stats.Idle != 0 {
+				t.Fatalf("unhealthy read pool remained usable: %+v", stats)
+			}
+			for _, socket := range b.inspectionDialer.sockets {
+				socket.mu.Lock()
+				closed := socket.closed
+				socket.mu.Unlock()
+				if !closed {
+					t.Fatal("native disposal was not joined")
+				}
+			}
+			closeErr := b.Close()
+			if boundary == "close" {
+				if !errors.Is(closeErr, witness) {
+					t.Fatalf("real close failure was hidden: %v", closeErr)
+				}
+			} else if closeErr != nil {
+				t.Fatalf("disposed pool close fabricated another failure: %v", closeErr)
+			}
+		})
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	refusal := &runlifecycle.RunNotFoundError{RunID: "00000000-0000-0000-0000-000000000001"}
-	readErr := b.InspectSnapshot(ctx, func(snapshot context.Context) error {
-		var value int
-		if err := b.QueryRowContext(snapshot, `SELECT 1`).Scan(&value); err != nil {
-			return err
-		}
-		return refusal
-	})
-	closeErr := b.Close()
-	if !errors.Is(readErr, refusal) || closeErr != nil {
-		t.Fatalf("healthy semantic refusal fabricated a transport error: read=%v close=%v", readErr, closeErr)
+}
+
+func TestInspectionRejectsOverlapAndPreservesCleanupDeadline(t *testing.T) {
+	for _, expiry := range []bool{false, true} {
+		t.Run(strconv.FormatBool(expiry), func(t *testing.T) {
+			dsn, _, _ := testutil.StartEmptyPostgres(t)
+			cfg, err := pq.NewConfig(dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := OpenForInspection(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := b.Ping(ctx); err != nil {
+				t.Fatal(err)
+			}
+			semantic := errors.New("semantic refusal")
+			err = b.withInspectionIO(ctx, func(_ context.Context, settle func() error) error {
+				if err := b.Ping(ctx); err == nil {
+					t.Fatal("overlapping inspection entered its native phase")
+				}
+				if err := settle(); err != nil {
+					return err
+				}
+				if expiry {
+					b.inspectionDialer.mu.Lock()
+					cleanup := b.inspectionDialer.ctx
+					b.inspectionDialer.mu.Unlock()
+					<-cleanup.Done()
+				}
+				return semantic
+			})
+			if !errors.Is(err, semantic) || errors.Is(err, context.DeadlineExceeded) != expiry {
+				t.Fatalf("cleanup disposition lost: %v", err)
+			}
+			if expiry && b.db.Stats().OpenConnections != 0 {
+				t.Fatal("cleanup deadline left an idle native connection")
+			}
+			if err := b.Close(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
