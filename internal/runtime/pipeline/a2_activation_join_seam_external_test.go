@@ -393,7 +393,7 @@ func a2ActivationJoinManagerFactory(t *testing.T, ctx context.Context, selected 
 			BaseContext: ctx, SemanticSource: source, SourceArtifactFact: authorActivityTestSourceArtifactFact,
 			WorkflowInstances: pc, LifecycleStore: grant, DeliveryStore: selected.events,
 			WorkOwner: pipelineExternalTestWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution(), ExecutionPosture: executionposture.Live,
-			PersistenceRoles: manager.PersistenceRoles{FlowActivation: bus, AgentRoutes: bus, RouteInstaller: bus, RouteVerifier: bus, RouteRestorer: bus, CreationPublisher: bus},
+			PersistenceRoles: manager.PersistenceRoles{FlowActivation: bus, AgentRoutes: bus, CreationPublisher: bus},
 		}, selected.events.(manager.ManagerPersistence))
 		if err := am.InstallStartupTopology(grant, admission, set); err != nil {
 			t.Fatal(err)

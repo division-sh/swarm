@@ -5,16 +5,15 @@ import (
 	"errors"
 	"fmt"
 
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 // AdoptSelectedFlowActivation transfers a committed selected attempt from the
 // outer preparation owner to the Manager that will receive its deliveries.
-func (am *AgentManager) AdoptSelectedFlowActivation(identity runtimeflowidentity.RunScopedFlowInstance, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, publication runtimebus.FlowRoutePublicationHandle, timersProjected bool) error {
-	if am == nil || am.lifecycle == nil || publication == nil {
-		return errors.New("selected flow activation requires a manager and exact route publication")
+func (am *AgentManager) AdoptSelectedFlowActivation(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, timersProjected bool) error {
+	if am == nil || am.lifecycle == nil {
+		return errors.New("selected flow activation requires its exact Manager owner")
 	}
 	if err := attempt.Validate(); err != nil {
 		return err
@@ -39,6 +38,12 @@ func (am *AgentManager) AdoptSelectedFlowActivation(identity runtimeflowidentity
 	if !attempt.ProcessBinding().Equal(binding) {
 		return errors.New("selected flow activation differs from Manager generation grant")
 	}
+	if am.workflowInstances == nil {
+		return errors.New("selected flow activation requires its durable attempt owner")
+	}
+	if err := am.workflowInstances.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt); err != nil {
+		return err
+	}
 	key := dynamicFlowRuntimeReadinessKey{runID: attempt.RunID(), instancePath: attempt.InstancePath()}
 	am.dynamicFlowReadinessMu.Lock()
 	defer am.dynamicFlowReadinessMu.Unlock()
@@ -49,7 +54,7 @@ func (am *AgentManager) AdoptSelectedFlowActivation(identity runtimeflowidentity
 		return errors.New("selected flow activation already has a Manager owner")
 	}
 	am.dynamicFlowActiveAttempts[key] = &dynamicFlowActiveAttempt{
-		receipt: attempt, identity: identity, publication: publication, timersProjected: timersProjected, complete: true,
+		receipt: attempt, identity: identity, timersProjected: timersProjected, complete: true,
 	}
 	return nil
 }
@@ -133,7 +138,7 @@ func (am *AgentManager) beginDynamicFlowActiveAttempt(
 		if err != nil {
 			return nil, false, err
 		}
-		retirement := &preparedFlowTopologyRetirement{manager: am, lease: lease, attempt: previous.receipt}
+		retirement := &preparedFlowTopologyRetirement{manager: am, lease: lease}
 		if err := am.settleDynamicFlowActiveAttempt(ctx, key, previous, retirement, disposition); err != nil {
 			return nil, false, fmt.Errorf("settle flow activation predecessor: %w", err)
 		}
@@ -263,8 +268,6 @@ func (am *AgentManager) settleDynamicFlowActiveAttempt(
 	}
 	active.retiring = true
 	active.retirementKind = disposition
-	retirement.publication = active.publication
-	retirement.attempt = active.receipt
 	previousSet := active.retirementSet
 	locallyRetired := active.locallyRetired
 	timersRetired := active.timersRetired
@@ -305,9 +308,6 @@ func (am *AgentManager) settleDynamicFlowActiveAttempt(
 		} else {
 			if disposition != flowActivationProcessRetirement && disposition != flowActivationFailedRetirement {
 				return errors.New("failed terminal flow retirement requires process replacement")
-			}
-			if err := am.retireFlowRouteAttempt(identity, active.receipt, active.publication); err != nil {
-				return fmt.Errorf("retry exact flow route retirement: %w", err)
 			}
 			if err := am.lifecycle.retryProcessFlowRetirement(previousSet); err != nil {
 				return fmt.Errorf("retry exact flow agent retirement: %w", err)
@@ -450,9 +450,6 @@ func (am *AgentManager) settleDynamicFlowAttemptAfterJoin(ctx context.Context, k
 		}
 	}()
 	if !active.locallyRetired {
-		if err := am.retireFlowRouteAttempt(active.identity, active.receipt, active.publication); err != nil {
-			return fmt.Errorf("retire flow route publication %s: %w", key.instancePath, err)
-		}
 		if active.retirementSet != nil {
 			if err := am.lifecycle.retryProcessFlowRetirement(active.retirementSet); err != nil {
 				return fmt.Errorf("retry flow agent retirement %s: %w", key.instancePath, err)

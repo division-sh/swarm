@@ -18961,8 +18961,12 @@ platform_tables:
         root scope '.', never the run UUID as a semantic scope. Old plan shapes are unsupported.
         The five forward phases are planned -> agents_registered -> route_installed ->
         timers_armed -> ready. The exact selected-store attempt owns each conditional phase
-        transition. Before advancing, the corresponding declared-agent, route or initial-timer
-        owner reconciles and verifies its complete installed resource set. Partial construction,
+        transition. Before advancing, the corresponding declared-agent or initial-timer
+        owner reconciles and verifies its complete installed resource set. The route_installed
+        label is retained attachment progress, not a mutable route installation: routing consumes
+        immutable compiled declarations and the selected-store instance index, and the exact
+        activation owner verifies the current attempt. No process route publication or persisted
+        per-instance route mirror grants readiness. Partial construction,
         incomplete resource installation, terminal/ineligible lifecycle, retired generation or a
         stale attempt cannot advance. Same-attempt acknowledged progress is idempotent. An exact
         attempt's timer acquisition is synchronous: scheduler admission or projection failure
@@ -18973,7 +18977,7 @@ platform_tables:
         after its predecessor resources have joined and abandonment is acknowledged.
         An exact retained attempt consumes its current phase to skip already completed installation
         and its acknowledged phase writes; ordinary ready replay does not issue backward progress
-        mutations. Callbacks still verify the current attempt, installed agent and route owners and do not re-arm initial
+        mutations. Callbacks still verify the current attempt and installed agent owners and do not re-arm initial
         timers. Admission of a new attempt resets installation to planned regardless of the
         predecessor phase. Historical ready evidence never authorizes a new process publication
         or successor attempt.
@@ -19001,11 +19005,11 @@ platform_tables:
         revive an old observation. Changing an unbound or settled plan advances the ordinal and
         starts a new unbound planned attempt; ordinal exhaustion fails closed.
         Within one process, whole-set fencing, accepted-work settlement, dependency release,
-        exact route/agent/timer cleanup and owned retirement joins finish before the selected store
+        exact agent/timer cleanup and owned retirement joins finish before the selected store
         acknowledges retired or aborted. Incomplete cleanup or unknown acknowledgment retains
         the exact predecessor owner and disposition; concurrent retry cannot create multiple
         successors. A new attempt then receives the next ordinal and planned phase even when
-        generation and plan are unchanged. It never inherits removed agents, routes or timers.
+        generation and plan are unchanged. It never inherits removed agents or timers.
         Orderly retirement and failed abandonment are mutually exclusive idempotent settlements.
         Neither may mutate a successor. Different-process reconstruction requires verified
         possession takeover through the existing process-generation authority, not a caller claim.

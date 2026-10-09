@@ -154,6 +154,7 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 	})
 	releaseRetry := sync.OnceFunc(func() { close(workflow.retryRelease) })
 	t.Cleanup(releaseRetry)
+	f.constructKeylessRoot(t)
 	binding, err := f.grant.ProcessExecutionBinding()
 	if err != nil {
 		t.Fatal(err)

@@ -509,9 +509,6 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			AgentRoutes:    bus,
 			FlowActivation: sqliteFlowActivationCommitter{store: sqliteStore},
-			RouteInstaller: bus,
-			RouteVerifier:  bus,
-			RouteRestorer:  bus,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
@@ -604,9 +601,6 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			AgentRoutes:    bus,
 			FlowActivation: sqliteFlowActivationCommitter{store: sqliteStore},
-			RouteInstaller: bus,
-			RouteVerifier:  bus,
-			RouteRestorer:  bus,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}

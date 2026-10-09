@@ -122,13 +122,17 @@ func TestFlowConstructorAcknowledgedFailureRetainsExactIdentityBothStores(t *tes
 func assertConstructorRows(t *testing.T, f receiverConfigActivationFixture, backend string, want int) {
 	t.Helper()
 	for _, table := range []string{"entity_state", "flow_instances", "workflow_instance_initial_materializations", "flow_instance_runtime_readiness"} {
+		wantRows := want
+		if f.rootConstructed && table != "entity_state" {
+			wantRows++
+		}
 		query := "SELECT COUNT(*) FROM " + table + " WHERE run_id = ?"
 		if backend == "postgres" {
 			query = "SELECT COUNT(*) FROM " + table + " WHERE run_id = $1::uuid"
 		}
 		var count int
-		if err := f.db.QueryRowContext(f.ctx, query, correlation.RunIDFromContext(f.ctx)).Scan(&count); err != nil || count != want {
-			t.Fatalf("constructor %s rows=%d err=%v, want %d", table, count, err, want)
+		if err := f.db.QueryRowContext(f.ctx, query, correlation.RunIDFromContext(f.ctx)).Scan(&count); err != nil || count != wantRows {
+			t.Fatalf("constructor %s rows=%d err=%v, want %d", table, count, err, wantRows)
 		}
 	}
 }

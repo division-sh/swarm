@@ -198,7 +198,7 @@ func (f receiverConfigActivationFixture) restartedReceiverConfigManager(t *testi
 		DeliveryStore: f.store, WorkOwner: storeTestWorkOwner(t),
 		PersistenceRoles: manager.PersistenceRoles{
 			AgentRoutes: f.bus, FlowActivation: agentFixtureFlowActivationCommitter{store: f.store},
-			RouteInstaller: f.bus, RouteVerifier: f.bus, RouteRestorer: f.bus, CreationPublisher: publisher,
+			CreationPublisher: publisher,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}
 	if len(workflowOverride) != 0 {

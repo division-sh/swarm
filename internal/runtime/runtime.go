@@ -1443,9 +1443,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			roles := runtimeDeps.ManagerPersistenceRoles
 			roles.AgentRoutes = rt.Bus
 			roles.FlowActivation = rt.Bus
-			roles.RouteInstaller = rt.Bus
-			roles.RouteVerifier = rt.Bus
-			roles.RouteRestorer = rt.Bus
 			roles.CreationPublisher = rt.Bus
 			roles.DeliveryRuntime = rt.Bus
 			return roles

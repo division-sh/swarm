@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -37,7 +36,6 @@ type dynamicFlowActiveAttempt struct {
 	receipt                  runtimepipeline.DynamicFlowRuntimeActivationAttempt
 	planHash                 string
 	identity                 runtimeflowidentity.RunScopedFlowInstance
-	publication              runtimebus.FlowRoutePublicationHandle
 	retiring                 bool
 	retirementSet            *terminalFlowRetirement
 	retirementKind           flowActivationRetirementDisposition
