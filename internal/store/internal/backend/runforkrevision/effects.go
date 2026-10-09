@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/counterprojection"
+
 	"github.com/google/uuid"
 )
 
@@ -61,7 +63,14 @@ func ValidFamily(family Family) bool {
 // mutation. Writers add effects after deriving the authoritative run identity;
 // the outer transaction finalizes the aggregate exactly once.
 type Effects struct {
-	byRun map[string]map[Family]*familySelection
+	byRun              map[string]map[Family]*familySelection
+	pendingEventCounts []counterprojection.Delta
+}
+
+// SetPendingEventCounts transfers finalization data, never transaction authority.
+// Only the outer mutation attempt supplies its remaining physical row deltas.
+func (e *Effects) SetPendingEventCounts(deltas []counterprojection.Delta) {
+	e.pendingEventCounts = append([]counterprojection.Delta(nil), deltas...)
 }
 
 type familySelection struct {
@@ -92,6 +101,7 @@ func (e *Effects) AttemptReset() func() {
 	return func() {
 		if e != nil {
 			e.byRun = cloneSelections(&Effects{byRun: baseline})
+			e.pendingEventCounts = nil
 		}
 	}
 }

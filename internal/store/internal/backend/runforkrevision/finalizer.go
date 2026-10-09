@@ -31,10 +31,14 @@ type ledgerAdapter interface {
 	insertFacts(context.Context, string, int64, []revisionFactInsert) error
 }
 
-func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects, deltas []counterprojection.Delta) (map[string]Result, error) {
+func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects) (map[string]Result, error) {
 	phase := transactiontest.BeginRevision(ctx)
 	defer phase.End()
 	changes := effects.normalized()
+	var deltas []counterprojection.Delta
+	if effects != nil {
+		deltas = effects.pendingEventCounts
+	}
 	results := make(map[string]Result, len(changes))
 	if len(changes) == 0 {
 		if len(deltas) != 0 {
@@ -61,6 +65,7 @@ func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects, delt
 	if err := adapter.applyEventCounts(ctx, deltas); err != nil {
 		return nil, err
 	}
+	effects.pendingEventCounts = nil
 	for _, change := range changes {
 		latestByFamily, err := readSelectedLatestFacts(ctx, adapter.projectionQueryer(), change)
 		if err != nil {

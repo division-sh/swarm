@@ -35,7 +35,7 @@ var admittedEventCallsites = map[eventBoundaryCallsite]int{
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "reuseDurableSubscribedEventRouteFacts", name: "AdmitForPersistence"}:                                               1,
 	{path: "internal/runtime/manager/runtime.go", scope: "AgentManager.SendDirective", name: "AdmitForPersistence"}:                                                               1,
 	{path: "internal/store/eventfixture/event.go", scope: "Insert", name: "AdmitForPersistence"}:                                                                                  1,
-	{path: "internal/store/eventfixture/unrevisioned.go", scope: "InsertUnrevisionedChild", name: "AdmitForPersistence"}:                                                          1,
+	{path: "internal/store/eventfixture/unrevisioned.go", scope: "StagedChild", name: "AdmitForPersistence"}:                                                                      1,
 	{path: "internal/store/internal/backend/eventpersistence/inbound_publication.go", scope: "commitInboundPublicationSQL", name: "AdmitForPersistence"}:                          1,
 	{path: "internal/store/internal/backend/runforkpersistence/run_fork_delivery_event_replay.go", scope: "projectRunForkReplayEvent", name: "AdmitForPersistence"}:               1,
 	{path: "internal/store/internal/backend/runforkpersistence/run_fork_delivery_event_replay.go", scope: "admitRunForkReplayEventTargetProjection", name: "AdmitForPersistence"}: 1,
@@ -48,6 +48,8 @@ var admittedEventCallsites = map[eventBoundaryCallsite]int{
 }
 
 var eventRecordImportFiles = map[string]struct{}{
+	"internal/store/eventfixture/unrevisioned.go":                             {},
+	"internal/store/internal/runtimepersistence/test_staged_event_fixture.go": {},
 	// Barrier outcomes load canonical complete records through LoadAdmittedMany.
 	"internal/store/internal/backend/pipelinepersistence/fan_out_barrier_owner.go": {},
 	// Sealed-group readback uses LoadAdmitted before comparing exact member integrity.
@@ -125,7 +127,7 @@ var completeEventReadSQL = regexp.MustCompile(`(?is)\bevent_class\b.*\bFROM\s+ev
 var eventPayloadBytesSQL = regexp.MustCompile(`(?is)\bpayload_bytes\b`)
 var eventPayloadColumnSQL = regexp.MustCompile(`(?i)\bpayload(?:_bytes)?\b`)
 
-const unrevisionedEventFixturePath = "internal/store/eventfixture/unrevisioned.go"
+const unrevisionedEventFixturePath = "internal/store/internal/backend/eventrecord/staged/fixture.go"
 
 var unrevisionedEventFixtureImports = map[string]struct{}{
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord":          {},
@@ -160,7 +162,7 @@ var unrevisionedEventFixtureSQL = map[string]string{
 }
 
 func classifiedUnrevisionedEventFixtureSQL(path, scope, query string) string {
-	if path != unrevisionedEventFixturePath || scope != "InsertUnrevisioned" {
+	if path != unrevisionedEventFixturePath || scope != "Insert" {
 		return ""
 	}
 	for name, allowed := range unrevisionedEventFixtureSQL {
@@ -177,7 +179,7 @@ type unrevisionedEventFixtureCounts struct {
 }
 
 var unrevisionedEventFixtureConsumers = map[eventBoundaryCallsite]int{
-	{path: "internal/store/storetest/event.go", scope: "InsertUnrevisionedChildEventRecord", name: "InsertUnrevisionedChild"}: 1,
+	{path: "internal/store/internal/runtimepersistence/test_staged_event_fixture.go", scope: "InsertStagedChildEventForTest", name: "StagedChild"}: 1,
 }
 
 func classifiedUnrevisionedEventFixtureConsumer(path, scope, name string) bool {
@@ -267,13 +269,13 @@ func TestEventAdmittedPersistenceBoundaryGuard(t *testing.T) {
 func TestUnrevisionedEventFixtureSQLAllowanceIsExact(t *testing.T) {
 	for name, allowed := range unrevisionedEventFixtureSQL {
 		t.Run(name, func(t *testing.T) {
-			if got := classifiedUnrevisionedEventFixtureSQL(unrevisionedEventFixturePath, "InsertUnrevisioned", allowed); got != name {
+			if got := classifiedUnrevisionedEventFixtureSQL(unrevisionedEventFixturePath, "Insert", allowed); got != name {
 				t.Fatalf("fixture SQL classification = %q, want %q", got, name)
 			}
 			for _, hostile := range []struct{ path, scope, query string }{
-				{"internal/store/eventfixture/sibling.go", "InsertUnrevisioned", allowed},
+				{"internal/store/internal/backend/eventrecord/staged/sibling.go", "Insert", allowed},
 				{unrevisionedEventFixturePath, "siblingFixture", allowed},
-				{unrevisionedEventFixturePath, "InsertUnrevisioned", allowed + " RETURNING event_id"},
+				{unrevisionedEventFixturePath, "Insert", allowed + " RETURNING event_id"},
 			} {
 				if got := classifiedUnrevisionedEventFixtureSQL(hostile.path, hostile.scope, hostile.query); got != "" {
 					t.Fatalf("hostile fixture SQL classified as %q: %#v", got, hostile)
@@ -316,7 +318,7 @@ func TestUnrevisionedEventFixtureHasOnlyStoretestConsumers(t *testing.T) {
 					return true
 				}
 				selector, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok || !eventBoundaryPackageIdent(selector.X, aliases) || (selector.Sel.Name != "InsertUnrevisioned" && selector.Sel.Name != "InsertUnrevisionedChild") {
+				if !ok || !eventBoundaryPackageIdent(selector.X, aliases) || selector.Sel.Name != "StagedChild" {
 					return true
 				}
 				scope := eventBoundaryEnclosingScope(file, call.Pos())
@@ -594,14 +596,14 @@ func checkEventBoundaryFile(t *testing.T, path, relative string, gotAdmission ma
 		if !strings.HasPrefix(importPath, "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord") {
 			continue
 		}
-		if strings.HasPrefix(relative, "internal/store/internal/backend/eventrecord/") {
-			continue
-		}
 		if relative == unrevisionedEventFixturePath {
 			if _, ok := unrevisionedEventFixtureImports[importPath]; ok {
 				fixture.imports[importPath]++
 				continue
 			}
+		}
+		if strings.HasPrefix(relative, "internal/store/internal/backend/eventrecord/") {
+			continue
 		}
 		if _, ok := eventRecordImportFiles[relative]; !ok {
 			t.Fatalf("%s imports private event records outside the closed store/fixture owner set", relative)

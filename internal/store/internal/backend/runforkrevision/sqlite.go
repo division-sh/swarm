@@ -15,11 +15,11 @@ type sqliteAdapter struct {
 	nativeTx *sql.Tx
 }
 
-func FinalizeSQLite(ctx context.Context, tx *sql.Tx, effects *Effects, deltas []counterprojection.Delta) (map[string]Result, error) {
+func FinalizeSQLite(ctx context.Context, tx *sql.Tx, effects *Effects) (map[string]Result, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("run fork revision finalization requires an existing SQLite transaction")
 	}
-	return finalize(ctx, &sqliteAdapter{tx: revisionQueryOwner(ctx, tx), nativeTx: tx}, effects, deltas)
+	return finalize(ctx, &sqliteAdapter{tx: revisionQueryOwner(ctx, tx), nativeTx: tx}, effects)
 }
 
 func (a *sqliteAdapter) applyEventCounts(ctx context.Context, deltas []counterprojection.Delta) error {

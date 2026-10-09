@@ -33,7 +33,7 @@ func Capture(ctx context.Context, tx *sql.Tx, runID string, families ...Family) 
 	if err := effects.Add(runID, families...); err != nil {
 		return 0, err
 	}
-	results, err := private.FinalizePostgres(ctx, tx, effects, nil)
+	results, err := private.FinalizePostgres(ctx, tx, effects)
 	if err != nil {
 		return 0, err
 	}
@@ -45,7 +45,7 @@ func CaptureSQLite(ctx context.Context, tx *sql.Tx, runID string, families ...Fa
 	if err := effects.Add(runID, families...); err != nil {
 		return 0, err
 	}
-	results, err := private.FinalizeSQLite(ctx, tx, effects, nil)
+	results, err := private.FinalizeSQLite(ctx, tx, effects)
 	if err != nil {
 		return 0, err
 	}
