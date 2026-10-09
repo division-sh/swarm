@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"sync"
@@ -84,5 +85,75 @@ func TestPostgresCanceledReadJoinsClaimedRollbackDisposition(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestPostgresCanceledReadJoinsClaimedDriverClose(t *testing.T) {
+	for _, closeFinished := range []bool{false, true} {
+		t.Run(fmt.Sprintf("close_finished=%t", closeFinished), func(t *testing.T) {
+			b, probe := newExitProbe(t)
+			probe.rollbackEntered, probe.rollbackRelease = make(chan struct{}), make(chan struct{})
+			probe.closeEntered, probe.closeRelease = make(chan struct{}), make(chan struct{})
+			probe.rollbackFailure = driver.ErrBadConn
+			var rollbackOnce, closeOnce sync.Once
+			releaseRollback := func() { rollbackOnce.Do(func() { close(probe.rollbackRelease) }) }
+			releaseClose := func() { closeOnce.Do(func() { close(probe.closeRelease) }) }
+			defer releaseRollback()
+			defer releaseClose()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			callbackRelease := make(chan struct{})
+			var callbackOnce sync.Once
+			releaseCallback := func() { callbackOnce.Do(func() { close(callbackRelease) }) }
+			defer releaseCallback()
+			callbackReturned := make(chan struct{})
+			done := make(chan error, 1)
+			go func() {
+				done <- b.RunReadTransaction(ctx, func(readCtx context.Context, tx *sql.Tx) error {
+					var value int
+					if err := tx.QueryRowContext(readCtx, "SELECT 1").Scan(&value); err != nil {
+						return err
+					}
+					cancel()
+					<-callbackRelease
+					close(callbackReturned)
+					return nil
+				})
+			}()
+			select {
+			case <-probe.rollbackEntered:
+			case <-time.After(3 * time.Second):
+				t.Fatal("cancellation did not claim rollback")
+			}
+			releaseRollback()
+			select {
+			case <-probe.closeEntered:
+			case <-time.After(3 * time.Second):
+				t.Fatal("bad rollback did not claim driver disposal")
+			}
+			if closeFinished {
+				releaseClose()
+				<-probe.closedSignal
+			}
+			releaseCallback()
+			<-callbackReturned
+			releaseClose()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) || !errors.Is(err, driver.ErrBadConn) {
+					t.Fatalf("claimed driver disposal lost its actual outcome: %v", err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("read cleanup did not join claimed disposal")
+			}
+			if probe.closed.Load() != 1 {
+				t.Fatalf("returned before exact disposal completed: closed=%d", probe.closed.Load())
+			}
+			next, stop := context.WithTimeout(context.Background(), time.Second)
+			defer stop()
+			if err := b.db.PingContext(next); err != nil {
+				t.Fatalf("exact disposal prevents a successor connection: %v", err)
+			}
+		})
 	}
 }

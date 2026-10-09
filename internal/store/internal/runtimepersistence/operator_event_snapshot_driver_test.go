@@ -14,6 +14,7 @@ import (
 type operatorSnapshotProbe struct {
 	mu             sync.Mutex
 	armed          bool
+	readOnlyGate   bool
 	gateKind       string
 	gateOccurrence int
 	seen           map[string]int
@@ -64,8 +65,9 @@ func (c operatorSnapshotConnector) Connect(ctx context.Context) (driver.Conn, er
 
 type operatorSnapshotConn struct {
 	diagnosticSQLConn
-	probe *operatorSnapshotProbe
-	inTx  atomic.Bool
+	probe    *operatorSnapshotProbe
+	inTx     atomic.Bool
+	readOnly atomic.Bool
 }
 
 func (c *operatorSnapshotConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
@@ -74,8 +76,9 @@ func (c *operatorSnapshotConn) BeginTx(ctx context.Context, opts driver.TxOption
 		return nil, err
 	}
 	c.inTx.Store(true)
+	c.readOnly.Store(opts.ReadOnly)
 	c.probe.mu.Lock()
-	observed := c.probe.armed
+	observed := c.probe.armed && (!c.probe.readOnlyGate || opts.ReadOnly)
 	if observed {
 		c.probe.options = append(c.probe.options, opts)
 		c.probe.active++
@@ -92,6 +95,7 @@ type operatorSnapshotTx struct {
 
 func (tx *operatorSnapshotTx) finish() {
 	tx.conn.inTx.Store(false)
+	tx.conn.readOnly.Store(false)
 	if tx.observed {
 		tx.conn.probe.mu.Lock()
 		tx.conn.probe.active--
@@ -135,6 +139,12 @@ func operatorSnapshotQueryKind(query string) string {
 		return "delivery"
 	case strings.Contains(q, "from dead_letters"):
 		return "deadletter"
+	case strings.HasPrefix(q, "select cast(receipt as text) from workflow_publication_stage_receipts"):
+		return "emit-stage"
+	case strings.HasPrefix(q, "select cast(feedback as text) from workflow_publication_stage_receipts"):
+		return "emit-feedback"
+	case strings.Contains(q, "from runtime_agent_turn_lifetimes t"):
+		return "canceled-turn"
 	default:
 		return "other"
 	}
@@ -143,7 +153,7 @@ func operatorSnapshotQueryKind(query string) string {
 func (c *operatorSnapshotConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	p, kind := c.probe, operatorSnapshotQueryKind(query)
 	p.mu.Lock()
-	observed := p.armed
+	observed := p.armed && (!p.readOnlyGate || c.readOnly.Load() || (!c.inTx.Load() && kind == p.gateKind))
 	gate := false
 	var readFailure error
 	var entered, release chan struct{}
@@ -173,7 +183,7 @@ func (c *operatorSnapshotConn) QueryContext(ctx context.Context, query string, a
 func (c *operatorSnapshotConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	q := strings.ToLower(strings.TrimSpace(query))
 	c.probe.mu.Lock()
-	if c.probe.armed && (strings.HasPrefix(q, "insert") || strings.HasPrefix(q, "update") || strings.HasPrefix(q, "delete")) {
+	if c.probe.armed && (!c.probe.readOnlyGate || c.readOnly.Load()) && (strings.HasPrefix(q, "insert") || strings.HasPrefix(q, "update") || strings.HasPrefix(q, "delete")) {
 		c.probe.writes++
 	}
 	c.probe.mu.Unlock()

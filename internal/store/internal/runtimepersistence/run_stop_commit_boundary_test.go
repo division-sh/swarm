@@ -53,7 +53,7 @@ func (c *stopCommitConnector) Connect(ctx context.Context) (driver.Conn, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &stopCommitConn{Conn: conn, owner: c}, nil
+	return &stopCommitConn{diagnosticSQLConn: diagnosticSQLConn{Conn: conn}, owner: c}, nil
 }
 
 func (c *stopCommitConnector) arm(next func(driver.Tx) error) {
@@ -63,7 +63,7 @@ func (c *stopCommitConnector) arm(next func(driver.Tx) error) {
 }
 
 type stopCommitConn struct {
-	driver.Conn
+	diagnosticSQLConn
 	owner *stopCommitConnector
 }
 
@@ -111,7 +111,7 @@ func (tx *stopCommitTx) Commit() error {
 	return tx.Tx.Commit()
 }
 
-func newStopCommitStore(t *testing.T, backend string) (selectedFanOutLifecycleOwner, *sql.DB, *stopCommitConnector) {
+func newStopCommitStore(t *testing.T, backend string, readProbe ...*operatorSnapshotProbe) (selectedFanOutLifecycleOwner, *sql.DB, *stopCommitConnector) {
 	t.Helper()
 	connector := &stopCommitConnector{}
 	if backend == "postgres" {
@@ -123,7 +123,14 @@ func newStopCommitStore(t *testing.T, backend string) (selectedFanOutLifecycleOw
 		connector.dsn = "file:" + path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
 		connector.driver = &sqlite.Driver{}
 	}
-	db := sql.OpenDB(connector)
+	var driverConnector driver.Connector = connector
+	if len(readProbe) > 1 {
+		t.Fatal("one exact read probe is supported")
+	}
+	if len(readProbe) == 1 {
+		driverConnector = operatorSnapshotConnector{Connector: connector, probe: readProbe[0]}
+	}
+	db := sql.OpenDB(driverConnector)
 	db.SetMaxOpenConns(12)
 	t.Cleanup(func() {
 		if err := db.Close(); err != nil {
