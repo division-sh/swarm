@@ -177,8 +177,7 @@ func inventory(ctx context.Context, tx *sql.Tx, lockPostgres bool, runID string)
 }
 
 func inventoryStateOnly(ctx context.Context, tx *sql.Tx, runID string) (_ []Projection, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT es.entity_id, es.flow_instance, es.entity_type, COALESCE(es.current_state,''),
-		es.fields, es.bookkeeping, es.gates, es.accumulator FROM entity_state es
+	rows, err := tx.QueryContext(ctx, `SELECT es.entity_id, es.flow_instance, es.entity_type, es.fields FROM entity_state es
 		WHERE es.run_id = $1 AND NOT EXISTS (SELECT 1 FROM flow_instances fi WHERE fi.run_id = es.run_id
 		AND (fi.entity_id = es.entity_id OR fi.instance_path = es.flow_instance)) ORDER BY es.entity_id`, runID)
 	if err != nil {
@@ -188,22 +187,16 @@ func inventoryStateOnly(ctx context.Context, tx *sql.Tx, runID string) (_ []Proj
 	var states []Projection
 	for rows.Next() {
 		var state Projection
-		if err := rows.Scan(&state.EntityID, &state.InstancePath, &state.EntityType, &state.Stage,
-			&state.Fields, &state.Bookkeeping, &state.Gates, &state.Accumulator); err != nil {
+		if err := rows.Scan(&state.EntityID, &state.InstancePath, &state.EntityType, &state.Fields); err != nil {
 			return nil, err
 		}
 		if id, err := uuid.Parse(state.EntityID); err != nil || id == uuid.Nil || id.String() != state.EntityID ||
 			state.InstancePath == "" || strings.TrimSpace(state.InstancePath) != state.InstancePath ||
-			state.EntityType == "" || strings.TrimSpace(state.EntityType) != state.EntityType || state.Stage == "" {
-			return nil, &ProjectionError{runID, state.EntityID, state.InstancePath, "state-only projection requires exact identity, declared fields and lifecycle"}
+			state.EntityType == "" || strings.TrimSpace(state.EntityType) != state.EntityType {
+			return nil, &ProjectionError{runID, state.EntityID, state.InstancePath, "state-only projection requires exact identity and declared fields"}
 		}
-		for _, object := range []struct {
-			name string
-			raw  any
-		}{{"fields", state.Fields}, {"bookkeeping", state.Bookkeeping}, {"gates", state.Gates}, {"accumulator", state.Accumulator}} {
-			if err := requireJSONObject(object.name, object.raw); err != nil {
-				return nil, &ProjectionError{runID, state.EntityID, state.InstancePath, err.Error()}
-			}
+		if err := requireJSONObject("fields", state.Fields); err != nil {
+			return nil, &ProjectionError{runID, state.EntityID, state.InstancePath, err.Error()}
 		}
 		states = append(states, state)
 	}

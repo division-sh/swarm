@@ -369,8 +369,8 @@ func loadRunForkRevisionSnapshot(ctx context.Context, tx *sql.Tx, runID string, 
 	return loadRunForkRevisionSnapshotScope(ctx, tx, runID, revision, false)
 }
 
-// The oracle shares fork admission and ordering, but needs only mutation
-// coordinates; unrelated historical families are not its evidence operands.
+// The oracle shares fork admission and ordering, including immutable entity
+// birth metadata for fieldless/empty members, but no unrelated fact families.
 func loadRunForkRevisionSnapshotScope(ctx context.Context, tx *sql.Tx, runID string, revision int64, mutationsOnly bool) (_ *runForkRevisionSnapshot, err error) {
 	if tx == nil {
 		return nil, fmt.Errorf("run fork revision snapshot requires a database transaction")
@@ -384,7 +384,7 @@ func loadRunForkRevisionSnapshotScope(ctx context.Context, tx *sql.Tx, runID str
 			       MIN(revision) OVER (PARTITION BY family, fact_key) AS first_revision,
 			       ROW_NUMBER() OVER (PARTITION BY family, fact_key ORDER BY revision DESC) AS latest_rank
 			FROM run_fork_fact_revisions
-			WHERE run_id = $1 AND revision <= $2 AND (NOT $3 OR family = 'entity_mutations')
+			WHERE run_id = $1 AND revision <= $2 AND (NOT $3 OR family IN ('entity_mutations', 'entity_metadata'))
 		)
 		SELECT run_id, family, fact_key, first_revision, revision, fact
 		FROM bounded
