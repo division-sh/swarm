@@ -121,3 +121,49 @@ ratchet threshold/exception definition or cache trust/publication contract is
 unresolved. Stop proof movement until healthy-nightly/bootstrap and merge-time
 blocking are live. Request reviewer-g's independent gate on items 1-4 and the
 membership-neutral PR-1 ceiling; no coding approval is presumed.
+
+## Delta After Independent Gate And User Clarification
+
+Reviewer-g 6074832462 is insufficient/widen, not permission to code. User now
+provides the merge-owner snapshot at `~/research/gate.sh`, read in full; SHA256
+`67adb76e52ffc31692ea930ed418f1925eb8a0a7da8efa843f37595ae714af1e`.
+The user states this owner runs before every merge: that is an operational trust
+boundary, not GitHub enforcement against a human bypass or a settings change.
+The snapshot binds expected SHA, mergeability/draft/rebaseability, latest check
+names and successful Required test summary, optional requested tier versus body
+and published tier check, and the most recent completed schedule's conclusion.
+The lead owns the deployed orchestrator; G will not introduce a second gate.
+
+Required repo-side integration: the planning path publishes a completed check
+named `CI tier: <tier>` from the resolved canonical plan, on its exact source
+head and linked to that Actions run/attempt. The current-head full plan and
+complete required evidence still qualify the run; this early label alone is
+never completion proof. Test core/full labels, stale or failed planning, missing
+or foreign identity, reruns, and same-SHA core-to-full qualification. Gate
+selection must not use an older differently named tier check after a later run.
+The merge invocation must request full when final-full proof is required, and
+must compare the actually run tier with the current PR body. A body-only edit
+does not create higher-tier proof.
+
+Observed snapshot limits are not hidden: the requested tier is optional, a
+missing tier check is tolerated, and nightly inspection skips pending runs and
+does not refuse missing/cancelled/stale/API-error outcomes. These do not prove
+the stricter preflight matrix above. Reviewer-g must reconcile the deployed
+operational boundary with the required negative controls before cutover; G does
+not claim the snapshot proves them or modify the lead's gate without handoff.
+
+User also rules that collector metadata lives in an authoritative sidecar, not
+the TSV `# collector=` header. PR-1 must make literally zero TSV edits, including
+that header; retain every byte/row/multiplicity. The sidecar must bind the exact
+baseline bytes and current complete collector identity, including cache code.
+Missing/corrupt/foreign metadata refuses; do not exclude new analyzer code to
+keep an old digest or treat the retained comment as current collector authority.
+Adapt D's prototype rather than copying its metadata-header transition. Final
+sidecar/immutable-base admission semantics require the re-gate, not a fallback
+compatibility reader or permission increase.
+
+PR-1 itself requires `CI-Tier: full` and `Local-Tier: full` under reviewer-g's
+ruling. The user-approved cheaper defaults for ordinary feedback do not lower
+qualification for this harness change. Subsequent ratchet thresholds remain
+unratified; nightly freshness, when implemented, is measured from run creation.
+No CI config, planner, runtime, cache implementation or TSV has changed.
