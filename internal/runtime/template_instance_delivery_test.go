@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -29,7 +28,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
@@ -331,7 +329,6 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := seedRuntimeTestRun(t, pg)
-	proofStore := routeMaterializationDBProofStore{pg: pg}
 	durable := externalRuntimeTestDurableDependencies(pg)
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -869,46 +866,6 @@ opco.ceo_ready:
       emit: opco.ceo_ready
 `,
 	}
-}
-
-type routeMaterializationDBProofStore struct {
-	pg *store.PostgresStore
-}
-
-func (s routeMaterializationDBProofStore) PipelineObligations() runtimepipelineobligation.Store {
-	return s.pg.PipelineObligations()
-}
-
-func (s routeMaterializationDBProofStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
-	return s.pg.RegisterAuthorActivityEventCatalog(scope, descriptors)
-}
-
-func (s routeMaterializationDBProofStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
-	return s.pg.CommitPublication(ctx, command)
-}
-
-func (s routeMaterializationDBProofStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
-	return s.pg.ListEventDeliveryRecipients(ctx, eventID)
-}
-
-func (s routeMaterializationDBProofStore) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
-	return s.pg.UpsertFlowInstanceRoute(ctx, route)
-}
-
-func (s routeMaterializationDBProofStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	return s.pg.DeleteFlowInstanceRoute(ctx, identity)
-}
-
-func (s routeMaterializationDBProofStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	return s.pg.ListFlowInstanceRoutes(ctx)
-}
-
-func (s routeMaterializationDBProofStore) ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error) {
-	return s.pg.ListFlowInstanceRouteRecords(ctx, identity)
-}
-
-func (s routeMaterializationDBProofStore) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	return s.pg.ListActiveFlowInstanceDescriptors(ctx, runID)
 }
 
 func seedRuntimeTestRun(t *testing.T, selected *store.PostgresStore) context.Context {
