@@ -338,14 +338,17 @@ func TestEntityViewRendersAbsentSlugAndNameAsDash(t *testing.T) {
 	var stdout bytes.Buffer
 	writeEntityFullResult(&stdout, entityFull{
 		Entity: entitySummary{
-			EntityID:     "entity-1",
-			RunID:        "run-1",
-			FlowInstance: "review",
-			EntityType:   "vertical",
-			CurrentState: "collecting",
-			Revision:     1,
-			CreatedAt:    "2026-05-20T01:00:00Z",
-			UpdatedAt:    "2026-05-20T01:05:00Z",
+			EntityID:           "entity-1",
+			RunID:              "run-1",
+			FlowInstance:       "review",
+			EntityType:         "vertical",
+			StageDefined:       entityTestPointer(true),
+			CurrentState:       entityTestPointer("collecting"),
+			Revision:           entityTestPointer(int64(1)),
+			LifecycleCreatedAt: entityTestPointer("2026-05-20T01:00:00Z"),
+			LifecycleUpdatedAt: entityTestPointer("2026-05-20T01:05:00Z"),
+			CreatedAt:          "2026-05-20T01:00:00Z",
+			UpdatedAt:          "2026-05-20T01:05:00Z",
 		},
 		Fields:      map[string]any{},
 		Gates:       map[string]bool{},
@@ -956,8 +959,8 @@ func TestEntityListFlowIdentifiersRemainExactAndDistinct(t *testing.T) {
 	flowB := "scope/" + sharedPrefix + "2"
 	var stdout bytes.Buffer
 	writeEntityListResult(&stdout, entityListResult{Entities: []entitySummary{
-		{EntityID: "entity-a", RunID: "run-1", FlowInstance: flowA, EntityType: "vertical", CurrentState: "collecting", UpdatedAt: "2026-05-20T01:05:00Z"},
-		{EntityID: "entity-b", RunID: "run-1", FlowInstance: flowB, EntityType: "vertical", CurrentState: "collecting", UpdatedAt: "2026-05-20T01:05:00Z"},
+		{EntityID: "entity-a", RunID: "run-1", FlowInstance: flowA, EntityType: "vertical", StageDefined: entityTestPointer(true), CurrentState: entityTestPointer("collecting"), UpdatedAt: "2026-05-20T01:05:00Z"},
+		{EntityID: "entity-b", RunID: "run-1", FlowInstance: flowB, EntityType: "vertical", StageDefined: entityTestPointer(true), CurrentState: entityTestPointer("collecting"), UpdatedAt: "2026-05-20T01:05:00Z"},
 	}}, entityListRenderOptions{runScoped: true})
 
 	rendered := stdout.String()
@@ -980,7 +983,7 @@ func TestEntityListFlowIdentifierSanitizesControlsWithoutTruncation(t *testing.T
 	want := "scope/" + strings.Repeat("b", 64) + " terminal segment"
 	var stdout bytes.Buffer
 	writeEntityListResult(&stdout, entityListResult{Entities: []entitySummary{
-		{EntityID: "entity-a", RunID: "run-1", FlowInstance: flow, EntityType: "vertical", CurrentState: "collecting", UpdatedAt: "2026-05-20T01:05:00Z"},
+		{EntityID: "entity-a", RunID: "run-1", FlowInstance: flow, EntityType: "vertical", StageDefined: entityTestPointer(true), CurrentState: entityTestPointer("collecting"), UpdatedAt: "2026-05-20T01:05:00Z"},
 	}}, entityListRenderOptions{runScoped: true})
 
 	rendered := stdout.String()
