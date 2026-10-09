@@ -18,9 +18,10 @@ import (
 func InsertStagedChildEventForTest(ctx context.Context, selected any, eventID, runID, parentEventID string,
 	eventType events.EventType, producer events.ProducerIdentity, payload []byte,
 	envelope events.EventEnvelope, at time.Time) (events.Event, error) {
+	var empty events.Event
 	event, record, err := eventfixture.StagedChild(eventID, runID, parentEventID, eventType, producer, payload, envelope, at)
 	if err != nil {
-		return events.Event{}, err
+		return empty, err
 	}
 	write := func(dialect authoractivity.Dialect) func(context.Context, *mutationprotocol.Attempt) (events.Event, error) {
 		return func(txctx context.Context, attempt *mutationprotocol.Attempt) (events.Event, error) {
@@ -38,14 +39,14 @@ func InsertStagedChildEventForTest(ctx context.Context, selected any, eventID, r
 	case *SQLiteRuntimeStore:
 		result = mutationprotocol.RunSQLite(ctx, store.backend, "stage child event fixture", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, write(authoractivity.DialectSQLite))
 	default:
-		return events.Event{}, fmt.Errorf("staged child event selected store %T is unsupported", selected)
+		return empty, fmt.Errorf("staged child event selected store %T is unsupported", selected)
 	}
 	if err := result.Err(); err != nil {
-		return events.Event{}, err
+		return empty, err
 	}
 	committed, ok := result.Value()
 	if !ok {
-		return events.Event{}, fmt.Errorf("staged child event commit was not acknowledged")
+		return empty, fmt.Errorf("staged child event commit was not acknowledged")
 	}
 	return committed, nil
 }

@@ -102,7 +102,6 @@ func TestRepairAuthorityOutcomeAndJoinedRelease(t *testing.T) {
 					"predecessor_authority_id", "successor_authority_id", "snapshot", "created_at",
 				}).AddRow(record.AuthorityID, 1, 1, 1, record.State, record.OwnerID, record.BootID, record.RuntimeInstanceID,
 					record.Backend, record.AcquisitionID, record.AcquisitionRequestHash, record.AcquisitionKind, nil, nil, "{}", record.CreatedAt))
-				expectFence()
 				mock.ExpectQuery("SELECT g.snapshot FROM runtime_generation_grants").WillReturnRows(sqlmock.NewRows([]string{"snapshot"}))
 				previous := sqlmock.NewRows([]string{"snapshot"})
 				args := make([]driver.Value, 17)
@@ -110,9 +109,7 @@ func TestRepairAuthorityOutcomeAndJoinedRelease(t *testing.T) {
 					args[i] = sqlmock.AnyArg()
 				}
 				args[15] = repairArgument(func(v driver.Value) bool { previous.AddRow(v); return true })
-				expectFence()
 				mock.ExpectExec("INSERT INTO runtime_startup_authority_facts").WithArgs(args...).WillReturnResult(sqlmock.NewResult(0, 1))
-				expectFence()
 				mock.ExpectQuery("SELECT snapshot FROM runtime_startup_authority_facts").WillReturnRows(previous)
 				mock.ExpectExec("INSERT INTO runtime_startup_authority_facts").WillReturnResult(sqlmock.NewResult(0, 1))
 				insert := mock.ExpectExec("INSERT INTO runtime_startup_authority_repairs")
