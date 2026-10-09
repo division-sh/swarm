@@ -16,7 +16,8 @@ func TestGenerationMutationFenceRetainedResetBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, completion := range []string{"commit", "rollback"} {
 			t.Run(backend+"/"+completion, func(t *testing.T) {
-				selected, db, sqlite := selectedForkDiscardTestStore(t, backend)
+				selected, mutationStore, db, postgres := newFanOutOwnerPairForTest(t, backend)
+				sqlite := !postgres
 				ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 15*time.Second)
 				defer cancel()
 				process := selectedPreparationProcessForTest(t, selected)
@@ -28,10 +29,6 @@ func TestGenerationMutationFenceRetainedResetBothStores(t *testing.T) {
 				var sequence int64
 				if err := db.QueryRowContext(ctx, `SELECT last_sequence FROM author_activity_order WHERE singleton_id=1`).Scan(&sequence); err != nil {
 					t.Fatal(err)
-				}
-				mutationStore := selected
-				if sqlite {
-					mutationStore = NewSQLiteRuntimeStoreForTest(db)
 				}
 				rolledBack := errors.New("release reset mutation fence by rollback")
 				reset := make(chan error, 1)
