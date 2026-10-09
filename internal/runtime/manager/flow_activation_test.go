@@ -161,12 +161,6 @@ type flowActivationTestBus struct {
 	creationStore      *flowActivationTestInstanceStore
 }
 
-type flowActivationTestPublication struct {
-	retire func() error
-}
-
-func (p flowActivationTestPublication) Retire() error { return p.retire() }
-
 type flowActivationSemanticRouteBus struct {
 	*flowActivationTestBus
 	durable       *runtimebus.RouteTable
@@ -1471,29 +1465,6 @@ func (b *flowActivationSemanticRouteBus) RetirePublishedFlowInstanceRoute(
 	return b.process.RemoveFlowInstanceRoute(identity)
 }
 
-func (b *flowActivationSemanticRouteBus) RetireFlowInstanceRouteForAttempt(identity runtimeflowidentity.RunScopedFlowInstance, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
-	if err := attempt.Validate(); err != nil {
-		return err
-	}
-	if err := identity.Validate(); err != nil {
-		return err
-	}
-	return b.RetirePublishedFlowInstanceRoute(identity)
-}
-
-func (b *flowActivationSemanticRouteBus) PublishPersistedFlowInstanceRouteForAttempt(_ context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) (runtimebus.FlowRoutePublicationHandle, error) {
-	if err := attempt.Validate(); err != nil {
-		return nil, err
-	}
-	if req.Identity.RunID != attempt.RunID() || req.Identity.Route.InstancePath != attempt.InstancePath() {
-		return nil, errors.New("semantic route publication differs from attempt")
-	}
-	if err := b.PublishPersistedFlowInstanceRoute(req); err != nil {
-		return nil, err
-	}
-	return flowActivationTestPublication{retire: func() error { return b.RetirePublishedFlowInstanceRoute(req.Identity) }}, nil
-}
-
 func (b *flowActivationSemanticRouteBus) HasFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) bool {
 	return b != nil && b.process != nil && b.process.HasFlowInstanceRoute(identity)
 }
@@ -1550,19 +1521,6 @@ func (b *flowActivationTestBus) PublishPersistedFlowInstanceRoute(req runtimebus
 	return nil
 }
 
-func (b *flowActivationTestBus) PublishPersistedFlowInstanceRouteForAttempt(_ context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) (runtimebus.FlowRoutePublicationHandle, error) {
-	if err := attempt.Validate(); err != nil {
-		return nil, err
-	}
-	if req.Identity.RunID != attempt.RunID() || req.Identity.Route.InstancePath != attempt.InstancePath() {
-		return nil, errors.New("route publication differs from attempt")
-	}
-	if err := b.PublishPersistedFlowInstanceRoute(req); err != nil {
-		return nil, err
-	}
-	return flowActivationTestPublication{retire: func() error { return b.RetirePublishedFlowInstanceRoute(req.Identity) }}, nil
-}
-
 func (b *flowActivationTestBus) RetirePublishedFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
 	keptPaths := b.addedPaths[:0]
 	keptRequests := b.addedRouteRequests[:0]
@@ -1578,16 +1536,6 @@ func (b *flowActivationTestBus) RetirePublishedFlowInstanceRoute(identity runtim
 	b.addedPaths = keptPaths
 	b.addedRouteRequests = keptRequests
 	return nil
-}
-
-func (b *flowActivationTestBus) RetireFlowInstanceRouteForAttempt(identity runtimeflowidentity.RunScopedFlowInstance, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
-	if err := attempt.Validate(); err != nil {
-		return err
-	}
-	if err := identity.Validate(); err != nil {
-		return err
-	}
-	return b.RetirePublishedFlowInstanceRoute(identity)
 }
 
 func (b *flowActivationTestBus) AddFlowInstanceRouteContext(ctx context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) error {
@@ -2286,11 +2234,14 @@ func TestFlowAttachmentReadyReplayDoesNotRepeatInstallation(t *testing.T) {
 	if err != nil || !found || !reflect.DeepEqual(before, after) {
 		t.Fatalf("ready replay changed durable authority: before=%#v after=%#v err=%v", before, after, err)
 	}
-	if len(instances.armedEntries) != 1 || len(bus.addedPaths) != 1 || len(bus.published) != 0 {
-		t.Fatalf("ready replay repeated installation: timers=%v routes=%v events=%d", instances.armedEntries, bus.addedPaths, len(bus.published))
+	if len(instances.armedEntries) != 1 || len(bus.published) != 0 {
+		t.Fatalf("ready replay repeated installation: timers=%v events=%d", instances.armedEntries, len(bus.published))
 	}
-	if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-		t.Fatal("ready replay lost the exact installed route")
+	if !flowActivationAttemptReadyForTest(am, ctx, req) {
+		t.Fatal("ready replay lost the exact owned activation attempt")
+	}
+	if len(bus.addedPaths) != 0 || len(bus.addedRouteRequests) != 0 {
+		t.Fatal("ready replay published a non-authoritative route resource")
 	}
 	instances.readinessMu.Lock()
 	replayWrites := instances.attachmentPhaseWrites - initialWrites

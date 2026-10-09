@@ -80,8 +80,6 @@ func (s subscriberRouteSource) code() string {
 
 type RouteTable struct {
 	mu                     sync.RWMutex
-	generationMu           sync.RWMutex
-	generation             uint64
 	source                 semanticview.Source
 	routes                 map[routeResolutionKey][]Subscriber
 	patterns               []routePattern
@@ -94,9 +92,6 @@ type RouteTable struct {
 	templates              map[string]routeFlowTemplate
 	connectDefinitions     map[string][]runtimepinrouting.ConnectRecipientRegistration
 	instanceOwners         map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance
-	publications           map[runtimeflowidentity.RunScopedFlowInstance]flowRoutePublicationRecord
-	fencedPublications     map[flowRoutePublicationFence]struct{}
-	nextPublication        uint64
 	instanceEventPath      map[runtimeflowidentity.RunScopedFlowInstance][]string
 	templateObservers      map[string][]routeTemplateSourceObserver
 	connectGraph           runtimepinrouting.CompiledConnectGraph
@@ -463,7 +458,7 @@ func connectRecipientSubscribers(evaluation runtimepinrouting.ConnectRecipientEv
 }
 
 func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
-	return rt.addFlowInstanceRouteForContextWithInputProducers(nil, req, nil)
+	return rt.addFlowInstanceRoute(req, nil)
 }
 
 func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest, inputProducers *runtimepinrouting.FlowInputProducerResolver) error {
@@ -489,7 +484,6 @@ func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 				rt.indexPatternLocked(index, eventTypes)
 			}
 		}
-		rt.generation++
 	}
 	return nil
 }
@@ -502,7 +496,6 @@ func (rt *RouteTable) addFlowInstanceRouteForTopology(req FlowInstanceRouteMater
 	added, _, err := rt.addFlowInstanceRouteLocked(req, inputProducers)
 	if added {
 		rt.resolutionIndexDirty = true
-		rt.generation++
 	}
 	return added, err
 }
@@ -633,8 +626,6 @@ func (rt *RouteTable) RemoveFlowInstanceRoute(identity runtimeflowidentity.RunSc
 	if rt == nil {
 		return fmt.Errorf("route table is required")
 	}
-	rt.generationMu.Lock()
-	defer rt.generationMu.Unlock()
 	return rt.removeFlowInstanceRoute(identity)
 }
 
@@ -654,7 +645,6 @@ func (rt *RouteTable) removeFlowInstanceRoute(identity runtimeflowidentity.RunSc
 	}
 	instancePath := owner.Route.InstancePath
 	delete(rt.instanceOwners, owner)
-	delete(rt.publications, owner)
 	delete(rt.instanceEventPath, owner)
 	filtered := rt.patterns[:0]
 	for _, pattern := range rt.patterns {
@@ -681,7 +671,6 @@ func (rt *RouteTable) removeFlowInstanceRoute(identity runtimeflowidentity.RunSc
 	rt.rebuildEventPathsLocked()
 	// Retirement is authoritative now; the derived index is rebuilt by its next consumer.
 	rt.resolutionIndexDirty = true
-	rt.generation++
 	return nil
 }
 
@@ -790,7 +779,6 @@ func newRouteTable(source semanticview.Source) *RouteTable {
 
 func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.CompiledConnectGraph) *RouteTable {
 	return &RouteTable{
-		generation:           1,
 		resolutionIndexDirty: true,
 		source:               source,
 		routes:               make(map[routeResolutionKey][]Subscriber),
@@ -799,64 +787,13 @@ func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.
 		authoredScopes:       make(map[string]struct{}),
 		templates:            make(map[string]routeFlowTemplate),
 		instanceOwners:       make(map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance),
-		publications:         make(map[runtimeflowidentity.RunScopedFlowInstance]flowRoutePublicationRecord),
-		fencedPublications:   make(map[flowRoutePublicationFence]struct{}),
 		instanceEventPath:    make(map[runtimeflowidentity.RunScopedFlowInstance][]string),
 		templateObservers:    make(map[string][]routeTemplateSourceObserver),
 		connectGraph:         graph,
 	}
 }
 
-type routeTableSnapshotGeneration struct {
-	value uint64
-}
-
-type routeTableGenerationLeaseKey struct{}
-
-type routeTableGenerationLease struct {
-	table *RouteTable
-}
-
-func (rt *RouteTable) snapshotGeneration() routeTableSnapshotGeneration {
-	if rt == nil {
-		return routeTableSnapshotGeneration{}
-	}
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	return routeTableSnapshotGeneration{value: rt.generation}
-}
-
-func (rt *RouteTable) snapshotGenerationCurrent(snapshot routeTableSnapshotGeneration) bool {
-	if rt == nil {
-		return snapshot.value == 0
-	}
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	return snapshot.value != 0 && rt.generation == snapshot.value
-}
-
-// A supplied resolver belongs only to the current unchanged-source topology
-// operation; the table retains its graph but never retains this resolver.
-func (rt *RouteTable) addFlowInstanceRouteForContextWithInputProducers(ctx context.Context, req FlowInstanceRouteMaterializationRequest, inputProducers *runtimepinrouting.FlowInputProducerResolver) error {
-	if rt == nil {
-		return fmt.Errorf("route table is required")
-	}
-	if ctx != nil {
-		if lease, _ := ctx.Value(routeTableGenerationLeaseKey{}).(routeTableGenerationLease); lease.table == rt {
-			return rt.addFlowInstanceRoute(req, inputProducers)
-		}
-	}
-	rt.generationMu.Lock()
-	defer rt.generationMu.Unlock()
-	return rt.addFlowInstanceRoute(req, inputProducers)
-}
-
-func (rt *RouteTable) removeFlowInstanceRouteForContext(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	if ctx != nil {
-		if lease, _ := ctx.Value(routeTableGenerationLeaseKey{}).(routeTableGenerationLease); lease.table == rt {
-			return rt.removeFlowInstanceRoute(identity)
-		}
-	}
+func (rt *RouteTable) removeFlowInstanceRouteForContext(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	return rt.RemoveFlowInstanceRoute(identity)
 }
 

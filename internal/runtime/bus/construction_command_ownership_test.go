@@ -18,3 +18,17 @@ func TestConstructionCommandsDoNotCarryInstanceRouteMirror(t *testing.T) {
 		}
 	}
 }
+
+func TestEventBusDoesNotOwnInstanceRoutePublication(t *testing.T) {
+	typeOf := reflect.TypeOf((*EventBus)(nil))
+	for _, name := range []string{"PublishPersistedFlowInstanceRouteForAttempt", "RetireFlowInstanceRouteForAttempt"} {
+		if _, found := typeOf.MethodByName(name); found {
+			t.Fatalf("EventBus restores parallel attachment ownership: %s", name)
+		}
+	}
+	for _, name := range []string{"publications", "fencedPublications", "nextPublication", "generationMu", "generation"} {
+		if _, found := reflect.TypeOf(RouteTable{}).FieldByName(name); found {
+			t.Fatalf("RouteTable restores mutable publication ownership: %s", name)
+		}
+	}
+}

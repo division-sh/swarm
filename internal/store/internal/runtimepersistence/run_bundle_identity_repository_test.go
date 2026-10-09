@@ -505,8 +505,6 @@ func eventBusSourceOperationLedger() map[string]string {
 		"ReplaceAgentRoute":                           operationAdmittedChild,
 		"ResetInMemoryState":                          operationMutation,
 		"ResolveSubscribedRecipients":                 operationPureRead,
-		"PublishPersistedFlowInstanceRouteForAttempt": operationMutation,
-		"RetireFlowInstanceRouteForAttempt":           operationAdmittedChild,
 		"RouteTable":                                  operationRetained,
 		"RunLifecycleCandidateOwner":                  operationRetained,
 		"SealFanOutPublications":                      operationMutation,
