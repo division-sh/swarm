@@ -212,7 +212,7 @@ func assertSnapshotOwnershipEntity(t *testing.T, f snapshotOwnershipFixture, for
 	t.Helper()
 	got := readSnapshotOwnershipEntity(t, f, forkRunID)
 	meta := want.MaterializationMetadata
-	if got.Flow != meta.FlowInstance || got.EntityType != meta.EntityType || got.Slug != meta.Slug || got.Name != meta.Name || got.State != want.CurrentState || got.Revision != wantRevision || want.EnteredStateAt == nil || !got.Entered.Equal(*want.EnteredStateAt) {
+	if got.Flow != meta.FlowInstance || got.EntityType != meta.EntityType || got.Slug != meta.Slug || got.Name != meta.Name || want.CurrentState == nil || got.State != *want.CurrentState || got.Revision != wantRevision || want.EnteredStateAt == nil || !got.Entered.Equal(*want.EnteredStateAt) {
 		t.Fatalf("fork row differs: got=%#v want=%#v revision=%d", got, want, wantRevision)
 	}
 	for i, bucket := range []map[string]any{want.Fields, want.Gates, want.Bookkeeping, want.Accumulator} {

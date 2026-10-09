@@ -36,8 +36,8 @@ func TestReconstructEntityStateProjection_RoundTripsTrackedEntityState(t *testin
 	if err != nil {
 		t.Fatalf("ReconstructEntityStateProjection: %v", err)
 	}
-	if got.CurrentState != "done" {
-		t.Fatalf("CurrentState = %q", got.CurrentState)
+	if got.CurrentState == nil || *got.CurrentState != "done" {
+		t.Fatalf("CurrentState = %v", got.CurrentState)
 	}
 	if got.Fields["status"] != "closed" {
 		t.Fatalf("Fields = %#v", got.Fields)
@@ -93,7 +93,7 @@ func TestReconstructEntityStateProjection_DomainNeverComesFromAuthoredPath(t *te
 	if err != nil {
 		t.Fatalf("ReconstructEntityStateProjection: %v", err)
 	}
-	if got.CurrentState != "running" || got.Fields["current_state"] != "business-state" {
+	if got.CurrentState == nil || *got.CurrentState != "running" || got.Fields["current_state"] != "business-state" {
 		t.Fatalf("lifecycle/authored collision = %#v", got)
 	}
 	if _, ok := got.Gates["review"]; ok {
