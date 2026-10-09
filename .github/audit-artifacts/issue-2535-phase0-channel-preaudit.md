@@ -138,10 +138,10 @@ success alone. Borrowed rows carry their fact to the named outer finalizer.
 | P03 M | same confirmBinding, rebind | Same outer finalizer | Changed verified claimant/epoch -> O/N; replay no-op, predecessor currentness preserved. |
 | P04 M | backend/operatorchannel/owner.go:unbind -> RetireBindingTx | Same outer runner/native COMMIT | Actual current-default retirement -> O/N; already-retired exact replay no-op. |
 | P05 M | backend/channelonboarding/owner.go:publishActivation | PG/SQLite runner.mutate -> RunTransaction, ack discarded | New activation and any replaced sibling -> O/N; exact activation replay no-op. Durable row is not process-catalogue readiness. |
-| P06 M | same advance, reboundActivation update | Same runner/native COMMIT | Only actual rebound coordinate/publication change -> O/N; phase-only/checkpoint edits are D. |
+| P06 M | same advance, reboundActivation update AND first transition into PhaseSucceeded | Same runner/native COMMIT | Actual rebound coordinate/publication change OR successful completion releasing current delivery/native eligibility -> O/N. Other phase-only/checkpoint edits are D. Completion correction is STOPPED pending the implementation addendum re-gate below; terminal/revision refusals are not converted to replay success. |
 | P07 M | same retireActivation | Same runner/native COMMIT | Actual retirement -> O/N; already retired no-op; preserve CAS/reason. |
 | P08 M | same retireTeardownAuthority (pending or completed identity retirement) | Same runner/native COMMIT | Retired matching operation/activation rows -> O/N; no matching affected authority no-op. |
-| P09 M | same completeTeardown -> RetireStaleNativeInboxConsumersTx | Same runner/native COMMIT | Actual consumer retirement -> N/O; completed replay no-op. Reserve/get teardown alone is D. |
+| P09 D | same completeTeardown | Same runner/native COMMIT writes only the operation checkpoint | No native-consumer write is borrowed here. Actual stale consumer retirement is a separate P12 outer transaction. Completion/replay retains its checkpoint contract and emits no hint. |
 | P10 M | backend/channelonboarding/client_locale.go:setClientLocale | Same runner/native COMMIT | Actual locale revision -> N/O; existing language/revision replay branch no-op. |
 | P11 M | runtimepersistence/channel_native_setting.go:AttachNativeInboxSetting -> AttachNativeInboxSettingTx | PG/SQLite backend.RunTransaction, ack discarded | New/changed setting/consumer/generation -> N/O; exact attach observation no-op. Inner helper must expose changed, not returned Setting alone. |
 | P12 M | same RetireStaleNativeInboxConsumers | Same native COMMIT | Actual stale consumer/setting retirement -> N/O; zero affected rows no-op. |
@@ -199,6 +199,7 @@ success alone. Borrowed rows carry their fact to the named outer finalizer.
 | P64 M | pipelinepersistence/generic_schedule_occurrence_commit.go:CommitGenericScheduleOccurrence -> commitPublicationTx | Own mutationprotocol.Run* -> acknowledged Value | Same constructed-card rule; schedule-only no-op/D; no timer/schedule admission or wakeup-policy rewrite. |
 | P65 M | pipelinepersistence/scenario_setup.go:SetupScenarioEntities/CommitScenarioSetup -> CommitFlowInstanceActivationsTx | Each existing outer Run* -> acknowledged scenario setup result | Actual initial/recursive gate-card creation -> O; identical scenario replay/no construction no-op. Not an event-only/log writer. |
 | P66 D | Schema installation/compatibility-free current schema admission, event log/diagnostic/directive append without construction | Existing schema/event owner finalizer | Not a channel business change. No schema migration or generic SQL notification hook. |
+| P67 A | operatorchannel/owner.go:bindFromProof / BindOperatorChannelFromProof | operatorchannel.Service.Bootstrap, sole production call serveapp/main.go:1339 BEFORE worker starts at1864; own native transaction | Boot-only binding/default work is consumed by P56's mandatory initial scan. Exact proof mismatch/unbound fence/replay retained. Not proof bookkeeping, and not a missed live post-subscription producer; there is no mounted post-start Bootstrap entrance. |
 
 Systematic sweep: all non-test selected-store writes to decision_cards,
 decision_card_changes/drafts, mailbox, channel_delivery_{defaults,plans,
@@ -213,6 +214,9 @@ No M seam remains intentionally poll-only. Future same-concept producer
 outside this map or missing acknowledged owner is a STOP/re-gate condition.
 
 ## Manifestations And Named Execution Proof
+
+Implementation addendum below adds M35 to the original M01-M34 matrix. The
+original proof obligations and native M30 restriction are not removed.
 
 ALL rows below are planned implementation proof, not PASS claims. Every P01
 throughP55, P59 andP61-P65 receives a corresponding scenario in planned
@@ -365,3 +369,69 @@ checkpoint unreachable; nondiscriminating negative/cost probe; changed
 authority/currentness/redispatch/TTL; any wider startup/reset restructuring;
 or necessary concurrent test-unit membership change. Current coding is
 FROZEN pending independent recorded outcome on this complete artifact.
+
+## Implementation Stop Addendum: Completion Eligibility
+
+The original final gate is approved6085629534, CI full / Local core plus
+the named supplements. It supersedes the provisional tier/frozen state above.
+Production edits began only after that gate. The following classification
+correction triggers its stop condition; further production work is frozen
+pending a focused amendment ruling, not permission to widen silently.
+
+**Observed gap:** P06 originally called every phase-only update a checkpoint
+unrelated to worker input. That is false for first transition to
+`channelonboarding.PhaseSucceeded`. The existing onboarding service drives
+this after successful confirmation at `internal/channelonboarding/service.go`.
+Both SQLite and PostgreSQL `channeldelivery.CurrentActivationID` joins require
+`onboarding.phase='succeeded'`; native admission and qualification require the
+same phase in `native_setting.go` and `native_qualification.go`.
+
+Full path: verified binding -> durable activation -> exact process snapshot
+publication -> registration promotion -> confirmation effect settlement ->
+`advance(...PhaseSucceeded)` native COMMIT -> selected current activation /
+native eligibility -> existing served worker scan -> authorized provider
+delivery/native operation. The confirmation must complete before this final
+transition is reachable. Binding/publication/registration remain their named
+P01/P05/P55 boundaries; the final phase transition is an additional relevant
+change inside already-listed P06, not a new runtime owner or product feature.
+
+| ID | Manifestation | Planned exact proof |
+| --- | --- | --- |
+| M35 / P06 completion | Earlier durable/process publication wakes may be consumed before succeeded; the last eligibility transition emits no hint if treated as a checkpoint, leaving work to the 1s/5s backstop | Existing `TestChannelDeliveryEffectCurrentnessSelectedStoreParity/(sqlite|postgres)/current`: no delivery authority before completion; exact activation becomes selected after completion; one O/N hint only after its outer native acknowledgement. Extend with ordinary/native worker held-before-finalization and failed/stale/terminal-refusal controls. Public `TestChannelConnectTelegramFirstUserJourney`, notice and native inbox journeys prove the service-driven ordered path. |
+
+The local counterexample extends that selected-store root with a subscription
+immediately before its existing final transition and a demand assertion after
+the existing exact selected-activation readback. It does not alter production
+phase handling, public success/refusal behavior, SQL admission, deadline or
+provider actions. The callback body already uses the native outcome API in
+the WIP rebound repair; it carries no completion change fact yet. Missing
+notification is an intermediate implementation/audit counterexample, not a
+claim of lost durable execution on master (master still polls).
+
+Canonical owners and systematic consumption: `channelonboarding.advance`
+owns this sole operation transition; the existing service drive and retained
+recovery consume that owner, not a second phase writer. The actual readers
+are delivery activation/currentness and native setting/qualification owners.
+Other onboarding phases/checkpoints, proof bookkeeping and ceremony writers
+remain D unless they perform the already-mapped rebound/retirement. P67 boot-
+from-proof remains initial-scan A; P09 checkpoint-only teardown remains D;
+actual stale consumer retirement remains P12. No extra registry or shared
+transaction change is needed, and no other producer is granted a blanket
+notify-on-success rule.
+
+Proposed bounded correction: reset the private changed fact at callback entry;
+capture the prior phase under the existing operation lock; record O/N only
+for the actual successful transition (or existing rebound change); publish
+only after native acknowledged COMMIT. Preserve acknowledgement plus cleanup
+error. Abort/unknown commit has no notification; stale/terminal refusal has
+none and retains its exact error. No retry or phase validation is changed.
+
+Tracker action: amend this P06/M35 classification and #2535 current status,
+refine the existing `harness_reliability_and_local_smoke` node, and request
+reviewer-g's short independent delta gate. No new issue/parent absorption;
+#2535/#2250/#1196/#2353/#2394 remain open. Existing parent sibling census,
+remaining Phase0 tail, architecture disposition and no-vendoring/no-framework
+conditions remain binding. Class commitment and one-PR feasibility unchanged:
+close all acknowledged local worker-input changes, not only this transition.
+The 67 P classifications and now35 M rows are still planned closure proof.
+No qualification or measured saving is claimed; no server2/full run started.
