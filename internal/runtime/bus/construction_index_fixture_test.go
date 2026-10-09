@@ -156,6 +156,9 @@ func (s *targetRouteMemoryStore) installIndexObservation(observed pipeline.FlowI
 }
 
 func (s *targetRouteMemoryStore) setTestConstructionSource(source semanticview.Source) {
+	if s == nil {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.constructionIndexSource = source

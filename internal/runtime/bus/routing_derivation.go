@@ -44,27 +44,6 @@ func independentPubsubSubscriber(s Subscriber) bool {
 	return s.routeSource != subscriberRouteSourceConnectRoutePlan
 }
 
-func (rt *RouteTable) ResolveIndependentPubsubForRun(runID, eventType string) []Subscriber {
-	resolved := rt.ResolveForRun(runID, eventType)
-	out := make([]Subscriber, 0, len(resolved))
-	for _, subscriber := range resolved {
-		if independentPubsubSubscriber(subscriber) {
-			out = append(out, subscriber)
-		}
-	}
-	return out
-}
-
-func (rt *RouteTable) ResolveIndependentPubsubFromSource(runID string, eventType events.EventType, source events.RoutingSource) []Subscriber {
-	var out []Subscriber
-	for _, key := range SourceEventRouteKeys(eventType, source) {
-		for _, subscriber := range rt.ResolveIndependentPubsubForRun(runID, key) {
-			out = appendUniqueSubscriber(out, subscriber)
-		}
-	}
-	return out
-}
-
 type subscriberRouteSource uint8
 
 const (
@@ -169,17 +148,6 @@ func (rt *RouteTable) compiledRouteOwnerDependencies(inputProducers runtimepinro
 					})
 				}
 			}
-		}
-	}
-	for sourcePath, observers := range rt.templateObservers {
-		for _, observer := range observers {
-			if observer.SubscriberInstancePath == "" {
-				continue
-			}
-			dependencies = append(dependencies, runtimepinrouting.RouteOwnerDependency{
-				SourceFlowPath:   sourcePath,
-				ReceiverFlowPath: runtimeflowidentity.SemanticScopeFromInstancePath(observer.SubscriberInstancePath),
-			})
 		}
 	}
 	return dependencies

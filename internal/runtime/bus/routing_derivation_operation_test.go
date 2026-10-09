@@ -399,7 +399,7 @@ func TestRouteTopologyPublicationUsesTableCompilationButRereadsCurrentTopology(t
 	}
 }
 
-func TestConnectPreviewUsesPairedRouteTableSource(t *testing.T) {
+func TestPreparedConstructionBindsCompiledPubsubWithoutRouteMembership(t *testing.T) {
 	source, eb := topologyOperationFixture(t)
 	live, err := DeriveRouteTable(source)
 	if err != nil {
@@ -428,8 +428,8 @@ func TestConnectPreviewUsesPairedRouteTableSource(t *testing.T) {
 			t.Fatal(err)
 		}
 		identity := topologyOperationIdentity(t, id)
-		if current.table == nil || !current.table.HasFlowInstanceRoute(identity) || live.HasFlowInstanceRoute(identity) {
-			t.Fatalf("preview %s must be isolated from live routes", id)
+		if len(current.plans) != 1 || !reflect.DeepEqual(current.selected["workers"], []runtimeflowidentity.Instance{constructed}) || live.HasFlowInstanceRoute(identity) {
+			t.Fatalf("prepared construction %s must remain operation-local data", id)
 		}
 		oracle, err := DeriveRouteTable(source.Source)
 		if err != nil {
@@ -438,8 +438,13 @@ func TestConnectPreviewUsesPairedRouteTableSource(t *testing.T) {
 		if err := oracle.AddConstructedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
 			t.Fatal(err)
 		}
-		if got, want := current.table.MaterializedRoutes(identity), oracle.MaterializedRoutes(identity); !reflect.DeepEqual(got, want) {
-			t.Fatalf("preview %s differs from independent derivation: got=%#v want=%#v", id, got, want)
+		key := constructed.InstancePath + "/start"
+		got, err := live.PubsubReceiverDefinitions(busInternalTestRunID, constructed, []string{key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := oracle.ResolveForRun(busInternalTestRunID, key); !reflect.DeepEqual(got, want) {
+			t.Fatalf("pure binding %s differs from independent derivation: got=%#v want=%#v", id, got, want)
 		}
 	}
 	source.censuses.Store(0)

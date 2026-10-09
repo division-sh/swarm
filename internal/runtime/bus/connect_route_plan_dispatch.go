@@ -16,7 +16,6 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -28,10 +27,8 @@ type connectRoutePlanPreviewRoutesKey struct{}
 type closedPublicationPlanningKey struct{}
 
 type connectRoutePlanPreviewRoutes struct {
-	table          *RouteTable
-	inputProducers *runtimepinrouting.FlowInputProducerResolver
-	selected       map[string][]runtimeflowidentity.Instance
-	plans          []runtimepipeline.FlowInstanceActivationPlan
+	selected map[string][]runtimeflowidentity.Instance
+	plans    []runtimepipeline.FlowInstanceActivationPlan
 }
 
 func withConnectRoutePlanPreview(ctx context.Context) context.Context {
@@ -39,23 +36,6 @@ func withConnectRoutePlanPreview(ctx context.Context) context.Context {
 		return ctx
 	}
 	return context.WithValue(ctx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{})
-}
-
-type staleConnectRoutePlanSnapshotError struct{}
-
-func (staleConnectRoutePlanSnapshotError) Error() string {
-	return "connect route snapshot generation is stale"
-}
-
-func exhaustedConnectRoutePlanSnapshotError() error {
-	return runtimefailures.Wrap(
-		runtimefailures.ClassDependencyUnavailable,
-		"connect_route_snapshot_stale",
-		"eventbus",
-		"plan_connect_routes",
-		map[string]any{"reason": "route_table_generation_changed"},
-		staleConnectRoutePlanSnapshotError{},
-	)
 }
 
 func withClosedPublicationPlanning(ctx context.Context) context.Context {
@@ -523,45 +503,12 @@ func (r connectRoutePlanResolver) installFlowConstructionPreview(ctx context.Con
 		if err := construction.Validate(); err != nil {
 			return err
 		}
-		if err := r.installConstructionIdentityPreview(ctx, runID, construction.Identity, construction.ActivationVariables); err != nil {
+		if err := construction.Identity.ValidateConstruction(r.source, runID); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func (r connectRoutePlanResolver) installConstructionIdentityPreview(ctx context.Context, runID string, instance runtimeflowidentity.Instance, variables map[string]string) error {
-	var preview *connectRoutePlanPreviewRoutes
-	if ctx != nil {
-		preview, _ = ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes)
-	}
-	if preview == nil {
-		return errors.New("connect route planning preview table is required before lifecycle materialization")
-	}
-	if preview.table == nil {
-		if r.routeTable == nil || !r.routeTable.compiledSourceReady {
-			return errors.New("connect route preview requires paired compiled route source")
+		if err := selectConnectionConstruction(ctx, construction.Identity); err != nil {
+			return err
 		}
-		inputProducers := r.routeTable.inputProducers
-		table, err := deriveRouteTableWithInputProducers(r.source, r.routeTable.connectGraph, inputProducers)
-		if err != nil {
-			return fmt.Errorf("derive connect route planning preview table: %w", err)
-		}
-		preview.table = table
-		preview.inputProducers = &inputProducers
-	}
-	liveIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, instance.Route())
-	if err != nil {
-		return fmt.Errorf("compose construction route planning preview identity: %w", err)
-	}
-	if len(preview.table.MaterializedRoutes(liveIdentity)) > 0 {
-		return nil
-	}
-	if err := preview.table.addFlowInstanceRouteForContextWithInputProducers(ctx, FlowInstanceRouteMaterializationRequest{
-		Identity: liveIdentity, Instance: instance,
-		ActivationVariables: cloneRouteActivationVariables(variables),
-	}, preview.inputProducers); err != nil {
-		return err
 	}
 	return nil
 }

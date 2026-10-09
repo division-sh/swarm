@@ -18885,9 +18885,15 @@ platform_tables:
         and process route registrations cannot substitute for admitted instance observations.
         Authored subscriptions and connections remain source-owned compiled definitions; the
         selected store exposes no authored routing-rule upsert or load API.
-        Connect recipient definitions are immutable source data, projected onto an admitted
+        Connect and pubsub recipient definitions are immutable source data, projected onto an admitted
         native instance or an operation-local R5.1 construction plan at selection time.
-        Mutable recipient registration and route-generation retries are not connection authority.
+        Mutable recipient registration, process route membership and route-generation retries
+        are not recipient-selection authority. Planning retains only operation-local construction
+        data, never a derived mutable route-table overlay. Pubsub inventory is bounded by the
+        exact publication coordinate and compiled observer dependencies, never all active templates,
+        and rejects foreign or repeated native coordinates;
+        native absence cannot borrow a process registration. Live-agent-only delivery without
+        compiled flow subscriptions grants no flow receiver authority and needs no instance query.
         Bounded target-owner lookup uses actual indexed receiver paths, not current field keys
         or proposed creation hashes. Non-executing selected-contract fork projection may describe
         static and root declaration roles without observing construction; this descriptive data

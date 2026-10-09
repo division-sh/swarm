@@ -579,25 +579,6 @@ func (eb *EventBus) runtimeActiveAgentDescriptors() map[agentidentity.Identity]A
 	return out
 }
 
-func (eb *EventBus) resolveRoutedSubscribersForEvent(evt events.Event, eventKeys []string) []Subscriber {
-	if eb == nil {
-		return nil
-	}
-	if len(eventKeys) == 0 {
-		return nil
-	}
-	eb.mu.RLock()
-	table := eb.routeTable
-	eb.mu.RUnlock()
-	out := make([]Subscriber, 0, 8)
-	if table != nil {
-		for _, eventType := range eventKeys {
-			out = append(out, table.ResolveForRun(evt.RunID(), eventType)...)
-		}
-	}
-	return dedupeSubscribers(out)
-}
-
 func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt events.Event, recipientIDs []string, deliveryRoutes []events.DeliveryRoute) (liveDeliveryDispatch, error) {
 	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
 	if err := events.ValidateDeliveryRoutes(deliveryRoutes); err != nil {

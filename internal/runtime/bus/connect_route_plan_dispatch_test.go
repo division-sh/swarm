@@ -1245,6 +1245,9 @@ func TestEventBusConnectRouteDeliversToLiveAgentCarrier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID,
+		StoredFlowInstanceIdentityFixture(source, "consumer", "", busInternalTestRunID, connectRoutePlanStaticOwner().EntityID), ""))
 	admission := testAgentSubscriptionAdmissionForFlow(t, "consumer-agent", "consumer", events.EventType("deploy.completed")).CarrierOnly()
 	identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, "consumer", "consumer-agent", "consumer")
 	ch := subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, connectRoutePlanStaticOwner().EntityID)
@@ -1691,7 +1694,7 @@ func TestEventBusPublish_SingletonConnectToRootUsesExactSelectedRootOwner(t *tes
 	}
 	store := newTargetRouteMemoryStore()
 	runID := uuid.NewString()
-	rootEntityID := eventtest.UUID("selected-root-owner")
+	rootEntityID := runtimeflowidentity.EntityID(runID)
 	store.setTargetOwners(ActiveTargetDescriptor{
 		ID: "selected-root-owner", FlowInstance: runID, EntityID: rootEntityID,
 	})
@@ -1699,6 +1702,7 @@ func TestEventBusPublish_SingletonConnectToRootUsesExactSelectedRootOwner(t *tes
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstructionForRun(t, eb, source, semanticview.RootExecutionFlowID(source), runID)
 	singletonEntityID := runtimeflowidentity.EntityID("scout")
 	if singletonEntityID == rootEntityID {
 		t.Fatal("test identities must distinguish singleton source from root receiver owner")
@@ -2107,6 +2111,9 @@ func TestEventBusConnectRecipientRegistrationExpandsWildcardOverDeclaredInputs(t
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID,
+		StoredFlowInstanceIdentityFixture(source, "consumer", "", busInternalTestRunID, connectRoutePlanStaticOwner().EntityID), ""))
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID, events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	want := connectRoutePlanStaticDeliveryRoute(t)
@@ -2545,7 +2552,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	}
 }
 
-func TestCompiledConnectEvaluationStaleSnapshotReevaluatesBeforeMutation(t *testing.T) {
+func TestCompiledConnectEvaluationIgnoresDescriptorGenerationBeforeMutation(t *testing.T) {
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, false)
 	store := &connectRoutePlanStaleSnapshotStore{
 		connectRoutePlanLifecycleStore: &connectRoutePlanLifecycleStore{
@@ -2570,8 +2577,8 @@ func TestCompiledConnectEvaluationStaleSnapshotReevaluatesBeforeMutation(t *test
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	if got := store.flowInstanceDescriptorCalls; got < 2 {
-		t.Fatalf("descriptor reads = %d, want re-evaluation after stale generation", got)
+	if store.mutations != 0 {
+		t.Fatal("route generation churn did not execute during the remaining mirror work")
 	}
 	if got := len(store.activations); got != 1 {
 		t.Fatalf("activations = %d, want exactly one post-fence mutation", got)
@@ -2582,7 +2589,7 @@ func TestCompiledConnectEvaluationStaleSnapshotReevaluatesBeforeMutation(t *test
 	}
 }
 
-func TestCompiledConnectEvaluationStaleSnapshotFailureLeavesLifecycleUnchanged(t *testing.T) {
+func TestCompiledConnectEvaluationIgnoresRepeatedDescriptorGenerationChurn(t *testing.T) {
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, false)
 	store := &connectRoutePlanStaleSnapshotStore{
 		connectRoutePlanLifecycleStore: &connectRoutePlanLifecycleStore{
@@ -2604,27 +2611,20 @@ func TestCompiledConnectEvaluationStaleSnapshotFailureLeavesLifecycleUnchanged(t
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-stale"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
-	err = eb.Publish(context.Background(), evt)
-	failure, ok := runtimefailures.As(err)
-	if err == nil || !ok ||
-		failure.Failure.Class != runtimefailures.ClassDependencyUnavailable ||
-		failure.Failure.Detail.Code != "connect_route_snapshot_stale" ||
-		!failure.Failure.Retryable || failure.Failure.Deterministic ||
-		failure.Failure.Component != "eventbus" || failure.Failure.Operation != "plan_connect_routes" {
-		t.Fatalf("Publish error = %v, want typed retryable exhausted stale-generation failure", err)
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
 	}
-	var stale staleConnectRoutePlanSnapshotError
-	if !errors.As(err, &stale) {
-		t.Fatalf("Publish error = %v, want preserved stale-generation cause", err)
+	if store.mutations == 10 {
+		t.Fatal("route generation churn did not execute during the remaining mirror work")
 	}
-	if got := len(store.activations); got != 0 {
-		t.Fatalf("activations = %d, want no lifecycle mutation", got)
+	if got := len(store.activations); got != 1 {
+		t.Fatalf("activations = %d, want exactly one native select-or-create mutation", got)
 	}
-	if _, ok := store.events[evt.ID()]; ok {
-		t.Fatalf("event %s persisted despite stale-generation failure", evt.ID())
+	if _, ok := store.events[evt.ID()]; !ok {
+		t.Fatalf("event %s was not persisted", evt.ID())
 	}
-	if routes := store.routes[evt.ID()]; len(routes) != 0 {
-		t.Fatalf("persisted routes = %#v, want none", routes)
+	if routes := store.routes[evt.ID()]; len(routes) != 1 || routes[0].ConnectClaim.Empty() {
+		t.Fatalf("persisted routes = %#v, want exactly one claimed route", routes)
 	}
 }
 
@@ -4764,8 +4764,6 @@ func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *
 		t.Fatalf("process index substituted for committed constructor evidence: ok=%t scope=%#v", ok, scope)
 	}
 	previewContext := withConnectRoutePlanPreview(ctx)
-	preview, _ := previewContext.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes)
-	preview.table = table
 	scope, ok, err = resolver.selectedTargetScope(previewContext, evt)
 	if err != nil || !ok || len(scope.instancePaths) != 0 {
 		t.Fatalf("process preview substituted for native receiver evidence: scope=%#v err=%v", scope, err)

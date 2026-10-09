@@ -39,7 +39,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission routes: %w", err)
 	}
-	instances, err := installContractFrontierFlowInstanceRoutes(routeTable, req.Source, req.Plan)
+	instances, err := ConstructedInstances(req.Source, req.Plan)
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
@@ -187,7 +187,11 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, selectedSourc
 		if eventIncomplete {
 			disposition = runfork.RunForkSelectedContractDispositionFailClosed
 		}
-		local, err := contractFrontierRecipients(routeTable.ResolveIndependentPubsubFromSource(runID, events.EventType(event.eventName), event.routingSource), events.EventType(event.eventName))
+		definitions, err := contractFrontierPubsubDefinitions(routeTable, selectedSource, runID, events.EventType(event.eventName), event.routingSource, instances)
+		if err != nil {
+			return nil, false, err
+		}
+		local, err := contractFrontierRecipients(definitions, events.EventType(event.eventName))
 		if err != nil {
 			return nil, false, err
 		}
