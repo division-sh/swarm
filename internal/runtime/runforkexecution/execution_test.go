@@ -3658,7 +3658,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	ctx = selectedForkExecutionTestContext(t, ctx, authority)
 	badIdentity := selectedContractTestAgentIdentityForRun(t, authority.SelectedFork.ForkRunID, "bad-agent", "")
 
-	_, _, err = startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
+	_, _, err = prepareSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
 		Owner:        executionOwner,
 		Prepared:     prepared,
 		Admission:    executionAdmission,
@@ -5054,7 +5054,7 @@ func assertSelectedContractRuntimeContainerProof(t *testing.T, proof *SelectedCo
 	if !proof.EventBusRecipientPlanGuard ||
 		!proof.RuntimeActiveAgentDescriptorsEphemeral ||
 		!proof.EphemeralAgentRuntime ||
-		!proof.QuiescenceRequired ||
+		proof.QuiescenceRequired ||
 		!proof.CleanupRequired {
 		t.Fatalf("runtime container lifecycle proof = %#v", proof)
 	}

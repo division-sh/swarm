@@ -86,7 +86,7 @@ func TestSelectedFiniteFeedRecoveryPinsMatchDurableFeedInventoryBothStores(t *te
 			read := func(want bool) {
 				t.Helper()
 				withForkOperationTx(t, db, func(tx *sql.Tx) {
-					pins, err := selectedFiniteFeedRecoveryPinsTx(ctx, tx, runID, bundle)
+					pins, err := selectedForkRecoveryPinsTx(ctx, tx, runID, bundle)
 					if want && (err != nil || len(pins) != 1 || pins[0].RunID != runID || pins[0].RunState != "paused") {
 						t.Fatalf("exact selected pins=%+v err=%v", pins, err)
 					}
@@ -95,7 +95,7 @@ func TestSelectedFiniteFeedRecoveryPinsMatchDurableFeedInventoryBothStores(t *te
 					}
 				})
 			}
-			read(false)
+			read(true) // An eventless child does not require a synthetic feed or pin.
 			if _, err := db.Exec(`INSERT INTO fan_out_intents VALUES ($1,'deployment','.','root.ready',$2,$3,$4)`, runID, version, schema, bundle); err != nil {
 				t.Fatal(err)
 			}
@@ -145,7 +145,7 @@ func TestInterruptedSelectedFiniteFeedSettlesPermanentOperationBothStores(t *tes
 					if _, _, err := bindForkOperationTx(ctx, tx, request, binding.ForkRunID, binding.BindingID, backend == "postgres"); err != nil {
 						t.Fatal(err)
 					}
-					if err := settleInterruptedSelectedFiniteFeedOperationTx(ctx, tx, binding, request.TargetBundleHash, failure, uncertain, time.Now().UTC(), backend == "postgres"); err != nil {
+					if err := settleInterruptedSelectedForkOperationTx(ctx, tx, binding, request.TargetBundleHash, failure, uncertain, time.Now().UTC(), backend == "postgres"); err != nil {
 						t.Fatal(err)
 					}
 				})
@@ -161,7 +161,7 @@ func TestInterruptedSelectedFiniteFeedSettlesPermanentOperationBothStores(t *tes
 					if record.Status != want || record.Failure == nil || record.Failure.Code != "selected_recovery_prelaunch_abandoned" || record.Result != nil {
 						t.Fatalf("interrupted operation: %+v, want %s with typed failure", record, want)
 					}
-					if err := settleInterruptedSelectedFiniteFeedOperationTx(ctx, tx, binding, request.TargetBundleHash, failure, uncertain, time.Now().UTC(), backend == "postgres"); err == nil {
+					if err := settleInterruptedSelectedForkOperationTx(ctx, tx, binding, request.TargetBundleHash, failure, uncertain, time.Now().UTC(), backend == "postgres"); err == nil {
 						t.Fatal("terminal operation was settled a second time")
 					}
 				})
@@ -205,17 +205,20 @@ func TestSelectedFiniteFeedRecoveryRequiresCheckpointAndOnlySettledExternalEffec
 			read := func(want bool) {
 				t.Helper()
 				withForkOperationTx(t, db, func(tx *sql.Tx) {
-					operation, err := selectedFiniteFeedRecoveryOperationTx(ctx, tx, binding, request.TargetBundleHash, backend == "postgres")
-					if err != nil || (operation != nil) != want {
-						t.Fatalf("resumable finite feed=%t want=%t err=%v", operation != nil, want, err)
+					if _, err := selectedForkOperationForRecoveryTx(ctx, tx, binding, request.TargetBundleHash, backend == "postgres"); err != nil {
+						t.Fatal(err)
+					}
+					settled, err := selectedForkRecoveryEffectsSettledTx(ctx, tx, childID)
+					if err != nil || settled != want {
+						t.Fatalf("settled predecessor effects=%t want=%t err=%v", settled, want, err)
 					}
 				})
 			}
-			read(false)
+			read(true) // No finite feed is required for exact selected recovery.
 			if _, err := db.Exec(`INSERT INTO fan_out_intents VALUES ($1,'handler')`, childID); err != nil {
 				t.Fatal(err)
 			}
-			read(false)
+			read(true)
 			if _, err := db.Exec(`INSERT INTO fan_out_intents VALUES ($1,'deployment')`, childID); err != nil {
 				t.Fatal(err)
 			}

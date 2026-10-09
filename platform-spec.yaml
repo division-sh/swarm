@@ -41420,6 +41420,19 @@ llm_completion_execution_authority:
     unavailable_accounting: One synthetic spend row uses MAX reservation amount, usage_accounting estimated, and accounting_basis accounting_unavailable_exhaustion; reservations are deleted in the same transaction.
   selected_fork:
     issuer: run_fork_selected_contract_runtime_executions is the sole container-generation issuer. The non-mutating admission is prerequisite evidence, never the execution grant.
+    activation_and_retention: >-
+      Resolve and admit the exact cut, materialize the child, prepare its exact stopped attachment, atomically activate
+      with the permanent fork-operation result, retain the process-owned executor, acknowledge activation, then serve
+      and settle owed work. Attachment prepares the exact selected generation, stopped agents, readiness attempts,
+      gateway and existing scheduler with callbacks withheld. No business publication, provider turn or timer firing
+      precedes committed activation and current selected authority. The runtime lease descends from the process-owned
+      selected occurrence, not the expiring request-orchestration lease. Direct and staged activation consume the same
+      attachment and retention owner. A committed activation remains successful after registration, handoff or cleanup
+      failure; retained diagnostics and durable recovery account for unfinished child work without another materialization.
+      Idle quiescence is not terminality: pending deadlines and replies keep their existing obligation owners live.
+      Normal settlement checks the canonical terminal run and exact current completion authority before quiescing and
+      closing execution. Process retirement cancels and joins serving, continuations and wakeups before releasing
+      manager, gateway, generation grant and source projection. No second executor or callback-only success is permitted.
     lifecycle: prepared -> running -> quiesced -> closed; prepared or running may become failed, then closed. Successful quiescence consumes one store-owned current-authority guard that atomically binds execution ID, fork run, generation, all four fingerprints, owner/fence, database-time lease freshness, and absence of live child attempts before transition. Runtime execution admission, claim, launch, and new child effects require an active fork run. Exact fenced quiescence/failure and terminal close are completion finalizers and remain available after accepted fork-local work terminalizes the run; they MUST NOT reuse the active-run admission guard or leave a live execution generation behind a completed run.
     uniqueness: Exactly one non-closed current generation exists per fork, including when no budget cap applies. Fingerprint conflict, stale generation/owner/fence, quiesced/terminal reuse, and second-process claim fail before provider launch.
     cleanup: Mutable cleanup quiesces/closes the authority, retains the cancelled runs parent tombstone, and preserves authority, effect attempt, turn/usage, spend, terminal evidence, and their foreign-key validity.

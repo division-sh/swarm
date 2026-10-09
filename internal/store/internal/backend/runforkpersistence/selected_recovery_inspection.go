@@ -44,6 +44,11 @@ func inspectSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlife
 	}
 	inspection.Plan, inspection.ExecutionState = record.SelectedForkRecoveryResult, record.state
 	if !record.hasExecution {
+		if record.Disposition == runfork.SelectedForkRecoveryResume {
+			plan, err := planSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, false)
+			inspection.Plan = plan.SelectedForkRecoveryResult
+			return inspection, err
+		}
 		return inspection, nil
 	}
 	settled, complete, err := settledSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, false)

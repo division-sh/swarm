@@ -60,7 +60,7 @@ func InspectSelectedForkRecoveries(ctx context.Context, reader SelectedForkRecov
 			return nil, err
 		}
 		inspection := InspectedSelectedForkRecovery{Entry: entry, Evidence: evidence, SelectedSource: selected}
-		if action == selectedRecoveryResumeFiniteFeed || action == selectedRecoveryActivateFiniteFeed {
+		if action == selectedRecoveryResume || action == selectedRecoveryActivate {
 			original, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
 				SourceRunID: entry.Binding.SourceRunID,
 				Selection:   runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},

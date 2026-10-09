@@ -75,8 +75,8 @@ func (s *RunForkSQLiteOwner) IssueRunForkSelectedContractRuntimeExecution(ctx co
 func issueSelectedSuccessorExecution(ctx context.Context, attempt *mutationprotocol.Attempt, dialect selectedRuntimeDialect, req runfork.SelectedContractRuntimeExecutionIssueRequest, deliveries interface {
 	TransferSelectedSuccessorAuthority(context.Context, *mutationprotocol.Attempt, string, runtimedelivery.ExecutionAuthority) error
 }) (runfork.SelectedContractRuntimeExecution, error) {
-	if req.Admission.ForkPoint.Kind != runfork.RunForkPointDeploymentRevision {
-		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected successor issuance is restricted to finite deployment feeds")
+	if err := req.Admission.ForkPoint.Validate(); err != nil {
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected successor requires exact typed cut: %w", err)
 	}
 	var issued runfork.SelectedContractRuntimeExecution
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
