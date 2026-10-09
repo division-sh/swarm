@@ -3,6 +3,7 @@ package workflowheader
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -212,6 +213,8 @@ func inventoryStateOnly(ctx context.Context, tx *sql.Tx, runID string) (_ []Proj
 func requireJSONObject(name string, raw any) error {
 	var data []byte
 	switch value := raw.(type) {
+	case json.RawMessage:
+		data = value
 	case []byte:
 		data = value
 	case string:
