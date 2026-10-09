@@ -207,10 +207,13 @@ func TestPersistenceAuthorityDebtAnalysisCacheIdentity(t *testing.T) {
 
 func TestPersistenceAuthorityDebtAnalysisCachePublishMaster(t *testing.T) {
 	if os.Getenv("SWARM_DEBT_CACHE_PUBLISH") != "1" {
-		t.Skip("protected-master immutable-archive producer only")
+		// Ordinary qualification proves refusal, not protected-master publication.
+		if debtProtectedMasterPublicationAllowed() {
+			t.Fatal("publication admitted without its protected-master opt-in")
+		}
+		return
 	}
-	if os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("GITHUB_REF") != "refs/heads/master" ||
-		(os.Getenv("GITHUB_EVENT_NAME") != "push" && os.Getenv("GITHUB_EVENT_NAME") != "schedule") {
+	if !debtProtectedMasterPublicationAllowed() {
 		t.Fatal("shared analysis publication requires protected master")
 	}
 	root := persistenceAuthorityRepoRoot(t)
@@ -226,4 +229,10 @@ func TestPersistenceAuthorityDebtAnalysisCachePublishMaster(t *testing.T) {
 	if !ok || !debtSitesEqual(sites, retained) {
 		t.Fatal("protected-master archive analysis was not durably published")
 	}
+}
+
+func debtProtectedMasterPublicationAllowed() bool {
+	return os.Getenv("SWARM_DEBT_CACHE_PUBLISH") == "1" && os.Getenv("GITHUB_ACTIONS") == "true" &&
+		os.Getenv("GITHUB_REF") == "refs/heads/master" &&
+		(os.Getenv("GITHUB_EVENT_NAME") == "push" || os.Getenv("GITHUB_EVENT_NAME") == "schedule")
 }
