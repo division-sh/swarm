@@ -739,7 +739,7 @@ jobs:
   nightly-proof:
     name: Master nightly proof
     needs: [ci-plan, required-tests, ci-tier]
-    if: ${{ always() && github.event_name == 'schedule' && github.ref == 'refs/heads/master' && needs.ci-plan.outputs.profile == 'full' && needs.required-tests.result == 'success' && needs.ci-tier.result == 'success' }}
+    if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master' && needs.ci-plan.outputs.profile == 'full' && needs.required-tests.result == 'success' && needs.ci-tier.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions: {}

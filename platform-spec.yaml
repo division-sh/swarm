@@ -23561,15 +23561,18 @@ test_specification:
         Body edits do not trigger CI. The late five-minute summary checks current body/head before success; it cannot revoke completed green.
         An unmet tier increase requires a new signed head and higher-tier qualifying protected checks; keep the PR draft/non-mergeable until qualification.
         Lead's final merge comparison checks current body against successful current-head trusted-App plan/summary, including post-approval edits; completed higher scope can satisfy lower.
-        Final-head full qualification is separately enforced by the user-run merge orchestrator; core feedback is not merge-full credit.
+        Full is the default final-head merge gate, separately enforced by the user-run merge orchestrator;
+        a lower merge tier requires an explicit reviewer tier ruling. Core feedback does not by itself waive the default full requirement.
         The native CI tier: <tier> check derives from the canonical plan and succeeds only after the same run's required summary;
         its Actions run/attempt, execution source and plan identity must match the qualifying aggregate. No privileged PR checks publisher is required.
         The tier-check activation marker is temporary bootstrap only and activates after the first full negative/positive hosted control.
         Original PR proof stays in place until a complete healthy master-nightly and the strict merge-time nightly marker are live.
-        Master nightly proof qualifies the existing ci.yml scheduled full owner and its same-run tier/summary;
+        Master nightly proof qualifies the existing ci.yml scheduled or deliberately manually dispatched full owner on master and its same-run tier/summary;
         establishing this nightly marker does not create a second dispatcher or remove original PR proof obligations.
-        Strict nightly admission uses the newest exact proof workflow on master, including pending/red/cancelled runs, and requires successful
-        complete proof no older than 30 hours from creation; missing, foreign, incomplete, stale, future or API-error evidence refuses.
+        Strict nightly admission uses the newest completed ci.yml run on master from schedule or workflow_dispatch and requires its same-run
+        Master nightly proof job and complete underlying full receipts to succeed, strictly less than 30 hours from creation.
+        A newer pending run may coexist with a fresh completed green; a newer completed red, cancelled or partial run blocks immediately.
+        Missing, foreign, incomplete, stale, future or API-error evidence refuses. A manual recovery clears red only with complete full master-nightly proof.
         Local --tier/--full requires unchanged HEAD and clean tracked/untracked non-ignored source before planning and after execution, retaining actual HEAD and plan/receipts for independent Local-Tier human comparison. No-context core/changed-package execution permits dirty developer feedback, not reviewer-bound proof; no local authorization sidecar, audit locator, GitHub lookup or branch/title inference.
       membership: >-
         Core executes ordinary admitted roots and fixed safety and smoke canaries. Lifecycle adds the retained

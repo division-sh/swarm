@@ -70,11 +70,25 @@ func TestNightlyProofReusesExhaustiveOwnerWithoutRemovingPRProof(t *testing.T) {
 	job := workflow.Jobs["nightly-proof"]
 	if !slices.Equal(job.Needs, []string{"ci-plan", "required-tests", "ci-tier"}) ||
 		!strings.Contains(job.If, "github.event_name == 'schedule'") ||
+		!strings.Contains(job.If, "github.event_name == 'workflow_dispatch'") ||
 		!strings.Contains(job.If, "github.ref == 'refs/heads/master'") ||
 		!strings.Contains(job.If, "needs.ci-plan.outputs.profile == 'full'") ||
 		!strings.Contains(job.If, "needs.required-tests.result == 'success'") ||
 		!strings.Contains(job.If, "needs.ci-tier.result == 'success'") {
 		t.Fatal("nightly must qualify the existing exhaustive owner, not partial feedback")
+	}
+	for _, event := range []string{"schedule", "workflow_dispatch", "pull_request", "push"} {
+		for _, ref := range []string{"refs/heads/master", "refs/heads/topic"} {
+			for _, status := range []string{"success", "failure", "cancelled", "skipped"} {
+				facts := ciEventFacts(event, false, "")
+				facts["github.ref"] = strconv.Quote(ref)
+				facts["needs.ci-tier.result"] = strconv.Quote(status)
+				want := (event == "schedule" || event == "workflow_dispatch") && ref == "refs/heads/master" && status == "success"
+				if got := evaluateCICondition(t, job.If, facts, false); got != want {
+					t.Fatalf("nightly event=%s ref=%s completion=%s admitted=%v", event, ref, status, got)
+				}
+			}
+		}
 	}
 	for _, retained := range []string{"proof-unit", "unused-linux", "unused-darwin", "unused-checks", "macos-sqlite-possession"} {
 		if !slices.Contains(workflow.Jobs["required-tests"].Needs, retained) || strings.Contains(workflow.Jobs[retained].If, "schedule") {
