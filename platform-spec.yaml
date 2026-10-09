@@ -32009,6 +32009,11 @@ api_specification:
           test_quiescence:
             $ref: '#/components/schemas/RunTestQuiescence'
       EntitySummary:
+        description: >-
+          Authored-data membership and clocks with nullable header lifecycle. Data-only imports have null for every
+          lifecycle property. Constructed no-stage members have stage_defined false, a positive header revision and
+          lifecycle clocks, but null current_state and entered_state_at. Staged members expose the exact declared stage.
+          created_at and updated_at are data clocks; lifecycle-only changes do not move the data-list cursor.
         type: object
         additionalProperties: false
         required:
@@ -32016,8 +32021,12 @@ api_specification:
         - run_id
         - flow_instance
         - entity_type
+        - stage_defined
         - current_state
         - revision
+        - entered_state_at
+        - lifecycle_created_at
+        - lifecycle_updated_at
         - created_at
         - updated_at
         properties:
@@ -32029,21 +32038,32 @@ api_specification:
             type: string
           entity_type:
             type: string
+          stage_defined:
+            type: [boolean, 'null']
           current_state:
-            type: string
+            type: [string, 'null']
           slug:
             type: string
           name:
             type: string
           revision:
-            type: integer
-            minimum: 0
+            type: [integer, 'null']
+            minimum: 1
+          entered_state_at:
+            type: [string, 'null']
+            format: date-time
+          lifecycle_created_at:
+            type: [string, 'null']
+            format: date-time
+          lifecycle_updated_at:
+            type: [string, 'null']
+            format: date-time
           created_at:
             $ref: '#/components/schemas/Timestamp'
           updated_at:
             $ref: '#/components/schemas/Timestamp'
       EntityFull:
-        description: 'Entity-native operator shape from the canonical typed entity-read owner: entity identity, authored fields, platform bookkeeping, gates and accumulator state. The v1 entity.get reader returns this decomposition directly; retired dashboard instance projections are not an alternate owner.'
+        description: 'Entity-native operator shape from the canonical typed entity-read owner: admitted data identity/fields and optional exact header lifecycle. Imports have explicit null bookkeeping/gates/accumulated/loops, never empty fabricated lifecycle maps. Constructed members retain valid maps and typed loop arrays. Retired projections are not an alternate owner.'
         type: object
         additionalProperties: false
         required:
@@ -32052,6 +32072,7 @@ api_specification:
         - bookkeeping
         - gates
         - accumulated
+        - loops
         properties:
           entity:
             $ref: '#/components/schemas/EntitySummary'
@@ -32060,21 +32081,21 @@ api_specification:
             description: Typed entity fields per the entity contract. Shape depends on entity_type.
             additionalProperties: true
           bookkeeping:
-            type: object
+            type: [object, 'null']
             description: Platform bookkeeping facts selected by explicit producers. Keys never classify authored fields.
             additionalProperties: true
           gates:
-            type: object
+            type: [object, 'null']
             description: "Gate state. Map of gate_name \u2192 boolean."
             additionalProperties:
               type: boolean
           accumulated:
-            type: object
+            type: [object, 'null']
             description: "Accumulator state. Map of accumulator key \u2192 JSON value; values may be scalars, objects, or\
               \ arrays depending on accumulate, data_accumulation, compute, or projection writers."
             additionalProperties: true
           loops:
-            type: array
+            type: [array, 'null']
             description: Typed bounded-loop runtime projection. The reserved mutable control bucket is never returned.
             items:
               $ref: '#/components/schemas/BoundedLoopActivation'
@@ -32112,6 +32133,7 @@ api_specification:
         additionalProperties: false
         required:
         - counts
+        - absent_count
         properties:
           counts:
             type: object
@@ -32119,6 +32141,10 @@ api_specification:
             additionalProperties:
               type: integer
               minimum: 0
+          absent_count:
+            type: integer
+            minimum: 0
+            description: SQL-null groups, separate from every real string bucket including unknown. Sum of counts plus absent_count conserves admitted data membership.
       DeliveryStatus:
         type: string
         description: >-

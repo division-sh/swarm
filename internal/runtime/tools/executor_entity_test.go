@@ -2859,7 +2859,7 @@ func seedEntityToolFixtureForTest(t *testing.T, ctx context.Context, input map[s
 		// they cannot exercise a live write without a constructed header.
 		if _, err := fixture.owner.SetupScenarioEntities(ctx, runtimepipeline.ScenarioSetupRequest{
 			RunID: runID, CreatedAt: time.Now().UTC(),
-			Entities: []runtimepipeline.ScenarioSetupEntityRequest{{Alias: entityID, EntityID: entityID, FlowInstance: flowInstance, EntityType: contract.EntityType, CurrentState: initial.ID(), Fields: fields}},
+			Entities: []runtimepipeline.ScenarioSetupEntityRequest{{Alias: entityID, EntityID: entityID, FlowInstance: flowInstance, EntityType: contract.EntityType, Fields: fields}},
 		}); err != nil {
 			t.Fatal(err)
 		}

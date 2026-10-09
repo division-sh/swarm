@@ -20,7 +20,9 @@ const DataReadColumns = `CAST(es.run_id AS TEXT), CAST(es.entity_id AS TEXT),
 	CAST(fi.entity_id AS TEXT), fi.instance_path, fi.entity_type, fi.flow_template,
 	fi.mode, fi.status, fi.config, fi.current_state, fi.stage_defined, fi.revision,
 	fi.entered_state_at, fi.created_at, fi.updated_at, fi.terminated_at,
-	fi.gates, fi.bookkeeping, fi.accumulator`
+	fi.gates, fi.bookkeeping, fi.accumulator,
+	(SELECT COUNT(*) FROM flow_instances owner
+	 WHERE owner.run_id = es.run_id AND (owner.entity_id = es.entity_id OR owner.instance_path = es.flow_instance))`
 
 const DataReadFrom = `FROM entity_state es LEFT JOIN flow_instances fi
 	ON fi.run_id = es.run_id AND (fi.entity_id = es.entity_id OR fi.instance_path = es.flow_instance)`
@@ -37,13 +39,17 @@ func ScanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), ta
 	var headerID, path, entityType, template, mode, status, stage sql.NullString
 	var stageDefined sql.NullBool
 	var revision sql.NullInt64
+	var owners int
 	var dataCreated, dataUpdated, entered, created, updated, terminated any
 	dest := []any{&runID, &state.EntityID, &state.FlowInstance, &state.EntityType, &slug, &name,
 		&state.Fields, &dataCreated, &dataUpdated, &headerID, &path, &entityType, &template,
 		&mode, &status, &header.Config, &stage, &stageDefined, &revision, &entered, &created, &updated,
-		&terminated, &header.Gates, &header.Bookkeeping, &header.Accumulator}
+		&terminated, &header.Gates, &header.Bookkeeping, &header.Accumulator, &owners}
 	if err := row.Scan(append(dest, tail...)...); err != nil {
 		return operatorread.OperatorEntityFull{}, err
+	}
+	if owners > 1 || (owners == 1) != headerID.Valid {
+		return operatorread.OperatorEntityFull{}, fmt.Errorf("entity has conflicting constructed header owners")
 	}
 	state.Slug, state.Name = slug.String, name.String
 	for _, clock := range []struct {
