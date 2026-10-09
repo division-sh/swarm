@@ -34,7 +34,7 @@ func (s *PipelinePostgresOwner) CommitScenarioSetup(ctx context.Context, command
 		return runtimepipeline.ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
-	plans, topology, err := validateScenarioConstruction(ctx, req, command.Activations)
+	plans, err := validateScenarioConstruction(ctx, req, command.Activations)
 	if err != nil {
 		return runtimepipeline.ScenarioSetupResult{}, err
 	}
@@ -60,9 +60,6 @@ func (s *PipelinePostgresOwner) CommitScenarioSetup(ctx context.Context, command
 				var err error
 				result.Activations, err = s.CommitFlowInstanceActivationsTx(txctx, attempt, plans)
 				if err != nil {
-					return err
-				}
-				if _, err := s.ReplaceFlowInstanceRouteTopologyTx(txctx, tx, topology); err != nil {
 					return err
 				}
 			}
@@ -138,7 +135,7 @@ func (s *PipelineSQLiteOwner) CommitScenarioSetup(ctx context.Context, command r
 		return runtimepipeline.ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
-	plans, topology, err := validateScenarioConstruction(ctx, req, command.Activations)
+	plans, err := validateScenarioConstruction(ctx, req, command.Activations)
 	if err != nil {
 		return runtimepipeline.ScenarioSetupResult{}, err
 	}
@@ -164,9 +161,6 @@ func (s *PipelineSQLiteOwner) CommitScenarioSetup(ctx context.Context, command r
 				var err error
 				result.Activations, err = s.CommitFlowInstanceActivationsTx(txctx, attempt, plans)
 				if err != nil {
-					return err
-				}
-				if _, err := s.ReplaceFlowInstanceRouteTopologyTx(txctx, tx, topology); err != nil {
 					return err
 				}
 			}
@@ -236,17 +230,17 @@ func acknowledgeScenarioSetup(result runtimepipeline.ScenarioSetupResult) runtim
 	return result
 }
 
-func validateScenarioConstruction(ctx context.Context, req runtimepipeline.ScenarioSetupRequest, activations []runtimebus.FlowInstanceActivationCommand) ([]runtimepipeline.FlowInstanceActivationPlan, []runtimebus.FlowInstanceRouteRecordSet, error) {
+func validateScenarioConstruction(ctx context.Context, req runtimepipeline.ScenarioSetupRequest, activations []runtimebus.FlowInstanceActivationCommand) ([]runtimepipeline.FlowInstanceActivationPlan, error) {
 	if len(activations) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 	fact, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !found || len(activations) != 1 {
-		return nil, nil, fmt.Errorf("scenario construction requires one selected root tree")
+		return nil, fmt.Errorf("scenario construction requires one selected root tree")
 	}
 	command := activations[0]
 	if err := command.Validate(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	plan := command.Plan
 	if plan.Readiness.RunID != req.RunID || plan.Readiness.BundleHash != fact.BundleHash() ||
@@ -254,7 +248,7 @@ func validateScenarioConstruction(ctx context.Context, req runtimepipeline.Scena
 		plan.Identity.ParentEntityID != "" || plan.Identity.ParentRoute.FlowID != "" ||
 		plan.CreatingInput != (runtimepipeline.FlowConstructionInput{}) || plan.StandingGenerationReplacement ||
 		!plan.OccurredAt.Equal(req.CreatedAt) {
-		return nil, nil, fmt.Errorf("scenario construction lost its exact no-argument run owner")
+		return nil, fmt.Errorf("scenario construction lost its exact no-argument run owner")
 	}
 	for _, entity := range req.Entities {
 		if entity.EntityID != req.RunID {
@@ -262,11 +256,11 @@ func validateScenarioConstruction(ctx context.Context, req runtimepipeline.Scena
 		}
 		fields, gates, _, _, err := scenarioSetupEntityJSON(entity)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		record, err := plan.PersistenceRecord()
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		matchesType := entity.EntityType == record.EntityType
 		if record.EntityType == "" {
@@ -274,11 +268,11 @@ func validateScenarioConstruction(ctx context.Context, req runtimepipeline.Scena
 		}
 		if !matchesType || entity.CurrentState != record.CurrentState ||
 			!scenarioSetupJSONEqual(string(fields), record.Fields) || !scenarioSetupJSONEqual(string(gates), record.Gates) {
-			return nil, nil, fmt.Errorf("scenario construction changed explicit imported fields, stage or gates")
+			return nil, fmt.Errorf("scenario construction changed explicit imported fields, stage or gates")
 		}
-		return []runtimepipeline.FlowInstanceActivationPlan{plan}, command.RouteTopology, nil
+		return []runtimepipeline.FlowInstanceActivationPlan{plan}, nil
 	}
-	return nil, nil, fmt.Errorf("scenario construction has no exact root seed")
+	return nil, fmt.Errorf("scenario construction has no exact root seed")
 }
 
 func normalizeScenarioSetupRequest(req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupRequest, error) {

@@ -135,30 +135,11 @@ func (r CommittedAPIEventPublication) Validate() error {
 }
 
 type FlowInstanceActivationCommand struct {
-	Plan          runtimepipeline.FlowInstanceActivationPlan
-	RouteTopology []FlowInstanceRouteRecordSet
+	Plan runtimepipeline.FlowInstanceActivationPlan
 }
 
 func (c FlowInstanceActivationCommand) Validate() error {
-	if err := c.Plan.Validate(); err != nil {
-		return err
-	}
-	if err := validateFlowInstanceRouteTopology(c.RouteTopology); err != nil {
-		return err
-	}
-	if len(c.RouteTopology) == 0 {
-		return errors.New("flow instance activation requires exact route topology")
-	}
-	owners := make(map[runtimeflowidentity.RunScopedFlowInstance]bool, len(c.RouteTopology))
-	for _, set := range c.RouteTopology {
-		owners[set.Identity] = true
-	}
-	for _, plan := range c.Plan.ConstructionPlans() {
-		if !owners[runtimeflowidentity.RunScopedFlowInstance{RunID: plan.Readiness.RunID, Route: plan.Identity.Route()}] {
-			return fmt.Errorf("construction %s omitted its exact route topology", plan.Identity.InstancePath)
-		}
-	}
-	return nil
+	return c.Plan.Validate()
 }
 
 type FlowInstanceActivationCommitOwner interface {
@@ -172,7 +153,6 @@ type PublicationCommand struct {
 	prospective         runtimepipeline.PreparedWorkflowPublicationState
 	Commit              CommitPublishRequest
 	Activations         []runtimepipeline.FlowInstanceActivationPlan
-	RouteTopology       []FlowInstanceRouteRecordSet
 	DynamicFlowCreation *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
 	AuthorScope         runtimeauthoractivity.Scope
 	HasAuthorScope      bool
@@ -227,12 +207,6 @@ func (c PublicationCommand) validatePublicationFacts() error {
 			return fmt.Errorf("publication activation %d: %w", index, err)
 		}
 	}
-	if err := validateFlowInstanceRouteTopology(c.RouteTopology); err != nil {
-		return fmt.Errorf("publication route topology: %w", err)
-	}
-	if len(c.RouteTopology) > 0 && len(c.Activations) == 0 {
-		return fmt.Errorf("publication route topology requires a flow activation")
-	}
 	if c.DynamicFlowCreation != nil {
 		if err := c.DynamicFlowCreation.Validate(); err != nil {
 			return err
@@ -276,7 +250,6 @@ type CommittedPublication struct {
 	AppendOutcome    EventAppendOutcome
 	DeliveryHandoffs []runtimedelivery.DurableHandoffProof
 	Activations      []CommittedFlowInstanceActivation
-	RouteTopology    []FlowInstanceRouteRecordSet
 	AcceptedStage    *runtimepipelineobligation.CommittedStageReceipt
 	// Acknowledged is false for transaction-local publication evidence.
 	Acknowledged bool
@@ -314,9 +287,6 @@ func (r CommittedPublication) Validate() error {
 		if err := activation.Validate(); err != nil {
 			return fmt.Errorf("committed flow activation %d: %w", index, err)
 		}
-	}
-	if err := validateFlowInstanceRouteTopology(r.RouteTopology); err != nil {
-		return fmt.Errorf("committed route topology: %w", err)
 	}
 	return nil
 }
@@ -786,24 +756,9 @@ func (InMemoryEventStore) CommitPublication(_ context.Context, command Publicati
 	}
 	result := CommittedPublication{
 		AppendOutcome: EventAppendInserted,
-		RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
 	}
 	result = result.WithCommitAcknowledgment()
 	return result, result.Validate()
-}
-
-func cloneFlowInstanceRouteTopology(sets []FlowInstanceRouteRecordSet) []FlowInstanceRouteRecordSet {
-	if len(sets) == 0 {
-		return nil
-	}
-	out := make([]FlowInstanceRouteRecordSet, len(sets))
-	for index, set := range sets {
-		out[index] = FlowInstanceRouteRecordSet{
-			Identity: set.Identity,
-			Routes:   append([]FlowInstanceRouteRecord(nil), set.Routes...),
-		}
-	}
-	return out
 }
 
 func (InMemoryEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {

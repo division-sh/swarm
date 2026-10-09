@@ -288,12 +288,10 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 	if _, exists := s.events[event.ID()]; exists {
 		result := CommittedPublication{
 			AppendOutcome: EventAppendExactDuplicate,
-			RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
 		}
 		for _, plan := range command.Activations {
 			result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan, ReadinessAttemptOrdinal: 1})
 		}
-		s.replaceFlowInstanceRouteTopologyLocked(command.RouteTopology)
 		result = result.WithCommitAcknowledgment()
 		return result, result.Validate()
 	}
@@ -313,7 +311,6 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 	}
 	result := CommittedPublication{
 		AppendOutcome: EventAppendInserted,
-		RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
 	}
 	for _, plan := range command.Activations {
 		result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan, Created: true, ReadinessAttemptOrdinal: 1})
@@ -332,7 +329,6 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 			}
 		}
 	}
-	s.replaceFlowInstanceRouteTopologyLocked(command.RouteTopology)
 	result = result.WithCommitAcknowledgment()
 	return result, result.Validate()
 }

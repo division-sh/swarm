@@ -1256,7 +1256,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			DecisionCardDraftExpiry:   runtimeDeps.DecisionCardDraftExpiry,
 			HumanTaskExpiry:           runtimeDeps.HumanTaskExpiry,
 			DeliveryRuntime:           rt.Bus,
-			FlowRoutes:                rt.Bus,
 			RunLifecycle:              runtimeDeps.EventBusDurable.RunLifecycle,
 			Credentials:               rt.Credentials,
 			ProviderCredentials:       rt.Options.ProviderCredentials,

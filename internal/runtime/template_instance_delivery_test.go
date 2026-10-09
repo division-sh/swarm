@@ -78,7 +78,6 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
-		FlowRoutes:          bus,
 	})
 	constructed := seedTemplateInstanceDeliveryRouteOwner(t, ctx, pg, pc, source)
 
@@ -141,7 +140,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner: runtimeTestEventBusWorkOwner(t, bus), Module: newRuntimeTestWorkflowModule(t, source),
 		Persistence: runtimepipeline.NewWorkflowPersistence(pg), RunLifecycle: pg,
-		PipelineObligations: pg.PipelineObligations(), DeliveryStore: pg, FlowRoutes: bus,
+		PipelineObligations: pg.PipelineObligations(), DeliveryStore: pg,
 	})
 	constructed := seedTemplateInstanceDeliveryRouteOwner(t, ctx, pg, pc, source)
 	if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
@@ -241,7 +240,6 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
-		FlowRoutes:          bus,
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
@@ -363,7 +361,6 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
-		FlowRoutes:          bus,
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
@@ -466,7 +463,6 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		RunLifecycle:        pg,
 		DeliveryStore:       pg,
 		PipelineObligations: pg.PipelineObligations(),
-		FlowRoutes:          bus,
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
@@ -567,7 +563,6 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
-		FlowRoutes:          bus,
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
@@ -699,7 +694,6 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
-		FlowRoutes:          bus,
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{

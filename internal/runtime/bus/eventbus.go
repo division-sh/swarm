@@ -1059,30 +1059,6 @@ func (eb *EventBus) StageFlowInstanceRouteContext(ctx context.Context, req FlowI
 	return persister.ReplaceFlowInstanceRouteTopology(ctx, flowInstanceRouteTopologyRecordSets(staged, identities))
 }
 
-// RetireCommittedFlowInstanceRoute applies selected-store commit evidence to
-// process-local routing. Durable route retirement has already committed.
-func (eb *EventBus) RetireCommittedFlowInstanceRoute(retirement runtimepipeline.WorkflowEngineRouteRetirement) error {
-	if eb == nil {
-		return errors.New("event bus is required")
-	}
-	if err := retirement.Identity.Validate(); err != nil {
-		return err
-	}
-	if retirement.ActivationAttemptID == "" {
-		return nil
-	}
-	if _, err := runtimeflowidentity.ParseActivationAttemptID(retirement.ActivationAttemptID); err != nil {
-		return err
-	}
-	eb.mu.RLock()
-	table := eb.routeTable
-	eb.mu.RUnlock()
-	if table == nil {
-		return errors.New("route table is not initialized")
-	}
-	return table.retireFlowInstanceRouteForAttempt(retirement.Identity, retirement.ActivationAttemptID, 0)
-}
-
 func (eb *EventBus) SetLoggerHook(logger LoggerHook) {
 	if eb == nil {
 		return

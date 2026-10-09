@@ -6028,34 +6028,22 @@ engine:
           set used to materialize the child instance's agents. That set contains runtime built-ins only,
           `instance_id`, `template_id`, `flow_scope_key`, and `flow_instance_path`; built-ins remain authoritative for their
           reserved names. Business state is not an activation-variable or subscriber-name authority.
-        persisted_truth: Materialized `routing_rules.subscriber_id` rows store concrete rendered subscriber IDs. Route
-          persistence, delivery planning, active-agent lookup, and runtime recovery consume that materialized route truth and
-          MUST NOT independently reinterpret authored subscriber templates. For a topology change, the compiled graph selects
-          the precise active template/instance dependencies and all affected owner sets. Route staging MUST derive against
-          every active persisted descriptor in that selected dependency scope whose exact creating-run
-          `{bundle_hash, workflow_version}` matches the current EventBus semantic source. It MUST replace the complete
-          route set for every affected owner in the same mutation, including
-          inactivating previously active rows absent from the derived set; additive upsert is not an exact-set operation.
-          Selecting an affected observer also selects every active producer dependency needed to derive that observer's
-          complete set, including unchanged and older producer instances in other scopes. Selecting only the changed
-          producer may delete valid observer routes during exact-set replacement; unrelated owners remain outside scope.
-          Publication activation, lifecycle route staging, and route retirement MUST consume the same compiled
-          dependency selection. The compiled graph and input-producer resolver are one immutable pair owned by the
-          current semantic route table and replaced together on source revision; these operations freshly read their
-          selected descriptor context. None may fall back to a full-run descriptor read for an independent route change
-          or retain descriptor membership across operations.
-          Descriptor `flow_template` is an authored template ID. Route scope is the semantic full template path; exact-set
-          derivation MUST resolve that scope through the current semantic route-template registry and compare the resulting
-          template ID. Direct equality between a nested scope path and template ID is invalid.
-          Creation and terminal source/consumer removal consume the same owner. Deriving only the newly created or removed
-          instance is invalid because cross-instance observers depend on both lifecycle owners. A missing-source descriptor
-          fails closed. The coordinate exists only through the exact current-run readiness row; current-run query context,
-          `flow_instances.config`, another run's readiness, and storage-path shape are not source authority. A malformed,
-          partial, or foreign coordinate fails the entire exact-set derivation before mutation. Store-wide or run-unscoped
-          descriptors may remain target-description facts, but they cannot authorize persisted route derivation. Every
-          descriptor consumer that erases source provenance, including connect-route `select` / `select-or-create` pin
-          resolution, MUST pass through this exact EventBus source admission before projecting a target descriptor; one
-          consumer may not bypass the owner because it does not itself persist routes.
+        persisted_truth: Constructed instance existence and immutable parent/key selection belong to the native
+          `flow_instances` index, admitted against the exact run source and provenance-specific native or historical
+          construction evidence. The immutable compiled graph and input-producer resolver select declaration dependencies;
+          operation-local admitted observations instantiate their recipients. No mutable or persisted per-instance route
+          membership proves existence, construction, source authority or executable readiness. Declaration applicability
+          is not concrete existence, and existence is not attachment permission.
+          Constructor, deployment-root, scenario-setup and publication commands MUST NOT carry a derived route-topology
+          passenger or persist a parallel subscriber mirror. The existing native transaction retains run/source/grant
+          fencing, exact constructor election, immutable creating receipts, initial lifecycle work, delivery evidence,
+          mutation/revision bookkeeping, counters and acknowledgment. Removing a mirror write never introduces another
+          transaction, early acknowledgment or independent post-commit construction.
+          Observer dependencies and exact requested coordinates remain graph-bounded. Every observation is validated
+          before canonical `(run_id, instance_path)` deduplication; unrelated owners are not scanned, and an incomplete,
+          ambiguous or foreign construction fails closed. Valid fixed historical headers consume their admitted fixed
+          provenance without requiring a nonexistent fresh constructor receipt. Original committed deliveries and replay
+          retain their exact identities rather than reselecting against today's instance inventory.
         recovery: Startup recovery of active flow-instance routes MUST load one exact run-scoped projection from the
           active `flow_instances` row identified by the persisted route's `{run_id, instance_path}`. Dynamic instances additionally
           consume their exact `flow_instance_runtime_readiness` plan. The plan owns the creation run and expected declared
@@ -40751,9 +40739,10 @@ agent_lifecycle_authority:
         publication, session or diagnostic errors. Engine and timer consumers retain and consume the typed committed
         terminal result on both success and later-error exits. No dependent retirement join occurs in an entity
         mutation lock, store transaction, originating execution lease or another dependency of the joined work.
-        Direct flow termination retains committed route-retirement evidence across auxiliary panic as well as error.
-        Its exact process-route retirement is consumed once on normal return or unwind; a failed retirement remains
-        part of the owning completion error, not a successful projection or permission to skip agent-set fencing.
+        Direct flow termination retains exact committed terminal-header authority across auxiliary panic as well as error.
+        No instance-route mirror or process-route retirement callback participates in that transaction or its unwind.
+        The Manager still owns exact agent-set fencing, accepted-work joins, timer retirement and durable attempt cleanup;
+        an auxiliary error cannot erase acknowledged terminal authority or authorize successor cleanup.
         After actual retirement succeeds, clear its retained executable responsibility before projecting auxiliary
         diagnostics. A diagnostic failure remains attributed in the completion/shutdown error but cannot retain or
         repeat already completed retirement.

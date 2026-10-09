@@ -474,12 +474,6 @@ func (s *sqliteFlowActivationLifecycleStore) CommitAgentLifecycleTransition(ctx 
 func (o sqliteFlowActivationCommitter) CommitFlowInstanceActivation(ctx context.Context, plan runtimepipeline.FlowInstanceActivationPlan) (runtimepipeline.CommittedFlowInstanceActivation, error) {
 	return o.store.CommitFlowInstanceActivation(ctx, runtimebus.FlowInstanceActivationCommand{
 		Plan: plan,
-		RouteTopology: []runtimebus.FlowInstanceRouteRecordSet{{
-			Identity: runtimeflowidentity.RunScopedFlowInstance{
-				RunID: plan.Readiness.RunID,
-				Route: plan.Identity.Route(),
-			},
-		}},
 	})
 }
 
@@ -547,6 +541,12 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 		}
 	})
 	req := sqliteKeyedFlowActivationRequest(t, ctx, bundle, "inst-1")
+	activateFixtureStructuralRoot(t, ctx, manager, bundle, req.OccurredAt)
+	prepared, err := manager.PrepareFlowInstanceActivation(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFixtureActivationVariables(t, prepared, "review", "inst-1", "review/inst-1")
 	if err := manager.ActivateFlowInstance(ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance through closed SQLite owner: %v", err)
 	}
@@ -566,13 +566,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 		t.Fatalf("LoadAgents: %v", err)
 	}
 	assertSQLiteActivatedAgentRoutes(t, agents, "reviewer\x00review/inst-1")
-	assertSQLiteAddedRoutes(t, bus, "review/inst-1")
-	assertSQLiteRouteMaterializationVars(t, bus, "review/inst-1", map[string]string{
-		"flow_instance_path": "review/inst-1",
-		"flow_scope_key":     "review",
-		"instance_id":        "inst-1",
-		"template_id":        "review",
-	})
+	assertSQLiteActivatedAgentFlowTopologies(t, ctx, sqliteStore, agents, runID, "review/inst-1")
 }
 
 func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T) {
@@ -628,6 +622,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 			t.Error(err)
 		}
 	})
+	activateFixtureStructuralRoot(t, ctx, manager, bundle, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC))
 	start := make(chan struct{})
 	errs := make(chan error, 2)
 	var wg sync.WaitGroup
@@ -638,6 +633,12 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 			defer wg.Done()
 			<-start
 			req := sqliteKeyedFlowActivationRequest(t, ctx, bundle, instanceID)
+			prepared, err := manager.PrepareFlowInstanceActivation(ctx, req)
+			if err != nil {
+				errs <- err
+				return
+			}
+			assertFixtureActivationVariables(t, prepared, "review", instanceID, "review/"+instanceID)
 			errs <- manager.ActivateFlowInstance(ctx, req)
 		}()
 	}
@@ -684,19 +685,6 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	if !exists || len(plan.Agents) != 0 {
 		t.Fatalf("fixture source set exists=%v agents=%#v, want no flow-owned static desired agents", exists, plan.Agents)
 	}
-	assertSQLiteAddedRoutes(t, bus, "review/component-a", "review/component-b")
-	assertSQLiteRouteMaterializationVars(t, bus, "review/component-a", map[string]string{
-		"flow_instance_path": "review/component-a",
-		"flow_scope_key":     "review",
-		"instance_id":        "component-a",
-		"template_id":        "review",
-	})
-	assertSQLiteRouteMaterializationVars(t, bus, "review/component-b", map[string]string{
-		"flow_instance_path": "review/component-b",
-		"flow_scope_key":     "review",
-		"instance_id":        "component-b",
-		"template_id":        "review",
-	})
 	for _, entry := range bus.runtimeLogEntries() {
 		if entry.Level == "error" || entry.Failure != nil {
 			t.Fatalf("runtime log = %#v, want no activation dead-letter/runtime errors", entry)
@@ -1103,6 +1091,18 @@ func sqliteKeyedFlowActivationRequest(t *testing.T, ctx context.Context, bundle 
 	return req
 }
 
+func activateFixtureStructuralRoot(t *testing.T, ctx context.Context, manager *runtimemanager.AgentManager, bundle *runtimecontracts.WorkflowContractBundle, at time.Time) {
+	t.Helper()
+	source := semanticview.Wrap(bundle)
+	root, err := runtimeflowidentity.StandingForGeneration(source, semanticview.RootExecutionFlowID(source), runtimecorrelation.RunIDFromContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: root, OccurredAt: at}); err != nil {
+		t.Fatalf("construct actual structural fixture root: %v", err)
+	}
+}
+
 func assertSQLiteActivatedAgentRoutes(t *testing.T, agents []runtimemanager.PersistedAgent, wantRoutes ...string) {
 	t.Helper()
 	got := map[string]struct{}{}
@@ -1141,6 +1141,9 @@ func assertSQLiteActivatedAgentFlowTopologies(
 		if err != nil || !found {
 			t.Fatalf("load readiness owner for %s: found=%v err=%v", path, found, err)
 		}
+		if !readiness.Eligible() || readiness.Pending() || readiness.Phase != runtimepipeline.FlowAttachmentReady || readiness.Plan.RunID != runID || readiness.Plan.Identity.InstancePath != path {
+			t.Fatalf("attachment did not complete for exact owner %s: %+v", path, readiness)
+		}
 		fingerprint, err := readiness.Plan.Hash()
 		if err != nil {
 			t.Fatalf("fingerprint readiness owner for %s: %v", path, err)
@@ -1167,33 +1170,13 @@ func assertSQLiteActivatedAgentFlowTopologies(
 	}
 }
 
-func assertSQLiteAddedRoutes(t *testing.T, bus *sqliteFlowActivationBus, wantPaths ...string) {
+func assertFixtureActivationVariables(t *testing.T, plan runtimepipeline.FlowInstanceActivationPlan, flow, instanceID, path string) {
 	t.Helper()
-	got := map[string]struct{}{}
-	for _, path := range bus.routePaths() {
-		got[strings.TrimSpace(path)] = struct{}{}
-	}
-	for _, want := range wantPaths {
-		if _, ok := got[want]; !ok {
-			t.Fatalf("added route paths = %#v, missing %q", got, want)
+	for key, want := range map[string]string{"flow_instance_path": path, "flow_scope_key": flow, "instance_id": instanceID, "template_id": flow} {
+		if got := plan.ActivationVariables[key]; got != want {
+			t.Fatalf("admitted activation variable %s for %s = %q want %q", key, path, got, want)
 		}
 	}
-}
-
-func assertSQLiteRouteMaterializationVars(t *testing.T, bus *sqliteFlowActivationBus, wantPath string, wantVars map[string]string) {
-	t.Helper()
-	for _, req := range bus.materializationRequests() {
-		if strings.TrimSpace(req.Identity.Route.InstancePath) != wantPath {
-			continue
-		}
-		for key, want := range wantVars {
-			if got := strings.TrimSpace(req.ActivationVariables[key]); got != want {
-				t.Fatalf("route materialization vars for %s key %s = %q, want %q; all vars=%#v", wantPath, key, got, want, req.ActivationVariables)
-			}
-		}
-		return
-	}
-	t.Fatalf("route materialization request for %s not found; got %#v", wantPath, bus.materializationRequests())
 }
 
 func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.T) {

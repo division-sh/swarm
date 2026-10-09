@@ -471,10 +471,6 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryTargetFlowInstanceMatches(ctx
 	return true, nil
 }
 
-type FlowInstanceRouteOwner interface {
-	RetireCommittedFlowInstanceRoute(WorkflowEngineRouteRetirement) error
-}
-
 func (pc *PipelineCoordinator) hasConstructedFlowInstance(ctx context.Context, source semanticview.Source, runID, flowID, instancePath, entityID string) (bool, error) {
 	if pc.workflowStore == nil || pc.workflowStore.instanceIndex == nil {
 		return false, fmt.Errorf("workflow target admission requires its instance index owner")

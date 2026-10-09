@@ -37,7 +37,6 @@ type eventCommitTxStore interface {
 	claimReplyContextTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.ClaimCommand) error
 	PrepareDynamicFlowCreationOccurrenceCommitTx(context.Context, *sql.Tx, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest) (bool, error)
 	CommitFlowInstanceActivationsTx(context.Context, *mutationprotocol.Attempt, []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error)
-	ReplaceFlowInstanceRouteTopologyTx(context.Context, *sql.Tx, []runtimebus.FlowInstanceRouteRecordSet) ([]runtimebus.FlowInstanceRouteRecordSet, error)
 	MarkDynamicFlowCreationOccurrenceCommittedTx(context.Context, *sql.Tx, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest) error
 	CaptureWorkflowPublicationStageTx(context.Context, *sql.Tx, events.Event, runtimepipeline.WorkflowPublicationStageRequest, bool) (runtimepipelineobligation.CommittedStageReceipt, error)
 }
@@ -637,10 +636,6 @@ func commitValidatedPublicationSQL(
 		if err != nil {
 			return runtimebus.CommittedPublication{}, err
 		}
-		result.RouteTopology, err = store.ReplaceFlowInstanceRouteTopologyTx(ctx, tx, command.RouteTopology)
-		if err != nil {
-			return runtimebus.CommittedPublication{}, err
-		}
 		return result, nil
 	}
 	if outcome != runtimebus.EventAppendInserted {
@@ -655,10 +650,6 @@ func commitValidatedPublicationSQL(
 		return runtimebus.CommittedPublication{}, fmt.Errorf("dynamic flow readiness is complete without its creation event")
 	}
 	result.Activations, err = store.CommitFlowInstanceActivationsTx(ctx, attempt, command.Activations)
-	if err != nil {
-		return runtimebus.CommittedPublication{}, err
-	}
-	result.RouteTopology, err = store.ReplaceFlowInstanceRouteTopologyTx(ctx, tx, command.RouteTopology)
 	if err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}

@@ -74,7 +74,6 @@ type PipelineCoordinator struct {
 	deliveryStore          runtimedelivery.Store
 	deadLetters            runtimedeadletters.AcknowledgedRecorder
 	deliveryRuntime        WorkflowDeliveryRuntime
-	flowRoutes             FlowInstanceRouteOwner
 	turnCancellationMu     sync.Mutex
 	turnCancellations      effects.TurnCancellationDispatcher
 	credentials            runtimecredentials.Store
@@ -120,7 +119,6 @@ type PipelineCoordinatorOptions struct {
 	DecisionCardDraftExpiry          DecisionCardDraftExpiry
 	HumanTaskExpiry                  HumanTaskExpiry
 	DeliveryRuntime                  WorkflowDeliveryRuntime
-	FlowRoutes                       FlowInstanceRouteOwner
 	RunLifecycle                     runtimerunlifecycle.OperationOwner
 	Credentials                      runtimecredentials.Store
 	ProviderCredentials              runtimecredentials.Store
@@ -362,7 +360,6 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		deliveryStore:                    opts.DeliveryStore,
 		deadLetters:                      opts.DeadLetters,
 		deliveryRuntime:                  opts.DeliveryRuntime,
-		flowRoutes:                       opts.FlowRoutes,
 		credentials:                      credentials,
 		managedCredentials:               opts.ManagedCredentials,
 		providerCredentials:              opts.ProviderCredentials,

@@ -443,25 +443,6 @@ func commitWorkflowEngineMutation(
 			if err := commitWorkflowEngineState(txctx, attempt, postgres, command.State); err != nil {
 				return err
 			}
-			if command.RouteRetirement != nil {
-				retirement := *command.RouteRetirement
-				attemptQuery := `SELECT activation_attempt_id::text FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2`
-				if !postgres {
-					attemptQuery = `SELECT activation_attempt_id FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`
-				}
-				var attemptID sql.NullString
-				if err := tx.QueryRowContext(txctx, attemptQuery, retirement.Identity.RunID, retirement.Identity.Route.InstancePath).Scan(&attemptID); err != nil && err != sql.ErrNoRows {
-					return fmt.Errorf("load committed flow route activation attempt: %w", err)
-				}
-				if attemptID.Valid {
-					retirement.ActivationAttemptID = attemptID.String
-				}
-				sets := []runtimebus.FlowInstanceRouteRecordSet{{Identity: command.RouteRetirement.Identity}}
-				if _, err := replaceFlowInstanceRouteTopologyTx(txctx, tx, postgres, sets); err != nil {
-					return fmt.Errorf("retire terminal workflow route: %w", err)
-				}
-				result.RouteRetirement = &retirement
-			}
 			before, err = commitWorkflowEngineInitialValues(txctx, attempt, store, postgres, command.State, before)
 			if err != nil {
 				return err

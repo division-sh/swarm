@@ -218,7 +218,6 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				Credentials:         credentialStore,
 				ProviderCredentials: credentialStore,
 				ChannelActivations:  activationOwner,
-				FlowRoutes:          bus,
 			})
 			owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(flowInstance)}
 			{
@@ -358,7 +357,6 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
 				ProviderCredentials: credentialStore,
-				FlowRoutes:          bus,
 				ChannelActivations:  replacementOwner,
 			})
 
@@ -382,7 +380,6 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
 				ProviderCredentials: credentialStore,
-				FlowRoutes:          bus,
 				ChannelActivations:  replacementOwner,
 			})
 
@@ -408,7 +405,6 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
 				ProviderCredentials: credentialStore,
-				FlowRoutes:          bus,
 				ChannelActivations:  fencedOwner,
 			})
 			stopActivityNode()

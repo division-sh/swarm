@@ -209,7 +209,7 @@ func (pc *PipelineCoordinator) CommitFlowInstanceTermination(ctx context.Context
 	if err != nil {
 		return FlowInstanceTermination{}, err
 	}
-	instance, err := pc.commitWorkflowTermination(runtimecorrelation.WithRunID(ctx, runID), flowIdentity, entityID, req.TerminatedAt, true)
+	instance, err := pc.commitWorkflowTermination(runtimecorrelation.WithRunID(ctx, runID), flowIdentity, entityID, req.TerminatedAt)
 	if err != nil && instance.Status != "terminated" {
 		return FlowInstanceTermination{}, err
 	}
@@ -357,7 +357,7 @@ func (pc *PipelineCoordinator) AbandonDynamicFlowRuntimeActivationAttempt(ctx co
 }
 
 func (pc *PipelineCoordinator) MarkTerminated(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID, terminatedAt time.Time) error {
-	_, err := pc.commitWorkflowTermination(ctx, flowIdentity, entityID, terminatedAt, false)
+	_, err := pc.commitWorkflowTermination(ctx, flowIdentity, entityID, terminatedAt)
 	return err
 }
 

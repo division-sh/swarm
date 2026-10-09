@@ -3485,7 +3485,6 @@ func newEventBusWorkflowCoordinator(
 		DecisionCardDraftExpiry: selected,
 		HumanTaskExpiry:         selected,
 		DeliveryRuntime:         eventBus,
-		FlowRoutes:              eventBus,
 		ReceiverExecution:       eventreceiver.NormalExecution(),
 	})
 

@@ -113,11 +113,6 @@ func seedSelectedConstructedRootHistory(t *testing.T, ctx context.Context, db *s
 		t.Fatalf("prepare source constructor tree: %v", err)
 	}
 	command := bus.FlowInstanceActivationCommand{Plan: plan}
-	for _, construction := range plan.ConstructionPlans() {
-		command.RouteTopology = append(command.RouteTopology, bus.FlowInstanceRouteRecordSet{
-			Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: construction.Identity.Route()},
-		})
-	}
 	committed, err := selected.CommitFlowInstanceActivation(ctx, command)
 	if err != nil || !committed.Created || !committed.Acknowledged {
 		t.Fatalf("commit source constructor tree: created=%v acknowledged=%v err=%v", committed.Created, committed.Acknowledged, err)

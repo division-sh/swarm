@@ -169,7 +169,7 @@ func mailboxFaultCoordinator(t *testing.T, rt servedControlProofRuntime, fault *
 	bus := &mailboxFaultPublicationBus{EventBus: rt.Runtime.Bus, fault: fault}
 	opts := runtimepipeline.PipelineCoordinatorOptions{
 		Module: rt.Runtime.Options.WorkflowModule, ExecutionPosture: rt.Runtime.ExecutionPosture,
-		ReceiverExecution: eventreceiver.NormalExecution(), DeliveryRuntime: bus, FlowRoutes: bus,
+		ReceiverExecution: eventreceiver.NormalExecution(), DeliveryRuntime: bus,
 		SourceArtifactFact: rt.Runtime.Options.SourceArtifactFact, WorkOwner: rt.Runtime.WorkOccurrence(),
 	}
 	if selected := rt.SQLite; selected != nil {

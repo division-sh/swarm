@@ -83,7 +83,7 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 				}
 				schedules, driver := newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
 				pc := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{
-					Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe, FlowRoutes: bus,
+					Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe,
 				})
 				bus.SetInterceptors(pc)
 				newManager, binding := a2ActivationJoinManagerFactory(t, ctx, selected, source)
@@ -266,7 +266,7 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					}
 					schedules, driver = newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
 					pc = newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{
-						Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe, FlowRoutes: bus,
+						Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe,
 					})
 					bus.SetInterceptors(pc)
 					am = newManager(pc, bus)

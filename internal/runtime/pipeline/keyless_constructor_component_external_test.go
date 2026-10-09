@@ -38,11 +38,6 @@ func commitKeylessConstructorComponent(t *testing.T, ctx context.Context, select
 		t.Fatalf("prepare actual keyless constructor: %v", err)
 	}
 	command := bus.FlowInstanceActivationCommand{Plan: plan}
-	for _, construction := range plan.ConstructionPlans() {
-		command.RouteTopology = append(command.RouteTopology, bus.FlowInstanceRouteRecordSet{
-			Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: construction.Identity.Route()},
-		})
-	}
 	committed, err := selected.events.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
 	if err != nil || !committed.Created || !committed.Acknowledged {
 		t.Fatalf("commit actual keyless constructor: acknowledged=%v created=%v err=%v", committed.Acknowledged, committed.Created, err)

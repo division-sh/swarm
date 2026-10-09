@@ -322,11 +322,7 @@ func (eb *EventBus) StartDeploymentRunAcknowledged(
 	if err != nil {
 		return durabledata.RunCreationOperationRecord{}, fmt.Errorf("prepare deployment root construction: %w", err)
 	}
-	topology, err := eb.prepareFlowInstanceActivationRouteTopology(ctx, []runtimepipeline.FlowInstanceActivationPlan{root})
-	if err != nil {
-		return durabledata.RunCreationOperationRecord{}, err
-	}
-	committed, commitErr := owner.CommitDeploymentRunCreation(ctx, DeploymentRunCreationCommand{RunCreation: canonical, Idempotency: request, Root: FlowInstanceActivationCommand{Plan: root, RouteTopology: topology}})
+	committed, commitErr := owner.CommitDeploymentRunCreation(ctx, DeploymentRunCreationCommand{RunCreation: canonical, Idempotency: request, Root: FlowInstanceActivationCommand{Plan: root}})
 	if !committed.Acknowledged {
 		return committed.Record, errors.Join(commitErr, errors.New("deployment run creation commit was not acknowledged"))
 	}
@@ -743,14 +739,9 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		prepared.receiver = receiver
 	}
 	request := prepared.CommitRequest()
-	routeTopology, err := eb.prepareFlowInstanceActivationRouteTopology(ctx, routePlan.ActivationPlans)
-	if err != nil {
-		return releaseFailure(err)
-	}
 	return prepared, PublicationCommand{
 		Commit:              request,
 		Activations:         append([]runtimepipeline.FlowInstanceActivationPlan(nil), routePlan.ActivationPlans...),
-		RouteTopology:       routeTopology,
 		DynamicFlowCreation: publication.dynamicFlowCreation,
 		AuthorScope:         authorScope,
 		HasAuthorScope:      hasAuthorScope,
@@ -815,73 +806,8 @@ func (eb *EventBus) prepareClosedPublicationDispatch(ctx context.Context, evt ev
 	return nil
 }
 
-func (eb *EventBus) prepareFlowInstanceActivationRouteTopology(
-	ctx context.Context,
-	plans []runtimepipeline.FlowInstanceActivationPlan,
-) ([]FlowInstanceRouteRecordSet, error) {
-	if len(plans) == 0 {
-		return nil, nil
-	}
-	var constructionPlans []runtimepipeline.FlowInstanceActivationPlan
-	for _, plan := range plans {
-		constructionPlans = append(constructionPlans, plan.ConstructionPlans()...)
-	}
-	plans = constructionPlans
-	eb.mu.RLock()
-	table := eb.routeTable
-	lister := eb.durable.ActiveFlows
-	eb.mu.RUnlock()
-	if table == nil || lister == nil {
-		return nil, errors.New("flow activation publication requires route topology owners")
-	}
-	changedPaths := make([]string, 0, len(plans))
-	for _, plan := range plans {
-		changedPaths = append(changedPaths, plan.Identity.Route().ScopeKey)
-	}
-	selected, err := eb.selectFlowInstanceRouteContext(ctx, table, lister, plans[0].Readiness.RunID, changedPaths)
-	if err != nil {
-		return nil, err
-	}
-	staged, contextIdentities, err := eb.deriveFlowInstanceRouteTopologyFromDescriptors(
-		ctx,
-		table,
-		plans[0].Readiness.RunID,
-		nil,
-		runtimeflowidentity.RunScopedFlowInstance{},
-		selected.graph,
-		selected.inputProducers,
-		true,
-		selected.descriptors,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("derive selected route topology before activation: %w", err)
-	}
-	explicit := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(plans))
-	for index, plan := range plans {
-		identity, err := runtimeflowidentity.NewRunScopedFlowInstance(plan.Readiness.RunID, plan.Identity.Route())
-		if err != nil {
-			return nil, fmt.Errorf("compose publication activation route %d: %w", index, err)
-		}
-		request := FlowInstanceRouteMaterializationRequest{
-			Identity:            identity,
-			Instance:            plan.Identity,
-			ActivationVariables: plan.ActivationVariables,
-		}
-		_, err = staged.addFlowInstanceRouteForTopology(request, &selected.inputProducers)
-		if err != nil {
-			return nil, fmt.Errorf("derive publication activation route %d: %w", index, err)
-		}
-		identity = request.Normalized().Identity
-		explicit = append(explicit, identity)
-	}
-	// The staged table is discarded after record projection; it is never used
-	// to resolve subscribers, so rebuilding its resolution index is unnecessary.
-	identities := selectedFlowInstanceRouteOwners(selected.selection, contextIdentities, explicit...)
-	return flowInstanceRouteTopologyRecordSets(staged, identities), nil
-}
-
-// CommitFlowInstanceActivation commits the exact instance record and the full
-// derived route topology before making either fact process-visible.
+// CommitFlowInstanceActivation acknowledges the exact constructor transaction
+// before attachment can make its executable resources process-visible.
 func (eb *EventBus) CommitFlowInstanceActivation(
 	ctx context.Context,
 	plan runtimepipeline.FlowInstanceActivationPlan,
@@ -893,11 +819,7 @@ func (eb *EventBus) CommitFlowInstanceActivation(
 	if !ok || owner == nil {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, errors.New("selected store does not support the closed flow instance activation operation")
 	}
-	topology, err := eb.prepareFlowInstanceActivationRouteTopology(ctx, []runtimepipeline.FlowInstanceActivationPlan{plan})
-	if err != nil {
-		return runtimepipeline.CommittedFlowInstanceActivation{}, err
-	}
-	committed, err := owner.CommitFlowInstanceActivation(ctx, FlowInstanceActivationCommand{Plan: plan, RouteTopology: topology})
+	committed, err := owner.CommitFlowInstanceActivation(ctx, FlowInstanceActivationCommand{Plan: plan})
 	if err != nil && !committed.Acknowledged {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, err
 	}

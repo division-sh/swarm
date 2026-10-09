@@ -892,7 +892,6 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 				PipelineObligations: selected.PipelineObligations(),
 				DeliveryStore:       deliveryOwner,
 				DeliveryRuntime:     bus,
-				FlowRoutes:          bus,
 			})
 
 			instance := artifactActionResultWorkflowInstance()
@@ -984,7 +983,6 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				PipelineObligations: selected.PipelineObligations(),
 				DeliveryStore:       selected,
 				DeliveryRuntime:     bus,
-				FlowRoutes:          bus,
 			})
 
 			healthyInstance := artifactActionResultWorkflowInstance()
@@ -1127,7 +1125,6 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				PipelineObligations: selected.PipelineObligations(),
 				DeliveryStore:       deliveryOwner,
 				DeliveryRuntime:     bus,
-				FlowRoutes:          bus,
 				TestWorkflowNodeHandlerStartHook: func(context.Context, string, events.Event) error {
 					select {
 					case handlerStarted <- struct{}{}:

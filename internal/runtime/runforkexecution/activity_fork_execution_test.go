@@ -355,7 +355,6 @@ func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContr
 	command := selectedExecutionSourceFlowCommand(t, ctx, loaded, event, root)
 	childCommand := selectedExecutionSourceFlowCommand(t, ctx, loaded, event, child)
 	command.Plan.Children = append(command.Plan.Children, childCommand.Plan)
-	command.RouteTopology = append(command.RouteTopology, childCommand.RouteTopology...)
 	committed, err := selected.(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
 	if err != nil || !committed.Acknowledged || !committed.Created || len(committed.Children) != 1 || !committed.Children[0].Created || !committed.Children[0].Acknowledged {
 		t.Fatalf("construct activity source tree: committed=%+v err=%v", committed, err)
