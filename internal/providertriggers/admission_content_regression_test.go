@@ -175,6 +175,8 @@ func checkTriggerReadbackReceiverMatrix(t *testing.T, mode string, plan InboundA
 			}
 			if plan.Transport() == packs.ChannelTransportWebhook {
 				mutations = append(mutations, "wrong scope")
+			} else {
+				mutations = append(mutations, "secret verification", "secret requirement")
 			}
 			for _, mutation := range mutations {
 				t.Run(mutation, func(t *testing.T) {
@@ -225,6 +227,10 @@ func checkTriggerReadbackReceiverMatrix(t *testing.T, mode string, plan InboundA
 						}
 					case "target admission":
 						subject.TriggerAdmission = packs.CloneSubjects([]packs.Subject{effective})[0].TriggerAdmission
+					case "secret verification":
+						subject.Capabilities = append(subject.Capabilities, packs.Capability{Code: packs.CapabilityVerifySecret, Target: "dummy"})
+					case "secret requirement":
+						subject.Requirements = append(subject.Requirements, packs.TargetScopedRequirement(packs.RequirementSecret, "dummy"))
 					}
 					if _, err := packs.NormalizeSubjects([]packs.Subject{subject}); err == nil {
 						t.Fatalf("contradictory %s readback admitted: %+v", mutation, subject)

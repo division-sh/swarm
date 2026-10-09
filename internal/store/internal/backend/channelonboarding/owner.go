@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -233,6 +234,11 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			return domain.Operation{}, err
 		}
 	}
+	if req.SessionAccount != nil {
+		if err := req.SessionAccount.Validate(); err != nil {
+			return domain.Operation{}, fmt.Errorf("%w: %v", domain.ErrInvalidRequest, err)
+		}
+	}
 	if req.BindingRevision > 0 && req.Phase != domain.PhaseAwaitingOperatorConfirmation && req.Phase != domain.PhasePublishingActivation {
 		return domain.Operation{}, domain.ErrInvalidRequest
 	}
@@ -285,11 +291,17 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		} else if req.ClearConfirmationOperationID {
 			return domain.ErrInvalidRequest
 		}
-		if err := op.Coordinate.ValidateForPhase(req.Phase); err != nil {
+		if err := op.Coordinate.ValidateForPhase(req.Phase, op.Posture); err != nil {
 			return fmt.Errorf("%w: %v", domain.ErrInvalidRequest, err)
 		}
 		if req.ReplaceCredentialAdmissions {
 			op.CredentialAdmissions = append([]domain.CredentialAdmission(nil), req.CredentialAdmissions...)
+		}
+		if req.SessionAccount != nil {
+			if op.SessionAccount != (operatorchannel.SessionAccountAdmission{}) && op.SessionAccount != *req.SessionAccount {
+				return domain.ErrConflict
+			}
+			op.SessionAccount = *req.SessionAccount
 		}
 		if strings.TrimSpace(req.IdentityOperationID) != "" {
 			op.IdentityOperationID = strings.TrimSpace(req.IdentityOperationID)
@@ -302,6 +314,9 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		}
 		wasTerminal := op.Phase.Terminal()
 		op.Phase, op.Revision, op.UpdatedAt = req.Phase, op.Revision+1, canonicalTime(req.Now)
+		if err := op.ValidateSessionAccount(); err != nil {
+			return err
+		}
 		if op.Phase.Terminal() && !wasTerminal {
 			op.CompletedAt = op.UpdatedAt
 		}
@@ -419,17 +434,21 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 		if err != nil {
 			return err
 		}
+		session, err := marshalSessionAccount(op.SessionAccount)
+		if err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(txctx, r.dialect().bind(`INSERT INTO connected_channel_activations (
 			activation_id,slot_key,operation_id,operation_revision,principal_id,provider,
 			interface_key,interface_ref,channel_pack_id,channel_pack_version,channel_manifest_hash,semantic_generation,
 			bundle_hash,bundle_identity,pack_inventory_generation,runtime_instance_id,context_publication_generation,plan_generation,
-			target_selector,target_generation,activation_posture,binding_revision,conversation_reference,proof_id,proof_revision,credential_admissions,
+			target_selector,target_generation,activation_posture,binding_revision,conversation_reference,proof_id,proof_revision,credential_admissions,session_account_admission,
 			activation_revision,status,created_at,updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'current',?,?)`),
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'current',?,?)`),
 			req.ActivationID, op.SlotKey, op.OperationID, op.Revision+1, op.PrincipalID, op.Provider,
 			i.Key(), i.InterfaceRef, i.ChannelPackID, i.ChannelPackVersion, i.ChannelManifestHash, i.SemanticGeneration,
 			c.BundleHash, c.BundleIdentity, c.PackInventoryGeneration, c.RuntimeInstanceID, c.ContextPublicationGeneration, c.PlanGeneration.Diagnostic(),
-			op.TargetSelector, c.TargetGeneration, string(op.Posture), req.BindingRevision, strings.TrimSpace(req.ConversationRef), nullable(req.ProofID), nullableInt(req.ProofRevision), string(admissions),
+			op.TargetSelector, c.TargetGeneration, string(op.Posture), req.BindingRevision, strings.TrimSpace(req.ConversationRef), nullable(req.ProofID), nullableInt(req.ProofRevision), string(admissions), session,
 			activationRevision, now, now)
 		if err != nil {
 			return fmt.Errorf("insert connected channel activation: %w", err)
@@ -818,7 +837,7 @@ const operationSelect = `SELECT operation_id,request_key_hash,request_hash,slot_
 	interface_ref,channel_pack_id,channel_pack_version,channel_manifest_hash,semantic_generation,
 	bundle_hash,bundle_identity,pack_inventory_generation,runtime_instance_id,context_publication_generation,plan_generation,
 	target_selector,target_generation,activation_posture,identity_ceremony,phase,operation_revision,save_proof,client_language,client_locale_revision,
-	credential_reservations,credential_admissions,identity_operation_id,binding_revision,activation_revision,confirmation_operation_id,
+	credential_reservations,credential_admissions,session_account_admission,identity_operation_id,binding_revision,activation_revision,confirmation_operation_id,
 	failure_code,failure_message,requested_at,updated_at,completed_at FROM channel_onboarding_operations`
 
 func loadOperationByRequestKey(ctx context.Context, q queryer, d dialect, key string, lock bool) (domain.Operation, bool, error) {
@@ -855,7 +874,7 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 	var verb, posture, ceremony, phase string
 	var planGeneration string
 	var reservations, admissions string
-	var identityOp, confirmationOp, failureCode, failureMessage sql.NullString
+	var identityOp, confirmationOp, failureCode, failureMessage, session sql.NullString
 	var bindingRevision, activationRevision sql.NullInt64
 	var completed any
 	var requested, updated any
@@ -863,7 +882,7 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 		&op.Interface.InterfaceRef, &op.Interface.ChannelPackID, &op.Interface.ChannelPackVersion, &op.Interface.ChannelManifestHash, &op.Interface.SemanticGeneration,
 		&op.Coordinate.BundleHash, &op.Coordinate.BundleIdentity, &op.Coordinate.PackInventoryGeneration, &op.Coordinate.RuntimeInstanceID, &op.Coordinate.ContextPublicationGeneration, &planGeneration,
 		&op.TargetSelector, &op.Coordinate.TargetGeneration, &posture, &ceremony, &phase, &op.Revision, &op.SaveProof, &op.ClientLanguage, &op.ClientLocaleRevision,
-		&reservations, &admissions, &identityOp, &bindingRevision, &activationRevision, &confirmationOp, &failureCode, &failureMessage, &requested, &updated, &completed)
+		&reservations, &admissions, &session, &identityOp, &bindingRevision, &activationRevision, &confirmationOp, &failureCode, &failureMessage, &requested, &updated, &completed)
 	if err == sql.ErrNoRows {
 		return domain.Operation{}, false, nil
 	}
@@ -875,7 +894,7 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 	if err != nil {
 		return domain.Operation{}, false, fmt.Errorf("decode channel onboarding plan generation: %w", err)
 	}
-	if err := op.Coordinate.ValidateForPhase(op.Phase); err != nil {
+	if err := op.Coordinate.ValidateForPhase(op.Phase, op.Posture); err != nil {
 		return domain.Operation{}, false, fmt.Errorf("decode channel onboarding coordinate: %w", err)
 	}
 	op.Interface = op.Interface.Normalized()
@@ -883,6 +902,12 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 		return domain.Operation{}, false, err
 	}
 	if op.CredentialAdmissions, err = unmarshalCredentialAdmissions(admissions); err != nil {
+		return domain.Operation{}, false, err
+	}
+	if op.SessionAccount, err = unmarshalSessionAccount(session); err != nil {
+		return domain.Operation{}, false, err
+	}
+	if err := op.ValidateSessionAccount(); err != nil {
 		return domain.Operation{}, false, err
 	}
 	op.IdentityOperationID, op.ConfirmationOperationID = identityOp.String, confirmationOp.String
@@ -902,24 +927,31 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 }
 
 func updateOperation(ctx context.Context, tx *sql.Tx, d dialect, op domain.Operation) error {
+	if err := op.ValidateSessionAccount(); err != nil {
+		return err
+	}
 	admissions, err := marshalCredentialAdmissions(op.CredentialAdmissions)
+	if err != nil {
+		return err
+	}
+	session, err := marshalSessionAccount(op.SessionAccount)
 	if err != nil {
 		return err
 	}
 	c := op.Coordinate.Normalized()
 	_, err = tx.ExecContext(ctx, d.bind(`UPDATE channel_onboarding_operations SET
 		bundle_hash=?,bundle_identity=?,pack_inventory_generation=?,runtime_instance_id=?,context_publication_generation=?,plan_generation=?,target_generation=?,
-		phase=?,operation_revision=?,credential_admissions=?,identity_operation_id=?,binding_revision=?,activation_revision=?,confirmation_operation_id=?,failure_code=?,failure_message=?,updated_at=?,completed_at=?
+		phase=?,operation_revision=?,credential_admissions=?,session_account_admission=?,identity_operation_id=?,binding_revision=?,activation_revision=?,confirmation_operation_id=?,failure_code=?,failure_message=?,updated_at=?,completed_at=?
 		WHERE operation_id=?`),
 		c.BundleHash, c.BundleIdentity, c.PackInventoryGeneration, c.RuntimeInstanceID, c.ContextPublicationGeneration, c.PlanGeneration.Diagnostic(), c.TargetGeneration,
-		string(op.Phase), op.Revision, string(admissions), nullable(op.IdentityOperationID), nullableInt(op.BindingRevision), nullableInt(op.ActivationRevision), nullable(op.ConfirmationOperationID), nullable(op.FailureCode), nullable(op.FailureMessage), op.UpdatedAt, nullableTime(op.CompletedAt), op.OperationID)
+		string(op.Phase), op.Revision, string(admissions), session, nullable(op.IdentityOperationID), nullableInt(op.BindingRevision), nullableInt(op.ActivationRevision), nullable(op.ConfirmationOperationID), nullable(op.FailureCode), nullable(op.FailureMessage), op.UpdatedAt, nullableTime(op.CompletedAt), op.OperationID)
 	return err
 }
 
 const activationSelect = `SELECT activation_id,slot_key,operation_id,operation_revision,principal_id,provider,
 	interface_ref,channel_pack_id,channel_pack_version,channel_manifest_hash,semantic_generation,
 	bundle_hash,bundle_identity,pack_inventory_generation,runtime_instance_id,context_publication_generation,plan_generation,
-	target_selector,target_generation,activation_posture,binding_revision,conversation_reference,proof_id,proof_revision,credential_admissions,
+	target_selector,target_generation,activation_posture,binding_revision,conversation_reference,proof_id,proof_revision,credential_admissions,session_account_admission,
 	activation_revision,status,retirement_reason,created_at,updated_at,retired_at FROM connected_channel_activations`
 
 func loadActivationBySlot(ctx context.Context, q queryer, d dialect, slot string, lock bool) (domain.ConnectedChannelActivation, bool, error) {
@@ -942,13 +974,13 @@ func scanActivationRow(row rowScanner) (domain.ConnectedChannelActivation, bool,
 	var a domain.ConnectedChannelActivation
 	var posture, status, admissions string
 	var planGeneration string
-	var proofID, retirement sql.NullString
+	var proofID, retirement, session sql.NullString
 	var proofRevision sql.NullInt64
 	var created, updated, retired any
 	err := row.Scan(&a.ActivationID, &a.SlotKey, &a.OperationID, &a.OperationRevision, &a.PrincipalID, &a.Provider,
 		&a.Interface.InterfaceRef, &a.Interface.ChannelPackID, &a.Interface.ChannelPackVersion, &a.Interface.ChannelManifestHash, &a.Interface.SemanticGeneration,
 		&a.Coordinate.BundleHash, &a.Coordinate.BundleIdentity, &a.Coordinate.PackInventoryGeneration, &a.Coordinate.RuntimeInstanceID, &a.Coordinate.ContextPublicationGeneration, &planGeneration,
-		&a.TargetSelector, &a.Coordinate.TargetGeneration, &posture, &a.BindingRevision, &a.ConversationRef, &proofID, &proofRevision, &admissions, &a.Revision, &status, &retirement, &created, &updated, &retired)
+		&a.TargetSelector, &a.Coordinate.TargetGeneration, &posture, &a.BindingRevision, &a.ConversationRef, &proofID, &proofRevision, &admissions, &session, &a.Revision, &status, &retirement, &created, &updated, &retired)
 	if err == sql.ErrNoRows {
 		return domain.ConnectedChannelActivation{}, false, nil
 	}
@@ -963,6 +995,12 @@ func scanActivationRow(row rowScanner) (domain.ConnectedChannelActivation, bool,
 	a.Posture, a.Status = domain.ActivationPosture(posture), domain.ActivationStatus(status)
 	a.ProofID, a.ProofRevision, a.RetirementReason = proofID.String, proofRevision.Int64, retirement.String
 	if a.CredentialAdmissions, err = unmarshalCredentialAdmissions(admissions); err != nil {
+		return a, false, err
+	}
+	if a.SessionAccount, err = unmarshalSessionAccount(session); err != nil {
+		return a, false, err
+	}
+	if err := a.ValidateSessionAccount(); err != nil {
 		return a, false, err
 	}
 	var timeErr error
@@ -984,6 +1022,44 @@ type credentialAdmissionRecord struct {
 	Kind      domain.CredentialAdmissionKind `json:"kind"`
 	Receipt   string                         `json:"receipt,omitempty"`
 	ValueSeal string                         `json:"value_seal"`
+}
+
+func marshalSessionAccount(account operatorchannel.SessionAccountAdmission) (any, error) {
+	if account == (operatorchannel.SessionAccountAdmission{}) {
+		return nil, nil
+	}
+	if err := account.Validate(); err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(account)
+	if err != nil {
+		return nil, err
+	}
+	return string(encoded), nil
+}
+
+func unmarshalSessionAccount(raw sql.NullString) (operatorchannel.SessionAccountAdmission, error) {
+	var account operatorchannel.SessionAccountAdmission
+	if !raw.Valid {
+		return account, nil
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw.String))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&account); err != nil {
+		return account, fmt.Errorf("decode retained session account: %w", err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return account, fmt.Errorf("decode retained session account: trailing content")
+	}
+	encoded, err := marshalSessionAccount(account)
+	if err != nil {
+		return account, err
+	}
+	if encoded != raw.String {
+		return account, fmt.Errorf("decode retained session account: noncanonical evidence")
+	}
+	return account, nil
 }
 
 func marshalCredentialAdmissions(admissions []domain.CredentialAdmission) ([]byte, error) {

@@ -11668,7 +11668,14 @@ tool_model:
         A structurally admitted webhook ingress is discoverable before credentials exist. Its candidate and reserved
         operation retain exact source, inventory, channel-plan and declaration identity with target_generation=0 and
         publication_sequence=0; those coordinates grant no run, route, provider registration or executable target.
-        Only preparing, credentials_admitted, failed and retired operation phases may carry that declaration-only target.
+        Webhook operations may carry that declaration-only target only in preparing, credentials_admitted, failed and
+        retired phases. Session pairing and operator claim also remain declaration-only through activating_provider,
+        awaiting_external_identity and awaiting_operator_confirmation; pairing or a claim must not fabricate a
+        business service/run. Publishing_activation and every later live phase still require an exact positive target.
+        The onboarding owner freezes provider, connection, account and admission revision as non-executable provenance
+        before operator identity and copies it into the later activation. It is immutable within that operation,
+        survives readback/restart and cannot be attached to webhook authority. Native session currentness and the
+        original onboarding/activation responsibility must still authenticate it before executable admission.
         After credentials_admitted, explicit connect consumes the selected-store responsibility and its exact complete
         admitted credential roles, reconciles the existing standing owner, and publishes its real current generation and
         publication sequence before provider preflight or effect. Existing executable ownership is reused without
@@ -16573,6 +16580,7 @@ platform_tables:
             client_locale_revision BIGINT NOT NULL DEFAULT 1 CHECK (client_locale_revision > 0),
             credential_reservations TEXT NOT NULL,
             credential_admissions TEXT NOT NULL DEFAULT '[]',
+            session_account_admission TEXT,
             identity_operation_id UUID,
             binding_revision BIGINT CHECK (binding_revision IS NULL OR binding_revision > 0),
             activation_revision BIGINT CHECK (activation_revision IS NULL OR activation_revision > 0),
@@ -16583,7 +16591,8 @@ platform_tables:
             updated_at TIMESTAMPTZ NOT NULL,
             completed_at TIMESTAMPTZ,
             CHECK ((phase IN ('succeeded','failed','retired')) = (completed_at IS NOT NULL)),
-            CHECK (target_generation > 0 OR phase IN ('preparing','credentials_admitted','failed','retired')),
+            CHECK (target_generation > 0 OR phase IN ('preparing','credentials_admitted','failed','retired') OR (activation_posture = 'session_connection' AND phase IN ('activating_provider','awaiting_external_identity','awaiting_operator_confirmation'))),
+            CHECK ((activation_posture = 'webhook_registration' AND session_account_admission IS NULL) OR (activation_posture = 'session_connection' AND (session_account_admission IS NOT NULL OR phase IN ('preparing','credentials_admitted','activating_provider','failed','retired')))),
             UNIQUE INDEX idx_channel_onboarding_active_slot (slot_key) WHERE phase NOT IN ('succeeded','failed','retired'),
             INDEX idx_channel_onboarding_principal (principal_id, requested_at),
             INDEX idx_channel_onboarding_phase (phase, updated_at)
@@ -16679,6 +16688,7 @@ platform_tables:
             proof_id UUID,
             proof_revision BIGINT CHECK (proof_revision IS NULL OR proof_revision > 0),
             credential_admissions TEXT NOT NULL,
+            session_account_admission TEXT,
             activation_revision BIGINT NOT NULL CHECK (activation_revision > 0),
             status TEXT NOT NULL CHECK (status IN ('current','retired')),
             retirement_reason TEXT,
@@ -16686,6 +16696,7 @@ platform_tables:
             updated_at TIMESTAMPTZ NOT NULL,
             retired_at TIMESTAMPTZ,
             CHECK ((proof_id IS NULL AND proof_revision IS NULL) OR (proof_id IS NOT NULL AND proof_revision IS NOT NULL)),
+            CHECK ((activation_posture = 'session_connection') = (session_account_admission IS NOT NULL)),
             CHECK ((status = 'current' AND retired_at IS NULL AND retirement_reason IS NULL) OR (status = 'retired' AND retired_at IS NOT NULL AND retirement_reason IS NOT NULL)),
             UNIQUE INDEX idx_connected_channel_current_slot (slot_key) WHERE status = 'current',
             INDEX idx_connected_channel_operation (operation_id, operation_revision),
@@ -34517,7 +34528,7 @@ api_specification:
           target_generation:
             type: integer
             minimum: 0
-            description: Zero is declaration-only discovery/reservation; executable phases and connected activations require a positive exact generation.
+            description: Zero is declaration-only discovery/reservation and session pairing/operator claim before publishing_activation; executable phases and connected activations require a positive exact generation.
       ChannelCredentialReservation:
         type: object
         additionalProperties: false

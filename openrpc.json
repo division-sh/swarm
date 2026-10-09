@@ -15239,7 +15239,7 @@
             "$ref": "#/components/schemas/OpaqueId"
           },
           "target_generation": {
-            "description": "Zero is declaration-only discovery/reservation; executable phases and connected activations require a positive exact generation.",
+            "description": "Zero is declaration-only discovery/reservation and session pairing/operator claim before publishing_activation; executable phases and connected activations require a positive exact generation.",
             "minimum": 0,
             "type": "integer"
           }
