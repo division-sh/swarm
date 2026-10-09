@@ -51,7 +51,7 @@ func TestWhatsAppIncomingPublicSDKMessageEditRevokeProjection(t *testing.T) {
 					event.Info.Chat = types.NewJID("100000000003-1", types.GroupServer)
 					event.Info.IsGroup = true
 				}
-				// Use the real SDK builders and public unwrapping. In a direct
+		// Use the real SDK message constructors and public unwrapping. In a direct
 				// edit the key RemoteJID is the author's recipient, not our chat.
 				client := whatsmeow.NewClient(&store.Device{ID: &self}, nil)
 				keyChat := bot
