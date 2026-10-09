@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -49,6 +52,34 @@ func TestVerifyRunPublicFlagAndAbsentStoreAdmission(t *testing.T) {
 			}
 			if _, err := os.Stat(stateDir); !os.IsNotExist(err) {
 				t.Fatalf("inspection created state: %v", err)
+			}
+		})
+	}
+}
+
+func TestVerifyRunTypedFailuresRetainCoordinatesAndCancellation(t *testing.T) {
+	run := uuid.NewString()
+	for _, tc := range []struct {
+		name  string
+		cause error
+		code  string
+		class failures.Class
+	}{
+		{"missing_run", &runlifecycle.RunNotFoundError{RunID: run}, "run_not_found", failures.ClassSchemaInvalid},
+		{"history", &mutationlog.HistoryError{RunID: run, EntityID: "entity", MutationID: "mutation", Code: "mutation_order_missing", Reason: "missing coordinate"}, "mutation_order_missing", failures.ClassSchemaInvalid},
+		{"canceled", errors.Join(&runlifecycle.RunNotFoundError{RunID: run}, context.Canceled), "run_inspection_canceled", failures.ClassDependencyUnavailable},
+		{"deadline", context.DeadlineExceeded, "run_inspection_timeout", failures.ClassTimeout},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			failure, ok := failures.As(verifyRunFailure(run, tc.cause))
+			if !ok || failure.Failure.Class != tc.class || failure.Failure.Detail.Code != tc.code || failure.Failure.Detail.Attributes["run_id"] != run {
+				t.Fatalf("wrong disposition: %v", failure)
+			}
+			if tc.class == failures.ClassSchemaInvalid && failure.Failure.Retryable {
+				t.Fatal("deterministic missing evidence was made retryable")
+			}
+			if tc.name == "history" && (failure.Failure.Detail.Attributes["entity_id"] != "entity" || failure.Failure.Detail.Attributes["mutation_id"] != "mutation") {
+				t.Fatal("coordinates lost")
 			}
 		})
 	}

@@ -43,14 +43,21 @@ func historicalSnapshotDatabase(t *testing.T, backend string) *sql.DB {
 	return db
 }
 
+// Minimal physical read fixtures share this owner; these rows deliberately do
+// not claim lifecycle construction or runtime admission.
+func requireHistoricalSnapshotRun(t *testing.T, db *sql.DB, runID string) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO runs VALUES($1,'event')`, runID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunForkHistoricalEventCursorContextBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			db := historicalSnapshotDatabase(t, backend)
 			runID, eventID := uuid.NewString(), uuid.NewString()
-			if _, err := db.Exec(`INSERT INTO runs VALUES($1,'event')`, runID); err != nil {
-				t.Fatal(err)
-			}
+			requireHistoricalSnapshotRun(t, db, runID)
 			body := `{"event_id":"` + eventID + `","event_name":"at-R","payload_base64":"e30="}`
 			const insert = `INSERT INTO run_fork_fact_revisions VALUES($1,'events',$2,$3,$4,true)`
 			if _, err := db.Exec(insert, runID, eventID, 1, body); err != nil {
@@ -106,9 +113,7 @@ func TestRunForkHistoricalSnapshotCommitBarrierBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			db := historicalSnapshotDatabase(t, backend)
 			runID, eventID, laterID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-			if _, err := db.Exec(`INSERT INTO runs VALUES($1,'event')`, runID); err != nil {
-				t.Fatal(err)
-			}
+			requireHistoricalSnapshotRun(t, db, runID)
 			body := func(id, name string) string {
 				return `{"event_id":"` + id + `","event_name":"` + name + `","payload_base64":"eyJ2YWx1ZSI6MS4wfQ=="}`
 			}

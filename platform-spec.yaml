@@ -25939,6 +25939,7 @@ cli_specification:
           event_replay_subscriber: {command: swarm event replay, selector: 'flag:subscriber', family: agent, mode: full_only, safety: mutating}
           run_fork_source: {command: swarm run fork, selector: 'flag:source', family: none, mode: different_concept, scope_rule: 'explicit local directory admitted once for exact source identity; no upload', safety: mutating}
           run_status_run: {command: swarm run status, selector: 'arg:run-id', family: run, mode: full_only}
+          verify_run: {command: swarm verify, selector: 'flag:run', family: run, mode: full_only, scope_rule: 'exact run UUID in the selected read-only store; no API prefix resolver'}
           run_fan_out_list_run: {command: swarm run fan-out list, selector: 'arg:run-id', family: run, mode: full_only}
           run_fan_out_list_delivery: {command: swarm run fan-out list, selector: 'flag:triggering-delivery-id', family: none, mode: different_concept, scope_rule: 'exact run-scoped triggering delivery UUID, not an event identifier'}
           run_fan_out_list_flow: {command: swarm run fan-out list, selector: 'flag:flow-path', family: none, mode: different_concept, scope_rule: exact authored declaration flow path}
@@ -28920,7 +28921,7 @@ cli_specification:
       group: author_validate
       tier: must_have
       implementation_status: implemented
-      behavior: local contract-file validation carve-out
+      behavior: Local contract-file validation, or --run <run_id> read-only state/history comparison through run_model.mutation_log.drift_detection; --portable and --run are mutually exclusive.
     runs:
       command: swarm run list [filters]
       group: run_operate
