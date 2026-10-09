@@ -173,7 +173,11 @@ func writeVerifyRunResult(w io.Writer, result verifyRunCommandResult) error {
 		return err
 	case "failed":
 		for _, failure := range result.Errors {
-			if _, err := fmt.Fprintf(w, "verify run failed: %s: %s\n", failure.Detail.Code, failure.Detail.Attributes["reason"]); err != nil {
+			message := failure.Message
+			if reason, ok := failure.Detail.Attributes["reason"].(string); ok {
+				message = reason
+			}
+			if _, err := fmt.Fprintf(w, "verify run failed: %s: %s\n", failure.Detail.Code, message); err != nil {
 				return err
 			}
 		}
