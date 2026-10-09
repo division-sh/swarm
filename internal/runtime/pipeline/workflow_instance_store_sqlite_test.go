@@ -166,7 +166,11 @@ func TestSQLiteWorkflowInstanceStore_runPipelineMutationUsesRuntimeMutationRunne
 		if err != nil {
 			return err
 		}
-		_, err = (testRunLifecycleMutation{tx: tx, dialect: workflowStoreDialectSQLite}).CreateRun(txctx, storerunlifecycle.CreateRequest{
+		runSource, err := eventfixture.RunSource(txctx, authoractivityfixture.DialectSQLite)
+		if err != nil {
+			return err
+		}
+		_, err = (testRunLifecycleMutation{tx: tx, dialect: workflowStoreDialectSQLite, source: runSource}).CreateRun(txctx, storerunlifecycle.CreateRequest{
 			RunID: uuid.NewString(), Origin: storerunlifecycle.ScenarioSetupRunOrigin(),
 			Source: source, StartedAt: time.Now().UTC(),
 		})
@@ -308,7 +312,11 @@ func (r *recordingRuntimeMutationRunner) lifecycleMutation(ctx context.Context) 
 	if dialect == "" {
 		dialect = workflowStoreDialectSQLite
 	}
-	return testRunLifecycleMutation{tx: tx, dialect: dialect}, nil
+	source, err := eventfixture.RunSource(ctx, authoractivityfixture.Dialect(dialect))
+	if err != nil {
+		return testRunLifecycleMutation{}, err
+	}
+	return testRunLifecycleMutation{tx: tx, dialect: dialect, source: source}, nil
 }
 
 func (r *recordingRuntimeMutationRunner) RequirePresentRun(ctx context.Context, runID string) error {
