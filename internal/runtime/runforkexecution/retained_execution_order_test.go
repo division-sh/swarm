@@ -157,7 +157,7 @@ func TestSelectedForkAcknowledgmentPrecedesBusinessDrainBothStores(t *testing.T)
 }
 
 func TestReviewerSelectedAsyncFailureDisposesResources(t *testing.T) {
-	for _, fault := range []string{"publication", "panic", "cancellation", "startup", "continuation", "settlement-retry", "settlement-cleanup", "stale-settlement", "cleanup-retry", "cleanup-panic", "operator-stop", "staged-publication"} {
+	for _, fault := range []string{"publication", "execution-scope", "panic", "cancellation", "startup", "continuation", "settlement-retry", "settlement-cleanup", "stale-settlement", "cleanup-retry", "cleanup-panic", "operator-stop", "staged-publication"} {
 		t.Run(fault, func(t *testing.T) { proveRetainedAcknowledgment(t, fault) })
 	}
 }
@@ -217,7 +217,7 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 				SelectedContractForkLifecycle: owner.ports.fork, SelectedContractReplayPersistence: owner.ports.replay,
 				started: make(chan struct{}), release: make(chan struct{}), cleanup: errors.New("activation cleanup diagnostic"),
 			}
-			if fault == "publication" || strings.HasPrefix(fault, "settlement-") || strings.HasPrefix(fault, "cleanup-") || fault == "stale-settlement" {
+			if fault == "publication" || fault == "execution-scope" || strings.HasPrefix(fault, "settlement-") || strings.HasPrefix(fault, "cleanup-") || fault == "stale-settlement" {
 				probe.publicationError = errors.New("reviewer injected publication failure")
 			} else if fault == "cancellation" {
 				probe.publicationError = context.Canceled
@@ -310,6 +310,21 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 			sourceBefore, err := storetest.ReadSelectedForkSourceDomain(context.Background(), selected, sourceID)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if fault == "execution-scope" {
+				// Orchestration's source is not the bound executable scope. Failure
+				// must still consume the attachment's exact selected source fact.
+				otherFact, err := correlation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("f", 64))
+				if err != nil {
+					t.Fatal(err)
+				}
+				owner.ports.contexts.mu.Lock()
+				for _, entry := range owner.ports.contexts.entries {
+					entry.operation.mu.Lock()
+					entry.operation.owned = correlation.WithSourceArtifactFact(entry.operation.owned, otherFact)
+					entry.operation.mu.Unlock()
+				}
+				owner.ports.contexts.mu.Unlock()
 			}
 			if strings.HasPrefix(fault, "cleanup-") {
 				owner.ports.contexts.mu.Lock()
