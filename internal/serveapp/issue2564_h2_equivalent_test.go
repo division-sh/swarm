@@ -585,7 +585,7 @@ func TestIssue2564H2FixedCutTimerPrefixBothStores(t *testing.T) {
 			})
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h01"}, "idempotency_key": "q6-hub-1"})
 			for hub := 2; hub <= 6; hub++ {
-				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "run_id": seed.RunID, "payload": map[string]any{"hub_id": fmt.Sprintf("h%02d", hub)}, "idempotency_key": fmt.Sprintf("q6-hub-%d", hub)})
+				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"hub_id": fmt.Sprintf("h%02d", hub)}, "idempotency_key": fmt.Sprintf("q6-hub-%d", hub)})
 			}
 			var before issue2564H2Snapshot
 			for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
