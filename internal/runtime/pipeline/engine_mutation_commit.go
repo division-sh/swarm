@@ -116,9 +116,8 @@ type WorkflowEngineStateRecord struct {
 }
 
 func (r WorkflowEngineStateRecord) Validate() error {
-	r.Identity = r.Identity.Normalize()
-	if err := r.Identity.Validate(); err != nil || strings.TrimSpace(r.EntityID) == "" {
-		return fmt.Errorf("workflow engine state record requires exact run, route, and entity identity")
+	if err := r.validateConstructionIdentity(); err != nil {
+		return err
 	}
 	if strings.TrimSpace(r.WorkflowName) == "" || strings.TrimSpace(r.CurrentState) == "" {
 		return fmt.Errorf("workflow engine state record requires workflow and current state")
@@ -132,22 +131,12 @@ func (r WorkflowEngineStateRecord) Validate() error {
 	if strings.TrimSpace(r.Mode) == "" || strings.TrimSpace(r.Status) == "" {
 		return fmt.Errorf("workflow engine state record requires mode and status")
 	}
-	if (r.Mode == "template") != (r.InstanceKey != "") {
-		return fmt.Errorf("workflow engine state key presence disagrees with its declaration mode")
-	}
 	for name, raw := range map[string]json.RawMessage{
 		"fields": r.Fields, "bookkeeping": r.Bookkeeping, "gates": r.Gates, "accumulator": r.Accumulator, "config": r.Config, "initial_fields": r.InitialFields,
 	} {
 		if len(raw) == 0 || !json.Valid(raw) {
 			return fmt.Errorf("workflow engine state record %s must be valid JSON", name)
 		}
-	}
-	construction, err := DecodeWorkflowInstanceRecordedHeader(r.Identity.Route, r.Config)
-	if err != nil {
-		return err
-	}
-	if construction.ParentRoute().FlowInstance != r.ParentInstance {
-		return fmt.Errorf("workflow engine state parent disagrees with exact construction identity")
 	}
 	if r.EnteredStageAt.IsZero() || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
 		return fmt.Errorf("workflow engine state record requires exact persisted times")
@@ -174,6 +163,24 @@ func (r WorkflowEngineStateRecord) Validate() error {
 		}
 	} else if r.ExpectedRevision <= 0 || strings.TrimSpace(r.ExpectedState) == "" {
 		return fmt.Errorf("workflow engine state mutation requires exact expected revision and state")
+	}
+	return nil
+}
+
+func (r WorkflowEngineStateRecord) validateConstructionIdentity() error {
+	r.Identity = r.Identity.Normalize()
+	if err := r.Identity.Validate(); err != nil || strings.TrimSpace(r.EntityID) == "" {
+		return fmt.Errorf("workflow engine state record requires exact run, route, and entity identity")
+	}
+	construction, err := DecodeWorkflowInstanceRecordedHeader(r.Identity.Route, r.Config)
+	if err != nil {
+		return err
+	}
+	if construction.ParentRoute().FlowInstance != r.ParentInstance {
+		return fmt.Errorf("workflow engine state parent disagrees with exact construction identity")
+	}
+	if (r.Mode == "template") != (r.InstanceKey != "") {
+		return fmt.Errorf("workflow engine state key presence disagrees with its declaration mode")
 	}
 	return nil
 }
