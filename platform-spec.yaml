@@ -23563,8 +23563,10 @@ test_specification:
         Lead's final merge comparison checks current body against successful current-head trusted-App plan/summary, including post-approval edits; completed higher scope can satisfy lower.
         Full is the default final-head merge gate, separately enforced by the user-run merge orchestrator;
         a lower merge tier requires an explicit reviewer tier ruling. Core feedback does not by itself waive the default full requirement.
-        The native CI tier: <tier> check derives from the canonical plan and succeeds only after the same run's required summary;
-        its Actions run/attempt, execution source and plan identity must match the qualifying aggregate. No privileged PR checks publisher is required.
+        The native CI tier: <tier> check records canonical plan selection after the same run's required summary reaches a terminal outcome,
+        including failed proof and fail-fast sibling cancellation. Its success records valid tier metadata, not successful qualification;
+        the separate Required test summary and complete receipts must succeed before merge or nightly credit. Its Actions run/attempt,
+        execution source and plan identity must match that aggregate. No privileged PR checks publisher is required.
         The tier-check activation marker is temporary bootstrap only and activates after the first full negative/positive hosted control.
         Original PR proof stays in place until a complete healthy master-nightly and the strict merge-time nightly marker are live.
         Master nightly proof qualifies the existing ci.yml scheduled or deliberately manually dispatched full owner on master and its same-run tier/summary;

@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestCITierCheckWaitsForSameRunSuccessfulSummary(t *testing.T) {
+func TestCITierCheckRecordsSameRunSelectionAndOutcome(t *testing.T) {
 	workflow := loadAdmissionWorkflow(t)
 	job := workflow.Jobs["ci-tier"]
 	if job.Name != "CI tier: ${{ needs.ci-plan.outputs.profile }}" || !slices.Equal(job.Needs, []string{"ci-plan", "required-tests"}) {
@@ -21,19 +21,19 @@ func TestCITierCheckWaitsForSameRunSuccessfulSummary(t *testing.T) {
 			facts := ciEventFacts("pull_request", false, "")
 			facts["needs.ci-plan.result"] = strconv.Quote(plan)
 			facts["needs.required-tests.result"] = strconv.Quote(summary)
-			if got := evaluateCICondition(t, job.If, facts, false); got != (plan == "success" && summary == "success") {
+			if got := evaluateCICondition(t, job.If, facts, false); got != (plan == "success") {
 				t.Fatalf("tier evidence admitted plan=%s summary=%s", plan, summary)
 			}
 		}
 	}
-	step := findWorkflowStep(job.Steps, "Publish only completed same-run tier evidence")
-	if step == nil || step.ContinueOnError || step.Env["TIER"] != "${{ needs.ci-plan.outputs.profile }}" {
+	step := findWorkflowStep(job.Steps, "Record same-run tier selection and proof outcome")
+	if step == nil || step.ContinueOnError || step.Env["TIER"] != "${{ needs.ci-plan.outputs.profile }}" || step.Env["PROOF_RESULT"] != "${{ needs.required-tests.result }}" {
 		t.Fatal("tier check bypasses canonical plan")
 	}
 	for _, tier := range []string{"core", "lifecycle", "full", "", "unknown", "full; exit 0"} {
 		output := filepath.Join(t.TempDir(), "summary")
 		command := exec.Command("bash", "-c", step.Run)
-		command.Env = append(os.Environ(), "TIER="+tier, "PLAN_DIGEST=plan", "EXECUTION_SHA=source", "GITHUB_RUN_ID=42", "GITHUB_RUN_ATTEMPT=2", "GITHUB_STEP_SUMMARY="+output)
+		command.Env = append(os.Environ(), "TIER="+tier, "PROOF_RESULT=failure", "PLAN_DIGEST=plan", "EXECUTION_SHA=source", "GITHUB_RUN_ID=42", "GITHUB_RUN_ATTEMPT=2", "GITHUB_STEP_SUMMARY="+output)
 		_, err := command.CombinedOutput()
 		valid := tier == "core" || tier == "lifecycle" || tier == "full"
 		if (err == nil) != valid {
@@ -41,9 +41,19 @@ func TestCITierCheckWaitsForSameRunSuccessfulSummary(t *testing.T) {
 		}
 		if valid {
 			data, err := os.ReadFile(output)
-			if err != nil || !strings.Contains(string(data), "run 42 attempt 2; execution source; plan plan") {
+			if err != nil || !strings.Contains(string(data), "run 42 attempt 2; execution source; plan plan; Required test summary: failure") || !strings.Contains(string(data), "Tier selection alone is not qualification") || strings.Contains(string(data), "qualified by") {
 				t.Fatalf("missing source/run/attempt/plan evidence: %s %v", data, err)
 			}
+		}
+	}
+	for _, outcome := range []string{"success", "failure", "cancelled", "skipped", "", "unknown"} {
+		output := filepath.Join(t.TempDir(), "summary")
+		command := exec.Command("bash", "-c", step.Run)
+		command.Env = append(os.Environ(), "TIER=full", "PROOF_RESULT="+outcome, "PLAN_DIGEST=plan", "EXECUTION_SHA=source", "GITHUB_RUN_ID=42", "GITHUB_RUN_ATTEMPT=2", "GITHUB_STEP_SUMMARY="+output)
+		_, err := command.CombinedOutput()
+		valid := outcome == "success" || outcome == "failure" || outcome == "cancelled" || outcome == "skipped"
+		if (err == nil) != valid {
+			t.Fatalf("summary outcome %q admission: %v", outcome, err)
 		}
 	}
 }
@@ -104,6 +114,15 @@ func TestNightlyProofReusesExhaustiveOwnerWithoutRemovingPRProof(t *testing.T) {
 					t.Fatalf("nightly event=%s ref=%s completion=%s admitted=%v", event, ref, status, got)
 				}
 			}
+		}
+	}
+	for _, outcome := range []string{"failure", "cancelled", "skipped"} {
+		facts := ciEventFacts("schedule", false, "")
+		facts["github.ref"] = strconv.Quote("refs/heads/master")
+		facts["needs.ci-tier.result"] = strconv.Quote("success")
+		facts["needs.required-tests.result"] = strconv.Quote(outcome)
+		if evaluateCICondition(t, job.If, facts, false) {
+			t.Fatalf("successful tier metadata granted nightly credit for %s proof", outcome)
 		}
 	}
 	for _, retained := range []string{"proof-unit", "unused-linux", "unused-darwin", "unused-checks", "macos-sqlite-possession"} {

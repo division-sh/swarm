@@ -719,23 +719,25 @@ jobs:
   ci-tier:
     name: 'CI tier: ${{ needs.ci-plan.outputs.profile }}'
     needs: [ci-plan, required-tests]
-    if: ${{ always() && needs.ci-plan.result == 'success' && needs.required-tests.result == 'success' }}
+    if: ${{ always() && needs.ci-plan.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions: {}
     steps:
-      - name: Publish only completed same-run tier evidence
+      - name: Record same-run tier selection and proof outcome
         env:
           TIER: ${{ needs.ci-plan.outputs.profile }}
           PLAN_DIGEST: ${{ needs.ci-plan.outputs.plan_digest }}
           EXECUTION_SHA: ${{ needs.ci-plan.outputs.execution_sha }}
+          PROOF_RESULT: ${{ needs.required-tests.result }}
         run: |
           set -euo pipefail
           case "$TIER" in core|lifecycle|full) ;; *) exit 1 ;; esac
+          case "$PROOF_RESULT" in success|failure|cancelled|skipped) ;; *) exit 1 ;; esac
           test -n "$PLAN_DIGEST"
           test -n "$EXECUTION_SHA"
-          printf 'Tier %s qualified by run %s attempt %s; execution %s; plan %s.\n' \
-            "$TIER" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$EXECUTION_SHA" "$PLAN_DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Tier %s selected by run %s attempt %s; execution %s; plan %s; Required test summary: %s. Tier selection alone is not qualification.\n' \
+            "$TIER" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$EXECUTION_SHA" "$PLAN_DIGEST" "$PROOF_RESULT" >> "$GITHUB_STEP_SUMMARY"
 
   nightly-proof:
     name: Master nightly proof
