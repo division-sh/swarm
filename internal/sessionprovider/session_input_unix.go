@@ -19,6 +19,7 @@ type nativeSessionInput struct {
 	Account            operatorchannel.SessionAccountAdmission
 	OperationID        string
 	OperationRevision  int64
+	ActivationID       string
 	ActivationRevision int64
 	TargetSelector     string
 	PrincipalID        string
@@ -59,13 +60,21 @@ func newSessionInputReader(state *sessionState, spool *captureStore) (*sessionIn
 }
 
 func (r *sessionInputReader) readOwnedInput(ctx context.Context, reference SessionInputReference) (nativeSessionInput, error) {
+	return r.readRetainedInput(ctx, reference, false)
+}
+
+func (r *sessionInputReader) readPendingBusinessInput(ctx context.Context, reference SessionInputReference) (nativeSessionInput, error) {
+	return r.readRetainedInput(ctx, reference, true)
+}
+
+func (r *sessionInputReader) readRetainedInput(ctx context.Context, reference SessionInputReference, recovery bool) (nativeSessionInput, error) {
 	var result nativeSessionInput
 	if r == nil || ctx == nil || ctx.Err() != nil || reference.ConnectionID != r.spool.connectionID ||
 		uuid.Validate(reference.OccurrenceID) != nil || reference.Conversation == "" || reference.EventID == "" {
 		return result, errCaptureScopeChanged
 	}
 	occurrence := r.state.currentOccurrence()
-	if occurrence == nil || occurrence.occurrenceID != reference.OccurrenceID {
+	if occurrence == nil || (!recovery && occurrence.occurrenceID != reference.OccurrenceID) {
 		return result, errClientOccurrenceFenced
 	}
 	workContext, release, err := occurrence.acquire(ctx)
@@ -103,8 +112,7 @@ func (r *sessionInputReader) readOwnedInput(ctx context.Context, reference Sessi
 		if event.Conversation != reference.Conversation || event.EventID != reference.EventID || event.Kind != reference.Kind {
 			continue
 		}
-		if event.OccurrenceID != reference.OccurrenceID || event.Scope.Session.ConnectionID != reference.ConnectionID ||
-			event.Scope.Session.AccountRef != account || workContext.Err() != nil {
+		if workContext.Err() != nil || !nativeCaptureMatchesReference(event, reference, account, ownedSource, recovery) {
 			return result, errCaptureScopeChanged
 		}
 		retained = true
@@ -112,7 +120,7 @@ func (r *sessionInputReader) readOwnedInput(ctx context.Context, reference Sessi
 			return r.state.ownsConnectedOccurrence(workContext, occurrence)
 		}
 		return nativeSessionInput{Scope: event.Scope.Kind, Account: event.Scope.Session, OperationID: event.Scope.OnboardingOperation,
-			OperationRevision: event.Scope.OperationRevision, ActivationRevision: event.Scope.ActivationRevision, TargetSelector: event.Scope.TargetSelector,
+			OperationRevision: event.Scope.OperationRevision, ActivationID: event.Scope.ActivationID, ActivationRevision: event.Scope.ActivationRevision, TargetSelector: event.Scope.TargetSelector,
 			PrincipalID: event.Scope.PrincipalID, Source: event.Scope.Source, BindingRevision: event.Scope.BindingRevision,
 			PublicationBinding: event.Scope.PublicationBinding,
 			SourceContext:      event.Source,
@@ -122,4 +130,15 @@ func (r *sessionInputReader) readOwnedInput(ctx context.Context, reference Sessi
 			Body:               event.Body, ReceivedAt: event.ReceivedAt, Context: workContext, Release: release}, nil
 	}
 	return result, fmt.Errorf("WhatsApp authenticated input requires its verified retained capture")
+}
+
+func nativeCaptureMatchesReference(event capturedEvent, reference SessionInputReference, account string, source correlation.SourceArtifactFact, recovery bool) bool {
+	if event.OccurrenceID != reference.OccurrenceID || event.Scope.Session.ConnectionID != reference.ConnectionID || event.Scope.Session.AccountRef != account {
+		return false
+	}
+	if recovery && event.Scope.Kind != channelonboarding.SessionInputBusiness {
+		return false
+	}
+	return event.Scope.Kind != channelonboarding.SessionInputBusiness ||
+		(source.Validate() == nil && source.BundleHash() == event.Source.Coordinate.BundleHash)
 }

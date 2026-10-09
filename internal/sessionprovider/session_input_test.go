@@ -255,7 +255,9 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 				{"business", func(e *capturedEvent) {
 					e.Scope.Kind = channelonboarding.SessionInputBusiness
 					e.Scope.PublicationBinding = captureFixture(t).Scope.PublicationBinding
+					e.Source.Coordinate.TargetGeneration = uint64(e.Scope.PublicationBinding.Generation)
 					e.Scope.ActivationRevision, e.Scope.BindingRevision = 1, 1
+					e.Scope.ActivationID = uuid.NewString()
 				}},
 			} {
 				t.Run(row.name, func(t *testing.T) {

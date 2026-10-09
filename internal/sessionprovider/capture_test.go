@@ -45,7 +45,7 @@ func captureFixture(t *testing.T) capturedEvent {
 				BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "source:test",
 				PackInventoryGeneration: "inventory:test", PlanGeneration: generation,
 			},
-			OnboardingOperation: uuid.NewString(), OperationRevision: 1, ActivationRevision: 1, TargetSelector: "ingress:.:whatsapp",
+			OnboardingOperation: uuid.NewString(), OperationRevision: 1, ActivationID: uuid.NewString(), ActivationRevision: 1, TargetSelector: "ingress:.:whatsapp",
 			PrincipalID: uuid.NewString(), BindingRevision: 1,
 		},
 		OccurrenceID: uuid.NewString(), Conversation: "synthetic_conversation", EventID: "event_1",
@@ -64,6 +64,7 @@ func TestWhatsAppCaptureScopeAndReceiptAreClosedProducts(t *testing.T) {
 	bootstrap.Scope.Kind = channelonboarding.SessionInputOnboarding
 	bootstrap.Scope.PublicationBinding = runtimeinbound.BindingGeneration{}
 	bootstrap.Scope.BindingRevision, bootstrap.Scope.ActivationRevision = 0, 0
+	bootstrap.Scope.ActivationID = ""
 	claimed := bootstrap
 	claimed.Scope.BindingRevision = 1
 	for _, event := range []capturedEvent{bootstrap, claimed, business} {
@@ -83,6 +84,10 @@ func TestWhatsAppCaptureScopeAndReceiptAreClosedProducts(t *testing.T) {
 		{"bootstrap_binding", bootstrap, func(e *capturedEvent) { e.Scope.PublicationBinding = business.Scope.PublicationBinding }},
 		{"bootstrap_activation", bootstrap, func(e *capturedEvent) { e.Scope.ActivationRevision = 1 }},
 		{"business_activation", business, func(e *capturedEvent) { e.Scope.ActivationRevision = 0 }},
+		{"business_activation_identity", business, func(e *capturedEvent) { e.Scope.ActivationID = "" }},
+		{"business_target_generation", business, func(e *capturedEvent) { e.Source.Coordinate.TargetGeneration++ }},
+		{"business_zero_target_generation", business, func(e *capturedEvent) { e.Source.Coordinate.TargetGeneration = 0 }},
+		{"bootstrap_activation_identity", bootstrap, func(e *capturedEvent) { e.Scope.ActivationID = business.Scope.ActivationID }},
 		{"missing_receipt", business, func(e *capturedEvent) { e.ReceivedAt = time.Time{} }},
 		{"unrepresentable_receipt", business, func(e *capturedEvent) { e.ReceivedAt = e.ReceivedAt.Add(time.Nanosecond) }},
 	} {
