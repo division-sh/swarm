@@ -28,11 +28,7 @@ func (s *PipelinePostgresOwner) InsertSnapshotEventForTest(ctx context.Context, 
 				return struct{}{}, fmt.Errorf("snapshot event fixture %s was not inserted", record.EventID)
 			}
 			if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-				_, err := tx.ExecContext(ctx, `
-					INSERT INTO committed_replay_scopes (event_id, run_id, scope, created_at, updated_at)
-					SELECT e.event_id, e.run_id, $2, $3, $3 FROM events e WHERE e.event_id = $1::uuid
-				`, record.EventID, string(runtimepipelineobligation.ScopeDirect), record.CreatedAt)
-				return err
+				return persistCommittedPipelineScopeTx(ctx, tx, record.EventID, runtimepipelineobligation.ScopeDirect, true, record.CreatedAt)
 			}); err != nil {
 				return struct{}{}, err
 			}
