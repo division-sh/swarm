@@ -244,7 +244,7 @@ func waitForPresenceEntity(t *testing.T, process *releaseServeProcess, runID, st
 				t.Fatal(err)
 			}
 			last = entity
-			if entity.Entity.CurrentState == stage && reflect.DeepEqual(entity.Fields, fields) {
+			if entity.Entity.CurrentState != nil && *entity.Entity.CurrentState == stage && reflect.DeepEqual(entity.Fields, fields) {
 				var aggregate struct {
 					Counts map[string]int `json:"counts"`
 				}

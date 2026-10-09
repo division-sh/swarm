@@ -41,13 +41,16 @@ func ScanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), ta
 	var revision sql.NullInt64
 	var owners int
 	var dataCreated, dataUpdated, entered, created, updated, terminated any
+	var fields, config, gates, bookkeeping, accumulator []byte
 	dest := []any{&runID, &state.EntityID, &state.FlowInstance, &state.EntityType, &slug, &name,
-		&state.Fields, &dataCreated, &dataUpdated, &headerID, &path, &entityType, &template,
-		&mode, &status, &header.Config, &stage, &stageDefined, &revision, &entered, &created, &updated,
-		&terminated, &header.Gates, &header.Bookkeeping, &header.Accumulator, &owners}
+		&fields, &dataCreated, &dataUpdated, &headerID, &path, &entityType, &template,
+		&mode, &status, &config, &stage, &stageDefined, &revision, &entered, &created, &updated,
+		&terminated, &gates, &bookkeeping, &accumulator, &owners}
 	if err := row.Scan(append(dest, tail...)...); err != nil {
 		return operatorread.OperatorEntityFull{}, err
 	}
+	state.Fields = fields
+	header.Config, header.Gates, header.Bookkeeping, header.Accumulator = config, gates, bookkeeping, accumulator
 	if owners > 1 || (owners == 1) != headerID.Valid {
 		return operatorread.OperatorEntityFull{}, fmt.Errorf("entity has conflicting constructed header owners")
 	}
@@ -105,25 +108,20 @@ func ScanData(row dataScanner, decodeTime func(any) (time.Time, bool, error), ta
 	if !headerID.Valid {
 		return out, nil
 	}
+	instance, err := target.DecodeComplete(flowidentity.RouteForInstancePath(state.FlowInstance), identity.NormalizeEntityID(state.EntityID))
+	if err != nil {
+		return operatorread.OperatorEntityFull{}, err
+	}
 	out.Entity.StageDefined, out.Entity.Revision = &header.StageDefined, &header.Revision
 	out.Entity.LifecycleCreatedAt, out.Entity.LifecycleUpdatedAt = &header.CreatedAt, &header.UpdatedAt
 	if header.StageDefined {
 		out.Entity.CurrentState, out.Entity.EnteredStateAt = &header.CurrentState, &header.EnteredStageAt
 	}
-	if err := canonicaljson.DecodePreservingNumberLexemes(header.Gates, &out.Gates); err != nil {
-		return operatorread.OperatorEntityFull{}, err
-	}
-	if err := canonicaljson.DecodePreservingNumberLexemes(header.Bookkeeping, &out.Bookkeeping); err != nil {
-		return operatorread.OperatorEntityFull{}, err
-	}
-	var buckets map[string]any
-	if err := canonicaljson.DecodePreservingNumberLexemes(header.Accumulator, &buckets); err != nil {
-		return operatorread.OperatorEntityFull{}, err
-	}
-	loops, err := loopruntime.PublicActivations(buckets)
+	out.Gates, out.Bookkeeping = instance.Gates, instance.Bookkeeping
+	loops, err := loopruntime.PublicActivations(instance.StateBuckets)
 	if err != nil {
 		return operatorread.OperatorEntityFull{}, err
 	}
-	out.Loops, out.Accumulated = loops, loopruntime.PublicStateBuckets(buckets)
+	out.Loops, out.Accumulated = loops, loopruntime.PublicStateBuckets(instance.StateBuckets)
 	return out, nil
 }

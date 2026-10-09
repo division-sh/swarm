@@ -2137,7 +2137,7 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	if chat.IdempotencyReplayed || chat.Turn.TurnIndex != 2 || chat.Snapshot.SourceTurn.TurnID != fixture.Turn1ID {
 		t.Fatalf("%s fork chat = %#v", rt.Backend, chat)
 	}
-	if len(chat.Snapshot.EntitySnapshot) != 1 || chat.Snapshot.EntitySnapshot[0].CurrentState != "draft" || chat.Snapshot.EntitySnapshot[0].Fields["name"] != "Before" {
+	if len(chat.Snapshot.EntitySnapshot) != 1 || chat.Snapshot.EntitySnapshot[0].CurrentState == nil || *chat.Snapshot.EntitySnapshot[0].CurrentState != "draft" || chat.Snapshot.EntitySnapshot[0].Fields["name"] != "Before" {
 		t.Fatalf("%s immutable fork snapshot = %#v", rt.Backend, chat.Snapshot.EntitySnapshot)
 	}
 	if rt.LLMRequests.Load() != 2 {
@@ -2957,11 +2957,11 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 	var result struct {
 		RunID    string `json:"run_id"`
 		Entities []struct {
-			Alias        string `json:"alias"`
-			EntityID     string `json:"entity_id"`
-			FlowInstance string `json:"flow_instance"`
-			EntityType   string `json:"entity_type"`
-			CurrentState string `json:"current_state"`
+			Alias        string  `json:"alias"`
+			EntityID     string  `json:"entity_id"`
+			FlowInstance string  `json:"flow_instance"`
+			EntityType   string  `json:"entity_type"`
+			CurrentState *string `json:"current_state"`
 		} `json:"entities"`
 	}
 	requireServedJSONRPCResult(t, rt.Endpoint, "test.setup_entities", params, &result)
@@ -2969,7 +2969,7 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 		t.Fatalf("%s test.setup_entities result = %#v, want run %s and one entity", rt.Backend, result, runID)
 	}
 	entity := result.Entities[0]
-	if entity.Alias != "subject" || entity.EntityID != entityID || entity.FlowInstance != runID || entity.EntityType != "widget" || entity.CurrentState != "waiting" {
+	if entity.Alias != "subject" || entity.EntityID != entityID || entity.FlowInstance != runID || entity.EntityType != "widget" || entity.CurrentState == nil || *entity.CurrentState != "waiting" {
 		t.Fatalf("%s test.setup_entities entity result = %#v", rt.Backend, entity)
 	}
 	requireServedTestSetupPersistence(t, rt, runID, entityID)
@@ -5763,13 +5763,13 @@ func requireServedEntityReadback(t *testing.T, endpoint, runID, entityID, wantSt
 	t.Helper()
 	var result struct {
 		Entity struct {
-			EntityID     string `json:"entity_id"`
-			RunID        string `json:"run_id"`
-			CurrentState string `json:"current_state"`
+			EntityID     string  `json:"entity_id"`
+			RunID        string  `json:"run_id"`
+			CurrentState *string `json:"current_state"`
 		} `json:"entity"`
 	}
 	requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"entity_id": entityID, "run_id": runID}, &result)
-	if result.Entity.EntityID != entityID || result.Entity.RunID != runID || result.Entity.CurrentState != wantState {
+	if result.Entity.EntityID != entityID || result.Entity.RunID != runID || result.Entity.CurrentState == nil || *result.Entity.CurrentState != wantState {
 		t.Fatalf("entity.get result = %#v, want %s/%s state %s", result.Entity, runID, entityID, wantState)
 	}
 }
