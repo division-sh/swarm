@@ -52,33 +52,12 @@ func (p deliveryPlanner) prepareRootConstruction(ctx context.Context, event even
 	if err != nil {
 		return nil, err
 	}
-	_, err = p.connectPlanner.prospectiveConnectInstances(ctx, event.RunID(), fact)
-	if err != nil {
+	if reused, err := p.reusePreparedRootConstruction(ctx, event, lookup, schema.Instance.Path()); reused || err != nil {
 		return nil, err
 	}
-	for _, tree := range preparedConnectPlans(ctx) {
-		if tree.Identity.Route() != owner.Route {
-			continue
-		}
-		if err := p.validateRootConstructorKey(event, schema.Instance.Path(), tree.Instance.InstanceKey); err != nil {
-			return nil, err
-		}
-		if err := selectConnectionConstruction(ctx, tree.Identity); err != nil {
-			return nil, err
-		}
-		return nil, nil
-	}
-	var observed pipeline.FlowInstanceObservation
-	var exists bool
-	if proposal := p.connectPlanner.lifecycle.runProposal; proposal.Present() {
-		if err := proposal.Validate(event.RunID(), fact); err != nil {
-			return nil, err
-		}
-	} else {
-		observed, exists, err = p.connectPlanner.lifecycle.index.LookupFlowInstance(ctx, lookup)
-		if err != nil {
-			return nil, err
-		}
+	observed, exists, err := p.lookupRootConstruction(ctx, lookup)
+	if err != nil {
+		return nil, err
 	}
 	if exists {
 		if err := observed.ValidateSelection(lookup); err != nil {
@@ -110,6 +89,29 @@ func (p deliveryPlanner) prepareRootConstruction(ctx context.Context, event even
 		return nil, fmt.Errorf("prepare root constructor: %w", err)
 	}
 	return []pipeline.FlowInstanceActivationPlan{plan}, nil
+}
+
+func (p deliveryPlanner) reusePreparedRootConstruction(ctx context.Context, event events.Event, lookup pipeline.FlowInstanceLookupRequest, key string) (bool, error) {
+	if _, err := p.connectPlanner.prospectiveConnectInstances(ctx, event.RunID(), lookup.SourceFact()); err != nil {
+		return false, err
+	}
+	for _, tree := range preparedConnectPlans(ctx) {
+		if tree.Identity.InstancePath != lookup.ExactPath() || tree.Identity.TemplateID != lookup.FlowID() {
+			continue
+		}
+		if err := p.validateRootConstructorKey(event, key, tree.Instance.InstanceKey); err != nil {
+			return false, err
+		}
+		return true, selectConnectionConstruction(ctx, tree.Identity)
+	}
+	return false, nil
+}
+
+func (p deliveryPlanner) lookupRootConstruction(ctx context.Context, lookup pipeline.FlowInstanceLookupRequest) (pipeline.FlowInstanceObservation, bool, error) {
+	if proposal := p.connectPlanner.lifecycle.runProposal; proposal.Present() {
+		return pipeline.FlowInstanceObservation{}, false, proposal.Validate(lookup.RunID(), lookup.SourceFact())
+	}
+	return p.connectPlanner.lifecycle.index.LookupFlowInstance(ctx, lookup)
 }
 
 func prepareRootConstructorArguments(ctx context.Context, request pipeline.FlowInstanceActivationRequest, input, key string) (pipeline.FlowInstanceActivationRequest, bool, error) {

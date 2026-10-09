@@ -86,29 +86,33 @@ func PrepareFlowInstanceSelection(ctx context.Context, reader FlowInstanceIndexR
 		return FlowInstanceSelection{}, fmt.Errorf("instance index returned an observation as absence")
 	}
 	if found {
-		if err := observation.ValidateSelection(request.Lookup); err != nil {
-			return FlowInstanceSelection{}, err
-		}
-		if request.Mode == contracts.FlowInputResolutionModeCreate {
-			return FlowInstanceSelection{}, flowInstanceOccupiedConflict(observation.Owner())
-		}
-		instance, err := observation.WorkflowInstance()
-		if err != nil {
-			return FlowInstanceSelection{}, err
-		}
-		stage := ""
-		if instance.StageDefined {
-			stage = instance.CurrentState
-		}
-		if err := NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(request.Lookup.Source(), request.Lookup.FlowID()); err != nil {
-			return FlowInstanceSelection{}, err
-		}
-		return FlowInstanceSelection{Observation: observation}, nil
+		return selectObservedFlowInstance(request, observation)
 	}
 	if request.Mode == contracts.FlowInputResolutionModeSelect {
 		return FlowInstanceSelection{}, &WorkflowInstanceLookupMiss{RequestedKey: request.Lookup.FlowID()}
 	}
 	return prepareMissingFlowInstance(ctx, planner, request)
+}
+
+func selectObservedFlowInstance(request FlowInstanceSelectionRequest, observation FlowInstanceObservation) (FlowInstanceSelection, error) {
+	if err := observation.ValidateSelection(request.Lookup); err != nil {
+		return FlowInstanceSelection{}, err
+	}
+	if request.Mode == contracts.FlowInputResolutionModeCreate {
+		return FlowInstanceSelection{}, flowInstanceOccupiedConflict(observation.Owner())
+	}
+	instance, err := observation.WorkflowInstance()
+	if err != nil {
+		return FlowInstanceSelection{}, err
+	}
+	stage := ""
+	if instance.StageDefined {
+		stage = instance.CurrentState
+	}
+	if err := NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(request.Lookup.Source(), request.Lookup.FlowID()); err != nil {
+		return FlowInstanceSelection{}, err
+	}
+	return FlowInstanceSelection{Observation: observation}, nil
 }
 
 func selectPreparedFlowInstance(request FlowInstanceSelectionRequest) (*FlowInstanceActivationPlan, bool, error) {

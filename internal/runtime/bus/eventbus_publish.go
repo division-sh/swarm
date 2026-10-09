@@ -500,15 +500,9 @@ func (eb *EventBus) preparePublishCommand(ctx context.Context, plan eventBusComm
 	if err := eb.executionPosture.Admit(plan.event.ExecutionMode(), "event persistence and delivery"); err != nil {
 		return preparedCtx, PreparedPublish{}, PublicationCommand{}, err
 	}
-	missing, err := eb.requireExistingRunActive(preparedCtx, admitted)
+	plan.runProposal, err = eb.preparePublicationRunProposal(preparedCtx, admitted, plan.runProposal)
 	if err != nil {
 		return preparedCtx, PreparedPublish{}, PublicationCommand{}, err
-	}
-	if missing {
-		plan.runProposal, err = runtimepipeline.NewFlowInstanceRunProposal(eb.sourceArtifactFact, admitted)
-		if err != nil {
-			return preparedCtx, PreparedPublish{}, PublicationCommand{}, err
-		}
 	}
 	prepared, command, err := eb.prepareClosedPublication(preparedCtx, plan)
 	if err == nil && plan.stageFeedback != nil {
@@ -584,6 +578,17 @@ func isolatedPublicationRunMissing(err error, runID string) bool {
 		}
 	}
 	return false
+}
+
+func (eb *EventBus) preparePublicationRunProposal(ctx context.Context, admitted events.AdmittedEvent, proposal runtimepipeline.FlowInstanceRunProposal) (runtimepipeline.FlowInstanceRunProposal, error) {
+	if proposal.Present() {
+		return proposal, proposal.Validate(admitted.Event().RunID(), eb.sourceArtifactFact)
+	}
+	missing, err := eb.requireExistingRunActive(ctx, admitted)
+	if err != nil || !missing {
+		return runtimepipeline.FlowInstanceRunProposal{}, err
+	}
+	return runtimepipeline.NewFlowInstanceRunProposal(eb.sourceArtifactFact, admitted)
 }
 
 func (eb *EventBus) finalizeCommittedFlowInstanceActivations(
