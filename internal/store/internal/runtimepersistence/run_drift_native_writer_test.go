@@ -31,6 +31,8 @@ func TestVerifyRunNativeConstructionBothStores(t *testing.T) {
 			node := mustPersistenceNode("drift-proof", "advance")
 			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "drift-proof", FlowInstance: "drift-proof/receiver", EntityID: record.EntityID})}
 			selected := fixture.store.(stateOnlyAcquisitionStore)
+			// Repeated native writes retain one timestamp; committed revisions,
+			// not occurrence time or UUID order across revisions, distinguish them.
 			for i, handled := range []bool{true, false, true} {
 				event := eventtest.ExistingRunRootIngress(uuid.NewString(), "drift.advance", "fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 				if err := commitSemanticEventFixtureWithRoutes(fixture.ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
@@ -45,7 +47,6 @@ func TestVerifyRunNativeConstructionBothStores(t *testing.T) {
 				} else {
 					record.ExpectedState = "done"
 					record.ExpectedRevision++
-					record.UpdatedAt = record.UpdatedAt.Add(time.Second)
 				}
 				record.Fields = json.RawMessage(fmt.Sprintf(`{"receiver_key":"receiver","account_id":"preserved","handled":%t}`, handled))
 				if _, err := fixture.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(fixture.ctx, pipeline.WorkflowEngineMutationCommand{State: record, DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, Duration: time.Second, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()}}); err != nil {
