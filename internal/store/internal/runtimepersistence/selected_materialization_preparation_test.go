@@ -101,6 +101,7 @@ func selectedStorePreparationOwnerForTest(t testing.TB, selected any) runforkexe
 			runtimepipeline.NewWorkflowPersistence(selected), selected, selected, selected,
 			selected, durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+			selected, selected,
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -122,6 +123,7 @@ func selectedStorePreparationOwnerForTest(t testing.TB, selected any) runforkexe
 			runtimepipeline.NewWorkflowPersistence(selected), selected, selected, selected,
 			selected, durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+			selected, selected,
 		)
 		if err != nil {
 			t.Fatal(err)

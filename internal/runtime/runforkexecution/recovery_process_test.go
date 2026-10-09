@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -228,6 +229,19 @@ type selectedCrashExecution struct {
 	checkpoint func(string)
 }
 
+type selectedCrashActivated struct {
+	SelectedContractForkLifecycle
+	checkpoint func(string)
+}
+
+func (p selectedCrashActivated) ActivateRunForkForSelectedContractExecution(ctx context.Context, request runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
+	result, err := p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, request)
+	if result.Activated {
+		p.checkpoint(request.ForkRunID)
+	}
+	return result, err
+}
+
 func (p selectedCrashExecution) IssueRunForkSelectedContractRuntimeExecution(ctx context.Context, req runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error) {
 	result, err := p.SelectedContractRuntimeExecutionLifecycle.IssueRunForkSelectedContractRuntimeExecution(ctx, req)
 	if err == nil && p.issued {
@@ -318,11 +332,13 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 		owner.ports.fork = selectedCrashMaterialization{SelectedContractForkLifecycle: owner.ports.fork, before: cut == "before_materialization", checkpoint: checkpoint}
 	} else if cut == "execution_issued" || cut == "execution_claimed" {
 		owner.ports.runtimeExecution = selectedCrashExecution{SelectedContractRuntimeExecutionLifecycle: owner.ports.runtimeExecution, issued: cut == "execution_issued", checkpoint: checkpoint}
-	} else if cut == "event_committed" {
+	} else if cut == "event_committed" || cut == "retained_event_committed" {
 		owner.ports.replay = selectedOperationPublicationProbe{SelectedContractReplayPersistence: owner.ports.replay, after: func(ctx context.Context) {
 			occurrence, _ := worklifetime.OccurrenceFromContext(ctx)
 			checkpoint(occurrence.(*worklifetime.SelectedForkOccurrence).Identity().RunID)
 		}}
+	} else if cut == "retained_after_activation" {
+		owner.ports.fork = selectedCrashActivated{SelectedContractForkLifecycle: owner.ports.fork, checkpoint: checkpoint}
 	} else if cut == "before_activation" || cut == "native_before_activation" {
 		var discards int
 		owner.ports.fork = selectedOperationActivationProbe{SelectedContractForkLifecycle: owner.ports.fork, discards: &discards, before: func(ctx context.Context) {
@@ -330,11 +346,22 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 			checkpoint(occurrence.(*worklifetime.SelectedForkOccurrence).Identity().RunID)
 		}}
 	}
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: sourceLoader,
-		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-		AgentRuntime:      options})
+	request := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: sourceLoader,
+		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source), AgentRuntime: options}
+	if strings.HasPrefix(cut, "retained_") {
+		request.ForkOperation = &runfork.ForkOperationRequest{
+			OperationID: uuid.NewString(), Actor: "retained-crash", IdempotencyKey: "fixed-cut",
+			TransportHash: "retained-crash-transport", SourceRunID: sourceRun, ForkEventID: eventID,
+			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: request.ContractSelection,
+		}
+	}
+	result, err := ExecuteSelectedContractRunFork(ctx, request)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if cut == "retained_event_committed" {
+		<-ctx.Done()
+		t.Fatal("retained execution stopped before its publication checkpoint")
 	}
 	if cut != "execution_returned" {
 		t.Fatalf("execution skipped checkpoint %s", cut)

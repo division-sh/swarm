@@ -59,6 +59,20 @@ func TestSelectedFiniteFeedRecoveryTopologiesUseExactPersistedReadinessBothStore
 					t.Fatal(err)
 				}
 			}
+			rootPlan, _, rootEncoded, err := selectedContractWorkflowReadiness(source, selectedWorkflowConstructionFixture(t, selectedContractWorkflowState{
+				RunID: runID, EntityID: uuid.NewString(), WorkflowName: "root", WorkflowVersion: "v1",
+				ExecutionMode: executionmode.Mock, Mode: "static", Route: "root",
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			rootHash, err := rootPlan.Hash()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`INSERT INTO flow_instance_runtime_readiness VALUES ($1,'root',$2,$3)`, runID, string(rootEncoded), rootHash); err != nil {
+				t.Fatal(err)
+			}
 			read := func(wantFailure string) {
 				t.Helper()
 				withForkOperationTx(t, db, func(tx *sql.Tx) {
@@ -77,6 +91,38 @@ func TestSelectedFiniteFeedRecoveryTopologiesUseExactPersistedReadinessBothStore
 				t.Fatal(err)
 			}
 			read("")
+			staticIdentity := agentidentitytest.DeclaredForRun(t, runID, "static-worker", "flow/static-worker", "flow", "static", "flow/static")
+			staticDeclaration, err := staticIdentity.Plan()
+			if err != nil {
+				t.Fatal(err)
+			}
+			staticPlan, staticTopologies, staticEncoded, err := selectedContractWorkflowReadiness(source, selectedWorkflowConstructionFixture(t, selectedContractWorkflowState{
+				RunID: runID, EntityID: uuid.NewString(), WorkflowName: "flow", WorkflowVersion: "v1",
+				ExecutionMode: executionmode.Mock, Mode: "static", Route: "flow/static",
+				Agents: []runfork.RunForkSelectedContractAgentExpectation{{Plan: staticDeclaration, ConfigRevision: strings.Repeat("b", 64)}},
+			}))
+			if err != nil || len(staticTopologies) != 1 || staticPlan.Agents[0].EntityID != "" {
+				t.Fatalf("exact static attachment: %+v %v", staticPlan, err)
+			}
+			staticHash, err := staticPlan.Hash()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`INSERT INTO flow_instances VALUES ($1,'flow/static','flow','static')`, runID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`INSERT INTO flow_instance_runtime_readiness VALUES ($1,'flow/static',$2,$3)`, runID, string(staticEncoded), staticHash); err != nil {
+				t.Fatal(err)
+			}
+			want = append(want, staticTopologies...)
+			read("") // Static and template attachments consume the same exact durable readiness.
+			if _, err := db.Exec(`UPDATE flow_instance_runtime_readiness SET plan_hash=$1 WHERE run_id=$2 AND instance_path='flow/static'`, strings.Repeat("f", 64), runID); err != nil {
+				t.Fatal(err)
+			}
+			read("flow readiness plan hash disagrees with its persisted plan")
+			if _, err := db.Exec(`UPDATE flow_instance_runtime_readiness SET plan_hash=$1 WHERE run_id=$2 AND instance_path='flow/static'`, staticHash, runID); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := db.Exec(`UPDATE flow_instance_runtime_readiness SET plan_hash=$1 WHERE run_id=$2 AND instance_path='flow/instance'`, strings.Repeat("f", 64), runID); err != nil {
 				t.Fatal(err)
 			}

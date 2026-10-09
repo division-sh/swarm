@@ -202,6 +202,10 @@ func requestPostgresCompletionCandidateTx(
 	if lifecycleState == runtimerunlifecycle.StatePaused {
 		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateDeferredPaused}, nil
 	}
+	selectedRunID, err := selectedCompletionRunTx(ctx, tx, true, runID)
+	if err != nil {
+		return runtimerunlifecycle.CandidateRequestResult{}, err
+	}
 	selectedNow = runtimerunlifecycle.CanonicalTimestamp(selectedNow)
 	requestedDue := selectedNow
 	if dueAt != nil {
@@ -215,7 +219,7 @@ func requestPostgresCompletionCandidateTx(
 			Disposition: runtimerunlifecycle.CandidateAlreadyCurrent,
 			Candidate: runtimerunlifecycle.Candidate{
 				RunID: runID, BundleHash: strings.TrimSpace(bundleHash),
-				Revision: currentRev, DueAt: currentDueAt,
+				Revision: currentRev, DueAt: currentDueAt, SelectedForkRunID: selectedRunID,
 			},
 		}
 		return result, result.Validate()
@@ -236,6 +240,7 @@ func requestPostgresCompletionCandidateTx(
 	); err != nil {
 		return runtimerunlifecycle.CandidateRequestResult{}, fmt.Errorf("request completion candidate: %w", err)
 	}
+	candidate.SelectedForkRunID = selectedRunID
 	candidate.DueAt = runtimerunlifecycle.CanonicalTimestamp(candidate.DueAt)
 	result := runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateRequested, Candidate: candidate}
 	return result, result.Validate()
@@ -283,6 +288,10 @@ func requestSQLiteCompletionCandidateTx(
 	if lifecycleState == runtimerunlifecycle.StatePaused {
 		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateDeferredPaused}, nil
 	}
+	selectedRunID, err := selectedCompletionRunTx(ctx, tx, false, runID)
+	if err != nil {
+		return runtimerunlifecycle.CandidateRequestResult{}, err
+	}
 	selectedNow = runtimerunlifecycle.CanonicalTimestamp(selectedNow)
 	requestedDue := selectedNow
 	if dueAt != nil {
@@ -295,7 +304,7 @@ func requestSQLiteCompletionCandidateTx(
 			Disposition: runtimerunlifecycle.CandidateAlreadyCurrent,
 			Candidate: runtimerunlifecycle.Candidate{
 				RunID: runID, BundleHash: strings.TrimSpace(bundleHash),
-				Revision: currentRev, DueAt: runtimerunlifecycle.CanonicalTimestamp(parsed),
+				Revision: currentRev, DueAt: runtimerunlifecycle.CanonicalTimestamp(parsed), SelectedForkRunID: selectedRunID,
 			},
 		}
 		return result, result.Validate()
@@ -315,7 +324,7 @@ func requestSQLiteCompletionCandidateTx(
 	}
 	candidate := runtimerunlifecycle.Candidate{
 		RunID: runID, BundleHash: strings.TrimSpace(bundleHash),
-		Revision: currentRev + 1, DueAt: requestedDue,
+		Revision: currentRev + 1, DueAt: requestedDue, SelectedForkRunID: selectedRunID,
 	}
 	request := runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateRequested, Candidate: candidate}
 	return request, request.Validate()
@@ -404,38 +413,13 @@ func (s *RunLifecyclePostgresOwner) ListCompletionCandidates(
 	if limit <= 0 {
 		return runtimerunlifecycle.CandidatePage{}, errors.New("completion candidate page limit must be positive")
 	}
-	rows, err := s.backend.QueryContext(ctx, `
-		SELECT run_id::text, bundle_hash, completion_revision, completion_due_at
-		FROM runs
-		WHERE bundle_hash = $1
-		  AND completion_due_at IS NOT NULL
-		  AND status = 'running'
-		  AND run_id::text > $2
-		ORDER BY run_id::text
-		LIMIT $3
-	`, strings.TrimSpace(scope.BundleHash), strings.TrimSpace(cursor.RunID), limit)
-	if err != nil {
-		return runtimerunlifecycle.CandidatePage{}, fmt.Errorf("list completion candidates: %w", err)
-	}
-	defer rows.Close()
-	page := runtimerunlifecycle.CandidatePage{Candidates: make([]runtimerunlifecycle.Candidate, 0, limit)}
-	for rows.Next() {
-		var candidate runtimerunlifecycle.Candidate
-		if err := rows.Scan(&candidate.RunID, &candidate.BundleHash, &candidate.Revision, &candidate.DueAt); err != nil {
-			return runtimerunlifecycle.CandidatePage{}, fmt.Errorf("scan completion candidate: %w", err)
-		}
-		candidate.DueAt = runtimerunlifecycle.CanonicalTimestamp(candidate.DueAt)
-		if err := candidate.Validate(); err != nil {
-			return runtimerunlifecycle.CandidatePage{}, err
-		}
-		page.Candidates = append(page.Candidates, candidate)
-		page.Next.RunID = candidate.RunID
-	}
-	if err := rows.Err(); err != nil {
-		return runtimerunlifecycle.CandidatePage{}, fmt.Errorf("read completion candidates: %w", err)
-	}
-	page.Exhausted = len(page.Candidates) < limit
-	return page, nil
+	var page runtimerunlifecycle.CandidatePage
+	err := s.runRead(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		page, err = listCompletionCandidatesTx(txctx, tx, true, scope, cursor, limit)
+		return err
+	})
+	return page, err
 }
 
 func (s *RunLifecycleSQLiteOwner) ListCompletionCandidates(
@@ -453,45 +437,13 @@ func (s *RunLifecycleSQLiteOwner) ListCompletionCandidates(
 	if limit <= 0 {
 		return runtimerunlifecycle.CandidatePage{}, errors.New("completion candidate page limit must be positive")
 	}
-	rows, err := s.backend.QueryContext(ctx, `
-		SELECT run_id, bundle_hash, completion_revision, completion_due_at
-		FROM runs
-		WHERE bundle_hash = ?
-		  AND completion_due_at IS NOT NULL
-		  AND status = 'running'
-		  AND run_id > ?
-		ORDER BY run_id
-		LIMIT ?
-	`, strings.TrimSpace(scope.BundleHash), strings.TrimSpace(cursor.RunID), limit)
-	if err != nil {
-		return runtimerunlifecycle.CandidatePage{}, fmt.Errorf("list sqlite completion candidates: %w", err)
-	}
-	defer rows.Close()
-	page := runtimerunlifecycle.CandidatePage{Candidates: make([]runtimerunlifecycle.Candidate, 0, limit)}
-	for rows.Next() {
-		var (
-			candidate runtimerunlifecycle.Candidate
-			dueAt     any
-		)
-		if err := rows.Scan(&candidate.RunID, &candidate.BundleHash, &candidate.Revision, &dueAt); err != nil {
-			return runtimerunlifecycle.CandidatePage{}, fmt.Errorf("scan sqlite completion candidate: %w", err)
-		}
-		parsed, ok, err := sqliteTimeValue(dueAt)
-		if err != nil || !ok {
-			return runtimerunlifecycle.CandidatePage{}, fmt.Errorf("decode sqlite completion candidate due_at: %w", err)
-		}
-		candidate.DueAt = runtimerunlifecycle.CanonicalTimestamp(parsed)
-		if err := candidate.Validate(); err != nil {
-			return runtimerunlifecycle.CandidatePage{}, err
-		}
-		page.Candidates = append(page.Candidates, candidate)
-		page.Next.RunID = candidate.RunID
-	}
-	if err := rows.Err(); err != nil {
-		return runtimerunlifecycle.CandidatePage{}, fmt.Errorf("read sqlite completion candidates: %w", err)
-	}
-	page.Exhausted = len(page.Candidates) < limit
-	return page, nil
+	var page runtimerunlifecycle.CandidatePage
+	err := s.runRead(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		page, err = listCompletionCandidatesTx(txctx, tx, false, scope, cursor, limit)
+		return err
+	})
+	return page, err
 }
 
 func (s *RunLifecyclePostgresOwner) ExecuteCompletionCandidate(
@@ -575,6 +527,9 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
 	}
 	if err != nil {
+		return runtimerunlifecycle.CompletionResult{}, err
+	}
+	if err := requireCompletionCandidateAuthorityTx(ctx, tx, true, candidate, bundleHash, s.completionAuthority); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	if strings.TrimSpace(bundleHash) != candidate.BundleHash || !currentDue.Valid || currentRev != candidate.Revision {
@@ -717,6 +672,9 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeExactNoop}, nil
 	}
 	if err != nil {
+		return runtimerunlifecycle.CompletionResult{}, err
+	}
+	if err := requireCompletionCandidateAuthorityTx(ctx, tx, false, candidate, bundleHash, s.completionAuthority); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	dueAt, duePresent, err := sqliteTimeValue(currentDue)

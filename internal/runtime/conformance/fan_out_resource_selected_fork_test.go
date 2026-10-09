@@ -426,6 +426,7 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 			durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected,
 			selected, selected, selected, selected, selected,
+			selected, selected,
 		)
 	case *store.PostgresStore:
 		forkOwner := fork
@@ -443,6 +444,7 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 			durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected,
 			selected, selected, selected, selected, selected,
+			selected, selected,
 		)
 	default:
 		t.Fatalf("selected fork store %T is not supported", f.selected)

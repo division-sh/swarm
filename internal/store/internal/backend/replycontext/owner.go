@@ -184,6 +184,16 @@ func (s *ReplyPostgresOwner) LoadReplyContext(ctx context.Context, id string) (r
 	return loadPostgresReplyContext(ctx, s.backend, id, false)
 }
 
+func (s *ReplyPostgresOwner) LoadWithinTransaction(ctx context.Context, tx *sql.Tx, id string) (runtimereplycontext.Record, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimereplycontext.Record{}, err
+	}
+	if tx == nil {
+		return runtimereplycontext.Record{}, fmt.Errorf("load postgres reply context: transaction is required")
+	}
+	return loadPostgresReplyContext(ctx, tx, id, false)
+}
+
 func loadPostgresReplyContext(ctx context.Context, db replyContextSQL, id string, forUpdate bool) (runtimereplycontext.Record, error) {
 	query := postgresReplyContextSelect + ` WHERE reply_context_id = $1`
 	if forUpdate {
@@ -194,6 +204,16 @@ func loadPostgresReplyContext(ctx context.Context, db replyContextSQL, id string
 
 func (s *ReplySQLiteOwner) LoadReplyContext(ctx context.Context, id string) (runtimereplycontext.Record, error) {
 	return loadSQLiteReplyContext(ctx, s.backend, id)
+}
+
+func (s *ReplySQLiteOwner) LoadWithinTransaction(ctx context.Context, tx *sql.Tx, id string) (runtimereplycontext.Record, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimereplycontext.Record{}, err
+	}
+	if tx == nil {
+		return runtimereplycontext.Record{}, fmt.Errorf("load sqlite reply context: transaction is required")
+	}
+	return loadSQLiteReplyContext(ctx, tx, id)
 }
 
 func loadSQLiteReplyContext(ctx context.Context, db replyContextSQL, id string) (runtimereplycontext.Record, error) {
