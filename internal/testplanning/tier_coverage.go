@@ -39,6 +39,10 @@ func (policy Policy) SelectTimingCell(tier string, root TestRoot, backend string
 // Retained ownership is derived from the same policy and active full census.
 // It is not a second list of package names or a change-based selector.
 func bindTierDeferrals(plan *RunPlan, full RunPlan, policy Policy) error {
+	selectors := make(map[string]unitSelector, len(policy.Units))
+	for id, unit := range policy.Units {
+		selectors[id] = compileUnitSelector(ProofUnit{Run: unit.Run, Skip: unit.Skip})
+	}
 	selected := map[TestRoot]bool{}
 	for _, unit := range plan.Units {
 		for _, root := range unit.SelectedRoots {
@@ -56,7 +60,7 @@ func bindTierDeferrals(plan *RunPlan, full RunPlan, policy Policy) error {
 		if selected[root] {
 			continue
 		}
-		minimum, err := minimumRootTier(policy, root)
+		minimum, err := minimumRootTier(policy, root, selectors)
 		if err != nil {
 			return err
 		}
@@ -76,7 +80,7 @@ func bindTierDeferrals(plan *RunPlan, full RunPlan, policy Policy) error {
 	return nil
 }
 
-func minimumRootTier(policy Policy, root TestRoot) (string, error) {
+func minimumRootTier(policy Policy, root TestRoot, selectors map[string]unitSelector) (string, error) {
 	for _, tier := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {
 		for _, id := range policy.Profiles[tier].Units {
 			unit := policy.Units[id]
@@ -84,7 +88,7 @@ func minimumRootTier(policy Policy, root TestRoot) (string, error) {
 				if pkg != root.Package {
 					continue
 				}
-				matches, err := selectedByUnit(ProofUnit{Run: unit.Run, Skip: unit.Skip}, root.Name)
+				matches, err := selectors[id].matches(root.Name)
 				if err != nil {
 					return "", err
 				}

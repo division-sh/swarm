@@ -256,6 +256,7 @@ func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof,
 		}
 		full = &complete
 	}
+	selectors := compileUnitSelectors(plan.Units)
 	if plan.Profile == ProfileFull {
 		backends := map[string]bool{}
 		for _, unit := range plan.Units {
@@ -289,7 +290,7 @@ func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof,
 		addRequired(pkgFromPath(pkg, plan), proof.Name, proof.Children...)
 	}
 	if plan.Profile == ProfileCore {
-		for _, unit := range plan.Units {
+		for i, unit := range plan.Units {
 			if unit.ID == "catalog-required-inventory" || strings.HasPrefix(unit.ID, "local-") {
 				for _, pkg := range unit.Packages {
 					entry, ok := inventory.Packages[pkg]
@@ -297,7 +298,7 @@ func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof,
 						return fmt.Errorf("local unit %s package %s absent from active inventory", unit.ID, pkg)
 					}
 					for _, name := range entry.Roots {
-						matched, err := selectedByUnit(unit, name)
+						matched, err := selectors[i].matches(name)
 						if err != nil {
 							return err
 						}
@@ -336,7 +337,7 @@ func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof,
 				unit.TestBearingPackages = append(unit.TestBearingPackages, pkg)
 			}
 			for _, name := range entry.Roots {
-				match, err := selectedByUnit(*unit, name)
+				match, err := selectors[i].matches(name)
 				if err != nil {
 					return err
 				}
@@ -477,24 +478,46 @@ func pkgFromPath(path string, plan *RunPlan) string {
 }
 
 func selectedByUnit(unit ProofUnit, name string) (bool, error) {
-	run := strings.Split(unit.Run, "/")[0]
-	if run != "" {
-		matched, err := regexp.MatchString(run, name)
-		if err != nil {
-			return false, err
-		}
-		if !matched {
-			return false, nil
-		}
+	return compileUnitSelector(unit).matches(name)
+}
+
+type unitSelector struct {
+	run, skip       *regexp.Regexp
+	runErr, skipErr error
+}
+
+func compileUnitSelectors(units []ProofUnit) []unitSelector {
+	selectors := make([]unitSelector, len(units))
+	for i, unit := range units {
+		selectors[i] = compileUnitSelector(unit)
+	}
+	return selectors
+}
+
+func compileUnitSelector(unit ProofUnit) unitSelector {
+	var selector unitSelector
+	if run := strings.Split(unit.Run, "/")[0]; run != "" {
+		selector.run, selector.runErr = regexp.Compile(run)
 	}
 	if unit.Skip != "" {
-		skipped, err := regexp.MatchString(unit.Skip, name)
-		if err != nil {
-			return false, err
-		}
-		if skipped {
-			return false, nil
-		}
+		selector.skip, selector.skipErr = regexp.Compile(unit.Skip)
+	}
+	return selector
+}
+
+func (s unitSelector) matches(name string) (bool, error) {
+	if s.runErr != nil {
+		return false, s.runErr
+	}
+	if s.run != nil && !s.run.MatchString(name) {
+		return false, nil
+	}
+	// Preserve the existing error order: skip is consulted only after run matches.
+	if s.skipErr != nil {
+		return false, s.skipErr
+	}
+	if s.skip != nil && s.skip.MatchString(name) {
+		return false, nil
 	}
 	return true, nil
 }
