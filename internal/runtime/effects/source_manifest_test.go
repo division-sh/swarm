@@ -35,6 +35,7 @@ const (
 // launch/write primitive makes this test fail until ownership is reclassified.
 // The selected-context Close/Done entries are sync.Once.Do settlement, not HTTP.
 var sourcePrimitiveOwners = map[string]primitiveOwner{
+	"internal/sessionprovider/channel_execution_unix.go:executeChannelSend:sdk_send:1":                                                    ownerOperatorInfra,
 	"internal/runtime/testfixtures/canonicalrouting/keyed_ingress.go:CopyNestedDeclarationLocalRawIngress:filesystem_write:1":             ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/keyed_ingress.go:CopyNestedDeclarationLocalRawIngress:filesystem_write:2":             ownerBuildTest,
 	"internal/runtime/context_manager.go:Done:http_do:1":                                                                                  ownerRuntimeDependency,
@@ -460,7 +461,7 @@ func isLocalCall(call *ast.CallExpr, name string) bool {
 func collectDirectPrimitives(root string) (map[string]struct{}, error) {
 	out := map[string]struct{}{}
 	base := filepath.Join(root, "internal", "runtime")
-	err := checkoutsource.WalkDir(root, base, func(path string, entry fs.DirEntry, err error) error {
+	visit := func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -499,8 +500,18 @@ func collectDirectPrimitives(root string) (map[string]struct{}, error) {
 			})
 		}
 		return nil
-	})
-	return out, err
+	}
+	if err := checkoutsource.WalkDir(root, base, visit); err != nil {
+		return nil, err
+	}
+	// This closed native launch delegates to the single private SDK send owner;
+	// it is network I/O, not the deterministic in-process read-only exemption.
+	path := filepath.Join(root, "internal", "sessionprovider", "channel_execution_unix.go")
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	return out, visit(path, fs.FileInfoToDirEntry(info), nil)
 }
 
 func commandVariables(body *ast.BlockStmt) map[string]struct{} {
@@ -572,6 +583,8 @@ func directPrimitive(call *ast.CallExpr, commandVars, fileVars map[string]struct
 	}
 	root := selectorRoot(selector.X)
 	switch {
+	case root == "occurrence" && selector.Sel.Name == "send":
+		return "sdk_send"
 	case selector.Sel.Name == "Do":
 		return "http_do"
 	case commandExecutionCall(selector, commandVars):

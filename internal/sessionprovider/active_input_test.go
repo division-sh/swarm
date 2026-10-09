@@ -72,12 +72,17 @@ type activeInputFixture struct {
 	handled    chan capturedEvent
 	basePath   string
 	location   string
+	senderJID  types.JID
 }
 
 // The peer supplies encrypted network frames; SDK decryption/capture, selected
 // claim/confirmation/activation and standing admission are real. This is not a
 // physical pairing, provider confirmation delivery, or served journey proof.
 func newActiveInputFixture(t *testing.T, backend string) *activeInputFixture {
+	return newActiveInputFixtureWithOutput(t, backend, false)
+}
+
+func newActiveInputFixtureWithOutput(t *testing.T, backend string, outbound bool) *activeInputFixture {
 	t.Helper()
 	f := &activeInputFixture{handled: make(chan capturedEvent, 1)}
 	if backend == "sqlite" {
@@ -116,6 +121,13 @@ func newActiveInputFixture(t *testing.T, backend string) *activeInputFixture {
 	}
 	f.state = sessionStateFixture(t, base, connectionID, "")
 	device := newSDKDeviceFixture(t, f.state.database)
+	if outbound {
+		device.LID = types.NewJID("200000000000", types.HiddenUserServer)
+		if err := device.Save(ctx); err != nil {
+			t.Fatal(err)
+		}
+		f.senderJID = types.NewJID("200000000003", types.HiddenUserServer)
+	}
 	_, senderStore := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "sender.db"))
 	f.sender = newSDKDeviceFixture(t, senderStore)
 	account := operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: connectionID,
@@ -269,6 +281,9 @@ func (f *activeInputFixture) receiveCaptureSDK(t *testing.T, text, id string, at
 		t.Fatal(err)
 	}
 	from := types.NewJID("100000000003", types.DefaultUserServer)
+	if !f.senderJID.IsEmpty() {
+		from = f.senderJID
+	}
 	from.Device = 1
 	message := encryptedMessageFromFixture(t, device, f.sender, from, &waE2E.Message{Conversation: proto.String(text)})
 	message.Attrs["id"], message.Attrs["t"] = id, at.Unix()
@@ -651,11 +666,10 @@ events:
 	}
 	connector := packs.ConnectorPackDescriptor{Identity: packs.MustPackIdentity("provider.whatsapp.fixture_connector", "0.1.0", packs.ManifestHash([]byte("fixture-connector")), packs.TypeConnector, packs.MustPackSource("test", "active-native-input")),
 		Provider: "whatsapp", Tools: map[string]contracts.ToolSchemaEntry{"whatsapp.fixture_send": contracts.MustToolSchemaEntry(
-			contracts.WithToolCategory(contracts.ToolCategoryProviderConnector.String()), contracts.WithToolHandler(contracts.ToolHandlerHTTP),
+			contracts.WithToolCategory(contracts.ToolCategoryProviderConnector.String()), contracts.WithToolHandler(contracts.ToolHandlerInProcess),
 			contracts.WithToolEffect(contracts.ActivityEffectClassNonIdempotentWrite),
 			contracts.WithToolSchemas(object(map[string]contracts.ToolInputSchema{"destination": text, "text": presentationText}, "destination", "text"), object(map[string]contracts.ToolInputSchema{"id": text}, "id")),
-			contracts.WithToolHTTP(contracts.HTTPToolSpec{Method: "POST", URL: "http://fixture.invalid/never-called", Body: map[string]any{"text": "{{input.text}}"}}),
-			contracts.WithToolResponseSuccess(contracts.HTTPResponseSuccess{Kind: "http_status_2xx"}), contracts.WithToolResponseMapping(map[string]any{"id": "{{response.body.id}}"}))}}
+			contracts.WithToolInProcessTarget(contracts.ToolInProcessWhatsAppSendText))}}
 	snapshot, err := yamlsource.LoadFile("../../platform-spec.yaml")
 	if err != nil {
 		t.Fatal(err)

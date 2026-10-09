@@ -11376,6 +11376,14 @@ tool_model:
         for exact retained session authority. Admitted tool intent does not establish connection readiness or
         authorize execution: the existing selected activation, owned native connection and effect owners must
         admit the exact operation at launch. Without those owners, discovery and invocation fail closed.
+        These provider operations are private activities, never agent grants or LLM tool definitions. A nearest
+        native declaration blocks same-name builtin fallback and discovered MCP substitution without losing its
+        immutable intent projection. SDK channel confirmation/delivery use the existing channel effect kinds and
+        selected-store settlement owners with a concrete in-process transport adapter. The exact connection/account,
+        activation, principal binding, destination and source occurrence must remain current before authorization
+        and after the committed launch marker, before the SDK send. A provider acknowledgment is observed and
+        schema-checked; delivery then consumes the compiled receipt projection. A launched send without an exact
+        acknowledgment stays outcome_uncertain and cannot be automatically redispatched, including after restart.
       session_private_persistence: >
         The connection-private SDK and incoming-capture database is owned by the private store session persistence
         implementation and consumed through typed SDK storage and capture operations. It is not the selected runtime

@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -195,6 +196,8 @@ var registrations = []Registration{
 	registration(KindServeRegistration, EffectWriteOrUnknown, "provider_registration", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestProviderRegistrationApplyEffectOutcomes"),
 	registration(KindChannelConfirmation, EffectWriteOrUnknown, "channel_confirmation", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelConfirmationEffectOutcomes"),
 	registration(KindChannelDelivery, EffectWriteOrUnknown, "channel_delivery", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelDeliveryEffectOutcomes"),
+	registration(KindChannelConfirmation, EffectWriteOrUnknown, "channel_confirmation_whatsapp", "in_process", "internal/runtime/effects/effects.go", []string{"internal/sessionprovider/channel_execution_unix.go:executeChannelSend:sdk_send:1"}, "TestWhatsAppChannelConfirmationJournalBothStores"),
+	registration(KindChannelDelivery, EffectWriteOrUnknown, "channel_delivery_whatsapp", "in_process", "internal/runtime/effects/effects.go", []string{"internal/sessionprovider/channel_execution_unix.go:executeChannelSend:sdk_send:1"}, "TestWhatsAppChannelDeliveryJournalBothStores"),
 	registration(KindChannelActionAck, EffectWriteOrUnknown, "channel_action_ack", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelActionAckEffectOutcomes"),
 	registration(KindChannelNativeSetting, EffectWriteOrUnknown, "channel_native_setting", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelNativeSettingEffectOutcomes"),
 	registration(KindManagedCredential, EffectWriteOrUnknown, "managed_credential", "http", "internal/runtime/managedcredentials/store.go", []string{"internal/runtime/managedcredentials/store.go:exchange:http_do:1", "internal/runtime/managedcredentials/store.go:exchangeGitHubAppInstallation:http_do:1"}, "TestManagedCredentialEffectOutcomes"),
@@ -940,7 +943,17 @@ func BeginServeRegistration(ctx context.Context, request []byte, lineage map[str
 // BeginChannelConfirmation authorizes one operator-origin channel delivery.
 // It is independent of workflow, run, entity, agent, and inbound-event authority.
 func BeginChannelConfirmation(ctx context.Context, request []byte, lineage map[string]string) (*Handle, error) {
-	const adapter = "channel_confirmation"
+	return beginChannelConfirmation(ctx, request, lineage, "channel_confirmation")
+}
+
+func BeginInProcessChannelConfirmation(ctx context.Context, target runtimecontracts.ToolInProcessTarget, request []byte, lineage map[string]string) (*Handle, error) {
+	if target != runtimecontracts.ToolInProcessWhatsAppSendText {
+		return nil, fmt.Errorf("channel confirmation requires the closed WhatsApp send target")
+	}
+	return beginChannelConfirmation(ctx, request, lineage, "channel_confirmation_whatsapp")
+}
+
+func beginChannelConfirmation(ctx context.Context, request []byte, lineage map[string]string, adapter string) (*Handle, error) {
 	if err := admitExecutionMode(ctx, adapter); err != nil {
 		return nil, err
 	}
@@ -965,7 +978,17 @@ func BeginChannelConfirmation(ctx context.Context, request []byte, lineage map[s
 // BeginChannelDelivery admits one persisted render's first send. The selected
 // store checks the default, binding, activation, plan, and render again at launch.
 func BeginChannelDelivery(ctx context.Context, request []byte, lineage map[string]string) (*Handle, error) {
-	const adapter = "channel_delivery"
+	return beginChannelDelivery(ctx, request, lineage, "channel_delivery")
+}
+
+func BeginInProcessChannelDelivery(ctx context.Context, target runtimecontracts.ToolInProcessTarget, request []byte, lineage map[string]string) (*Handle, error) {
+	if target != runtimecontracts.ToolInProcessWhatsAppSendText {
+		return nil, fmt.Errorf("channel delivery requires the closed WhatsApp send target")
+	}
+	return beginChannelDelivery(ctx, request, lineage, "channel_delivery_whatsapp")
+}
+
+func beginChannelDelivery(ctx context.Context, request []byte, lineage map[string]string, adapter string) (*Handle, error) {
 	if err := admitExecutionMode(ctx, adapter); err != nil {
 		return nil, err
 	}

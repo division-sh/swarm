@@ -49,6 +49,7 @@ type sdkPeer struct {
 	wg       sync.WaitGroup
 	paired   bool
 	ready    chan *sdkPeerSocket
+	devices  map[types.JID]uint16
 }
 
 type sdkPeerSocket struct {
@@ -235,6 +236,21 @@ func (p *sdkPeer) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		} else if node.Tag == "iq" {
 			response := waBinary.Node{Tag: "iq", Attrs: waBinary.Attrs{"id": node.Attrs["id"], "type": "result"}}
+			if node.AttrGetter().OptionalString("xmlns") == "usync" {
+				var users []waBinary.Node
+				p.mu.Lock()
+				requested := node.GetChildByTag("usync", "list")
+				for _, user := range requested.GetChildren() {
+					jid := user.AttrGetter().JID("jid")
+					if device, ok := p.devices[jid]; ok {
+						users = append(users, waBinary.Node{Tag: "user", Attrs: waBinary.Attrs{"jid": jid}, Content: []waBinary.Node{
+							{Tag: "devices", Content: []waBinary.Node{{Tag: "device-list", Content: []waBinary.Node{{Tag: "device", Attrs: waBinary.Attrs{"id": int(device)}}}}}},
+						}})
+					}
+				}
+				p.mu.Unlock()
+				response.Content = []waBinary.Node{{Tag: "usync", Content: []waBinary.Node{{Tag: "list", Content: users}}}}
+			}
 			if node.AttrGetter().OptionalString("xmlns") == "encrypt" && node.AttrGetter().OptionalString("type") == "get" {
 				response.Content = []waBinary.Node{{Tag: "count", Attrs: waBinary.Attrs{"value": "100"}}}
 			}
@@ -249,6 +265,15 @@ func (p *sdkPeer) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func (p *sdkPeer) admitMessageRecipient(jid types.JID, device uint16) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.devices == nil {
+		p.devices = make(map[types.JID]uint16)
+	}
+	p.devices[jid] = device
 }
 
 func (p *sdkPeer) fail(err error) {
