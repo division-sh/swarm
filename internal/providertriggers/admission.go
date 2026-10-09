@@ -100,13 +100,14 @@ type InboundAdmissionPlan struct {
 // AdmittedRequest is the authenticated, retry-stable request identity. Its
 // private projection state can only be consumed by the plan that admitted it.
 type AdmittedRequest struct {
-	semanticContentDigest string
-	generation            triggergeneration.Generation
-	provider              string
-	manifestOwner         *Manifest
-	rawOwner              *RawAdmissionPolicy
-	manifestAdmission     *manifestAdmission
-	rawAdmission          *rawRequestAdmission
+	semanticContentDigest   string
+	projectionContentDigest string
+	generation              triggergeneration.Generation
+	provider                string
+	manifestOwner           *Manifest
+	rawOwner                *RawAdmissionPolicy
+	manifestAdmission       *manifestAdmission
+	rawAdmission            *rawRequestAdmission
 }
 
 func (a AdmittedRequest) SemanticContentDigest() string { return a.semanticContentDigest }
@@ -581,13 +582,17 @@ func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error)
 			manifestAdmission: &manifestAdmission,
 		}
 		if manifestAdmission.response == nil {
-			semanticContent := req.Payload
-			if p.manifest.value.definition.PayloadSource == "form" {
-				semanticContent = formValuesPayload(req.Form)
-			}
-			admitted.semanticContentDigest, err = semanticContentDigest(semanticContent)
+			admitted.projectionContentDigest, err = semanticContentDigest(req.Payload)
 			if err != nil {
 				return AdmittedRequest{}, err
+			}
+			admitted.semanticContentDigest = admitted.projectionContentDigest
+			if p.manifest.value.definition.PayloadSource == "form" {
+				// Form owns retry identity; Payload independently owns normalization.
+				admitted.semanticContentDigest, err = semanticContentDigest(formValuesPayload(req.Form))
+				if err != nil {
+					return AdmittedRequest{}, err
+				}
 			}
 		}
 		return admitted, nil
@@ -662,12 +667,19 @@ func (p InboundAdmissionPlan) validateProjectionEvidence(admitted AdmittedReques
 		}
 		original := admitted.manifestAdmission
 		if original.response != nil {
-			if admitted.semanticContentDigest != "" {
+			if admitted.semanticContentDigest != "" || admitted.projectionContentDigest != "" {
 				return badRequest("admitted challenge carries semantic delivery content")
 			}
 			return nil
 		}
 		payload = original.request.Payload
+		projectionDigest, err := semanticContentDigest(payload)
+		if err != nil {
+			return err
+		}
+		if projectionDigest != admitted.projectionContentDigest {
+			return badRequest("admitted request projection content changed")
+		}
 		if p.manifest.value.definition.PayloadSource == "form" {
 			payload = formValuesPayload(original.request.Form)
 		}

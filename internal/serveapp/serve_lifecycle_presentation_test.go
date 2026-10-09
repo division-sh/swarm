@@ -636,6 +636,7 @@ func testServeIngressSubject(bundleHash, alias, provider, secret, status string)
 			PolicySource: "raw_declaration", RequestAuthentication: "HMAC_SHA256", Event: "inbound." + provider,
 		},
 		Requirements: []packs.Requirement{packs.RequirementWithStatus(packs.RequirementSecret, secret, packs.RequirementScopeTarget, status, "credential_store")},
+		Capabilities: []packs.Capability{{Code: packs.CapabilityReceiveHTTPSRoute, Target: "/webhooks/" + alias + "/" + provider}},
 	}
 }
 
