@@ -1315,7 +1315,7 @@ func proveProcessCapabilityTakeoverRetiresNewWorkGrants(t *testing.T, selectedGr
 			if selectedGrant && abandoned.SelectedGrant == nil {
 				t.Fatal("abandoned process omitted its selected grant")
 			}
-			proveBulkRetirementWaitsForMutation(t, db, backend, abandoned.Grant, func(ctx context.Context) error {
+			proveBulkRetirementWaitsForMutation(t, selected, db, backend, abandoned.Grant, func(ctx context.Context) error {
 				capability, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("blocked-grant-retirement-successor"))
 				if capability != nil {
 					t.Cleanup(func() { _ = capability.Release(context.Background()) })
@@ -1643,7 +1643,7 @@ func proveAuthorityRepairRetiresEveryCurrentNewWorkGrant(t *testing.T, selectedG
 			repairRequest := runtimestartupownership.AuthorityRepairRequest{
 				OperationID: uuid.NewString(), FindingsDigest: inspection.FindingsDigest, Confirmed: true,
 			}
-			proveBulkRetirementWaitsForMutation(t, db, backend, abandoned.Grant, func(ctx context.Context) error {
+			proveBulkRetirementWaitsForMutation(t, selected, db, backend, abandoned.Grant, func(ctx context.Context) error {
 				_, err := selected.RepairAuthority(ctx, repairRequest)
 				return err
 			})
