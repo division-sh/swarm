@@ -184,6 +184,7 @@ func selectedContractExecutionOwnerForCatalogTest(t testing.TB, db *sql.DB, sele
 		runtimepipeline.NewWorkflowPersistence(selected), fork, selected, selected,
 		selected, durable, selected.PipelineObligations(), selected, managerRoles,
 		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+		selected, selected,
 	)
 	if err != nil {
 		t.Fatalf("NewSelectedContractExecutionOwner: %v", err)
@@ -231,6 +232,7 @@ func selectedContractExecutionOwnerForCatalogHarness(t testing.TB, h *runtimeHar
 		runtimepipeline.NewWorkflowPersistence(selected), fork, selected, selected,
 		selected, durable, selected.PipelineObligations(), selected, managerRoles,
 		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+		selected, selected,
 	)
 	if err != nil {
 		t.Fatalf("NewSelectedContractExecutionOwner(SQLite): %v", err)

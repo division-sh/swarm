@@ -27,6 +27,11 @@ func (o *PostgresOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup r
 	key := claimKey(wakeup)
 	o.claims.mu.Lock()
 	defer o.claims.mu.Unlock()
+	defer func() {
+		if len(o.claims.keys) == 0 {
+			err = errors.Join(err, o.closeClaimConn())
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}

@@ -579,25 +579,28 @@ func (s Snapshot) Validate() error {
 }
 
 type Candidate struct {
-	RunID      string
-	BundleHash string
-	Revision   int64
-	DueAt      time.Time
+	RunID             string
+	BundleHash        string
+	Revision          int64
+	DueAt             time.Time
+	SelectedForkRunID string
 }
 
 type CandidateIdentity struct {
-	RunID          string
-	BundleHash     string
-	Revision       int64
-	DueAtUnixMicro int64
+	RunID             string
+	BundleHash        string
+	Revision          int64
+	DueAtUnixMicro    int64
+	SelectedForkRunID string
 }
 
 func (c Candidate) Identity() CandidateIdentity {
 	return CandidateIdentity{
-		RunID:          c.RunID,
-		BundleHash:     c.BundleHash,
-		Revision:       c.Revision,
-		DueAtUnixMicro: c.DueAt.UnixMicro(),
+		RunID:             c.RunID,
+		BundleHash:        c.BundleHash,
+		Revision:          c.Revision,
+		DueAtUnixMicro:    c.DueAt.UnixMicro(),
+		SelectedForkRunID: c.SelectedForkRunID,
 	}
 }
 
@@ -621,19 +624,39 @@ func (c Candidate) Validate() error {
 	if !c.DueAt.Equal(CanonicalTimestamp(c.DueAt)) {
 		return errors.New("completion candidate due_at must use canonical microsecond precision")
 	}
-	return nil
+	if c.SelectedForkRunID != "" && c.SelectedForkRunID != c.RunID {
+		return errors.New("selected completion candidate must name its exact run")
+	}
+	return c.Scope().Validate()
+}
+
+func (c Candidate) Scope() CandidateScope {
+	return CandidateScope{BundleHash: c.BundleHash, SelectedForkRunID: c.SelectedForkRunID}
 }
 
 type CandidateScope struct {
-	BundleHash string
+	BundleHash        string
+	SelectedForkRunID string
 }
 
 func (s CandidateScope) Validate() error {
 	if strings.TrimSpace(s.BundleHash) == "" {
 		return errors.New("completion candidate scope requires bundle_hash")
 	}
+	if s.SelectedForkRunID != "" {
+		id, err := uuid.Parse(s.SelectedForkRunID)
+		if err != nil || id == uuid.Nil || id.String() != s.SelectedForkRunID {
+			return errors.New("selected completion scope requires exact canonical run identity")
+		}
+	}
 	return nil
 }
+
+func (s CandidateScope) MatchesCandidate(c Candidate) bool {
+	return s == c.Scope()
+}
+
+var ErrCompletionAuthority = errors.New("completion execution authority is invalid")
 
 type CandidateCursor struct {
 	RunID string

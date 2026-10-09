@@ -19365,6 +19365,37 @@ platform_tables:
           observational only and cannot derive or write completed.
         completion_candidate:
           canonical_owner: internal/runtime/runlifecycle domain and generation-owned executor plus private PostgreSQL and SQLite selected-store adapters
+          execution_scope: >
+            The existing executor admits either a normal runtime occurrence and bundle scope, or an exact selected-fork
+            occurrence and child-run scope with its admitted source and execution authority. Immutable selected-contract
+            binding membership determines that namespace in canonical request and listing projections, not a caller flag
+            or fork origin. Ordinary enumeration, handoff and direct execution exclude selected children; selected
+            consumers cannot consume their source, a sibling, or an ordinary candidate. A missing selected registration
+            never falls back to the normal bundle sink. Scope is execution evidence, not another durable candidate queue.
+          selected_execution_fence: >
+            Every native completion attempt locks the run first and validates exact selected scope and current selected
+            execution authority before any completion-owned mutation, including due clearing, barrier advancement,
+            schedule creation and completed status. Existing candidate revision/due CAS, global author-activity fence
+            ordering, transaction acknowledgement and historical capture remain unchanged. A stale authority is a typed
+            refusal and cannot enter the ordinary transient retry loop.
+          attachment_and_retirement: >
+            Preparation registers the existing executor stopped. Committed handoffs may represent dormant work but
+            cannot execute before explicit Start after committed activation and durable admission of retained inputs.
+            Startup enumeration and racing notifications preserve dirty-generation and successor representation. Failed
+            activation retires the attachment without deleting the durable candidate. An acknowledged terminal result
+            wakes retained serving to reread authoritative run state; the wake neither grants completion nor replaces
+            restart recovery. Retirement joins candidate chains and accepted admissions and releases the exact
+            registration before selected resources and execution lifetime are released. Cleanup diagnostics cannot
+            erase committed completion or masquerade as unfinished resource release. Selected and ordinary executors
+            consume the same compiled flow-scoped final-stage catalog and canonical pending-work policy, including the
+            existing generic-schedule handoff owner.
+          generic_schedule_resource_custody: >
+            A generic-schedule attachment owns only the exact wakeups it positively claimed. Its retirement fences new
+            callbacks and reconciliation, joins accepted work, and releases only that inventory. An unclaimed or foreign
+            terminal readback cannot acquire release authority. Failed exact releases remain owned for cleanup retry.
+            Retirement cannot close all claims belonging to a shared selected-store owner; whole-owner process cleanup
+            is a separate operation. The native claim owner closes an idle claim connection when no locks remain, including
+            unsuccessful claim admission, while preserving other attachments' held claims.
           durable_identity: >
             One nullable completion_due_at and monotonic completion_revision pair on the canonical runs row is the only
             durable candidate authority. The candidate identity is exact {run_id, bundle_hash, completion_revision,

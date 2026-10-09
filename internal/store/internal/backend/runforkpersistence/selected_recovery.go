@@ -625,31 +625,30 @@ func selectedForkRecoveryTopologiesTx(ctx context.Context, tx *sql.Tx, forkRunID
 		}
 		seen[path] = struct{}{}
 		switch mode {
-		case "static":
-			if len(raw) != 0 {
-				return nil, fmt.Errorf("static selected recovery workflow %s has template readiness", path)
-			}
-		case "template":
+		case "static", "template":
 			if len(raw) == 0 {
-				return nil, fmt.Errorf("template selected recovery workflow %s lacks readiness", path)
-			}
-			normalized, err := runtimepipeline.DecodeFlowReadinessPlan(raw, planHash.String)
-			if err != nil {
-				return nil, fmt.Errorf("validate selected recovery readiness %s: %w", path, err)
-			}
-			if normalized.RunID != forkRunID ||
-				normalized.BundleHash != bundleHash || normalized.Identity.InstancePath != path || normalized.Identity.TemplateID != template {
-				return nil, fmt.Errorf("selected recovery readiness %s conflicts with committed workflow", path)
-			}
-			admission, err := agenttopology.FlowReadinessAdmission(forkRunID, path, planHash.String)
-			if err != nil {
-				return nil, fmt.Errorf("admit selected recovery readiness %s: %w", path, err)
-			}
-			for _, agent := range normalized.Agents {
-				topologies = append(topologies, runfork.RunForkSelectedContractAgentTopology{Identity: agent.Identity, Admission: admission})
+				return nil, fmt.Errorf("%s selected recovery workflow %s lacks readiness", mode, path)
 			}
 		default:
 			return nil, fmt.Errorf("selected recovery workflow %s has unsupported mode %s", path, mode)
+		}
+		normalized, err := runtimepipeline.DecodeFlowReadinessPlan(raw, planHash.String)
+		if err != nil {
+			return nil, fmt.Errorf("validate selected recovery readiness %s: %w", path, err)
+		}
+		if normalized.RunID != forkRunID ||
+			normalized.BundleHash != bundleHash || normalized.Identity.InstancePath != path || normalized.Identity.TemplateID != template {
+			return nil, fmt.Errorf("selected recovery readiness %s conflicts with committed workflow", path)
+		}
+		admission, err := agenttopology.FlowReadinessAdmission(forkRunID, path, planHash.String)
+		if err != nil {
+			return nil, fmt.Errorf("admit selected recovery readiness %s: %w", path, err)
+		}
+		for _, agent := range normalized.Agents {
+			if mode == "static" && agent.EntityID != "" {
+				return nil, fmt.Errorf("static selected recovery agent %v adopts workflow entity", agent.Identity)
+			}
+			topologies = append(topologies, runfork.RunForkSelectedContractAgentTopology{Identity: agent.Identity, Admission: admission})
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -725,7 +724,7 @@ func selectedForkActiveEffectsTx(ctx context.Context, tx *sql.Tx, executionID st
 }
 
 func sameSelectedForkPointIdentity(a, b runfork.RunForkPoint) bool {
-	return a.Kind == b.Kind && a.Revision == b.Revision && a.EventID == b.EventID
+	return a.SameIdentity(b)
 }
 
 func selectedForkOperationForRecoveryTx(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, bundleHash string, postgres bool) (runfork.ForkOperationRecord, error) {

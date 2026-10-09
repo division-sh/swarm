@@ -26,6 +26,7 @@ type RunLifecyclePostgresOwner struct {
 	delivery               *deliverystore.DeliveryPostgresOwner
 	pipeline               pipelineTerminalizer
 	decisionCards          decisionCardTerminalizer
+	completionAuthority    completionAuthorityOwner
 }
 
 type RunLifecycleSQLiteOwner struct {
@@ -35,6 +36,7 @@ type RunLifecycleSQLiteOwner struct {
 	delivery               *deliverystore.DeliverySQLiteOwner
 	pipeline               pipelineTerminalizer
 	decisionCards          decisionCardTerminalizer
+	completionAuthority    completionAuthorityOwner
 	nowFn                  func() time.Time
 }
 

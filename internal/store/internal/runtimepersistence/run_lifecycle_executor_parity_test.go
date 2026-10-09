@@ -940,7 +940,7 @@ func awaitRunLifecycleSinkInstallation(
 	registry := candidateRegistryForFixture(t, fixture)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		installed := registry.Registered(runLifecycleCandidateParityBundleHash, sink)
+		installed := registry.Registered(runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash}, sink)
 		if installed {
 			return
 		}

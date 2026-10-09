@@ -535,6 +535,12 @@ func (p RunForkPoint) Validate() error {
 	return nil
 }
 
+// SameIdentity compares the persisted cut, not diagnostic event metadata.
+func (p RunForkPoint) SameIdentity(other RunForkPoint) bool {
+	return p.Validate() == nil && other.Validate() == nil && p.Kind == other.Kind &&
+		p.Revision == other.Revision && p.EventID == other.EventID
+}
+
 const (
 	RunForkRouteHistoryNotApplicable      = "not_applicable"
 	RunForkRouteHistoryUnknownUnversioned = "unknown_unversioned"

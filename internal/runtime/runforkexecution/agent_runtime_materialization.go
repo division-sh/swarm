@@ -26,6 +26,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -34,6 +35,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -205,20 +207,24 @@ func agentPlanDescriptions(plans []agentidentity.Plan) []string {
 }
 
 type selectedContractAgentRuntime struct {
-	mu                  sync.Mutex
-	shutdownMu          sync.Mutex
-	manager             *runtimemanager.AgentManager
-	generationGrant     runtimestartupownership.GenerationGrant
-	cleanup             func()
-	workspaceProjection *selectedContractWorkspaceProjection
-	bus                 *runtimebus.EventBus
-	pipeline            selectedFlowActivationRetirementStore
-	pendingActivations  []selectedFlowActivation
-	executionLease      *worklifetime.Lease
-	cancelExecution     context.CancelCauseFunc
-	executionDone       chan error
-	scheduler           *runtimepipeline.Scheduler
-	timerLifecycle      *runtimepipeline.PipelineCoordinator
+	mu                     sync.Mutex
+	shutdownMu             sync.Mutex
+	manager                *runtimemanager.AgentManager
+	generationGrant        runtimestartupownership.GenerationGrant
+	cleanup                func()
+	workspaceProjection    *selectedContractWorkspaceProjection
+	bus                    *runtimebus.EventBus
+	pipeline               selectedFlowActivationRetirementStore
+	pendingActivations     []selectedFlowActivation
+	executionLease         *worklifetime.Lease
+	cancelExecution        context.CancelCauseFunc
+	executionDone          chan error
+	scheduler              *runtimepipeline.Scheduler
+	timerLifecycle         *runtimepipeline.PipelineCoordinator
+	genericSchedules       *genericschedule.Lifecycle
+	completionExecutor     *runlifecycle.Executor
+	completionRegistration runlifecycle.CandidateRegistration
+	completionDiagnostics  *selectedForkCommitDiagnostics
 }
 
 type selectedContractWorkspaceProjection struct {
@@ -957,12 +963,12 @@ func (r *selectedContractAgentRuntime) Shutdown() (result error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.executionDone = nil
+	if err := r.stopExecutionWork(); err != nil {
+		return errors.Join(result, err)
+	}
 	if r.executionLease != nil {
 		result = errors.Join(result, r.executionLease.Done())
 		r.executionLease = nil
-	}
-	if err := r.stopExecutionWork(); err != nil {
-		return errors.Join(result, err)
 	}
 	if r.cleanup != nil {
 		r.cleanup()
@@ -984,6 +990,12 @@ func (r *selectedContractAgentRuntime) stopExecutionWork() error {
 		}
 		r.timerLifecycle = nil
 	}
+	if r.genericSchedules != nil {
+		if err := r.genericSchedules.Stop(context.Background()); err != nil {
+			return err
+		}
+		r.genericSchedules = nil
+	}
 	if r.scheduler != nil {
 		r.scheduler.Stop()
 		if err := r.scheduler.Wait(context.Background()); err != nil {
@@ -996,6 +1008,20 @@ func (r *selectedContractAgentRuntime) stopExecutionWork() error {
 			return err
 		}
 		r.manager = nil
+	}
+	if r.completionExecutor != nil {
+		retireErr := r.completionExecutor.Retire(context.Background())
+		if err := r.completionExecutor.Wait(context.Background()); err != nil {
+			return errors.Join(retireErr, err)
+		}
+		r.completionExecutor = nil
+		if r.completionDiagnostics != nil {
+			r.completionDiagnostics.add(retireErr)
+		}
+	}
+	if r.completionRegistration != nil {
+		r.completionRegistration.Release()
+		r.completionRegistration = nil
 	}
 	if len(r.pendingActivations) != 0 {
 		var err error

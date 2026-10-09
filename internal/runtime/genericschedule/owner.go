@@ -21,6 +21,10 @@ const wakeupCallbackTimeout = 10 * time.Second
 
 const catchupWarningThreshold = 1000
 
+type lifecycleCallbackContextKey struct{}
+
+var errLifecycleCallbackStop = errors.New("generic schedule callback cannot join its own lifecycle shutdown")
+
 type Store interface {
 	AdmitGenericScheduleOutcome(context.Context, AdmissionCommand) (AdmissionCommit, error)
 	LoadGenericScheduleActivation(context.Context, string) (Activation, bool, error)
@@ -30,7 +34,6 @@ type Store interface {
 	CancelGenericScheduleOutcome(context.Context, CancelCommand) (CancelCommit, error)
 	ClaimGenericScheduleWakeup(context.Context, Wakeup) (bool, error)
 	ReleaseGenericScheduleWakeup(context.Context, Wakeup) error
-	ReleaseGenericScheduleClaims(context.Context) error
 }
 
 type AdmissionCommit struct {
@@ -164,12 +167,15 @@ type Lifecycle struct {
 	logger     Logger
 	posture    executionposture.Posture
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	mu     sync.Mutex
-	wg     sync.WaitGroup
-	retry  map[string]worklifetime.Occurrence
-	stop   bool
+	ctx         context.Context
+	cancel      context.CancelFunc
+	mu          sync.Mutex
+	wg          sync.WaitGroup
+	retry       map[string]worklifetime.Occurrence
+	stop        bool
+	callbackWG  sync.WaitGroup
+	claimsMu    sync.Mutex
+	ownedClaims map[Wakeup]struct{}
 }
 
 func NewLifecycle(store Store, scheduler Scheduler, planner PublicationPlanner, dispatcher runtimeengine.PostCommitDispatcher, logger Logger, posture executionposture.Posture) (*Lifecycle, error) {
@@ -183,6 +189,7 @@ func NewLifecycle(store Store, scheduler Scheduler, planner PublicationPlanner, 
 	lifecycle := &Lifecycle{
 		store: store, scheduler: scheduler, planner: planner, dispatcher: dispatcher, logger: logger, posture: posture,
 		ctx: ctx, cancel: cancel, retry: make(map[string]worklifetime.Occurrence),
+		ownedClaims: make(map[Wakeup]struct{}),
 	}
 	if err := scheduler.BindGenericScheduleLifecycle(lifecycle.handleWakeup); err != nil {
 		cancel()
@@ -323,14 +330,16 @@ func (l *Lifecycle) ReconcileWakeup(ctx context.Context, activationID string) (o
 	if activationID == "" {
 		return errors.New("generic schedule reconciliation requires activation_id")
 	}
-	l.mu.Lock()
-	stopped := l.stop
-	l.mu.Unlock()
+	if !l.beginCallback() {
+		return nil
+	}
+	defer l.callbackWG.Done()
+	ctx = context.WithValue(ctx, lifecycleCallbackContextKey{}, l)
 	activation, found, err := l.store.LoadGenericScheduleActivation(ctx, activationID)
 	if err != nil {
 		return err
 	}
-	if !found || stopped || activation.Status != StatusActive {
+	if !found || activation.Status != StatusActive {
 		if found {
 			wakeup, wakeErr := NewWakeup(activation.ID, activation.CurrentDueAt)
 			if wakeErr != nil {
@@ -355,12 +364,12 @@ func (l *Lifecycle) ReconcileWakeup(ctx context.Context, activationID string) (o
 	if err != nil {
 		return err
 	}
-	claimed, err := l.store.ClaimGenericScheduleWakeup(ctx, wakeup)
+	claimed, err := l.claimWakeup(ctx, wakeup)
 	if err != nil || !claimed {
 		return err
 	}
 	if err := l.scheduler.RegisterGenericScheduleWakeup(ctx, wakeup); err != nil {
-		return errors.Join(err, l.store.ReleaseGenericScheduleWakeup(context.WithoutCancel(ctx), wakeup))
+		return errors.Join(err, l.releaseWakeup(context.WithoutCancel(ctx), wakeup))
 	}
 	return nil
 }
@@ -390,8 +399,13 @@ func (l *Lifecycle) reconcileImmediately(ctx context.Context, activationID strin
 }
 
 func (l *Lifecycle) handleWakeup(ctx context.Context, wakeup Wakeup) {
+	if !l.beginCallback() {
+		return
+	}
+	defer l.callbackWG.Done()
 	callbackCtx, cancel := context.WithTimeout(ctx, wakeupCallbackTimeout)
 	defer cancel()
+	callbackCtx = context.WithValue(callbackCtx, lifecycleCallbackContextKey{}, l)
 	result, err := l.fire(callbackCtx, wakeup)
 	if err != nil {
 		l.log(callbackCtx, "fire", wakeup.ActivationID(), err)
@@ -642,7 +656,57 @@ func (l *Lifecycle) retireExactWakeup(ctx context.Context, wakeup Wakeup) error 
 	if err := l.scheduler.RetireGenericScheduleWakeup(wakeup); err != nil {
 		return err
 	}
-	return l.store.ReleaseGenericScheduleWakeup(ctx, wakeup)
+	return l.releaseWakeup(ctx, wakeup)
+}
+
+func (l *Lifecycle) beginCallback() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.stop {
+		return false
+	}
+	l.callbackWG.Add(1)
+	return true
+}
+
+func (l *Lifecycle) claimWakeup(ctx context.Context, wakeup Wakeup) (bool, error) {
+	l.claimsMu.Lock()
+	defer l.claimsMu.Unlock()
+	claimed, err := l.store.ClaimGenericScheduleWakeup(ctx, wakeup)
+	if err == nil && claimed {
+		if l.ownedClaims == nil {
+			l.ownedClaims = make(map[Wakeup]struct{})
+		}
+		l.ownedClaims[wakeup] = struct{}{}
+	}
+	return claimed, err
+}
+
+func (l *Lifecycle) releaseWakeup(ctx context.Context, wakeup Wakeup) error {
+	l.claimsMu.Lock()
+	defer l.claimsMu.Unlock()
+	if _, owned := l.ownedClaims[wakeup]; !owned {
+		return nil
+	}
+	if err := l.store.ReleaseGenericScheduleWakeup(ctx, wakeup); err != nil {
+		return err
+	}
+	delete(l.ownedClaims, wakeup)
+	return nil
+}
+
+func (l *Lifecycle) releaseOwnedClaims(ctx context.Context) error {
+	l.claimsMu.Lock()
+	defer l.claimsMu.Unlock()
+	var result error
+	for wakeup := range l.ownedClaims {
+		if err := l.store.ReleaseGenericScheduleWakeup(ctx, wakeup); err != nil {
+			result = errors.Join(result, err)
+			continue
+		}
+		delete(l.ownedClaims, wakeup)
+	}
+	return result
 }
 
 func (l *Lifecycle) startTerminalRetirementRecovery(wakeup Wakeup) {
@@ -692,6 +756,9 @@ func (l *Lifecycle) Stop(ctx context.Context) error {
 	if l == nil {
 		return nil
 	}
+	if ctx.Value(lifecycleCallbackContextKey{}) == l {
+		return errLifecycleCallbackStop
+	}
 	l.mu.Lock()
 	if !l.stop {
 		l.stop = true
@@ -701,6 +768,7 @@ func (l *Lifecycle) Stop(ctx context.Context) error {
 	done := make(chan struct{})
 	go func() {
 		l.wg.Wait()
+		l.callbackWG.Wait()
 		close(done)
 	}()
 	select {
@@ -711,7 +779,7 @@ func (l *Lifecycle) Stop(ctx context.Context) error {
 	if err := l.scheduler.StopGenericScheduleWakeups(ctx); err != nil {
 		return err
 	}
-	return l.store.ReleaseGenericScheduleClaims(ctx)
+	return l.releaseOwnedClaims(ctx)
 }
 
 func (l *Lifecycle) log(ctx context.Context, action, activationID string, err error) {

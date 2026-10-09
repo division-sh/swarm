@@ -68,6 +68,7 @@ type RunForkPostgresOwner struct {
 	requireCurrent func() error
 	events         eventCommitOwner
 	conversations  conversationForkSourceReader
+	replies        runForkReplyContextOwner
 	durableData    *storedurabledata.Owner
 	apiIdempotency *storeapiidempotency.PostgresOwner
 	candidates     *storerunhandoff.CandidateCoordinator
@@ -86,6 +87,7 @@ type RunForkSQLiteOwner struct {
 	nowFn          func() time.Time
 	events         eventCommitOwner
 	conversations  conversationForkSourceReader
+	replies        runForkReplyContextOwner
 	durableData    *storedurabledata.Owner
 	apiIdempotency *storeapiidempotency.SQLiteOwner
 	candidates     *storerunhandoff.CandidateCoordinator
@@ -120,11 +122,12 @@ func NewPostgres(
 	pipeline *storepipeline.PipelinePostgresOwner,
 	events eventCommitOwner,
 	conversations conversationForkSourceReader,
+	replies runForkReplyContextOwner,
 	durableData *storedurabledata.Owner,
 	apiIdempotency *storeapiidempotency.PostgresOwner,
 	candidates *storerunhandoff.CandidateCoordinator,
 ) (*RunForkPostgresOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil || conversations == nil || durableData == nil || apiIdempotency == nil || candidates == nil {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil || conversations == nil || replies == nil || durableData == nil || apiIdempotency == nil || candidates == nil {
 		return nil, errors.New("run-fork PostgreSQL owner dependencies are required")
 	}
 	return &RunForkPostgresOwner{
@@ -137,6 +140,7 @@ func NewPostgres(
 		requireCurrent:            requireCurrent,
 		events:                    events,
 		conversations:             conversations,
+		replies:                   replies,
 		durableData:               durableData,
 		apiIdempotency:            apiIdempotency,
 		candidates:                candidates,
@@ -153,12 +157,13 @@ func NewSQLite(
 	pipeline *storepipeline.PipelineSQLiteOwner,
 	events eventCommitOwner,
 	conversations conversationForkSourceReader,
+	replies runForkReplyContextOwner,
 	durableData *storedurabledata.Owner,
 	apiIdempotency *storeapiidempotency.SQLiteOwner,
 	candidates *storerunhandoff.CandidateCoordinator,
 	now func() time.Time,
 ) (*RunForkSQLiteOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil || conversations == nil || durableData == nil || apiIdempotency == nil || candidates == nil {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil || conversations == nil || replies == nil || durableData == nil || apiIdempotency == nil || candidates == nil {
 		return nil, errors.New("run-fork SQLite owner dependencies are required")
 	}
 	if now == nil {
@@ -175,6 +180,7 @@ func NewSQLite(
 		nowFn:                   now,
 		events:                  events,
 		conversations:           conversations,
+		replies:                 replies,
 		durableData:             durableData,
 		apiIdempotency:          apiIdempotency,
 		candidates:              candidates,

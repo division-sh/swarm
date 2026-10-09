@@ -1219,7 +1219,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			return nil, fmt.Errorf("workflow run lifecycle completion executor requires the generic schedule lifecycle")
 		}
 		scope := runtimerunlifecycle.CandidateScope{BundleHash: boot.SourceArtifactFact.BundleHash()}
-		terminalCatalog, err := runLifecycleTerminalCatalog(source)
+		terminalCatalog, err := RunLifecycleTerminalCatalog(source)
 		if err != nil {
 			return nil, fmt.Errorf("build run lifecycle stage catalog: %w", err)
 		}

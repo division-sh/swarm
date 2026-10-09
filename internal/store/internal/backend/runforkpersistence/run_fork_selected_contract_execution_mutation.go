@@ -615,12 +615,8 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx conte
 				}
 				return fmt.Errorf("load selected-contract source event preparation status: %w", err)
 			}
-			if !runForkSelectedContractBranchSourceStatusSupported(sourceStatus) {
-				state, parseErr := runtimerunlifecycle.ParseState(sourceStatus)
-				if parseErr != nil {
-					return parseErr
-				}
-				return fmt.Errorf("selected-contract source event preparation state %s is unsupported", state)
+			if _, err := runtimerunlifecycle.ParseState(sourceStatus); err != nil {
+				return fmt.Errorf("validate historical selected source state: %w", err)
 			}
 			if err := requirePostgresRunActive(ctx, tx, forkRunID); err != nil {
 				return fmt.Errorf("admit selected-contract source event preparation fork: %w", err)
@@ -710,12 +706,8 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEventModes(ctx c
 		}
 		return nil, fmt.Errorf("load selected-contract source event admission status: %w", err)
 	}
-	if !runForkSelectedContractBranchSourceStatusSupported(sourceStatus) {
-		state, parseErr := runtimerunlifecycle.ParseState(sourceStatus)
-		if parseErr != nil {
-			return nil, parseErr
-		}
-		return nil, fmt.Errorf("selected-contract source event admission state %s is unsupported", state)
+	if _, err := runtimerunlifecycle.ParseState(sourceStatus); err != nil {
+		return nil, fmt.Errorf("validate historical selected source state: %w", err)
 	}
 	records, err := eventrecordpostgres.LoadMany(ctx, s.backend, ids)
 	if err != nil {

@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -67,6 +68,34 @@ func TestSelectedRecoveryBootActionsAreClosed(t *testing.T) {
 	for _, disposition := range []runfork.SelectedForkRecoveryDisposition{"", "resumable", "normal_runtime"} {
 		if action, err := selectedRecoveryActionFor(runfork.SelectedForkRecoveryResult{RunID: entry.Binding.ForkRunID, Disposition: disposition}, entry); err == nil || action != 0 {
 			t.Fatalf("unadmitted disposition %q became boot action %d: %v", disposition, action, err)
+		}
+	}
+}
+
+func TestSelectedRecoveryUsesPersistedCutIdentityNotDiagnosticMetadata(t *testing.T) {
+	result, entry := selectedRecoveryEvidence()
+	point := runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 3, EventID: uuid.NewString()}
+	entry.Binding.ForkPoint, entry.Binding.ForkEventID = point, point.EventID
+	point.Input, point.EventName, point.ProducedBy, point.Timestamp = "event selector", "item.received", "historical producer", time.Unix(1700002200, 0).UTC()
+	result.Operation.Request.ResolvedPoint, result.Operation.Request.ForkEventID = &point, point.EventID
+	request, hash, err := result.Operation.Request.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	result.Operation.Request, result.Operation.SemanticHash = request, hash
+	if action, err := selectedRecoveryActionFor(result, entry); err != nil || action != selectedRecoveryResume {
+		t.Fatalf("exact recorded event cut was rejected for diagnostic metadata: %d %v", action, err)
+	}
+	for _, changed := range []runfork.RunForkPoint{
+		{Kind: runfork.RunForkPointEvent, Revision: 4, EventID: point.EventID},
+		{Kind: runfork.RunForkPointEvent, Revision: 3, EventID: uuid.NewString()},
+		{Kind: runfork.RunForkPointRunStart, Revision: 3},
+		{Kind: runfork.RunForkPointEvent, Revision: 0, EventID: point.EventID},
+	} {
+		altered := entry
+		altered.Binding.ForkPoint = changed
+		if action, err := selectedRecoveryActionFor(result, altered); err == nil || action != 0 {
+			t.Fatalf("changed or invalid cut became recovery authority: %+v %d %v", changed, action, err)
 		}
 	}
 }

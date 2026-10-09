@@ -751,13 +751,14 @@ func TestLifecycleTerminalWakeupsRetireBeforeReleasingClaims(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			activation := testGlobalActivation(t, AbsoluteDue(now.Add(time.Hour)), now, now.Add(time.Hour))
+			initial := activation
 			activation.Status = test.status
 			test.apply(&activation)
 			if err := activation.Validate(); err != nil {
 				t.Fatal(err)
 			}
 			order := []string{}
-			store := &lifecycleProofStore{activation: activation, order: &order}
+			store := &lifecycleProofStore{activation: initial, order: &order}
 			scheduler := &lifecycleProofScheduler{order: &order}
 			lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil, executionposture.Live)
 			if err != nil {
@@ -765,6 +766,11 @@ func TestLifecycleTerminalWakeupsRetireBeforeReleasingClaims(t *testing.T) {
 			}
 			defer stopLifecycleProof(t, lifecycle)
 
+			if err := lifecycle.ReconcileWakeup(context.Background(), activation.ID); err != nil {
+				t.Fatal(err)
+			}
+			store.activation = activation
+			order = order[:0]
 			if err := lifecycle.ReconcileWakeup(context.Background(), activation.ID); err != nil {
 				t.Fatal(err)
 			}
@@ -804,12 +810,13 @@ func TestLifecycleActiveRecurringWakeupRetainsClaim(t *testing.T) {
 func TestLifecycleRetirementFailureRetainsClaim(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	activation := testGlobalActivation(t, AbsoluteDue(now.Add(time.Hour)), now, now.Add(time.Hour))
+	initial := activation
 	activation.Status = StatusCancelled
 	activation.CancelCause = "operator_cancelled"
 	activation.CancelledAt = now
 	retireErr := errors.New("scheduler retirement failed")
 	order := []string{}
-	store := &lifecycleProofStore{activation: activation, order: &order}
+	store := &lifecycleProofStore{activation: initial, order: &order}
 	scheduler := &lifecycleProofScheduler{order: &order, retireErr: retireErr}
 	lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil, executionposture.Live)
 	if err != nil {
@@ -817,6 +824,11 @@ func TestLifecycleRetirementFailureRetainsClaim(t *testing.T) {
 	}
 	defer stopLifecycleProof(t, lifecycle)
 
+	if err := lifecycle.ReconcileWakeup(context.Background(), activation.ID); err != nil {
+		t.Fatal(err)
+	}
+	store.activation = activation
+	order = order[:0]
 	err = lifecycle.ReconcileWakeup(context.Background(), activation.ID)
 	if !errors.Is(err, retireErr) {
 		t.Fatalf("retirement error = %v, want %v", err, retireErr)
@@ -830,12 +842,12 @@ func TestLifecycleRetirementFailureRetainsClaim(t *testing.T) {
 }
 
 func TestLifecycleEmptyTerminalPreparationRetiresOriginalExactWakeup(t *testing.T) {
-	_, _, wakeup := lifecyclePreparedOccurrence(t)
+	activation, _, wakeup := lifecyclePreparedOccurrence(t)
 	for _, name := range []string{"missing", "malformed_terminalized"} {
 		t.Run(name, func(t *testing.T) {
 			order := []string{}
 			store := &lifecycleProofStore{
-				missing: true, prepared: PreparedOccurrence{Outcome: PrepareTerminal}, order: &order,
+				activation: activation, prepared: PreparedOccurrence{Outcome: PrepareTerminal}, order: &order,
 			}
 			scheduler := &lifecycleProofScheduler{order: &order}
 			lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil, executionposture.Live)
@@ -844,6 +856,11 @@ func TestLifecycleEmptyTerminalPreparationRetiresOriginalExactWakeup(t *testing.
 			}
 			defer stopLifecycleProof(t, lifecycle)
 
+			if err := lifecycle.ReconcileWakeup(context.Background(), activation.ID); err != nil {
+				t.Fatal(err)
+			}
+			store.missing = true
+			order = order[:0]
 			lifecycle.handleWakeup(context.Background(), wakeup)
 			if len(scheduler.retired) != 1 || scheduler.retired[0] != wakeup || len(store.released) != 1 || store.released[0] != wakeup {
 				t.Fatalf("empty terminal exact retirement retired=%#v released=%#v", scheduler.retired, store.released)
@@ -856,10 +873,10 @@ func TestLifecycleEmptyTerminalPreparationRetiresOriginalExactWakeup(t *testing.
 }
 
 func TestLifecycleEmptyTerminalReleaseFailureRecoversExactWakeup(t *testing.T) {
-	_, _, wakeup := lifecyclePreparedOccurrence(t)
+	activation, _, wakeup := lifecyclePreparedOccurrence(t)
 	releaseErr := errors.New("claim release failed")
 	store := &lifecycleProofStore{
-		missing: true, prepared: PreparedOccurrence{Outcome: PrepareTerminal},
+		activation: activation, prepared: PreparedOccurrence{Outcome: PrepareTerminal},
 		releaseErrs: []error{releaseErr}, releaseSeen: make(chan error, 2),
 	}
 	scheduler := &lifecycleProofScheduler{}
@@ -869,6 +886,10 @@ func TestLifecycleEmptyTerminalReleaseFailureRecoversExactWakeup(t *testing.T) {
 	}
 	defer stopLifecycleProof(t, lifecycle)
 
+	if err := lifecycle.ReconcileWakeup(context.Background(), activation.ID); err != nil {
+		t.Fatal(err)
+	}
+	store.missing = true
 	lifecycle.handleWakeup(context.Background(), wakeup)
 	select {
 	case err := <-store.releaseSeen:

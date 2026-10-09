@@ -41,12 +41,8 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEventModes(ctx con
 			}
 			return fmt.Errorf("load selected-contract source event admission status: %w", err)
 		}
-		if !runForkSelectedContractBranchSourceStatusSupported(sourceStatus) {
-			state, parseErr := runtimerunlifecycle.ParseState(sourceStatus)
-			if parseErr != nil {
-				return parseErr
-			}
-			return fmt.Errorf("selected-contract source event admission state %s is unsupported", state)
+		if _, err := runtimerunlifecycle.ParseState(sourceStatus); err != nil {
+			return fmt.Errorf("validate historical selected source state: %w", err)
 		}
 		events, err := loadSQLiteRunForkSelectedContractEvents(txctx, tx, ids)
 		if err != nil {
@@ -93,12 +89,8 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 				}
 				return fmt.Errorf("load selected-contract source event preparation status: %w", err)
 			}
-			if !runForkSelectedContractBranchSourceStatusSupported(sourceStatus) {
-				state, parseErr := runtimerunlifecycle.ParseState(sourceStatus)
-				if parseErr != nil {
-					return parseErr
-				}
-				return fmt.Errorf("selected-contract source event preparation state %s is unsupported", state)
+			if _, err := runtimerunlifecycle.ParseState(sourceStatus); err != nil {
+				return fmt.Errorf("validate historical selected source state: %w", err)
 			}
 			if err := requireSQLiteRunActive(txctx, tx, forkRunID); err != nil {
 				return fmt.Errorf("admit selected-contract source event preparation fork: %w", err)

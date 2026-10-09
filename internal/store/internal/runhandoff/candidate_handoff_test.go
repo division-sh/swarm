@@ -13,6 +13,46 @@ import (
 
 const handoffTestBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
+func TestCandidateHandoffSeparatesNormalAndExactSelectedScopes(t *testing.T) {
+	coordinator := NewCandidateCoordinator()
+	runIDs := []string{"11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"}
+	normal, first, second := new(recordingCandidateSink), new(recordingCandidateSink), new(recordingCandidateSink)
+	for i, scope := range []runtimerunlifecycle.CandidateScope{
+		{BundleHash: handoffTestBundleHash},
+		{BundleHash: handoffTestBundleHash, SelectedForkRunID: runIDs[0]},
+		{BundleHash: handoffTestBundleHash, SelectedForkRunID: runIDs[1]},
+	} {
+		registration, err := coordinator.Register(context.Background(), scope, []*recordingCandidateSink{normal, first, second}[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer registration.Release()
+	}
+	for _, selectedRunID := range []string{"", runIDs[0], runIDs[1], "33333333-3333-4333-8333-333333333333"} {
+		candidate := runtimerunlifecycle.Candidate{RunID: runIDs[0], BundleHash: handoffTestBundleHash, Revision: 1,
+			DueAt: time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC), SelectedForkRunID: selectedRunID}
+		if selectedRunID != "" {
+			candidate.RunID = selectedRunID
+		}
+		handoff, err := ReserveCandidateHandoff(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := handoff.Prepare(coordinator, runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateRequested, Candidate: candidate}); err != nil {
+			handoff.Rollback()
+			t.Fatal(err)
+		}
+		if err := handoff.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, sink := range []*recordingCandidateSink{normal, first, second} {
+		if sink.reserved != 1 || len(sink.submitted) != 1 {
+			t.Fatalf("missing selected sink borrowed a sibling or normal sink: %+v", sink)
+		}
+	}
+}
+
 func TestCandidateHandoffAfterFenceRequiresAcceptedSameRuntimeWork(t *testing.T) {
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: "candidate-handoff", BundleHash: handoffTestBundleHash})

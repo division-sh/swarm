@@ -365,9 +365,11 @@ func newSelectedContractPipeline(
 	loaded LoadedSelectedContractSource,
 	agentRuntime SelectedContractAgentRuntimeOptions,
 	scheduler *runtimepipeline.Scheduler,
+	genericSchedules runtimepipeline.GenericScheduleWakeupOwner,
 ) *runtimepipeline.PipelineCoordinator {
 	options := selectedContractPipelineCoordinatorOptions(bus, ports, loaded, agentRuntime)
 	options.TimerScheduler = scheduler
+	options.GenericSchedules = genericSchedules
 	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, options)
 }
 
