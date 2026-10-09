@@ -20,7 +20,6 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -565,7 +564,8 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			return
 		}
 		commitResult, err = g.store.CommitInboundPublication(pubCtx, runtimeinbound.CommitCommand{
-			Request: publicationRequest, Finalization: finalization,
+			Admission: batchPlan.Admission(),
+			Request:   publicationRequest, Finalization: finalization,
 			Publications: batchPlan.CommitCommands(), AuthorProjection: authorProjection,
 			PotentialBareText: bareCandidate,
 		})
@@ -777,10 +777,10 @@ func projectInboundPublication(target InboundTarget, delivery providertriggers.D
 	if delivery.ProviderEventID != admitted.ProviderEventID() || delivery.ProviderEventType != admitted.ProviderEventType() {
 		return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, fmt.Errorf("compiled provider projection changed admitted request identity")
 	}
-	routingSource, err := events.NewExternalIngressRoutingSource(target.FlowPath, events.RoutingSourceAuthorityProviderAdmissionPlan)
-	if err != nil {
-		return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, err
+	if target.FlowPath != request.FlowPath {
+		return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, fmt.Errorf("inbound request changed its admitted declaring flow")
 	}
+	var err error
 	published := make([]runtimebus.InboundDeliveryEvent, 0, len(delivery.Events))
 	eventIDs := make([]string, 0, len(delivery.Events))
 	eventNames := make([]string, 0, len(delivery.Events))
@@ -791,22 +791,12 @@ func projectInboundPublication(target InboundTarget, delivery providertriggers.D
 		if err != nil {
 			return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, err
 		}
-		eventID, err := runtimeinbound.DeterministicEventID(request.PublicationID, ordinal)
+		item, err := runtimeinbound.ProjectOutputEvent(request, ordinal, output, posture)
 		if err != nil {
 			return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, err
 		}
-		event, err := events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: events.EventFacts{
-			ID: eventID, Type: output.Name, Producer: events.ProducerClaim{Type: events.EventProducerExternal, ID: "inbound-gateway"},
-			Payload: mustJSON(output.Payload), RoutingSource: routingSource,
-			CreatedAt: now, ExecutionMode: posture.RootMode(),
-		}, RunID: request.ResolvedRunID})
-		if err != nil {
-			return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, err
-		}
-		published = append(published, runtimebus.InboundDeliveryEvent{
-			Event: event, Kind: runtimeprovideroutput.Kind(output.Kind), Authorization: output.Authorization,
-		})
-		eventIDs = append(eventIDs, eventID)
+		published = append(published, item)
+		eventIDs = append(eventIDs, item.Event.ID())
 		eventNames = append(eventNames, string(output.Name))
 		if output.Kind == providertriggers.OutputKindNormalized {
 			authorProjection = runtimeauthoractivity.InboundProjection{
@@ -821,15 +811,7 @@ func projectInboundPublication(target InboundTarget, delivery providertriggers.D
 		eventNames = nil
 		authorProjection = runtimeauthoractivity.InboundProjection{}
 	}
-	evidencePayload, err := runtimeinbound.BuildEvidencePayload(request, eventIDs, eventNames)
-	if err != nil {
-		return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, err
-	}
-	evidence, err := events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{Facts: events.EventFacts{
-		ID: request.MarkerEventID, Type: events.EventTypePlatformInboundRecord,
-		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"}, Payload: evidencePayload,
-		CreatedAt: now, ExecutionMode: posture.RootMode(),
-	}, RunID: request.ResolvedRunID})
+	evidence, err := runtimeinbound.ProjectEvidence(request, eventIDs, eventNames, posture)
 	if err != nil {
 		return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, err
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -21,6 +22,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	nativeinput "github.com/division-sh/swarm/internal/sessionprovider/input"
 )
 
 var (
@@ -169,6 +171,7 @@ type FlowInstanceActivationCommitOwner interface {
 // admission and route planning. Activation plans are semantic facts derived by
 // the runtime; selected-store adapters persist them atomically with the event.
 type PublicationCommand struct {
+	nativeInput         *nativeinput.Admission
 	prospective         runtimepipeline.PreparedWorkflowPublicationState
 	Commit              CommitPublishRequest
 	Activations         []runtimepipeline.FlowInstanceActivationPlan
@@ -181,8 +184,28 @@ type PublicationCommand struct {
 }
 
 func (c PublicationCommand) Validate() error {
+	if c.nativeInput != nil {
+		return fmt.Errorf("native provider publication requires its exact inbound transaction")
+	}
 	if !c.prospective.Empty() {
 		return fmt.Errorf("prospective receiver publication requires its exact engine mutation transaction")
+	}
+	if err := events.ValidateGenericPublishEvent(c.Commit.Event.Event()); err != nil {
+		return err
+	}
+	return c.validatePublicationFacts()
+}
+
+func (c PublicationCommand) ValidateInbound(admission providertriggers.PublicationAdmission) error {
+	input, native := admission.NativeInput()
+	if c.nativeInput == nil {
+		if native {
+			return fmt.Errorf("native inbound publication lost its prepared authority")
+		}
+		return c.Validate()
+	}
+	if !native || !c.nativeInput.SameOwner(input) || !c.prospective.Empty() {
+		return fmt.Errorf("native inbound publication requires its original sealed admission")
 	}
 	if err := events.ValidateGenericPublishEvent(c.Commit.Event.Event()); err != nil {
 		return err

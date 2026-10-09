@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -22,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	nativeinput "github.com/division-sh/swarm/internal/sessionprovider/input"
 	"github.com/google/uuid"
 )
 
@@ -225,6 +227,7 @@ type Finalization struct {
 // every event before entering storage; the selected store owns the one atomic
 // transaction and cannot call back into runtime or borrow transaction context.
 type CommitCommand struct {
+	Admission             providertriggers.PublicationAdmission
 	Request               Request
 	Finalization          Finalization
 	Publications          []runtimebus.PublicationCommand
@@ -233,6 +236,37 @@ type CommitCommand struct {
 	OperatorChannelAction *operatorchannel.InboundAction
 	OperatorChannelText   *operatorchannel.InboundText
 	PotentialBareText     *operatorchannel.InboundText
+}
+
+// WithNativeLifetime preserves the mutation caller's context values while
+// making owner retirement cancel SQL lock waits and the transaction itself.
+func (c CommitCommand) WithNativeLifetime(ctx context.Context) (context.Context, func()) {
+	input, native := c.Admission.NativeInput()
+	if !native {
+		return ctx, func() {}
+	}
+	owned, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(input.Context(), cancel)
+	if !input.LifetimeCurrent(ctx) {
+		cancel()
+	}
+	return nativeCommitContext{Context: owned, parent: ctx, input: input, cancel: cancel}, func() { stop(); cancel() }
+}
+
+type nativeCommitContext struct {
+	context.Context
+	parent context.Context
+	input  nativeinput.Admission
+	cancel context.CancelFunc
+}
+
+// Native transaction owners check Err immediately before COMMIT admission.
+// Observe the original lifetime synchronously, not a scheduled AfterFunc alone.
+func (c nativeCommitContext) Err() error {
+	if !c.input.LifetimeCurrent(c.parent) {
+		c.cancel()
+	}
+	return c.Context.Err()
 }
 
 func (c CommitCommand) Validate() error {
@@ -341,7 +375,7 @@ func (c CommitCommand) Validate() error {
 			return err
 		}
 		publication := c.Publications[index]
-		if err := publication.Validate(); err != nil {
+		if err := publication.ValidateInbound(c.Admission); err != nil {
 			return fmt.Errorf("inbound publication command %d: %w", index, err)
 		}
 		if publication.Commit.Event.ID() != item.Event.ID() || publication.Commit.Event.Event().Type() != item.Event.Type() {

@@ -17,6 +17,15 @@ type OnboardingBindingRequest struct {
 	ParentBindingRevision int64
 }
 
+// LockBindingTx consumes the identity codec under the caller's principal fence.
+func LockBindingTx(ctx context.Context, tx *sql.Tx, postgres bool, identity domain.InterfaceIdentity) (domain.Binding, bool, error) {
+	d := dialectSQLite
+	if postgres {
+		d = dialectPostgres
+	}
+	return loadBinding(ctx, tx, d, identity.Key(), true)
+}
+
 // RequireOnboardingBinding consumes the identity owner's decoders inside the
 // caller's parent-locked transaction. Bound child identity is immutable; reading
 // it without a child lock preserves confirmation's child-before-parent ordering.

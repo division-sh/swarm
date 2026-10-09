@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -36,6 +37,8 @@ type admittedInput struct {
 }
 
 type Admission struct{ value *admittedInput }
+
+func (a Admission) SameOwner(other Admission) bool { return a.value != nil && a.value == other.value }
 
 // SealOwnedCapture has one concrete native issuer. Its Go internal visibility
 // and the issuer census prohibit raw-data construction by admission consumers.
@@ -101,10 +104,7 @@ func (a Admission) RequireBusiness(ctx context.Context, provider string, generat
 	}
 	matched := 0
 	for _, binding := range rows {
-		if binding.Interface.Key() == op.Interface.Key() && binding.PrincipalID == op.PrincipalID &&
-			binding.Status == operatorchannel.BindingCurrent && binding.Revision == capture.BindingRevision &&
-			binding.ConversationRef == activation.ConversationRef && binding.ProofID == activation.ProofID && binding.ProofRevision == activation.ProofRevision &&
-			binding.ProviderAuthority.Kind == operatorchannel.ProviderAuthoritySession && binding.ProviderAuthority.Session == capture.Responsibility.SessionAccount {
+		if capture.Responsibility.MatchesBusinessBinding(op, activation, binding, capture.BindingRevision) {
 			matched++
 		}
 	}
@@ -115,6 +115,22 @@ func (a Admission) RequireBusiness(ctx context.Context, provider string, generat
 		return fmt.Errorf("native business input has no exact selected run owner")
 	}
 	return capture.RunCurrent(ctx)
+}
+
+func (a Admission) Responsibility() channelonboarding.AdmissionResponsibility {
+	if a.value == nil {
+		return channelonboarding.AdmissionResponsibility{}
+	}
+	r := a.value.capture.Responsibility
+	r.Credentials = slices.Clone(r.Credentials)
+	return r
+}
+
+func (a Admission) BindingRevision() int64 {
+	if a.value == nil {
+		return 0
+	}
+	return a.value.capture.BindingRevision
 }
 
 func (a Admission) Body() []byte {

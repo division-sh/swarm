@@ -23,6 +23,7 @@ import (
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	flowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -59,6 +60,8 @@ type activeInputFixture struct {
 	identities *operatorchannel.Service
 	channel    packs.SatisfactionPlan
 	trigger    providertriggers.InboundAdmissionPlan
+	catalog    *providertriggers.CatalogSnapshot
+	workOwner  *worklifetime.RuntimeOccurrence
 	operation  channelonboarding.Operation
 	activation channelonboarding.ConnectedChannelActivation
 	binding    operatorchannel.Binding
@@ -90,6 +93,7 @@ func newActiveInputFixture(t *testing.T, backend string) *activeInputFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.catalog = catalog
 	f.trigger, err = catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "whatsapp", Provider: "whatsapp"})
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +144,23 @@ func newActiveInputFixture(t *testing.T, backend string) *activeInputFixture {
 	}
 	f.peer = newSDKPeer(t)
 	f.ctx = authoractivity.WithScope(correlation.WithSourceArtifactFact(f.peer.ctx, source), authoractivity.BundleScope(f.source.Coordinate.RuntimeInstanceID, source.BundleHash()))
+	process := worklifetime.NewProcess()
+	f.workOwner, err = process.NewRuntime(f.ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: f.source.Coordinate.RuntimeInstanceID, BundleHash: source.BundleHash()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ctx = worklifetime.WithOccurrence(f.ctx, f.workOwner)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := f.workOwner.RetireAndWait(ctx); err != nil {
+			t.Error(err)
+		}
+		process.Retire()
+		if _, err := process.Join(ctx); err != nil {
+			t.Error(err)
+		}
+	})
 	f.occurrence, err = f.state.newOccurrence(f.ctx, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)

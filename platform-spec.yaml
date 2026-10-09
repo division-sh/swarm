@@ -11343,6 +11343,24 @@ tool_model:
         Source retirement, release, cancellation and disconnection refuse new execution. Historical terminal replay
         and private proof codecs retain provenance without serializing the live admission. Credential-only providers
         continue to consume their exact credential-snapshot seals and cannot carry an inactive native admission.
+      session_publication_commit: >
+        Native business delivery consumes the existing trigger admission, BODY projection, inbound event/evidence
+        projection, EventBus preparation, selected-store atomic inbound commit and post-commit dispatch owners.
+        Prepared native commands privately retain their original input fact: generic publication rejects them,
+        and the inbound command requires the same sealed admission rather than allowing a dropped or substituted
+        transfer. Its transaction-local responsibility preflight uses the same operation, activation and binding
+        semantic predicates as fresh admission and the existing typed selected-owner codecs. Parent ownership is
+        locked before the principal; principal ownership precedes binding and activation. Standing source, run,
+        generation, publication sequence and executable disposition remain fenced by the existing standing owner.
+        No root-store currentness reader or provider I/O runs under SQL ownership. Native lifetime cancellation is
+        linked both at mutation entry and inside the retained domain-writer context so owner-lock waits can end
+        without abandoning the mutation protocol's transaction/commit ownership. Lifetime is rechecked before
+        domain completion; retirement, unbind and changed authority cannot leave a partial publication or a false
+        completion receipt. The original private capture/request remains pending on refusal or rollback.
+        Only acknowledged newly created receipts enter EventBus commit application and dispatch; duplicates do
+        not redispatch. Verified historical receipt reconciliation may retire the original private capture after
+        SDK retirement without reissuing execution authority. This does not make unfinished recovery, provider
+        installation, served operator controls or physical interoperability implicit in a component fixture.
       session_operator_claim: >
         Declaration-first onboarding consumes original native capture bytes through the verified trigger BODY and
         the exact compiled channel text mapping. The closed native claim fact retains the original parent operation

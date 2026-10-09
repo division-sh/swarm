@@ -1,6 +1,7 @@
 package providertriggers
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -74,6 +75,28 @@ func (a PublicationAdmission) ValidateOutput(bundleHash, provider string, ordina
 			return fmt.Errorf("native publication changed its admitted run")
 		}
 	}
+	return a.validateOutput(bundleHash, provider, ordinal, count, event, kind, authorization)
+}
+
+// NativeInput transfers only the opaque native owner's product, not a writable
+// authority record. HTTP admissions have no native responsibility to fence.
+func (a PublicationAdmission) NativeInput() (nativeinput.Admission, bool) {
+	if a.nativeInput == nil {
+		return nativeinput.Admission{}, false
+	}
+	return *a.nativeInput, true
+}
+
+// ValidateCommitOutput is store-safe: selected responsibility is checked by its
+// transaction owner, not by re-entering a root-store reader under SQL locks.
+func (a PublicationAdmission) ValidateCommitOutput(ctx context.Context, bundleHash, provider string, ordinal, count int, event events.Event, kind provideroutput.Kind, authorization provideroutput.Authorization) error {
+	if a.nativeInput != nil && (!a.nativeInput.LifetimeCurrent(ctx) || event.RunID() != a.nativeInput.PublicationRunID()) {
+		return fmt.Errorf("native publication no longer owns its admitted lifetime and run")
+	}
+	return a.validateOutput(bundleHash, provider, ordinal, count, event, kind, authorization)
+}
+
+func (a PublicationAdmission) validateOutput(bundleHash, provider string, ordinal, count int, event events.Event, kind provideroutput.Kind, authorization provideroutput.Authorization) error {
 	if a.bundleHash == "" || a.bundleHash != bundleHash || a.provider != provider || len(a.outputs) != count || ordinal < 0 || ordinal >= count {
 		return fmt.Errorf("provider publication requires its exact authenticated output admission")
 	}

@@ -123,7 +123,7 @@ func commitInboundPublicationSQL(
 	children := make([]runtimeinbound.EventRecord, len(command.Finalization.Events))
 	for index, publication := range command.Publications {
 		var err error
-		committed[index], err = commitPublicationTx(ctx, attempt, eventStore, publication)
+		committed[index], err = commitValidatedPublicationTx(ctx, attempt, eventStore, publication, true)
 		if err != nil {
 			return runtimeinbound.CommitResult{}, fmt.Errorf("commit inbound publication event %d: %w", index, err)
 		}
@@ -164,16 +164,23 @@ func commitInboundPublicationSQL(
 	if err != nil {
 		return runtimeinbound.CommitResult{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return runtimeinbound.CommitResult{}, fmt.Errorf("inbound publication canceled before domain completion: %w", err)
+	}
 	record.Created = true
 	return runtimeinbound.CommitResult{Record: record, Publications: committed, OperatorChannelClaim: settledClaim}, nil
 }
 
 func (s *EventPostgresOwner) CommitInboundPublication(ctx context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
+	ctx, release := command.WithNativeLifetime(ctx)
+	defer release()
 	if err := command.Validate(); err != nil {
 		return runtimeinbound.CommitResult{}, err
 	}
 	request := command.Request.Normalized()
 	outcome := runPostgresEventMutationResult(ctx, s, true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimeinbound.CommitResult, error) {
+		txctx, release := command.WithNativeLifetime(txctx)
+		defer release()
 		var result runtimeinbound.CommitResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, request.PublicationID); err != nil {
@@ -193,7 +200,7 @@ func (s *EventPostgresOwner) CommitInboundPublication(ctx context.Context, comma
 				result.Record = existing
 				return nil
 			}
-			if err := admitPostgresInboundStandingTargetTx(txctx, s, tx, request); err != nil {
+			if err := admitPostgresInboundStandingTargetTx(txctx, s, tx, command); err != nil {
 				return err
 			}
 			if err := insertPostgresInboundPublicationPreparedTx(txctx, tx, request); err != nil {
@@ -394,7 +401,11 @@ func loadPostgresInboundPublicationChildren(ctx context.Context, db inboundPubli
 	return children, nil
 }
 
-func admitPostgresInboundStandingTargetTx(ctx context.Context, s *EventPostgresOwner, tx *sql.Tx, request runtimeinbound.Request) error {
+func admitPostgresInboundStandingTargetTx(ctx context.Context, s *EventPostgresOwner, tx *sql.Tx, command runtimeinbound.CommitCommand) error {
+	if err := admitNativeInboundPublicationTx(ctx, tx, true, command); err != nil {
+		return err
+	}
+	request := command.Request.Normalized()
 	var flowPath, runID, publicationState string
 	var generation, publicationSequence int64
 	err := tx.QueryRowContext(ctx, `
