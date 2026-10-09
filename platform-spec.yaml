@@ -6091,6 +6091,10 @@ engine:
           startup before mutation; startup MUST NOT complete its topology, arm timers, emit its creation event, settle effects
           or drains, recover receipts, or replay deliveries. When replay is enabled, this keyed reconciler may complete that
           durable work under the existing recovery authority.
+        startup_inspection: The selected read snapshot reports desired flow attachment counts from the same source-scoped
+          readiness projection, including completed and source-transition plans. Pending attachment and interrupted pipeline
+          work remain separate observations. Mutable or persisted route membership is not startup work evidence and has no
+          recovery-inspection capability. A desired plan is not an executable attachment receipt.
         serving_generation_reconstruction: >-
           Every allowed serving generation MUST reconstruct completed, eligible, current-format dynamic topology regardless
           of `runtime.recovery_on_startup` or `DisablePersistentStartupRecovery`. The selected-store readiness owner exposes

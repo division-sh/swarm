@@ -6,17 +6,17 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
 type recoveryInspectionReader struct {
-	phase  string
-	err    error
-	reads  []string
-	cancel context.CancelFunc
+	phase      string
+	err        error
+	reads      []string
+	cancel     context.CancelFunc
+	projection *pipeline.DynamicFlowRuntimeReadinessProjection
 }
 
 func (r *recoveryInspectionReader) read(name string) error {
@@ -28,14 +28,15 @@ func (r *recoveryInspectionReader) read(name string) error {
 }
 
 func (r *recoveryInspectionReader) InspectDynamicFlowRuntimeReadinessForSource(context.Context, correlation.SourceArtifactFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error) {
-	return pipeline.DynamicFlowRuntimeReadinessProjection{CurrentPending: make([]pipeline.DynamicFlowRuntimeReadiness, 2)}, r.read("readiness")
+	projection := pipeline.DynamicFlowRuntimeReadinessProjection{CurrentPending: make([]pipeline.DynamicFlowRuntimeReadiness, 2)}
+	if r.projection != nil {
+		projection = *r.projection
+	}
+	return projection, r.read("readiness")
 }
 
 func (r *recoveryInspectionReader) LoadAgents(context.Context) ([]PersistedAgent, error) {
 	return make([]PersistedAgent, 3), r.read("agents")
-}
-func (r *recoveryInspectionReader) ListFlowInstanceRoutes(context.Context) ([]flowidentity.RunScopedFlowInstance, error) {
-	return make([]flowidentity.RunScopedFlowInstance, 4), r.read("routes")
 }
 func (r *recoveryInspectionReader) ListSelectedContractRouteRecoveryRecords(context.Context) ([]SelectedContractRouteRecoveryRecord, error) {
 	return make([]SelectedContractRouteRecoveryRecord, 5), r.read("selected")
@@ -50,11 +51,11 @@ func (r *recoveryInspectionReader) GlobalWorkPresence(context.Context) (pipeline
 func TestRecoverableStateInspectionRequiresCompleteReads(t *testing.T) {
 	reader := &recoveryInspectionReader{}
 	state, err := InspectRecoverableStateSnapshot(context.Background(), authorActivityTestSourceArtifactFact, reader)
-	want := RecoverableStateSnapshot{PendingDynamicFlowRuntimeReadinessCount: 2, PersistedAgentCount: 3, PersistedFlowInstanceRouteCount: 4, PersistedSelectedContractRouteRecoveryCount: 5, ReplayEligibleEventPresent: true}
-	if err != nil || state != want || !reflect.DeepEqual(reader.reads, []string{"readiness", "agents", "routes", "selected", "presence"}) {
+	want := RecoverableStateSnapshot{PendingDynamicFlowRuntimeReadinessCount: 2, PersistedAgentCount: 3, PersistedFlowAttachmentCount: 2, PersistedSelectedContractRouteRecoveryCount: 5, ReplayEligibleEventPresent: true}
+	if err != nil || state != want || !reflect.DeepEqual(reader.reads, []string{"readiness", "agents", "selected", "presence"}) {
 		t.Fatalf("inspection: %+v, %v, %v", state, err, reader.reads)
 	}
-	for _, phase := range []string{"readiness", "agents", "routes", "selected", "presence"} {
+	for _, phase := range []string{"readiness", "agents", "selected", "presence"} {
 		t.Run(phase, func(t *testing.T) {
 			witness := errors.New("unavailable " + phase)
 			reader := &recoveryInspectionReader{phase: phase, err: witness}
@@ -81,5 +82,46 @@ func TestRecoverableStateInspectionRequiresCompleteReads(t *testing.T) {
 	reader.cancel = cancel
 	if state, err := InspectRecoverableStateSnapshot(ctx, authorActivityTestSourceArtifactFact, reader); !errors.Is(err, context.Canceled) || state != (RecoverableStateSnapshot{}) {
 		t.Fatalf("late cancellation passed: %+v, %v", state, err)
+	}
+}
+
+func TestRecoverableStateUsesDesiredAttachmentProjection(t *testing.T) {
+	pending := pipeline.DynamicFlowRuntimeReadiness{RunStatus: "running", InstanceStatus: "active", Phase: pipeline.FlowAttachmentPlanned}
+	completed := pending
+	completed.Phase = pipeline.FlowAttachmentReady
+	for _, tc := range []struct {
+		name       string
+		projection pipeline.DynamicFlowRuntimeReadinessProjection
+		count      int
+		pending    int
+	}{
+		{"empty", pipeline.DynamicFlowRuntimeReadinessProjection{}, 0, 0},
+		{"completed", pipeline.DynamicFlowRuntimeReadinessProjection{CurrentCompleted: []pipeline.DynamicFlowRuntimeReadiness{completed}}, 1, 0},
+		{"pending", pipeline.DynamicFlowRuntimeReadinessProjection{CurrentPending: []pipeline.DynamicFlowRuntimeReadiness{pending}}, 1, 1},
+		{"completed_transition", pipeline.DynamicFlowRuntimeReadinessProjection{SourceTransitionRequired: []pipeline.DynamicFlowRuntimeReadiness{completed}}, 1, 0},
+		{"pending_transition", pipeline.DynamicFlowRuntimeReadinessProjection{SourceTransitionRequired: []pipeline.DynamicFlowRuntimeReadiness{pending}}, 1, 1},
+		{"mixed", pipeline.DynamicFlowRuntimeReadinessProjection{
+			CurrentPending: []pipeline.DynamicFlowRuntimeReadiness{pending}, CurrentCompleted: []pipeline.DynamicFlowRuntimeReadiness{completed},
+			SourceTransitionRequired: []pipeline.DynamicFlowRuntimeReadiness{pending, completed},
+		}, 4, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := &recoveryInspectionReader{projection: &tc.projection}
+			state, err := InspectRecoverableStateSnapshot(context.Background(), authorActivityTestSourceArtifactFact, reader)
+			if err != nil || state.PersistedFlowAttachmentCount != tc.count || state.PendingDynamicFlowRuntimeReadinessCount != tc.pending {
+				t.Fatalf("desired attachment observation: %+v, %v", state, err)
+			}
+			onlyAttachment := RecoverableStateSnapshot{PersistedFlowAttachmentCount: state.PersistedFlowAttachmentCount}
+			wantClasses := []string{}
+			if tc.count > 0 {
+				wantClasses = []string{"persisted flow attachments"}
+			}
+			if onlyAttachment.HasRecoverableWork() != (tc.count > 0) || !reflect.DeepEqual(onlyAttachment.Classes(), wantClasses) {
+				t.Fatalf("attachment-only work classification: %+v, %v", onlyAttachment, onlyAttachment.Classes())
+			}
+			if _, restored := state.Detail()["persisted_flow_instance_route_count"]; restored {
+				t.Fatal("recovery restored mirror-backed diagnostics")
+			}
+		})
 	}
 }

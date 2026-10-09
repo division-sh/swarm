@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -114,6 +115,27 @@ type managedNativeDurableRoles struct {
 	runtimerunlifecycle.OperationOwner
 }
 
+func (managedNativeDurableRoles) LookupFlowInstance(context.Context, runtimepipeline.FlowInstanceLookupRequest) (runtimepipeline.FlowInstanceObservation, bool, error) {
+	return runtimepipeline.FlowInstanceObservation{}, false, fmt.Errorf("unexpected component fixture instance lookup")
+}
+
+func (managedNativeDurableRoles) ListFlowInstances(context.Context, runtimepipeline.FlowInstanceLookupScope) ([]runtimepipeline.FlowInstanceObservation, error) {
+	return nil, fmt.Errorf("unexpected component fixture instance inventory")
+}
+
+func TestRuntimeSyntheticInstanceIndexFailsClosed(t *testing.T) {
+	roles := runtimeTestSyntheticDurableDependencies(nil).Instances
+	if roles == nil {
+		t.Fatal("component fixture omitted its unavailable instance-index role")
+	}
+	if observation, found, err := roles.LookupFlowInstance(context.Background(), runtimepipeline.FlowInstanceLookupRequest{}); err == nil || found || !reflect.DeepEqual(observation, runtimepipeline.FlowInstanceObservation{}) {
+		t.Fatalf("component fixture fabricated instance evidence: %+v, %t, %v", observation, found, err)
+	}
+	if observations, err := roles.ListFlowInstances(context.Background(), runtimepipeline.FlowInstanceLookupScope{}); err == nil || len(observations) != 0 {
+		t.Fatalf("component fixture fabricated an instance inventory: %+v, %v", observations, err)
+	}
+}
+
 func (managedNativeDurableRoles) LoadFlowConstructionPublication(context.Context, runtimeflowidentity.RunScopedFlowInstance, string) (runtimepipeline.FlowConstructionPublicationEvidence, error) {
 	return runtimepipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("unexpected managed-native construction receipt read")
 }
@@ -195,7 +217,7 @@ func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) run
 		FlowRoutes: roles, FlowRouteRecords: roles, FlowRouteSets: roles,
 		FlowRouteTopology: roles, FlowRouteRollback: roles, ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
 		PreparedEvents:        roles,
-		TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles,
+		TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles, Instances: roles,
 	}
 }
 
