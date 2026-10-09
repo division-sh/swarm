@@ -7,7 +7,6 @@ import (
 	"sort"
 	"sync"
 
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -27,8 +26,6 @@ type preparedFlowInstanceDeactivation struct {
 type preparedFlowTopologyRetirement struct {
 	manager     *AgentManager
 	lease       *worklifetime.Lease
-	publication runtimebus.FlowRoutePublicationHandle
-	attempt     runtimepipeline.DynamicFlowRuntimeActivationAttempt
 	transferred bool
 	aborted     bool
 	set         *terminalFlowRetirement
@@ -63,8 +60,7 @@ func (p *preparedFlowTopologyRetirement) retireWithDisposition(flow runtimeflowi
 	if err != nil && set == nil {
 		return err
 	}
-	routeErr := am.retireFlowRouteAttempt(flow, p.attempt, p.publication)
-	retireErr := errors.Join(err, routeErr)
+	retireErr := err
 	if set == nil {
 		return retireErr
 	}

@@ -108,9 +108,6 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 				PersistenceRoles: runtimemanager.PersistenceRoles{
 					AgentRoutes:    bus,
 					FlowActivation: agentFixtureFlowActivationCommitter{store: selected},
-					RouteInstaller: bus,
-					RouteVerifier:  bus,
-					RouteRestorer:  bus,
 				},
 				ReceiverExecution: eventreceiver.NormalExecution(),
 			}, selected))

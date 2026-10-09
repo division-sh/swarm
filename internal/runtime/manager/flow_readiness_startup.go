@@ -403,7 +403,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessItem(ctx context.Con
 	if processPrepared {
 		am.dynamicFlowReadinessMu.Lock()
 		active := am.dynamicFlowActiveAttempts[key]
-		if active == nil || active.retiring || active.publication == nil {
+		if active == nil || active.retiring || active.pending != nil || active.receipt.Validate() != nil {
 			am.dynamicFlowReadinessMu.Unlock()
 			return fmt.Errorf("dynamic flow %s has no retained prepared topology", item.InstancePath)
 		}
@@ -479,5 +479,5 @@ func (am *AgentManager) verifyDynamicFlowRuntimeProcessTopology(ctx context.Cont
 	if err := am.verifyDynamicFlowAgents(ctx, flowIdentity, records, topologyAuthority); err != nil {
 		return err
 	}
-	return am.verifyDynamicFlowRoute(ctx, flowIdentity)
+	return am.workflowInstances.VerifyDynamicFlowRuntimeActivationAttempt(ctx, active.receipt)
 }

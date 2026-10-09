@@ -287,9 +287,6 @@ func selectedContractManagerOptions(options runtimemanager.AgentManagerOptions, 
 	options.LifecycleStore = lifecycle
 	roles.AgentRoutes = bus
 	roles.FlowActivation = bus
-	roles.RouteInstaller = bus
-	roles.RouteVerifier = bus
-	roles.RouteRestorer = bus
 	roles.FlowTermination = pipeline
 	roles.CreationPublisher = bus
 	roles.DeliveryRuntime = bus
@@ -520,23 +517,22 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		return nil, managedexecution.Admission{}, err
 	}
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, binding.RuntimeInstanceID)
-	publishRoutes := func() error {
+	admitActivations := func() error {
 		for _, flow := range req.AgentRuntime.Flows {
 			owner, err := runtimeflowidentity.NewRunScopedFlowInstance(authority.SelectedFork.ForkRunID, flow.Instance.Route())
 			if err != nil {
 				return err
 			}
-			route := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: flow.Instance, ActivationVariables: flow.ActivationVariables}
-			if err := admitSelectedContractFlowRoute(ctx, pipeline, bus, binding, route, diagnostics, &runtimeOwner.pendingActivations); err != nil {
+			if err := admitSelectedContractFlowActivation(ctx, pipeline, binding, owner, diagnostics, &runtimeOwner.pendingActivations); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
-	transferRoutes := func(manager *runtimemanager.AgentManager) error {
+	transferActivations := func(manager *runtimemanager.AgentManager) error {
 		for len(runtimeOwner.pendingActivations) > 0 {
 			activation := runtimeOwner.pendingActivations[0]
-			if err := manager.AdoptSelectedFlowActivation(activation.identity, activation.attempt, activation.publication, activation.timersProjected); err != nil {
+			if err := manager.AdoptSelectedFlowActivation(ctx, activation.identity, activation.attempt, activation.timersProjected); err != nil {
 				return err
 			}
 			runtimeOwner.pendingActivations = runtimeOwner.pendingActivations[1:]
@@ -567,13 +563,13 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		if _, err := generationGrant.AdmitExecution(ctx); err != nil {
 			return nil, managedexecution.Admission{}, err
 		}
-		if err := publishRoutes(); err != nil {
+		if err := admitActivations(); err != nil {
 			return nil, managedexecution.Admission{}, err
 		}
-		if err := completeSelectedContractFlowRoutes(ctx, pipeline, bus, runtimeOwner.pendingActivations, diagnostics); err != nil {
+		if err := completeSelectedContractFlowActivations(ctx, pipeline, runtimeOwner.pendingActivations, diagnostics); err != nil {
 			return nil, managedexecution.Admission{}, err
 		}
-		if err := transferRoutes(manager); err != nil {
+		if err := transferActivations(manager); err != nil {
 			return nil, managedexecution.Admission{}, err
 		}
 		return runtimeOwner, admission, nil
@@ -607,7 +603,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	if _, err := generationGrant.AdmitExecution(ctx); err != nil {
 		return nil, managedexecution.Admission{}, fmt.Errorf("admit selected-contract runtime generation: %w", err)
 	}
-	if err := publishRoutes(); err != nil {
+	if err := admitActivations(); err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
 	for _, rec := range req.AgentRuntime.Records {
@@ -644,10 +640,10 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			EntityID: rec.Config.EffectiveEntityID(),
 		})
 	}
-	if err := completeSelectedContractFlowRoutes(ctx, pipeline, bus, runtimeOwner.pendingActivations, diagnostics); err != nil {
+	if err := completeSelectedContractFlowActivations(ctx, pipeline, runtimeOwner.pendingActivations, diagnostics); err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
-	if err := transferRoutes(manager); err != nil {
+	if err := transferActivations(manager); err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
 	receiverExecution, err := builder.options.ReceiverExecution.WithSelectedAdmission(admission)
@@ -952,7 +948,7 @@ func (r *selectedContractAgentRuntime) Shutdown() (result error) {
 	}
 	if len(r.pendingActivations) != 0 {
 		var err error
-		r.pendingActivations, err = retireSelectedFlowActivations(context.Background(), r.bus, r.pipeline, r.pendingActivations)
+		r.pendingActivations, err = retireSelectedFlowActivations(context.Background(), r.pipeline, r.pendingActivations)
 		if err != nil {
 			return err
 		}

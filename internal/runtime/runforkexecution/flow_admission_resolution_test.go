@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -19,6 +18,8 @@ type selectedPendingAdmissionProbe struct {
 	resolved                                      pipeline.DynamicFlowRuntimeActivationResolution
 	resolveErr                                    error
 	panicAfterCommit                              bool
+	acknowledged                                  bool
+	beginErr, verifyErr                           error
 	verifications, abandonments, timerRetirements int
 	request                                       pipeline.DynamicFlowRuntimeActivationRequest
 }
@@ -35,7 +36,10 @@ func (p *selectedPendingAdmissionProbe) BeginDynamicFlowRuntimeActivation(_ cont
 	if p.panicAfterCommit {
 		panic("selected Begin lost its response")
 	}
-	return pipeline.DynamicFlowRuntimeActivationAdmissionResult{}, errors.New("selected Begin lost its response")
+	if p.acknowledged {
+		return pipeline.DynamicFlowRuntimeActivationAdmissionResult{Acknowledged: true, Attempt: p.resolved.Attempt}, p.beginErr
+	}
+	return pipeline.DynamicFlowRuntimeActivationAdmissionResult{}, p.beginErr
 }
 
 func (p *selectedPendingAdmissionProbe) ResolveDynamicFlowRuntimeActivation(_ context.Context, request pipeline.DynamicFlowRuntimeActivationRequest) (pipeline.DynamicFlowRuntimeActivationResolution, error) {
@@ -47,7 +51,7 @@ func (p *selectedPendingAdmissionProbe) ResolveDynamicFlowRuntimeActivation(_ co
 
 func (p *selectedPendingAdmissionProbe) VerifyDynamicFlowRuntimeActivationAttempt(context.Context, pipeline.DynamicFlowRuntimeActivationAttempt) error {
 	p.verifications++
-	return nil
+	return p.verifyErr
 }
 
 func (p *selectedPendingAdmissionProbe) AbandonDynamicFlowRuntimeActivationAttempt(_ context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error {
@@ -78,7 +82,7 @@ func TestSelectedAdmissionResponsibilitySurvivesLostResponseAndPanic(t *testing.
 				t.Fatal(err)
 			}
 			var inventory []selectedFlowActivation
-			probe := &selectedPendingAdmissionProbe{inventory: &inventory, readiness: pipeline.DynamicFlowRuntimeReadiness{Plan: plan, AttemptOrdinal: 1, AttemptState: "planned", RunStatus: "running", InstanceStatus: "active", Phase: pipeline.FlowAttachmentPlanned}, panicAfterCommit: cut == "panic"}
+			probe := &selectedPendingAdmissionProbe{inventory: &inventory, readiness: pipeline.DynamicFlowRuntimeReadiness{Plan: plan, AttemptOrdinal: 1, AttemptState: "planned", RunStatus: "running", InstanceStatus: "active", Phase: pipeline.FlowAttachmentPlanned}, panicAfterCommit: cut == "panic", beginErr: errors.New("selected Begin lost its response")}
 			probe.resolved = pipeline.DynamicFlowRuntimeActivationResolution{Disposition: pipeline.FlowActivationAdmitted, Attempt: attempt}
 			switch cut {
 			case "unadmitted":
@@ -93,15 +97,14 @@ func TestSelectedAdmissionResponsibilitySurvivesLostResponseAndPanic(t *testing.
 			case "invalid_disposition":
 				probe.resolved.Disposition = pipeline.FlowActivationResolution(99)
 			}
-			publisher := &selectedFlowRoutePublisherProbe{}
 			diagnostics := &selectedForkCommitDiagnostics{}
 			var admissionErr error
 			var panicked any
 			func() {
 				defer func() { panicked = recover() }()
-				admissionErr = admitSelectedContractFlowRoute(context.Background(), probe, publisher, binding, bus.FlowInstanceRouteMaterializationRequest{Identity: identity}, diagnostics, &inventory)
+				admissionErr = admitSelectedContractFlowActivation(context.Background(), probe, binding, identity, diagnostics, &inventory)
 			}()
-			if len(inventory) != 1 || probe.request.ID() == "" || publisher.stages != 0 || publisher.publishes != 0 {
+			if len(inventory) != 1 || probe.request.ID() == "" || probe.timerRetirements != 0 {
 				t.Fatalf("lost exact non-executable inventory: %+v", inventory)
 			}
 			if cut == "committed" {
@@ -115,7 +118,7 @@ func TestSelectedAdmissionResponsibilitySurvivesLostResponseAndPanic(t *testing.
 				t.Fatal("panic was hidden")
 			}
 			if cut != "committed" {
-				retained, cleanupErr := retireSelectedFlowActivations(context.Background(), nil, probe, inventory)
+				retained, cleanupErr := retireSelectedFlowActivations(context.Background(), probe, inventory)
 				if cut == "foreign" || cut == "unadmitted" {
 					if cleanupErr != nil || len(retained) != 0 || probe.abandonments != 0 {
 						t.Fatal("non-owned resolution acquired cleanup authority")
@@ -127,9 +130,9 @@ func TestSelectedAdmissionResponsibilitySurvivesLostResponseAndPanic(t *testing.
 				}
 				probe.resolveErr = nil
 				probe.resolved = pipeline.DynamicFlowRuntimeActivationResolution{Disposition: pipeline.FlowActivationAdmitted, Attempt: attempt}
-				retained, cleanupErr = retireSelectedFlowActivations(context.Background(), nil, probe, retained)
-				if cleanupErr != nil || len(retained) != 0 || probe.abandonments != 1 || probe.timerRetirements != 0 || publisher.stages != 0 {
-					t.Fatalf("pending cleanup attached topology: retained=%+v err=%v", retained, cleanupErr)
+				retained, cleanupErr = retireSelectedFlowActivations(context.Background(), probe, retained)
+				if cleanupErr != nil || len(retained) != 0 || probe.abandonments != 1 || probe.timerRetirements != 0 {
+					t.Fatalf("pending cleanup acquired resources: retained=%+v err=%v", retained, cleanupErr)
 				}
 			}
 		})

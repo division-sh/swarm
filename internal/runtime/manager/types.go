@@ -223,9 +223,6 @@ type DeliveryRuntimeOwner interface {
 type PersistenceRoles struct {
 	AgentRoutes          AgentRouteBus
 	FlowActivation       FlowInstanceActivationCommitter
-	RouteInstaller       FlowInstanceRouteContextInstaller
-	RouteVerifier        FlowInstanceRouteContextVerifier
-	RouteRestorer        PersistedFlowInstanceRouteRestorer
 	FlowTermination      FlowInstanceTerminalMutationOwner
 	CreationPublisher    runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher
 	LifecycleCensus      AgentLifecycleCellCensus

@@ -30,14 +30,15 @@ import (
 )
 
 type receiverConfigActivationFixture struct {
-	ctx       context.Context
-	db        *sql.DB
-	store     agentFixtureFlowStore
-	manager   *manager.AgentManager
-	workflows *pipeline.PipelineCoordinator
-	bus       *sqliteFlowActivationBus
-	bundle    *contracts.WorkflowContractBundle
-	grant     startupownership.LiveGenerationGrant
+	ctx             context.Context
+	db              *sql.DB
+	store           agentFixtureFlowStore
+	manager         *manager.AgentManager
+	workflows       *pipeline.PipelineCoordinator
+	bus             *sqliteFlowActivationBus
+	bundle          *contracts.WorkflowContractBundle
+	grant           startupownership.LiveGenerationGrant
+	rootConstructed bool
 }
 
 func newReceiverConfigActivationFixture(t *testing.T, backend string) receiverConfigActivationFixture {
@@ -147,9 +148,7 @@ func newReceiverConfigActivationFixtureForStore(t *testing.T, selected agentFixt
 		ExecutionPosture: executionposture.Live, BaseContext: ctx, SourceArtifactFact: fact,
 		SemanticSource: semanticview.Wrap(bundle), WorkflowInstances: workflows, LLMBackend: "anthropic",
 		DeliveryStore: selected, WorkOwner: storeTestWorkOwner(t),
-		PersistenceRoles: manager.PersistenceRoles{
-			AgentRoutes: bus, FlowActivation: committer,
-			RouteInstaller: bus, RouteVerifier: bus, RouteRestorer: bus}, ReceiverExecution: eventreceiver.NormalExecution(),
+		PersistenceRoles: manager.PersistenceRoles{AgentRoutes: bus, FlowActivation: committer}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}
 	for _, apply := range configure {
 		apply(&options)
@@ -214,6 +213,25 @@ func (f receiverConfigActivationFixture) newRuntimeEventBus(t *testing.T, option
 		t.Fatal(err)
 	}
 	return publisher
+}
+
+func (f *receiverConfigActivationFixture) constructKeylessRoot(t *testing.T) {
+	t.Helper()
+	runID := correlation.RunIDFromContext(f.ctx)
+	request := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
+	request.Instance = flowidentity.Stored(request.ContractBundle, ".", runID, runID, runID, "")
+	plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.ConstructionPlans()) != 1 || len(plan.Instance.Fields) != 0 {
+		t.Fatal("attachment fixture requires one entityless keyless root")
+	}
+	committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, plan)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("construct attachment parent: %+v %v", committed, err)
+	}
+	f.rootConstructed = true
 }
 
 func (f receiverConfigActivationFixture) request(key, instanceID, label string) pipeline.FlowInstanceActivationRequest {

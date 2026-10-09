@@ -58,22 +58,8 @@ type flowInstancePersistence interface {
 	LoadRouteRecoveryProjection(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
 }
 
-type FlowInstanceRouteContextInstaller interface {
-	StageFlowInstanceRouteContext(context.Context, runtimebus.FlowInstanceRouteMaterializationRequest) (runtimebus.FlowInstanceRouteTopologyResult, error)
-}
-
 type FlowInstanceActivationCommitter interface {
 	CommitFlowInstanceActivation(context.Context, runtimepipeline.FlowInstanceActivationPlan) (runtimepipeline.CommittedFlowInstanceActivation, error)
-}
-
-type FlowInstanceRouteContextVerifier interface {
-	HasFlowInstanceRoute(runtimeflowidentity.RunScopedFlowInstance) bool
-	VerifyFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
-}
-
-type PersistedFlowInstanceRouteRestorer interface {
-	PublishPersistedFlowInstanceRouteForAttempt(context.Context, runtimebus.FlowInstanceRouteMaterializationRequest, runtimepipeline.DynamicFlowRuntimeActivationAttempt) (runtimebus.FlowRoutePublicationHandle, error)
-	RetireFlowInstanceRouteForAttempt(runtimeflowidentity.RunScopedFlowInstance, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 }
 
 type FlowInstanceTerminalMutationOwner interface {
@@ -639,22 +625,6 @@ func flowInstanceAgentMaterializationBlueprints(req runtimepipeline.FlowInstance
 		return strings.TrimSpace(blueprints[i].Config.ID) < strings.TrimSpace(blueprints[j].Config.ID)
 	})
 	return blueprints, nil
-}
-
-func (am *AgentManager) installFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, req runtimepipeline.FlowInstanceActivationRequest) (runtimebus.FlowInstanceRouteTopologyResult, error) {
-	instance := req.Instance
-	vars := flowActivationVars(req)
-	if err := identity.Validate(); err != nil {
-		return runtimebus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("invalid flow-instance route identity: %w", err)
-	}
-	if identity.Route != instance.Route() {
-		return runtimebus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("flow-instance route identity disagrees with activation instance")
-	}
-	request := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: req.Instance, ActivationVariables: vars}
-	if am.roles.RouteInstaller != nil {
-		return am.roles.RouteInstaller.StageFlowInstanceRouteContext(ctx, request)
-	}
-	return runtimebus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("event bus does not support context-aware derived flow-instance routing for %s", instance.InstancePath)
 }
 
 var dynamicFlowCreationEventNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.dynamic-flow.creation-event.v1"))

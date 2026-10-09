@@ -553,24 +553,8 @@ func ProveTerminalPanicMutationFailure(t *testing.T, persistence AgentLifecycleP
 	}
 }
 
-type terminalReadinessRouteProbe struct {
-	err           error
-	panicOnRetire bool
-}
-
-func (p terminalReadinessRouteProbe) RetirePublishedFlowInstanceRoute(runtimeflowidentity.RunScopedFlowInstance) error {
-	if p.panicOnRetire {
-		panic(p.err)
-	}
-	return p.err
-}
-
-func (p terminalReadinessRouteProbe) Retire() error {
-	return p.RetirePublishedFlowInstanceRoute(runtimeflowidentity.RunScopedFlowInstance{})
-}
-
 func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
-	for _, mode := range []string{"success", "route_error", "route_panic"} {
+	for _, mode := range []string{"success", "agent_fence_panic"} {
 		t.Run(mode, func(t *testing.T) {
 			probe := newLifecyclePersistenceProbe()
 			c := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
@@ -586,22 +570,18 @@ func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			injected := errors.New("readiness route retirement failure")
-			route := terminalReadinessRouteProbe{}
-			if mode != "success" {
-				route.err = injected
-				route.panicOnRetire = mode == "route_panic"
-			}
+			injected := errors.New("readiness agent fence failure")
+			c.routes = &terminalRetirementRouteProbe{remove: func(runtimeeffects.LifecycleToken) {}, fence: func(runtimeeffects.LifecycleToken) {
+				if mode != "success" {
+					panic(injected)
+				}
+			}}
 			am := &AgentManager{lifecycle: c, workOwner: newTestManagerWorkOwner(t)}
 			lease, err := am.beginWork(ctx, "test readiness topology retirement")
 			if err != nil {
 				t.Fatal(err)
 			}
-			attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt("1", rec.Config.Identity.RunID, "review/inst-1", lifecycleProbeProcessBinding())
-			if err != nil {
-				t.Fatal(err)
-			}
-			prepared := &preparedFlowTopologyRetirement{manager: am, lease: lease, attempt: attempt, publication: route}
+			prepared := &preparedFlowTopologyRetirement{manager: am, lease: lease}
 			defer prepared.abort()
 			flow, err := runtimeflowidentity.NewRunScopedFlowInstance(rec.Config.Identity.RunID, runtimeflowidentity.RouteForInstancePath("review/inst-1"))
 			if err != nil {

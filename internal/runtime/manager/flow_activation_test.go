@@ -367,11 +367,6 @@ func (o flowActivationTestTerminationOwner) CommitFlowInstanceTermination(ctx co
 	return runtimepipeline.FlowInstanceTermination{Instance: instance, Identity: canonicalIdentity}, nil
 }
 
-type flowActivationTestCommitter struct {
-	instances FlowInstanceActivationCommitter
-	routes    FlowInstanceRouteContextInstaller
-}
-
 type flowActivationOutcomeCommitter struct {
 	base         FlowInstanceActivationCommitter
 	acknowledged bool
@@ -384,26 +379,6 @@ func (o flowActivationOutcomeCommitter) CommitFlowInstanceActivation(ctx context
 	}
 	committed, err := o.base.CommitFlowInstanceActivation(ctx, plan)
 	return committed, errors.Join(err, o.err)
-}
-
-func (o flowActivationTestCommitter) CommitFlowInstanceActivation(
-	ctx context.Context,
-	plan runtimepipeline.FlowInstanceActivationPlan,
-) (runtimepipeline.CommittedFlowInstanceActivation, error) {
-	if o.instances == nil || o.routes == nil {
-		return runtimepipeline.CommittedFlowInstanceActivation{}, errors.New("test flow activation commit owners are required")
-	}
-	committed, err := o.instances.CommitFlowInstanceActivation(ctx, plan)
-	if err != nil || !committed.Acknowledged {
-		return runtimepipeline.CommittedFlowInstanceActivation{}, err
-	}
-	staged, err := o.routes.StageFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: runtimeflowidentity.RunScopedFlowInstance{RunID: plan.Readiness.RunID, Route: plan.Identity.Route()}, Instance: plan.Identity, ActivationVariables: plan.ActivationVariables,
-	})
-	if !staged.Acknowledged || err != nil {
-		return runtimepipeline.CommittedFlowInstanceActivation{}, err
-	}
-	return committed, nil
 }
 
 func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersistence, stores ...ManagerPersistence) *AgentManager {
@@ -437,14 +412,13 @@ func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersi
 			typed.flowActivationTestBus.creationStore = testInstances
 		}
 	}
-	routes, _ := bus.(FlowInstanceRouteContextInstaller)
 	activationOwner, _ := bus.(FlowInstanceActivationCommitter)
 	if activationOwner == nil {
 		construction, ok := instances.(FlowInstanceActivationCommitter)
 		if instances != nil && !ok {
 			t.Fatalf("Manager component fixture has no typed activation commit owner: %T", instances)
 		}
-		activationOwner = flowActivationTestCommitter{instances: construction, routes: routes}
+		activationOwner = construction
 	}
 	manager := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
 		WorkflowInstances:  instances,
@@ -2454,8 +2428,21 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 	}
 }
 
+func flowActivationAttemptReadyForTest(am *AgentManager, ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) bool {
+	key := dynamicFlowRuntimeReadinessKey{runID: req.TriggerEvent.RunID(), instancePath: req.Instance.InstancePath}
+	am.dynamicFlowReadinessMu.Lock()
+	active := am.dynamicFlowActiveAttempts[key]
+	if active == nil || !active.complete || active.retiring || active.retirementKind != 0 {
+		am.dynamicFlowReadinessMu.Unlock()
+		return false
+	}
+	receipt := active.receipt
+	am.dynamicFlowReadinessMu.Unlock()
+	return am.workflowInstances.VerifyDynamicFlowRuntimeActivationAttempt(ctx, receipt) == nil
+}
+
 func TestFlowActivationRetirementResumesExactOwnerAfterTransientCleanupFailure(t *testing.T) {
-	for _, failure := range []string{"route", "agent_join", "timer", "durable_attempt"} {
+	for _, failure := range []string{"agent_fence", "agent_join", "timer", "durable_attempt"} {
 		t.Run(failure, func(t *testing.T) {
 			bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
 			instances := &flowActivationTestInstanceStore{}
@@ -2473,20 +2460,18 @@ func TestFlowActivationRetirementResumesExactOwnerAfterTransientCleanupFailure(t
 			key := dynamicFlowRuntimeReadinessKey{runID: req.TriggerEvent.RunID(), instancePath: req.Instance.Route().InstancePath}
 			am.dynamicFlowReadinessMu.Lock()
 			active := am.dynamicFlowActiveAttempts[key]
-			if active == nil || active.publication == nil || !active.complete {
+			if active == nil || active.receipt.Validate() != nil || !active.complete {
 				am.dynamicFlowReadinessMu.Unlock()
 				t.Fatal("activated flow has no complete exact local owner")
 			}
 			oldAttemptID := active.receipt.ID()
-			if failure == "route" {
-				original := active.publication
+			if failure == "agent_fence" {
 				calls := 0
-				active.publication = flowActivationTestPublication{retire: func() error {
+				am.lifecycle.routes = &terminalRetirementRouteProbe{AgentRouteBus: bus, remove: bus.RemoveAgentRoute, fence: func(runtimeeffects.LifecycleToken) {
 					calls++
 					if calls == 1 {
-						return errors.New("injected route retirement failure")
+						panic("injected agent fence retirement failure")
 					}
-					return original.Retire()
 				}}
 			}
 			am.dynamicFlowReadinessMu.Unlock()
@@ -2555,7 +2540,7 @@ func TestFlowActivationRetirementResumesExactOwnerAfterTransientCleanupFailure(t
 			if err := foreignLease.Done(); !errors.Is(err, worklifetime.ErrAlreadySettled) {
 				t.Fatalf("refused retirement retained work lease: %v", err)
 			}
-			if failure == "route" {
+			if failure == "agent_fence" {
 				readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, req.Instance.Route())
 				if err != nil || !found {
 					t.Fatalf("load retry readiness: found=%v err=%v", found, err)
@@ -2564,9 +2549,6 @@ func TestFlowActivationRetirementResumesExactOwnerAfterTransientCleanupFailure(t
 				if err != nil || !created || successor == active || successor.receipt.ID() == oldAttemptID {
 					t.Fatalf("same-plan retry reused unsettled predecessor: created=%v successor=%+v err=%v", created, successor, err)
 				}
-				am.dynamicFlowReadinessMu.Lock()
-				successor.publication = flowActivationTestPublication{retire: func() error { return nil }}
-				am.dynamicFlowReadinessMu.Unlock()
 				if err := retire(); err != nil {
 					t.Fatalf("retire unlaunched successor attempt: %v", err)
 				}
@@ -2579,8 +2561,8 @@ func TestFlowActivationRetirementResumesExactOwnerAfterTransientCleanupFailure(t
 			instances.readinessMu.Lock()
 			_, retired := instances.retiredAttemptIDs[active.receipt]
 			instances.readinessMu.Unlock()
-			if stillOwned || !retired || bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-				t.Fatalf("resumed retirement incomplete: local=%v durable=%v route=%v", stillOwned, retired, bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)))
+			if stillOwned || !retired || !active.locallyRetired || !active.timersRetired {
+				t.Fatalf("resumed retirement incomplete: local=%v durable=%v agents=%v timers=%v", stillOwned, retired, active.locallyRetired, active.timersRetired)
 			}
 		})
 	}
@@ -2598,7 +2580,8 @@ func TestJoinedFlowAttemptRetirementBatchesOnlyAfterLocalCleanupAndRetries(t *te
 		RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1,
 	}
 	const count = runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit + 1
-	retiredRoutes := 0
+	retiredTimers := 0
+	instances.retireInitialEntry = func(string) error { retiredTimers++; return nil }
 	for i := range count {
 		path := fmt.Sprintf("account/batch-%d", i)
 		attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt("1", uuid.NewString(), path, binding)
@@ -2607,19 +2590,16 @@ func TestJoinedFlowAttemptRetirementBatchesOnlyAfterLocalCleanupAndRetries(t *te
 		}
 		key := dynamicFlowRuntimeReadinessKey{runID: attempt.RunID(), instancePath: path}
 		am.dynamicFlowActiveAttempts[key] = &dynamicFlowActiveAttempt{
-			receipt:  attempt,
-			identity: runtimeflowidentity.RunScopedFlowInstance{RunID: attempt.RunID(), Route: runtimeflowidentity.StoredRoute("account", fmt.Sprintf("batch-%d", i), path)},
-			publication: flowActivationTestPublication{retire: func() error {
-				retiredRoutes++
-				return nil
-			}},
+			receipt:         attempt,
+			identity:        runtimeflowidentity.RunScopedFlowInstance{RunID: attempt.RunID(), Route: runtimeflowidentity.StoredRoute("account", fmt.Sprintf("batch-%d", i), path)},
+			timersProjected: true,
 		}
 		instances.activationAttempts[flowActivationReadinessKey(attempt.RunID(), path)] = attempt
 	}
 	failed := false
 	instances.retireAttempt = func() error {
-		if retiredRoutes < runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit {
-			return errors.New("durable settlement preceded local route cleanup")
+		if retiredTimers < runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit {
+			return errors.New("durable settlement preceded timer cleanup")
 		}
 		if !failed {
 			failed = true
@@ -2633,8 +2613,8 @@ func TestJoinedFlowAttemptRetirementBatchesOnlyAfterLocalCleanupAndRetries(t *te
 	if got := len(am.dynamicFlowActiveAttempts); got != runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit {
 		t.Fatalf("retained attempts after atomic batch failure = %d, want %d", got, runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit)
 	}
-	if retiredRoutes != count {
-		t.Fatalf("retired routes = %d, want %d", retiredRoutes, count)
+	if retiredTimers != count {
+		t.Fatalf("retired timers = %d, want %d", retiredTimers, count)
 	}
 	if err := am.retireDynamicFlowAttemptsAfterJoin(ctx); err != nil {
 		t.Fatalf("retry joined retirement: %v", err)
@@ -2642,8 +2622,8 @@ func TestJoinedFlowAttemptRetirementBatchesOnlyAfterLocalCleanupAndRetries(t *te
 	if got := len(am.dynamicFlowActiveAttempts); got != 0 {
 		t.Fatalf("retained attempts after retry = %d", got)
 	}
-	if retiredRoutes != count {
-		t.Fatalf("local route cleanup repeated: got %d, want %d", retiredRoutes, count)
+	if retiredTimers != count {
+		t.Fatalf("timer cleanup repeated: got %d, want %d", retiredTimers, count)
 	}
 	if !reflect.DeepEqual(instances.retirementBatches, []int{1, runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit}) {
 		t.Fatalf("committed retirement batches = %v", instances.retirementBatches)
@@ -2671,8 +2651,8 @@ func TestJoinedFlowAttemptRetirementBatchesOnlyAfterLocalCleanupAndRetries(t *te
 	if err := am.retireDynamicFlowAttemptsAfterJoin(ctx); err != nil {
 		t.Fatalf("retry acknowledged retirement: %v", err)
 	}
-	if am.dynamicFlowActiveAttempts[key] != nil || retiredRoutes != count {
-		t.Fatalf("acknowledged retry retained local owner or repeated cleanup: active=%v routes=%d", am.dynamicFlowActiveAttempts[key] != nil, retiredRoutes)
+	if am.dynamicFlowActiveAttempts[key] != nil || retiredTimers != count {
+		t.Fatalf("acknowledged retry retained local owner or repeated cleanup: active=%v timers=%d", am.dynamicFlowActiveAttempts[key] != nil, retiredTimers)
 	}
 }
 
@@ -2698,31 +2678,39 @@ func TestSelectedFlowActivationRetainsExactRetirementIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			retired := 0
-			publication := flowActivationTestPublication{retire: func() error { retired++; return nil }}
 			foreign := owner
 			foreign.RunID = uuid.NewString()
-			if err := am.AdoptSelectedFlowActivation(foreign, attempt, publication, true); err == nil || len(am.dynamicFlowActiveAttempts) != 0 {
+			ctx := testAuthorActivityContext(context.Background())
+			if err := am.AdoptSelectedFlowActivation(ctx, foreign, attempt, true); err == nil || len(am.dynamicFlowActiveAttempts) != 0 {
 				t.Fatalf("foreign transfer changed ownership: %v", err)
 			}
+			if err := am.AdoptSelectedFlowActivation(ctx, owner, attempt, true); err == nil || len(am.dynamicFlowActiveAttempts) != 0 {
+				t.Fatal("unadmitted attempt acquired a local owner")
+			}
 			instances.activationAttempts[flowActivationReadinessKey(runID, route.InstancePath)] = attempt
-			if err := am.AdoptSelectedFlowActivation(owner, attempt, publication, true); err != nil {
+			instances.readiness = map[string]runtimepipeline.DynamicFlowRuntimeReadiness{
+				flowActivationReadinessKey(runID, route.InstancePath): {
+					InstancePath: route.InstancePath, AttemptOrdinal: attempt.Ordinal(), AttemptState: "accepted",
+					RunStatus: "running", InstanceStatus: "active", Phase: runtimepipeline.FlowAttachmentReady,
+				},
+			}
+			if err := am.AdoptSelectedFlowActivation(ctx, owner, attempt, true); err != nil {
 				t.Fatal(err)
 			}
-			if err := am.AdoptSelectedFlowActivation(owner, attempt, publication, true); err == nil {
+			if err := am.AdoptSelectedFlowActivation(ctx, owner, attempt, true); err == nil {
 				t.Fatal("duplicate transfer acquired a second owner")
 			}
 			if err := am.retireDynamicFlowAttemptsAfterJoin(testAuthorActivityContext(context.Background())); err != nil {
 				t.Fatal(err)
 			}
-			if retired != 1 || len(am.dynamicFlowActiveAttempts) != 0 || !reflect.DeepEqual(instances.retiredTimerOwners, []runtimeflowidentity.RunScopedFlowInstance{owner}) {
-				t.Fatalf("transfer/retirement lost complete identity: routes=%d owners=%+v active=%d", retired, instances.retiredTimerOwners, len(am.dynamicFlowActiveAttempts))
+			if len(am.dynamicFlowActiveAttempts) != 0 || !reflect.DeepEqual(instances.retiredTimerOwners, []runtimeflowidentity.RunScopedFlowInstance{owner}) {
+				t.Fatalf("transfer/retirement lost complete identity: owners=%+v active=%d", instances.retiredTimerOwners, len(am.dynamicFlowActiveAttempts))
 			}
 			if _, found := instances.retiredAttemptIDs[attempt]; !found {
 				t.Fatal("cleanup did not settle the exact durable attempt")
 			}
-			if err := am.retireDynamicFlowAttemptsAfterJoin(testAuthorActivityContext(context.Background())); err != nil || retired != 1 || len(instances.retiredTimerOwners) != 1 {
-				t.Fatalf("joined cleanup was repeated: routes=%d owners=%+v err=%v", retired, instances.retiredTimerOwners, err)
+			if err := am.retireDynamicFlowAttemptsAfterJoin(testAuthorActivityContext(context.Background())); err != nil || len(instances.retiredTimerOwners) != 1 {
+				t.Fatalf("joined cleanup was repeated: owners=%+v err=%v", instances.retiredTimerOwners, err)
 			}
 		})
 	}
@@ -2734,6 +2722,8 @@ func failurePrefix(failure string) string {
 		return "durable attempt"
 	case "agent_join":
 		return "agent join"
+	case "agent_fence":
+		return "agent fence"
 	default:
 		return failure
 	}

@@ -510,8 +510,8 @@ func runtimeTestDurableDependencies(durable runtimeTestDurableEventStore) runtim
 
 func runtimeTestManagerBusRoles(bus *runtimebus.EventBus) runtimemanager.PersistenceRoles {
 	return runtimemanager.PersistenceRoles{
-		AgentRoutes: bus, RouteInstaller: bus, RouteVerifier: bus,
-		RouteRestorer: bus, FlowActivation: bus, CreationPublisher: bus, DeliveryRuntime: bus,
+		AgentRoutes:    bus,
+		FlowActivation: bus, CreationPublisher: bus, DeliveryRuntime: bus,
 	}
 }
 

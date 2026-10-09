@@ -102,8 +102,8 @@ func ownConformanceTestAgentManager(t testing.TB, manager *runtimemanager.AgentM
 
 func conformanceManagerPersistenceRoles(selected any, eventBus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator) runtimemanager.PersistenceRoles {
 	roles := runtimemanager.PersistenceRoles{
-		AgentRoutes: eventBus, RouteInstaller: eventBus, RouteVerifier: eventBus,
-		RouteRestorer: eventBus, FlowActivation: eventBus, FlowTermination: pipeline, CreationPublisher: eventBus, DeliveryRuntime: eventBus,
+		AgentRoutes:    eventBus,
+		FlowActivation: eventBus, FlowTermination: pipeline, CreationPublisher: eventBus, DeliveryRuntime: eventBus,
 	}
 	roles.LifecycleCensus, _ = selected.(runtimemanager.AgentLifecycleCellCensus)
 	roles.LifecycleState, _ = selected.(runtimemanager.AgentLifecycleStateReader)

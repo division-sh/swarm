@@ -565,8 +565,8 @@ func (f completeEventDispatchFixture) newRecordingManager(
 		DeliveryStore:      f.store,
 		ExecutionPosture:   executionposture.Live,
 		PersistenceRoles: runtimemanager.PersistenceRoles{
-			AgentRoutes: f.bus, RouteInstaller: f.bus, RouteVerifier: f.bus,
-			RouteRestorer: f.bus, CreationPublisher: f.bus, DeliveryRuntime: f.bus,
+			AgentRoutes:       f.bus,
+			CreationPublisher: f.bus, DeliveryRuntime: f.bus,
 			LifecycleState: f.store,
 		},
 		WorkOwner:         owner,

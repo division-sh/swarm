@@ -195,9 +195,16 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 	if got := calls["MarkDynamicFlowRuntimeCreationEventEmitted"]; len(got) != 0 {
 		t.Fatalf("split creation completion writer remains in manager: %#v", got)
 	}
-	if got := calls["StageFlowInstanceRouteContext"]; len(got) != 1 || got["flow_activation.go"] != 1 {
-		t.Fatalf("route staging consumers = %#v, want one manager adapter", got)
+	for _, retired := range []string{"StageFlowInstanceRouteContext", "PublishPersistedFlowInstanceRouteForAttempt", "RetireFlowInstanceRouteForAttempt", "VerifyFlowInstanceRoute"} {
+		if got := calls[retired]; len(got) != 0 {
+			t.Fatalf("retired attachment route consumer %s remains: %#v", retired, got)
+		}
 	}
+	requireStaticReadinessCalls(t, calls, "VerifyDynamicFlowRuntimeActivationAttempt", map[string]int{
+		"dynamic_flow_activation_owner.go": 2,
+		"flow_readiness_startup.go":        1,
+		"flow_runtime_readiness.go":        1,
+	})
 	if got := calls["AddFlowInstanceRouteContext"]; len(got) != 0 {
 		t.Fatalf("legacy route publication consumers remain in manager: %#v", got)
 	}
