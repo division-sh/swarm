@@ -64,7 +64,7 @@ func TestMasterReplayRequiresExactTreeCurrentTierAndAttempt(t *testing.T) {
 	if err := ValidateMasterReplay("division-sh/swarm", "refs/heads/master", "master", "tree", "tree", []MergedPR{pr}, run, checks, protected, plan); err != nil {
 		t.Fatal(err)
 	}
-	for _, mutation := range []string{"main", "direct", "ambiguous", "unmerged", "foreign_repo", "merge_sha", "tree", "new_tier", "missing_tier", "failed", "attempt", "foreign_head", "duplicate_job", "wrong_app", "wrong_protection", "wrong_run", "missing_check", "duplicate_check", "invalid_plan"} {
+	for _, mutation := range []string{"main", "direct", "ambiguous", "unmerged", "foreign_repo", "merge_sha", "tree", "new_tier", "malformed_tier", "failed", "attempt", "foreign_head", "duplicate_job", "wrong_app", "wrong_protection", "wrong_run", "missing_check", "duplicate_check", "invalid_plan"} {
 		t.Run(mutation, func(t *testing.T) {
 			candidate := pr
 			prs, reference, tree := []MergedPR{candidate}, "refs/heads/master", "tree"
@@ -91,8 +91,8 @@ func TestMasterReplayRequiresExactTreeCurrentTierAndAttempt(t *testing.T) {
 				tree = "different"
 			case "new_tier":
 				prs[0].Body = "CI-Tier: lifecycle"
-			case "missing_tier":
-				prs[0].Body = ""
+			case "malformed_tier":
+				prs[0].Body = "CI-Tier: unknown"
 			case "failed":
 				r.Conclusion = "failure"
 			case "attempt":

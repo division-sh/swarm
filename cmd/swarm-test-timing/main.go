@@ -221,8 +221,7 @@ func planCI(cfg config) error {
 		}
 		body, err = testplanning.PREventBody(raw)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "invalid PR event JSON: %v; conservative full qualification\n", err)
-			body = ""
+			return fmt.Errorf("invalid PR event JSON: %w", err)
 		}
 	}
 	profile, reason, err := policy.ResolveProfile(cfg.event, body, cfg.profile)
