@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,117 @@ import (
 type channelHintProof struct {
 	subscription *render.ReconcileSubscription
 	sequence     uint64
+}
+
+func TestChannelActivityNativeAcknowledgementCutsBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, operation := range []string{"start", "claim", "complete", "uncertain"} {
+			for _, phase := range []string{"entry_cancel", "callback_cancel", "commit_refused", "commit_ack_lost", "commit_admitted_cancel", "healthy"} {
+				t.Run(backend+"/"+operation+"/"+phase, func(t *testing.T) {
+					fixture, control := openCompletionOutcomeFixture(t, backend)
+					ctx, cancel := context.WithCancel(testAuthorActivityContext())
+					defer cancel()
+					card, continuation := newRootProposedEffectTestCard(t, fixture.authority.Target.RunID, time.Now().UTC())
+					cards := fixture.store.(decisioncard.ProposedEffectStore)
+					if err := cards.CreateProposedEffectCard(ctx, card, continuation); err != nil {
+						t.Fatal(err)
+					}
+					record := runtimepipeline.ActivityAttemptRecord{
+						RequestEventID: continuation.RequestEventID, RunID: continuation.RunID, ExecutionMode: continuation.ExecutionMode,
+						SourceEventID: continuation.SourceEventID, EntityID: continuation.EntityID, FlowInstance: continuation.FlowInstance,
+						NodeID: continuation.NodeID, HandlerEventKey: continuation.HandlerEventKey, ActivityID: continuation.ActivityID,
+						Tool: continuation.Tool, EffectClass: string(continuation.EffectClass), Attempt: 1,
+						SuccessEvent: continuation.SuccessEvent, FailureEvent: continuation.FailureEvent, InputHash: continuation.EffectContentHash,
+					}
+					journal := fixture.store.(activityStoryJournal)
+					write := journal.StartActivityAttempt
+					var predecessor runtimepipeline.ActivityAttemptRecord
+					switch operation {
+					case "claim":
+						write = journal.ClaimActivityAttemptForLoopGeneration
+					case "complete", "uncertain":
+						var inserted bool
+						var err error
+						predecessor, inserted, err = journal.StartActivityAttempt(ctx, record)
+						if err != nil || !inserted {
+							t.Fatalf("start before native terminal cut: inserted=%t error=%v", inserted, err)
+						}
+						status := runtimepipeline.ActivityAttemptStatusSucceeded
+						write = journal.CompleteActivityAttempt
+						if operation == "uncertain" {
+							status = runtimepipeline.ActivityAttemptStatusUncertain
+							write = journal.MarkActivityAttemptUncertain
+						}
+						record = activityStoryTerminal(t, predecessor, status)
+					}
+					proof := observeChannelHints(t, fixture.store.(interface {
+						SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
+					}))
+					control.phase, control.cancel, control.failure = phase, cancel, errors.New("independent native activity COMMIT failure")
+					control.statement = func(query string) bool {
+						query = strings.Join(strings.Fields(strings.ToUpper(query)), " ")
+						return strings.HasPrefix(query, "INSERT INTO ACTIVITY_ATTEMPTS (") || strings.HasPrefix(query, "UPDATE ACTIVITY_ATTEMPTS SET ")
+					}
+					control.enabled.Store(true)
+					if phase == "entry_cancel" {
+						cancel()
+					}
+					actual, acknowledged, err := write(ctx, record)
+					control.enabled.Store(false)
+					wantAck := phase == "healthy" || phase == "commit_admitted_cancel"
+					if acknowledged != wantAck {
+						t.Fatalf("native acknowledgment=%t want=%t error=%v", acknowledged, wantAck, err)
+					}
+					if wantAck {
+						if err != nil || actual.RequestEventID != record.RequestEventID {
+							t.Fatalf("acknowledged native result lost: %+v error=%v", actual, err)
+						}
+						proof.expect(t, render.ReconcileOrdinary)
+					} else {
+						if !reflect.DeepEqual(actual, runtimepipeline.ActivityAttemptRecord{}) {
+							t.Fatalf("unacknowledged native result exposed attempt: %+v", actual)
+						}
+						proof.expect(t, 0)
+						cause := control.failure
+						if phase == "entry_cancel" || phase == "callback_cancel" {
+							cause = context.Canceled
+						}
+						if !errors.Is(err, cause) {
+							t.Fatalf("native failure cause lost: %v want=%v", err, cause)
+						}
+					}
+					wantWrites := int32(1)
+					if phase == "entry_cancel" {
+						wantWrites = 0
+					}
+					if control.writes.Load() != wantWrites {
+						t.Fatalf("native cut replayed or missed exact journal write: %d want=%d", control.writes.Load(), wantWrites)
+					}
+					stored, found, readErr := journal.LoadActivityAttempt(testAuthorActivityContext(), record.RequestEventID)
+					if readErr != nil {
+						t.Fatal(readErr)
+					}
+					if wantAck || phase == "commit_ack_lost" {
+						wantStatus := "started"
+						if operation == "complete" {
+							wantStatus = "succeeded"
+						} else if operation == "uncertain" {
+							wantStatus = "uncertain"
+						}
+						if !found || stored.Status != wantStatus {
+							t.Fatalf("native COMMIT evidence not durable: %+v found=%t", stored, found)
+						}
+					} else if predecessor.RequestEventID == "" {
+						if found {
+							t.Fatalf("rolled-back start survived: %+v", stored)
+						}
+					} else if !found || !reflect.DeepEqual(predecessor, stored) {
+						t.Fatalf("rolled-back terminal cut changed predecessor: %+v found=%t", stored, found)
+					}
+				})
+			}
+		}
+	}
 }
 
 func TestChannelPostCommitActivityHintsBothStores(t *testing.T) {

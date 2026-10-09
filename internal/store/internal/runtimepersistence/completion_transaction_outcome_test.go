@@ -20,11 +20,12 @@ import (
 // The completion mutation, SQL and independent persistence readback are real.
 type completionOutcomeConnector struct {
 	driver.Connector
-	enabled atomic.Bool
-	writes  atomic.Int32
-	phase   string
-	cancel  context.CancelFunc
-	failure error
+	enabled   atomic.Bool
+	writes    atomic.Int32
+	phase     string
+	cancel    context.CancelFunc
+	failure   error
+	statement func(string) bool
 }
 
 func (c *completionOutcomeConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -50,7 +51,7 @@ func (c *completionOutcomeConn) BeginTx(ctx context.Context, opts driver.TxOptio
 
 func (c *completionOutcomeConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	result, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
-	if err == nil && completionOutcomeAgentTurnInsert(query) {
+	if err == nil && c.control.observesStatement(query) {
 		c.control.observeWrite()
 	}
 	return result, err
@@ -58,7 +59,7 @@ func (c *completionOutcomeConn) ExecContext(ctx context.Context, query string, a
 
 func (c *completionOutcomeConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	rows, err := c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
-	if err == nil && completionOutcomeAgentTurnInsert(query) {
+	if err == nil && c.control.observesStatement(query) {
 		// PostgreSQL contributes stored coordinates via INSERT RETURNING. Observe
 		// the successful native row, not query entry or an unrelated history read.
 		return &completionOutcomeRows{Rows: rows, control: c.control}, nil
@@ -69,6 +70,13 @@ func (c *completionOutcomeConn) QueryContext(ctx context.Context, query string, 
 func completionOutcomeAgentTurnInsert(query string) bool {
 	normalized := strings.Join(strings.Fields(strings.ToUpper(query)), " ")
 	return strings.HasPrefix(normalized, "INSERT INTO AGENT_TURNS (")
+}
+
+func (c *completionOutcomeConnector) observesStatement(query string) bool {
+	if c.statement != nil {
+		return c.statement(query)
+	}
+	return completionOutcomeAgentTurnInsert(query)
 }
 
 func (c *completionOutcomeConnector) observeWrite() {

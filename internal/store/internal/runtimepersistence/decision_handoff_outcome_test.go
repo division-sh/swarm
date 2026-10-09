@@ -1,12 +1,15 @@
 package runtimepersistence
 
 import (
+	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -82,6 +85,13 @@ func TestDecisionCompletionPreservesCommittedHandoffOutcome(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer registration.Release()
+				proof := observeChannelHints(t, cards.(interface {
+					SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
+				}))
+				before, err := cards.GetDecisionCard(ctx, card.CardID)
+				if err != nil {
+					t.Fatal(err)
+				}
 				if kind == "human" {
 					result, completionErr := cards.(decisioncard.HumanTaskStore).CompleteHumanTaskOutcome(ctx, card.CardID, decisionID, at)
 					if !errors.Is(completionErr, injected) || result.CardID != card.CardID || result.State != decisioncard.HumanTaskContinuationOutcomeDispatched {
@@ -95,6 +105,31 @@ func TestDecisionCompletionPreservesCommittedHandoffOutcome(t *testing.T) {
 				}
 				if submits != 1 {
 					t.Fatalf("handoff submissions=%d want=1", submits)
+				}
+				wantHint := render.ReconcileDemand(0)
+				if kind == "proposed" {
+					wantHint = render.ReconcileOrdinary
+				} else {
+					// Human outcome-dispatched is execution bookkeeping, not an
+					// input to FreezeCurrentSourceTx's human-card arm.
+					after, err := cards.GetDecisionCard(ctx, card.CardID)
+					if err != nil || !reflect.DeepEqual(before, after) {
+						t.Fatalf("human outcome completion changed rendered card input: %+v error=%v", after, err)
+					}
+				}
+				proof.expect(t, wantHint)
+				if kind == "human" {
+					if _, err := cards.(decisioncard.HumanTaskStore).CompleteHumanTaskOutcome(ctx, card.CardID, decisionID, at); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					if _, err := cards.(decisioncard.ProposedEffectStore).CompleteProposedEffectRoute(ctx, card.CardID, decisionID, at); err != nil {
+						t.Fatal(err)
+					}
+				}
+				proof.expect(t, 0)
+				if submits != 1 {
+					t.Fatalf("exact replay submitted another completion candidate: %d", submits)
 				}
 			})
 		}

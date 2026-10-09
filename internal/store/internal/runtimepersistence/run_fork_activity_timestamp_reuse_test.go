@@ -11,6 +11,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -23,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -159,6 +162,207 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 	}
 }
 
+func TestOrdinaryForkActivityReplayCardDependencyBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			for _, approved := range []bool{false, true} {
+				policy := "recorded"
+				if approved {
+					policy = "approved_effect"
+				}
+				for _, status := range []string{"succeeded", "failed", "uncertain", "started"} {
+					for _, pendingCard := range []bool{false, true} {
+						presence := "no_child_card"
+						if pendingCard {
+							presence = "pending_child_card"
+						}
+						t.Run(policy+"/"+status+"/"+presence, func(t *testing.T) {
+							child, event, sourceRecord := seedActivityEvidenceForFork(t, fixture, backend.name == "postgres", approved, status, 0, true, pendingCard)
+							original := originalCarriageForRun(t, fixture.store, event.RunID())
+							source := selectedActivityProducerSourceOptions(t, false, false, true, !approved)
+							bundle, _ := semanticview.Bundle(source)
+							ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
+							journal := fixture.store.(activityTimestampJournal)
+							sourceOwner, err := activityidentity.ParseOwnerKey(sourceRecord.NodeID)
+							if err != nil {
+								t.Fatal(err)
+							}
+							copiedRequestID := activityidentity.RequestEventID(activityidentity.Fact{
+								RunID: child.ForkRunID, SourceEventID: activityidentity.ForkLineageEventID(child.ForkRunID, event.ID()),
+								EntityID: child.ForkRunID, Owner: sourceOwner, ExecutionFlowID: ".", HandlerEventKey: sourceRecord.HandlerEventKey,
+								ActivityID: sourceRecord.ActivityID, Tool: sourceRecord.Tool, Attempt: 1,
+							})
+							if copied, found, err := journal.LoadActivityAttempt(ctx, copiedRequestID); err != nil || found {
+								t.Fatalf("ordinary materialization copied executable evidence before activation: %+v found=%t error=%v", copied, found, err)
+							}
+							beforeCards, _, err := fixture.store.(decisioncard.Store).ListDecisionCards(ctx, decisioncard.ListOptions{RunID: child.ForkRunID, Limit: 10})
+							if err != nil {
+								t.Fatal(err)
+							}
+							hints := observeChannelHints(t, fixture.store.(interface {
+								SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
+							}))
+							owner := fixture.store.(interface {
+								ActivateRunFork(context.Context, runfork.RunForkActivateRequest) (runfork.RunForkActivation, error)
+								LoadPreparedPublishEvent(context.Context, string) (bus.PreparedPublishEvent, bool, error)
+							})
+							before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
+							activation, err := owner.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
+								ForkRunID: child.ForkRunID, AllowSourceFreeze: true,
+								OriginalLoopCarriage:              original,
+								HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{},
+							})
+							if status == "started" || (approved && status == "uncertain") {
+								if err == nil {
+									t.Fatal("non-reusable historical evidence was activated")
+								}
+								if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
+									t.Fatal("refused activity replay changed persisted fork evidence")
+								}
+								hints.expect(t, 0)
+								return
+							}
+							if err != nil || !activation.Activated || activation.DeliveryEventReplay == nil || activation.DeliveryEventReplay.ReplayedDeliveryCount != 1 {
+								t.Fatalf("ordinary activity replay: %+v error=%v", activation, err)
+							}
+							wantHint := render.ReconcileDemand(0)
+							if approved || pendingCard {
+								// Source terminalization supersedes the predecessor card;
+								// historical attempt copying has no child-card dependency.
+								wantHint = render.ReconcileOrdinary
+							}
+							hints.expect(t, wantHint)
+							prepared, found, err := owner.LoadPreparedPublishEvent(ctx, deterministicRunForkReplayEventID(child.ForkRunID, event.ID()))
+							if err != nil || !found || len(prepared.DeliveryRoutes) != 1 || prepared.DeliveryRoutes[0].AgentIdentity.RunID != child.ForkRunID {
+								t.Fatalf("ordinary replay readback: %+v found=%v error=%v", prepared, found, err)
+							}
+							var payload runForkActivityRequestPayload
+							if err := json.Unmarshal(prepared.Event.Event().Payload(), &payload); err != nil {
+								t.Fatal(err)
+							}
+							activityOwner, err := activityidentity.ParseOwnerKey(payload.NodeID)
+							if err != nil {
+								t.Fatal(err)
+							}
+							fact := activityidentity.Fact{RunID: child.ForkRunID, SourceEventID: payload.SourceEventID, ParentEventID: payload.ParentEventID,
+								EntityID: payload.EntityID, Owner: activityOwner, ExecutionFlowID: payload.FlowID, HandlerEventKey: payload.HandlerEventKey,
+								ActivityID: payload.ActivityID, Tool: payload.Tool, Attempt: 1, RevisionID: payload.Generation.RevisionID}
+							if activityidentity.RequestEventID(fact) != copiedRequestID {
+								t.Fatal("ordinary replay changed the reserved historical request identity")
+							}
+							copied, found, err := journal.LoadActivityAttempt(ctx, copiedRequestID)
+							if err != nil || !found || copied.RunID != child.ForkRunID || copied.Status != sourceRecord.Status || !copied.StartedAt.Equal(sourceRecord.StartedAt) {
+								t.Fatalf("ordinary replay did not copy exact historical attempt: %+v found=%v error=%v", copied, found, err)
+							}
+							cards, cursor, err := fixture.store.(decisioncard.Store).ListDecisionCards(ctx, decisioncard.ListOptions{RunID: child.ForkRunID, Limit: 10})
+							wantCards := 0
+							if pendingCard {
+								wantCards = 1
+							}
+							if err != nil || len(cards) != wantCards || cursor != "" {
+								t.Fatalf("ordinary fork card presence: %+v cursor=%q error=%v", cards, cursor, err)
+							}
+							if !reflect.DeepEqual(beforeCards, cards) {
+								t.Fatal("ordinary replay changed materialized pending-card authority")
+							}
+							if pendingCard {
+								pending, err := fixture.store.(decisioncard.ProposedEffectStore).LoadProposedEffectContinuation(ctx, cards[0].CardID)
+								if err != nil || pending.RunID != child.ForkRunID || pending.RequestEventID == copied.RequestEventID {
+									t.Fatalf("recorded copy was confused with current card authority: %+v error=%v", pending, err)
+								}
+								if current, found, err := journal.LoadActivityAttempt(ctx, pending.RequestEventID); err != nil || found {
+									t.Fatalf("fresh pending request inherited historical attempt: %+v found=%t error=%v", current, found, err)
+								}
+								readback, err := fixture.store.(decisioncard.ProposedEffectStore).ProposedEffectReadback(ctx, cards[0].CardID)
+								if err != nil || readback.DispatchState != "held" {
+									t.Fatalf("pending fork card became dispatchable through historical copy: %+v error=%v", readback, err)
+								}
+							}
+							sourceAfter, found, err := journal.LoadActivityAttempt(ctx, sourceRecord.RequestEventID)
+							if err != nil || !found || !reflect.DeepEqual(sourceRecord, sourceAfter) {
+								t.Fatalf("ordinary replay changed source attempt: %+v found=%v error=%v", sourceAfter, found, err)
+							}
+						})
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSelectedForkRecordedActivityCardDependencyBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			for _, approved := range []bool{false, true} {
+				policy := "recorded"
+				if approved {
+					policy = "approved_effect"
+				}
+				t.Run(policy, func(t *testing.T) {
+					child, event, sourceRecord := seedActivityEvidenceForFork(t, fixture, backend.name == "postgres", approved, "succeeded", 0, false, true)
+					ctx := testAuthorActivityContext()
+					cards := fixture.store.(decisioncard.ProposedEffectStore)
+					before, cursor, err := fixture.store.(decisioncard.Store).ListDecisionCards(ctx, decisioncard.ListOptions{RunID: child.ForkRunID, Limit: 10})
+					if err != nil || cursor != "" || len(before) != 1 {
+						t.Fatalf("selected materialization omitted pending card: %+v cursor=%q error=%v", before, cursor, err)
+					}
+					pending, err := cards.LoadProposedEffectContinuation(ctx, before[0].CardID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					journal := fixture.store.(activityTimestampJournal)
+					if current, found, err := journal.LoadActivityAttempt(ctx, pending.RequestEventID); err != nil || found {
+						t.Fatalf("pending selected request inherited attempt before preparation: %+v found=%t error=%v", current, found, err)
+					}
+					proof := observeChannelHints(t, fixture.store.(interface {
+						SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
+					}))
+					store := fixture.store.(selectedActivityProjectionStore)
+					loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, fixture.store, event.RunID()))
+					if err != nil || len(loaded) != 1 {
+						t.Fatalf("selected recorded preparation: %+v error=%v", loaded, err)
+					}
+					proof.expect(t, 0)
+					var payload runForkActivityRequestPayload
+					if err := json.Unmarshal(loaded[0].Payload, &payload); err != nil {
+						t.Fatal(err)
+					}
+					owner, err := activityidentity.ParseOwnerKey(payload.NodeID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					copiedID := activityidentity.RequestEventID(activityidentity.Fact{
+						RunID: child.ForkRunID, SourceEventID: payload.SourceEventID, ParentEventID: payload.ParentEventID,
+						EntityID: payload.EntityID, Owner: owner, ExecutionFlowID: payload.FlowID, HandlerEventKey: payload.HandlerEventKey,
+						ActivityID: payload.ActivityID, Tool: payload.Tool, Attempt: 1, RevisionID: payload.Generation.RevisionID,
+					})
+					copied, found, err := journal.LoadActivityAttempt(ctx, copiedID)
+					if err != nil || !found || copied.RunID != child.ForkRunID || copied.Status != sourceRecord.Status || copiedID == pending.RequestEventID {
+						t.Fatalf("selected copy confused current card authority: %+v pending=%+v found=%t error=%v", copied, pending, found, err)
+					}
+					if current, found, err := journal.LoadActivityAttempt(ctx, pending.RequestEventID); err != nil || found {
+						t.Fatalf("selected preparation populated pending request: %+v found=%t error=%v", current, found, err)
+					}
+					after, cursor, err := fixture.store.(decisioncard.Store).ListDecisionCards(ctx, decisioncard.ListOptions{RunID: child.ForkRunID, Limit: 10})
+					if err != nil || cursor != "" || !reflect.DeepEqual(before, after) {
+						t.Fatalf("selected preparation changed live card inputs: %+v cursor=%q error=%v", after, cursor, err)
+					}
+					readback, err := cards.ProposedEffectReadback(ctx, pending.CardID)
+					if err != nil || readback.RequestEventID != pending.RequestEventID || readback.DispatchState != "held" {
+						t.Fatalf("selected pending card borrowed recorded dispatch: %+v error=%v", readback, err)
+					}
+					sourceAfter, found, err := journal.LoadActivityAttempt(ctx, sourceRecord.RequestEventID)
+					if err != nil || !found || !reflect.DeepEqual(sourceRecord, sourceAfter) {
+						t.Fatalf("selected copy changed predecessor evidence: %+v found=%t error=%v", sourceAfter, found, err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestRunForkActivityTimestampRejectsIncompleteReuseBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
@@ -249,17 +453,35 @@ func seedActivityTimestampReuse(t *testing.T, fixture authorActivityReceiptFixtu
 // Loop state is explicit fixture evidence; attempt writes use the real journal.
 // Ordinary loop execution is proved separately by the served/container journeys.
 func seedActivityEvidenceReuse(t *testing.T, fixture authorActivityReceiptFixture, postgres, approved bool, status string, loopAttempt int) (runfork.RunForkMaterialization, events.Event, runtimepipeline.ActivityAttemptRecord) {
+	return seedActivityEvidenceForFork(t, fixture, postgres, approved, status, loopAttempt, false, false)
+}
+
+func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixture, postgres, approved bool, status string, loopAttempt int, ordinaryReplay, pendingCard bool) (runfork.RunForkMaterialization, events.Event, runtimepipeline.ActivityAttemptRecord) {
 	t.Helper()
 	runID, parentID := uuid.NewString(), uuid.NewString()
 	entityID := ""
 	at := time.Date(2026, 7, 14, 12, 1, 0, 0, time.UTC)
+	if ordinaryReplay || pendingCard {
+		// Pending cards retain their cadence across materialization. Use a
+		// current cut, rather than silently extending a historical deadline.
+		at = time.Now().UTC().Add(-5 * time.Minute).Truncate(time.Microsecond)
+	}
 	declarations := selectedActivityProducerSourceWithLoops(t, false, loopAttempt > 0)
+	if ordinaryReplay && !approved {
+		declarations = selectedActivityProducerSourceOptions(t, false, false, true, true)
+	}
 	ctx := seedSelectedActivitySourceRun(t, fixture, runID, declarations)
 	flow, instance := "flow-a", "flow-a"
 	node := mustPersistenceNode(flow, "writer")
 	owner := activityidentity.MustNodeOwner(node)
 	policy := runtimecontracts.ActivityForkReuseRecordedResult
 	activity, tool, handler, success, failure := "commit", "provider.write", "review.accepted", "flow-a/commit.succeeded", "flow-a/commit.failed"
+	if ordinaryReplay && !approved {
+		flow, instance, entityID = ".", runID, runID
+		node = mustPersistenceRootNode("writer")
+		owner = activityidentity.MustNodeOwner(node)
+		success, failure = "commit.succeeded", "commit.failed"
+	}
 	var card decisioncard.Card
 	var continuation decisioncard.ProposedEffectContinuation
 	var source events.RoutingSource
@@ -286,10 +508,14 @@ func seedActivityEvidenceReuse(t *testing.T, fixture authorActivityReceiptFixtur
 	constructed := constructSelectedActivityProducerFixture(t, ctx, fixture.store.(agentFixtureFlowStore), declarations, parent, flow, at)
 	instance, entityID = constructed.InstancePath, constructed.EntityID
 	if !approved {
-		var err error
-		source, err = pinrouting.AdmitNodeExecutionRoutingSource(declarations, node, flow, events.RouteIdentity{FlowID: flow, FlowInstance: instance, EntityID: entityID})
-		if err != nil {
-			t.Fatal(err)
+		if ordinaryReplay {
+			source = eventtest.RootRoutingSource(runID)
+		} else {
+			var err error
+			source, err = pinrouting.AdmitNodeExecutionRoutingSource(declarations, node, flow, events.RouteIdentity{FlowID: flow, FlowInstance: instance, EntityID: entityID})
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	var generation attemptgeneration.Generation
@@ -335,6 +561,17 @@ func seedActivityEvidenceReuse(t *testing.T, fixture authorActivityReceiptFixtur
 			t.Fatal(err)
 		}
 	}
+	if pendingCard {
+		pendingAt := at.Add(time.Minute)
+		pending, continuation := newDeclaredRootActivityCard(t, runID, pendingAt, declarations)
+		parent := eventtest.ExistingRunRootIngress(continuation.SourceEventID, "activity.seeded", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, pendingAt)
+		if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, parent); err != nil {
+			t.Fatal(err)
+		}
+		if err := fixture.store.(decisioncard.ProposedEffectStore).CreateProposedEffectCard(ctx, pending, continuation); err != nil {
+			t.Fatal(err)
+		}
+	}
 	payload, err := json.Marshal(map[string]any{"activity_id": activity, "tool": tool, "input": input, "effect_class": "non_idempotent_write", "fork_policy": string(policy),
 		"success_event": success, "failure_event": failure, "attempt": 1, "entity_id": entityID, "node_id": owner.Key(), "flow_id": flow, "flow_instance": instance,
 		"handler_event_key": handler, "source_run_id": runID, "source_event_id": parentID, "loop_generation": generation, "loop_stage": loopStage})
@@ -343,7 +580,12 @@ func seedActivityEvidenceReuse(t *testing.T, fixture authorActivityReceiptFixtur
 	}
 	event := eventtest.ChildForProducerWithRoutingSource(requestID, "platform.activity_requested", eventtest.Producer(events.EventProducerPlatform, "workflow"), "", payload, 1,
 		events.EventLineage{RunID: runID, ParentEventID: parentID, ExecutionMode: executionmode.Live}, events.EventEnvelope{}, source, at.Add(2*time.Minute))
-	if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, nil); err != nil {
+	var routes []events.DeliveryRoute
+	if ordinaryReplay {
+		agent := bustest.IdentityForRun(t, runID, "activity-replay", "")
+		routes = []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(agent.AgentID()), AgentIdentity: agent}}
+	}
+	if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, routes); err != nil {
 		t.Fatal(err)
 	}
 	if approved {
@@ -391,7 +633,18 @@ func seedActivityEvidenceReuse(t *testing.T, fixture authorActivityReceiptFixtur
 		}
 	}
 	fixture.advance()
-	child := materializeSelectedActivityFixture(t, ctx, fixture.store.(selectedActivityProjectionStore), runID, event.ID())
+	var child runfork.RunForkMaterialization
+	if ordinaryReplay {
+		owner := fixture.store.(interface {
+			MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+		})
+		child, err = owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: event.ID()})
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		child = materializeSelectedActivityFixture(t, ctx, fixture.store.(selectedActivityProjectionStore), runID, event.ID())
+	}
 	wantEntities := 2
 	if child.MaterializedEntityCount != wantEntities {
 		t.Fatalf("producer materialization count=%d want=%d", child.MaterializedEntityCount, wantEntities)

@@ -517,8 +517,8 @@ Process-owned channel worker remains the only scheduling owner.
 | P69 M | activityjournal.Claim -> ClaimActivityAttemptForLoopGeneration -> each existing Run*.Value | Move to same handoff after real loop admission; stale generation/run refusal and exact claim replay stay quiet. |
 | P70 M | activityjournal.Complete -> each CompleteActivityAttempt outer Run*.Value | Move actual started-to-terminal row-change fact plus exact linkage to acknowledged finalizer. Its public bool currently means acknowledgment, not changed; preserve that contract. |
 | P71 M | activityjournal.MarkUncertain -> each MarkActivityAttemptUncertain outer Run*.Value | Move actual row change through existing finalizer; started/terminal/replay/refusal and exact mode remain fail-closed. No redispatch. |
-| P72 M, conditional linkage | copyRunForkActivityAttemptEvidence -> prepareRunForkSelectedContractSourceEvent -> PG LoadRunForkSelectedContractSourceEvents (ReadCommitted RunPostgresWithOptions) or SQLite counterpart (RunSQLite), each Acknowledged | Carry actual insert plus fork-local exact dependency fact to these named preparation COMMIT owners. Prove linked/no-card historical copies, not assumed blanket relevance. Existing loadRunForkProposedEffectAuthority answers predecessor approval/suppression and is not a replacement current-card predicate. |
-| P73 M, conditional linkage | same borrowed preparation reached by projectRunForkReplayEvent -> applyRunForkDeliveryEventReplay -> ordinary ActivateRunFork PG/SQLite outer Run* | Carry copied-attempt fact to the activation finalizer in addition to P33 source-freeze cards. No notification inside borrowed copy/preparation/replay. Linked/no-card reachability remains required execution proof, not credited as same seam. |
+| P72 D, execution-probed | copyRunForkActivityAttemptEvidence -> prepareRunForkSelectedContractSourceEvent -> PG LoadRunForkSelectedContractSourceEvents (ReadCommitted RunPostgresWithOptions) or SQLite counterpart (RunSQLite), each Acknowledged | Historical copied request identity is distinct from a fresh materialized pending card's reserved request. The both-store selected preparation proof below compares exact identities, absence before/after, held dispatch and immutable card/source evidence. No historical-copy hint is added; actual materialized cards are P32, and subsequent linked journal writes are P68-P71. Predecessor approval/suppression is not current-card linkage. |
+| P73 D for copied evidence; P33 M retained | same borrowed preparation reached by projectRunForkReplayEvent -> applyRunForkDeliveryEventReplay -> ordinary ActivateRunFork PG/SQLite outer Run* | The both-store ordinary activation/replay matrix below proves the same identity separation, separately from P72, with no-card and real pending-card controls. Source-card terminalization still carries its actual P33 change to the activation finalizer. No notification inside borrowed copy/preparation/replay and no extra hint for copying historical evidence. |
 
 Runtime pipeline activity_engine.go (live and replay), persistence_ports.go and
 activity_journal.go already consume the canonical activity methods; generated
@@ -776,3 +776,83 @@ It is not a review-ready/pushed runtime head: ordinary fork-copy replay/linkage,
 native outcome cuts, complete P/M/Q execution and matched costs remain open.
 Next qualification stays core plus the six named channel units/supplements,
 then exact-head hosted full. No local full or server2 slot is requested.
+
+## Ordinary Fork And Native Outcome Proof Amendment
+
+This test-only amendment follows the independent consolidated checkpoint
+6088824575. It resolves the conditional P72/P73 classification separately;
+it does not add a producer, change an activity/fork contract, or infer a
+worker input from the existence of an activity row. Production code remains
+the reviewed e7ec69633 tree.
+
+- P72: TestRunForkActivityTimestampRecordedReuseBothStores retains its16
+  original status/policy/store cells and no-card/source-immutability/retry
+  assertions. TestSelectedForkRecordedActivityCardDependencyBothStores adds
+  four real selected-preparation cells with a pending fork-local proposed
+  card present. Before preparation its reserved request has no attempt.
+  After the native outer commit, the exact copied request is DIFFERENT;
+  the pending request still has no attempt, its dispatch is held, and the
+  card and predecessor journal evidence are unchanged. Preparation publishes
+  no hint. This is a different historical-evidence concept, not a missing
+  live-card notification or an assumed initial scan.
+- P73: TestOrdinaryForkActivityReplayCardDependencyBothStores has32 cells:
+  both stores x recorded/approved-effect policy x succeeded/failed/uncertain/
+  started evidence x no-card/pending-card presence. Actual ordinary materialize
+  and ActivateRunFork with HistoricalReplayExecutionAdmitter reconstruct one
+  exact replay delivery. The copied deterministic request is absent before
+  activation and present afterward, and its identity matches the admitted
+  replay payload. Any pending card retains a distinct reserved request,
+  absent attempt and held dispatch before/after the activation COMMIT. Source
+  attempts remain unchanged. Started evidence and approved uncertain evidence
+  refuse with whole execution snapshot unchanged and no hint. Actual source
+  card terminalization emits the existing P33 ordinary hint; without such
+  cards historical copying alone emits none. No borrowed fork notifier was
+  introduced. These selected-store tests do not claim a public model/tool call.
+- Current live dependency remains P68-P71: the existing linked/readback,
+  constructed-header loop, and real public started-to-succeeded card-edit
+  receipts above prove actual current-card notification. A fresh held card
+  and historical recorded result are deliberately not interchangeable.
+
+Native cuts use the existing completionOutcomeConnector real-driver test
+owner. Its optional exact-statement predicate observes actual activity
+INSERT/UPDATE success (including PostgreSQL RETURNING row consumption); the
+original completion tests keep their agent-turn predicate. SQL, native
+transactions, finalizers and independent journal readback are real. No new
+native driver/protocol, SQL test observer port or production hook is added.
+
+- TestChannelActivityNativeAcknowledgementCutsBothStores has48 cells: both
+  stores x Start/Claim/Complete/MarkUncertain x entry cancellation, cancellation
+  after the actual write, refused COMMIT, lost COMMIT acknowledgment, admitted
+  COMMIT cancellation and healthy COMMIT. Each actual writer runs once (zero
+  at refused entry). Cancellation/refusal rolls back, preserves predecessor
+  evidence and emits no hint. Lost acknowledgment follows a real native
+  COMMIT: the row is durable, but public result/ack and hint are withheld and
+  the independent cause is retained. Acknowledged commits preserve their
+  public result and ordinary hint, including cancellation after admission.
+  The COMMIT-return fault models missing acknowledgment, not network wire loss.
+  The Claim cells use the supported no-loop journal entry; the separately
+  retained constructed-header test supplies valid/stale loop-generation proof.
+- TestDecisionCompletionPreservesCommittedHandoffOutcome retains all four
+  both-store human/proposed result/cause/candidate assertions. It now observes
+  the actual finalizer after native COMMIT and the failing candidate handoff:
+  proposed completion still hints and retains the cleanup cause. Exact replay
+  is quiet and submits no second candidate. Human outcome-dispatched changes
+  execution bookkeeping, not its frozen-card inputs; the exact card is
+  unchanged and no hint is required. This is P29's existing event-only D arm,
+  not a new missed producer or a swallowed cleanup failure.
+- The earlier ActivityJournalCleanupPersistenceFault wrapper remains explicitly
+  synthetic post-acknowledgment consumer evidence, NOT a native fault-cut
+  receipt. The new native cuts and actual handoff proof do not relabel it.
+
+Normal focused fork/handoff controls PASS18.331s (32 ordinary,4 selected,4
+handoff cells); native journal cuts separately passed all48 cells. The first
+diagnostics correctly rejected fixture route history and a foreign authored
+bundle context. The expanded pending-card fixture then rejected expired
+historical cadence: it now uses a current fork cut, without extending any
+deadline. The initial human-handoff hint expectation was wrong; exact frozen
+inputs and native readback prove the D classification above. These fixture
+counterexamples are not recorded as runtime defects or waived qualification.
+
+Race repetitions, fresh all-package guards/census and clean-head core plus
+six unchanged channel units/named supplements remain pending at this amendment.
+No PR, final audit, performance savings or whole-class closure is claimed yet.
