@@ -38,17 +38,23 @@ func mutationTestRunner(t *testing.T, db *sql.DB, commits ...bool) nativeRunner 
 			if err != nil {
 				return false, err
 			}
-			if err := write(ctx, tx); err != nil {
+			txctx, retire := privateactivity.BindTransaction(ctx, ctx, tx, privateactivity.DialectSQLite)
+			if err := write(txctx, tx); err != nil {
 				_ = tx.Rollback()
+				retire()
 				return false, err
 			}
 			if !commit {
-				if err := tx.Rollback(); err != nil {
+				err := tx.Rollback()
+				retire()
+				if err != nil {
 					return false, err
 				}
 				continue
 			}
-			if err := tx.Commit(); err != nil {
+			err = tx.Commit()
+			retire()
+			if err != nil {
 				return false, err
 			}
 			return true, nil
@@ -239,7 +245,7 @@ func TestWholeParentDeletionHasNamedEarlyStoryCut(t *testing.T) {
 			return "deleted", err
 		})
 	if !result.Acknowledged() || result.Err() != nil {
-		t.Fatalf("named whole-parent deletion failed: %+v", result)
+		t.Fatalf("named whole-parent deletion failed: %+v err=%v", result, result.Err())
 	}
 	if value, ok := result.Value(); !ok || value != "deleted" {
 		t.Fatalf("whole-parent result = %q, %v", value, ok)
@@ -307,7 +313,7 @@ func TestForkDiscardKindFollowsDurableRetentionEvidence(t *testing.T) {
 				return attempt.kind, nil
 			})
 		if result.Err() != nil || !result.Acknowledged() {
-			t.Fatalf("selected fork discard kind failed: %+v", result)
+			t.Fatalf("selected fork discard kind failed: %+v err=%v", result, result.Err())
 		}
 	}
 }

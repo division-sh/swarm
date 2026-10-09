@@ -144,6 +144,10 @@ func TestRunForkExactFactsConcurrentBothStores(t *testing.T) {
 					}
 				}
 				for _, f := range fixtures {
+					snapshot, err := s.selected.(runLifecycleCandidateParityStore).LoadRunLifecycleSnapshot(ctx, f.runID)
+					if err != nil || snapshot.EventCount != 3 {
+						t.Fatalf("concurrent event counter=%d, want 3; err=%v", snapshot.EventCount, err)
+					}
 					seen := map[int64]bool{}
 					for _, result := range results {
 						capture := result.result[f.runID]

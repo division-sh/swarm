@@ -18883,7 +18883,9 @@ platform_tables:
         same native transaction as the event work, never by reading and overwriting an old total or recounting events.
         Exact duplicates, runless events, and outcomes without event rows contribute zero. Transaction-local
         pending deltas aggregate and flush by physical run identity: PostgreSQL UUID aliases share one projection,
-        while distinct SQLite TEXT keys never collapse. First-contribution order and payload spelling are unchanged.
+        while distinct SQLite TEXT keys never collapse. Revision finalization applies pending counter deltas after
+        its existing canonical parent and revision-head locks, before historical projections; counter contributions
+        never introduce an earlier multi-run row-lock order. First-contribution order and payload spelling are unchanged.
         Lifecycle, history, and result snapshots preserve the transaction-visible exact count, and rollback discards both event work and
         counter changes. Public entity_count remains derived from distinct entity_state.entity_id values for the run
         and is not stored on runs.'

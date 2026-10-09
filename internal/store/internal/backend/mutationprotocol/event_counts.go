@@ -52,6 +52,17 @@ func (a *Attempt) flushEventCount(ctx context.Context, runID string) error {
 	return nil
 }
 
+func (a *Attempt) pendingEventCounts() []counterprojection.Delta {
+	deltas := make([]counterprojection.Delta, 0, len(a.eventCountOrder))
+	for _, runID := range a.eventCountOrder {
+		key, _ := physicalRunKey(a.dialect, runID)
+		if delta := a.eventCounts[key]; delta != 0 {
+			deltas = append(deltas, counterprojection.Delta{RunID: runID, Amount: delta})
+		}
+	}
+	return deltas
+}
+
 // FlushEventCounts preserves visibility at explicit result/history boundaries.
 // A later flush applies only physical changes made after the preceding one.
 func (a *Attempt) FlushEventCounts(ctx context.Context) error {
