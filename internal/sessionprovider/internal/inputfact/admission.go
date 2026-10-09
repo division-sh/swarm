@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
@@ -20,10 +21,13 @@ type Capture struct {
 	BindingRevision  int64
 	PublicationRunID string
 	Body             []byte
+	OriginalCapture  []byte
 	ReceivedAt       time.Time
 	Generation       triggergeneration.Generation
 	Context          context.Context
 	Release          func()
+	RunCurrent       func(context.Context) error
+	NativeCurrent    func() bool
 }
 
 type admittedInput struct {
@@ -37,11 +41,12 @@ type Admission struct{ value *admittedInput }
 // and the issuer census prohibit raw-data construction by admission consumers.
 func SealOwnedCapture(capture Capture) Admission {
 	capture.Body = bytes.Clone(capture.Body)
+	capture.OriginalCapture = bytes.Clone(capture.OriginalCapture)
 	return Admission{value: &admittedInput{capture: capture}}
 }
 
 func (a Admission) Validate(ctx context.Context, provider string, generation triggergeneration.Generation) error {
-	if a.value == nil || ctx == nil || ctx.Err() != nil || a.value.capture.Context == nil || a.value.capture.Context.Err() != nil ||
+	if !a.LifetimeCurrent(ctx) ||
 		a.value.capture.Store == nil || a.value.capture.Release == nil || provider != a.value.capture.Responsibility.Provider ||
 		!generation.Equal(a.value.capture.Generation) {
 		return fmt.Errorf("exact current native input admission is required")
@@ -50,10 +55,17 @@ func (a Admission) Validate(ctx context.Context, provider string, generation tri
 	if err != nil {
 		return err
 	}
-	if !current || ctx.Err() != nil || a.value.capture.Context.Err() != nil {
+	if !current || !a.LifetimeCurrent(ctx) {
 		return fmt.Errorf("native input responsibility is no longer current")
 	}
 	return nil
+}
+
+// LifetimeCurrent never reads the selected store; mutation owners can use it
+// while holding their own SQL transaction without a read-through deadlock.
+func (a Admission) LifetimeCurrent(ctx context.Context) bool {
+	return a.value != nil && ctx != nil && ctx.Err() == nil && a.value.capture.Context != nil && a.value.capture.Context.Err() == nil &&
+		a.value.capture.NativeCurrent != nil && a.value.capture.NativeCurrent()
 }
 
 func (a Admission) RequireBusiness(ctx context.Context, provider string, generation triggergeneration.Generation) error {
@@ -77,7 +89,32 @@ func (a Admission) RequireBusiness(ctx context.Context, provider string, generat
 		ctx.Err() != nil || capture.Context.Err() != nil {
 		return fmt.Errorf("native business input contradicts its original binding")
 	}
-	return nil
+	bindings, ok := capture.Store.(interface {
+		ListOperatorChannelBindings(context.Context, string) ([]operatorchannel.Binding, error)
+	})
+	if !ok {
+		return fmt.Errorf("native business input has no canonical identity binding owner")
+	}
+	rows, err := bindings.ListOperatorChannelBindings(ctx, op.PrincipalID)
+	if err != nil {
+		return err
+	}
+	matched := 0
+	for _, binding := range rows {
+		if binding.Interface.Key() == op.Interface.Key() && binding.PrincipalID == op.PrincipalID &&
+			binding.Status == operatorchannel.BindingCurrent && binding.Revision == capture.BindingRevision &&
+			binding.ConversationRef == activation.ConversationRef && binding.ProofID == activation.ProofID && binding.ProofRevision == activation.ProofRevision &&
+			binding.ProviderAuthority.Kind == operatorchannel.ProviderAuthoritySession && binding.ProviderAuthority.Session == capture.Responsibility.SessionAccount {
+			matched++
+		}
+	}
+	if matched != 1 || ctx.Err() != nil || capture.Context.Err() != nil {
+		return fmt.Errorf("native business input no longer owns its original operator binding")
+	}
+	if capture.RunCurrent == nil {
+		return fmt.Errorf("native business input has no exact selected run owner")
+	}
+	return capture.RunCurrent(ctx)
 }
 
 func (a Admission) Body() []byte {
@@ -85,6 +122,13 @@ func (a Admission) Body() []byte {
 		return nil
 	}
 	return bytes.Clone(a.value.capture.Body)
+}
+
+func (a Admission) OriginalCapture() []byte {
+	if a.value == nil {
+		return nil
+	}
+	return bytes.Clone(a.value.capture.OriginalCapture)
 }
 func (a Admission) ReceivedAt() time.Time {
 	if a.value == nil {

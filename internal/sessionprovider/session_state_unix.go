@@ -162,6 +162,13 @@ func (s *sessionState) currentOccurrence() *clientOccurrence {
 	return s.occurrence
 }
 
+func (s *sessionState) ownsConnectedOccurrence(ctx context.Context, occurrence *clientOccurrence) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return ctx != nil && ctx.Err() == nil && occurrence != nil && !s.closed && !s.retiring && s.occurrence == occurrence &&
+		occurrence.ctx.Err() == nil && occurrence.client.IsConnected() && occurrence.client.IsLoggedIn()
+}
+
 func (s *sessionState) retireOccurrence(ctx context.Context) error {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()

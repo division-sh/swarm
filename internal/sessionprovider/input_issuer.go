@@ -2,10 +2,13 @@ package sessionprovider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/sessionprovider/input"
 	"github.com/division-sh/swarm/internal/sessionprovider/internal/inputfact"
 )
@@ -71,9 +74,40 @@ func (o *sessionInputOwner) admit(ctx context.Context, reference SessionInputRef
 		return input.Admission{}, fmt.Errorf("native capture responsibility is no longer current")
 	}
 	ownedContext, cancel := context.WithCancel(native.Context)
+	original, err := json.Marshal(native.OriginalCapture)
+	if err != nil {
+		cancel()
+		return input.Admission{}, err
+	}
 	retained = true
 	return inputfact.SealOwnedCapture(inputfact.Capture{Store: o.store, Responsibility: responsibility,
 		Scope: native.Scope, BindingRevision: native.BindingRevision, PublicationRunID: native.PublicationBinding.RunID,
-		Body: native.Body, ReceivedAt: native.ReceivedAt, Generation: native.SourceContext.CatalogGeneration, Context: ownedContext,
-		Release: func() { cancel(); native.Release() }}), nil
+		Body: native.Body, OriginalCapture: original, ReceivedAt: native.ReceivedAt, Generation: native.SourceContext.CatalogGeneration, Context: ownedContext,
+		Release: func() { cancel(); native.Release() }, NativeCurrent: native.NativeCurrent, RunCurrent: o.businessRunOwner(native)}), nil
+}
+
+func (o *sessionInputOwner) businessRunOwner(native nativeSessionInput) func(context.Context) error {
+	if native.Scope != channelonboarding.SessionInputBusiness {
+		return nil
+	}
+	return func(ctx context.Context) error {
+		reader, ok := o.store.(interface {
+			LoadReconciledStandingService(context.Context, pipeline.StandingServiceCandidate) (pipeline.StandingServiceReconciliation, bool, error)
+		})
+		source := native.OwnedSource
+		target, err := packs.ParseChannelRegistrationTarget(native.TargetSelector)
+		if !ok || source.Validate() != nil || err != nil || source.BundleHash() != native.SourceContext.Coordinate.BundleHash {
+			return fmt.Errorf("native business input requires its exact owned source and standing owner")
+		}
+		standing, found, err := reader.LoadReconciledStandingService(ctx, pipeline.StandingServiceCandidate{
+			ServiceID: native.PublicationBinding.ServiceID, FlowPath: target.FlowPath, BindingEnabled: true, Source: source})
+		if err != nil {
+			return err
+		}
+		if !found || standing.RunID != native.PublicationBinding.RunID || standing.Generation != native.PublicationBinding.Generation ||
+			standing.EffectiveState != "active" || standing.PublicationSequence < 1 || !standing.RestartDisposition.Executable() {
+			return fmt.Errorf("native business input no longer owns its original selected run")
+		}
+		return nil
+	}
 }

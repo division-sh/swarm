@@ -115,6 +115,12 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			SpecRef:        "platform-spec.yaml#tool_model.hitl_channel_pack_interface.capability_model.session_capture_publication",
 			Reason:         "connection-private capture staging and retirement mutate only whatsapp_incoming_capture; executable publication and committed receipt verification remain selected-store owner calls",
 		},
+		"internal/sessionprovider/claim_recovery.go": {
+			Classification: rawSQLProviderStateBoundary,
+			Issue:          2577,
+			SpecRef:        "platform-spec.yaml#tool_model.hitl_channel_pack_interface.capability_model.session_operator_claim",
+			Reason:         "connection-private setup capture retirement deletes only the validated original spool row after exact selected-store claim receipt verification; it grants no fresh or recovery execution authority",
+		},
 		"internal/sessionprovider/session_state_unix.go": {
 			Classification: rawSQLProviderStateBoundary,
 			Issue:          2577,

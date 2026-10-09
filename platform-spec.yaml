@@ -11324,12 +11324,37 @@ tool_model:
         but can never mint business PublicationAdmission. Business sealing requires the retained explicit business
         scope, positive exact activation and binding revisions, original validated publication run, exact executable
         source/target and current activation responsibility; target positivity or onboarding phase is not that scope.
+        It also consumes the selected identity binding's current status, exact revision, principal, interface,
+        conversation, proof and provider account, rather than accepting a revision copied into activation history.
+        The original selected standing run and generation must still belong to that exact source and declaration.
         The complete declaration coordinate and catalog generation are frozen by capture before SDK acknowledgment;
         input issuance consumes those originals and accepts no replacement source or generation from a caller factory.
         Fresh input is not unfinished recovery:
         original recovery must verify resumable retained authority without requiring a dead process occurrence or
         adopting replacement context. Native and selected-owner component fixtures do not alone establish supported
         public dispatch, acknowledgment ordering or capture-to-publication closure.
+      session_identity_admission: >
+        Retained session account records are provenance, not executable permission. The private concrete native
+        lifecycle owner issues an opaque account admission only after checking its original selected operation,
+        actual paired private database and current connected SDK occurrence. A read-only Go-internal facade exposes
+        no raw constructor. Identity begin, confirmation and saved-proof restoration re-admit only that exact retained
+        account; no new account, admission revision or credential value is adopted. Begin and nonterminal confirmation
+        hold the admission through mutation and recheck its original parent revision in the selected transaction.
+        Source retirement, release, cancellation and disconnection refuse new execution. Historical terminal replay
+        and private proof codecs retain provenance without serializing the live admission. Credential-only providers
+        continue to consume their exact credential-snapshot seals and cannot carry an inactive native admission.
+      session_operator_claim: >
+        Declaration-first onboarding consumes original native capture bytes through the verified trigger BODY and
+        the exact compiled channel text mapping. The closed native claim fact retains the original parent operation
+        and revision, capture receipt time, content/scope fingerprint and native lifetime. The selected-store
+        operator-channel claim owner commits it without synthesizing a standing run, publishing business events,
+        accepting a caller text DTO as authority or calling a root-store reader while holding its SQL transaction.
+        Receipt identity is the operation-scoped session-operator-claim-v1 hash of parent identity and the canonical
+        captured provider-event key, represented as a namespace-OID UUID. Receipt reconciliation uses the committed
+        original fingerprint and disposition only: it can retire identical captured setup work after SDK retirement
+        or database reopen without making the old occurrence live, reissuing the old input as business, repeating a
+        claim, or changing the original receipt time. Missing history, conflict, corruption and I/O failures retain
+        the pending capture. Uncommitted input cannot adopt an advanced parent revision.
       session_incoming_sdk_projection: >
         The concrete WhatsApp input adapter projects supported public SDK message, text-edit and revoke facts into
         a defensive provider payload before private capture. Transport chat and sender facts determine conversation
@@ -16802,7 +16827,11 @@ platform_tables:
       description: >-
         Immutable selected-store disposition for every challenge-shaped provider fact admitted by the operator-channel
         owner. Accepted setup claims and rejected/expired/wrong-target claims are named and retained. The receipt commits
-        in the inbound publication transaction; accepted setup facts publish zero raw or normalized business events.
+        in the inbound publication transaction for webhooks. Session onboarding claims instead commit through the same
+        selected-store claim owner without a standing run or business publication, using a closed native input fact,
+        exact parent revision and retained original capture fingerprint. Accepted setup facts publish zero raw or
+        normalized business events. Historical receipt reconciliation verifies original evidence and grants no new
+        execution authority after retirement or restart.
       ddl: |
         CREATE TABLE operator_channel_claim_receipts (
             publication_id UUID PRIMARY KEY,
@@ -16813,6 +16842,8 @@ platform_tables:
             operation_id UUID REFERENCES operator_channel_operations(operation_id),
             disposition TEXT NOT NULL CHECK (disposition IN ('consumed_by_binding','rejected_binding_claim')),
             reason TEXT NOT NULL,
+            provider_authorization TEXT NOT NULL,
+            native_capture_fingerprint TEXT,
             recorded_at TIMESTAMPTZ NOT NULL,
             UNIQUE (provider, provider_event_id, interface_key)
         );

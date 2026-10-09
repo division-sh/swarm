@@ -3,10 +3,10 @@ package operatorchannel
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"github.com/google/uuid"
 )
 
@@ -19,21 +19,7 @@ const (
 
 // SessionAccountAdmission identifies the admitted provider account, not the
 // human operator, provider-private keys, or a current connection occurrence.
-type SessionAccountAdmission struct {
-	Provider     string `json:"provider"`
-	ConnectionID string `json:"connection_id"`
-	AccountRef   string `json:"account_reference"`
-	AdmissionID  string `json:"admission_id"`
-	Revision     int64  `json:"admission_revision"`
-}
-
-func (s SessionAccountAdmission) Validate() error {
-	if strings.TrimSpace(s.Provider) == "" || strings.TrimSpace(s.AccountRef) == "" ||
-		uuid.Validate(s.ConnectionID) != nil || uuid.Validate(s.AdmissionID) != nil || s.Revision < 1 {
-		return fmt.Errorf("session account admission requires provider, stable connection, exact account and admission revision")
-	}
-	return nil
-}
+type SessionAccountAdmission = authority.Account
 
 // ProviderAuthority is one closed private identity authority. A session may
 // additionally require a real credential (Discord), but never a dummy token.
@@ -41,6 +27,7 @@ type ProviderAuthority struct {
 	Kind       ProviderAuthorityKind
 	Credential runtimecredentials.ValueEvidence
 	Session    SessionAccountAdmission
+	session    authority.Admission
 }
 
 type SessionConnectionObservation struct {
@@ -68,7 +55,7 @@ func CredentialProviderAuthority(evidence runtimecredentials.ValueEvidence) (Pro
 func (a ProviderAuthority) Validate() error {
 	switch a.Kind {
 	case ProviderAuthorityCredential:
-		if a.Session != (SessionAccountAdmission{}) {
+		if a.Session != (SessionAccountAdmission{}) || !a.session.Empty() {
 			return fmt.Errorf("credential provider authority cannot carry an inactive session admission")
 		}
 		return a.Credential.Validate()
@@ -98,21 +85,78 @@ func (a ProviderAuthority) RequireExecutable() error {
 		return err
 	}
 	if a.Kind == ProviderAuthoritySession {
-		return &SessionProviderUnavailableError{Provider: a.Session.Provider}
+		if err := a.session.Validate(context.Background(), a.Session); err != nil {
+			return &SessionProviderUnavailableError{Provider: a.Session.Provider}
+		}
 	}
 	return nil
 }
 
-func (a ProviderAuthority) Current(ctx context.Context, owner interface {
-	CurrentValueMatchesSeal(context.Context, runtimecredentials.ValueEvidence) (bool, error)
-}) (bool, error) {
-	if err := a.RequireExecutable(); err != nil {
-		return false, err
+type SessionAdmissionOwner interface {
+	AdmitSessionAccount(context.Context, SessionAccountAdmission) (authority.Admission, error)
+}
+
+// AdmitExecution re-admits exact retained provenance, never replacement values.
+// Session issuance is restricted to the owned SDK subtree, not this interface.
+func (a ProviderAuthority) AdmitExecution(ctx context.Context, owner CredentialCurrentness) (ProviderAuthority, bool, error) {
+	if err := a.Validate(); err != nil {
+		return ProviderAuthority{}, false, err
+	}
+	if ctx == nil || ctx.Err() != nil {
+		return ProviderAuthority{}, false, fmt.Errorf("current provider admission context is required")
+	}
+	if a.Kind == ProviderAuthoritySession {
+		native, ok := owner.(SessionAdmissionOwner)
+		if !ok {
+			return ProviderAuthority{}, false, &SessionProviderUnavailableError{Provider: a.Session.Provider}
+		}
+		admission, err := native.AdmitSessionAccount(ctx, a.Session)
+		if err != nil {
+			return ProviderAuthority{}, false, err
+		}
+		if err := admission.Validate(ctx, a.Session); err != nil {
+			admission.Close()
+			return ProviderAuthority{}, false, err
+		}
+		a.session = admission
+		if a.Credential == (runtimecredentials.ValueEvidence{}) {
+			return a, true, nil
+		}
 	}
 	if owner == nil {
-		return false, fmt.Errorf("provider credential snapshot owner is required")
+		a.CloseExecution()
+		return ProviderAuthority{}, false, fmt.Errorf("provider credential snapshot owner is required")
 	}
-	return owner.CurrentValueMatchesSeal(ctx, a.Credential)
+	current, err := owner.CurrentValueMatchesSeal(ctx, a.Credential)
+	if err != nil || !current || ctx.Err() != nil {
+		a.CloseExecution()
+		if err == nil && ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		return ProviderAuthority{}, false, err
+	}
+	return a, true, nil
+}
+
+func (a ProviderAuthority) Current(ctx context.Context, owner CredentialCurrentness) (bool, error) {
+	admitted, current, err := a.AdmitExecution(ctx, owner)
+	defer admitted.CloseExecution()
+	return current, err
+}
+
+func (a ProviderAuthority) CloseExecution() { a.session.Close() }
+
+func (a ProviderAuthority) SessionParent() (string, int64) { return a.session.Parent() }
+
+func (a ProviderAuthority) SameProvenance(other ProviderAuthority) bool {
+	return a.Kind == other.Kind && a.Credential == other.Credential && a.Session == other.Session
+}
+
+func (a ProviderAuthority) RequireExecutableFor(expected ProviderAuthority) error {
+	if !a.SameProvenance(expected) {
+		return fmt.Errorf("provider admission contradicts its retained authority")
+	}
+	return a.RequireExecutable()
 }
 
 // ProviderAuthorityRecord is the private durable codec, never a public DTO.
