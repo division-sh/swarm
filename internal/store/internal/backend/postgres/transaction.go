@@ -106,16 +106,25 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	var tx *sql.Tx
 	releaseOrdering := func() {}
 	defer func() { releaseOrdering() }()
+	var stopReadRollback func() bool
+	var readRollbackDone <-chan error
 	probe := b.testTransactions.Begin(opts != nil && opts.ReadOnly, false)
 	defer func() { probe.Finish(err) }()
 	defer func() {
 		cleanupStarted := time.Now()
 		var cleanupErr error
 		rolledBack := false
+		var rollbackErr error
 		if tx != nil {
 			probe.RollbackAttempted()
-			rollbackErr := tx.Rollback()
-			releaseOrdering()
+		}
+		if stopReadRollback != nil && !stopReadRollback() {
+			rollbackErr = <-readRollbackDone
+		} else if tx != nil {
+			rollbackErr = tx.Rollback()
+		}
+		releaseOrdering()
+		if tx != nil {
 			rolledBack = rollbackErr == nil
 			if rollbackErr != nil {
 				discard = true
@@ -123,6 +132,9 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 					cleanupErr = rollbackErr
 				}
 			}
+		} else if rollbackErr != nil && rollbackErr != sql.ErrTxDone {
+			discard = true
+			cleanupErr = rollbackErr
 		}
 		if discard {
 			rawErr := conn.Raw(func(any) error { return driver.ErrBadConn })
@@ -155,7 +167,9 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		sqlCtx = context.WithoutCancel(ctx)
 	}
 	beginStarted := time.Now()
-	tx, err = conn.BeginTx(sqlCtx, opts)
+	// The owner must join rollback before Raw/discard/close. Read queries still
+	// use the caller context; only the SQL transaction's finalizer is owner-held.
+	tx, err = conn.BeginTx(context.WithoutCancel(ctx), opts)
 	probe.RecordAdmission(0, poolWait, time.Since(beginStarted))
 	if err != nil {
 		if callerErr := ctx.Err(); callerErr != nil {
@@ -165,6 +179,12 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	}
 	probe.Begun()
 	sqlCtx, releaseOrdering = authoractivity.BindTransaction(ctx, sqlCtx, tx, authoractivity.DialectPostgres)
+	if !drain {
+		readTx := tx
+		done := make(chan error, 1)
+		readRollbackDone = done
+		stopReadRollback = context.AfterFunc(ctx, func() { done <- readTx.Rollback() })
+	}
 	sqlCtx = transactiontest.WithAttempt(sqlCtx, probe)
 	if err := ctx.Err(); err != nil {
 		return false, err
@@ -181,7 +201,6 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	}
 	probe.BeforeCommit()
 	commitErr := tx.Commit()
-	releaseOrdering()
 	if commitErr != nil {
 		probe.CommitFailed()
 		discard = true
