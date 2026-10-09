@@ -33,6 +33,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -590,17 +591,12 @@ func (startupRecoveryMinimalEventStore) ListEventDeliveryRecipients(context.Cont
 
 func (startupRecoveryMinimalEventStore) SupportsPersistedReplay() bool { return false }
 
-func (startupRecoveryMinimalEventStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	return nil, nil
-}
-
 func (startupRecoveryMinimalEventStore) ListSelectedContractRouteRecoveryRecords(context.Context) ([]runtimemanager.SelectedContractRouteRecoveryRecord, error) {
 	return nil, nil
 }
 
 type startupRecoveryEventStore struct {
 	missing     []events.PersistedReplayEvent
-	routes      []runtimeflowidentity.RunScopedFlowInstance
 	claimErr    error
 	obligations *startupRecoveryPipelineOwner
 }
@@ -630,10 +626,6 @@ func (startupRecoveryEventStore) UpsertFlowInstanceRoute(context.Context, runtim
 
 func (startupRecoveryEventStore) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return nil
-}
-
-func (s startupRecoveryEventStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	return append([]runtimeflowidentity.RunScopedFlowInstance(nil), s.routes...), nil
 }
 
 func (startupRecoveryEventStore) ListSelectedContractRouteRecoveryRecords(context.Context) ([]runtimemanager.SelectedContractRouteRecoveryRecord, error) {
@@ -918,20 +910,19 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 }
 
 func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	bundle, found := semanticview.Bundle(module.SemanticSource())
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("startup fixture requires its actual admitted source artifact")
+	}
+	fact := testSourceArtifactFact(t, bundle.SourceArtifact.BundleHash())
+	ctx := testAuthorActivityContextForBundle(context.Background(), fact.BundleHash())
 	eventStore := &startupRecoveryEventStore{
 		missing: []events.PersistedReplayEvent{{
 			Event: eventtest.RunCreatingRootIngress(eventtest.UUID("startup-recovery-manager-work"), "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		}},
-		routes: []runtimeflowidentity.RunScopedFlowInstance{
-			{
-				RunID: eventtest.UUID("startup-recovery-manager-run"),
-				Route: runtimeflowidentity.DeriveRoute("child", "inst-1"),
-			},
-		},
 	}
 	managerIdentity := agentidentitytest.RootRuntime(t, "persisted-agent", "startup-recovery-manager-work")
 	managerTopology, err := runtimeagenttopology.FlowReadinessAdmission(
@@ -949,7 +940,7 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 		}),
 		Topology: managerTopology,
 	}}}
-	managerStore.session.admitRun(t, managerIdentity.RunID, testSourceArtifactFact(t, runtimeTestBundleHash))
+	managerStore.session.admitRun(t, managerIdentity.RunID, fact)
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
@@ -964,9 +955,10 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
 		},
 		Options: RuntimeOptions{
-			SelfCheck:      false,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
+			SelfCheck:          false,
+			WorkflowModule:     module,
+			LLMRuntime:         noopLLMRuntime{},
+			SourceArtifactFact: fact,
 		}}, startupRecoveryFanOutSessionForTest(t, db))
 
 	if err != nil {
@@ -1007,23 +999,35 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 	if got := detailInt(detail["persisted_agent_count"]); got != 1 {
 		t.Fatalf("persisted_agent_count = %d, want 1", got)
 	}
-	if got := detailInt(detail["persisted_flow_instance_route_count"]); got != 1 {
-		t.Fatalf("persisted_flow_instance_route_count = %d, want 1", got)
+	if got := detailInt(detail["persisted_flow_attachment_count"]); got != 0 {
+		t.Fatalf("persisted_flow_attachment_count = %d, want no desired attachment", got)
+	}
+	if _, found := detail["persisted_flow_instance_route_count"]; found {
+		t.Fatal("startup diagnostics restored non-authoritative route membership")
 	}
 	if !detailBool(detail["replay_eligible_event_present"]) {
 		t.Fatalf("replay_eligible_event_present = %#v, want true", detail["replay_eligible_event_present"])
 	}
 	classes := detailClasses(detail["recoverable_work_classes"])
 	assertContainsClass(t, classes, "persisted agents")
-	assertContainsClass(t, classes, "persisted flow instance routes")
+	for _, class := range classes {
+		if class == "persisted flow instance routes" {
+			t.Fatal("startup classified a retired route resource as recovery work")
+		}
+	}
 	assertContainsClass(t, classes, "events missing pipeline receipts")
 }
 
 func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	bundle, found := semanticview.Bundle(module.SemanticSource())
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("startup fixture requires its actual admitted source artifact")
+	}
+	fact := testSourceArtifactFact(t, bundle.SourceArtifact.BundleHash())
+	ctx := testAuthorActivityContextForBundle(context.Background(), fact.BundleHash())
 	scheduleStore := &recoveryDisabledScheduleStore{active: []runtimegenericschedule.Activation{recoveryGuardActivation(t, "recover-me")}}
 	eventStore := startupRecoveryMinimalEventStore{}
 	managerStore := &recoveryGuardManagerStore{}
@@ -1043,9 +1047,10 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
 		Options: RuntimeOptions{
-			SelfCheck:      false,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
+			SelfCheck:          false,
+			WorkflowModule:     module,
+			LLMRuntime:         noopLLMRuntime{},
+			SourceArtifactFact: fact,
 		}}, startupRecoveryFanOutSessionForTest(t, db))
 
 	if err != nil {

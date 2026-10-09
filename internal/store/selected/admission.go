@@ -8,7 +8,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -49,7 +48,6 @@ type admissionInspectionPort interface {
 	StandingRunRestartDisposition(context.Context, string) (runlifecycle.StandingRestartDisposition, error)
 	InspectDynamicFlowRuntimeReadinessForSource(context.Context, correlation.SourceArtifactFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error)
 	LoadAgents(context.Context) ([]manager.PersistedAgent, error)
-	ListFlowInstanceRoutes(context.Context) ([]flowidentity.RunScopedFlowInstance, error)
 	PipelineObligations() pipelineobligation.Store
 	ObserveOrdinaryRunSource(context.Context, correlation.SourceArtifactFact, string) (bool, error)
 	channelonboarding.RetainedActivationReader
@@ -371,15 +369,6 @@ func (s *AdmissionSnapshot) ObserveOrdinaryRunSource(ctx context.Context, source
 	}
 	defer done()
 	return s.store.ObserveOrdinaryRunSource(ctx, source, runID)
-}
-
-func (s *AdmissionSnapshot) ListFlowInstanceRoutes(ctx context.Context) ([]flowidentity.RunScopedFlowInstance, error) {
-	ctx, done, err := s.readContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer done()
-	return s.store.ListFlowInstanceRoutes(ctx)
 }
 
 func (s *AdmissionSnapshot) GlobalWorkPresence(ctx context.Context) (pipelineobligation.GlobalWorkPresence, error) {
