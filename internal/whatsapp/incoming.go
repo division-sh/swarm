@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -171,4 +172,13 @@ func (event capturedEvent) publicationProviderEventID() (string, error) {
 	key, err := json.Marshal([]string{event.Scope.Session.ConnectionID, event.Scope.Session.AccountRef,
 		event.Conversation, event.EventID, event.Kind})
 	return string(key), err
+}
+
+func (event capturedEvent) publicationIdentity() (runtimeinbound.Identity, error) {
+	key, err := event.publicationProviderEventID()
+	if err != nil {
+		return runtimeinbound.Identity{}, err
+	}
+	identity := event.Scope.PublicationBinding.Identity("whatsapp", key)
+	return identity, identity.Validate()
 }

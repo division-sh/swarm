@@ -47,7 +47,7 @@ func withCaptureProvenance(event capturedEvent, request runtimeinbound.Request) 
 	if err := event.validate(); err != nil {
 		return runtimeinbound.Request{}, err
 	}
-	if request.EntityID != event.Scope.EntityID {
+	if request.Identity().BindingGeneration() != event.Scope.PublicationBinding {
 		return runtimeinbound.Request{}, runtimeinbound.ErrRequestIdentityConflict
 	}
 	metadata := request.Normalized().OriginalTransportMetadata
@@ -113,7 +113,7 @@ func publicationRequestBytes(request runtimeinbound.Request) ([]byte, error) {
 }
 
 func validateCapturePublication(event capturedEvent, request runtimeinbound.Request) error {
-	identity, err := event.publicationProviderEventID()
+	identity, err := event.publicationIdentity()
 	if err != nil {
 		return err
 	}
@@ -121,8 +121,11 @@ func validateCapturePublication(event capturedEvent, request runtimeinbound.Requ
 	if err != nil {
 		return err
 	}
-	publicationID, markerID := runtimeinbound.DeterministicIDs("whatsapp", request.EntityID, identity)
-	if request.Provider != "whatsapp" || request.EntityID != event.Scope.EntityID || request.ProviderEventID != identity || request.RequestFingerprint != fingerprint ||
+	publicationID, markerID, err := runtimeinbound.DeterministicIDs(identity)
+	if err != nil {
+		return err
+	}
+	if request.Identity() != identity || request.RequestFingerprint != fingerprint ||
 		request.PublicationID != publicationID || request.MarkerEventID != markerID {
 		return runtimeinbound.ErrRequestIdentityConflict
 	}
@@ -200,7 +203,7 @@ func (s *captureStore) stagePublication(ctx context.Context, event capturedEvent
 }
 
 type publicationReader interface {
-	LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error)
+	LoadInboundPublicationByIdentity(context.Context, runtimeinbound.Identity) (runtimeinbound.Record, bool, error)
 }
 
 // This reader must be the selected-store owner, whose exact load verifies all
@@ -242,7 +245,7 @@ func (s *captureStore) reconcilePublished(ctx context.Context, event capturedEve
 	if reader == nil {
 		return false, errCapturePublicationPending
 	}
-	identity, err := event.publicationProviderEventID()
+	identity, err := event.publicationIdentity()
 	if err != nil {
 		return false, err
 	}
@@ -259,7 +262,7 @@ func (s *captureStore) reconcilePublished(ctx context.Context, event capturedEve
 		if !row.event.sameCapture(event) {
 			continue
 		}
-		record, found, err := reader.LoadInboundPublicationByIdentity(ctx, "whatsapp", event.Scope.EntityID, identity)
+		record, found, err := reader.LoadInboundPublicationByIdentity(ctx, identity)
 		if err != nil {
 			return false, err
 		}

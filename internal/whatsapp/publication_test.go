@@ -20,7 +20,7 @@ import (
 
 func capturePublicationFixture(t *testing.T, event capturedEvent) runtimeinbound.Request {
 	t.Helper()
-	identity, err := event.publicationProviderEventID()
+	identity, err := event.publicationIdentity()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,13 +28,15 @@ func capturePublicationFixture(t *testing.T, event capturedEvent) runtimeinbound
 	if err != nil {
 		t.Fatal(err)
 	}
-	entity := event.Scope.EntityID
-	publicationID, markerID := runtimeinbound.DeterministicIDs("whatsapp", entity, identity)
+	publicationID, markerID, err := runtimeinbound.DeterministicIDs(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
 	request := runtimeinbound.Request{PublicationID: publicationID, MarkerEventID: markerID, Provider: "whatsapp",
-		EntityID: entity, ProviderEventID: identity, RequestFingerprint: fingerprint,
-		RequestProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion, StableServiceID: uuid.NewString(),
-		FlowPath: "fixture", InstanceID: "fixture", TargetAlias: "whatsapp", TargetFlowInstance: "fixture",
-		ExpectedGeneration: 1, ExpectedPublicationSequence: 1, ResolvedRunID: uuid.NewString(),
+		ProviderEventID: identity.ProviderEventID, RequestFingerprint: fingerprint,
+		RequestProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion, StableServiceID: identity.ServiceID,
+		FlowPath: ".", TargetAlias: "whatsapp",
+		ExpectedGeneration: identity.Generation, ExpectedPublicationSequence: 1, ResolvedRunID: identity.RunID,
 		AcknowledgementMode:       runtimeinbound.AcknowledgementDurableBeforeDispatch,
 		OriginalReceivedAt:        time.Date(2026, 10, 7, 12, 0, 0, 123456000, time.UTC),
 		OriginalTransportMetadata: []byte(`{"transport":"managed_session","fixture":true}`)}
@@ -54,9 +56,9 @@ type capturePublicationReader struct {
 	calls  int
 }
 
-func (r *capturePublicationReader) LoadInboundPublicationByIdentity(_ context.Context, provider, entity, event string) (runtimeinbound.Record, bool, error) {
+func (r *capturePublicationReader) LoadInboundPublicationByIdentity(_ context.Context, identity runtimeinbound.Identity) (runtimeinbound.Record, bool, error) {
 	r.calls++
-	if provider != r.record.Provider || entity != r.record.EntityID || event != r.record.ProviderEventID {
+	if identity != r.record.Identity() {
 		return runtimeinbound.Record{}, false, errors.New("publication lookup changed original identity")
 	}
 	return r.record, r.found, r.err
@@ -111,7 +113,7 @@ func TestWhatsAppCapturePublicationStagingSurvivesReopenAndRefusesReplacement(t 
 		name string
 		fn   func(*runtimeinbound.Request)
 	}{
-		{"target", func(r *runtimeinbound.Request) { r.TargetFlowInstance = "replacement" }},
+		{"target", func(r *runtimeinbound.Request) { r.TargetAlias = "replacement" }},
 		{"generation", func(r *runtimeinbound.Request) { r.ExpectedGeneration++ }},
 		{"run", func(r *runtimeinbound.Request) { r.ResolvedRunID = uuid.NewString() }},
 		{"source metadata", func(r *runtimeinbound.Request) { r.OriginalTransportMetadata = []byte(`{"source":"replacement"}`) }},
@@ -119,6 +121,11 @@ func TestWhatsAppCapturePublicationStagingSurvivesReopenAndRefusesReplacement(t 
 		t.Run(mutate.name, func(t *testing.T) {
 			changed := request
 			mutate.fn(&changed)
+			var err error
+			changed.PublicationID, changed.MarkerEventID, err = runtimeinbound.DeterministicIDs(changed.Identity())
+			if err != nil {
+				t.Fatal(err)
+			}
 			if err := reopened.stagePublication(ctx, event, changed); !errors.Is(err, runtimeinbound.ErrRequestIdentityConflict) {
 				t.Fatalf("replacement staging = %v", err)
 			}
@@ -182,7 +189,7 @@ func TestWhatsAppCaptureRetirementRequiresDurableExactReadback(t *testing.T) {
 			case "no_commit_time":
 				reader.record.CommittedAt = time.Time{}
 			case "foreign_target":
-				reader.record.TargetFlowInstance = "replacement"
+				reader.record.TargetAlias = "replacement"
 			case "changed_fingerprint":
 				reader.record.RequestFingerprint = string(bytes.Repeat([]byte("b"), 64))
 			}
@@ -250,6 +257,11 @@ func TestWhatsAppCapturePublicationCorruptionBlocksEveryConsumer(t *testing.T) {
 				} else {
 					changed := request
 					changed.ProviderEventID = "foreign"
+					var err error
+					changed.PublicationID, changed.MarkerEventID, err = runtimeinbound.DeterministicIDs(changed.Identity())
+					if err != nil {
+						t.Fatal(err)
+					}
 					raw, err := publicationRequestBytes(changed)
 					if err != nil {
 						t.Fatal(err)

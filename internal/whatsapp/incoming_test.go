@@ -211,8 +211,11 @@ func TestWhatsAppIncomingImmutableCaptureDuplicateAndPublicationIdentity(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	entity := uuid.NewString()
-	id, _ := inboundpublication.DeterministicIDs("whatsapp", entity, key)
+	identity := scope.PublicationBinding.Identity("whatsapp", key)
+	id, _, err := inboundpublication.DeterministicIDs(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, mutate := range []func(*capturedEvent){
 		func(e *capturedEvent) { e.Conversation = "other conversation" },
 		func(e *capturedEvent) { e.Kind = "edit" },
@@ -226,7 +229,10 @@ func TestWhatsAppIncomingImmutableCaptureDuplicateAndPublicationIdentity(t *test
 		if err != nil {
 			t.Fatal(err)
 		}
-		otherID, _ := inboundpublication.DeterministicIDs("whatsapp", entity, key)
+		otherID, _, err := inboundpublication.DeterministicIDs(scope.PublicationBinding.Identity("whatsapp", key))
+		if err != nil {
+			t.Fatal(err)
+		}
 		if otherID == id {
 			t.Fatal("publication owner conflated a capture-key dimension")
 		}
