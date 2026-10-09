@@ -378,6 +378,10 @@ func TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority(t *testing.
 		"connectRecipientAdmissionsForRunLocked":  {},
 		"connectRecipientAdmissionsForRun":        {},
 		"connectRecipientAdmissionsForTargets":    {},
+		"resolveRoutedSubscribersForEvent":        {},
+		"installConstructionIdentityPreview":      {},
+		"planAtGeneration":                        {},
+		"exhaustedConnectRoutePlanSnapshotError":  {},
 	}
 	guardedFiles := []string{
 		"internal/events/types.go",
@@ -387,6 +391,7 @@ func TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority(t *testing.
 		"internal/runtime/bus/connect_route_plan_dispatch.go",
 		"internal/runtime/bus/connect_instance_selection.go",
 		"internal/runtime/bus/indexed_connect_receivers.go",
+		"internal/runtime/bus/indexed_pubsub_receivers.go",
 		"internal/runtime/bus/routing_derivation.go",
 		"internal/runtime/bus/eventbus.go",
 		"internal/runtime/bus/eventbus_routing.go",

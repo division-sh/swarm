@@ -52,23 +52,26 @@ func (e *exactDirectRecipientsUnavailableError) Unwrap() error {
 }
 
 type deliveryRouteResolver struct {
-	resolveRoutedSubscribers            func(events.Event, []string) []Subscriber
+	resolveRoutedSubscribers            func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error)
 	resolveSubscribedRecipients         func(string) []deliveryRecipientCandidate
 	resolveRoutedNodeInternalRecipients func(events.Event, []Subscriber) []deliveryRecipientCandidate
 	describeSubscribersForEvent         func(string, []Subscriber) []PublishDiagnosticRecipient
 }
 
-func (r deliveryRouteResolver) Resolve(evt events.Event) deliveryRoutingResult {
-	return r.resolve(evt, ordinaryPublicationSource{}, nil)
+func (r deliveryRouteResolver) Resolve(ctx context.Context, evt events.Event) (deliveryRoutingResult, error) {
+	return r.resolve(ctx, evt, ordinaryPublicationSource{}, nil)
 }
 
-func (r deliveryRouteResolver) ResolveIndependentPubsub(evt events.Event, source ordinaryPublicationSource) deliveryRoutingResult {
-	return r.resolve(evt, source, independentPubsubSubscriber)
+func (r deliveryRouteResolver) ResolveIndependentPubsub(ctx context.Context, evt events.Event, source ordinaryPublicationSource) (deliveryRoutingResult, error) {
+	return r.resolve(ctx, evt, source, independentPubsubSubscriber)
 }
 
-func (r deliveryRouteResolver) resolve(evt events.Event, source ordinaryPublicationSource, include func(Subscriber) bool) deliveryRoutingResult {
-	eventKeys := source.eventKeys(evt)
-	routedRecipients := r.resolveRoutedSubscribers(evt, eventKeys)
+func (r deliveryRouteResolver) resolve(ctx context.Context, evt events.Event, source ordinaryPublicationSource, include func(Subscriber) bool) (deliveryRoutingResult, error) {
+	eventKeys := pubsubEventKeys(evt, source)
+	routedRecipients, err := r.resolveRoutedSubscribers(ctx, evt, eventKeys, source)
+	if err != nil {
+		return deliveryRoutingResult{}, err
+	}
 	if include != nil || !source.route.Empty() {
 		filtered := make([]Subscriber, 0, len(routedRecipients))
 		for _, subscriber := range routedRecipients {
@@ -107,7 +110,7 @@ func (r deliveryRouteResolver) resolve(evt events.Event, source ordinaryPublicat
 	if direct := deliveryRecipientIDs(subscribedRecipients); len(direct) > 0 {
 		result.ExtraDetail["subscription_recipients"] = direct
 	}
-	return result
+	return result, nil
 }
 
 type deliveryRecipientManifest struct {
@@ -218,20 +221,10 @@ func (p deliveryPlanner) planForRecipientMaterialization(ctx context.Context, ev
 	if evt.Type() == events.EventType("platform.runtime_log") {
 		return routePlan, nil
 	}
-	for attempt := 0; attempt < 3; attempt++ {
-		snapshot := p.connectPlanner.routeTable.snapshotGeneration()
-		planned, err := p.planAtGeneration(ctx, evt)
-		if err != nil {
-			return RoutePlan{}, err
-		}
-		if p.connectPlanner.routeTable.snapshotGenerationCurrent(snapshot) {
-			return planned, nil
-		}
-	}
-	return RoutePlan{}, exhaustedConnectRoutePlanSnapshotError()
+	return p.planRecipients(ctx, evt)
 }
 
-func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event) (RoutePlan, error) {
+func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (RoutePlan, error) {
 	routePlan := newRoutePlan(evt)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	ctx = withConnectRoutePlanPreview(ctx)
@@ -354,18 +347,10 @@ func (p deliveryPlanner) planIndependentPubsubBranch(ctx context.Context, evt ev
 			return independentPubsubSubscriber(subscriber) && input.AllowsSubscriber(subscriber)
 		}
 	}
-	resolver := p.routeResolver
-	if preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil && preview.table != nil {
-		original := resolver.resolveRoutedSubscribers
-		resolver.resolveRoutedSubscribers = func(event events.Event, keys []string) []Subscriber {
-			out := original(event, keys)
-			for _, key := range keys {
-				out = append(out, preview.table.ResolveForRun(event.RunID(), key)...)
-			}
-			return dedupeSubscribers(out)
-		}
+	routing, err := p.routeResolver.resolve(ctx, localEvent, source, include)
+	if err != nil {
+		return RoutePlan{}, err
 	}
-	routing := resolver.resolve(localEvent, source, include)
 	manifest, err := p.recipientPolicy.evaluate(ctx, localEvent, routing.Recipients, source)
 	if err != nil {
 		return RoutePlan{}, err
@@ -627,7 +612,7 @@ func cloneAnyMap(in map[string]any) map[string]any {
 func (eb *EventBus) newEventBusDeliveryPlanner() deliveryPlanner {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers:            eb.resolveRoutedSubscribersForEvent,
+			resolveRoutedSubscribers:            eb.connectRoutePlanner.resolvePubsubSubscribers,
 			resolveSubscribedRecipients:         eb.resolveSubscribedRecipientsForPlanning,
 			resolveRoutedNodeInternalRecipients: eb.resolveInternalRecipientsForRoutedNodePlanning,
 			describeSubscribersForEvent:         eb.describeSubscribersForEvent,
@@ -1224,7 +1209,7 @@ func routedRootNodeDeliveryIntentsForNoTargetEvent(source semanticview.Source, e
 	}
 	out := make([]plannedDeliveryRoute, 0, len(routed))
 	for _, subscriber := range routed {
-		if !routedRootNodeMatchesNoTargetEvent(evt, subscriber, root.FlowID()) {
+		if !routedRootNodeMatchesNoTargetEvent(evt, subscriber, root) {
 			continue
 		}
 		out = append(out, plannedDeliveryRoute{
@@ -1238,18 +1223,19 @@ func routedRootNodeDeliveryIntentsForNoTargetEvent(source semanticview.Source, e
 	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerRootNodeRoute)
 }
 
-func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber, rootFlowID string) bool {
+func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber, root semanticview.RootExecutionCoordinate) bool {
 	if !subscriber.Recipient.IsNode() {
 		return false
 	}
-	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") != "." {
+	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+	if !root.Valid() || (path != "." && path != root.RunID()) {
 		return false
 	}
 	handlerFlowID := subscriber.handlerNode.FlowPath()
 	if handlerFlowID == "" {
-		handlerFlowID = strings.TrimSpace(rootFlowID)
+		handlerFlowID = root.FlowID()
 	}
-	if handlerFlowID != strings.TrimSpace(rootFlowID) {
+	if handlerFlowID != root.FlowID() {
 		return false
 	}
 	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")

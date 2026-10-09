@@ -64,7 +64,7 @@ func (p deliveryPlanner) prepareRootConstruction(ctx context.Context, event even
 		if err := p.validateRootConstructionReuse(ctx, event, observed, schema.Instance.Path()); err != nil {
 			return nil, err
 		}
-		if err := p.connectPlanner.installConstructionIdentityPreview(ctx, event.RunID(), identity, nil); err != nil {
+		if err := selectConnectionConstruction(ctx, identity); err != nil {
 			return nil, err
 		}
 		return nil, nil

@@ -3,7 +3,6 @@ package bus
 import (
 	"context"
 	"fmt"
-	"slices"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -26,22 +25,12 @@ func (r connectRoutePlanResolver) addIndexedLookupPaths(ctx context.Context, run
 	if err != nil {
 		return err
 	}
-	observations, err := r.lifecycle.index.ListFlowInstances(ctx, scope)
+	instances, err := r.indexedInstances(ctx, scope)
 	if err != nil {
 		return err
 	}
-	for _, observed := range observations {
-		if observed.Owner().RunID != runID || !slices.Contains(scope.FlowIDs(), observed.Identity().TemplateID) {
-			return fmt.Errorf("native receiver inventory crosses its compiled lookup scope")
-		}
-		request, err := pipeline.NewExactFlowInstanceLookup(r.source, fact, observed.Owner())
-		if err != nil {
-			return err
-		}
-		if err := observed.ValidateSelection(request); err != nil {
-			return err
-		}
-		paths[observed.Identity().InstancePath] = struct{}{}
+	for _, instance := range instances {
+		paths[instance.InstancePath] = struct{}{}
 	}
 	proposals, err := r.prospectiveConnectInstances(ctx, runID, fact)
 	if err != nil {
