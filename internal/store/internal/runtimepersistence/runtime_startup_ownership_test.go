@@ -1311,11 +1311,11 @@ func proveProcessCapabilityTakeoverRetiresNewWorkGrants(t *testing.T, selectedGr
 	t.Helper()
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant)
+			selected, mutationStore, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant)
 			if selectedGrant && abandoned.SelectedGrant == nil {
 				t.Fatal("abandoned process omitted its selected grant")
 			}
-			proveBulkRetirementWaitsForMutation(t, selected, db, backend, abandoned.Grant, func(ctx context.Context) error {
+			proveBulkRetirementWaitsForMutation(t, mutationStore, db, backend, abandoned.Grant, func(ctx context.Context) error {
 				capability, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("blocked-grant-retirement-successor"))
 				if capability != nil {
 					t.Cleanup(func() { _ = capability.Release(context.Background()) })
@@ -1415,18 +1415,18 @@ func loadTakeoverDeliverySnapshot(t *testing.T, ctx context.Context, db *sql.DB,
 }
 
 func abandonedProcessCapabilityFixture(t *testing.T, backend string) (startupAuthorityParityStore, *sql.DB, sqliteForcedDeathEvidence) {
-	return abandonedProcessCapabilityFixtureWithSelection(t, backend, false)
+	selected, _, db, evidence := abandonedProcessCapabilityFixtureWithSelection(t, backend, false)
+	return selected, db, evidence
 }
 
-func abandonedProcessCapabilityFixtureWithSelection(t *testing.T, backend string, selectedGrant bool) (startupAuthorityParityStore, *sql.DB, sqliteForcedDeathEvidence) {
+func abandonedProcessCapabilityFixtureWithSelection(t *testing.T, backend string, selectedGrant bool) (startupAuthorityParityStore, selectedFanOutOwner, *sql.DB, sqliteForcedDeathEvidence) {
 	t.Helper()
+	first, mutationStore, db, _ := newFanOutOwnerPairForTest(t, backend)
+	selected := first.(startupAuthorityParityStore)
 	if backend == "sqlite" {
-		path := filepath.Join(t.TempDir(), "runtime.db")
-		selected := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
-		return selected, selected.backend.ConstructionHandle(), spawnSQLiteForcedDeathPredecessorWithSelection(t, path, selectedGrant)
+		path := first.(interface{ Path() string }).Path()
+		return selected, mutationStore, db, spawnSQLiteForcedDeathPredecessorWithSelection(t, path, selectedGrant)
 	}
-	_, db, _ := testutil.StartPostgres(t)
-	selected := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	capability, _, grant := admitRegistrationTestGeneration(t, ctx, selected, "abandoned-postgres-owner")
 	authority, err := capability.Evidence()
@@ -1435,7 +1435,7 @@ func abandonedProcessCapabilityFixtureWithSelection(t *testing.T, backend string
 	}
 	evidence := sqliteForcedDeathEvidence{Authority: authority, Grant: grant, Revision: grant.SourceSetRevision}
 	if selectedGrant {
-		evidence.SelectedGrant = selectedGrantForAbandonedProcess(t, selected, db, false, capability)
+		evidence.SelectedGrant = selectedGrantForAbandonedProcess(t, first.(selectedCompletionAuthorityStore), db, false, capability)
 	}
 	terminatePostgresRetainedProcessSession(t, ctx, db)
 	select {
@@ -1443,7 +1443,7 @@ func abandonedProcessCapabilityFixtureWithSelection(t *testing.T, backend string
 	case <-time.After(4 * time.Second):
 		t.Fatal("terminated PostgreSQL predecessor did not stop")
 	}
-	return selected, db, evidence
+	return selected, mutationStore, db, evidence
 }
 
 func selectedGrantForAbandonedProcess(t *testing.T, store selectedCompletionAuthorityStore, db *sql.DB, sqlite bool, process runtimestartupownership.ProcessCapability) *runtimestartupownership.GrantEvidence {
@@ -1587,7 +1587,7 @@ func proveAuthorityRepairRetiresEveryCurrentNewWorkGrant(t *testing.T, selectedG
 	t.Helper()
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant)
+			selected, mutationStore, db, abandoned := abandonedProcessCapabilityFixtureWithSelection(t, backend, selectedGrant)
 			if selectedGrant && abandoned.SelectedGrant == nil {
 				t.Fatal("abandoned process omitted its selected grant")
 			}
@@ -1643,7 +1643,7 @@ func proveAuthorityRepairRetiresEveryCurrentNewWorkGrant(t *testing.T, selectedG
 			repairRequest := runtimestartupownership.AuthorityRepairRequest{
 				OperationID: uuid.NewString(), FindingsDigest: inspection.FindingsDigest, Confirmed: true,
 			}
-			proveBulkRetirementWaitsForMutation(t, selected, db, backend, abandoned.Grant, func(ctx context.Context) error {
+			proveBulkRetirementWaitsForMutation(t, mutationStore, db, backend, abandoned.Grant, func(ctx context.Context) error {
 				_, err := selected.RepairAuthority(ctx, repairRequest)
 				return err
 			})

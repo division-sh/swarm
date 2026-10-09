@@ -22,11 +22,6 @@ import (
 func proveBulkRetirementWaitsForMutation(t *testing.T, selected any, db *sql.DB, backend string, evidence startupownership.GrantEvidence, retire func(context.Context) error) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
-	if backend == "sqlite" {
-		// An independent native owner must contend on the database fence, not
-		// the retiring owner's in-process writer permit.
-		selected = NewSQLiteRuntimeStoreForTest(db)
-	}
 	rolledBack := errors.New("release bulk retirement fence by rollback")
 	retired := make(chan error, 1)
 	err := runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(txctx context.Context, tx *sql.Tx) error {
@@ -60,11 +55,9 @@ func TestGenerationMutationFenceBothStores(t *testing.T) {
 		for _, kind := range []string{"normal", "selected"} {
 			for _, finish := range []string{"commit", "rollback"} {
 				t.Run(backend+"/"+kind+"/"+finish, func(t *testing.T) {
-					store, db, sqlite := selectedForkDiscardTestStore(t, backend)
-					mutationStore := store
-					if sqlite {
-						mutationStore = NewSQLiteRuntimeStoreForTest(db)
-					}
+					selected, mutationStore, db, postgres := newFanOutOwnerPairForTest(t, backend)
+					store := selected.(selectedForkDiscardStore)
+					sqlite := !postgres
 					ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 20*time.Second)
 					defer cancel()
 					var grant startupownership.GenerationGrant
