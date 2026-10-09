@@ -370,7 +370,7 @@ func TestWhatsAppRecoveredBusinessStandingRefusalsBothStores(t *testing.T) {
 				}
 				admitted.Close()
 				f.restartBusinessConnection(t)
-				operation := pipeline.StandingServiceOperation{ServiceID: f.standing.ServiceID, Actor: "native-recovery-proof"}
+				operation := pipeline.StandingServiceOperation{ServiceID: f.standing.ServiceID, Actor: "native-recovery-proof", ExecutionPosture: executionposture.Live}
 				if change == "suspended" {
 					_, err = f.selected.SuspendStandingService(f.ctx, operation)
 				} else {
