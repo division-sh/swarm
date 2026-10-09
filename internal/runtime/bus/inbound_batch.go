@@ -235,28 +235,13 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		if err != nil {
 			return release(err)
 		}
-		if runProposal.Present() {
-			if err := runProposal.Validate(admitted.Event().RunID(), eb.sourceArtifactFact); err != nil {
-				return release(err)
-			}
-		} else {
-			missing, err := eb.requireExistingRunActive(preparedCtx, admitted)
-			if err != nil {
-				return release(err)
-			}
-			if missing {
-				runProposal, err = pipeline.NewFlowInstanceRunProposal(eb.sourceArtifactFact, admitted)
-				if err != nil {
-					return release(err)
-				}
-			}
+		runProposal, err = eb.preparePublicationRunProposal(preparedCtx, admitted, runProposal)
+		if err != nil {
+			return release(err)
 		}
-		preparedCtx = withConnectRoutePlanPreview(preparedCtx)
-		for _, command := range plan.commands {
-			preparedCtx, err = eb.deliveryPlanner.previewPreparedConstructions(preparedCtx, admitted.Event().RunID(), command.Activations)
-			if err != nil {
-				return release(err)
-			}
+		preparedCtx, err = eb.previewInboundConstructions(preparedCtx, admitted.Event().RunID(), plan.commands)
+		if err != nil {
+			return release(err)
 		}
 		rawSettlement := eb.admitProviderRawSettlement(item.Kind, admitted.Event())
 		prepared, command, err := eb.prepareClosedPublication(preparedCtx, eventBusCommitPublishPlan{
@@ -275,8 +260,6 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 			ownedActivations = append(ownedActivations, activation)
 		}
 		command.Activations = ownedActivations
-		if len(command.Activations) == 0 {
-		}
 		if err := command.Validate(); err != nil {
 			return release(fmt.Errorf("canonicalize inbound activation ownership: %w", err))
 		}
@@ -284,6 +267,18 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		plan.commands = append(plan.commands, command)
 	}
 	return plan, nil
+}
+
+func (eb *EventBus) previewInboundConstructions(ctx context.Context, runID string, commands []PublicationCommand) (context.Context, error) {
+	ctx = withConnectRoutePlanPreview(ctx)
+	for _, command := range commands {
+		var err error
+		ctx, err = eb.deliveryPlanner.previewPreparedConstructions(ctx, runID, command.Activations)
+		if err != nil {
+			return ctx, err
+		}
+	}
+	return ctx, nil
 }
 
 func (eb *EventBus) admitProviderRawSettlement(kind runtimeprovideroutput.Kind, evt events.Event) providerRawSettlementAdmission {
