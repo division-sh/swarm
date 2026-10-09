@@ -64,6 +64,7 @@ type SelectedContractRuntimeExecutionLifecycle interface {
 	QuiesceRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority) error
 	CloseRunForkSelectedContractRuntimeExecution(context.Context, string) error
 	FailRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, json.RawMessage) error
+	FailActivatedRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, json.RawMessage) (bool, error)
 }
 
 // SelectedContractReplayPersistence owns source replay admission and exact

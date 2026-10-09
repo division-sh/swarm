@@ -42,6 +42,8 @@ type PreparedSelectedFork struct {
 	cleanupComplete         bool
 	closeErr                error
 	pendingDiscard          *selectedForkFailureDiscard
+	failureMu               sync.Mutex
+	pendingExecutionFailure *selectedForkExecutionFailure
 	loadedSource            LoadedSelectedContractSource
 	originalSource          LoadedSelectedContractSource
 	originalLoopCarriage    semanticview.OriginalLoopCarriage
@@ -402,6 +404,10 @@ func (p *PreparedSelectedFork) Close() (finalErr error) {
 			return err
 		}
 		p.retainedRuntime = nil
+	}
+	if err := p.settleExecutionFailure(); err != nil {
+		p.closeErr = err
+		return err
 	}
 	if err := p.operation.retireSelected(); err != nil {
 		p.closeErr = err

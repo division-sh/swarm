@@ -387,6 +387,10 @@ func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]to
 	return s.mailboxPostgresOwner.ExpireMailboxItems(ctx, limit)
 }
 
+func (s *PostgresStore) FailActivatedRunForkSelectedContractRuntimeExecution(ctx context.Context, authority effects.Authority, failure json.RawMessage) (bool, error) {
+	return s.runForkPostgresOwner.FailActivatedRunForkSelectedContractRuntimeExecution(ctx, authority, failure)
+}
+
 func (s *PostgresStore) FailOperatorConversationForkChat(ctx context.Context, req runfork.ConversationForkChatFailureRequest) error {
 	return s.runForkPostgresOwner.FailOperatorConversationForkChat(ctx, req)
 }
@@ -1677,6 +1681,10 @@ func (s *SQLiteRuntimeStore) ExpireDecisionCardInputDrafts(ctx context.Context, 
 
 func (s *SQLiteRuntimeStore) ExpireMailboxItems(ctx context.Context, limit int) ([]tools.MailboxItem, error) {
 	return s.mailboxSQLiteOwner.ExpireMailboxItems(ctx, limit)
+}
+
+func (s *SQLiteRuntimeStore) FailActivatedRunForkSelectedContractRuntimeExecution(ctx context.Context, authority effects.Authority, failure json.RawMessage) (bool, error) {
+	return s.runForkSQLiteOwner.FailActivatedRunForkSelectedContractRuntimeExecution(ctx, authority, failure)
 }
 
 func (s *SQLiteRuntimeStore) FailOperatorConversationForkChat(ctx context.Context, req runfork.ConversationForkChatFailureRequest) error {
