@@ -871,7 +871,21 @@ default observed statement. The exact independent complexity comparison at
 adcf97abb also passes:261/261 cyclo and559/559 cognitive hotspots at30,
 no policy/baseline increase. This is focused checkpoint proof, not a tier run.
 
-Fresh all-package guards/census are queued through ordinary admission, and
-clean-head core plus six unchanged channel units/named supplements remain
-pending. No PR, final audit, performance savings or whole-class closure is
-claimed yet. The next commit changes this audit only, not executable proof.
+Fresh all-package Census/Inventory/Registry/Guard sweep and the COMPLETE
+core-structural-owner-guards selection both PASSED through ordinary admission.
+The structural run waited13m53s, then package compute0.048s/7.245s/5.368s/13.991s;
+queue time is not execution or a demonstrated speed saving. Logs:
+channel-structural-final.log SHA256
+0427d0360abf2f953b799190d1b665e62ad4506423c0e16ded5e5158400c77d3,
+channel-census-final.log SHA256
+4dc33c0c5b5bf82186eee9880cfb230c0375ad4f64a8d882b522dbd3519529fc.
+Full API-spec package PASS4.246s and complete base-to-head diff check passes.
+These guards ran with the documentation-only 62e3c1a98 amendment; all Go,
+platform spec and proof policy bytes are unchanged from the race-tested
+adcf97abb executable source. No ownership/registry/baseline exception or test
+selection reduction was needed for this delta.
+
+Clean-head core plus six unchanged channel units/named supplements remain
+pending. G can now request the server2 qualification window; none has been
+taken yet. No PR, final audit, performance savings or whole-class closure is
+claimed. This receipt update changes the audit only, not executable proof.
