@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
@@ -91,18 +92,8 @@ func projectRunForkConstructionContext(plan runfork.RunForkPlan, forkRunID strin
 	}
 	child := events.DeliveryContext{Joins: append([]events.JoinAdmissionReceipt(nil), source.Joins...)}
 	if source.Reply != nil {
-		found := false
-		for _, record := range plan.ReplyContexts {
-			if record.ID != source.Reply.ID {
-				continue
-			}
-			if found || record.RunID != plan.SourceRunID || record.Validate() != nil {
-				return events.DeliveryContext{}, fmt.Errorf("construction occurrence has contradictory reply evidence")
-			}
-			found = true
-		}
-		if !found {
-			return events.DeliveryContext{}, fmt.Errorf("construction occurrence has no fixed-cut reply evidence")
+		if err := requireConstructionReplyAtCut(plan, source.Reply.ID); err != nil {
+			return events.DeliveryContext{}, err
 		}
 		child.Reply = &events.ReplyContextRef{ID: deterministicRunForkReplyContextID(forkRunID, source.Reply.ID)}
 	}
@@ -110,33 +101,54 @@ func projectRunForkConstructionContext(plan runfork.RunForkPlan, forkRunID strin
 		if receipt.Disposition == events.JoinAdmissionEarly {
 			continue
 		}
-		entry := receipt.Ref.StageEntry()
-		var entity *runfork.RunForkEntityState
-		for i := range plan.Entities {
-			if plan.Entities[i].EntityID == entry.EntityID {
-				if entity != nil {
-					return events.DeliveryContext{}, fmt.Errorf("construction return repeats its source owner")
-				}
-				entity = &plan.Entities[i]
-			}
-		}
-		if entity == nil || entity.MaterializationMetadata == nil {
-			return events.DeliveryContext{}, fmt.Errorf("construction return has no fixed-cut source owner")
-		}
-		projection, err := runfork.ProjectEntityOwnership(plan.SourceRunID, forkRunID, entity.EntityID, entity.MaterializationMetadata.FlowInstance)
-		if err != nil {
-			return events.DeliveryContext{}, err
-		}
-		_, _, correspondence, err := projectRunForkEntityExecutionState(*entity, plan.SourceRunID, forkRunID, projection)
-		if err != nil {
-			return events.DeliveryContext{}, err
-		}
-		child.Joins[index].Ref, err = projectRunForkJoinReference(receipt.Ref, plan.SourceRunID, forkRunID, projection, correspondence)
+		var err error
+		child.Joins[index].Ref, err = projectConstructionReturnAtCut(plan, forkRunID, receipt.Ref)
 		if err != nil {
 			return events.DeliveryContext{}, err
 		}
 	}
 	return child, child.Validate()
+}
+
+func requireConstructionReplyAtCut(plan runfork.RunForkPlan, replyID string) error {
+	found := false
+	for _, record := range plan.ReplyContexts {
+		if record.ID != replyID {
+			continue
+		}
+		if found || record.RunID != plan.SourceRunID || record.Validate() != nil {
+			return fmt.Errorf("construction occurrence has contradictory reply evidence")
+		}
+		found = true
+	}
+	if !found {
+		return fmt.Errorf("construction occurrence has no fixed-cut reply evidence")
+	}
+	return nil
+}
+
+func projectConstructionReturnAtCut(plan runfork.RunForkPlan, forkRunID string, ref timeridentity.JoinRef) (timeridentity.JoinRef, error) {
+	var entity *runfork.RunForkEntityState
+	for i := range plan.Entities {
+		if plan.Entities[i].EntityID == ref.StageEntry().EntityID {
+			if entity != nil {
+				return timeridentity.JoinRef{}, fmt.Errorf("construction return repeats its source owner")
+			}
+			entity = &plan.Entities[i]
+		}
+	}
+	if entity == nil || entity.MaterializationMetadata == nil {
+		return timeridentity.JoinRef{}, fmt.Errorf("construction return has no fixed-cut source owner")
+	}
+	projection, err := runfork.ProjectEntityOwnership(plan.SourceRunID, forkRunID, entity.EntityID, entity.MaterializationMetadata.FlowInstance)
+	if err != nil {
+		return timeridentity.JoinRef{}, err
+	}
+	_, _, correspondence, err := projectRunForkEntityExecutionState(*entity, plan.SourceRunID, forkRunID, projection)
+	if err != nil {
+		return timeridentity.JoinRef{}, err
+	}
+	return projectRunForkJoinReference(ref, plan.SourceRunID, forkRunID, projection, correspondence)
 }
 
 func deterministicRunForkReplyContextID(forkRunID, sourceReplyID string) string {
