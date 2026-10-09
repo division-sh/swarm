@@ -28,6 +28,7 @@ type RunLifecyclePostgresOwner struct {
 	pipeline               pipelineTerminalizer
 	decisionCards          decisionCardTerminalizer
 	channelChanges         *runtimechanneldelivery.ReconcileSignal
+	completionAuthority    completionAuthorityOwner
 }
 
 type RunLifecycleSQLiteOwner struct {
@@ -38,6 +39,7 @@ type RunLifecycleSQLiteOwner struct {
 	pipeline               pipelineTerminalizer
 	decisionCards          decisionCardTerminalizer
 	channelChanges         *runtimechanneldelivery.ReconcileSignal
+	completionAuthority    completionAuthorityOwner
 	nowFn                  func() time.Time
 }
 

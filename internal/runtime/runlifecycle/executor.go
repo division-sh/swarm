@@ -8,6 +8,8 @@ import (
 	"time"
 
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 )
 
 const defaultCandidatePageSize = 128
@@ -47,6 +49,7 @@ type ExecutorOptions struct {
 	RetryPolicy      RetryPolicy
 	PageSize         int
 	GenericSchedules GenericScheduleWakeupOwner
+	ExecutionContext context.Context
 }
 
 type GenericScheduleWakeupOwner interface {
@@ -80,7 +83,11 @@ type Executor struct {
 	store            CandidateStore
 	scope            CandidateScope
 	catalog          FinalCatalog
-	occurrence       *worklifetime.RuntimeOccurrence
+	occurrence       completionOccurrence
+	executionContext context.Context
+	startGate        chan struct{}
+	completionWake   chan struct{}
+	chainsDone       sync.WaitGroup
 	clock            WakeClock
 	retry            RetryPolicy
 	pageSize         int
@@ -96,11 +103,16 @@ type Executor struct {
 	settlementErr error
 }
 
+type completionOccurrence interface {
+	worklifetime.Occurrence
+	BeginAcceptedDescendant(context.Context) (*worklifetime.Lease, error)
+}
+
 func NewExecutor(
 	store CandidateStore,
 	scope CandidateScope,
 	catalog FinalCatalog,
-	occurrence *worklifetime.RuntimeOccurrence,
+	occurrence worklifetime.Occurrence,
 	opts ExecutorOptions,
 ) (*Executor, error) {
 	if store == nil {
@@ -109,8 +121,9 @@ func NewExecutor(
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
-	if occurrence == nil {
-		return nil, errors.New("run lifecycle executor requires runtime occurrence")
+	owner, err := requireExecutorLifetime(scope, occurrence, opts.ExecutionContext)
+	if err != nil {
+		return nil, err
 	}
 	if opts.Clock == nil {
 		opts.Clock = realWakeClock{}
@@ -122,10 +135,36 @@ func NewExecutor(
 		opts.PageSize = defaultCandidatePageSize
 	}
 	return &Executor{
-		store: store, scope: scope, catalog: catalog, occurrence: occurrence,
+		store: store, scope: scope, catalog: catalog, occurrence: owner,
+		executionContext: opts.ExecutionContext, startGate: make(chan struct{}), completionWake: make(chan struct{}, 1),
 		clock: opts.Clock, retry: opts.RetryPolicy, pageSize: opts.PageSize, genericSchedules: opts.GenericSchedules,
 		chains: make(map[string]*candidateChain),
 	}, nil
+}
+
+func requireExecutorLifetime(scope CandidateScope, occurrence worklifetime.Occurrence, ctx context.Context) (completionOccurrence, error) {
+	switch owner := occurrence.(type) {
+	case *worklifetime.RuntimeOccurrence:
+		if owner == nil || scope.SelectedForkRunID != "" || ctx != nil || owner.Identity().BundleHash != scope.BundleHash {
+			return nil, errors.New("normal completion executor requires normal runtime scope")
+		}
+		return owner, nil
+	case *worklifetime.SelectedForkOccurrence:
+		if owner == nil || ctx == nil || scope.SelectedForkRunID == "" || owner.Identity().RunID != scope.SelectedForkRunID {
+			return nil, errors.New("selected completion executor requires exact selected lifetime")
+		}
+		authority, present := effects.AuthorityFromContext(ctx)
+		source, hasSource := correlation.SourceArtifactFactFromContext(ctx)
+		identity := owner.Identity()
+		if !present || !hasSource || source.BundleHash() != scope.BundleHash || !authority.Valid() || authority.Kind != effects.AuthoritySelectedContractFork ||
+			authority.SelectedFork.ForkRunID != identity.RunID ||
+			authority.SelectedFork.ExecutionID != identity.ExecutionID || authority.SelectedFork.Generation != identity.Generation {
+			return nil, errors.New("selected completion executor context contradicts its admitted lifetime")
+		}
+		return owner, nil
+	default:
+		return nil, errors.New("completion executor requires normal or selected runtime lifetime")
+	}
 }
 
 func (e *Executor) Start(ctx context.Context) error {
@@ -142,6 +181,7 @@ func (e *Executor) Start(ctx context.Context) error {
 		return errors.New("run lifecycle executor already started")
 	}
 	e.started = true
+	close(e.startGate)
 	e.mu.Unlock()
 
 	cursor := CandidateCursor{}
@@ -201,6 +241,9 @@ func (e *Executor) ReserveCompletionCandidate(ctx context.Context) (CandidateAdm
 	if e.retiring {
 		return nil, worklifetime.ErrRetired
 	}
+	if e.executionContext != nil {
+		ctx = e.executionContext
+	}
 	lease, err := e.occurrence.BeginAcceptedDescendant(context.WithoutCancel(ctx))
 	if err != nil {
 		return nil, err
@@ -254,8 +297,8 @@ func (e *Executor) installReserved(lease *worklifetime.Lease, candidate Candidat
 	if err := candidate.Validate(); err != nil {
 		return err
 	}
-	if candidate.BundleHash != e.scope.BundleHash {
-		return fmt.Errorf("completion candidate bundle_hash %s does not match executor scope %s", candidate.BundleHash, e.scope.BundleHash)
+	if !e.scope.MatchesCandidate(candidate) {
+		return fmt.Errorf("completion candidate does not match executor scope %+v", e.scope)
 	}
 	e.mu.Lock()
 	if e.retiring {
@@ -278,6 +321,7 @@ func (e *Executor) installReserved(lease *worklifetime.Lease, candidate Candidat
 		wake:                   make(chan struct{}, 1),
 	}
 	e.chains[candidate.RunID] = chain
+	e.chainsDone.Add(1)
 	e.mu.Unlock()
 
 	go e.runChain(chainCtx, lease, chain)
@@ -319,7 +363,16 @@ func signalCandidateChain(chain *candidateChain) {
 }
 
 func (e *Executor) runChain(ctx context.Context, lease *worklifetime.Lease, chain *candidateChain) {
-	defer func() { _ = lease.Done() }()
+	defer func() {
+		_ = lease.Done()
+		e.chainsDone.Done()
+	}()
+	select {
+	case <-ctx.Done():
+		e.removeChain(chain)
+		return
+	case <-e.startGate:
+	}
 
 	attempt := 0
 	for {
@@ -347,6 +400,13 @@ func (e *Executor) runChain(ctx context.Context, lease *worklifetime.Lease, chai
 		// Retirement cancels waits and retries, but an admitted persistence
 		// operation must finish before its occurrence lease can settle.
 		result, err := e.store.ExecuteCompletionCandidate(context.WithoutCancel(ctx), candidate, e.catalog)
+		if errors.Is(err, ErrCompletionAuthority) && !result.Committed {
+			e.mu.Lock()
+			e.settlementErr = errors.Join(e.settlementErr, err)
+			e.mu.Unlock()
+			e.removeChain(chain)
+			return
+		}
 		if err != nil && !result.Committed {
 			result = CompletionResult{Outcome: OutcomeRetryCurrent, Retryable: err}
 		} else if err != nil {
@@ -367,6 +427,12 @@ func (e *Executor) runChain(ctx context.Context, lease *worklifetime.Lease, chai
 		if result.Outcome != OutcomeRetryCurrent && !e.reconcileCommittedGenericSchedules(ctx, result.GenericScheduleActivations) {
 			e.removeChain(chain)
 			return
+		}
+		if result.Committed && result.Outcome == OutcomeTerminallyEligible {
+			select {
+			case e.completionWake <- struct{}{}:
+			default:
+			}
 		}
 		action := e.finishAttempt(ctx, chain, candidate, generation, result)
 		switch action {
@@ -607,4 +673,31 @@ func (e *Executor) ActiveCandidates() int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return len(e.chains)
+}
+
+func (e *Executor) CompletionWakeups() <-chan struct{} {
+	return e.completionWake
+}
+
+func (e *Executor) Wait(ctx context.Context) error {
+	if e == nil {
+		return nil
+	}
+	e.mu.Lock()
+	retiring := e.retiring
+	e.mu.Unlock()
+	if !retiring {
+		return errors.New("completion executor must retire before joining")
+	}
+	done := make(chan struct{})
+	go func() {
+		e.chainsDone.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	}
 }

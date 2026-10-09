@@ -67,6 +67,8 @@ type runForkSelectedContractMaterializationPort struct {
 	materializeEntity     func(context.Context, *sql.Tx, *mutationprotocol.Attempt, activeRunSourceOwnerFunc, string, contracts.BundleIdentity, runfork.RunForkPlan, runfork.RunForkEntityState, runForkEntityMetadata, time.Time, *privaterunlifecycle.ChannelCardChanges) error
 	publishChannelChanges func(bool, bool) error
 	materializeBarriers   runForkFanOutBarrierOwner
+	workflowTimers        runForkWorkflowTimerMaterializationOwner
+	replies               runForkReplyContextOwner
 	now                   func() time.Time
 }
 
@@ -235,6 +237,15 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			if err := requireExactMaterializedRunForkFanOut(txctx, tx, port.postgres, forkRunID, plan, fanOutPlanRefs, req.OriginalLoopCarriage, identity.SourceArtifactFact.BundleHash(), port.durableData, pins); err != nil {
 				return err
 			}
+			if len(plan.WorkflowTimers) != 0 {
+				snapshot, err := port.loadSnapshot(txctx, tx, forkRunID)
+				if err != nil {
+					return err
+				}
+				if _, err := materializeRunForkWorkflowTimers(runtimecorrelation.WithRunID(txctx, forkRunID), attempt, plan, forkRunID, req.Readiness, port.workflowTimers, snapshot.StartedAt, true); err != nil {
+					return err
+				}
+			}
 			existing.DataPins = pins
 			existing.MaterializedFanOutCount = len(plan.FanOutObligations) - countRunForkSourceDeploymentFeeds(plan) + len(pins)
 			if routeResolved {
@@ -307,6 +318,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			if err := port.materializeEntity(forkCtx, tx, attempt, forkMutationSource, forkRunID, target, plan, entity, metadata[entity.EntityID], now, &changes); err != nil {
 				return err
 			}
+		}
+		if _, err := materializeRunForkWorkflowTimers(forkCtx, attempt, plan, forkRunID, req.Readiness, port.workflowTimers, now, false); err != nil {
+			return err
 		}
 		materializedFanOutCount, err := materializeRunForkFanOutObligations(txctx, tx, port.postgres, attempt, port.materializeBarriers, forkRunID, plan, fanOutPlanRefs, req.OriginalLoopCarriage, identity.SourceArtifactFact.BundleHash(), port.durableData, pins, now)
 		if err != nil {
@@ -449,6 +463,8 @@ func postgresRunForkSelectedContractMaterializationPort(s *RunForkPostgresOwner)
 		},
 		publishChannelChanges: s.publishChannelChanges,
 		materializeBarriers:   s.PipelinePostgresOwner,
+		workflowTimers:        s.PipelinePostgresOwner,
+		replies:               s.replies,
 		now:                   func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -501,6 +517,8 @@ func sqliteRunForkSelectedContractMaterializationPort(s *RunForkSQLiteOwner) run
 		},
 		publishChannelChanges: s.publishChannelChanges,
 		materializeBarriers:   s.PipelineSQLiteOwner,
+		workflowTimers:        s.PipelineSQLiteOwner,
+		replies:               s.replies,
 		now:                   s.now,
 	}
 }

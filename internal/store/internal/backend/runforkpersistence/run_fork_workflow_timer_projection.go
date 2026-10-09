@@ -2,20 +2,14 @@ package runforkpersistence
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
-
-const runForkWorkflowTimerReconstructionOwner = "run_fork_workflow_timer"
 
 // The caller admits raw at point and supplies the selected declaration's
 // canonical activation, or nil for an admitted rule removal. Projection grants
@@ -29,28 +23,17 @@ func projectRunForkWorkflowTimer(
 	correspondence *loopruntime.ForkCorrespondence,
 	bornAt time.Time,
 ) (pipeline.WorkflowTimerActivation, bool, error) {
-	if sourceRunID == "" || forkRunID == "" || sourceRunID == forkRunID ||
-		sourceRunID != strings.TrimSpace(sourceRunID) || forkRunID != strings.TrimSpace(forkRunID) {
-		return pipeline.WorkflowTimerActivation{}, false, fmt.Errorf("fork workflow timer requires exact distinct source and child runs")
-	}
-	if err := point.Validate(); err != nil {
-		return pipeline.WorkflowTimerActivation{}, false, fmt.Errorf("fork workflow timer point: %w", err)
-	}
 	source, bornAt, err := decodeRunForkWorkflowTimerSource(raw, sourceRunID, bornAt)
 	if err != nil {
 		return pipeline.WorkflowTimerActivation{}, false, err
 	}
-	child, err := projectRunForkWorkflowTimerOwnership(source, sourceRunID, forkRunID)
+	record, err := runfork.ProjectWorkflowTimerRecord(source.PersistenceRecord(), source.Ref, forkRunID, point, correspondence, bornAt)
 	if err != nil {
 		return pipeline.WorkflowTimerActivation{}, false, err
 	}
-	child.Ref.ActivationID = timeridentity.WorkflowTimerActivationID(
-		"fork", sourceRunID, source.Ref.ActivationID, forkRunID,
-		string(point.Kind), strconv.FormatInt(point.Revision, 10), point.EventID,
-	)
-	child.Ref.Generation, err = projectRunForkWorkflowTimerGeneration(source.Ref.Generation, correspondence, forkRunID, child.EntityID)
+	child, err := pipeline.DecodeWorkflowTimerActivationPersistenceRecord(record)
 	if err != nil {
-		return pipeline.WorkflowTimerActivation{}, false, err
+		return pipeline.WorkflowTimerActivation{}, false, fmt.Errorf("projected fork workflow timer: %w", err)
 	}
 	if selected != nil {
 		if err := validateRunForkWorkflowTimerSelection(*selected, child); err != nil {
@@ -59,14 +42,6 @@ func projectRunForkWorkflowTimer(
 		child.Ref.DeclarationRevision = selected.Ref.DeclarationRevision
 		child.OwnerAgent, child.EventType = selected.OwnerAgent, selected.EventType
 	}
-	child.CreatedAt, child.FiredAt = bornAt, time.Time{}
-	child.SourceTimerID, child.ForkedFromRunID = source.Ref.ActivationID, sourceRunID
-	child.ForkedFromPointKind, child.ForkedFromPointRevision, child.ForkedFromEventID = point.Kind, point.Revision, point.EventID
-	child.SourceArmedAt = source.CreatedAt
-	if !source.SourceArmedAt.IsZero() {
-		child.SourceArmedAt = source.SourceArmedAt
-	}
-	child.ReconstructionOwner = runForkWorkflowTimerReconstructionOwner
 	child = child.Canonical()
 	if err := child.Validate(); err != nil {
 		return pipeline.WorkflowTimerActivation{}, false, fmt.Errorf("projected fork workflow timer: %w", err)
@@ -98,53 +73,6 @@ func decodeRunForkWorkflowTimerSource(raw []byte, sourceRunID string, bornAt tim
 		return pipeline.WorkflowTimerActivation{}, time.Time{}, fmt.Errorf("fork workflow timer birth must follow its source row birth")
 	}
 	return source, bornAt, nil
-}
-
-func projectRunForkWorkflowTimerOwnership(source pipeline.WorkflowTimerActivation, sourceRunID, forkRunID string) (pipeline.WorkflowTimerActivation, error) {
-	ownership, err := projectRunForkEntityOwnership(sourceRunID, forkRunID, source.EntityID, source.Route.InstancePath)
-	if err != nil {
-		return pipeline.WorkflowTimerActivation{}, err
-	}
-	root := ownership.Source == (runfork.EntityIdentity{EntityID: sourceRunID, FlowInstance: sourceRunID})
-	childRoute := source.Route
-	if root {
-		if source.Route != (flowidentity.Route{ScopeKey: ".", InstanceID: sourceRunID, InstancePath: sourceRunID}) || source.RoutingSource.Kind() != events.RoutingSourceRoot {
-			return pipeline.WorkflowTimerActivation{}, fmt.Errorf("fork root workflow timer contradicts exact root ownership")
-		}
-		childRoute.InstanceID, childRoute.InstancePath = forkRunID, forkRunID
-	} else if source.RoutingSource.Kind() != events.RoutingSourceFlowOwnedControl || source.RoutingSource.Route().FlowID != source.Route.ScopeKey {
-		return pipeline.WorkflowTimerActivation{}, fmt.Errorf("fork workflow timer declaration scope contradicts its recorded route")
-	}
-	childSource, err := runfork.ProjectProducerOwnership(sourceRunID, forkRunID, source.RoutingSource)
-	if err != nil {
-		return pipeline.WorkflowTimerActivation{}, err
-	}
-	child := source.Canonical()
-	child.RunID, child.EntityID, child.Route, child.RoutingSource = forkRunID, ownership.Fork.EntityID, childRoute, childSource
-	return child, nil
-}
-
-func projectRunForkWorkflowTimerGeneration(source attemptgeneration.Generation, correspondence *loopruntime.ForkCorrespondence, forkRunID, entityID string) (attemptgeneration.Generation, error) {
-	if correspondence != nil {
-		if err := correspondence.RequireDestination(forkRunID, entityID); err != nil {
-			return attemptgeneration.Generation{}, err
-		}
-	}
-	if source == (attemptgeneration.Generation{}) {
-		return source, nil
-	}
-	admitted, err := correspondence.AdmitSource(source)
-	if err != nil {
-		return attemptgeneration.Generation{}, fmt.Errorf("fork workflow timer source generation: %w", err)
-	}
-	bound, err := correspondence.Bind(admitted)
-	if err != nil {
-		return attemptgeneration.Generation{}, err
-	}
-	if err := bound.RequireDestination(forkRunID, entityID); err != nil {
-		return attemptgeneration.Generation{}, err
-	}
-	return bound.Generation(), nil
 }
 
 func validateRunForkWorkflowTimerSelection(selected, child pipeline.WorkflowTimerActivation) error {

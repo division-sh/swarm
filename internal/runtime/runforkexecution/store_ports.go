@@ -17,6 +17,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -25,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
@@ -108,6 +110,8 @@ type selectedContractExecutionPorts struct {
 	humanTasks              decisioncard.HumanTaskStore
 	decisionCardDraftExpiry runtimepipeline.DecisionCardDraftExpiry
 	humanTaskExpiry         runtimepipeline.HumanTaskExpiry
+	candidates              runlifecycle.CandidateOwner
+	genericSchedules        genericschedule.Store
 }
 
 func NewSelectedContractExecutionOwner(
@@ -132,6 +136,8 @@ func NewSelectedContractExecutionOwner(
 	humanTasks decisioncard.HumanTaskStore,
 	decisionCardDraftExpiry runtimepipeline.DecisionCardDraftExpiry,
 	humanTaskExpiry runtimepipeline.HumanTaskExpiry,
+	candidates runlifecycle.CandidateOwner,
+	genericSchedules genericschedule.Store,
 ) (SelectedContractExecutionOwner, error) {
 	required := []struct {
 		name  string
@@ -158,6 +164,7 @@ func NewSelectedContractExecutionOwner(
 		{"managed capabilities", managedCapabilities}, {"budget", budget}, {"runtime logs", logs},
 		{"decision cards", decisionCards}, {"proposed effects", proposedEffects},
 		{"human tasks", humanTasks}, {"decision-card draft expiry", decisionCardDraftExpiry}, {"human-task expiry", humanTaskExpiry},
+		{"run completion candidates", candidates}, {"generic schedule lifecycle", genericSchedules},
 	}
 	for _, role := range required {
 		if role.value == nil {
@@ -176,6 +183,7 @@ func NewSelectedContractExecutionOwner(
 		budget: budget, logs: logs, decisionCards: decisionCards,
 		proposedEffects: proposedEffects, humanTasks: humanTasks,
 		decisionCardDraftExpiry: decisionCardDraftExpiry, humanTaskExpiry: humanTaskExpiry,
+		candidates: candidates, genericSchedules: genericSchedules,
 	}}, nil
 }
 

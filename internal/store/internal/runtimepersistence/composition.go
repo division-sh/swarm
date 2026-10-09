@@ -208,6 +208,9 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := effectOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
+	if err := runLifecycle.BindCompletionAuthority(effectOwner); err != nil {
+		return nil, err
+	}
 	deliveryOwner, err := storedelivery.NewDeliveryPostgresOwner(deadLetterOwner, runLifecycle, candidates, agentOwner)
 	if err != nil {
 		return nil, err
@@ -288,7 +291,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := pipelineOwner.BindSelectedForkWriter(eventOwner); err != nil {
 		return nil, err
 	}
-	runForkOwner, err := storerunfork.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, durableData, apiIdempotency, candidates)
+	runForkOwner, err := storerunfork.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, replyContexts, durableData, apiIdempotency, candidates)
 	if err != nil {
 		return nil, err
 	}
@@ -497,6 +500,9 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err := effectOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
+	if err := runLifecycle.BindCompletionAuthority(effectOwner); err != nil {
+		return nil, err
+	}
 	deliveryOwner, err := storedelivery.NewDeliverySQLiteOwner(deadLetterOwner, runLifecycle, candidates, agentOwner, store.now)
 	if err != nil {
 		return nil, err
@@ -585,7 +591,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err := pipelineOwner.BindSelectedForkWriter(eventOwner); err != nil {
 		return nil, err
 	}
-	runForkOwner, err := storerunfork.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, durableData, apiIdempotency, candidates, store.now)
+	runForkOwner, err := storerunfork.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, replyContexts, durableData, apiIdempotency, candidates, store.now)
 	if err != nil {
 		return nil, err
 	}

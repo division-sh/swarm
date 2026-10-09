@@ -274,7 +274,7 @@ func validateSelectedRecoveryOperation(result runfork.SelectedForkRecoveryResult
 	}
 	operation := record.Request
 	if record.ForkRunID != result.RunID || record.BindingID != entry.Binding.BindingID ||
-		operation.ResolvedPoint == nil || *operation.ResolvedPoint != entry.Binding.ForkPoint ||
+		operation.ResolvedPoint == nil || !operation.ResolvedPoint.SameIdentity(entry.Binding.ForkPoint) ||
 		operation.SourceRunID != entry.Binding.SourceRunID || operation.TargetBundleHash != entry.BundleHash ||
 		operation.ContractSelection != entry.Binding.ContractSelection {
 		return fmt.Errorf("selected recovery operation differs from its fixed binding")
