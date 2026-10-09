@@ -961,23 +961,3 @@ func assertSQLiteMutationCount(t *testing.T, db *sql.DB, entityID, field, writer
 		t.Fatalf("mutation count for field=%s writer=%s step=%s old=%s new=%s = %d, want %d", field, writerID, handlerStep, oldValue, newValue, got, want)
 	}
 }
-
-func assertSQLiteTxTableCount(t *testing.T, tx *sql.Tx, table string, want int) {
-	t.Helper()
-	var query string
-	switch table {
-	case "runs":
-		query = `SELECT COUNT(*) FROM runs`
-	case "entity_mutations":
-		query = `SELECT COUNT(*) FROM entity_mutations`
-	default:
-		t.Fatalf("unsupported sqlite table %q", table)
-	}
-	var got int
-	if err := tx.QueryRow(query).Scan(&got); err != nil {
-		t.Fatalf("count sqlite %s rows: %v", table, err)
-	}
-	if got != want {
-		t.Fatalf("sqlite %s rows = %d, want %d", table, got, want)
-	}
-}
