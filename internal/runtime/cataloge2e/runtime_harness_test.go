@@ -1397,16 +1397,12 @@ func (h *runtimeHarness) ensureTargetFlowInstance(target events.RouteIdentity, t
 	}
 	ctx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+	instance := catalogChildConstructionIdentity(h.t, h, catalogRuntimeRunID,
+		runtimeflowidentity.Stored(semanticview.Wrap(h.bundle), target.FlowID, route.InstancePath, route.InstanceID, target.EntityID, ""),
+	)
 	_, err := h.rt.Manager.EnsureFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(h.bundle),
-		Instance: runtimeflowidentity.Stored(
-			semanticview.Wrap(h.bundle),
-			target.FlowID,
-			route.InstancePath,
-			route.InstanceID,
-			target.EntityID,
-			"",
-		),
+		ContractBundle:   semanticview.Wrap(h.bundle),
+		Instance:         instance,
 		ConstructorInput: constructorInput,
 		ResolvedKey:      resolvedKey,
 		TriggerEvent:     trigger,

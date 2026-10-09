@@ -396,9 +396,50 @@ func seedCatalogRootStateForRun(t testing.TB, h *runtimeHarness, runID string) {
 	}
 }
 
+func catalogRootConstructionIdentity(t testing.TB, h *runtimeHarness, runID string) runtimeflowidentity.Instance {
+	t.Helper()
+	owner := runtimeflowidentity.RunScopedFlowInstance{
+		RunID: runID, Route: runtimeflowidentity.StoredRoute(".", runID, runID),
+	}
+	ctx := catalogRunContext(h, runID)
+	root, found, err := h.workflow.Load(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		seedCatalogRootStateForRun(t, h, runID)
+		root, found, err = h.workflow.Load(ctx, owner)
+	}
+	if err != nil || !found {
+		t.Fatalf("load constructed catalog root %s: found=%t err=%v", runID, found, err)
+	}
+	identity, err := root.ConstructionIdentity(owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return identity
+}
+
+func catalogChildConstructionIdentity(t testing.TB, h *runtimeHarness, runID string, child runtimeflowidentity.Instance) runtimeflowidentity.Instance {
+	t.Helper()
+	parent := catalogRootConstructionIdentity(t, h, runID)
+	child.ParentEntityID = parent.EntityID
+	child.ParentRoute = runtimeflowidentity.ParentRoute{
+		FlowID: parent.TemplateID, FlowInstance: parent.InstancePath, EntityID: parent.EntityID,
+	}
+	if err := child.ValidateConstruction(semanticview.Wrap(h.bundle), runID); err != nil {
+		t.Fatalf("catalog child construction identity: %v", err)
+	}
+	return child
+}
+
 func materializeCatalogSelectedForkSourceFlow(t testing.TB, h *runtimeHarness, runID, flowPath, constructorInput string) string {
 	t.Helper()
+	source := semanticview.Wrap(h.bundle)
 	entityID := eventtest.UUID("run-scoped-selected-fork-worker")
+	instance := catalogChildConstructionIdentity(t, h, runID,
+		runtimeflowidentity.Stored(source, "worker-flow", flowPath, "worker-001", entityID, ""),
+	)
 	at := time.Now().UTC()
 	ctx := worklifetime.WithOccurrence(catalogRunContext(h, runID), h.rt.WorkOccurrence())
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
@@ -407,10 +448,8 @@ func materializeCatalogSelectedForkSourceFlow(t testing.TB, h *runtimeHarness, r
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at,
 	)
 	if err := h.rt.Manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: semanticview.Wrap(h.bundle),
-		Instance: runtimeflowidentity.Stored(
-			semanticview.Wrap(h.bundle), "worker-flow", flowPath, "worker-001", entityID, "",
-		),
+		ContractBundle:   source,
+		Instance:         instance,
 		ConstructorInput: constructorInput, ResolvedKey: "worker-001",
 		TriggerEvent: trigger,
 		OccurredAt:   at,
