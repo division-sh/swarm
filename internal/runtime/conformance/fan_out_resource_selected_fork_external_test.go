@@ -264,7 +264,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 		durable := bus.DurableDependencies{
 			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-			FlowRoutes: selected, FlowRouteRecords: selected,
+
 			FlowRouteTopology: selected,
 			ActiveAgents:      selected, ActiveFlows: selected, TargetOwners: selected,
 			PreparedEvents: selected, TargetFailureRecorder: selected,
@@ -292,7 +292,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 		durable := bus.DurableDependencies{
 			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-			FlowRoutes: selected, FlowRouteRecords: selected,
+
 			FlowRouteTopology: selected,
 			ActiveAgents:      selected, ActiveFlows: selected, TargetOwners: selected,
 			PreparedEvents: selected, TargetFailureRecorder: selected,

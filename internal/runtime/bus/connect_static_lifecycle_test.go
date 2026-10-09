@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -10,6 +11,28 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
+
+func TestConnectStaticDeclarationPlansDoNotDependOnInstanceRoutes(t *testing.T) {
+	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyReceiverMixedAgent(t))
+	table, err := DeriveRouteTable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := table.staticAgentDeclarationPlans()
+	if len(want) != 1 {
+		t.Fatalf("static declaration plans = %d, want 1", len(want))
+	}
+	table.patterns = nil
+	if got := table.staticAgentDeclarationPlans(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("process-route removal changed compiled declarations: got=%+v want=%+v", got, want)
+	}
+	for plan := range want {
+		delete(want, plan)
+	}
+	if got := table.staticAgentDeclarationPlans(); len(got) != 1 {
+		t.Fatalf("caller mutated compiled declaration plans: %+v", got)
+	}
+}
 
 func TestConnectPendingAgentConsumesExactStaticDeclaration(t *testing.T) {
 	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyReceiverMixedAgent(t))

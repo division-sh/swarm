@@ -883,13 +883,6 @@ func (b *sqliteFlowActivationBus) HasFlowInstanceRoute(identity runtimeflowident
 	return false
 }
 
-func (b *sqliteFlowActivationBus) VerifyFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	if !b.HasFlowInstanceRoute(identity) {
-		return errors.New("flow-instance route is not installed")
-	}
-	return nil
-}
-
 func (b *sqliteFlowActivationBus) runtimeLogEntries() []runtimepipeline.RuntimeLogEntry {
 	b.mu.Lock()
 	defer b.mu.Unlock()

@@ -333,7 +333,6 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	ctx := seedRuntimeTestRun(t, pg)
 	proofStore := routeMaterializationDBProofStore{pg: pg}
 	durable := externalRuntimeTestDurableDependencies(pg)
-	durable.FlowRoutes = proofStore
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {

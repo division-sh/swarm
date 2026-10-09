@@ -213,16 +213,15 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 			ReplyContext:             durable,
 			RunLifecycle:             durable,
 			DeliveryLifecycle:        durable,
-			FlowRoutes:               durable,
-			FlowRouteRecords:         durable,
-			FlowRouteTopology:        durable,
-			ActiveAgents:             durable,
-			ActiveFlows:              durable,
-			TargetOwners:             durable,
-			PreparedEvents:           durable,
-			TargetFailureRecorder:    durable,
-			RunOrigins:               durable,
-			StandingRestarts:         durable,
+
+			FlowRouteTopology:     durable,
+			ActiveAgents:          durable,
+			ActiveFlows:           durable,
+			TargetOwners:          durable,
+			PreparedEvents:        durable,
+			TargetFailureRecorder: durable,
+			RunOrigins:            durable,
+			StandingRestarts:      durable,
 		}
 	}
 	deliveryStore, hasDeliveryStore := eventStore.(runtimedelivery.Store)

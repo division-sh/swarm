@@ -430,7 +430,7 @@ func externalRuntimeTestDurableDependencies(durable externalRuntimeTestDurableEv
 		ConstructionPublications: durable,
 		EmitFeedback:             durable,
 		ReplyContext:             durable, RunLifecycle: durable,
-		DeliveryLifecycle: durable, FlowRoutes: durable, FlowRouteRecords: durable,
+		DeliveryLifecycle: durable,
 		FlowRouteTopology: durable, ActiveAgents: durable,
 		ActiveFlows: durable, TargetOwners: durable, PreparedEvents: durable,
 		TargetFailureRecorder: durable, RunOrigins: durable, StandingRestarts: durable,

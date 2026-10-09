@@ -208,7 +208,7 @@ func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) run
 	roles := managedNativeDurableRoles{}
 	return runtimebus.DurableDependencies{
 		RunLifecycle: roles, DeliveryLifecycle: delivery,
-		FlowRoutes: roles, FlowRouteRecords: roles,
+
 		FlowRouteTopology: roles, ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
 		PreparedEvents:        roles,
 		TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles, Instances: roles,

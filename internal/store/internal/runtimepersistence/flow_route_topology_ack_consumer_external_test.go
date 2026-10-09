@@ -3,6 +3,7 @@ package runtimepersistence_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -89,8 +90,8 @@ func TestFlowRouteTopologyAcknowledgedFaultCompletesProcessFollowupBothStores(t 
 			if err != nil || len(routes) == 0 || !eventBus.HasFlowInstanceRoute(identity) {
 				t.Fatalf("acknowledged route not durable and visible: routes=%#v visible=%v err=%v", routes, eventBus.HasFlowInstanceRoute(identity), err)
 			}
-			if err := eventBus.VerifyFlowInstanceRoute(ctx, identity); err != nil {
-				t.Fatalf("process route differs from committed route: %v", err)
+			if expected := eventBus.RouteTable().MaterializedRoutes(identity); !slices.Equal(routes, expected) {
+				t.Fatalf("process route differs from committed route: durable=%#v process=%#v", routes, expected)
 			}
 			wrapped.refuse = true
 			if err := flowroutefixture.StageAndPublish(ctx, eventBus, req); !errors.Is(err, fault) || wrapped.calls != 1 || !eventBus.HasFlowInstanceRoute(identity) {

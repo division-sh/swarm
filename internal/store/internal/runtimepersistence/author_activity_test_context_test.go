@@ -162,8 +162,8 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 		Instances:                store,
 		ConstructionPublications: store,
 		ReplyContext:             store, RunLifecycle: store, DeliveryLifecycle: store,
-		FlowRoutes: store, FlowRouteRecords: store, FlowRouteTopology: store,
-		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, PreparedEvents: store,
+		FlowRouteTopology: store,
+		ActiveAgents:      store, ActiveFlows: store, TargetOwners: store, PreparedEvents: store,
 		TargetFailureRecorder: store, RunOrigins: store, StandingRestarts: store,
 	}
 	if feedback, ok := store.(runtimepipeline.WorkflowEmitFeedbackOwner); ok {

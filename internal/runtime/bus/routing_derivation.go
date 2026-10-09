@@ -91,6 +91,7 @@ type RouteTable struct {
 	authoredScopes         map[string]struct{}
 	templates              map[string]routeFlowTemplate
 	connectDefinitions     map[string][]runtimepinrouting.ConnectRecipientRegistration
+	staticAgentPlans       map[agentidentity.Plan]struct{}
 	instanceOwners         map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance
 	instanceEventPath      map[runtimeflowidentity.RunScopedFlowInstance][]string
 	templateObservers      map[string][]routeTemplateSourceObserver
@@ -240,7 +241,7 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 			LocalEvents: cloneStringSet(localEvents),
 			Subscribers: subscribers,
 		}
-		definitions, err := compileRouteConnectDefinitions(graph, scope, subscribers)
+		definitions, staticPlans, err := compileRouteConnectDefinitions(graph, scope, subscribers)
 		if err != nil {
 			return nil, err
 		}
@@ -248,6 +249,9 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 			rt.connectDefinitions = make(map[string][]runtimepinrouting.ConnectRecipientRegistration)
 		}
 		rt.connectDefinitions[scope.ID] = definitions
+		for _, plan := range staticPlans {
+			rt.staticAgentPlans[plan.Normalize()] = struct{}{}
+		}
 		if strings.EqualFold(scope.Mode, "template") {
 			continue
 		}
@@ -271,8 +275,9 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 	return rt, nil
 }
 
-func compileRouteConnectDefinitions(graph runtimepinrouting.CompiledConnectGraph, scope semanticview.FlowScope, subscribers []routeSubscriberTemplate) ([]runtimepinrouting.ConnectRecipientRegistration, error) {
+func compileRouteConnectDefinitions(graph runtimepinrouting.CompiledConnectGraph, scope semanticview.FlowScope, subscribers []routeSubscriberTemplate) ([]runtimepinrouting.ConnectRecipientRegistration, []agentidentity.Plan, error) {
 	var definitions []runtimepinrouting.ConnectRecipientRegistration
+	var staticPlans []agentidentity.Plan
 	path := scope.Path
 	if scope.ID == "." {
 		path = "."
@@ -280,7 +285,10 @@ func compileRouteConnectDefinitions(graph runtimepinrouting.CompiledConnectGraph
 	for _, subscriber := range subscribers {
 		recipient, err := connectDeclarationRecipient(path, subscriber)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
+		}
+		if !strings.EqualFold(scope.Mode, "template") && subscriber.Kind == subscriberAgent {
+			staticPlans = append(staticPlans, recipient.AgentPlan())
 		}
 		for _, pattern := range subscriber.Patterns {
 			eventsForPattern := []string{pattern.raw}
@@ -297,7 +305,7 @@ func compileRouteConnectDefinitions(graph runtimepinrouting.CompiledConnectGraph
 			}
 		}
 	}
-	return definitions, nil
+	return definitions, staticPlans, nil
 }
 
 func connectDeclarationRecipient(path string, subscriber routeSubscriberTemplate) (runtimepinrouting.ConnectRecipient, error) {
@@ -355,13 +363,8 @@ func (rt *RouteTable) staticAgentDeclarationPlans() map[agentidentity.Plan]struc
 	if rt == nil {
 		return plans
 	}
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	for _, pattern := range rt.patterns {
-		subscriber := pattern.Subscriber
-		if pattern.RunID == "" && subscriber.agentLifecycle == agentLifecycleAdmissionStaticDeclaration {
-			plans[subscriber.AgentPlan.Normalize()] = struct{}{}
-		}
+	for plan := range rt.staticAgentPlans {
+		plans[plan] = struct{}{}
 	}
 	return plans
 }
@@ -786,6 +789,7 @@ func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.
 		authoredEventPath:    make(map[string]struct{}),
 		authoredScopes:       make(map[string]struct{}),
 		templates:            make(map[string]routeFlowTemplate),
+		staticAgentPlans:     make(map[agentidentity.Plan]struct{}),
 		instanceOwners:       make(map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance),
 		instanceEventPath:    make(map[runtimeflowidentity.RunScopedFlowInstance][]string),
 		templateObservers:    make(map[string][]routeTemplateSourceObserver),

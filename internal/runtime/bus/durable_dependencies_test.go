@@ -106,20 +106,8 @@ func (unexpectedDurableTestRoles) SummarizeRun(context.Context, string) (runtime
 func (unexpectedDurableTestRoles) TerminalizeRun(context.Context, string, string) ([]runtimedelivery.Terminalization, error) {
 	return nil, errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) UpsertFlowInstanceRoute(context.Context, FlowInstanceRouteRecord) error {
-	return errUnexpectedDurableTestRole
-}
-func (unexpectedDurableTestRoles) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
-	return errUnexpectedDurableTestRole
-}
-func (unexpectedDurableTestRoles) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	return nil, errUnexpectedDurableTestRole
-}
 func (unexpectedDurableTestRoles) ReplaceFlowInstanceRouteTopology(context.Context, []FlowInstanceRouteRecordSet) (FlowInstanceRouteTopologyResult, error) {
 	return FlowInstanceRouteTopologyResult{}, errUnexpectedDurableTestRole
-}
-func (unexpectedDurableTestRoles) ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance) ([]FlowInstanceRouteRecord, error) {
-	return nil, errUnexpectedDurableTestRole
 }
 func (unexpectedDurableTestRoles) ListActiveAgentDescriptors(context.Context, string) ([]ActiveAgentDescriptor, error) {
 	return nil, nil
@@ -185,12 +173,6 @@ func ExactDurableTestDependencies(selected any) DurableDependencies {
 	if deps.DeliveryLifecycle == nil {
 		deps.DeliveryLifecycle = defaults
 	}
-	if deps.FlowRoutes == nil {
-		deps.FlowRoutes = defaults
-	}
-	if deps.FlowRouteRecords == nil {
-		deps.FlowRouteRecords = defaults
-	}
 	if deps.FlowRouteTopology == nil {
 		deps.FlowRouteTopology = defaults
 	}
@@ -240,12 +222,6 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 	if role, ok := selected.(runtimedelivery.Store); ok {
 		deps.DeliveryLifecycle = role
 	}
-	if role, ok := selected.(FlowInstanceRoutePersistence); ok {
-		deps.FlowRoutes = role
-	}
-	if role, ok := selected.(FlowInstanceRouteRecordReader); ok {
-		deps.FlowRouteRecords = role
-	}
 	if role, ok := selected.(FlowInstanceRouteTopologyPersistence); ok {
 		deps.FlowRouteTopology = role
 	}
@@ -278,7 +254,7 @@ func TestDurableDependenciesDoNotRequireReceiverElectionReader(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	deps := DurableDependencies{
 		Instances:    roles,
-		RunLifecycle: roles, DeliveryLifecycle: roles, FlowRoutes: roles, FlowRouteRecords: roles,
+		RunLifecycle: roles, DeliveryLifecycle: roles,
 		FlowRouteTopology: roles,
 		ActiveAgents:      roles, ActiveFlows: roles, TargetOwners: roles,
 		PreparedEvents: roles, TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles,
@@ -293,6 +269,11 @@ func TestDurableDependenciesDoNotRequireReceiverElectionReader(t *testing.T) {
 	if _, err := NewEventBusWithOptions(store, opts); err != nil {
 		t.Fatalf("construct with complete durable dependencies: %v", err)
 	}
+	opts.Durable.Instances = nil
+	if _, err := NewEventBusWithOptions(store, opts); err == nil {
+		t.Fatal("durable bus accepted absent native instance index")
+	}
+	opts.Durable.Instances = roles
 	opts.Durable.ConstructionPublications = nil
 	if _, err := NewEventBusWithOptions(store, opts); err == nil {
 		t.Fatal("durable bus accepted absent construction receipt reader")

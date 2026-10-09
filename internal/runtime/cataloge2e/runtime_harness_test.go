@@ -465,7 +465,7 @@ func catalogPostgresRuntimeDeps(cfg *config.Config, pg *store.PostgresStore, wor
 		EventStore:          pg,
 		EventBusDurable: runtimebus.DurableDependencies{
 			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
-			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteTopology: pg,
+			FlowRouteTopology: pg,
 			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, PreparedEvents: pg,
 			TargetFailureRecorder: pg, RunOrigins: pg, StandingRestarts: pg, ConstructionPublications: pg, Instances: pg, EmitFeedback: pg,
 		},
@@ -524,7 +524,7 @@ func catalogSQLiteRuntimeDeps(cfg *config.Config, sqlite *store.SQLiteRuntimeSto
 		EventStore:          sqlite,
 		EventBusDurable: runtimebus.DurableDependencies{
 			ReplyContext: sqlite, RunLifecycle: sqlite, DeliveryLifecycle: sqlite,
-			FlowRoutes: sqlite, FlowRouteRecords: sqlite, FlowRouteTopology: sqlite,
+			FlowRouteTopology: sqlite,
 			ActiveAgents: sqlite, ActiveFlows: sqlite, TargetOwners: sqlite, PreparedEvents: sqlite,
 			TargetFailureRecorder: sqlite, RunOrigins: sqlite, StandingRestarts: sqlite, ConstructionPublications: sqlite, Instances: sqlite, EmitFeedback: sqlite,
 		},

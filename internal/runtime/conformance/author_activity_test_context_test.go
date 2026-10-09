@@ -324,7 +324,7 @@ func conformanceDurableEventBusDependencies(store conformanceDurableEventBusStor
 		Instances:                store,
 		ConstructionPublications: store,
 		ReplyContext:             store, RunLifecycle: store, DeliveryLifecycle: store,
-		FlowRoutes: store, FlowRouteRecords: store, FlowRouteTopology: store,
+		FlowRouteTopology: store,
 		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, PreparedEvents: store,
 		TargetFailureRecorder: store, RunOrigins: store, StandingRestarts: store, EmitFeedback: store,
 	}
