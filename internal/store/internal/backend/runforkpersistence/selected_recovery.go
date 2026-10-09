@@ -196,6 +196,16 @@ func loadSelectedRecoveryRecordTx(ctx context.Context, tx *sql.Tx, snapshot runl
 	if !snapshot.Origin.Equal(wantOrigin) {
 		return result, fmt.Errorf("selected recovery fork origin differs from its fixed binding")
 	}
+	result.binding = binding
+	result.Operation, err = loadSelectedForkRecoveryOperationTx(ctx, tx, binding, snapshot.BundleHash, !sqlite && lock)
+	if err != nil {
+		return result, err
+	}
+	return loadSelectedRecoveryExecutionTx(ctx, tx, snapshot, result, sqlite, lock)
+}
+
+func loadSelectedRecoveryExecutionTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, result selectedRecoveryRecord, sqlite, lock bool) (selectedRecoveryRecord, error) {
+	runID, binding := result.RunID, result.binding
 	query := `SELECT execution_id,state,preparation_binding,preparation_fingerprint,failure,
 		source_run_id,binding_id,fork_point_kind,fork_revision,COALESCE(CAST(fork_event_id AS TEXT),''),generation,fence_generation,executable_coordinate_fingerprint,
 		admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,effective_config_fingerprint,
@@ -209,7 +219,7 @@ func loadSelectedRecoveryRecordTx(ctx context.Context, tx *sql.Tx, snapshot runl
 	var bindingID, pointKind string
 	var forkRevision int64
 	execution := runfork.SelectedContractRuntimeExecution{ForkRunID: runID}
-	err = tx.QueryRowContext(ctx, query, runID).Scan(&result.ExecutionID, &state, &raw, &fingerprint, &failureRaw,
+	err := tx.QueryRowContext(ctx, query, runID).Scan(&result.ExecutionID, &state, &raw, &fingerprint, &failureRaw,
 		&execution.SourceRunID, &bindingID, &pointKind, &forkRevision, &execution.ForkEventID, &execution.Generation, &execution.FenceGeneration,
 		&execution.ExecutableCoordinateFingerprint, &execution.AdmissionFingerprint, &execution.ContainerPlanFingerprint,
 		&execution.ActorCensusFingerprint, &execution.EffectiveConfigFingerprint, &execution.DeclarationPlanFingerprint, &declarationRaw)
@@ -217,6 +227,13 @@ func loadSelectedRecoveryRecordTx(ctx context.Context, tx *sql.Tx, snapshot runl
 		result.Disposition = runfork.SelectedForkRecoveryStaged
 		if snapshot.State.Terminal() {
 			result.Disposition = runfork.SelectedForkRecoveryTerminal
+		} else if result.Operation != nil && result.Operation.Status == runfork.ForkOperationMaterialized {
+			if snapshot.State != runlifecycle.StatePaused {
+				return result, fmt.Errorf("materialized selected recovery child is not paused")
+			}
+			result.Disposition = runfork.SelectedForkRecoveryResume
+		} else if result.Operation != nil && result.Operation.Status == runfork.ForkOperationActivated {
+			return result, fmt.Errorf("activated selected recovery lacks execution evidence")
 		}
 		if snapshot.State == runlifecycle.StateRunning {
 			return result, fmt.Errorf("selected running fork lacks execution evidence")
@@ -288,6 +305,10 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		if len(req.Cancellations) != 0 {
 			return result, fmt.Errorf("selected cancellation recovery lacks predecessor execution")
 		}
+		if result.Disposition == runfork.SelectedForkRecoveryResume {
+			plan, err := planSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, true)
+			return plan.SelectedForkRecoveryResult, err
+		}
 		return result, nil
 	}
 	preparation, state := record.preparation, record.state
@@ -331,11 +352,11 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 	}
 	result = plan.SelectedForkRecoveryResult
 	result.CanceledTurns = canceled
-	if result.Disposition == runfork.SelectedForkRecoveryResumeFiniteFeed && state != "closed" {
+	if (result.Disposition == runfork.SelectedForkRecoveryResume || result.Disposition == runfork.SelectedForkRecoveryActivate) && state != "closed" {
 		res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions
 			SET state='closed',fence_generation=fence_generation+1,lease_expires_at=NULL,terminal_at=$2,updated_at=$2
 			WHERE execution_id=$1 AND state=$3 AND failure IS NULL`, result.ExecutionID, req.Effects.Now(), state)
-		if err := requireExactlyOneMutation(res, err, "fence selected finite-feed predecessor"); err != nil {
+		if err := requireExactlyOneMutation(res, err, "fence selected recovery predecessor"); err != nil {
 			return result, err
 		}
 	}
@@ -372,9 +393,13 @@ func recoverFailedSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selected
 	if err != nil || len(result.PendingCancellations) != 0 {
 		return result, err
 	}
-	if binding.ForkPoint.Kind == runfork.RunForkPointDeploymentRevision {
-		if err := settleInterruptedSelectedFiniteFeedOperationTx(ctx, tx, binding, snapshot.BundleHash, *failure,
+	if result.Operation != nil && result.Operation.Status == runfork.ForkOperationMaterialized {
+		if err := settleInterruptedSelectedForkOperationTx(ctx, tx, binding, snapshot.BundleHash, *failure,
 			result.Effects.OutcomeUncertain != 0 || failure.Class == failures.ClassOutcomeUncertain, req.Effects.Now(), !sqlite); err != nil {
+			return result, err
+		}
+		result.Operation, err = loadSelectedForkRecoveryOperationTx(ctx, tx, binding, snapshot.BundleHash, !sqlite)
+		if err != nil {
 			return result, err
 		}
 	}
@@ -391,12 +416,11 @@ func recoverFailedSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selected
 
 func settledSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, record selectedRecoveryRecord, sqlite, lock bool) (runfork.SelectedForkRecoveryResult, bool, error) {
 	result := record.SelectedForkRecoveryResult
-	if record.state != "closed" || record.failure != nil {
+	if !snapshot.State.Terminal() || record.state != "closed" || record.failure != nil {
 		return result, false, nil
 	}
-	activated, err := selectedForkActivatedOperationTx(ctx, tx, result.RunID, record.binding.BindingID, record.binding.ForkPoint, !sqlite && lock)
-	if err != nil || !activated {
-		return result, false, err
+	if result.Operation == nil || result.Operation.Status != runfork.ForkOperationActivated {
+		return result, false, nil
 	}
 	active, err := selectedForkActiveEffectsTx(ctx, tx, result.ExecutionID)
 	if err != nil {
@@ -405,10 +429,7 @@ func settledSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlife
 	if active {
 		return result, false, fmt.Errorf("closed selected execution retains unsettled effects")
 	}
-	result.Disposition = runfork.SelectedForkRecoveryControlOnly
-	if snapshot.State.Terminal() {
-		result.Disposition = runfork.SelectedForkRecoveryTerminal
-	}
+	result.Disposition = runfork.SelectedForkRecoveryTerminal
 	return result, true, nil
 }
 
@@ -416,41 +437,39 @@ func settledSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlife
 // settlement and terminal mutations remain exclusively in boot recovery.
 func planSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, record selectedRecoveryRecord, sqlite, lock bool) (selectedRecoveryRecord, error) {
 	result := record
-	runID, binding, state, failure := result.RunID, record.binding, record.state, record.failure
-	if binding.ForkPoint.Kind == runfork.RunForkPointDeploymentRevision && !snapshot.State.Terminal() {
-		resume, err := selectedFiniteFeedRecoveryOperationTx(ctx, tx, binding, snapshot.BundleHash, !sqlite && lock)
-		if err != nil {
-			return result, err
-		}
-		if resume != nil && snapshot.State != runlifecycle.StatePaused {
-			return result, fmt.Errorf("selected finite-feed recovery requires paused child, got %s", snapshot.State)
-		}
-		var pins []durabledata.Pin
-		var topologies []runfork.RunForkSelectedContractAgentTopology
-		if resume != nil {
-			pins, err = selectedFiniteFeedRecoveryPinsTx(ctx, tx, binding.ForkRunID, snapshot.BundleHash)
-			if err != nil {
-				return result, err
-			}
-			topologies, err = selectedFiniteFeedRecoveryTopologiesTx(ctx, tx, binding.ForkRunID, snapshot.BundleHash)
-			if err != nil {
-				return result, err
-			}
-		}
-		if resume != nil && state == "quiesced" && failure == nil {
-			if err := requireSelectedDeploymentDrainedTx(ctx, tx, runID); err != nil {
-				return result, fmt.Errorf("quiesced selected feed has unfinished work: %w", err)
-			}
-			result.Disposition = runfork.SelectedForkRecoveryActivateFiniteFeed
-			result.Resume = &runfork.SelectedForkFiniteFeedResume{Operation: resume.Request, ForkRunStatus: string(snapshot.State), Pins: pins, AgentTopologies: topologies}
-			return result, nil
-		}
-		if resume != nil && (state == "prepared" || state == "running" || state == "closed") && failure == nil {
-			result.Disposition = runfork.SelectedForkRecoveryResumeFiniteFeed
-			result.Resume = &runfork.SelectedForkFiniteFeedResume{Operation: resume.Request, ForkRunStatus: string(snapshot.State), Pins: pins, AgentTopologies: topologies}
-			return result, nil
-		}
+	disposition, eligible, err := selectedRecoveryContinuationDisposition(snapshot.State, record)
+	if err != nil {
+		return result, err
 	}
+	if eligible {
+		settled := !record.hasExecution
+		if record.hasExecution {
+			settled, err = selectedForkRecoveryEffectsSettledTx(ctx, tx, result.RunID)
+			if err != nil {
+				return result, err
+			}
+		}
+		if settled {
+			pins, err := selectedForkRecoveryPinsTx(ctx, tx, result.RunID, snapshot.BundleHash)
+			if err != nil {
+				return result, err
+			}
+			topologies, err := selectedForkRecoveryTopologiesTx(ctx, tx, result.RunID, snapshot.BundleHash)
+			if err != nil {
+				return result, err
+			}
+			result.Disposition = disposition
+			result.Continuation = &runfork.SelectedForkContinuation{ForkRunStatus: string(snapshot.State), Pins: pins, AgentTopologies: topologies}
+			return result, nil
+		}
+		return failedSelectedRecovery(record)
+	}
+	return planInterruptedSelectedRecoveryTx(ctx, tx, snapshot, record)
+}
+
+func planInterruptedSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, record selectedRecoveryRecord) (selectedRecoveryRecord, error) {
+	result := record
+	state, failure := record.state, record.failure
 	if state == "failed" && failure == nil {
 		return result, fmt.Errorf("failed selected execution lacks failure evidence")
 	}
@@ -480,9 +499,15 @@ func planSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecyc
 	default:
 		return result, fmt.Errorf("selected recovery state is invalid: %s", state)
 	}
+	return failedSelectedRecovery(record)
+}
+
+func failedSelectedRecovery(record selectedRecoveryRecord) (selectedRecoveryRecord, error) {
+	result := record
+	failure := record.failure
 	if failure == nil {
 		class, code := failures.ClassLifecycleConflict, "selected_recovery_prelaunch_abandoned"
-		if state != "prepared" {
+		if record.state != "prepared" {
 			class, code = failures.ClassOutcomeUncertain, "selected_recovery_outcome_unconfirmed"
 		}
 		envelope, ok := failures.EnvelopeFromError(failures.New(class, code, "selected-fork", "startup_recovery", map[string]any{"execution_id": result.ExecutionID}))
@@ -496,7 +521,42 @@ func planSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecyc
 	return result, nil
 }
 
-func selectedFiniteFeedRecoveryPinsTx(ctx context.Context, tx *sql.Tx, forkRunID, bundleHash string) ([]durabledata.Pin, error) {
+func selectedRecoveryContinuationDisposition(state runlifecycle.State, record selectedRecoveryRecord) (runfork.SelectedForkRecoveryDisposition, bool, error) {
+	if state.Terminal() || record.Operation == nil || record.failure != nil {
+		return "", false, nil
+	}
+	switch record.Operation.Status {
+	case runfork.ForkOperationMaterialized:
+		if state != runlifecycle.StatePaused {
+			return "", false, fmt.Errorf("materialized selected recovery requires paused child, got %s", state)
+		}
+	case runfork.ForkOperationActivated:
+		if state != runlifecycle.StateRunning && state != runlifecycle.StatePaused {
+			return "", false, fmt.Errorf("activated selected recovery requires running or paused child, got %s", state)
+		}
+	default:
+		return "", false, nil
+	}
+	if !record.hasExecution {
+		if record.Operation.Status != runfork.ForkOperationMaterialized {
+			return "", false, fmt.Errorf("activated selected recovery lacks execution evidence")
+		}
+		return runfork.SelectedForkRecoveryResume, true, nil
+	}
+	switch record.state {
+	case "quiesced":
+		if record.Operation.Status == runfork.ForkOperationActivated {
+			return runfork.SelectedForkRecoveryResume, true, nil
+		}
+		return runfork.SelectedForkRecoveryActivate, true, nil
+	case "prepared", "running", "closed":
+		return runfork.SelectedForkRecoveryResume, true, nil
+	default:
+		return "", false, nil
+	}
+}
+
+func selectedForkRecoveryPinsTx(ctx context.Context, tx *sql.Tx, forkRunID, bundleHash string) ([]durabledata.Pin, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT p.run_id,r.status,p.flow_path,p.event_name,p.schema_digest,p.version_id,p.selection,
 		i.source_resource_version_id,i.deployment_schema_digest,i.bundle_hash
 		FROM resource_version_pins p JOIN runs r ON r.run_id=p.run_id
@@ -504,7 +564,7 @@ func selectedFiniteFeedRecoveryPinsTx(ctx context.Context, tx *sql.Tx, forkRunID
 			AND i.source_resource_flow_path=p.flow_path AND i.source_resource_event_name=p.event_name
 		WHERE p.run_id=$1 ORDER BY p.flow_path,p.event_name`, forkRunID)
 	if err != nil {
-		return nil, fmt.Errorf("load selected finite-feed pins: %w", err)
+		return nil, fmt.Errorf("load selected recovery pins: %w", err)
 	}
 	defer rows.Close()
 	var pins []durabledata.Pin
@@ -514,38 +574,38 @@ func selectedFiniteFeedRecoveryPinsTx(ctx context.Context, tx *sql.Tx, forkRunID
 		var version, schema, feedBundle sql.NullString
 		if err := rows.Scan(&pin.RunID, &pin.RunState, &pin.Declaration.FlowPath, &pin.Declaration.EventName,
 			&pin.SchemaDigest, &pin.VersionID, &pin.Selection, &version, &schema, &feedBundle); err != nil {
-			return nil, fmt.Errorf("decode selected finite-feed pin: %w", err)
+			return nil, fmt.Errorf("decode selected recovery pin: %w", err)
 		}
 		if pin.RunID != forkRunID || pin.Validate() != nil || !version.Valid || version.String != string(pin.VersionID) ||
 			!schema.Valid || schema.String != string(pin.SchemaDigest) || !feedBundle.Valid || feedBundle.String != bundleHash {
-			return nil, fmt.Errorf("selected finite-feed pin conflicts with fork run")
+			return nil, fmt.Errorf("selected recovery pin conflicts with fork run")
 		}
 		if _, duplicate := seen[pin.Declaration]; duplicate {
-			return nil, fmt.Errorf("selected finite-feed pin has duplicate feed declaration %s", pin.Declaration.Key())
+			return nil, fmt.Errorf("selected recovery pin has duplicate feed declaration %s", pin.Declaration.Key())
 		}
 		seen[pin.Declaration] = struct{}{}
 		pins = append(pins, pin)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read selected finite-feed pins: %w", err)
+		return nil, fmt.Errorf("read selected recovery pins: %w", err)
 	}
 	var feeds int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, forkRunID).Scan(&feeds); err != nil {
-		return nil, fmt.Errorf("count selected finite feeds for pins: %w", err)
+		return nil, fmt.Errorf("count selected deployment feeds for pins: %w", err)
 	}
-	if feeds == 0 || feeds != len(pins) {
-		return nil, fmt.Errorf("selected finite-feed pin count %d conflicts with %d admitted feeds", len(pins), feeds)
+	if feeds != len(pins) {
+		return nil, fmt.Errorf("selected recovery pin count %d conflicts with %d admitted feeds", len(pins), feeds)
 	}
 	return pins, nil
 }
 
-func selectedFiniteFeedRecoveryTopologiesTx(ctx context.Context, tx *sql.Tx, forkRunID, bundleHash string) ([]runfork.RunForkSelectedContractAgentTopology, error) {
+func selectedForkRecoveryTopologiesTx(ctx context.Context, tx *sql.Tx, forkRunID, bundleHash string) ([]runfork.RunForkSelectedContractAgentTopology, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT f.instance_path,f.flow_template,f.mode,r.plan,r.plan_hash
 		FROM flow_instances f LEFT JOIN flow_instance_runtime_readiness r
 			ON r.run_id=f.run_id AND r.instance_path=f.instance_path
 		WHERE f.run_id=$1 ORDER BY f.instance_path`, forkRunID)
 	if err != nil {
-		return nil, fmt.Errorf("load selected finite-feed workflow readiness: %w", err)
+		return nil, fmt.Errorf("load selected recovery workflow readiness: %w", err)
 	}
 	defer rows.Close()
 	var topologies []runfork.RunForkSelectedContractAgentTopology
@@ -555,72 +615,69 @@ func selectedFiniteFeedRecoveryTopologiesTx(ctx context.Context, tx *sql.Tx, for
 		var raw []byte
 		var planHash sql.NullString
 		if err := rows.Scan(&path, &template, &mode, &raw, &planHash); err != nil {
-			return nil, fmt.Errorf("decode selected finite-feed workflow readiness: %w", err)
+			return nil, fmt.Errorf("decode selected recovery workflow readiness: %w", err)
 		}
 		if path == "" || template == "" {
-			return nil, fmt.Errorf("selected finite-feed workflow has incomplete identity")
+			return nil, fmt.Errorf("selected recovery workflow has incomplete identity")
 		}
 		if _, duplicate := seen[path]; duplicate {
-			return nil, fmt.Errorf("selected finite-feed workflow %s appears more than once", path)
+			return nil, fmt.Errorf("selected recovery workflow %s appears more than once", path)
 		}
 		seen[path] = struct{}{}
 		switch mode {
 		case "static":
 			if len(raw) != 0 {
-				return nil, fmt.Errorf("static selected finite-feed workflow %s has template readiness", path)
+				return nil, fmt.Errorf("static selected recovery workflow %s has template readiness", path)
 			}
 		case "template":
 			if len(raw) == 0 {
-				return nil, fmt.Errorf("template selected finite-feed workflow %s lacks readiness", path)
+				return nil, fmt.Errorf("template selected recovery workflow %s lacks readiness", path)
 			}
 			normalized, err := runtimepipeline.DecodeFlowReadinessPlan(raw, planHash.String)
 			if err != nil {
-				return nil, fmt.Errorf("validate selected finite-feed readiness %s: %w", path, err)
+				return nil, fmt.Errorf("validate selected recovery readiness %s: %w", path, err)
 			}
 			if normalized.RunID != forkRunID ||
 				normalized.BundleHash != bundleHash || normalized.Identity.InstancePath != path || normalized.Identity.TemplateID != template {
-				return nil, fmt.Errorf("selected finite-feed readiness %s conflicts with committed workflow", path)
+				return nil, fmt.Errorf("selected recovery readiness %s conflicts with committed workflow", path)
 			}
 			admission, err := agenttopology.FlowReadinessAdmission(forkRunID, path, planHash.String)
 			if err != nil {
-				return nil, fmt.Errorf("admit selected finite-feed readiness %s: %w", path, err)
+				return nil, fmt.Errorf("admit selected recovery readiness %s: %w", path, err)
 			}
 			for _, agent := range normalized.Agents {
 				topologies = append(topologies, runfork.RunForkSelectedContractAgentTopology{Identity: agent.Identity, Admission: admission})
 			}
 		default:
-			return nil, fmt.Errorf("selected finite-feed workflow %s has unsupported mode %s", path, mode)
+			return nil, fmt.Errorf("selected recovery workflow %s has unsupported mode %s", path, mode)
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read selected finite-feed workflow readiness: %w", err)
+		return nil, fmt.Errorf("read selected recovery workflow readiness: %w", err)
 	}
 	var orphaned int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM flow_instance_runtime_readiness r
 		LEFT JOIN flow_instances f ON f.run_id=r.run_id AND f.instance_path=r.instance_path
 		WHERE r.run_id=$1 AND f.run_id IS NULL`, forkRunID).Scan(&orphaned); err != nil {
-		return nil, fmt.Errorf("count orphaned selected finite-feed readiness: %w", err)
+		return nil, fmt.Errorf("count orphaned selected recovery readiness: %w", err)
 	}
 	if orphaned != 0 {
-		return nil, fmt.Errorf("selected finite-feed recovery has %d orphaned readiness plans", orphaned)
+		return nil, fmt.Errorf("selected recovery recovery has %d orphaned readiness plans", orphaned)
 	}
 	return topologies, nil
 }
 
-func settleInterruptedSelectedFiniteFeedOperationTx(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, bundleHash string, failure failures.Envelope, uncertain bool, now time.Time, postgres bool) error {
-	if binding.ForkPoint.Kind != runfork.RunForkPointDeploymentRevision {
-		return fmt.Errorf("interrupted finite-feed settlement requires deployment revision")
-	}
+func settleInterruptedSelectedForkOperationTx(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, bundleHash string, failure failures.Envelope, uncertain bool, now time.Time, postgres bool) error {
 	operation, err := selectedForkOperationForRecoveryTx(ctx, tx, binding, bundleHash, postgres)
 	if err != nil {
 		return err
 	}
 	if operation.Status != runfork.ForkOperationMaterialized {
-		return fmt.Errorf("interrupted finite-feed operation is %s, not materialized", operation.Status)
+		return fmt.Errorf("interrupted selected fork operation is %s, not materialized", operation.Status)
 	}
 	code := strings.TrimSpace(failure.Detail.Code)
 	if code == "" {
-		return fmt.Errorf("interrupted finite-feed failure has no typed code")
+		return fmt.Errorf("interrupted selected fork failure has no typed code")
 	}
 	terminal := runfork.ForkOperationFailure{Code: code, Reason: failure.Message}
 	if err := terminal.Validate(); err != nil {
@@ -643,39 +700,22 @@ func settleInterruptedSelectedFiniteFeedOperationTx(ctx context.Context, tx *sql
 	if err != nil {
 		return err
 	}
-	return requireExactlyOneMutation(mutation, nil, "settle interrupted finite-feed operation")
+	return requireExactlyOneMutation(mutation, nil, "settle interrupted selected fork operation")
 }
 
-// A finite feed is resumable only from its permanent operation and exact
-// committed feed checkpoint. External effects remain under their existing
-// uncertain/failed recovery policy, never under a replaying successor.
-func selectedFiniteFeedRecoveryOperationTx(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, bundleHash string, postgres bool) (*runfork.ForkOperationRecord, error) {
-	if binding.ForkPoint.Kind != runfork.RunForkPointDeploymentRevision {
-		return nil, nil
-	}
-	operation, err := selectedForkOperationForRecoveryTx(ctx, tx, binding, bundleHash, postgres)
-	if err != nil {
-		return nil, err
-	}
-	if operation.Status != runfork.ForkOperationMaterialized {
-		return nil, nil
-	}
-	var feeds, unsafeEffects int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, binding.ForkRunID).Scan(&feeds); err != nil {
-		return nil, fmt.Errorf("read selected recovery feed checkpoint: %w", err)
-	}
+// Existing effect policy owns unsafe predecessor work; recovery must not turn
+// an unsettled effect or a missing attempt into permission to replay it.
+func selectedForkRecoveryEffectsSettledTx(ctx context.Context, tx *sql.Tx, forkRunID string) (bool, error) {
+	var unsafeEffects int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_external_effect_operations o WHERE o.selected_execution_id IN
 		(SELECT execution_id FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1)
 		AND (o.state IS NULL OR o.state<>'settled'
 			OR NOT EXISTS (SELECT 1 FROM runtime_external_effect_attempts a WHERE a.operation_id=o.operation_id)
 			OR EXISTS (SELECT 1 FROM runtime_external_effect_attempts a WHERE a.operation_id=o.operation_id AND (a.state IS NULL OR a.state<>'settled')))`,
-		binding.ForkRunID).Scan(&unsafeEffects); err != nil {
-		return nil, fmt.Errorf("read selected recovery effect inventory: %w", err)
+		forkRunID).Scan(&unsafeEffects); err != nil {
+		return false, fmt.Errorf("read selected recovery effect inventory: %w", err)
 	}
-	if feeds == 0 || unsafeEffects != 0 {
-		return nil, nil
-	}
-	return &operation, nil
+	return unsafeEffects == 0, nil
 }
 
 func selectedForkActiveEffectsTx(ctx context.Context, tx *sql.Tx, executionID string) (bool, error) {
@@ -689,43 +729,34 @@ func sameSelectedForkPointIdentity(a, b runfork.RunForkPoint) bool {
 }
 
 func selectedForkOperationForRecoveryTx(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, bundleHash string, postgres bool) (runfork.ForkOperationRecord, error) {
+	record, err := loadSelectedForkRecoveryOperationTx(ctx, tx, binding, bundleHash, postgres)
+	if err != nil {
+		return runfork.ForkOperationRecord{}, err
+	}
+	if record == nil {
+		return runfork.ForkOperationRecord{}, fmt.Errorf("selected recovery lacks permanent fork operation")
+	}
+	return *record, nil
+}
+
+func loadSelectedForkRecoveryOperationTx(ctx context.Context, tx *sql.Tx, binding runfork.RunForkSelectedContractBinding, bundleHash string, postgres bool) (*runfork.ForkOperationRecord, error) {
 	var operationID string
-	if err := tx.QueryRowContext(ctx, `SELECT CAST(operation_id AS TEXT) FROM run_fork_operations WHERE fork_run_id=$1`, binding.ForkRunID).Scan(&operationID); err != nil {
-		return runfork.ForkOperationRecord{}, fmt.Errorf("load permanent selected fork operation: %w", err)
+	err := tx.QueryRowContext(ctx, `SELECT CAST(operation_id AS TEXT) FROM run_fork_operations WHERE fork_run_id=$1`, binding.ForkRunID).Scan(&operationID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load permanent selected fork operation: %w", err)
 	}
 	record, found, err := loadForkOperationByIDTx(ctx, tx, operationID, postgres)
 	if err != nil {
-		return runfork.ForkOperationRecord{}, err
+		return nil, err
 	}
 	if !found || record.ForkRunID != binding.ForkRunID || record.BindingID != binding.BindingID ||
 		record.Request.SourceRunID != binding.SourceRunID || record.Request.TargetBundleHash != bundleHash ||
 		record.Request.ResolvedPoint == nil || !sameSelectedForkPointIdentity(*record.Request.ResolvedPoint, binding.ForkPoint) ||
 		record.Request.ForkEventID != binding.ForkEventID || record.Request.ContractSelection != binding.ContractSelection {
-		return runfork.ForkOperationRecord{}, fmt.Errorf("permanent selected fork operation conflicts with exact binding")
+		return nil, fmt.Errorf("permanent selected fork operation conflicts with exact binding")
 	}
-	return record, nil
-}
-
-func selectedForkActivatedOperationTx(ctx context.Context, tx *sql.Tx, forkRunID, bindingID string, point runfork.RunForkPoint, postgres bool) (bool, error) {
-	var operationID string
-	err := tx.QueryRowContext(ctx, `SELECT CAST(operation_id AS TEXT) FROM run_fork_operations WHERE fork_run_id=$1`, forkRunID).Scan(&operationID)
-	if err == sql.ErrNoRows {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	record, found, err := loadForkOperationByIDTx(ctx, tx, operationID, postgres)
-	if err != nil {
-		return false, err
-	}
-	if !found {
-		return false, fmt.Errorf("selected recovery operation disappeared during exact lookup")
-	}
-	if record.ForkRunID != forkRunID || record.BindingID != bindingID || record.Request.ResolvedPoint == nil ||
-		record.Request.ResolvedPoint.Kind != point.Kind || record.Request.ResolvedPoint.Revision != point.Revision ||
-		record.Request.ResolvedPoint.EventID != point.EventID {
-		return false, fmt.Errorf("selected recovery operation conflicts with exact binding")
-	}
-	return record.Status == runfork.ForkOperationActivated, nil
+	return &record, nil
 }

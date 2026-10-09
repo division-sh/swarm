@@ -1119,6 +1119,14 @@ func (s *PostgresStore) RequireRunForkSelectedContractBinding(ctx context.Contex
 	return s.runForkPostgresOwner.RequireRunForkSelectedContractBinding(ctx, forkRunID)
 }
 
+func (s *PostgresStore) RequireRunForkSelectedContractExecutionSettlement(ctx context.Context, authority effects.Authority, allowedSourceEventIDs []string, source semanticview.Source) error {
+	return s.runForkPostgresOwner.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, allowedSourceEventIDs, source)
+}
+
+func (s *PostgresStore) RequireSelectedForkInputPublished(ctx context.Context, authority effects.Authority, sourceEvent runfork.RunForkSelectedContractSourceEvent, expectedSchema events.PayloadSchemaBinding) (bool, error) {
+	return s.runForkPostgresOwner.RequireSelectedForkInputPublished(ctx, authority, sourceEvent, expectedSchema)
+}
+
 func (s *PostgresStore) ReserveChannelOnboarding(ctx context.Context, req channelonboarding.StartRequest) (channelonboarding.Operation, error) {
 	return s.channelOnboardingPostgresOwner.ReserveChannelOnboarding(ctx, req)
 }
@@ -2373,6 +2381,14 @@ func (s *SQLiteRuntimeStore) RequirePublicationRunActive(ctx context.Context, ru
 
 func (s *SQLiteRuntimeStore) RequireRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractBinding, error) {
 	return s.runForkSQLiteOwner.RequireRunForkSelectedContractBinding(ctx, forkRunID)
+}
+
+func (s *SQLiteRuntimeStore) RequireRunForkSelectedContractExecutionSettlement(ctx context.Context, authority effects.Authority, allowedSourceEventIDs []string, source semanticview.Source) error {
+	return s.runForkSQLiteOwner.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, allowedSourceEventIDs, source)
+}
+
+func (s *SQLiteRuntimeStore) RequireSelectedForkInputPublished(ctx context.Context, authority effects.Authority, sourceEvent runfork.RunForkSelectedContractSourceEvent, expectedSchema events.PayloadSchemaBinding) (bool, error) {
+	return s.runForkSQLiteOwner.RequireSelectedForkInputPublished(ctx, authority, sourceEvent, expectedSchema)
 }
 
 func (s *SQLiteRuntimeStore) ReserveChannelOnboarding(ctx context.Context, req channelonboarding.StartRequest) (channelonboarding.Operation, error) {

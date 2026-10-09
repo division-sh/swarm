@@ -62,7 +62,7 @@ func TestSelectedFiniteFeedRecoveryTopologiesUseExactPersistedReadinessBothStore
 			read := func(wantFailure string) {
 				t.Helper()
 				withForkOperationTx(t, db, func(tx *sql.Tx) {
-					got, err := selectedFiniteFeedRecoveryTopologiesTx(ctx, tx, runID, bundle)
+					got, err := selectedForkRecoveryTopologiesTx(ctx, tx, runID, bundle)
 					if wantFailure == "" {
 						if err != nil || !reflect.DeepEqual(got, want) {
 							t.Fatalf("recovered topologies=%+v want=%+v err=%v", got, want, err)

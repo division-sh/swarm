@@ -196,3 +196,14 @@ func (o *selectedContractOperation) releaseOrchestration() error {
 	o.use = nil
 	return nil
 }
+
+func (o *selectedContractOperation) beginRetainedExecution() (*worklifetime.Lease, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.retired || o.selected == nil || o.use == nil {
+		return nil, errors.New("selected execution requires its accepted bound operation")
+	}
+	// The orchestration lease ends at acknowledgment. Execution must instead
+	// descend from the exact process-owned operation, never the request lease.
+	return o.selected.BeginStanding(o.owned)
+}
