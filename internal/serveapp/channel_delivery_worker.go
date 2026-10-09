@@ -559,9 +559,6 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 		defer nativeTicker.Stop()
 		nativeDue := true
 		for {
-			if workCtx.Err() != nil {
-				return
-			}
 			demand, start := subscription.BeginPass()
 			if start.Subscription == 0 {
 				return

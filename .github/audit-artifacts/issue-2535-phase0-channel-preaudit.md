@@ -1197,6 +1197,13 @@ Canonical Process admission and retirement, business authority, startup
 publication ordering and every store/transaction finalizer are unchanged.
 The authoritative channel scheduling contract records this same distinction.
 No second worker, cancellation framework, generic filter, schema or vendor.
+The independent complexity ratchet also rejects the added nested cancellation
+branch as a new startup hotspot. The correction removes the duplicate loop
+context check: the canonical subscription's BeginPass already rejects canceled
+or replaced ownership before returning any executable pass. The existing zero-
+subscription refusal remains in the worker. This consumes the same owner rather
+than distributing cancellation checks or creating a helper/framework; the full
+signal/worker retirement matrix and final ratchet are rerun at the resulting head.
 
 #2595 master44c4047f0 combines cleanly: merge-tree succeeds with tree
 403355abba7eee0c412ee133be68c21a163e1aa4 and GitHub reports MERGEABLE.
