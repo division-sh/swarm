@@ -10,11 +10,18 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
 
@@ -39,47 +46,89 @@ func TestVerifyRunPublicAdmissionBothStores(t *testing.T) {
 			}
 			selected, configText := newVerifyCompositionBootStore(t, backend, root, schema)
 			writeRuntimeConfigText(t, config, configText)
-			runID := uuid.NewString()
+			runID := "abcdefab-1234-4000-8000-abcdefabcdef"
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact})
-			for _, missing := range []bool{false, true} {
-				id := runID
-				if missing {
-					id = uuid.NewString()
+			for _, withMutations := range []bool{false, true} {
+				if withMutations {
+					fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+					if err != nil {
+						t.Fatal(err)
+					}
+					runtimeID := uuid.NewString()
+					constructionContext := correlation.WithRuntimeInstanceID(ctx, runtimeID)
+					constructionContext = correlation.WithSourceArtifactFact(constructionContext, fact)
+					constructionContext = authoractivity.WithScope(constructionContext, authoractivity.BundleScope(runtimeID, fact.BundleHash()))
+					constructionContext = effects.WithExecutionMode(correlation.WithRunID(constructionContext, runID), effects.ExecutionModeLive)
+					at := time.Now().UTC()
+					// Typed component construction supplies nonempty mutation history;
+					// it is a UUID-admission witness, not the required S03 workload.
+					command, err := flowactivationfixture.Command(constructionContext, pipeline.WorkflowInstance{
+						InstanceID: runID, StorageRef: runID, EntityID: runID,
+						WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), EntityType: "work",
+						CurrentState: "waiting", StageDefined: true, CreatedAt: at, EnteredStageAt: at,
+						Fields: map[string]any{},
+					}, pipeline.WorkflowLifecycleMutationPlan{}, at)
+					if err != nil {
+						t.Fatal(err)
+					}
+					committed, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(constructionContext, command)
+					if err != nil || !committed.Acknowledged || !committed.Created {
+						t.Fatalf("construct mutation-bearing run: %+v %v", committed, err)
+					}
+					if history := storetest.ObserveEntityMutationHistory(t, constructionContext, selected, runID); len(history) == 0 {
+						t.Fatal("UUID fixture has no mutations")
+					}
 				}
-				for _, mode := range []string{"json", "text", "quiet"} {
-					t.Run(fmt.Sprintf("missing_%t/%s", missing, mode), func(t *testing.T) {
-						args := []string{"verify", root, "--config", config, "--run", id}
-						if mode != "text" {
-							args = append(args, "--"+mode)
-						}
-						var out, errOut bytes.Buffer
-						code := executeRootCommand(ctx, RepoRoot(), args, &out, &errOut)
-						if (code != 0) != missing || errOut.Len() != 0 {
-							t.Fatalf("wrong exit: missing=%t code=%d stdout=%s stderr=%s", missing, code, &out, &errOut)
-						}
-						if mode == "json" {
-							var result verifyRunCommandResult
-							if err := json.Unmarshal(out.Bytes(), &result); err != nil {
-								t.Fatal(err)
-							}
-							if result.RunID != id || result.EntitiesChecked != 0 || len(result.Rows) != 0 || result.OK == missing {
-								t.Fatalf("wrong result: %+v", result)
-							}
-							if missing {
-								if result.Status != "failed" || len(result.Errors) != 1 || result.Errors[0].Detail.Code != "run_not_found" || result.Errors[0].Retryable {
-									t.Fatalf("missing run lost typed refusal: %+v", result)
+				for _, missing := range []bool{false, true} {
+					id := runID
+					if missing {
+						id = uuid.NewString()
+					}
+					for _, mode := range []string{"json", "text", "quiet"} {
+						for _, uppercase := range []bool{false, true} {
+							t.Run(fmt.Sprintf("mutations_%t/missing_%t/%s/uppercase_%t", withMutations, missing, mode, uppercase), func(t *testing.T) {
+								argument := id
+								if uppercase {
+									argument = strings.ToUpper(id)
 								}
-							} else if result.Status != "passed" || len(result.Errors) != 0 {
-								t.Fatalf("empty existing run refused: %+v", result)
-							}
-						} else if missing {
-							if !strings.Contains(out.String(), "run_not_found") || strings.Contains(out.String(), "no drift") {
-								t.Fatalf("missing run reported clean: %s", &out)
-							}
-						} else if !strings.Contains(out.String(), "0 entities checked, no drift") {
-							t.Fatalf("missing clean transcript: %s", &out)
+								args := []string{"verify", root, "--config", config, "--run", argument}
+								if mode != "text" {
+									args = append(args, "--"+mode)
+								}
+								var out, errOut bytes.Buffer
+								code := executeRootCommand(ctx, RepoRoot(), args, &out, &errOut)
+								wantEntities := 0
+								if withMutations && !missing {
+									wantEntities = 1
+								}
+								if (code != 0) != missing || errOut.Len() != 0 {
+									t.Fatalf("wrong exit: missing=%t code=%d stdout=%s stderr=%s", missing, code, &out, &errOut)
+								}
+								if mode == "json" {
+									var result verifyRunCommandResult
+									if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+										t.Fatal(err)
+									}
+									if result.RunID != id || result.EntitiesChecked != wantEntities || len(result.Rows) != 0 || result.OK == missing {
+										t.Fatalf("wrong result: %+v", result)
+									}
+									if missing {
+										if result.Status != "failed" || len(result.Errors) != 1 || result.Errors[0].Detail.Code != "run_not_found" || result.Errors[0].Retryable {
+											t.Fatalf("missing run lost typed refusal: %+v", result)
+										}
+									} else if result.Status != "passed" || len(result.Errors) != 0 {
+										t.Fatalf("existing run refused: %+v", result)
+									}
+								} else if missing {
+									if !strings.Contains(out.String(), "run_not_found") || strings.Contains(out.String(), "no drift") {
+										t.Fatalf("missing run reported clean: %s", &out)
+									}
+								} else if want := fmt.Sprintf("%d entities checked, no drift", wantEntities); !strings.Contains(out.String(), want) {
+									t.Fatalf("missing clean transcript: %s", &out)
+								}
+							})
 						}
-					})
+					}
 				}
 			}
 		})
@@ -139,6 +188,10 @@ func TestVerifyRunTypedFailuresRetainCoordinatesAndCancellation(t *testing.T) {
 		{"history", &mutationlog.HistoryError{RunID: run, EntityID: "entity", MutationID: "mutation", Code: "mutation_order_missing", Reason: "missing coordinate"}, "mutation_order_missing", failures.ClassSchemaInvalid},
 		{"canceled", errors.Join(&runlifecycle.RunNotFoundError{RunID: run}, context.Canceled), "run_inspection_canceled", failures.ClassDependencyUnavailable},
 		{"deadline", context.DeadlineExceeded, "run_inspection_timeout", failures.ClassTimeout},
+		{"transport", fmt.Errorf("load run fork revision snapshot: %w", errors.New("driver transport failure")), "run_inspection_failed", failures.ClassDependencyUnavailable},
+		{"wrapped_deadline", fmt.Errorf("load run fork revision snapshot: %w", context.DeadlineExceeded), "run_inspection_timeout", failures.ClassTimeout},
+		{"history_and_cleanup", errors.Join(&mutationlog.HistoryError{RunID: run, Code: "invalid_mutation_order"}, errors.New("row cleanup failed")), "run_inspection_failed", failures.ClassDependencyUnavailable},
+		{"missing_and_cleanup", errors.Join(&runlifecycle.RunNotFoundError{RunID: run}, errors.New("inspection close failed")), "run_inspection_failed", failures.ClassDependencyUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			failure, ok := failures.As(verifyRunFailure(run, tc.cause))
@@ -147,6 +200,9 @@ func TestVerifyRunTypedFailuresRetainCoordinatesAndCancellation(t *testing.T) {
 			}
 			if tc.class == failures.ClassSchemaInvalid && failure.Failure.Retryable {
 				t.Fatal("deterministic missing evidence was made retryable")
+			}
+			if !errors.Is(failure, tc.cause) || (tc.class == failures.ClassDependencyUnavailable && !failure.Failure.Retryable) {
+				t.Fatal("operational cause or retry classification lost")
 			}
 			if tc.name == "history" && (failure.Failure.Detail.Attributes["entity_id"] != "entity" || failure.Failure.Detail.Attributes["mutation_id"] != "mutation") {
 				t.Fatal("coordinates lost")
