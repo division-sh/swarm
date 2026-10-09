@@ -26,6 +26,13 @@ type admittedPublicationOutput struct {
 }
 
 func (p InboundAdmissionPlan) ProjectPublication(admitted AdmittedRequest, bundleHash, flowID string) (Delivery, PublicationAdmission, error) {
+	if admitted.sessionInput != nil {
+		coordinate := admitted.sessionInput.Coordinate()
+		target, err := packs.ParseChannelRegistrationTarget(admitted.sessionInput.TargetSelector())
+		if err != nil || coordinate.Validate() != nil || coordinate.BundleHash != bundleHash || target.FlowPath != flowID || target.Provider != p.provider {
+			return Delivery{}, PublicationAdmission{}, fmt.Errorf("session publication requires its exact executable source and target")
+		}
+	}
 	if _, err := packs.IngressSubjectID(bundleHash, flowID, p.provider); err != nil {
 		return Delivery{}, PublicationAdmission{}, err
 	}

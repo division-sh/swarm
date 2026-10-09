@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/google/uuid"
@@ -34,6 +35,7 @@ func TestWhatsAppCaptureRedeliveryAfterRetirementUsesHistoricalEvidence(t *testi
 		duplicate := event
 		if fresh {
 			duplicate.OccurrenceID = uuid.NewString()
+			duplicate.ReceivedAt = event.ReceivedAt.Add(time.Hour)
 		}
 		if err := spool.capture(ctx, duplicate); err != nil {
 			t.Fatal(err)

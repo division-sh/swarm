@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -31,7 +32,7 @@ type incomingPayload struct {
 	Ephemeral           bool    `json:"ephemeral"`
 }
 
-func captureSDKMessage(scope captureScope, occurrenceID string, event *events.Message) (capturedEvent, error) {
+func captureSDKMessage(scope captureScope, occurrenceID string, event *events.Message, receivedAt time.Time) (capturedEvent, error) {
 	var result capturedEvent
 	if err := scope.validate(); err != nil {
 		return result, err
@@ -73,7 +74,7 @@ func captureSDKMessage(scope captureScope, occurrenceID string, event *events.Me
 		return result, err
 	}
 	result = capturedEvent{Scope: scope, OccurrenceID: occurrenceID, Conversation: payload.Conversation,
-		EventID: event.Info.ID, Kind: kind, Body: body}
+		EventID: event.Info.ID, Kind: kind, Body: body, ReceivedAt: receivedAt.UTC()}
 	return result, result.validate()
 }
 

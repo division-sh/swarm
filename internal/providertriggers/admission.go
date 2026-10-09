@@ -2,6 +2,7 @@ package providertriggers
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -12,8 +13,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
@@ -108,6 +111,7 @@ type AdmittedRequest struct {
 	rawOwner                *RawAdmissionPolicy
 	manifestAdmission       *manifestAdmission
 	rawAdmission            *rawRequestAdmission
+	sessionInput            *channelonboarding.SessionInputAdmission
 }
 
 func (a AdmittedRequest) SemanticContentDigest() string { return a.semanticContentDigest }
@@ -574,28 +578,7 @@ func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error)
 		if err != nil {
 			return AdmittedRequest{}, err
 		}
-		if p.packIdentity == nil {
-			return AdmittedRequest{}, badRequest("compiled pack admission requires verified pack identity")
-		}
-		admitted := AdmittedRequest{
-			generation: p.generation, provider: p.provider, manifestOwner: p.manifest,
-			manifestAdmission: &manifestAdmission,
-		}
-		if manifestAdmission.response == nil {
-			admitted.projectionContentDigest, err = semanticContentDigest(req.Payload)
-			if err != nil {
-				return AdmittedRequest{}, err
-			}
-			admitted.semanticContentDigest = admitted.projectionContentDigest
-			if p.manifest.value.definition.PayloadSource == "form" {
-				// Form owns retry identity; Payload independently owns normalization.
-				admitted.semanticContentDigest, err = semanticContentDigest(formValuesPayload(req.Form))
-				if err != nil {
-					return AdmittedRequest{}, err
-				}
-			}
-		}
-		return admitted, nil
+		return p.admitManifestProjection(req, manifestAdmission)
 	}
 	rawAdmission, err := p.admitExplicitRaw(req)
 	if err != nil {
@@ -609,6 +592,56 @@ func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error)
 		semanticContentDigest: digest, generation: p.generation, provider: p.provider,
 		rawOwner: p.raw, rawAdmission: &rawAdmission,
 	}, nil
+}
+
+// AdmitSessionInput consumes an owner-issued native input, not caller payload,
+// a session descriptor, or a connected flag. HTTP authentication stays separate.
+func (p InboundAdmissionPlan) AdmitSessionInput(ctx context.Context, input channelonboarding.SessionInputAdmission) (AdmittedRequest, error) {
+	if !p.Valid() || p.Transport() != packs.ChannelTransportSession || p.manifest == nil {
+		return AdmittedRequest{}, unauthorized("compiled session admission plan is required")
+	}
+	if err := input.Validate(ctx, p.provider, p.generation); err != nil {
+		return AdmittedRequest{}, err
+	}
+	body := input.Body()
+	var payload any
+	if err := canonicaljson.DecodePreservingNumberLexemes(body, &payload); err != nil {
+		return AdmittedRequest{}, err
+	}
+	req := Request{Provider: p.provider, Payload: payload, Body: body, Received: input.ReceivedAt()}
+	manifestAdmission, err := p.manifest.value.definition.admitAuthenticatedPayload(req)
+	if err != nil {
+		return AdmittedRequest{}, err
+	}
+	admitted, err := p.admitManifestProjection(req, manifestAdmission)
+	if err != nil {
+		return AdmittedRequest{}, err
+	}
+	admitted.sessionInput = &input
+	return admitted, nil
+}
+
+func (p InboundAdmissionPlan) admitManifestProjection(req Request, original manifestAdmission) (AdmittedRequest, error) {
+	if p.packIdentity == nil {
+		return AdmittedRequest{}, badRequest("compiled pack admission requires verified pack identity")
+	}
+	admitted := AdmittedRequest{generation: p.generation, provider: p.provider, manifestOwner: p.manifest, manifestAdmission: &original}
+	if original.response != nil {
+		return admitted, nil
+	}
+	digest, err := semanticContentDigest(req.Payload)
+	if err != nil {
+		return AdmittedRequest{}, err
+	}
+	admitted.projectionContentDigest, admitted.semanticContentDigest = digest, digest
+	if p.manifest.value.definition.PayloadSource == "form" {
+		// Form owns retry identity; Payload independently owns normalization.
+		admitted.semanticContentDigest, err = semanticContentDigest(formValuesPayload(req.Form))
+		if err != nil {
+			return AdmittedRequest{}, err
+		}
+	}
+	return admitted, nil
 }
 
 // ProjectDelivery constructs the raw and optional normalized executable
@@ -660,6 +693,16 @@ func (p InboundAdmissionPlan) ProjectDelivery(admitted AdmittedRequest) (Deliver
 }
 
 func (p InboundAdmissionPlan) validateProjectionEvidence(admitted AdmittedRequest) error {
+	if p.Transport() == packs.ChannelTransportSession {
+		if admitted.sessionInput == nil {
+			return unauthorized("session projection requires its owner-issued input admission")
+		}
+		if err := admitted.sessionInput.Validate(admitted.sessionInput.Context(), p.provider, p.generation); err != nil {
+			return err
+		}
+	} else if admitted.sessionInput != nil {
+		return unauthorized("webhook projection cannot consume session authority")
+	}
 	var payload any
 	if p.manifest != nil {
 		if admitted.manifestOwner != p.manifest || admitted.manifestAdmission == nil {

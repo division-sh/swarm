@@ -11283,8 +11283,13 @@ tool_model:
         bound to the existing admitted activity/effect owners and their uncertainty policy.
       session_incoming_capture: >
         WhatsApp incoming capture commits exact payload bytes together with the original session admission,
-        connection occurrence, exact original admitted service/run/binding generation, source identity, onboarding responsibility, principal and binding revision before
+        connection occurrence, original microsecond-precision receipt time, source identity, exact onboarding operation
+        revision and target selector, principal and binding revision before
         reporting its local successful-capture status. A repeated provider event may retain its original occurrence;
+        it also retains the first capture's receipt time rather than today's transport clock. Onboarding captures
+        explicitly carry no service/run/binding generation or activation revision; executable business captures
+        instead require their exact admitted service/run/binding generation and positive activation revision.
+        The two scopes are a closed product, not an absent-business-field inference or a bootstrap execution grant.
         different payload or scope evidence conflicts rather than overwriting history. Account, conversation,
         provider event and message/edit/revoke kind are distinct identity dimensions. Captured work survives ordinary
         private-state reopen and is never reinterpreted using a replacement account, source, principal or binding.
@@ -11295,6 +11300,25 @@ tool_model:
         digest. An index cannot hide corrupt evidence from admission, and refusal never rewrites that evidence.
         Provider transport acknowledgment, local capture commit and selected-store atomic publication remain
         separate boundaries; a local capture fixture alone does not establish supported end-to-end delivery.
+      session_input_admission: >
+        SessionInputOwner composes the concrete native capture reader and the existing selected-store
+        AdmissionResponsibilityCurrent owner. For fresh input the reader holds the actual connected SDK occurrence
+        and private database possession, verifies the paired account against that database, and consumes the complete
+        retained capture validator. The selected currentness owner consumes the original responsibility's operation
+        revision: exact for pending onboarding, or the activation's frozen operation revision for active input, never
+        today's completion-progress revision. It requires the same activation revision,
+        declaration coordinate, target selector, provider account admission, source/inventory/plan generation,
+        principal and binding revision. A later onboarding revision cannot adopt an earlier capture. Its issued
+        SessionInputAdmission is process-local, closed and non-serializable; caller payloads, descriptors and booleans
+        cannot construct it. Copies share one owned lease, and release, cancellation or retirement invalidates their
+        later projections. AdmitSessionInput consumes its defensive bytes and frozen receipt time through the existing
+        trigger BODY, delivery identity, normalization and output authorization owners. Session input rejects HTTP
+        admission, and webhook admission does not accept this fact. Runless onboarding input may reach authenticated
+        operator delivery projection but cannot mint business PublicationAdmission; that additionally requires the exact
+        positive executable source/target and current activation responsibility. Fresh input is not unfinished recovery:
+        original recovery must verify resumable retained authority without requiring a dead process occurrence or
+        adopting replacement context. Native and selected-owner component fixtures do not alone establish supported
+        public dispatch, acknowledgment ordering or capture-to-publication closure.
       session_incoming_sdk_projection: >
         The concrete WhatsApp input adapter projects supported public SDK message, text-edit and revoke facts into
         a defensive provider payload before private capture. Transport chat and sender facts determine conversation
@@ -11327,6 +11351,7 @@ tool_model:
         authorization; session admission and the existing normalized-output authorization owner remain mandatory.
         Before invoking atomic selected-store publication, the private incoming capture freezes its original runtime
         publication request, including exact target, run, generation, sequence, receipt time and transport metadata.
+        The request's receipt time must equal its retained capture time; staging refuses substitution.
         Its existing publication identity covers connection, account, conversation, provider event and kind; its
         semantic fingerprint binds the stable original capture scope and exact body bytes, excluding only the transport
         occurrence. The original occurrence remains mandatory retained provenance in the canonical publication's

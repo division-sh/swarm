@@ -33,6 +33,7 @@ func captureFixture(t *testing.T) capturedEvent {
 	}
 	return capturedEvent{
 		Scope: captureScope{
+			Kind: channelonboarding.SessionInputBusiness,
 			PublicationBinding: runtimeinbound.BindingGeneration{ServiceID: runtimeflowidentity.StandingServiceID("."),
 				RunID: uuid.NewString(), Generation: 1},
 			Session: operatorchannel.SessionAccountAdmission{
@@ -43,10 +44,52 @@ func captureFixture(t *testing.T) capturedEvent {
 				BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "source:test",
 				PackInventoryGeneration: "inventory:test", PlanGeneration: generation,
 			},
-			OnboardingOperation: uuid.NewString(), PrincipalID: uuid.NewString(), BindingRevision: 1,
+			OnboardingOperation: uuid.NewString(), OperationRevision: 1, ActivationRevision: 1, TargetSelector: "ingress:.:whatsapp",
+			PrincipalID: uuid.NewString(), BindingRevision: 1,
 		},
 		OccurrenceID: uuid.NewString(), Conversation: "synthetic_conversation", EventID: "event_1",
 		Kind: "message", Body: []byte("{ \"text\" : \"private fixture\" }"),
+		ReceivedAt: time.Date(2026, 10, 7, 12, 0, 0, 123456000, time.UTC),
+	}
+}
+
+func TestWhatsAppCaptureScopeAndReceiptAreClosedProducts(t *testing.T) {
+	business := captureFixture(t)
+	bootstrap := business
+	bootstrap.Scope.Kind = channelonboarding.SessionInputOnboarding
+	bootstrap.Scope.PublicationBinding = runtimeinbound.BindingGeneration{}
+	bootstrap.Scope.BindingRevision, bootstrap.Scope.ActivationRevision = 0, 0
+	for _, event := range []capturedEvent{bootstrap, business} {
+		if err := event.validate(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, row := range []struct {
+		name string
+		base capturedEvent
+		edit func(*capturedEvent)
+	}{
+		{"unknown_scope", business, func(e *capturedEvent) { e.Scope.Kind = "guessed" }},
+		{"no_scope", business, func(e *capturedEvent) { e.Scope.Kind = "" }},
+		{"no_operation_revision", business, func(e *capturedEvent) { e.Scope.OperationRevision = 0 }},
+		{"no_target", business, func(e *capturedEvent) { e.Scope.TargetSelector = "" }},
+		{"bootstrap_binding", bootstrap, func(e *capturedEvent) { e.Scope.PublicationBinding = business.Scope.PublicationBinding }},
+		{"bootstrap_activation", bootstrap, func(e *capturedEvent) { e.Scope.ActivationRevision = 1 }},
+		{"business_activation", business, func(e *capturedEvent) { e.Scope.ActivationRevision = 0 }},
+		{"missing_receipt", business, func(e *capturedEvent) { e.ReceivedAt = time.Time{} }},
+		{"unrepresentable_receipt", business, func(e *capturedEvent) { e.ReceivedAt = e.ReceivedAt.Add(time.Nanosecond) }},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			event := row.base
+			row.edit(&event)
+			_, spool := openCaptureFixture(t, filepath.Join(t.TempDir(), "incoming.db"), event.Scope.Session.ConnectionID)
+			if err := spool.capture(context.Background(), event); err == nil {
+				t.Fatal("invalid scope or receipt acquired durable capture")
+			}
+			if rows, err := spool.pending(context.Background()); err != nil || len(rows) != 0 {
+				t.Fatal("failed capture mutated private evidence", err)
+			}
+		})
 	}
 }
 
