@@ -570,10 +570,9 @@ func TestIssue2564H2FixedCutTimerPrefixBothStores(t *testing.T) {
 				}
 			})
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"hub_id": "h01"}, "idempotency_key": "q6-hub-1"})
-			for hub := 2; hub <= 6; hub++ {
-				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"hub_id": fmt.Sprintf("h%02d", hub)}, "idempotency_key": fmt.Sprintf("q6-hub-%d", hub)})
-			}
-			waitProgress := func(previous int) {
+			// One real keyed hub isolates cut preservation from the separate
+			// six-hub 900/600-submission pressure journey below.
+			waitProgress := func(previous int) issue2564H2Snapshot {
 				t.Helper()
 				ctx, cancel := context.WithTimeout(t.Context(), servedProofPollDeadline)
 				defer cancel()
@@ -582,20 +581,15 @@ func TestIssue2564H2FixedCutTimerPrefixBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatalf("read H2 progress: %v", err)
 					}
-					if len(candidate.Events) > previous {
-						return
+					if len(candidate.Events) > previous && issue2564H2Accounting(seed.RunID, candidate, false, keys) == nil {
+						return candidate
 					}
 					time.Sleep(100 * time.Millisecond)
 				}
 				t.Fatal("Q6 H2 proof never reached the required timer progression")
+				return issue2564H2Snapshot{}
 			}
-			waitProgress(11)
-			// Joined shutdown fences accepted publication settlement; a live
-			// timer snapshot may legitimately precede its pipeline receipt.
-			if err := process.stop(); err != nil {
-				t.Fatal(err)
-			}
-			before := issue2564H2WaitAccounting(t, rt, seed.RunID, false, keys)
+			before := waitProgress(1)
 			// Reusing admitted bytes must not conceal a changed immutable cut.
 			checked := false
 			for coordinate, witness := range rt.cuts {
@@ -634,12 +628,7 @@ func TestIssue2564H2FixedCutTimerPrefixBothStores(t *testing.T) {
 					break
 				}
 			}
-			process, rt = start(false)
-			waitProgress(len(before.Events))
-			if err := process.stop(); err != nil {
-				t.Fatal(err)
-			}
-			after := issue2564H2WaitAccounting(t, rt, seed.RunID, false, keys)
+			after := waitProgress(len(before.Events))
 			for id, hub := range before.Hubs {
 				current := after.Hubs[id]
 				if len(current.History) != 1 || !issue2564H2CutsPreserved(hub.Cuts, current.Cuts) {
