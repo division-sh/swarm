@@ -145,7 +145,7 @@ func issue2564H2FinalEntryCompletion(t *testing.T, backend string, acceptedTimer
 	}
 	counter, counterOK := ack.Fields["acknowledgments"].(int64)
 	if ack.CurrentState != "done" || ack.Status != "active" || !ack.TerminatedAt.IsZero() ||
-		ack.Revision != before.Revision+int64(transitions) || len(ack.TransitionHistory) != len(before.TransitionHistory)+transitions ||
+		ack.Revision != before.Revision+int64(transitions) || len(ack.TransitionHistory) != 1 ||
 		ack.Fields["case_id"] != "ordering" || !counterOK || counter != 1 {
 		t.Fatalf("final ACK lost fields/history or acquired retirement authority: before=%+v ack=%+v", before, ack)
 	}

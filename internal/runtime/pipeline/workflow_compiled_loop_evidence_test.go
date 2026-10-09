@@ -159,7 +159,7 @@ func (h *compiledLoopEvidenceHarness) advance(nodeID, eventType, revision, from,
 		h.t.Fatalf("execute %s: handled=%v err=%v", eventType, result.Handled, err)
 	}
 	after := h.load()
-	if after.CurrentState != to || after.Revision != before.Revision+1 || len(after.TransitionHistory) != len(before.TransitionHistory)+1 {
+	if after.CurrentState != to || after.Revision != before.Revision+1 || len(after.TransitionHistory) != 1 {
 		h.t.Fatalf("%s did not commit one transition: before=%#v after=%#v", eventType, before, after)
 	}
 	record := after.TransitionHistory[len(after.TransitionHistory)-1]

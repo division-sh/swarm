@@ -14276,6 +14276,13 @@ flow_model:
             flow_instances.config column and historical FlowConfig carrier contain closed runtime header controls
             only: route, parent, version, lifecycle and transition evidence. A business config member or unknown
             control is invalid. Header/parent/creating-receipt checks remain fail-closed; no repair-on-read exists.
+            Transition evidence is bounded current control: transition_history contains zero or one complete typed
+            record. The producer validates every supplied record before retaining the last admitted append, not the
+            greatest event timestamp or UUID. A transition replaces current evidence; field-only/no-op updates retain
+            it. Persisted cumulative arrays are invalid, with no truncation, migration or compatibility reader.
+            Historical FlowConfig retains the exact current transition at its recorded cut, including RuleRef,
+            carrier, flow, source/target stages, trigger, guards and time/timer cause. Later source progression cannot
+            replace that fixed evidence; every supported domain event remains an exact historical cut.
             Actor config persists the ordinary agent-owned opaque object, not an envelope with receiver_config.
             The typed runtime descriptor, authored prompt guards, numeric kinds, owned bytes and actor revisions
             retain their existing contracts. Business names cannot grant actor tools, model or prompt authority.
