@@ -48,11 +48,11 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decision)
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
 					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
-					history := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
+					history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 					if len(history) != 1 || history[0].From != "approved" || history[0].To != "done" {
 						t.Fatalf("nested gate history: %+v", history)
 					}
-					gateRecord := readLifecycleTransitionAtCut(t, rt, seed.RunID, entityID, history[0].TriggerEventID)
+					gateRecord := readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, history[0].TriggerEventID)
 					cause, ok := gateRecord.Evidence.Compiled()
 					if !ok || cause.FlowID() != "outer/inner" || cause.Edge().Source != "gate" || cause.Edge().Verdict != "approve" || gateRecord.From != "review" || gateRecord.To != "approved" {
 						t.Fatalf("nested gate lost its exact compiled cause: %+v", gateRecord)
@@ -80,7 +80,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 				}
 				started := publish("loop.start", "release-start", map[string]any{"seed": true})
 				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
-				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), started.EventID, "waiting", "drafting")
+				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), started.EventID, "waiting", "drafting")
 				var finalEvent string
 				for attempt := 1; attempt <= 2; attempt++ {
 					current := readLifecycleLoop(t, rt, seed.RunID, entityID)
@@ -90,14 +90,14 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					payload := map[string]any{"revision_id": current.RevisionID}
 					admit := publish("loop.admit", fmt.Sprintf("release-admit-%d", attempt), payload)
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
-					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), admit.EventID, "drafting", "review")
+					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), admit.EventID, "drafting", "review")
 					finalEvent = publish("loop.repeat", fmt.Sprintf("release-repeat-%d", attempt), payload).EventID
 					next := "drafting"
 					if attempt == 2 {
 						next = "escaped"
 					}
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, next)
-					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), finalEvent, "review", next)
+					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), finalEvent, "review", next)
 				}
 				closed := readLifecycleLoop(t, rt, seed.RunID, entityID)
 				if closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" || closed.Attempt != 2 {
@@ -108,7 +108,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					t.Fatal("connected receiver borrowed the producer entity")
 				}
 				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
-				history := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
+				history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 				if len(history) != 1 {
 					t.Fatalf("loop transition history: %+v", history)
 				}

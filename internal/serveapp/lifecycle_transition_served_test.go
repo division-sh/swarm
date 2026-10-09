@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -46,11 +45,11 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 							waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
 							for _, recipient := range recipients {
 								entityID := requireLifecycleFlowEntity(t, rt, seed.RunID, recipient, "done")
-								history := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
+								history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 								if len(history) != 1 || history[0].From != "active" || history[0].To != "done" {
 									t.Fatalf("history=%#v", history)
 								}
-								record := readLifecycleTransitionAtCut(t, rt, seed.RunID, entityID, history[0].TriggerEventID)
+								record := readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, history[0].TriggerEventID)
 								flow := strings.TrimSuffix(recipient, "/")
 								if flow == "" {
 									flow = "."
@@ -113,13 +112,10 @@ func requireLifecycleFlowEntity(t *testing.T, rt servedControlProofRuntime, runI
 	return ""
 }
 
-func readLifecycleTransitionHistory(t *testing.T, rt servedControlProofRuntime, runID, entityID string) []pipeline.WorkflowTransitionRecord {
+func readLifecycleTransitionHistory(t *testing.T, reader receiverProofStateReader, runID, entityID string) []pipeline.WorkflowTransitionRecord {
 	t.Helper()
-	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(config AS TEXT) FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, runID, entityID).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
-	return decodeLifecycleTransitionHistory(t, []byte(raw))
+	observed := storetest.ObserveWriterFlow(t, t.Context(), reader, runID, entityID)
+	return decodeLifecycleTransitionHistory(t, observed.Config)
 }
 
 func decodeLifecycleTransitionHistory(t *testing.T, raw []byte) []pipeline.WorkflowTransitionRecord {
@@ -151,48 +147,30 @@ func requireLifecycleCurrentTransition(t *testing.T, history []pipeline.Workflow
 
 // Inspect one explicit cut through the same fixed-snapshot owner used by fork;
 // never reconstruct a trajectory from current headers or transition timestamps.
-func readLifecycleTransitionAtCut(t *testing.T, rt servedControlProofRuntime, runID, entityID, eventID string) pipeline.WorkflowTransitionRecord {
+func readLifecycleTransitionAtCut(t *testing.T, reader receiverProofStateReader, runID, entityID, eventID string) pipeline.WorkflowTransitionRecord {
 	t.Helper()
-	type planner interface {
-		PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
-	}
-	var reader planner
-	if rt.Postgres != nil {
-		reader = rt.Postgres
-	} else if rt.SQLite != nil {
-		reader = rt.SQLite
-	} else {
-		reader, _ = rt.ReceiverStateReader.(planner)
-	}
 	if reader == nil || eventID == "" {
 		t.Fatal("transition proof requires its selected fixed-cut reader and exact event")
 	}
-	plan, err := reader.PlanRunFork(context.Background(), runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
-	if err != nil || plan.ForkPoint.EventID != eventID {
+	entity, err := storetest.ReadReceiverEntityAtEventCut(t.Context(), reader, runID, entityID, eventID)
+	if err != nil {
 		t.Fatalf("read exact transition cut %s: %v", eventID, err)
 	}
-	for _, entity := range plan.Entities {
-		if entity.EntityID != entityID {
-			continue
-		}
-		metadata := entity.MaterializationMetadata
-		if metadata == nil {
-			t.Fatal("historical entity has no construction header")
-		}
-		route := flowidentity.StoredRoute(metadata.FlowTemplate, flowidentity.LogicalInstanceID(metadata.FlowInstance), metadata.FlowInstance)
-		if _, err := pipeline.DecodeWorkflowInstanceRecordedHeader(route, metadata.FlowConfig); err != nil {
-			t.Fatal(err)
-		}
-		var config struct {
-			History []pipeline.WorkflowTransitionRecord `json:"transition_history"`
-		}
-		if err := json.Unmarshal(metadata.FlowConfig, &config); err != nil || len(config.History) != 1 {
-			t.Fatalf("cut %s lost bounded complete transition: %s, %v", eventID, metadata.FlowConfig, err)
-		}
-		return config.History[0]
+	metadata := entity.MaterializationMetadata
+	if metadata == nil {
+		t.Fatal("historical entity has no construction header")
 	}
-	t.Fatalf("cut %s lacks exact entity %s", eventID, entityID)
-	return pipeline.WorkflowTransitionRecord{}
+	route := flowidentity.StoredRoute(metadata.FlowTemplate, flowidentity.LogicalInstanceID(metadata.FlowInstance), metadata.FlowInstance)
+	if _, err := pipeline.DecodeWorkflowInstanceRecordedHeader(route, metadata.FlowConfig); err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		History []pipeline.WorkflowTransitionRecord `json:"transition_history"`
+	}
+	if err := json.Unmarshal(metadata.FlowConfig, &config); err != nil || len(config.History) != 1 {
+		t.Fatalf("cut %s lost bounded complete transition: %s, %v", eventID, metadata.FlowConfig, err)
+	}
+	return config.History[0]
 }
 
 func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing.T) {

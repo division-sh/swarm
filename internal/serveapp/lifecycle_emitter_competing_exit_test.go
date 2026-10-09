@@ -131,7 +131,7 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 								t.Fatalf("outcome deliveries=%d, want %d", deliveries, count)
 							}
 							exits := 0
-							for _, row := range readLifecycleTransitionHistory(t, rt, seed.RunID, entityID) {
+							for _, row := range readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID) {
 								if row.From == "review" {
 									exits++
 									if row.To != target {

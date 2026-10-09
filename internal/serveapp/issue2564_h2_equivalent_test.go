@@ -441,9 +441,9 @@ func issue2564H2DeclarationKeys(t *testing.T, root string) map[string]string {
 	return keys
 }
 
-func issue2564H2Accounting(run string, snapshot issue2564H2Snapshot, closed bool, keys map[string]string) error {
-	if len(snapshot.Hubs) != 6 {
-		return fmt.Errorf("H2 hub inventory=%d, want six", len(snapshot.Hubs))
+func issue2564H2Accounting(run string, snapshot issue2564H2Snapshot, closed bool, keys map[string]string, expectedHubs int) error {
+	if len(snapshot.Hubs) != expectedHubs {
+		return fmt.Errorf("H2 hub inventory=%d, want %d", len(snapshot.Hubs), expectedHubs)
 	}
 	seen := map[string]bool{}
 	for _, hub := range snapshot.Hubs {
@@ -581,7 +581,7 @@ func TestIssue2564H2FixedCutTimerPrefixBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatalf("read H2 progress: %v", err)
 					}
-					if len(candidate.Events) > previous && issue2564H2Accounting(seed.RunID, candidate, false, keys) == nil {
+					if len(candidate.Events) > previous && issue2564H2Accounting(seed.RunID, candidate, false, keys, 1) == nil {
 						return candidate
 					}
 					time.Sleep(100 * time.Millisecond)
@@ -653,7 +653,7 @@ func issue2564H2WaitAccounting(t *testing.T, rt issue2564H2Fixture, run string, 
 		lastRead = time.Since(started)
 		reads++
 		if err == nil {
-			err = issue2564H2Accounting(run, snapshot, closed, keys)
+			err = issue2564H2Accounting(run, snapshot, closed, keys, 6)
 			if err == nil {
 				return snapshot
 			}

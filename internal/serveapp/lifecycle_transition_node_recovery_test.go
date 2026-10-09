@@ -139,7 +139,7 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 					waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
 				}
 				waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
-				before := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
+				before := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 				expected := lifecycleRecoveryCarrier(t, runtime, escape)
 				armed.Store(true)
 				published := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.repeat", "interrupted-repeat", map[string]any{"revision_id": loop.RevisionID}))
@@ -153,7 +153,7 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 					t.Fatal("barrier captured another admitted event")
 				}
 				pending := readLifecycleNodeRecoveryDelivery(t, rt, old.Claim.DeliveryID(), "before_shutdown")
-				if pending.Status != "in_progress" || pending.EventID != published.EventID || !reflect.DeepEqual(before, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)) {
+				if pending.Status != "in_progress" || pending.EventID != published.EventID || !reflect.DeepEqual(before, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)) {
 					t.Fatal("pending first attempt changed state/history or identity")
 				}
 				if code := first.stop(); code != 0 {
@@ -180,7 +180,7 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 				}
 				requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, target)
 				waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
-				after := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
+				after := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 				if len(after) != 1 || len(before) != 1 || after[0].TriggerEventID == before[0].TriggerEventID {
 					t.Fatal("reexecuted node lost or duplicated prior history")
 				}
