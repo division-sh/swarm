@@ -70,10 +70,7 @@ func TestReceiverFlowInitializationPublicationBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				src, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()})
-				if err != nil {
-					t.Fatal(err)
-				}
+				src := constructStaticPublicationSourceFixture(t, ctx, fixture.store.(agentFixtureFlowStore), bundle, "producer")
 				event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "producer/deploy.done", "operator", "", []byte(`{"vertical_id":"first"}`), 0, runID, events.EventEnvelope{}, src, time.Now().UTC())
 				before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 				plans, err := eventBus.PrepareEnginePublications(ctx, []engine.EmitIntent{{Event: event}})

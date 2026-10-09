@@ -131,7 +131,7 @@ func TestReceiverConstructionAndObserverIsolationBothStores(t *testing.T) {
 						if err != nil {
 							t.Fatal(err)
 						}
-						src := eventtest.StaticFlowRoutingSource("producer", "producer", uuid.NewString())
+						src := constructStaticPublicationSourceFixture(t, ctx, fixture.store.(agentFixtureFlowStore), bundle, "producer")
 						event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "producer/deploy.done", "operator", "", []byte(`{"vertical_id":"first"}`), 0, runID, events.EventEnvelope{}, src, time.Now().UTC().Truncate(time.Microsecond))
 						before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 						plans, err := eventBus.PrepareEnginePublications(ctx, []engine.EmitIntent{{Event: event}})
