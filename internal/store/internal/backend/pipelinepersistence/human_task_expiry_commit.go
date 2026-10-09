@@ -69,7 +69,10 @@ func commitHumanTaskExpirations(
 	for index, publication := range result.Publications {
 		result.Publications[index] = publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()
 	}
-	return result, errors.Join(outcome.Err(), result.Validate(), store.publishCardChanges(acknowledged, len(result.Publications) > 0))
+	if len(result.Publications) == 0 {
+		return result, errors.Join(outcome.Err(), result.Validate())
+	}
+	return result, errors.Join(outcome.Err(), result.Validate(), store.publishCardChanges(acknowledged, true))
 }
 
 func (s *PipelinePostgresOwner) CommitHumanTaskExpirations(ctx context.Context, command runtimepipeline.HumanTaskExpiryCommand) (runtimepipeline.CommittedHumanTaskExpiry, error) {

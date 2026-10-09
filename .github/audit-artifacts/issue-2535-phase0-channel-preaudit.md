@@ -1006,3 +1006,69 @@ The raw-authority repair and fresh guard/census proof are complete; clean-head
 Local core, six COMPLETE channel units/named supplements, matched cost and
 hosted full still remain. Server2 is released and must be allocated again
 before any fresh tier run. There is no PR or chosen-class closure claim.
+
+## Second Server2 Core Receipt And Bounded Broad Repair
+
+User allocated server2 again for frozen7ade404f7. Preflight verified no
+swarm-test process and admission active=0/waiting=0. Go1.25.5, native PG16,
+normal capacity4, short disk TMPDIR /home/youmew/g-tmp, clean detached source
+7ade404f7ff4cc6f1bb4474aedbcb3cb5eb8e16a. Plan digest
+70126c477a18c1112aebda4a3558622633a82649a4552d83ada0556cf214b2f5,
+22 units/7424 selected roots/7407 required roots/4145 deferred roots. Receipt
+directory core-20261009T220224.812098455 in the retained server2 worktree.
+
+This aggregate FAILED, with21 passing unit receipts and broad-01 FAILED
+383.322s. The pipeline package panic prevented remaining roots from running;
+missing required roots are NOT credited. The original broad primary evidence
+SHA256 is3e4aef94642e1cf32acfa7d48e7986f53b9e60dcb712b2194a95d3a6640e21d8.
+No six-channel or other named supplement started. Server2 was released at
+completion, no runner process, active=0/waiting=0. No automatic carry or
+whole-core qualification is claimed; reviewer carry was requested6090227668.
+
+The two actual failures are OWNED, unrelated to the unreproduced public
+event.publish timeout. Its disposition6089996078 permits continued required
+qualification, retains the failed race aggregate and requires a stop/capture
+if the same timeout recurs. It did not recur in this core.
+
+1. TestEmptyHumanTaskExpiryAcknowledgementOnBothStores/sqlite panicked in
+   commitHumanTaskExpirations when the new publisher method was invoked even
+   on the canonical acknowledged zero-publication result. That pure empty
+   transaction test legitimately provides no publication owner. Base2fc passes
+   both stores1.549s. The bounded repair skips only the proven empty/no-change
+   publication outcome BEFORE touching that dependency. It still returns the
+   original acknowledged result, validation and transaction/cleanup cause.
+   Nonempty acknowledged results still signal through the existing owner.
+   There is no nil compatibility check, ignored error or transaction/business
+   change. The unchanged existing both-store control passes race3,7.494s;
+   positive expiry/run-supersession and channel card/terminal hint controls
+   pass7.801s. Existing native refusal and empty-commit assertions are retained.
+2. TestRewrite2566EntryGoldenMatchesTypedCorpus had two stale locations for
+   selectedActivityProducerSourceWithRootFields/literal-2 and literal-10.
+   The exact original bodies moved into selectedActivityProducerSourceOptions
+   when the fork-card fixture gained its supported root-write branch. Only
+   the function/flow locators are updated. All566 entries and every independent
+   entry/order/finals value are identical; no historical intent ledger,
+   parser-derived expectation or fallback lookup. The full rewrite-stages
+   package passes race3,79.541s, including its hostile/membership controls.
+
+Local evidence/checksums:
+channel-empty-expiry-base.log SHA256
+8d38bbbb52eb32fb1096da58f1532a5b2680b30be07c216635b8857ecbc579ef;
+channel-empty-expiry-repair-race.log SHA256
+4cc771cb614b6189a8ca41206a9f73c3901e410fce22b26a5d16bc5e3c9fc9eb;
+channel-entry-golden-repair-race.log SHA256
+c1d5d5f4404afca6b361157c793ef0d9e0e65c721578703c429bb44e79a08e3f.
+
+The four-root cost probe at clean7ade passed159.374s, same host/toolchain,
+root selection/count as characterized baseline, but its package timeout was
+15m versus the baseline8m; it is not the exact-command matched receipt.
+The subsequent8m run overlapped the local expiry repair and is explicitly
+MIXED SOURCE, uncredited, even though its tests pass164.536s. A clean frozen
+exact-command comparison remains required; neither run proves fleet savings.
+No measured/active deadline or M30 window has changed.
+
+The repair is within the existing no-op finalizer and fixture-accounting gate.
+No new producer, port, framework, vendoring or class split. Fresh complete
+guard/census/debt proof and reviewer disposition on21-unit carry precede the
+next server2 request. All six channel units and named supplements remain
+unexecuted qualification, as do hosted full and the final PR proof audit.

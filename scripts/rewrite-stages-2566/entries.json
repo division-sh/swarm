@@ -5333,25 +5333,25 @@
   {
     "file": "internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go",
     "source": "internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go",
-    "flow": "selectedActivityProducerSourceWithRootFields/literal-2",
+    "flow": "selectedActivityProducerSourceOptions/literal-2",
     "entry": "pending",
     "order": [
       "pending"
     ],
     "finals": [],
-    "function": "selectedActivityProducerSourceWithRootFields",
+    "function": "selectedActivityProducerSourceOptions",
     "literal": 2
   },
   {
     "file": "internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go",
     "source": "internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go",
-    "flow": "selectedActivityProducerSourceWithRootFields/literal-10",
+    "flow": "selectedActivityProducerSourceOptions/literal-10",
     "entry": "pending",
     "order": [
       "pending"
     ],
     "finals": [],
-    "function": "selectedActivityProducerSourceWithRootFields",
+    "function": "selectedActivityProducerSourceOptions",
     "literal": 10
   },
   {
