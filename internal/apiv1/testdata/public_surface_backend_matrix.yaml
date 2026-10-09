@@ -60,7 +60,45 @@ store_parity:
       constructor: OpenAdmissionInspection
       consumers: [internal/cliapp/verify_deployment_store.go, internal/cliapp/verify_run.go]
       semantic_owner: internal/store/selected.AdmissionInspection and existing canonical domain readers
-      proof_ids: [admission-inspection-parity, admission-possession-public-parity]
+      proof_ids:
+        - admission-inspection-parity
+        - admission-possession-public-parity
+        - verify-run-public
+        - verify-run-flags
+        - verify-run-failures
+        - verify-run-formats
+        - verify-run-drift
+        - verify-run-history
+        - verify-run-json
+        - verify-run-fork-order
+        - verify-run-overlap
+        - verify-run-cross-run
+        - verify-run-membership
+        - verify-run-absence
+        - verify-run-snapshot
+        - verify-run-snapshot-failures
+        - verify-run-canonical-membership
+        - verify-run-header-domains
+        - verify-run-pair-admission
+        - verify-run-header-read
+        - verify-run-state-only
+        - verify-run-mutation-locks
+        - verify-run-historical-fieldless
+        - verify-run-native
+        - verify-run-fork-consumers
+        - verify-run-fork-activation
+        - verify-run-ordinary-replay
+        - verify-run-activity
+        - verify-run-gate-summary
+        - verify-run-decision-freeze
+        - verify-run-fanout
+        - verify-run-fork-activity
+        - verify-run-fork-activity-numeric
+        - verify-run-terminalization
+        - verify-run-registry
+        - verify-run-numeric
+        - verify-run-projection
+        - verify-run-projection-membership
       close_proof_ids: [admission-inspection-parity, admission-inspection-transport-close]
   different_construction:
     runtime_deps: [Config, Options, StartupGrant]
@@ -157,6 +195,44 @@ store_parity:
       purpose_ids: [admission_inspection]
       capabilities: [{claim_id: startup_authority, risk_dimensions: [selected_construction, fail_closed]}]
     - {id: admission-inspection-transport-close, kind: go_test, name: TestAdmissionInspectionBoundsSilentPostgresHandshake, path: internal/store/selected/admission_transport_test.go, profile: core, purpose_ids: [admission_inspection]}
+    # Run inspection and preservation of its shared header/fork mutation consumers.
+    # Source-qualified proofs bind backend children to whichever unit owns each root.
+    - {id: verify-run-public, kind: go_test, name: TestVerifyRunPublicAdmissionBothStores, path: internal/cliapp/verify_run_test.go, profile: core, purpose_ids: [admission_inspection]}
+    - {id: verify-run-flags, kind: go_test, name: TestVerifyRunPublicFlagAndAbsentStoreAdmission, path: internal/cliapp/verify_run_test.go, profile: core, purpose_ids: [admission_inspection]}
+    - {id: verify-run-failures, kind: go_test, name: TestVerifyRunTypedFailuresRetainCoordinatesAndCancellation, path: internal/cliapp/verify_run_test.go, profile: core, purpose_ids: [admission_inspection]}
+    - {id: verify-run-formats, kind: go_test, name: TestVerifyRunPublicOutputParity, path: internal/cliapp/verify_run_test.go, profile: core, purpose_ids: [admission_inspection]}
+    - {id: verify-run-drift, kind: go_test, name: TestVerifyRunMutationDriftBothStores, path: internal/store/internal/backend/runforkpersistence/run_drift_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-history, kind: go_test, name: TestVerifyRunHistoryAdmissionBothStores, path: internal/store/internal/backend/runforkpersistence/run_drift_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-json, kind: go_test, name: TestVerifyRunPhysicalJSONAdmissionBothStores, path: internal/store/internal/backend/runforkpersistence/run_drift_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-fork-order, kind: go_test, name: TestVerifyRunSharedForkOrderBothStores, path: internal/store/internal/backend/runforkpersistence/run_drift_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-overlap, kind: go_test, name: TestVerifyRunOverlappingForkOrderBothStores, path: internal/store/internal/backend/runforkpersistence/run_drift_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-cross-run, kind: go_test, name: TestVerifyRunCrossRunIsolationBothStores, path: internal/store/internal/backend/runforkpersistence/run_drift_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-membership, kind: go_test, name: TestVerifyRunEntityMembershipBothStores, path: internal/store/internal/backend/runforkpersistence/run_drift_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-absence, kind: go_test, name: TestVerifyRunMissingAndEmptyExistingRunBothStores, path: internal/store/internal/backend/runforkpersistence/run_drift_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-snapshot, kind: go_test, name: TestVerifyRunSnapshotIsolationBothStores, path: internal/store/internal/backend/runforkpersistence/run_drift_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-snapshot-failures, kind: go_test, name: TestVerifyRunSnapshotFailuresRetainCause, path: internal/store/internal/backend/runforkpersistence/run_drift_failure_test.go, profile: core, purpose_ids: [admission_inspection]}
+    - {id: verify-run-canonical-membership, kind: go_test, name: TestVerifyRunCanonicalMembershipBothStores, path: internal/store/internal/backend/runforkpersistence/run_drift_ownership_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-header-domains, kind: go_test, name: TestVerifyRunCanonicalHeaderDomainsBothStores, path: internal/store/internal/backend/runforkpersistence/run_drift_ownership_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite/lifecycle_state, sqlite/bookkeeping, sqlite/gate, sqlite/accumulator, sqlite/authored_field, postgres/lifecycle_state, postgres/bookkeeping, postgres/gate, postgres/accumulator, postgres/authored_field], purpose_ids: [admission_inspection]}
+    - {id: verify-run-pair-admission, kind: go_test, name: TestVerifyRunConstructedPairAdmissionBothStores, path: internal/store/internal/backend/runforkpersistence/run_drift_ownership_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite/missing_fields, sqlite/fieldless_fields, sqlite/foreign_run, sqlite/wrong_entity, sqlite/wrong_path, sqlite/wrong_type, sqlite/conflicting_fields, sqlite/invalid_header_json, sqlite/invalid_fields_json, sqlite/invalid_revision, sqlite/empty_declared_type, postgres/missing_fields, postgres/fieldless_fields, postgres/foreign_run, postgres/wrong_entity, postgres/wrong_path, postgres/wrong_type, postgres/conflicting_fields, postgres/invalid_header_json, postgres/invalid_fields_json, postgres/invalid_revision, postgres/empty_declared_type], purpose_ids: [admission_inspection]}
+    - {id: verify-run-header-read, kind: go_test, name: TestVerifyRunSharedHeaderReadScopeBothStores, path: internal/store/internal/backend/runforkpersistence/run_drift_ownership_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-state-only, kind: go_test, name: TestVerifyRunStateOnlyDoesNotAcquireConstructionBothStores, path: internal/store/internal/backend/runforkpersistence/run_drift_ownership_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-mutation-locks, kind: go_test, name: TestVerifyRunSharedHeaderReadPreservesMutationLocks, path: internal/store/internal/backend/runforkpersistence/run_drift_ownership_test.go, profile: core, purpose_ids: [admission_inspection]}
+    - {id: verify-run-historical-fieldless, kind: go_test, name: TestSelectedForkHistoricalFieldlessHeaderBothStores, path: internal/store/internal/backend/runforkpersistence/run_fork_workflow_ownership_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-native, kind: go_test, name: TestVerifyRunNativeConstructionBothStores, path: internal/store/internal/runtimepersistence/run_drift_native_writer_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-fork-consumers, kind: go_test, name: TestMutationDomainsReachBothForkConsumersBothStores, path: internal/store/internal/runtimepersistence/fork_mutation_domain_consumers_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-fork-activation, kind: go_test, name: TestForkActivationInventoriesConstructedHeadersBothStores, path: internal/store/internal/runtimepersistence/fork_constructed_inventory_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite/fieldless, sqlite/fields, postgres/fieldless, postgres/fields], purpose_ids: [admission_inspection]}
+    - {id: verify-run-ordinary-replay, kind: go_test, name: TestOrdinaryReplayInitializedReceiversBothStores, path: internal/store/internal/runtimepersistence/run_fork_replay_initialization_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite/wrong_path, sqlite/wrong_run, sqlite/foreign_template, sqlite/wrong_stage, sqlite/malformed_bookkeeping, sqlite/state_only_receiver, sqlite/missing_declared_fields, postgres/wrong_path, postgres/wrong_run, postgres/foreign_template, postgres/wrong_stage, postgres/malformed_bookkeeping, postgres/state_only_receiver, postgres/missing_declared_fields], purpose_ids: [admission_inspection]}
+    - {id: verify-run-activity, kind: go_test, name: TestActivityAdmissionConsumesConstructedHeaderBothStores, path: internal/store/internal/runtimepersistence/workflow_header_activity_admission_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [postgres/fieldless/current, postgres/fieldless/malformed_bucket, postgres/fieldless/missing_header, postgres/fieldless/stale, postgres/fieldless/wrong_entity, postgres/fieldless/wrong_header_flow, postgres/fieldless/wrong_path, postgres/fields/current, postgres/fields/malformed_bucket, postgres/fields/missing_header, postgres/fields/stale, postgres/fields/wrong_entity, postgres/fields/wrong_header_flow, postgres/fields/wrong_path, sqlite/fieldless/current, sqlite/fieldless/malformed_bucket, sqlite/fieldless/missing_header, sqlite/fieldless/stale, sqlite/fieldless/wrong_entity, sqlite/fieldless/wrong_header_flow, sqlite/fieldless/wrong_path, sqlite/fields/current, sqlite/fields/malformed_bucket, sqlite/fields/missing_header, sqlite/fields/stale, sqlite/fields/wrong_entity, sqlite/fields/wrong_header_flow, sqlite/fields/wrong_path], purpose_ids: [admission_inspection]}
+    - {id: verify-run-gate-summary, kind: go_test, name: TestConstructedHeaderGateSummaryBothStores, path: internal/store/internal/runtimepersistence/workflow_header_gate_summary_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-decision-freeze, kind: go_test, name: TestConstructedHeaderGateFreezeBothStores, path: internal/store/internal/runtimepersistence/workflow_header_gate_summary_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite/fields=false, sqlite/fields=true, postgres/fields=false, postgres/fields=true], purpose_ids: [admission_inspection]}
+    - {id: verify-run-fanout, kind: go_test, name: TestFanOutBarrierConsumesConstructedHeaderBothStores, path: internal/store/internal/runtimepersistence/workflow_header_fan_out_admission_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [postgres/fieldless/current, postgres/fieldless/malformed_bucket, postgres/fieldless/missing_header, postgres/fieldless/stale, postgres/fieldless/wrong_header_flow, postgres/fieldless/wrong_path, postgres/fieldless/wrong_scope, postgres/fields/current, postgres/fields/malformed_bucket, postgres/fields/missing_fields, postgres/fields/missing_header, postgres/fields/stale, postgres/fields/wrong_header_flow, postgres/fields/wrong_path, postgres/fields/wrong_scope, sqlite/fieldless/current, sqlite/fieldless/malformed_bucket, sqlite/fieldless/missing_header, sqlite/fieldless/stale, sqlite/fieldless/wrong_header_flow, sqlite/fieldless/wrong_path, sqlite/fieldless/wrong_scope, sqlite/fields/current, sqlite/fields/malformed_bucket, sqlite/fields/missing_fields, sqlite/fields/missing_header, sqlite/fields/stale, sqlite/fields/wrong_header_flow, sqlite/fields/wrong_path, sqlite/fields/wrong_scope], purpose_ids: [admission_inspection]}
+    - {id: verify-run-fork-activity, kind: go_test, name: TestSelectedContractActivitySourceProjectionBothStores, path: internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite/root_source, sqlite/root_source_independent_target, sqlite/static_source, sqlite/static_source_independent_target, sqlite/root_payload_disagrees, sqlite/static_payload_disagrees, postgres/root_source, postgres/root_source_independent_target, postgres/static_source, postgres/static_source_independent_target, postgres/root_payload_disagrees, postgres/static_payload_disagrees], purpose_ids: [admission_inspection]}
+    - {id: verify-run-fork-activity-numeric, kind: go_test, name: TestSelectedContractActivitySourceProjectionPreservesNumericPayloadBothStores, path: internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite/root, sqlite/static, postgres/root, postgres/static], purpose_ids: [admission_inspection]}
+    - {id: verify-run-terminalization, kind: go_test, name: TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores, path: internal/store/internal/runtimepersistence/decision_cards_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], purpose_ids: [admission_inspection]}
+    - {id: verify-run-registry, kind: go_test, name: TestVerifyRunJobflowRegistryIntegrationBothStores, path: internal/serveapp/verify_run_registry_integration_test.go, profile: core, backends: [default_sqlite, explicit_postgres], required_children: [sqlite/clean/text, sqlite/clean/json, sqlite/drift/text, sqlite/drift/json, postgres/clean/text, postgres/clean/json, postgres/drift/text, postgres/drift/json], purpose_ids: [admission_inspection]}
+    - {id: verify-run-numeric, kind: go_test, name: TestVerifyRunJSONPreservesAtomicNumericEvidence, path: internal/runtime/mutationlog/drift_test.go, profile: core, purpose_ids: [admission_inspection]}
+    - {id: verify-run-projection, kind: go_test, name: TestVerifyRunProjectionDomainComparison, path: internal/runtime/mutationlog/drift_test.go, profile: core, purpose_ids: [admission_inspection]}
+    - {id: verify-run-projection-membership, kind: go_test, name: TestVerifyRunProjectionEntityMembership, path: internal/runtime/mutationlog/drift_test.go, profile: core, purpose_ids: [admission_inspection]}
     - id: authority-repair-parity
       kind: go_test
       name: TestAuthorityRepairParity
