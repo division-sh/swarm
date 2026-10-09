@@ -45,7 +45,7 @@ func (b *Backend) withInspectionIO(ctx context.Context, operation func(context.C
 		if stop != nil {
 			err = errors.Join(err, stop())
 		}
-		return errors.Join(err, b.inspectionDialer.close())
+		return errors.Join(err, b.disposeInspectionIO())
 	}
 	var once sync.Once
 	var cleanup context.Context
@@ -69,7 +69,7 @@ func (b *Backend) withInspectionIO(ctx context.Context, operation func(context.C
 		if disposed {
 			// Stop failed native I/O before evicting this single-purpose pool;
 			// no unhealthy idle session may survive a completed observation.
-			cleanupErr = errors.Join(cleanupErr, b.inspectionDialer.close(), b.db.Close())
+			cleanupErr = errors.Join(cleanupErr, b.disposeInspectionIO())
 		}
 		if finish != nil {
 			cleanupErr = errors.Join(cleanupErr, finish())
@@ -78,10 +78,16 @@ func (b *Backend) withInspectionIO(ctx context.Context, operation func(context.C
 		if !disposed && cleanupErr != nil {
 			// Finish can discover a late cleanup failure; the native deadline
 			// remains installed while the failed pool and sockets are disposed.
-			cleanupErr = errors.Join(cleanupErr, b.inspectionDialer.close(), b.db.Close())
+			cleanupErr = errors.Join(cleanupErr, b.disposeInspectionIO())
 		}
 		err = errors.Join(err, observationErr, cleanupErr, b.inspectionDialer.phaseError(), observationContextError(cleanup))
 		cancelCleanup()
 	}()
 	return operation(context.WithoutCancel(ctx), settle)
+}
+
+func (b *Backend) disposeInspectionIO() error {
+	// Socket disposal interrupts failed I/O; pool disposal also evicts idle
+	// entries, including an initial bind failure before observation begins.
+	return errors.Join(b.inspectionDialer.close(), b.db.Close(), b.inspectionDialer.phaseError())
 }
