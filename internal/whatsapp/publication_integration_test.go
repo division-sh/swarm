@@ -215,7 +215,7 @@ func (f *sessionPublicationFixture) captureVariant(t *testing.T, kind string, gr
 		}
 		message.Message = &waE2E.Message{ProtocolMessage: protocol}
 	}
-	event, err := captureSDKMessage(scope, uuid.NewString(), message)
+	event, err := captureSDKMessage(scope, uuid.NewString(), message, captureFixture(t).ReceivedAt)
 	if err != nil {
 		t.Fatal(err)
 	}

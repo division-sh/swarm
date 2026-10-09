@@ -102,7 +102,7 @@ func TestWhatsAppIncomingAcceptedPackProjectionIsNotAdmission(t *testing.T) {
 					}
 					event.Message = &waE2E.Message{ProtocolMessage: protocol}
 				}
-				captured, err := captureSDKMessage(captureFixture(t).Scope, uuid.NewString(), event)
+				captured, err := captureSDKMessage(captureFixture(t).Scope, uuid.NewString(), event, captureFixture(t).ReceivedAt)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -144,7 +144,7 @@ func TestWhatsAppIncomingAcceptedPackReplyAndForwardParity(t *testing.T) {
 				}
 				event.Message = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 					Text: proto.String("current text"), ContextInfo: info}}
-				captured, err := captureSDKMessage(captureFixture(t).Scope, uuid.NewString(), event)
+				captured, err := captureSDKMessage(captureFixture(t).Scope, uuid.NewString(), event, captureFixture(t).ReceivedAt)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -168,7 +168,7 @@ func TestWhatsAppIncomingAcceptedPackRefusesMalformedPayload(t *testing.T) {
 			t.Fatalf("malformed/objectless payload accepted: %s", body)
 		}
 	}
-	captured, err := captureSDKMessage(captureFixture(t).Scope, uuid.NewString(), incomingMessageFixture())
+	captured, err := captureSDKMessage(captureFixture(t).Scope, uuid.NewString(), incomingMessageFixture(), captureFixture(t).ReceivedAt)
 	if err != nil {
 		t.Fatal(err)
 	}

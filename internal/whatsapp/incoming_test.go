@@ -51,7 +51,7 @@ func TestWhatsAppIncomingPublicSDKMessageEditRevokeProjection(t *testing.T) {
 					event.Info.Chat = types.NewJID("100000000003-1", types.GroupServer)
 					event.Info.IsGroup = true
 				}
-		// Use the real SDK message constructors and public unwrapping. In a direct
+				// Use the real SDK message constructors and public unwrapping. In a direct
 				// edit the key RemoteJID is the author's recipient, not our chat.
 				client := whatsmeow.NewClient(&store.Device{ID: &self}, nil)
 				keyChat := bot
@@ -66,7 +66,7 @@ func TestWhatsAppIncomingPublicSDKMessageEditRevokeProjection(t *testing.T) {
 					event.Message = client.BuildRevoke(keyChat, self, "ORIGINAL")
 					event.Info.Edit = types.EditAttributeSenderRevoke
 				}
-				captured, err := captureSDKMessage(scope, uuid.NewString(), event)
+				captured, err := captureSDKMessage(scope, uuid.NewString(), event, captureFixture(t).ReceivedAt)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -106,7 +106,7 @@ func TestWhatsAppIncomingReplyAndForwardUseOnlyCurrentText(t *testing.T) {
 				info.StanzaID = nil
 			}
 			event.Message = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: proto.String("current reply text"), ContextInfo: info}}
-			captured, err := captureSDKMessage(captureFixture(t).Scope, uuid.NewString(), event)
+			captured, err := captureSDKMessage(captureFixture(t).Scope, uuid.NewString(), event, captureFixture(t).ReceivedAt)
 			if variant == "id_without_quote" || variant == "quote_without_id" {
 				if !errors.Is(err, errIncomingMalformed) {
 					t.Fatalf("incomplete reply became evidence: %v", err)
@@ -157,7 +157,7 @@ func TestWhatsAppIncomingMalformedUnsupportedAndIdentityConflicts(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			event := incomingMessageFixture()
 			tc.mutate(event)
-			if _, err := captureSDKMessage(captureFixture(t).Scope, uuid.NewString(), event); !errors.Is(err, tc.want) {
+			if _, err := captureSDKMessage(captureFixture(t).Scope, uuid.NewString(), event, captureFixture(t).ReceivedAt); !errors.Is(err, tc.want) {
 				t.Fatalf("wrong refusal: %v", err)
 			}
 		})
@@ -167,7 +167,7 @@ func TestWhatsAppIncomingMalformedUnsupportedAndIdentityConflicts(t *testing.T) 
 func TestWhatsAppIncomingImmutableCaptureDuplicateAndPublicationIdentity(t *testing.T) {
 	scope := captureFixture(t).Scope
 	event := incomingMessageFixture()
-	original, err := captureSDKMessage(scope, uuid.NewString(), event)
+	original, err := captureSDKMessage(scope, uuid.NewString(), event, captureFixture(t).ReceivedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestWhatsAppIncomingImmutableCaptureDuplicateAndPublicationIdentity(t *test
 		t.Fatal(err)
 	}
 	event.Info.PushName, event.RetryCount = "changed display name", 3
-	repeated, err := captureSDKMessage(scope, uuid.NewString(), event)
+	repeated, err := captureSDKMessage(scope, uuid.NewString(), event, captureFixture(t).ReceivedAt)
 	if err != nil || !bytes.Equal(repeated.Body, original.Body) {
 		t.Fatal("delivery-attempt metadata changed stable captured content")
 	}
@@ -187,7 +187,7 @@ func TestWhatsAppIncomingImmutableCaptureDuplicateAndPublicationIdentity(t *test
 	if bytes.Contains(original.Body, []byte("changed after capture")) {
 		t.Fatal("SDK mutation changed frozen capture")
 	}
-	changed, err := captureSDKMessage(scope, uuid.NewString(), event)
+	changed, err := captureSDKMessage(scope, uuid.NewString(), event, captureFixture(t).ReceivedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestWhatsAppIncomingImmutableCaptureDuplicateAndPublicationIdentity(t *test
 	}
 	*event.Message.Conversation = "exact current text"
 	event.Info.Sender = types.NewJID("100000004", types.HiddenUserServer)
-	changed, err = captureSDKMessage(scope, uuid.NewString(), event)
+	changed, err = captureSDKMessage(scope, uuid.NewString(), event, captureFixture(t).ReceivedAt)
 	if err != nil {
 		t.Fatal(err)
 	}

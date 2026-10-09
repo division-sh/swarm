@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -27,10 +28,14 @@ var errCaptureScopeChanged = errors.New("WhatsApp capture belongs to a different
 // captureScope freezes existing admitted facts. It does not grant execution or
 // reconstruct a binding from today's source/principal during recovery.
 type captureScope struct {
+	Kind                channelonboarding.SessionInputScope
 	Session             operatorchannel.SessionAccountAdmission
 	PublicationBinding  runtimeinbound.BindingGeneration
 	Source              channelonboarding.ChannelDurableContextIdentity
 	OnboardingOperation string
+	OperationRevision   int64
+	ActivationRevision  int64
+	TargetSelector      string
 	PrincipalID         string
 	BindingRevision     int64
 }
@@ -42,11 +47,23 @@ func (s captureScope) validate() error {
 	if err := s.Source.Validate(); err != nil {
 		return err
 	}
-	if err := s.PublicationBinding.Validate(); err != nil {
-		return err
+	switch s.Kind {
+	case channelonboarding.SessionInputOnboarding:
+		if s.PublicationBinding != (runtimeinbound.BindingGeneration{}) || s.BindingRevision != 0 || s.ActivationRevision != 0 {
+			return fmt.Errorf("WhatsApp onboarding capture cannot carry business publication authority")
+		}
+	case channelonboarding.SessionInputBusiness:
+		if err := s.PublicationBinding.Validate(); err != nil {
+			return err
+		}
+		if s.BindingRevision < 1 || s.ActivationRevision < 1 {
+			return fmt.Errorf("WhatsApp business capture requires its confirmed binding")
+		}
+	default:
+		return fmt.Errorf("WhatsApp capture requires explicit onboarding or business scope")
 	}
 	if s.Session.Provider != "whatsapp" || uuid.Validate(s.OnboardingOperation) != nil ||
-		uuid.Validate(s.PrincipalID) != nil || s.BindingRevision < 0 {
+		uuid.Validate(s.PrincipalID) != nil || s.BindingRevision < 0 || s.OperationRevision < 1 || s.TargetSelector == "" {
 		return fmt.Errorf("WhatsApp capture requires its exact existing onboarding/principal/source scope")
 	}
 	return nil
@@ -59,6 +76,7 @@ type capturedEvent struct {
 	EventID      string
 	Kind         string
 	Body         []byte
+	ReceivedAt   time.Time
 }
 
 func (e capturedEvent) validate() error {
@@ -71,6 +89,9 @@ func (e capturedEvent) validate() error {
 	}
 	if len(e.Body) == 0 || len(e.Body) > maxCaptureEventBytes {
 		return errCaptureCapacity
+	}
+	if e.ReceivedAt.IsZero() || !e.ReceivedAt.Equal(e.ReceivedAt.Truncate(time.Microsecond)) {
+		return fmt.Errorf("WhatsApp capture requires its original microsecond receipt time")
 	}
 	_, err := canonicaljson.Decode(e.Body)
 	return err

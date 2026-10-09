@@ -25,7 +25,7 @@ type pendingCapture struct {
 
 func (e capturedEvent) sameCapture(other capturedEvent) bool {
 	return e.Scope == other.Scope && e.OccurrenceID == other.OccurrenceID && e.Conversation == other.Conversation &&
-		e.EventID == other.EventID && e.Kind == other.Kind && bytes.Equal(e.Body, other.Body)
+		e.EventID == other.EventID && e.Kind == other.Kind && e.ReceivedAt.Equal(other.ReceivedAt) && bytes.Equal(e.Body, other.Body)
 }
 
 func (e capturedEvent) publicationFingerprint() (string, error) {
@@ -126,7 +126,7 @@ func validateCapturePublication(event capturedEvent, request runtimeinbound.Requ
 		return err
 	}
 	if request.Identity() != identity || request.RequestFingerprint != fingerprint ||
-		request.PublicationID != publicationID || request.MarkerEventID != markerID {
+		request.PublicationID != publicationID || request.MarkerEventID != markerID || !request.OriginalReceivedAt.Equal(event.ReceivedAt) {
 		return runtimeinbound.ErrRequestIdentityConflict
 	}
 	original, err := publicationCaptureProvenance(request)

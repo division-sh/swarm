@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -95,6 +96,7 @@ func TestWhatsAppCaptureValidRedeliveryRetainsOriginalOccurrence(t *testing.T) {
 	before := captureStoredRowsFixture(t, db)
 	redelivery := event
 	redelivery.OccurrenceID = uuid.NewString()
+	redelivery.ReceivedAt = event.ReceivedAt.Add(time.Hour)
 	if err := capture.capture(context.Background(), redelivery); err != nil {
 		t.Fatal(err)
 	}
