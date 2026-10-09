@@ -60,7 +60,12 @@ func TestIssue2269StaticAndTemplateAgentsRetainExactTurnTimeout(t *testing.T) {
 
 func TestIssue2269TurnTimeoutParticipatesInPlanAndRecovery(t *testing.T) {
 	source := semanticview.Wrap(testFlowBundle(t, ""))
-	materialization, err := ConstructedFlowMaterialization(source, managerIdentityTestRunID, runtimeflowidentity.Stored(source, "review", "review/inst-1", "inst-1", runtimepipeline.FlowInstanceEntityID("review/inst-1"), ""))
+	parent := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), managerIdentityTestRunID, managerIdentityTestRunID, managerIdentityTestRunID, "")
+	instance, err := runtimeflowidentity.KeyedChild(source, parent, "review", "inst-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialization, err := ConstructedFlowMaterialization(source, managerIdentityTestRunID, instance)
 	if err != nil {
 		t.Fatal(err)
 	}
