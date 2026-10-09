@@ -213,7 +213,11 @@ func captureTestTimeReference(cfg config) error {
 	if len(problems) != 0 {
 		return fmt.Errorf("reference evidence: %s", strings.Join(problems, "; "))
 	}
-	reference, err := testtiming.CaptureTestTimeReference(plan, evidence)
+	policyBytes, err := os.ReadFile(cfg.proofPolicyPath)
+	if err != nil {
+		return err
+	}
+	reference, err := testtiming.CaptureTestTimeReference(plan, evidence, policyBytes)
 	if err != nil {
 		return err
 	}

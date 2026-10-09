@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 
@@ -19,9 +20,10 @@ const (
 	TestTimeReferenceHead   = "cbfb3e267dd48d3e880e2f96bc03e9c41633973b"
 	TestTimeReferenceSource = "5661cf9f42e443d04bfe774f8b4e87e95bea44d6"
 	TestTimeApproval        = "https://github.com/division-sh/swarm/issues/2535#issuecomment-6075837853"
+	TestTimeReferencePolicy = "59f9bd7d4034d93875fdbf24e6b87a5152eb9b8bb1881993562bb59ef7b482bf"
 	// Changing the anchor requires a reviewed versioned policy adjustment, not
 	// a Test-Time body line, automatic publisher, or each new merge base.
-	TestTimeReferenceDigest = "28960dae3fdd93f83f2b2ddd164fe577007bc197b971933e16a3b7021c3859be"
+	TestTimeReferenceDigest = "28a31b0d7486b50148271a83fede137d3a7399b8710e851d63e66e36f62ef4a1"
 )
 
 type TimingCell struct {
@@ -37,6 +39,11 @@ type RootTime struct {
 	Seconds float64 `json:"seconds"`
 }
 
+type ReferenceRootTime struct {
+	RootTime
+	Tiers []string `json:"tiers"`
+}
+
 type TestTimeReference struct {
 	Version      int                       `json:"version"`
 	Approval     string                    `json:"approval"`
@@ -45,8 +52,9 @@ type TestTimeReference struct {
 	Attempt      int                       `json:"attempt"`
 	Source       string                    `json:"source"`
 	PlanDigest   string                    `json:"plan_digest"`
+	PolicySHA256 string                    `json:"policy_sha256"`
 	BuildContext testplanning.BuildContext `json:"build_context"`
-	Roots        []RootTime                `json:"roots"`
+	Roots        []ReferenceRootTime       `json:"roots"`
 }
 
 type TestTimeTier struct {
@@ -92,23 +100,57 @@ func LoadTestTimeReference(r io.Reader) (TestTimeReference, error) {
 	if !bytes.Equal(raw, canonical.Bytes()) || hex.EncodeToString(digest[:]) != TestTimeReferenceDigest {
 		return reference, fmt.Errorf("test-time anchor bytes differ from the independently approved pinned reference")
 	}
-	if reference.Version != 1 || reference.Approval != TestTimeApproval || reference.RunID != TestTimeReferenceRunID || reference.Attempt != 1 || reference.WorkflowHead != TestTimeReferenceHead || reference.Source != TestTimeReferenceSource || len(reference.Roots) == 0 {
+	if reference.Version != 2 || reference.Approval != TestTimeApproval || reference.RunID != TestTimeReferenceRunID || reference.Attempt != 1 || reference.WorkflowHead != TestTimeReferenceHead || reference.Source != TestTimeReferenceSource || reference.PolicySHA256 != TestTimeReferencePolicy || len(reference.Roots) == 0 {
 		return reference, fmt.Errorf("test-time reference identity is not the approved full run")
 	}
 	return reference, nil
 }
 
 // CaptureTestTimeReference has no automatic publication path. It consumes the
-// complete admitted full receipts once, retaining execution/backend identity.
-func CaptureTestTimeReference(plan testplanning.RunPlan, evidence []CommandEvidence) (TestTimeReference, error) {
+// complete admitted full receipts once, retaining execution/backend identity
+// and membership selected by the exact policy at that execution source.
+func CaptureTestTimeReference(plan testplanning.RunPlan, evidence []CommandEvidence, policyBytes []byte) (TestTimeReference, error) {
 	if plan.Profile != testplanning.ProfileFull || plan.Venue != testplanning.VenueCI || plan.HeadSHA != TestTimeReferenceSource {
 		return TestTimeReference{}, fmt.Errorf("reference must be the approved hosted full execution")
+	}
+	policyDigest := sha256.Sum256(policyBytes)
+	if hex.EncodeToString(policyDigest[:]) != TestTimeReferencePolicy {
+		return TestTimeReference{}, fmt.Errorf("reference capture requires the exact policy from the approved execution source")
+	}
+	policy, err := testplanning.LoadPolicy(bytes.NewReader(policyBytes))
+	if err != nil {
+		return TestTimeReference{}, err
 	}
 	roots, err := observedRootTimes(plan, TestTimeReferenceRunID, 1, evidence)
 	if err != nil {
 		return TestTimeReference{}, err
 	}
-	return TestTimeReference{Version: 1, Approval: TestTimeApproval, WorkflowHead: TestTimeReferenceHead, RunID: TestTimeReferenceRunID, Attempt: 1, Source: plan.HeadSHA, PlanDigest: plan.Digest, BuildContext: plan.BuildContext, Roots: roots}, nil
+	frozen, err := referenceTimingRoots(roots, policy)
+	if err != nil {
+		return TestTimeReference{}, err
+	}
+	return TestTimeReference{Version: 2, Approval: TestTimeApproval, WorkflowHead: TestTimeReferenceHead, RunID: TestTimeReferenceRunID, Attempt: 1, Source: plan.HeadSHA, PlanDigest: plan.Digest, PolicySHA256: TestTimeReferencePolicy, BuildContext: plan.BuildContext, Roots: frozen}, nil
+}
+
+func referenceTimingRoots(roots []RootTime, policy testplanning.Policy) ([]ReferenceRootTime, error) {
+	var frozen []ReferenceRootTime
+	for _, root := range roots {
+		item := ReferenceRootTime{RootTime: root}
+		for _, tier := range []string{testplanning.ProfileCore, testplanning.ProfileLifecycle, testplanning.ProfileFull} {
+			include, err := policy.SelectTimingCell(tier, testplanning.TestRoot{Package: root.Package, Name: root.Root}, root.Backend)
+			if err != nil {
+				return nil, err
+			}
+			if include {
+				item.Tiers = append(item.Tiers, tier)
+			}
+		}
+		if !slices.Contains(item.Tiers, testplanning.ProfileFull) {
+			return nil, fmt.Errorf("reference cell %s.%s/%s lacks a reference-era full owner", root.Package, root.Root, root.Backend)
+		}
+		frozen = append(frozen, item)
+	}
+	return frozen, nil
 }
 
 func observedRootTimes(plan testplanning.RunPlan, runID int64, attempt int, evidence []CommandEvidence) ([]RootTime, error) {
@@ -213,9 +255,9 @@ func EvaluateTestTime(reference TestTimeReference, policy testplanning.Policy, p
 	return result
 }
 
-func compareTimingTier(baseline, candidate []RootTime, policy testplanning.Policy, tier string) (TestTimeTier, []string) {
+func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, policy testplanning.Policy, tier string) (TestTimeTier, []string) {
 	row := TestTimeTier{Tier: tier}
-	baseline, problems := projectTimingRoots(baseline, policy, tier)
+	baseline, problems := projectReferenceTimingRoots(reference, tier)
 	candidate, candidateProblems := projectTimingRoots(candidate, policy, tier)
 	problems = append(problems, candidateProblems...)
 	base := map[TimingCell]RootTime{}
@@ -231,7 +273,7 @@ func compareTimingTier(baseline, candidate []RootTime, policy testplanning.Polic
 		} else {
 			row.Added = append(row.Added, root)
 			if root.Seconds > 30 {
-				problems = append(problems, fmt.Sprintf("%s: new root %s.%s/%s is %.3fs (>30s): Test-Time rationale AND independent placement approval require a reviewed versioned policy adjustment", tier, root.Package, root.Root, root.Backend, root.Seconds))
+				problems = append(problems, fmt.Sprintf("%s: new or promoted root %s.%s/%s is %.3fs (>30s): Test-Time rationale AND independent placement approval require a reviewed versioned policy adjustment", tier, root.Package, root.Root, root.Backend, root.Seconds))
 			}
 		}
 	}
@@ -250,6 +292,27 @@ func compareTimingTier(baseline, candidate []RootTime, policy testplanning.Polic
 		problems = append(problems, fmt.Sprintf("%s: unreviewed test-time growth %.3fs exceeds min(5%% of %.3fs, 600s) = %.3fs", tier, row.Growth, row.Baseline, row.Allowance))
 	}
 	return row, problems
+}
+
+func projectReferenceTimingRoots(roots []ReferenceRootTime, tier string) ([]RootTime, []string) {
+	var selected []RootTime
+	var problems []string
+	for _, root := range roots {
+		var canonical []string
+		for _, known := range []string{testplanning.ProfileCore, testplanning.ProfileLifecycle, testplanning.ProfileFull} {
+			if slices.Contains(root.Tiers, known) {
+				canonical = append(canonical, known)
+			}
+		}
+		if !slices.Equal(root.Tiers, canonical) || !slices.Contains(root.Tiers, testplanning.ProfileFull) {
+			problems = append(problems, fmt.Sprintf("invalid pinned tier membership for %s.%s/%s", root.Package, root.Root, root.Backend))
+			continue
+		}
+		if slices.Contains(root.Tiers, tier) {
+			selected = append(selected, root.RootTime)
+		}
+	}
+	return selected, problems
 }
 
 func projectTimingRoots(roots []RootTime, policy testplanning.Policy, tier string) ([]RootTime, []string) {
