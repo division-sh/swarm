@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -24,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -46,13 +49,23 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 			t.Run(backend.name+"/"+scenario.name, func(t *testing.T) {
 				selected := backend.open(t)
 				runID := uuid.NewString()
-				insertGateRecoveryRun(t, selected, runID)
-				ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				files := a2ActivationJoinFiles(scenario.count)
 				if scenario.descendant != "" {
 					files = a2ConstructedDescendantJoinFiles(scenario.count, scenario.descendant)
 				}
 				source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))
+				bundle, _ := semanticview.Bundle(source)
+				fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), runID))
+				fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: fact, Artifact: bundle.SourceArtifact}
+				if selected.postgres {
+					runlifecyclefixture.RequirePostgres(t, ctx, selected.db, fixture)
+				} else {
+					runlifecyclefixture.RequireSQLite(t, ctx, selected.db, fixture)
+				}
 				targetFlow := "orders"
 				if scenario.descendant != "" {
 					targetFlow = scenario.descendant
@@ -63,17 +76,17 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 				}}
 				probe, logger := lifecycleprobe.New(), &exactJoinRuntimeLogger{}
 				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-					ContractBundle: source, TestLifecycleProbe: probe, Logger: logger,
+					ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), TestLifecycleProbe: probe, Logger: logger,
 				}, "platform.join_complete", "platform.join_timeout")
 				if err != nil {
 					t.Fatal(err)
 				}
 				schedules, driver := newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
 				pc := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{
-					Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe, FlowRoutes: bus,
+					Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe, FlowRoutes: bus,
 				})
 				bus.SetInterceptors(pc)
-				newManager := a2ActivationJoinManagerFactory(t, ctx, selected, source)
+				newManager, binding := a2ActivationJoinManagerFactory(t, ctx, selected, source)
 				am := newManager(pc, bus)
 				parent, err := flowidentity.StandingForGeneration(source, ".", runID)
 				if err != nil {
@@ -88,6 +101,19 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				now := time.Now().UTC().Truncate(time.Microsecond)
+				constructA2StructuralRoot(t, ctx, am, bus, source, parent, now)
+				count := func(table string) int {
+					t.Helper()
+					var n int
+					if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE run_id=$1", runID).Scan(&n); err != nil {
+						t.Fatal(err)
+					}
+					return n
+				}
+				baseline := make(map[string]int)
+				for _, table := range []string{"entity_state", "flow_instances", "workflow_instance_initial_materializations", "flow_instance_runtime_readiness", "timers", "entity_mutations"} {
+					baseline[table] = count(table)
+				}
 				req := pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: identity,
 					ConstructorInput: "order.created", ResolvedKey: identity.InstanceID,
 					TriggerEvent: eventtest.ExistingRunRootIngress(uuid.NewString(), "order.created", "operator", "", []byte(`{"order_id":"order-1"}`), 0, runID, events.EventEnvelope{}, now), OccurredAt: now}
@@ -119,16 +145,8 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					plannedArm.JoinRef().StageEntry() != entry || len(targetPlan.Lifecycle.Schedules) != 1 {
 					t.Fatalf("activation omitted exact initial lifecycle: entry=%#v arm=%#v plan=%#v err=%v", entry, plannedArm, targetPlan.Lifecycle, err)
 				}
-				count := func(table string) int {
-					t.Helper()
-					var n int
-					if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE run_id=$1", runID).Scan(&n); err != nil {
-						t.Fatal(err)
-					}
-					return n
-				}
-				for _, table := range []string{"entity_state", "flow_instances", "workflow_instance_initial_materializations", "flow_instance_runtime_readiness", "timers", "entity_mutations"} {
-					if count(table) != 0 {
+				for table, before := range baseline {
+					if count(table) != before {
 						t.Fatalf("preparation persisted %s", table)
 					}
 				}
@@ -138,8 +156,8 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					if err == nil || !strings.Contains(err.Error(), "a2_activation_join_sql_fault") || failed.Acknowledged {
 						t.Fatalf("activation did not reach real schedule fault: result=%#v err=%v", failed, err)
 					}
-					for _, table := range []string{"entity_state", "flow_instances", "workflow_instance_initial_materializations", "flow_instance_runtime_readiness", "timers", "entity_mutations"} {
-						if count(table) != 0 {
+					for table, before := range baseline {
+						if count(table) != before {
 							t.Fatalf("failed activation leaked %s", table)
 						}
 					}
@@ -222,8 +240,15 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					t.Fatalf("duplicate readiness finalization: %v", err)
 				}
 				readiness, found, err = pc.LoadDynamicFlowRuntimeReadiness(ctx, runID, identity.Route())
-				if err != nil || !found || readiness.Phase != pipeline.FlowAttachmentReady || !bus.HasFlowInstanceRoute(owner) || count("timers") != wantTimers {
-					t.Fatalf("readiness/route did not converge once: found=%v readiness=%#v err=%v", found, readiness, err)
+				if err != nil || !found || readiness.Phase != pipeline.FlowAttachmentReady || readiness.AttemptState != "accepted" || count("timers") != wantTimers {
+					t.Fatalf("readiness did not converge once: found=%v readiness=%#v err=%v", found, readiness, err)
+				}
+				attempt, err := pipeline.NewDynamicFlowRuntimeActivationAttempt(strconv.FormatUint(readiness.AttemptOrdinal, 10), runID, owner.Route.InstancePath, binding)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := pc.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt); err != nil {
+					t.Fatalf("ready attachment has no exact admitted attempt: %v", err)
 				}
 				if strings.HasSuffix(scenario.name, "restart_before_arrival") {
 					before := load()
@@ -234,14 +259,14 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					bus, err = newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-						ContractBundle: source, TestLifecycleProbe: probe, Logger: logger,
+						ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), TestLifecycleProbe: probe, Logger: logger,
 					}, "platform.join_complete", "platform.join_timeout")
 					if err != nil {
 						t.Fatal(err)
 					}
 					schedules, driver = newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
 					pc = newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{
-						Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe, FlowRoutes: bus,
+						Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe, FlowRoutes: bus,
 					})
 					bus.SetInterceptors(pc)
 					am = newManager(pc, bus)
@@ -253,8 +278,22 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 							t.Fatalf("reconstruct sibling readiness: %v", err)
 						}
 					}
-					if !reflect.DeepEqual(load(), before) || !bus.HasFlowInstanceRoute(owner) || count("timers") != wantTimers {
+					if !reflect.DeepEqual(load(), before) || count("timers") != wantTimers {
 						t.Fatal("reconstruction reminted initial entry, membership or deadline")
+					}
+					readiness, found, err = pc.LoadDynamicFlowRuntimeReadiness(ctx, runID, identity.Route())
+					if err != nil || !found || readiness.Phase != pipeline.FlowAttachmentReady || readiness.AttemptState != "accepted" || readiness.AttemptOrdinal <= attempt.Ordinal() {
+						t.Fatalf("restart reused predecessor readiness: %+v found=%t err=%v", readiness, found, err)
+					}
+					if err := pc.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt); err == nil {
+						t.Fatal("restarted attachment retained predecessor authority")
+					}
+					attempt, err = pipeline.NewDynamicFlowRuntimeActivationAttempt(strconv.FormatUint(readiness.AttemptOrdinal, 10), runID, owner.Route.InstancePath, binding)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := pc.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt); err != nil {
+						t.Fatalf("reconstruction omitted exact successor admission: %v", err)
 					}
 					if scenario.descendant != "" {
 						assertA2ConstructedGateSources(t, ctx, selected, plan)
@@ -356,8 +395,27 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 	}
 }
 
-func a2ActivationJoinManagerFactory(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, source semanticview.Source) func(*pipeline.PipelineCoordinator, *runtimebus.EventBus) *manager.AgentManager {
+func constructA2StructuralRoot(t *testing.T, ctx context.Context, am *manager.AgentManager, bus *runtimebus.EventBus, source semanticview.Source, parent flowidentity.Instance, at time.Time) {
 	t.Helper()
+	plan, err := am.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: parent, OccurredAt: at})
+	if err != nil || len(plan.ConstructionPlans()) != 1 {
+		t.Fatalf("prepare structural root only: %+v %v", plan, err)
+	}
+	committed, err := bus.CommitFlowInstanceActivation(ctx, plan)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("construct actual structural root: %+v %v", committed, err)
+	}
+	if err := am.FinalizeCommittedFlowInstanceActivation(ctx, committed); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func a2ActivationJoinManagerFactory(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, source semanticview.Source) (func(*pipeline.PipelineCoordinator, *runtimebus.EventBus) *manager.AgentManager, processbinding.Binding) {
+	t.Helper()
+	fact, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("activation fixture requires its admitted source")
+	}
 	process, err := selected.events.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
 		OwnerID: "a2-activation-join", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 	})
@@ -365,14 +423,14 @@ func a2ActivationJoinManagerFactory(t *testing.T, ctx context.Context, selected 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = process.Release(context.Background()) })
-	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}}, nil)
+	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fact.BundleHash()}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := process.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: set}); err != nil {
 		t.Fatal(err)
 	}
-	grant, err := process.IssueGenerationGrant(ctx, startupownership.GrantRequest{BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
+	grant, err := process.IssueGenerationGrant(ctx, startupownership.GrantRequest{BundleHash: fact.BundleHash(),
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: set.Revision})
 	if err != nil {
 		t.Fatal(err)
@@ -383,16 +441,20 @@ func a2ActivationJoinManagerFactory(t *testing.T, ctx context.Context, selected 
 	if _, err := grant.AdmitExecution(ctx); err != nil {
 		t.Fatal(err)
 	}
-	admission, err := agenttopology.StaticAdmission(set.Revision, authorActivityTestSourceArtifactFact.BundleHash(), agenttopology.LifetimeDurableManaged)
+	admission, err := agenttopology.StaticAdmission(set.Revision, fact.BundleHash(), agenttopology.LifetimeDurableManaged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := grant.ProcessExecutionBinding()
 	if err != nil {
 		t.Fatal(err)
 	}
 	return func(pc *pipeline.PipelineCoordinator, bus *runtimebus.EventBus) *manager.AgentManager {
 		t.Helper()
 		am := manager.NewAgentManagerWithOptions(bus, nil, manager.AgentManagerOptions{
-			BaseContext: ctx, SemanticSource: source, SourceArtifactFact: authorActivityTestSourceArtifactFact,
+			BaseContext: ctx, SemanticSource: source, SourceArtifactFact: fact,
 			WorkflowInstances: pc, LifecycleStore: grant, DeliveryStore: selected.events,
-			WorkOwner: pipelineExternalTestWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution(), ExecutionPosture: executionposture.Live,
+			WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), ReceiverExecution: eventreceiver.NormalExecution(), ExecutionPosture: executionposture.Live,
 			PersistenceRoles: manager.PersistenceRoles{FlowActivation: bus, AgentRoutes: bus, CreationPublisher: bus},
 		}, selected.events.(manager.ManagerPersistence))
 		if err := am.InstallStartupTopology(grant, admission, set); err != nil {
@@ -404,7 +466,7 @@ func a2ActivationJoinManagerFactory(t *testing.T, ctx context.Context, selected 
 			}
 		})
 		return am
-	}
+	}, binding
 }
 
 func a2ActivationJoinScheduleFault(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase) func() {
