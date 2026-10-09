@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/staged"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -54,7 +55,8 @@ func TestReviewer2589TerminalSnapshotUUIDAlias(t *testing.T) {
 				if !inserted {
 					return fmt.Errorf("expected physical event insert")
 				}
-				snapshot, _, err := writer.MarkTerminalTx(txctx, attempt, runtimerunlifecycle.TerminalRequest{RunID: readID, State: runtimerunlifecycle.StateCancelled, EndedAt: started.Add(time.Second)})
+				var cardChanges privaterunlifecycle.ChannelCardChanges
+				snapshot, _, err := writer.MarkTerminalTx(txctx, attempt, runtimerunlifecycle.TerminalRequest{RunID: readID, State: runtimerunlifecycle.StateCancelled, EndedAt: started.Add(time.Second)}, &cardChanges)
 				if err != nil {
 					return err
 				}
