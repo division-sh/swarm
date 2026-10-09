@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
@@ -142,13 +143,27 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 			}
 			return requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 		}
+		requireStep := func(command string, published servedEventPublishRPCResult, from, to string) pipeline.WorkflowTransitionRecord {
+			t.Helper()
+			history := readLifecycleTransitionHistory(t, rt, runID, s.entity)
+			if len(history) != 1 {
+				t.Fatalf("template step retained cumulative or missing evidence: %+v", history)
+			}
+			record := requireLifecycleCurrentTransition(t, history, history[0].TriggerEventID, from, to)
+			var occurrence operatorread.OperatorEventFull
+			requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": record.TriggerEventID}, &occurrence)
+			if occurrence.EventName != side+".loop."+command || occurrence.SourceEventID != published.EventID || occurrence.RunID != runID || !occurrence.CreatedAt.Equal(record.FiredAt) {
+				t.Fatalf("template transition did not consume the exact emitted child of its command: record=%+v occurrence=%+v command=%+v", record, occurrence, published)
+			}
+			return record
+		}
 		seed := publish("seed", "seed", map[string]any{"seed": true})
 		if runID != "" && seed.RunID != runID {
 			t.Fatal("sibling escaped its run")
 		}
 		runID, sourceEvent = seed.RunID, seed.EventID
 		s.entity, s.instance = requireLifecycleTemplateEntity(t, rt, runID, s.flow, "drafting")
-		requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, runID, s.entity), seed.EventID, "waiting", "drafting")
+		requireStep("start", seed, "waiting", "drafting")
 		requireLifecycleTemplateInstance(t, rt, runID, s.instance, s.flow)
 		var keyed operatorread.OperatorEntityFull
 		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": s.entity}, &keyed)
@@ -162,14 +177,14 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 			}
 			admit := publish("admit", fmt.Sprintf("admit-%d", attempt), map[string]any{"revision_id": loop.RevisionID})
 			requireLifecycleTemplateEntity(t, rt, runID, s.flow, "review")
-			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, runID, s.entity), admit.EventID, "drafting", "review")
+			requireStep("admit", admit, "drafting", "review")
 			repeat := publish("repeat", fmt.Sprintf("repeat-%d", attempt), map[string]any{"revision_id": loop.RevisionID})
 			state := "drafting"
 			if attempt == 2 {
 				state = "escaped"
 			}
 			requireLifecycleTemplateEntity(t, rt, runID, s.flow, state)
-			record := requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, runID, s.entity), repeat.EventID, "review", state)
+			record := requireStep("repeat", repeat, "review", state)
 			compiled, ok := record.Evidence.Compiled()
 			wantSource := "loop.repeat"
 			if attempt == 2 {
