@@ -1,6 +1,8 @@
 # Pre-Implementation Coverage Audit: #2535 Phase0 Channel Worker
 
-Status: AUDIT ONLY. Independent coding re-gate requested; no production edit.
+Status: IMPLEMENTATION FROZEN pending the activity-dispatch owner-map delta
+gate below. Original first slice6085629534 and completion delta6086299760
+remain binding for their approved boundary; no closure claimed.
 Source: master2fc6a13bde271492602b7ca0ed82bfe3325280f8,
 tree206adb09324179764db0409002aef677af7f07b5. Agent-g.
 Binding review: https://github.com/division-sh/swarm/issues/2535#issuecomment-6084282948.
@@ -138,7 +140,7 @@ success alone. Borrowed rows carry their fact to the named outer finalizer.
 | P03 M | same confirmBinding, rebind | Same outer finalizer | Changed verified claimant/epoch -> O/N; replay no-op, predecessor currentness preserved. |
 | P04 M | backend/operatorchannel/owner.go:unbind -> RetireBindingTx | Same outer runner/native COMMIT | Actual current-default retirement -> O/N; already-retired exact replay no-op. |
 | P05 M | backend/channelonboarding/owner.go:publishActivation | PG/SQLite runner.mutate -> RunTransaction, ack discarded | New activation and any replaced sibling -> O/N; exact activation replay no-op. Durable row is not process-catalogue readiness. |
-| P06 M | same advance, reboundActivation update AND first transition into PhaseSucceeded | Same runner/native COMMIT | Actual rebound coordinate/publication change OR successful completion releasing current delivery/native eligibility -> O/N. Other phase-only/checkpoint edits are D. Completion correction is STOPPED pending the implementation addendum re-gate below; terminal/revision refusals are not converted to replay success. |
+| P06 M | same advance, reboundActivation update AND first transition into PhaseSucceeded | Same runner/native COMMIT | Actual rebound coordinate/publication change OR successful completion releasing current delivery/native eligibility -> O/N, approved6086299760. Other phase-only/checkpoint edits are D; terminal/revision refusals are not converted to replay success. |
 | P07 M | same retireActivation | Same runner/native COMMIT | Actual retirement -> O/N; already retired no-op; preserve CAS/reason. |
 | P08 M | same retireTeardownAuthority (pending or completed identity retirement) | Same runner/native COMMIT | Retired matching operation/activation rows -> O/N; no matching affected authority no-op. |
 | P09 D | same completeTeardown | Same runner/native COMMIT writes only the operation checkpoint | No native-consumer write is borrowed here. Actual stale consumer retirement is a separate P12 outer transaction. Completion/replay retains its checkpoint contract and emits no hint. |
@@ -186,7 +188,7 @@ success alone. Borrowed rows carry their fact to the named outer finalizer.
 | P51 M | same RejectInboxEntry | Same native finalizer | Actual entry-rejected intent -> O; exact rejection no-op. |
 | P52 M | effectpersistence/runtime_external_effects.go:SettleExternalAttempt -> projectChannelSourceSettlementTx | Existing outer Run* Result.Acknowledged; effectMutationError retains ack cleanup distinction | Changed channel delivery receipt/plan or native setting -> O (N only if actual new desired native work); identical terminal settlement no-op, no speculative retry. |
 | P53 M | same ReconcileExternalEffectAttempts -> recoverChannelSourceSettlementTx | Existing outer Run* Result.Value; RecoverySummary | Actual original channel projection -> O; authorized abandonment/no channel projection/terminal replay no-op. Before worker starts, its initial scan consumes durable result. |
-| P54 M | effectpersistence SettleCompletion/provider drain or recovery causing run terminalization | Existing completion/recovery outer Run* Result.Value and committed result | Only actual terminal card change carried from runlifecycle -> O; unrelated provider accounting/history D. No provider redispatch/change to drain semantics. |
+| P54 D -> P30 M | effectpersistence SettleCompletion/provider drain or recovery requesting run completion | Existing completion/recovery outer Run* result commits the request/accounting; ExecuteCompletionCandidate later owns actual run/card terminalization | RequestCompletion and agent draining do not themselves change the rendered card. No local hint for those journal writes; actual later SupersedeRunTx change belongs to P30's acknowledged completion-candidate finalizer. Preserve provider drain and no redispatch. |
 | P55 M | serveapp/channel_onboarding.go:serveChannelActivationRefresher.PublishChannelActivation/PromoteChannelRegistration and teardown/process re-publication callbacks | Exact successful manager catalogue/ingress publication, AFTER durable ack; no SQL inferred here | O/N only after real process publication; error does not imply readiness. Preserve staged rollback/compensation. |
 | P56 A | serveapp/main.go:startServeChannelDelivery; activateServeLifecycle/Process teardown/reset composition | Process.Begin lease; immediate native + ordinary scan; joined lease.Done | Initial scan covers durable work while no listener exists. No earlier autonomous launch/startup reorder. |
 | P57 D | reserve/begin/expire identity ceremony, principal creation/proof bookkeeping, onboarding checkpoint without rebound | Existing owner transaction only changes ceremony/credentials, not worker input | No wake required by worker input census; existing onboarding service advances it independently. |
@@ -435,3 +437,198 @@ conditions remain binding. Class commitment and one-PR feasibility unchanged:
 close all acknowledged local worker-input changes, not only this transition.
 The 67 P classifications and now35 M rows are still planned closure proof.
 No qualification or measured saving is claimed; no server2/full run started.
+
+### Completion Delta Gate And Reader Census
+
+6086299760 approves this completion amendment in the same first slice and
+permits production edits to resume. CI full / Local core plus the named
+supplements, native M30 windows and all original stop conditions still bind.
+The absent-hint counterexample above remains historical failing proof.
+
+The phase's complete known worker-reader family is: activation.go (current
+activation/cursor), list.go (current plan selection), resolve_text.go (verified
+text/reply currentness), resolve_action.go (receipt/action currentness),
+native_setting.go (exact native admission), native_qualification.go (qualified
+consumer), effectpersistence/channel_delivery_authority.go and
+effectpersistence/channel_native_setting_authority.go (authorization/prelaunch).
+All already consume the canonical persisted onboarding phase; none is a new
+phase writer or a new interpreter to refactor. M35 must execution-prove these
+readers before completion, after its actual post-cut wake, and through retained
+stale/foreign/terminal refusal. Hint cardinality alone earns no closure.
+In list.go the explicit succeeded relation is the requested-response branch;
+ordinary notice/card responsibility discovery remains possible before completion.
+Its worker activation and effect-authorization gates still refuse execution.
+Do not replace this distinction with an incorrect all-plan-list-empty assertion.
+`advance` remains the sole completion writer and must retain the prior phase
+under its existing operation lock. Exact terminal/stale requests keep existing
+refusal behavior; only actual completion or rebound produces demand.
+
+## Implementation Stop Addendum: Activity Dispatch Render Sources
+
+A second stop condition is met: the final frozen-render dependency sweep
+found an additional live domain writer, not another reconciliation worker.
+Further production edits are frozen for reviewer-g's additive owner-map gate.
+Approved implementation remains uncommitted in agent-g-test-time-phase0;
+pushed3eab1592c remains audit-only. This is not a request for a new product
+operation, framework or a global activity notifier.
+
+### Entry Point, Exact Concept And Execution Path
+
+`backend/channeldelivery/source_render.go:freezeCurrentCardTx` calls the
+existing `decisionpersistence.ProposedEffectReadbackInTx`. Its readback reads
+`activity_attempts.status,execution_mode` by the continuation's exact reserved
+request ID and feeds `DispatchState` to `FreezeCard`. Consequently the first
+attempt insertion and actual terminal status changes alter card render bytes
+without a card-row or proposed-continuation-row mutation. P58's exclusion of
+provider effect/ACK accounting does not classify these activity dispatch facts.
+
+Full path: create proposal/card and reserved request -> decide approve ->
+commit request release -> live/loop claim through the activity journal ->
+acknowledge started attempt -> provider dispatch -> complete/mark uncertain ->
+acknowledge terminal attempt -> exact proposed-effect readback -> frozen card
+render and authorized channel edit. Card, continuation, run and execution-mode
+authority must already agree before this render is reachable. Card/route
+creation and request release are the existing P25/P26/P27/P29 family; activity
+status is the newly named same working class below; provider effect admission
+and non-redispatch remain different business concepts under their existing
+owners. Channel destination, Process subscription and native acknowledgment
+gates retain their original classifications and proofs. A hint grants none of
+those authorities.
+
+Chosen class remains acknowledged local channel-worker-input changes without
+post-commit reconciliation demand. Immediate parent remains unnecessary
+reconciliation latency/test waiting; #2535 is the fleet parent and #2250 the
+separately open composition architecture parent. This is a missing rendered
+source in the existing class, not evidence of data loss on polling master.
+The first local helper is not the boundary: both activity backends, borrowed
+fork copies, destructive deletion and all readers/outer finalizers are named.
+
+### Canonical Owners And Systematic Consumption Delta
+
+The activity journal owns attempt identity/status and its standalone native
+finalizers. The decision/proposed-continuation owner owns the exact card/request
+dependency and readback. Fork preparation owns reminting copied historical
+attempt evidence; its borrowed helper does not own COMMIT. The one existing
+Process-owned channel worker remains the only scheduling owner.
+
+| Row | Producer and outer native boundary | Required consumption / proof classification |
+| --- | --- | --- |
+| P68 M | activityjournal.Start -> ActivityPostgresOwner/ActivitySQLiteOwner.StartActivityAttempt -> RunPostgres/RunSQLite.Value | Move to existing signal only for actual inserted attempt with exact linked card; validated insert replay/unlinked attempt stays quiet. |
+| P69 M | activityjournal.Claim -> ClaimActivityAttemptForLoopGeneration -> each existing Run*.Value | Move to same handoff after real loop admission; stale generation/run refusal and exact claim replay stay quiet. |
+| P70 M | activityjournal.Complete -> each CompleteActivityAttempt outer Run*.Value | Move actual started-to-terminal row-change fact plus exact linkage to acknowledged finalizer. Its public bool currently means acknowledgment, not changed; preserve that contract. |
+| P71 M | activityjournal.MarkUncertain -> each MarkActivityAttemptUncertain outer Run*.Value | Move actual row change through existing finalizer; started/terminal/replay/refusal and exact mode remain fail-closed. No redispatch. |
+| P72 M, conditional linkage | copyRunForkActivityAttemptEvidence -> prepareRunForkSelectedContractSourceEvent -> PG LoadRunForkSelectedContractSourceEvents (ReadCommitted RunPostgresWithOptions) or SQLite counterpart (RunSQLite), each Acknowledged | Carry actual insert plus fork-local exact dependency fact to these named preparation COMMIT owners. Prove linked/no-card historical copies, not assumed blanket relevance. Existing loadRunForkProposedEffectAuthority answers predecessor approval/suppression and is not a replacement current-card predicate. |
+| P73 M, conditional linkage | same borrowed preparation reached by projectRunForkReplayEvent -> applyRunForkDeliveryEventReplay -> ordinary ActivateRunFork PG/SQLite outer Run* | Carry copied-attempt fact to the activation finalizer in addition to P33 source-freeze cards. No notification inside borrowed copy/preparation/replay. Linked/no-card reachability remains required execution proof, not credited as same seam. |
+
+Runtime pipeline activity_engine.go (live and replay), persistence_ports.go and
+activity_journal.go already consume the canonical activity methods; generated
+runtimepersistence delegates both existing owners. They gain no public
+authority or schema. Eventpersistence embeds that owner, not an independent
+status writer. The decision readback already consumes journal truth and must
+keep its execution-mode contradiction refusal. Channel freeze/render already
+consumes that readback; adding a second dispatch interpreter is forbidden.
+
+The repo-wide production `activity_attempts` read/write sweep also found:
+standing-service started/uncertain eligibility reads and fork-source-freeze
+dispatch evidence reads (different business admission; actual terminal card
+change already P30/P33); selected-fork discard and destructive reset deletions
+(existing P33/P59, cards removed with their target, never pretend a removed
+target gained a surviving card); immutable author-activity story occurrences
+(different append-only historical concept). No other direct status writer was
+found. No-op/rejected/unknown outcomes in all six new rows must remain quiet.
+
+The complete FreezeCurrentSourceTx arm check names response's immutable stored
+render/current-plan pointer (P39-P42/P47/P52), summary count/presentation
+(existing channel plan owners), notice summary/priority/payload/notified and
+source coordinates (P15-P18/P52), and card row/change revision, active input
+draft, proposed continuation and activity dispatch (P19-P29/P36-P38/P45-P47
+plus this delta). Exact destination bounds/page/audience remain existing
+plan/default/action owners. Prompt expiry is already P23. These are explicit
+reader dependencies, not claims that a helper name alone proves execution.
+
+Old non-authoritative interpretations to remove/delegate are error==nil as
+change evidence, completion's acknowledgment bool as row-change evidence, and
+card/continuation change rows as an exhaustive render-input list. No old
+selected-store migration, compatibility or guessed payload/effect-class link.
+
+### Bounded Design Proposal And Spec Delta
+
+Keep public activity return types/boolean meaning and shared mutationprotocol
+semantics unchanged. Promote private actual changed/no-op facts at the
+existing journal/copy owners, reset them per attempt, and let the existing
+decision/proposed-continuation owner provide exact request/run/mode linkage.
+Its authoritative `proposed_effect_continuations` DDL already has UNIQUE
+request_event_id (platform-spec.yaml ~18107); no new table/index/registry is
+needed. Only a relevant changed fact may produce ordinary demand after the
+named outer native acknowledgment. Original cleanup/handoff error survives;
+abort/rollback/unknown/no-op emits none. No global notify-on-any-activity-write
+and no native-scope provider scan for card-only demand.
+
+Proposed authoritative spec delta, pending gate: the channel scheduling
+contract also names linked activity start/terminal dispatch facts and borrowed
+fork copies as frozen-card inputs, while retaining exact dependency, no-op,
+acknowledgment and no-redispatch restrictions. This does not alter the attempt
+state machine, immutable fork evidence or render business meaning. P54 is
+corrected above: completion request/agent drain is not actual run terminal.
+
+### Manifestations And Exact Planned Proof
+
+| Row | Manifestation | Required proof on both stores |
+| --- | --- | --- |
+| M36 | Live/loop activity first start and succeeded/failed/uncertain status changes affect exact proposed card dispatch render | Existing TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothStores gains exact post-cut demand plus its original rendered Dispatch bytes and mode-corruption refusal. Add actual valid loop Claim and dedicated MarkUncertain; run the real activity pipeline/public card edit through the corrected owner with repair ticks held, not just hint membership. |
+| M37 | Exact terminal/claim retry, unlinked activity, foreign run/mode/generation and native outcome cuts must not cause another scan or dispatch | Use real journal replay/refusal and unlinked records; preserve original acknowledged bool. Existing-owner fault controls for rollback, unknown COMMIT, ack+cleanup and in-pass hints must distinguish actual row change and retain original error. Measure linked/unlinked path query/call cost; no blanket slow-path scan. |
+| M38 | Fork copied activity evidence can arrive outside standalone journal completion | Execute PG/SQLite selected source preparation and ordinary replay activation separately, including exact retained repeat, linked and no-card facts, rollback and post-ack cleanup. Assert fork-local render/wake and source/sibling noninterference; where linkage is impossible prove that actual supported branch and classify D rather than infer it. |
+
+The selected-store counterexample is execution-proven on the intermediate
+WIP, with no production activity-owner edit: all eight both-store/status cells
+fail only the new absent-wake assertions while original readback/render/mode
+assertions pass. Race3 repeats all24 cells with42 missing-wake assertions,
+87.287s, no race warning or unrelated failure. Command:
+`go test ./internal/store/internal/runtimepersistence -run '^TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothStores$' -race -count=3 -v -timeout=4m`.
+Evidence: channel-activity-wake-counterexample.log under agent-g's persistent
+state directory, SHA256
+14dca6cd8806d74888636118015d89b45e89e23a60fe8952b676c136a40d7aa8.
+Dedicated Claim/MarkUncertain and conditional fork manifestations are planned,
+not executed or closure-credited. No unchanged-master polling failure is claimed.
+
+### Tracker, Promotion, Feasibility And Gate Request
+
+Current issue must be repaired before further coding; additive audit and the
+existing harness_reliability_and_local_smoke watchlist node are refined for
+activity render-input coverage. No child/umbrella supersession, new issue or
+POTENTIAL_ISSUES entry. Parent sibling probe above finds no second worker; the
+watchlist's post-commit producer/readback family requires absorbing this live
+input now rather than leaving a dishonest card-only first slice. Broader
+transaction/startup/provider lifecycle work stays #2250; remaining performance
+families and fleet/nightly acceptance stay #2535/#1196/#2353/#2394. Original
+remaining-tail grouping/confidence is unchanged, not promoted to closure.
+
+Architecture disposition: promote the small private fact in the existing
+journal/decision/fork owners now, watchlist only for broader composition debt.
+Estimated bounded correction is one implementation pass plus dual-store fault,
+loop/fork and public proof; medium confidence until conditional fork linkage
+is executed. ROI is complete rendered-input coverage without waking every
+activity or changing provider execution. Intended closure stays complete for
+the chosen class, not the parents: one PR is feasible with these six named
+outer boundaries; a local card-only fix would leave this same-concept writer
+live. Counts are now73 P classifications/38 M manifestations/9 Q obligations,
+all new rows still planned except the explicit failing counterexample.
+
+Request reviewer-g's short independent additive gate before any activity-owner
+repair. CI full / Local core plus existing supplements remain binding, with
+these focused both-store additions. M30's5.5s windows,1s/5s production repair
+and all original refusal/cleanup conditions remain unchanged. Freeze again
+for further unclassified live inputs or any required shared transaction,
+authority/schema or new-framework change.
+
+Current intermediate approved-boundary proof: service-driven onboarding wake,
+exact Process/pass and worker controls pass race3 (39.225s/1.025s); real
+card-kind create/terminal/replay controls pass race3 (33.253s); public notice
+and prompt uncertain-edit roots pass13.319s with post-cut successful-pass
+oracles. No matched speed saving or full manifestation closure is claimed.
+The all-package census diagnostic completed RED: startup predicate owner
+hash/proof ledger, existing selected-fork writer token, new root partition
+assignments/catalog consumption and classified persistence registry deltas
+need explicit updates. No guard is waived or weakened. The exact structural
+owner-guard unit passed independently; neither receipt is local core/full
+qualification. No server2/full run or review-ready PR has started.
