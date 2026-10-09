@@ -3,7 +3,6 @@ package sessionprovider
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -11,44 +10,51 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/store/sessionstate"
+
 	"github.com/google/uuid"
 )
 
-func captureStoredRowsFixture(t *testing.T, db *sql.DB) []string {
+func captureStoredRowsFixture(t *testing.T, fixture *sessionstate.Fixture) []string {
 	t.Helper()
-	rows, err := db.Query(`SELECT json_array(sequence,connection_id,account_ref,conversation_ref,event_id,event_kind,
-		body_bytes,hex(envelope),hex(digest)) FROM whatsapp_incoming_capture ORDER BY sequence`)
+	rows, err := fixture.CaptureStoredRows(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
-	var result []string
-	for rows.Next() {
-		var row string
-		if err := rows.Scan(&row); err != nil {
-			t.Fatal(err)
-		}
-		result = append(result, row)
-	}
-	if err := rows.Err(); err != nil {
+	return rows
+}
+
+func TestWhatsAppPrivateStateFixtureRefusesUnlistedCuts(t *testing.T) {
+	event := captureFixture(t)
+	fixture, capture := openCaptureFixture(t, filepath.Join(t.TempDir(), "incoming.db"), event.Scope.Session.ConnectionID)
+	if err := capture.capture(context.Background(), event); err != nil {
 		t.Fatal(err)
 	}
-	return result
+	before := captureStoredRowsFixture(t, fixture)
+	if err := fixture.CorruptCaptureIndex(context.Background(), sessionstate.CaptureCorruption("arbitrary-column")); err == nil {
+		t.Fatal("unlisted corruption admitted")
+	}
+	if err := fixture.SetCaptureFault(context.Background(), sessionstate.CaptureFault("arbitrary-table"), true); err == nil {
+		t.Fatal("unlisted fault admitted")
+	}
+	if after := captureStoredRowsFixture(t, fixture); !reflect.DeepEqual(before, after) {
+		t.Fatal("invalid fixture operation mutated evidence")
+	}
 }
 
 func TestWhatsAppCaptureAdmissionCannotAcknowledgeCorruptStoredRows(t *testing.T) {
 	for _, mutation := range []struct {
 		name  string
-		query string
+		query sessionstate.CaptureCorruption
 	}{
-		{"connection", `UPDATE whatsapp_incoming_capture SET connection_id='another_connection'`},
-		{"account", `UPDATE whatsapp_incoming_capture SET account_ref='another_account'`},
-		{"conversation", `UPDATE whatsapp_incoming_capture SET conversation_ref='another_conversation'`},
-		{"event", `UPDATE whatsapp_incoming_capture SET event_id='another_event'`},
-		{"kind", `UPDATE whatsapp_incoming_capture SET event_kind='edit'`},
-		{"byte_count", `UPDATE whatsapp_incoming_capture SET body_bytes=1`},
-		{"envelope", `UPDATE whatsapp_incoming_capture SET envelope='{}'`},
-		{"digest", `UPDATE whatsapp_incoming_capture SET digest=x'00'`},
+		{"connection", sessionstate.CorruptConnection},
+		{"account", sessionstate.CorruptAccount},
+		{"conversation", sessionstate.CorruptConversation},
+		{"event", sessionstate.CorruptEvent},
+		{"kind", sessionstate.CorruptKind},
+		{"byte_count", sessionstate.CorruptByteCount},
+		{"envelope", sessionstate.CorruptEnvelope},
+		{"digest", sessionstate.CorruptDigest},
 	} {
 		for _, consumer := range []string{"redelivery", "new_event_quota"} {
 			t.Run(mutation.name+"/"+consumer, func(t *testing.T) {
@@ -57,7 +63,7 @@ func TestWhatsAppCaptureAdmissionCannotAcknowledgeCorruptStoredRows(t *testing.T
 				if err := capture.capture(context.Background(), event); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := db.Exec(mutation.query); err != nil {
+				if err := db.CorruptCaptureIndex(context.Background(), mutation.query); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := capture.pending(context.Background()); err == nil {
@@ -140,7 +146,7 @@ func TestWhatsAppCaptureDuplicateScopeBodyAndEnvelopeValidation(t *testing.T) {
 				}
 				raw = append(raw[:len(raw)-1], []byte(`,"UnknownAuthority":true}`)...)
 				digest := sha256.Sum256(raw)
-				if _, err := db.Exec(`UPDATE whatsapp_incoming_capture SET envelope=?,digest=?`, raw, digest[:]); err != nil {
+				if err := db.ReplaceCaptureEnvelope(context.Background(), raw, digest[:]); err != nil {
 					t.Fatal(err)
 				}
 			}

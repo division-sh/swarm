@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/store/sessionstate"
+
 	"github.com/google/uuid"
 	"go.mau.fi/libsignal/ecc"
 	"go.mau.fi/libsignal/keys/identity"
@@ -90,12 +92,12 @@ func TestWhatsAppEncryptedCaptureCommitControlsSDKReceipt(t *testing.T) {
 			event.Scope.Session.AccountRef = device.ID.String()
 			captureDB, capture := openCaptureFixture(t, filepath.Join(t.TempDir(), "incoming.db"), event.Scope.Session.ConnectionID)
 			if outcome == "write_failure" {
-				if _, err := captureDB.Exec(`CREATE TRIGGER refuse_capture BEFORE INSERT ON whatsapp_incoming_capture BEGIN SELECT RAISE(ABORT,'test capture refusal'); END`); err != nil {
+				if err := captureDB.SetCaptureFault(context.Background(), sessionstate.CaptureInsertFault, true); err != nil {
 					t.Fatal(err)
 				}
 			}
 			log := encryptedCaptureLog{handlerFailed: make(chan struct{}, 1)}
-			o, err := newClientOccurrence(peer.ctx, event.Scope.Session.ConnectionID, event.OccurrenceID, device, container.LIDMap, log)
+			o, err := newClientOccurrence(peer.ctx, event.Scope.Session.ConnectionID, event.OccurrenceID, device, container.LIDMap(), log)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -190,9 +192,7 @@ func TestWhatsAppEncryptedCaptureCommitControlsSDKReceipt(t *testing.T) {
 					t.Fatalf("failed capture emitted SDK acknowledgment/receipt: %v", frame.node)
 				default:
 				}
-				var count int
-				if err := captureDB.QueryRow(`SELECT COUNT(*) FROM whatsapp_callback_failures WHERE connection_id=? AND occurrence_id=?`,
-					event.Scope.Session.ConnectionID, event.OccurrenceID).Scan(&count); err != nil || count != 1 {
+				if count, err := captureDB.CallbackFailureCount(context.Background(), event.Scope.Session.ConnectionID, event.OccurrenceID, ""); err != nil || count != 1 {
 					t.Fatalf("failure evidence missing: %d %v", count, err)
 				}
 				if strings.Contains(guard.currentFailure().Error(), "private callback payload") {
@@ -206,7 +206,7 @@ func TestWhatsAppEncryptedCaptureCommitControlsSDKReceipt(t *testing.T) {
 func TestWhatsAppClientOccurrenceCallbackBindingCannotChangeAfterConnect(t *testing.T) {
 	_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
 	device := newSDKDeviceFixture(t, container)
-	o, err := newClientOccurrence(context.Background(), uuid.NewString(), uuid.NewString(), device, container.LIDMap, nil)
+	o, err := newClientOccurrence(context.Background(), uuid.NewString(), uuid.NewString(), device, container.LIDMap(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

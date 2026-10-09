@@ -14,17 +14,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/store/sessionstate"
+
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/google/uuid"
 )
 
 func capturePublicationFixture(t *testing.T, event capturedEvent) runtimeinbound.Request {
 	t.Helper()
-	identity, err := event.publicationIdentity()
+	identity, err := event.PublicationIdentity()
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := event.publicationFingerprint()
+	fingerprint, err := event.PublicationFingerprint()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,8 +106,8 @@ func TestWhatsAppCapturePublicationStagingSurvivesReopenAndRefusesReplacement(t 
 		t.Fatal(err)
 	}
 	_, reopened := openCaptureFixture(t, path, event.Scope.Session.ConnectionID)
-	rows, err := reopened.readPendingRows(ctx, reopened.db)
-	if err != nil || len(rows) != 1 || !rows[0].event.sameCapture(event) ||
+	rows, err := reopened.pendingPublications(ctx)
+	if err != nil || len(rows) != 1 || !rows[0].event.SameCapture(event) ||
 		!equalCapturePublicationRequest(t, rows[0].request, request) {
 		t.Fatalf("recovery lost original target or capture: %+v, %v", rows, err)
 	}
@@ -158,8 +160,8 @@ func TestWhatsAppCapturePublicationStagingSurvivesReopenAndRefusesReplacement(t 
 			}
 		})
 	}
-	rows, err = reopened.readPendingRows(ctx, reopened.db)
-	if err != nil || len(rows) != 1 || !rows[0].event.sameCapture(event) || !equalCapturePublicationRequest(t, rows[0].request, request) {
+	rows, err = reopened.pendingPublications(ctx)
+	if err != nil || len(rows) != 1 || !rows[0].event.SameCapture(event) || !equalCapturePublicationRequest(t, rows[0].request, request) {
 		t.Fatal("rejected replacement changed retained evidence", err)
 	}
 }
@@ -220,19 +222,18 @@ func TestWhatsAppCaptureRetirementWriteFailureRetainsPublicationRequest(t *testi
 	if err := store.stagePublication(ctx, event, request); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`CREATE TRIGGER reject_retirement BEFORE DELETE ON whatsapp_incoming_capture
-		BEGIN SELECT RAISE(ABORT,'capture retirement write failure'); END`); err != nil {
+	if err := db.SetCaptureFault(context.Background(), sessionstate.CaptureRetirementFault, true); err != nil {
 		t.Fatal(err)
 	}
 	reader := publishedCaptureFixture(request)
 	if err := store.retirePublished(ctx, event, reader); err == nil {
 		t.Fatal("failed local retirement reported success")
 	}
-	rows, err := store.readPendingRows(ctx, db)
-	if err != nil || len(rows) != 1 || !rows[0].event.sameCapture(event) || !equalCapturePublicationRequest(t, rows[0].request, request) {
+	rows, err := store.pendingPublications(ctx)
+	if err != nil || len(rows) != 1 || !rows[0].event.SameCapture(event) || !equalCapturePublicationRequest(t, rows[0].request, request) {
 		t.Fatal("failed retirement lost original evidence", err)
 	}
-	if _, err := db.Exec(`DROP TRIGGER reject_retirement`); err != nil {
+	if err := db.SetCaptureFault(context.Background(), sessionstate.CaptureRetirementFault, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.retirePublished(ctx, event, reader); err != nil {
@@ -255,7 +256,7 @@ func TestWhatsAppCapturePublicationCorruptionBlocksEveryConsumer(t *testing.T) {
 					t.Fatal(err)
 				}
 				if corruption == "digest" {
-					if _, err := db.Exec(`UPDATE whatsapp_incoming_capture SET publication_digest=?`, make([]byte, 32)); err != nil {
+					if err := db.CorruptPublicationDigest(context.Background()); err != nil {
 						t.Fatal(err)
 					}
 				} else {
@@ -271,7 +272,7 @@ func TestWhatsAppCapturePublicationCorruptionBlocksEveryConsumer(t *testing.T) {
 						t.Fatal(err)
 					}
 					digest := sha256.Sum256(raw)
-					if _, err := db.Exec(`UPDATE whatsapp_incoming_capture SET publication_request=?,publication_digest=?`, raw, digest[:]); err != nil {
+					if err := db.ReplacePublicationRequest(context.Background(), raw, digest[:]); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -294,8 +295,7 @@ func TestWhatsAppCapturePublicationCorruptionBlocksEveryConsumer(t *testing.T) {
 				if err == nil || reader.calls != 0 {
 					t.Fatalf("corrupt publication evidence accepted: err=%v, reads=%d", err, reader.calls)
 				}
-				var count int
-				if err := db.QueryRow(`SELECT COUNT(*) FROM whatsapp_incoming_capture`).Scan(&count); err != nil || count != 1 {
+				if count, err := db.CaptureCount(context.Background()); err != nil || count != 1 {
 					t.Fatal("corruption refusal rewrote capture evidence", err)
 				}
 			})
@@ -311,8 +311,7 @@ func TestWhatsAppCapturePublicationStageWriteFailureCannotRetire(t *testing.T) {
 	if err := store.capture(ctx, event); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`CREATE TRIGGER reject_stage BEFORE UPDATE ON whatsapp_incoming_capture
-		BEGIN SELECT RAISE(ABORT,'capture staging write failure'); END`); err != nil {
+	if err := db.SetCaptureFault(context.Background(), sessionstate.CaptureStageFault, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.stagePublication(ctx, event, request); err == nil {
@@ -323,11 +322,11 @@ func TestWhatsAppCapturePublicationStageWriteFailureCannotRetire(t *testing.T) {
 	if err := store.retirePublished(ctx, event, reader); !errors.Is(err, errCapturePublicationPending) || reader.calls != 1 {
 		t.Fatal("partial staging retired capture", err)
 	}
-	rows, err := store.readPendingRows(ctx, db)
-	if err != nil || len(rows) != 1 || rows[0].request != nil || !rows[0].event.sameCapture(event) {
+	rows, err := store.pendingPublications(ctx)
+	if err != nil || len(rows) != 1 || rows[0].request != nil || !rows[0].event.SameCapture(event) {
 		t.Fatal("failed staging lost evidence or retained a partial request", err)
 	}
-	if _, err := db.Exec(`DROP TRIGGER reject_stage`); err != nil {
+	if err := db.SetCaptureFault(context.Background(), sessionstate.CaptureStageFault, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.stagePublication(ctx, event, request); err != nil {
@@ -432,7 +431,7 @@ func TestWhatsAppCapturePublicationProcessDeathBoundaries(t *testing.T) {
 				t.Fatal("process-death fixture returned ordinary success")
 			}
 			_, reopened := openCaptureFixture(t, path, event.Scope.Session.ConnectionID)
-			rows, err := reopened.readPendingRows(context.Background(), reopened.db)
+			rows, err := reopened.pendingPublications(context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -442,7 +441,7 @@ func TestWhatsAppCapturePublicationProcessDeathBoundaries(t *testing.T) {
 				}
 				return
 			}
-			if len(rows) != 1 || !rows[0].event.sameCapture(event) || (rows[0].request != nil) != (mode == "after_stage") {
+			if len(rows) != 1 || !rows[0].event.SameCapture(event) || (rows[0].request != nil) != (mode == "after_stage") {
 				t.Fatal("crash lost original capture or changed staging boundary")
 			}
 			if mode == "after_stage" && !equalCapturePublicationRequest(t, rows[0].request, request) {

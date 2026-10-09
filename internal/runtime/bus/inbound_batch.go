@@ -224,7 +224,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		}
 		return InboundDeliveryPlan{}, cause
 	}
-	for _, item := range validated.Events {
+	for index, item := range validated.Events {
 		itemCtx := context.WithValue(ctx, authenticatedProviderPublicationKey{}, authenticatedProviderPublication{
 			eventID: item.Event.ID(), source: item.Event.RoutingSource().Route(), kind: item.Kind,
 		})
@@ -260,11 +260,13 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		if len(command.Activations) == 0 {
 			command.RouteTopology = nil
 		}
-		if err := command.Validate(); err != nil {
-			return release(fmt.Errorf("canonicalize inbound activation ownership: %w", err))
+		command.Commit.inbound = &preparedInboundPublication{
+			admission: validated.Admission, eventID: command.Commit.Event.ID(),
+			bundleHash: eb.sourceArtifactFact.BundleHash(), provider: validated.Provider,
+			ordinal: index, count: len(validated.Events), kind: item.Kind, authorization: item.Authorization,
 		}
-		if input, native := validated.Admission.NativeInput(); native {
-			command.nativeInput = &input
+		if err := command.ValidateInbound(validated.Admission); err != nil {
+			return release(fmt.Errorf("canonicalize inbound activation ownership: %w", err))
 		}
 		plan.prepared = append(plan.prepared, prepared)
 		plan.commands = append(plan.commands, command)

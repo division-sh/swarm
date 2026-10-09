@@ -29,7 +29,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/sessionprovider/input"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
@@ -81,9 +80,7 @@ func newActiveInputFixture(t *testing.T, backend string) *activeInputFixture {
 	if backend == "sqlite" {
 		f.selected = storetest.StartSQLiteRuntimeStore(t)
 	} else {
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		f.selected = storetest.AdmitPostgresRuntimeStore(t, db)
+		f.selected = storetest.StartPostgresRuntimeStore(t)
 	}
 	ctx, now := context.Background(), time.Now().UTC().Truncate(time.Microsecond)
 	source := sourceartifactfixture.Require(t, ctx, f.selected)
@@ -112,7 +109,7 @@ func newActiveInputFixture(t *testing.T, backend string) *activeInputFixture {
 		t.Fatal(err)
 	}
 	f.state = sessionStateFixture(t, base, connectionID, "")
-	device := newSDKDeviceFixture(t, f.state.container)
+	device := newSDKDeviceFixture(t, f.state.database)
 	_, senderStore := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "sender.db"))
 	f.sender = newSDKDeviceFixture(t, senderStore)
 	account := operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: connectionID,
@@ -500,7 +497,7 @@ func TestWhatsAppUncommittedOnboardingCaptureDoesNotAdoptAdvancementBothStores(t
 				t.Fatal("original pending capture adopted a new operation revision")
 			}
 			rows, err := f.spool.pending(f.ctx)
-			if err != nil || len(rows) != 1 || !rows[0].sameCapture(event) {
+			if err != nil || len(rows) != 1 || !rows[0].SameCapture(event) {
 				t.Fatalf("refusal lost original pending evidence: %+v %v", rows, err)
 			}
 		})

@@ -15,6 +15,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -22,7 +23,6 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	nativeinput "github.com/division-sh/swarm/internal/sessionprovider/input"
 )
 
 var (
@@ -171,7 +171,6 @@ type FlowInstanceActivationCommitOwner interface {
 // admission and route planning. Activation plans are semantic facts derived by
 // the runtime; selected-store adapters persist them atomically with the event.
 type PublicationCommand struct {
-	nativeInput         *nativeinput.Admission
 	prospective         runtimepipeline.PreparedWorkflowPublicationState
 	Commit              CommitPublishRequest
 	Activations         []runtimepipeline.FlowInstanceActivationPlan
@@ -184,8 +183,8 @@ type PublicationCommand struct {
 }
 
 func (c PublicationCommand) Validate() error {
-	if c.nativeInput != nil {
-		return fmt.Errorf("native provider publication requires its exact inbound transaction")
+	if c.Commit.inbound != nil || c.Commit.Event.Event().RoutingSource().Kind() == events.RoutingSourceExternalIngress {
+		return fmt.Errorf("provider ingress publication requires its exact inbound transaction")
 	}
 	if !c.prospective.Empty() {
 		return fmt.Errorf("prospective receiver publication requires its exact engine mutation transaction")
@@ -197,15 +196,13 @@ func (c PublicationCommand) Validate() error {
 }
 
 func (c PublicationCommand) ValidateInbound(admission providertriggers.PublicationAdmission) error {
-	input, native := admission.NativeInput()
-	if c.nativeInput == nil {
-		if native {
-			return fmt.Errorf("native inbound publication lost its prepared authority")
-		}
-		return c.Validate()
+	prepared := c.Commit.inbound
+	if prepared == nil || !prepared.admission.SameOwner(admission) || !c.prospective.Empty() || c.Commit.Event.ID() != prepared.eventID {
+		return fmt.Errorf("provider ingress publication requires its original prepared output seal")
 	}
-	if !native || !c.nativeInput.SameOwner(input) || !c.prospective.Empty() {
-		return fmt.Errorf("native inbound publication requires its original sealed admission")
+	if err := admission.ValidateCommitOutput(context.Background(), prepared.bundleHash, prepared.provider,
+		prepared.ordinal, prepared.count, c.Commit.Event.Event(), prepared.kind, prepared.authorization); err != nil {
+		return err
 	}
 	if err := events.ValidateGenericPublishEvent(c.Commit.Event.Event()); err != nil {
 		return err
@@ -482,6 +479,7 @@ const (
 // mandatory initial side effects are the delivery manifest, replay scope, and
 // optional failure evidence declared here.
 type CommitPublishRequest struct {
+	inbound             *preparedInboundPublication
 	Event               events.AdmittedEvent
 	RouteSettlement     events.RouteSettlement
 	DeliveryRoutes      []events.DeliveryRoute
@@ -493,6 +491,20 @@ type CommitPublishRequest struct {
 	ReplyCreations      []runtimereplycontext.Record
 	ReplyClaims         []runtimereplycontext.ClaimCommand
 	JoinAdmissionFences []runtimepipeline.WorkflowJoinAdmissionFence
+}
+
+// The canonical prepared commit retains its exact provider seal. Exported
+// command projections cannot erase this responsibility: ingress source facts
+// require this capability, and generic publication refuses ingress entirely.
+type preparedInboundPublication struct {
+	admission     providertriggers.PublicationAdmission
+	eventID       string
+	bundleHash    string
+	provider      string
+	ordinal       int
+	count         int
+	kind          provideroutput.Kind
+	authorization provideroutput.Authorization
 }
 
 func (r CommitPublishRequest) ValidatePreparedEvent() error {

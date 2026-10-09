@@ -37,11 +37,11 @@ func prepareSessionClaim(ctx context.Context, admitted input.Admission, trigger 
 	if err != nil {
 		return authority.Claim{}, absent, err
 	}
-	providerID, err := event.publicationProviderEventID()
+	providerID, err := event.PublicationProviderEventID()
 	if err != nil {
 		return authority.Claim{}, absent, err
 	}
-	fingerprint, err := event.publicationFingerprint()
+	fingerprint, err := event.PublicationFingerprint()
 	if err != nil {
 		return authority.Claim{}, absent, err
 	}

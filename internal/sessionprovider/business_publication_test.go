@@ -5,7 +5,6 @@ package sessionprovider
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -82,6 +81,8 @@ func sessionBusinessSemanticFixture(t *testing.T) semanticview.Source {
 		Events: map[string]contracts.EventCatalogEntry{
 			"inbound.whatsapp":         {Payload: contracts.EventPayloadSpec{Type: "object"}},
 			"inbound.whatsapp.message": {Payload: contracts.EventPayloadSpec{Type: "object"}},
+			"inbound.whatsapp.edit":    {Payload: contracts.EventPayloadSpec{Type: "object"}},
+			"inbound.whatsapp.revoke":  {Payload: contracts.EventPayloadSpec{Type: "object"}},
 		},
 		Schema: contracts.FlowSchemaDocument{}}
 	bundle := &contracts.WorkflowContractBundle{RootSchema: &root.Schema,
@@ -91,7 +92,7 @@ func sessionBusinessSemanticFixture(t *testing.T) semanticview.Source {
 	if err := contracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatal(err)
 	}
-	return semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{".": {"inbound.whatsapp", "inbound.whatsapp.message"}})
+	return semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{".": {"inbound.whatsapp", "inbound.whatsapp.message", "inbound.whatsapp.edit", "inbound.whatsapp.revoke"}})
 }
 
 func TestWhatsAppBusinessCommitTemporalFencesBothStores(t *testing.T) {
@@ -129,7 +130,7 @@ func TestWhatsAppBusinessCommitTemporalFencesBothStores(t *testing.T) {
 				case "missing_transfer":
 					prepared.command.Admission = providertriggers.PublicationAdmission{}
 				case "rollback":
-					fault := &sessionPublicationFixture{db: storetest.Database(f.selected)}
+					fault := &sessionPublicationFixture{ctx: f.ctx, selected: f.selected.(sessionPublicationStore)}
 					defer fault.rejectPublication(t, backend)()
 				}
 				if err != nil {
@@ -154,13 +155,13 @@ func TestWhatsAppBusinessCommitTemporalFencesBothStores(t *testing.T) {
 					t.Fatalf("stale commit left receipt: %t %v", found, err)
 				}
 				requireNoSessionPublicationEvents(t, f, prepared.command)
-				pending, err := f.spool.readPendingRows(f.ctx, f.spool.db)
+				pending, err := f.spool.pendingPublications(f.ctx)
 				if err != nil {
 					t.Fatal(err)
 				}
 				retained := false
 				for _, row := range pending {
-					if row.event.sameCapture(event) && row.request != nil && row.request.PublicationID == prepared.command.Request.PublicationID {
+					if row.event.SameCapture(event) && row.request != nil && row.request.PublicationID == prepared.command.Request.PublicationID {
 						retained = true
 					}
 				}
@@ -201,21 +202,16 @@ func TestWhatsAppBusinessCommitCancellationWhileLockedBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { _ = eventBus.AbandonInboundDeliveryPlan(context.Background(), prepared.plan) })
-				db := storetest.Database(f.selected)
 				probe := storetest.CollectTransactions(t, f.selected, storetest.TransactionProbeOptions{})
-				lock, err := db.BeginTx(f.ctx, nil)
+				lock, err := storetest.HoldSessionPublicationOnboardingLock(f.ctx, f.selected, f.operation.OperationID)
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer lock.Rollback()
-				if backend == "postgres" {
-					var revision int64
-					if err := lock.QueryRowContext(f.ctx, `SELECT operation_revision FROM channel_onboarding_operations WHERE operation_id=$1 FOR UPDATE`, f.operation.OperationID).Scan(&revision); err != nil {
-						t.Fatal(err)
+				t.Cleanup(func() {
+					if err := lock.Release(); err != nil {
+						t.Error(err)
 					}
-				} else if _, err := lock.ExecContext(f.ctx, `UPDATE channel_onboarding_operations SET updated_at=updated_at WHERE operation_id=?`, f.operation.OperationID); err != nil {
-					t.Fatal(err)
-				}
+				})
 				done := make(chan error, 1)
 				go func() {
 					result, err := f.selected.(sessionBusinessStore).CommitInboundPublication(f.ctx, prepared.command)
@@ -224,7 +220,7 @@ func TestWhatsAppBusinessCommitCancellationWhileLockedBothStores(t *testing.T) {
 					}
 					done <- err
 				}()
-				waitSessionPublicationLock(t, db, backend, probe)
+				waitSessionPublicationLock(t, lock, backend, probe)
 				if shutdown == "release" {
 					admitted.Close()
 				} else {
@@ -236,11 +232,13 @@ func TestWhatsAppBusinessCommitCancellationWhileLockedBothStores(t *testing.T) {
 						t.Fatal("native cancellation was not refused")
 					}
 				case <-time.After(5 * time.Second):
-					_ = lock.Rollback()
+					if err := lock.Release(); err != nil {
+						t.Error(err)
+					}
 					<-done
 					t.Fatal("native cancellation waited for the unrelated owner lock")
 				}
-				if err := lock.Rollback(); err != nil {
+				if err := lock.Release(); err != nil {
 					t.Fatal(err)
 				}
 				admitted.Close()
@@ -257,7 +255,7 @@ func TestWhatsAppBusinessCommitCancellationWhileLockedBothStores(t *testing.T) {
 	}
 }
 
-func waitSessionPublicationLock(t *testing.T, db *sql.DB, backend string, probe *storetest.TransactionCollector) {
+func waitSessionPublicationLock(t *testing.T, lock *storetest.SessionPublicationLock, backend string, probe *storetest.TransactionCollector) {
 	t.Helper()
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
@@ -266,7 +264,9 @@ func waitSessionPublicationLock(t *testing.T, db *sql.DB, backend string, probe 
 	for {
 		blocked := probe.Snapshot().Total.BeginAttempts > 0
 		if backend == "postgres" {
-			if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%channel_onboarding_operations%' AND pid<>pg_backend_pid())`).Scan(&blocked); err != nil {
+			var err error
+			blocked, err = lock.Waiting(context.Background())
+			if err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -327,7 +327,7 @@ func TestWhatsAppBusinessCommitRuntimeDispatchAndHistoryBothStores(t *testing.T)
 				t.Fatalf("original committed history required live SDK: %t %v", settled, err)
 			}
 			original, err := publicationCaptureProvenance(record.Request)
-			if err != nil || !bytes.Equal(original.Body, event.Body) || !original.sameCapture(event) {
+			if err != nil || !bytes.Equal(original.Body, event.Body) || !original.SameCapture(event) {
 				t.Fatalf("receipt lost original capture: %v", err)
 			}
 		})

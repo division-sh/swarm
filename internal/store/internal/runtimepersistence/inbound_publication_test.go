@@ -113,7 +113,8 @@ func runInboundPublicationProofMutation(t *testing.T, store inboundPublicationPr
 	}
 	projection, _ := runtimeauthoractivity.InboundProjectionFromContext(ctx)
 	result, err := store.CommitInboundPublication(ctx, runtimeinbound.CommitCommand{
-		Request: request, Finalization: builder.finalization,
+		Admission: plan.Admission(),
+		Request:   request, Finalization: builder.finalization,
 		Publications: plan.CommitCommands(), AuthorProjection: projection,
 	})
 	if err == nil {

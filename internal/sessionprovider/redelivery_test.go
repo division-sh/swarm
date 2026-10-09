@@ -55,7 +55,7 @@ func TestWhatsAppCaptureRedeliveryAfterRetirementUsesHistoricalEvidence(t *testi
 		}
 	}
 	original, err := publicationCaptureProvenance(reader.record.Request)
-	if err != nil || !original.sameCapture(event) {
+	if err != nil || !original.SameCapture(event) {
 		t.Fatal("historical reconciliation overwrote original provenance", err)
 	}
 }
@@ -97,7 +97,7 @@ func TestWhatsAppHistoricalCaptureRedeliveryRejectsChangedStableEvidence(t *test
 				t.Fatalf("changed stable evidence adopted historical authority: settled=%t err=%v", settled, err)
 			}
 			pending, err := spool.pending(ctx)
-			if err != nil || len(pending) != 1 || !pending[0].sameCapture(duplicate) {
+			if err != nil || len(pending) != 1 || !pending[0].SameCapture(duplicate) {
 				t.Fatal("refusal discarded changed capture evidence", err)
 			}
 		})

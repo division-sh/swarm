@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+
+	"github.com/division-sh/swarm/internal/store/sessionstate"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -70,7 +74,6 @@ type sessionPublicationStore interface {
 type sessionPublicationFixture struct {
 	ctx       context.Context
 	selected  sessionPublicationStore
-	db        *sql.DB
 	bus       *runtimebus.EventBus
 	manifest  providertriggers.Manifest
 	catalog   *providertriggers.CatalogSnapshot
@@ -79,30 +82,23 @@ type sessionPublicationFixture struct {
 	standing  runtimepipeline.StandingServiceReconciliation
 	sequence  int64
 	plans     int
+	prepared  map[string]runtimebus.InboundDeliveryPlan
 	location  string
 }
 
-// Session/account admission and enabled-binding selection are supplied fixture
-// facts. Store bootstrap, standing admission, normalization, catalog output
-// authorization, atomic commit and integrity readback are real. No SDK runs.
+// Capture/session coordinates and enabled-binding selection are fixture facts.
+// The declared fixture webhook policy authenticates publication; no native SDK
+// authority is manufactured. Standing admission, output seals, commit/dispatch
+// and history readback are real. The active-input fixtures separately run SDKs.
 func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicationFixture {
 	t.Helper()
 	f := &sessionPublicationFixture{manifest: incomingNormalizationFixture(t)}
 	if backend == "sqlite" {
-		f.selected = storetest.StartSQLiteRuntimeStore(t)
+		f.location = filepath.Join(t.TempDir(), "runtime.db")
+		f.selected, _ = storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background(), f.location)
 	} else {
-		location, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		f.selected = storetest.AdmitPostgresRuntimeStore(t, db)
-		f.location = location
-	}
-	f.db = storetest.Database(f.selected)
-	if backend == "sqlite" {
-		var sequence int
-		var name string
-		if err := f.db.QueryRow(`PRAGMA database_list`).Scan(&sequence, &name, &f.location); err != nil {
-			t.Fatal(err)
-		}
+		f.location = testutil.StartPostgresDSN(t)
+		f.selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, f.location)
 	}
 	source := sourceartifactfixture.Require(t, context.Background(), f.selected)
 	runtimeID := uuid.NewString()
@@ -133,9 +129,9 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 	if err != nil {
 		t.Fatal(err)
 	}
-	descriptors := []runtimeauthoractivity.EventDescriptor{{EventType: "inbound.whatsapp", Disposition: runtimeauthoractivity.StoryDifferent}}
+	descriptors := []runtimeauthoractivity.EventDescriptor{{EventType: "inbound.whatsapp", Disposition: runtimeauthoractivity.StoryAuthored}}
 	for _, kind := range []string{"message", "edit", "revoke"} {
-		descriptors = append(descriptors, runtimeauthoractivity.EventDescriptor{EventType: "inbound.whatsapp." + kind, Disposition: runtimeauthoractivity.StoryDifferent})
+		descriptors = append(descriptors, runtimeauthoractivity.EventDescriptor{EventType: "inbound.whatsapp." + kind, Disposition: runtimeauthoractivity.StoryAuthored})
 	}
 	scope, _ := runtimeauthoractivity.ScopeFromContext(f.ctx)
 	lease, err := f.selected.RegisterAuthorActivityEventCatalog(scope, descriptors)
@@ -154,6 +150,7 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 		t.Fatal(err)
 	}
 	f.bus, err = runtimebus.NewEventBusWithOptions(f.selected, runtimebus.EventBusOptions{
+		ContractBundle:   sessionBusinessSemanticFixture(t),
 		ExecutionPosture: executionposture.Live, SourceArtifactFact: source, RuntimeInstanceID: runtimeID,
 		WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(), DeliveryAuthority: authority,
 		PipelineObligations: f.selected.PipelineObligations(), PayloadAdmitter: payload, ProviderOutputVerifier: f.catalog,
@@ -246,7 +243,7 @@ func TestWhatsAppSessionPublicationRedeliveryLifecycleBothStores(t *testing.T) {
 								}
 							}
 							if phase == "commit_result_lost" || phase == "after_retire" {
-								if _, err := f.selected.CommitInboundPublication(f.ctx, command); err != nil {
+								if _, err := f.commit(f.ctx, command); err != nil {
 									t.Fatal(err)
 								}
 							}
@@ -277,13 +274,13 @@ func TestWhatsAppSessionPublicationRedeliveryLifecycleBothStores(t *testing.T) {
 								t.Fatal(err)
 							}
 							if phase == "before_stage" || phase == "after_stage" {
-								if settled || !pending[0].sameCapture(event) {
+								if settled || !pending[0].SameCapture(event) {
 									t.Fatal("uncommitted duplicate invented history or replaced occurrence")
 								}
 								if err := spool.stagePublication(f.ctx, pending[0], command.Request); err != nil {
 									t.Fatal(err)
 								}
-								if result, err := f.selected.CommitInboundPublication(f.ctx, command); err != nil || !result.Acknowledged || !result.Record.Created {
+								if result, err := f.commit(f.ctx, command); err != nil || !result.Acknowledged || !result.Record.Created {
 									t.Fatalf("first commit = %+v, %v", result, err)
 								}
 								if err := spool.retirePublished(f.ctx, pending[0], f.selected); err != nil {
@@ -292,12 +289,12 @@ func TestWhatsAppSessionPublicationRedeliveryLifecycleBothStores(t *testing.T) {
 							} else if !settled {
 								t.Fatal("committed duplicate failed historical acknowledgment")
 							}
-							result, err := f.selected.CommitInboundPublication(f.ctx, command)
+							result, err := f.commit(f.ctx, command)
 							if err != nil || !result.Acknowledged || result.Record.Created || len(result.Publications) != 0 || f.plans != plans {
 								t.Fatalf("duplicate created another publication/dispatch plan: %+v %v", result, err)
 							}
 							original, err := publicationCaptureProvenance(result.Record.Request)
-							if err != nil || !original.sameCapture(event) {
+							if err != nil || !original.SameCapture(event) {
 								t.Fatal("history lost exact original capture occurrence", err)
 							}
 							pending, err = spool.pending(f.ctx)
@@ -335,7 +332,7 @@ func TestWhatsAppSessionPublicationVariantsBothStores(t *testing.T) {
 							if err := spool.stagePublication(f.ctx, event, command.Request); err != nil {
 								t.Fatal(err)
 							}
-							if result, err := f.selected.CommitInboundPublication(f.ctx, command); err != nil || !result.Acknowledged || result.Record.OutputCount != 2 {
+							if result, err := f.commit(f.ctx, command); err != nil || !result.Acknowledged || result.Record.OutputCount != 2 {
 								t.Fatalf("variant commit = %+v %v", result, err)
 							}
 							if err := spool.retirePublished(f.ctx, event, f.selected); err != nil {
@@ -343,7 +340,7 @@ func TestWhatsAppSessionPublicationVariantsBothStores(t *testing.T) {
 							}
 							record, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, command.Request.Identity())
 							if err != nil || !found || len(record.Events) != 2 || string(record.Events[1].Event.Type()) != "inbound.whatsapp."+kind ||
-								!record.Events[1].Authorization.Valid() || !bytes.Equal(record.Events[0].Event.Payload(), event.Body) {
+								!record.Events[1].Authorization.Valid() || !fixtureRawPublicationMatches(event, record.Events[0].Event.Payload()) {
 								t.Fatalf("variant readback = %+v found=%t err=%v", record, found, err)
 							}
 							if err := f.catalog.VerifyProviderOutputAuthorization(record.Events[1].Authorization); err != nil {
@@ -357,32 +354,13 @@ func TestWhatsAppSessionPublicationVariantsBothStores(t *testing.T) {
 	}
 }
 
-func (f *sessionPublicationFixture) rejectPublication(t *testing.T, backend string) func() {
+func (f *sessionPublicationFixture) rejectPublication(t *testing.T, _ string) func() {
 	t.Helper()
-	if backend == "sqlite" {
-		if _, err := f.db.Exec(`CREATE TRIGGER reject_whatsapp_publication BEFORE INSERT ON inbound_publication_events
-			BEGIN SELECT RAISE(ABORT,'publication rollback proof'); END`); err != nil {
-			t.Fatal(err)
-		}
-		return func() {
-			if _, err := f.db.Exec(`DROP TRIGGER reject_whatsapp_publication`); err != nil {
-				t.Error(err)
-			}
-		}
-	}
-	if _, err := f.db.Exec(`CREATE FUNCTION reject_whatsapp_publication() RETURNS trigger LANGUAGE plpgsql AS
-		$$ BEGIN RAISE EXCEPTION 'publication rollback proof'; END $$`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.db.Exec(`CREATE TRIGGER reject_whatsapp_publication BEFORE INSERT ON inbound_publication_events
-		FOR EACH ROW EXECUTE FUNCTION reject_whatsapp_publication()`); err != nil {
+	if err := storetest.SetSessionPublicationInsertFault(f.ctx, f.selected, true); err != nil {
 		t.Fatal(err)
 	}
 	return func() {
-		if _, err := f.db.Exec(`DROP TRIGGER reject_whatsapp_publication ON inbound_publication_events`); err != nil {
-			t.Error(err)
-		}
-		if _, err := f.db.Exec(`DROP FUNCTION reject_whatsapp_publication()`); err != nil {
+		if err := storetest.SetSessionPublicationInsertFault(context.WithoutCancel(f.ctx), f.selected, false); err != nil {
 			t.Error(err)
 		}
 	}
@@ -403,7 +381,7 @@ func TestWhatsAppSessionPublicationRollbackAndHistoricalResetBothStores(t *testi
 				t.Fatal(err)
 			}
 			drop := f.rejectPublication(t, backend)
-			result, err := f.selected.CommitInboundPublication(f.ctx, command)
+			result, err := f.commit(f.ctx, command)
 			drop()
 			if err == nil || result.Acknowledged {
 				t.Fatal("rolled-back compound publication acknowledged capture", err)
@@ -414,11 +392,11 @@ func TestWhatsAppSessionPublicationRollbackAndHistoricalResetBothStores(t *testi
 			if record, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, command.Request.Identity()); err != nil || found {
 				t.Fatalf("rollback left publication: %+v found=%t err=%v", record, found, err)
 			}
-			rows, err := spool.readPendingRows(f.ctx, db)
-			if err != nil || len(rows) != 1 || !rows[0].event.sameCapture(event) || !equalCapturePublicationRequest(t, rows[0].request, command.Request) {
+			rows, err := spool.pendingPublications(f.ctx)
+			if err != nil || len(rows) != 1 || !rows[0].event.SameCapture(event) || !equalCapturePublicationRequest(t, rows[0].request, command.Request) {
 				t.Fatal("rollback lost original request responsibility", err)
 			}
-			if _, err := f.selected.CommitInboundPublication(f.ctx, command); err != nil {
+			if _, err := f.commit(f.ctx, command); err != nil {
 				t.Fatal(err)
 			}
 			if err := spool.retirePublished(f.ctx, event, f.selected); err != nil {
@@ -440,7 +418,7 @@ func TestWhatsAppSessionPublicationRollbackAndHistoricalResetBothStores(t *testi
 			if settled, err := spool.reconcilePublished(f.ctx, duplicate, f.selected); err != nil || !settled || f.plans != 1 {
 				t.Fatalf("reset caused re-planning/adoption: settled=%t plans=%d err=%v", settled, f.plans, err)
 			}
-			if result, err := f.selected.CommitInboundPublication(f.ctx, command); err != nil || !result.Acknowledged || result.Record.Created || len(result.Publications) != 0 {
+			if result, err := f.commit(f.ctx, command); err != nil || !result.Acknowledged || result.Record.Created || len(result.Publications) != 0 {
 				t.Fatalf("historical duplicate after reset = %+v err=%v", result, err)
 			}
 		})
@@ -462,7 +440,7 @@ func TestWhatsAppHistoricalPublicationFailuresRetainCaptureBothStores(t *testing
 			f := newSessionPublicationFixture(t, backend)
 			event := f.capture(t)
 			command := f.command(t, event)
-			if _, err := f.selected.CommitInboundPublication(f.ctx, command); err != nil {
+			if _, err := f.commit(f.ctx, command); err != nil {
 				t.Fatal(err)
 			}
 			duplicate := event
@@ -475,18 +453,17 @@ func TestWhatsAppHistoricalPublicationFailuresRetainCaptureBothStores(t *testing
 			if settled, err := spool.reconcilePublished(f.ctx, duplicate, publicationReadFault{publicationReader: f.selected, err: readFailure}); !errors.Is(err, readFailure) || settled {
 				t.Fatal("historical read error reported retirement", err)
 			}
-			if _, err := db.Exec(`CREATE TRIGGER reject_historical_retirement BEFORE DELETE ON whatsapp_incoming_capture
-				BEGIN SELECT RAISE(ABORT,'historical retirement failure'); END`); err != nil {
+			if err := db.SetCaptureFault(context.Background(), sessionstate.CaptureRetirementFault, true); err != nil {
 				t.Fatal(err)
 			}
 			if settled, err := spool.reconcilePublished(f.ctx, duplicate, f.selected); err == nil || settled {
 				t.Fatal("failed historical delete reported success", err)
 			}
 			pending, err := spool.pending(f.ctx)
-			if err != nil || len(pending) != 1 || !pending[0].sameCapture(duplicate) {
+			if err != nil || len(pending) != 1 || !pending[0].SameCapture(duplicate) {
 				t.Fatal("failed historical retirement discarded original pending evidence", err)
 			}
-			if _, err := db.Exec(`DROP TRIGGER reject_historical_retirement`); err != nil {
+			if err := db.SetCaptureFault(context.Background(), sessionstate.CaptureRetirementFault, false); err != nil {
 				t.Fatal(err)
 			}
 			if settled, err := spool.reconcilePublished(f.ctx, duplicate, f.selected); err != nil || !settled {
@@ -502,7 +479,7 @@ func TestWhatsAppHistoricalPublicationStableScopeRefusalsBothStores(t *testing.T
 			f := newSessionPublicationFixture(t, backend)
 			original := f.capture(t)
 			command := f.command(t, original)
-			if _, err := f.selected.CommitInboundPublication(f.ctx, command); err != nil {
+			if _, err := f.commit(f.ctx, command); err != nil {
 				t.Fatal(err)
 			}
 			for _, cell := range []struct {
@@ -521,7 +498,10 @@ func TestWhatsAppHistoricalPublicationStableScopeRefusalsBothStores(t *testing.T
 				}},
 				{"admission", func(e *capturedEvent) { e.Scope.Session.AdmissionID = uuid.NewString() }},
 				{"admission_revision", func(e *capturedEvent) { e.Scope.Session.Revision++ }},
-				{"source", func(e *capturedEvent) { e.Scope.Source.BundleIdentity = "other" }},
+				{"source", func(e *capturedEvent) {
+					e.Scope.Source.BundleIdentity = "other"
+					e.Source.Coordinate.BundleIdentity = "other"
+				}},
 				{"principal", func(e *capturedEvent) { e.Scope.PrincipalID = uuid.NewString() }},
 				{"operation", func(e *capturedEvent) { e.Scope.OnboardingOperation = uuid.NewString() }},
 				{"binding", func(e *capturedEvent) { e.Scope.BindingRevision++ }},
@@ -538,7 +518,7 @@ func TestWhatsAppHistoricalPublicationStableScopeRefusalsBothStores(t *testing.T
 						t.Fatalf("changed content/scope adopted original history: %t %v", settled, err)
 					}
 					pending, err := spool.pending(f.ctx)
-					if err != nil || len(pending) != 1 || !pending[0].sameCapture(changed) || f.plans != 1 {
+					if err != nil || len(pending) != 1 || !pending[0].SameCapture(changed) || f.plans != 1 {
 						t.Fatal("refusal lost evidence or planned another publication", err)
 					}
 				})
@@ -560,10 +540,10 @@ func TestWhatsAppHistoricalPublicationStableScopeRefusalsBothStores(t *testing.T
 					}
 					// The admitted connection owner checks its complete frozen scope;
 					// an altered namespace cannot become an original-scope retry.
-					if err := changed.requireOriginalScope(original.Scope); !errors.Is(err, errCaptureScopeChanged) {
+					if err := changed.RequireOriginalScope(original.Scope); !errors.Is(err, errCaptureScopeChanged) {
 						t.Fatal("changed namespace passed original admission scope", err)
 					}
-					identity, err := changed.publicationIdentity()
+					identity, err := changed.PublicationIdentity()
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -601,7 +581,7 @@ func TestWhatsAppSessionPublicationOutputAuthorizationBeforeMutationBothStores(t
 						generation = triggergeneration.FromCanonicalBytes([]byte("foreign generation"))
 					}
 					bad := runtimeprovideroutput.MustAuthorization(provider, name, pack, version, manifest, generation)
-					batch := runtimebus.InboundDeliveryBatch{Provider: "whatsapp", Events: []runtimebus.InboundDeliveryEvent{
+					batch := runtimebus.InboundDeliveryBatch{Provider: "whatsapp", Admission: command.Admission, Events: []runtimebus.InboundDeliveryEvent{
 						{Event: command.Finalization.Events[0].Event, Kind: runtimeprovideroutput.KindRaw},
 						{Event: command.Finalization.Events[1].Event, Kind: runtimeprovideroutput.KindNormalized, Authorization: bad},
 					}}
@@ -622,50 +602,47 @@ func (f *sessionPublicationFixture) command(t *testing.T, event capturedEvent) r
 	request := capturePublicationFixture(t, event)
 	request.FlowPath = f.candidate.FlowPath
 	request.ExpectedGeneration, request.ExpectedPublicationSequence = f.standing.Generation, f.sequence
-	normalized, err := f.manifest.ProjectNormalizedPayload(event.Body)
-	if err != nil || len(normalized) != 1 {
-		t.Fatalf("normalized projection: %+v %v", normalized, err)
-	}
-	authorization, err := runtimeprovideroutput.NewAuthorization("whatsapp", string(normalized[0].Name),
-		f.identity.ID, f.identity.Version, f.identity.ManifestHash, f.catalog.Generation())
+	// This historical-storage fixture has a real authenticated webhook policy,
+	// not native SDK authority. The separate active-input journey owns the SDK proof.
+	trigger, err := f.catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "whatsapp", Provider: "whatsapp", SigningSecret: "isolated-fixture-secret"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizedBody, err := json.Marshal(normalized[0].Payload)
+	var payload map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes(event.Body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	authenticated, err := trigger.AdmitRequest(providertriggers.Request{Provider: "whatsapp", Target: providertriggers.Target{WebhookSecret: "isolated-fixture-secret"}, Headers: http.Header{"X-Fixture-Signature": {"isolated-fixture-secret"}}, Body: event.Body, Payload: payload, Received: event.ReceivedAt})
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch := runtimebus.InboundDeliveryBatch{Provider: "whatsapp", AuthorSubjectType: "chat", AuthorSubjectID: event.Conversation}
-	routingSource, err := events.NewExternalIngressRoutingSource(request.FlowPath, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	delivery, admission, err := trigger.ProjectPublication(authenticated, f.candidate.Source.BundleHash(), request.FlowPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for ordinal, output := range []struct {
-		name          events.EventType
-		body          []byte
-		kind          runtimeprovideroutput.Kind
-		authorization runtimeprovideroutput.Authorization
-	}{{"inbound.whatsapp", event.Body, runtimeprovideroutput.KindRaw, runtimeprovideroutput.Authorization{}},
-		{normalized[0].Name, normalizedBody, runtimeprovideroutput.KindNormalized, authorization}} {
-		id, err := runtimeinbound.DeterministicEventID(request.PublicationID, ordinal)
+	batch := runtimebus.InboundDeliveryBatch{Provider: "whatsapp", Admission: admission, AuthorSubjectType: "chat", AuthorSubjectID: event.Conversation}
+	for ordinal, output := range delivery.Events {
+		projected, err := runtimeinbound.ProjectOutputEvent(request, ordinal, output, executionposture.Live)
 		if err != nil {
 			t.Fatal(err)
 		}
-		batch.Events = append(batch.Events, runtimebus.InboundDeliveryEvent{Kind: output.kind, Authorization: output.authorization,
-			Event: eventtest.ExistingRunRootIngressWithRoutingSource(id, output.name, "inbound-gateway", "", output.body, 0, request.ResolvedRunID,
-				events.EventEnvelope{}, routingSource, request.OriginalReceivedAt)})
+		batch.Events = append(batch.Events, projected)
 	}
 	plan, err := f.bus.PrepareInboundDeliveryBatch(f.ctx, batch)
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.plans++
+	if f.prepared == nil {
+		f.prepared = make(map[string]runtimebus.InboundDeliveryPlan)
+	}
+	f.prepared[request.PublicationID] = plan
 	t.Cleanup(func() {
 		if err := f.bus.AbandonInboundDeliveryPlan(context.Background(), plan); err != nil {
 			t.Error(err)
 		}
 	})
-	command := runtimeinbound.CommitCommand{Request: request, Publications: plan.CommitCommands()}
+	command := runtimeinbound.CommitCommand{Admission: plan.Admission(), Request: request, Publications: plan.CommitCommands()}
 	command.AuthorProjection, _ = runtimeauthoractivity.InboundProjectionFromContext(f.ctx)
 	for ordinal, prepared := range plan.PreparedPublications() {
 		manifest, _, _, err := runtimeinbound.CanonicalRecipientManifest(prepared.DeliveryRoutes())
@@ -676,17 +653,51 @@ func (f *sessionPublicationFixture) command(t *testing.T, event capturedEvent) r
 			Ordinal: ordinal, Event: prepared.Event, Kind: batch.Events[ordinal].Kind,
 			Authorization: batch.Events[ordinal].Authorization, RecipientManifest: manifest})
 	}
-	payload, err := runtimeinbound.BuildEvidencePayload(request,
+	evidencePayload, err := runtimeinbound.BuildEvidencePayload(request,
 		[]string{batch.Events[0].Event.ID(), batch.Events[1].Event.ID()}, []string{string(batch.Events[0].Event.Type()), string(batch.Events[1].Event.Type())})
 	if err != nil {
 		t.Fatal(err)
 	}
 	command.Finalization.EvidenceEvent = eventtest.DiagnosticDirect(request.MarkerEventID, events.EventTypePlatformInboundRecord,
-		"runtime", "", payload, 0, request.ResolvedRunID, "", events.EventEnvelope{}, request.OriginalReceivedAt)
+		"runtime", "", evidencePayload, 0, request.ResolvedRunID, "", events.EventEnvelope{}, request.OriginalReceivedAt)
 	if err := command.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	return command
+}
+
+func (f *sessionPublicationFixture) commit(ctx context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
+	result, err := f.selected.CommitInboundPublication(ctx, command)
+	if err != nil || !result.Acknowledged || !result.Record.Created {
+		return result, err
+	}
+	plan, found := f.prepared[command.Request.PublicationID]
+	if !found {
+		return result, fmt.Errorf("fixture publication lost its prepared delivery plan")
+	}
+	prepared, err := f.bus.ApplyInboundDeliveryCommit(ctx, plan, result.Publications)
+	if err != nil {
+		return result, err
+	}
+	for _, publication := range prepared {
+		if err := f.bus.DispatchPreparedPublish(ctx, publication); err != nil {
+			return result, err
+		}
+	}
+	return result, nil
+}
+
+func fixtureRawPublicationMatches(event capturedEvent, body []byte) bool {
+	var content map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes(event.Body, &content); err != nil {
+		return false
+	}
+	expected, err := canonicaljson.MarshalPreservingNumberKinds(map[string]any{
+		"provider": "whatsapp", "event_type": event.Kind, "provider_event_type": event.Kind,
+		"provider_event_id": event.EventID, "provider_delivery_id": event.EventID,
+		"payload": content, "headers": map[string]any{}, "received_at": event.ReceivedAt.UTC().Format(time.RFC3339),
+	})
+	return err == nil && bytes.Equal(body, expected)
 }
 
 func TestWhatsAppSessionCaptureNormalizedPublicationBothStores(t *testing.T) {
@@ -703,7 +714,7 @@ func TestWhatsAppSessionCaptureNormalizedPublicationBothStores(t *testing.T) {
 			if err := spool.stagePublication(f.ctx, event, command.Request); err != nil {
 				t.Fatal(err)
 			}
-			result, err := f.selected.CommitInboundPublication(f.ctx, command)
+			result, err := f.commit(f.ctx, command)
 			if err != nil || !result.Acknowledged || !result.Record.Created || result.Record.OutputCount != 2 {
 				t.Fatalf("real normalized commit: %+v %v", result, err)
 			}
@@ -724,12 +735,12 @@ func TestWhatsAppSessionCaptureNormalizedPublicationBothStores(t *testing.T) {
 				t.Fatalf("historical reconciliation replanned or failed: %t plans=%d %v", settled, f.plans, err)
 			}
 			record, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, command.Request.Identity())
-			if err != nil || !found || record.OutputCount != 2 || len(record.Events) != 2 || !bytes.Equal(record.Events[0].Event.Payload(), event.Body) {
+			if err != nil || !found || record.OutputCount != 2 || len(record.Events) != 2 || !fixtureRawPublicationMatches(event, record.Events[0].Event.Payload()) {
 				t.Fatalf("verified historical event set changed: %+v %t %v", record, found, err)
 			}
 			changed := command
 			changed.Request.RequestFingerprint, _ = runtimeinbound.SemanticFingerprint("different capture")
-			if _, err := f.selected.CommitInboundPublication(f.ctx, changed); !errors.Is(err, runtimeinbound.ErrRequestIdentityConflict) {
+			if _, err := f.commit(f.ctx, changed); !errors.Is(err, runtimeinbound.ErrRequestIdentityConflict) {
 				t.Fatal("canonical store accepted different content", err)
 			}
 		})

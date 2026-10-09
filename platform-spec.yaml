@@ -11346,9 +11346,14 @@ tool_model:
       session_publication_commit: >
         Native business delivery consumes the existing trigger admission, BODY projection, inbound event/evidence
         projection, EventBus preparation, selected-store atomic inbound commit and post-commit dispatch owners.
-        Prepared native commands privately retain their original input fact: generic publication rejects them,
-        and the inbound command requires the same sealed admission rather than allowing a dropped or substituted
-        transfer. Its transaction-local responsibility preflight uses the same operation, activation and binding
+        Each prepared ingress commit retains its original immutable output seal in the canonical commit value.
+        Typed external-ingress source facts require that seal even after exported command reconstruction;
+        generic publication refuses external ingress, and inbound publication requires the original seal and
+        exact admitted output rather than accepting missing, reconstructed or substituted authority. This applies
+        to both webhook and session ingress, without provider-name inference. Commit checks retain the declaring
+        source independently of canonical receiver coordinates introduced by route planning; original input cannot
+        preclaim those coordinates or a concrete sender. Native transaction-local responsibility preflight uses
+        the same operation, activation and binding
         semantic predicates as fresh admission and the existing typed selected-owner codecs. Parent ownership is
         locked before the principal; principal ownership precedes binding and activation. Standing source, run,
         generation, publication sequence and executable disposition remain fenced by the existing standing owner.
@@ -11361,6 +11366,16 @@ tool_model:
         not redispatch. Verified historical receipt reconciliation may retire the original private capture after
         SDK retirement without reissuing execution authority. This does not make unfinished recovery, provider
         installation, served operator controls or physical interoperability implicit in a component fixture.
+      session_private_persistence: >
+        The connection-private SDK and incoming-capture database is owned by the private store session persistence
+        implementation and consumed through typed SDK storage and capture operations. It is not the selected runtime
+        store. Provider consumers receive no database, transaction, query, SQL-capable SDK container or general
+        mutation callback. Shared capture evidence is data only; account, input and claim issuance remain inside
+        the closed native session owner. Directory/file possession and SDK write fencing/join precede database
+        release. Capture quota, whole-row/digest validation, original staged request bytes and receipt-verified
+        retirement retain one semantic owner. Private-state tests consume finite named corruption, quota, fault,
+        close/reopen and observation fixtures. Selected-store tests consume exact-instance onboarding lock/waiter,
+        publication failure and release operations, never a recovered pool or general transaction capability.
       session_operator_claim: >
         Declaration-first onboarding consumes original native capture bytes through the verified trigger BODY and
         the exact compiled channel text mapping. The closed native claim fact retains the original parent operation

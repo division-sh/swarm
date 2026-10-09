@@ -13,7 +13,7 @@ import (
 	"time"
 
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -53,18 +53,10 @@ func TestWhatsAppHistoricalPublicationProcessDeathBothStores(t *testing.T) {
 		}
 		var reader publicationReader
 		if os.Getenv(backendKey) == "sqlite" {
-			selected, err := store.NewSQLiteRuntimeStore(os.Getenv(locationKey))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = selected.Close() })
+			selected, _ := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background(), os.Getenv(locationKey))
 			reader = selected
 		} else {
-			selected, err := store.NewPostgresStore(os.Getenv(locationKey))
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = selected.Close() })
+			selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, os.Getenv(locationKey))
 			reader = selected
 		}
 		_, spool := openCaptureFixture(t, os.Getenv(capturePathKey), event.Scope.Session.ConnectionID)
@@ -84,7 +76,7 @@ func TestWhatsAppHistoricalPublicationProcessDeathBothStores(t *testing.T) {
 				t.Run(phase, func(t *testing.T) {
 					event := f.capture(t)
 					command := f.command(t, event)
-					if result, err := f.selected.CommitInboundPublication(f.ctx, command); err != nil || !result.Acknowledged {
+					if result, err := f.commit(f.ctx, command); err != nil || !result.Acknowledged {
 						t.Fatalf("publication for interruption proof: %+v %v", result, err)
 					}
 					duplicate := event
@@ -155,7 +147,7 @@ func TestWhatsAppHistoricalPublicationProcessDeathBothStores(t *testing.T) {
 							t.Fatal("historically retired duplicate reappeared")
 						}
 					} else {
-						if len(pending) != 1 || !pending[0].sameCapture(duplicate) {
+						if len(pending) != 1 || !pending[0].SameCapture(duplicate) {
 							t.Fatal("interrupted historical read lost capture before retirement")
 						}
 						if settled, err := spool.reconcilePublished(f.ctx, pending[0], f.selected); err != nil || !settled {

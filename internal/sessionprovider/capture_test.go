@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/store/sessionstate"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -67,7 +67,7 @@ func TestWhatsAppCaptureScopeAndReceiptAreClosedProducts(t *testing.T) {
 	claimed := bootstrap
 	claimed.Scope.BindingRevision = 1
 	for _, event := range []capturedEvent{bootstrap, claimed, business} {
-		if err := event.validate(); err != nil {
+		if err := event.Validate(); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -185,23 +185,23 @@ func TestWhatsAppCaptureProcessDeathBeforeAndAfterCommit(t *testing.T) {
 	}
 }
 
-func openCaptureFixture(t *testing.T, path, connectionID string) (*sql.DB, *captureStore) {
+func openCaptureFixture(t *testing.T, path, connectionID string) (*sessionstate.Fixture, *captureStore) {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?_pragma=synchronous(FULL)")
+	fixture, owner, err := sessionstate.OpenCaptureFixture(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := newCaptureStore(context.Background(), db, connectionID)
+	capture, err := newCaptureStore(context.Background(), owner, connectionID)
 	if err != nil {
-		_ = db.Close()
+		_ = fixture.Close()
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := db.Close(); err != nil {
+		if err := fixture.Close(); err != nil {
 			t.Error(err)
 		}
 	})
-	return db, store
+	return fixture, capture
 }
 
 func TestWhatsAppCaptureAcknowledgmentRequiresCommitAndSurvivesReopen(t *testing.T) {
@@ -238,8 +238,7 @@ func TestWhatsAppCaptureAcknowledgmentRequiresCommitAndSurvivesReopen(t *testing
 func TestWhatsAppCaptureWriteFailureHasNoAckAndRetainsFailureEvidence(t *testing.T) {
 	event := captureFixture(t)
 	db, store := openCaptureFixture(t, filepath.Join(t.TempDir(), "incoming.db"), event.Scope.Session.ConnectionID)
-	if _, err := db.Exec(`CREATE TRIGGER reject_capture BEFORE INSERT ON whatsapp_incoming_capture
-		BEGIN SELECT RAISE(ABORT,'capture fixture write failure'); END`); err != nil {
+	if err := db.SetCaptureFault(context.Background(), sessionstate.CaptureInsertFault, true); err != nil {
 		t.Fatal(err)
 	}
 	guard, err := newCallbackGuard(context.Background(), event.Scope.Session.ConnectionID, event.OccurrenceID,
@@ -254,8 +253,7 @@ func TestWhatsAppCaptureWriteFailureHasNoAckAndRetainsFailureEvidence(t *testing
 	if err != nil || len(got) != 0 {
 		t.Fatalf("failed capture retained a partial event: %+v %v", got, err)
 	}
-	var reason string
-	if err := db.QueryRow(`SELECT reason FROM whatsapp_callback_failures WHERE occurrence_id=?`, event.OccurrenceID).Scan(&reason); err != nil || reason != "capture_failed" {
+	if reason, err := db.CallbackFailureReason(context.Background(), event.OccurrenceID); err != nil || reason != "capture_failed" {
 		t.Fatalf("failure evidence missing: %q %v", reason, err)
 	}
 }
@@ -271,8 +269,7 @@ func TestWhatsAppCapturePanicsBeforeCommitRetainOnlyFailureEvidence(t *testing.T
 	if guard.receive(event) {
 		t.Fatal("panic was acknowledged")
 	}
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM whatsapp_callback_failures WHERE occurrence_id=? AND reason='crash'`, event.OccurrenceID).Scan(&count); err != nil || count != 1 {
+	if count, err := db.CallbackFailureCount(context.Background(), "", event.OccurrenceID, "crash"); err != nil || count != 1 {
 		t.Fatalf("durable crash evidence missing: %d %v", count, err)
 	}
 	got, err := store.pending(context.Background())
@@ -311,32 +308,10 @@ func TestWhatsAppCaptureBoundsRefuseWithoutTrimming(t *testing.T) {
 
 // Quota setup is not an append-throughput proof. Seed the exact private state
 // once, then independently validate every row through the production reader.
-func seedCaptureQuotaFixture(t *testing.T, db *sql.DB, capture *captureStore, event capturedEvent, count int) {
+func seedCaptureQuotaFixture(t *testing.T, db *sessionstate.Fixture, capture *captureStore, event capturedEvent, count int) {
 	t.Helper()
 	event.EventID = "0"
-	if err := capture.capture(context.Background(), event); err != nil {
-		t.Fatal(err)
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-	for i := 1; i < count; i++ {
-		event.EventID = fmt.Sprint(i)
-		envelope, err := json.Marshal(event)
-		if err != nil {
-			t.Fatal(err)
-		}
-		digest := sha256.Sum256(envelope)
-		if _, err := tx.Exec(`INSERT INTO whatsapp_incoming_capture
-			(connection_id,account_ref,conversation_ref,event_id,event_kind,body_bytes,envelope,digest)
-			VALUES(?,?,?,?,?,?,?,?)`, event.Scope.Session.ConnectionID, event.Scope.Session.AccountRef, event.Conversation,
-			event.EventID, event.Kind, len(event.Body), envelope, digest[:]); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
+	if err := db.SeedCaptureQuota(context.Background(), event, count); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := capture.pending(context.Background())
@@ -352,25 +327,13 @@ func seedCaptureQuotaFixture(t *testing.T, db *sql.DB, capture *captureStore, ev
 	}
 }
 
-func captureRawRowsFixture(t *testing.T, db *sql.DB) [][]byte {
+func captureRawRowsFixture(t *testing.T, fixture *sessionstate.Fixture) [][]byte {
 	t.Helper()
-	rows, err := db.Query(`SELECT envelope,digest FROM whatsapp_incoming_capture ORDER BY sequence`)
+	rows, err := fixture.CaptureRawRows(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
-	var result [][]byte
-	for rows.Next() {
-		var envelope, digest []byte
-		if err := rows.Scan(&envelope, &digest); err != nil {
-			t.Fatal(err)
-		}
-		result = append(result, envelope, digest)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	return result
+	return rows
 }
 
 func TestWhatsAppCaptureSurvivesRebindResetWithoutNewAuthority(t *testing.T) {
@@ -400,7 +363,7 @@ func TestWhatsAppCaptureSurvivesRebindResetWithoutNewAuthority(t *testing.T) {
 			if err != nil || len(got) != 1 || !reflect.DeepEqual(got[0], event) {
 				t.Fatal("retained capture was deleted or rewritten")
 			}
-			if err := got[0].requireOriginalScope(current); !errors.Is(err, errCaptureScopeChanged) {
+			if err := got[0].RequireOriginalScope(current); !errors.Is(err, errCaptureScopeChanged) {
 				t.Fatalf("old capture adopted new authority: %v", err)
 			}
 		})
@@ -429,7 +392,7 @@ func TestWhatsAppCaptureIdentityCollisionAndCorruptionRefuse(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := db.Exec(`UPDATE whatsapp_incoming_capture SET conversation_ref='tampered' WHERE sequence=1`); err != nil {
+	if err := db.CorruptFirstCaptureConversation(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.pending(context.Background()); err == nil {
