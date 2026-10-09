@@ -42,6 +42,21 @@ func (o *sessionInputOwner) admit(ctx context.Context, reference SessionInputRef
 	if err != nil {
 		return input.Admission{}, err
 	}
+	return o.admitRetainedInput(ctx, reference, native, false)
+}
+
+func (o *sessionInputOwner) recoverBusiness(ctx context.Context, reference SessionInputReference) (input.Admission, error) {
+	if o == nil || ctx == nil || ctx.Err() != nil {
+		return input.Admission{}, fmt.Errorf("current native input owner is required")
+	}
+	native, err := o.native.readPendingBusinessInput(ctx, reference)
+	if err != nil {
+		return input.Admission{}, err
+	}
+	return o.admitRetainedInput(ctx, reference, native, true)
+}
+
+func (o *sessionInputOwner) admitRetainedInput(ctx context.Context, reference SessionInputReference, native nativeSessionInput, recovery bool) (input.Admission, error) {
 	if native.Release == nil {
 		return input.Admission{}, fmt.Errorf("native capture must retain its SDK lifetime")
 	}
@@ -60,12 +75,10 @@ func (o *sessionInputOwner) admit(ctx context.Context, reference SessionInputRef
 	if err != nil {
 		return input.Admission{}, err
 	}
-	if !native.matchesOriginalOperation(op, native.SourceContext.Coordinate) {
-		return input.Admission{}, fmt.Errorf("native capture is outside its original responsibility")
+	responsibility, err := o.inputResponsibility(ctx, native, op, recovery)
+	if err != nil {
+		return input.Admission{}, err
 	}
-	responsibility := channelonboarding.AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: native.OperationRevision,
-		ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
-		Provider: op.Provider, Credentials: append([]channelonboarding.CredentialAdmission(nil), op.CredentialAdmissions...), SessionAccount: op.SessionAccount}
 	current, err := channelonboarding.AdmissionResponsibilityCurrent(ctx, o.store, responsibility, true)
 	if err != nil {
 		return input.Admission{}, err
@@ -84,6 +97,41 @@ func (o *sessionInputOwner) admit(ctx context.Context, reference SessionInputRef
 		Scope: native.Scope, BindingRevision: native.BindingRevision, PublicationRunID: native.PublicationBinding.RunID,
 		Body: native.Body, OriginalCapture: original, ReceivedAt: native.ReceivedAt, Generation: native.SourceContext.CatalogGeneration, Context: ownedContext,
 		Release: func() { cancel(); native.Release() }, NativeCurrent: native.NativeCurrent, RunCurrent: o.businessRunOwner(native)}), nil
+}
+
+func (o *sessionInputOwner) inputResponsibility(ctx context.Context, native nativeSessionInput, op channelonboarding.Operation, recovery bool) (channelonboarding.AdmissionResponsibility, error) {
+	original := channelonboarding.AdmissionResponsibility{OperationID: native.OperationID, OperationRevision: native.OperationRevision,
+		ActivationRevision: native.ActivationRevision, Coordinate: native.SourceContext.Coordinate, TargetSelector: native.TargetSelector,
+		Provider: native.Account.Provider, SessionAccount: native.Account}
+	if !recovery {
+		if !native.matchesOriginalOperation(op, native.SourceContext.Coordinate) {
+			return original, fmt.Errorf("native capture is outside its original responsibility")
+		}
+		original.Credentials = append([]channelonboarding.CredentialAdmission(nil), op.CredentialAdmissions...)
+		if native.Scope == channelonboarding.SessionInputBusiness {
+			activation, err := o.store.GetConnectedChannelActivation(ctx, op.SlotKey)
+			if err != nil {
+				return original, err
+			}
+			if activation.ActivationID != native.ActivationID || !original.MatchesActivation(op, activation) {
+				return original, errCaptureScopeChanged
+			}
+		}
+		return original, nil
+	}
+	if native.Scope != channelonboarding.SessionInputBusiness || native.PrincipalID != op.PrincipalID ||
+		!native.Source.Matches(op.Coordinate.DurableIdentity()) || op.ValidateSessionAccount() != nil {
+		return original, errCaptureScopeChanged
+	}
+	activation, err := o.store.GetConnectedChannelActivation(ctx, op.SlotKey)
+	if err != nil {
+		return original, err
+	}
+	resumed, ok := original.ResumeSessionBusiness(op, activation, native.BindingRevision, native.ActivationID)
+	if !ok {
+		return original, errCaptureScopeChanged
+	}
+	return resumed, nil
 }
 
 func (o *sessionInputOwner) businessRunOwner(native nativeSessionInput) func(context.Context) error {

@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/sessionprovider/input"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
@@ -69,6 +70,8 @@ type activeInputFixture struct {
 	mu         sync.Mutex
 	scope      captureScope
 	handled    chan capturedEvent
+	basePath   string
+	location   string
 }
 
 // The peer supplies encrypted network frames; SDK decryption/capture, selected
@@ -78,9 +81,11 @@ func newActiveInputFixture(t *testing.T, backend string) *activeInputFixture {
 	t.Helper()
 	f := &activeInputFixture{handled: make(chan capturedEvent, 1)}
 	if backend == "sqlite" {
-		f.selected = storetest.StartSQLiteRuntimeStore(t)
+		f.location = filepath.Join(t.TempDir(), "runtime.db")
+		f.selected, _ = storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background(), f.location)
 	} else {
-		f.selected = storetest.StartPostgresRuntimeStore(t)
+		f.location = testutil.StartPostgresDSN(t)
+		f.selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, f.location)
 	}
 	ctx, now := context.Background(), time.Now().UTC().Truncate(time.Microsecond)
 	source := sourceartifactfixture.Require(t, ctx, f.selected)
@@ -105,6 +110,7 @@ func newActiveInputFixture(t *testing.T, backend string) *activeInputFixture {
 		t.Fatal(err)
 	}
 	base, connectionID := t.TempDir(), uuid.NewString()
+	f.basePath = base
 	if err := os.Chmod(base, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -147,10 +153,11 @@ func newActiveInputFixture(t *testing.T, backend string) *activeInputFixture {
 		t.Fatal(err)
 	}
 	f.ctx = worklifetime.WithOccurrence(f.ctx, f.workOwner)
+	initialWorkOwner := f.workOwner
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if _, err := f.workOwner.RetireAndWait(ctx); err != nil {
+		if _, err := initialWorkOwner.RetireAndWait(ctx); err != nil {
 			t.Error(err)
 		}
 		process.Retire()
@@ -162,28 +169,12 @@ func newActiveInputFixture(t *testing.T, backend string) *activeInputFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, f.spool = openCaptureFixture(t, filepath.Join(t.TempDir(), "incoming.db"), connectionID)
-	f.setScope(channelonboarding.SessionInputOnboarding)
-	if _, err := f.occurrence.bindCallbacks(func(ctx context.Context, raw any) error {
-		message, ok := raw.(*waEvents.Message)
-		if !ok {
-			return nil
-		}
-		f.mu.Lock()
-		scope := f.scope
-		f.mu.Unlock()
-		event, err := captureSDKMessage(scope, f.source, f.occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond))
-		if err != nil {
-			return err
-		}
-		if err := f.spool.capture(ctx, event); err != nil {
-			return err
-		}
-		f.handled <- event
-		return nil
-	}, f.spool.recordFailure); err != nil {
+	f.spool, err = newCaptureStore(f.ctx, f.state.database, connectionID)
+	if err != nil {
 		t.Fatal(err)
 	}
+	f.setScope(channelonboarding.SessionInputOnboarding)
+	f.bindCaptureCallbacks(t)
 	f.peer.attach(t, f.occurrence.client)
 	if err := f.occurrence.connect(); err != nil || !f.occurrence.client.WaitForConnection(5*time.Second) {
 		t.Fatal("native connection", err)
@@ -214,6 +205,33 @@ func newActiveInputFixture(t *testing.T, backend string) *activeInputFixture {
 	return f
 }
 
+func (f *activeInputFixture) bindCaptureCallbacks(t *testing.T) {
+	t.Helper()
+	if f.handled == nil {
+		f.handled = make(chan capturedEvent, 1)
+	}
+	if _, err := f.occurrence.bindCallbacks(func(ctx context.Context, raw any) error {
+		message, ok := raw.(*waEvents.Message)
+		if !ok {
+			return nil
+		}
+		f.mu.Lock()
+		scope := f.scope
+		f.mu.Unlock()
+		event, err := captureSDKMessage(scope, f.source, f.occurrence.occurrenceID, message, time.Now().UTC().Truncate(time.Microsecond))
+		if err != nil {
+			return err
+		}
+		if err := f.spool.capture(ctx, event); err != nil {
+			return err
+		}
+		f.handled <- event
+		return nil
+	}, f.spool.recordFailure); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (f *activeInputFixture) setScope(kind channelonboarding.SessionInputScope) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -222,12 +240,29 @@ func (f *activeInputFixture) setScope(kind channelonboarding.SessionInputScope) 
 		PrincipalID: f.operation.PrincipalID, BindingRevision: f.operation.BindingRevision}
 	if kind == channelonboarding.SessionInputBusiness {
 		f.scope.OperationRevision = f.activation.OperationRevision
+		f.scope.ActivationID = f.activation.ActivationID
 		f.scope.ActivationRevision = f.activation.Revision
 		f.scope.PublicationBinding = inbound.BindingGeneration{ServiceID: f.standing.ServiceID, RunID: f.standing.RunID, Generation: f.standing.Generation}
 	}
 }
 
 func (f *activeInputFixture) receive(t *testing.T, text string) (capturedEvent, input.Admission) {
+	return f.receiveSDK(t, text, uuid.NewString(), time.Now())
+}
+
+func (f *activeInputFixture) receiveSDK(t *testing.T, text, id string, at time.Time) (capturedEvent, input.Admission) {
+	t.Helper()
+	event := f.receiveCaptureSDK(t, text, id, at)
+	admitted, err := f.owner.admit(f.ctx, SessionInputReference{ConnectionID: event.Scope.Session.ConnectionID,
+		OccurrenceID: event.OccurrenceID, Conversation: event.Conversation, EventID: event.EventID, Kind: event.Kind})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(admitted.Close)
+	return event, admitted
+}
+
+func (f *activeInputFixture) receiveCaptureSDK(t *testing.T, text, id string, at time.Time) capturedEvent {
 	t.Helper()
 	device, err := f.state.device(f.peer.ctx)
 	if err != nil {
@@ -236,7 +271,7 @@ func (f *activeInputFixture) receive(t *testing.T, text string) (capturedEvent, 
 	from := types.NewJID("100000000003", types.DefaultUserServer)
 	from.Device = 1
 	message := encryptedMessageFromFixture(t, device, f.sender, from, &waE2E.Message{Conversation: proto.String(text)})
-	message.Attrs["id"] = uuid.NewString()
+	message.Attrs["id"], message.Attrs["t"] = id, at.Unix()
 	f.peer.mu.Lock()
 	socket := f.peer.peers[0]
 	f.peer.mu.Unlock()
@@ -249,13 +284,7 @@ func (f *activeInputFixture) receive(t *testing.T, text string) (capturedEvent, 
 	case <-f.peer.ctx.Done():
 		t.Fatal("no native capture")
 	}
-	admitted, err := f.owner.admit(f.ctx, SessionInputReference{ConnectionID: event.Scope.Session.ConnectionID,
-		OccurrenceID: event.OccurrenceID, Conversation: event.Conversation, EventID: event.EventID, Kind: event.Kind})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(admitted.Close)
-	return event, admitted
+	return event
 }
 
 func (f *activeInputFixture) activate(t *testing.T) {

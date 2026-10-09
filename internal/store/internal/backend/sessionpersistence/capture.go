@@ -1,7 +1,6 @@
 package sessionpersistence
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -84,7 +83,7 @@ func (s *CaptureStore) Capture(ctx context.Context, event capturedEvent) error {
 		}
 		// A recovered occurrence may see the same provider delivery again. All
 		// stored routing and quota evidence was validated before this success.
-		if prior.Scope != event.Scope || !prior.Source.CatalogGeneration.Equal(event.Source.CatalogGeneration) || !bytes.Equal(prior.Body, event.Body) {
+		if !prior.SameDelivery(event) {
 			return errCaptureConflict
 		}
 		return tx.Commit()

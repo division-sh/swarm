@@ -11376,6 +11376,30 @@ tool_model:
         retirement retain one semantic owner. Private-state tests consume finite named corruption, quota, fault,
         close/reopen and observation fixtures. Selected-store tests consume exact-instance onboarding lock/waiter,
         publication failure and release operations, never a recovered pool or general transaction capability.
+      session_business_handoff: >
+        The incoming handoff reads bounded private capture rows and reconciles exact selected-store publication
+        history before seeking executable authority. Verified committed rows may retire without a live SDK;
+        uncommitted business rows require a fresh connected occurrence over the same exclusively owned pairing.
+        The existing admission responsibility owner permits only an existing activation's process-coordinate
+        refresh: original operation and stable activation ID, source and catalog, provider account,
+        admission, principal, binding revision, target generation and selected publication run remain exact.
+        A changed binding, replacement activation, source, account or target cannot adopt pending work.
+        The exact retained activation may advance its operation/activation revisions only through its authorized
+        process-coordinate refresh; unchanged coordinates cannot justify adopting different revisions.
+        The original capture, SDK occurrence, receipt time, staged request bytes and publication identity never
+        change during resumption. Fresh input still requires its original live occurrence; only the private
+        pending-business consumer may resume verified durable capture. Preparation, durable staging, atomic
+        publication and post-commit dispatch use their existing owners; refusal, rollback and conflicting
+        staged requests retain evidence. Setup rows belong to claim reconciliation and are not business work.
+        This owner never retries outgoing effects or redispatches a verified historical publication.
+        Stable business-publication comparison includes the captured activation ID and all durable scope fields,
+        but excludes process-refresh operation/activation revisions, socket occurrence and receipt time. Those
+        originals remain immutable provenance and mandatory unfinished-admission checks. Identical redelivery
+        after an authorized coordinate refresh therefore reconciles only verified original history, while a
+        changed activation, binding, account, source, principal, publication run or body still refuses.
+        Private duplicate-capture admission consumes that same delivery projection after validating complete
+        stored routing, digest and byte-count evidence. A matching redelivery never overwrites the original pending
+        capture or staged request. Setup revisions remain exact and cannot borrow business resumption semantics.
       session_operator_claim: >
         Declaration-first onboarding consumes original native capture bytes through the verified trigger BODY and
         the exact compiled channel text mapping. The closed native claim fact retains the original parent operation

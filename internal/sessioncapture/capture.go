@@ -33,6 +33,7 @@ type Scope struct {
 	Source              channelonboarding.ChannelDurableContextIdentity
 	OnboardingOperation string
 	OperationRevision   int64
+	ActivationID        string
 	ActivationRevision  int64
 	TargetSelector      string
 	PrincipalID         string
@@ -48,14 +49,14 @@ func (s Scope) Validate() error {
 	}
 	switch s.Kind {
 	case channelonboarding.SessionInputOnboarding:
-		if s.PublicationBinding != (runtimeinbound.BindingGeneration{}) || s.ActivationRevision != 0 {
+		if s.PublicationBinding != (runtimeinbound.BindingGeneration{}) || s.ActivationRevision != 0 || s.ActivationID != "" {
 			return fmt.Errorf("WhatsApp onboarding capture cannot carry business publication authority")
 		}
 	case channelonboarding.SessionInputBusiness:
 		if err := s.PublicationBinding.Validate(); err != nil {
 			return err
 		}
-		if s.BindingRevision < 1 || s.ActivationRevision < 1 {
+		if s.BindingRevision < 1 || s.ActivationRevision < 1 || uuid.Validate(s.ActivationID) != nil {
 			return fmt.Errorf("WhatsApp business capture requires its confirmed binding")
 		}
 	default:
@@ -91,6 +92,10 @@ func (e Event) Validate() error {
 	if e.Source.Coordinate.ValidateContext() != nil || !e.Source.CatalogGeneration.Valid() ||
 		!e.Scope.Source.Matches(e.Source.Coordinate.DurableIdentity()) {
 		return fmt.Errorf("WhatsApp capture requires its frozen exact source and catalog")
+	}
+	if e.Scope.Kind == channelonboarding.SessionInputBusiness &&
+		(e.Source.Coordinate.Validate() != nil || e.Source.Coordinate.TargetGeneration != uint64(e.Scope.PublicationBinding.Generation)) {
+		return fmt.Errorf("WhatsApp business capture contradicts its original target generation")
 	}
 	if uuid.Validate(e.OccurrenceID) != nil || e.Conversation == "" || e.EventID == "" ||
 		(e.Kind != "message" && e.Kind != "edit" && e.Kind != "revoke") {
@@ -146,11 +151,42 @@ func (e Event) PublicationFingerprint() (string, error) {
 		return "", err
 	}
 	return runtimeinbound.SemanticFingerprint(struct {
-		Scope                       Scope
+		Scope                       publicationAuthority
 		Conversation, EventID, Kind string
 		Body                        []byte
 		CatalogGeneration           string
-	}{e.Scope, e.Conversation, e.EventID, e.Kind, e.Body, e.Source.CatalogGeneration.Diagnostic()})
+	}{e.Scope.publicationAuthority(), e.Conversation, e.EventID, e.Kind, e.Body, e.Source.CatalogGeneration.Diagnostic()})
+}
+
+// Coordinate rebinding advances process revisions, not the stable activation.
+// Original revisions remain in capture/provenance and gate unfinished execution.
+type publicationAuthority struct {
+	Kind                channelonboarding.SessionInputScope
+	Session             operatorchannel.SessionAccountAdmission
+	PublicationBinding  runtimeinbound.BindingGeneration
+	Source              channelonboarding.ChannelDurableContextIdentity
+	OnboardingOperation string
+	ActivationID        string
+	TargetSelector      string
+	PrincipalID         string
+	BindingRevision     int64
+	OperationRevision   int64
+	ActivationRevision  int64
+}
+
+func (s Scope) publicationAuthority() publicationAuthority {
+	result := publicationAuthority{Kind: s.Kind, Session: s.Session, PublicationBinding: s.PublicationBinding,
+		Source: s.Source, OnboardingOperation: s.OnboardingOperation, ActivationID: s.ActivationID,
+		TargetSelector: s.TargetSelector, PrincipalID: s.PrincipalID, BindingRevision: s.BindingRevision}
+	if s.Kind != channelonboarding.SessionInputBusiness {
+		result.OperationRevision, result.ActivationRevision = s.OperationRevision, s.ActivationRevision
+	}
+	return result
+}
+
+func (e Event) SameDelivery(other Event) bool {
+	return e.Scope.publicationAuthority() == other.Scope.publicationAuthority() && e.Conversation == other.Conversation &&
+		e.EventID == other.EventID && e.Kind == other.Kind && e.Source.CatalogGeneration.Equal(other.Source.CatalogGeneration) && bytes.Equal(e.Body, other.Body)
 }
 
 const CaptureProvenanceKey = "whatsapp_capture"
@@ -279,6 +315,9 @@ func DecodePublicationRequest(event Event, raw, digest []byte) (runtimeinbound.R
 // Staging freezes the request selected by the existing runtime admission owner;
 // it does not grant account, target, standing or normalized-output authority.
 func VerifyHistoricalCapture(event Event, record runtimeinbound.Record) ([]byte, error) {
+	if err := event.Validate(); err != nil {
+		return nil, err
+	}
 	if record.State != "committed" || record.CommittedAt.IsZero() {
 		return nil, ErrCapturePublicationPending
 	}
@@ -289,8 +328,7 @@ func VerifyHistoricalCapture(event Event, record runtimeinbound.Record) ([]byte,
 	if err := ValidateCapturePublication(original, record.Request); err != nil {
 		return nil, err
 	}
-	if original.Scope != event.Scope || original.Conversation != event.Conversation || original.EventID != event.EventID ||
-		original.Kind != event.Kind || !original.Source.CatalogGeneration.Equal(event.Source.CatalogGeneration) || !bytes.Equal(original.Body, event.Body) {
+	if !original.SameDelivery(event) {
 		return nil, runtimeinbound.ErrRequestIdentityConflict
 	}
 	return PublicationRequestBytes(record.Request)

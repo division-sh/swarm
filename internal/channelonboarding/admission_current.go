@@ -74,3 +74,28 @@ func (expected AdmissionResponsibility) MatchesBusinessBinding(op Operation, act
 		binding.ProofRevision == activation.ProofRevision && binding.ProviderAuthority.Kind == operatorchannel.ProviderAuthoritySession &&
 		binding.ProviderAuthority.Session == expected.SessionAccount
 }
+
+// ResumeSessionBusiness projects only an existing activation's process-coordinate
+// refresh. Its publication operation, account, binding and target stay original.
+func (expected AdmissionResponsibility) ResumeSessionBusiness(op Operation, activation ConnectedChannelActivation, bindingRevision int64, activationID string) (AdmissionResponsibility, bool) {
+	if op.Posture != ActivationSessionConnection || expected.ActivationRevision < 1 ||
+		bindingRevision < 1 || op.BindingRevision != bindingRevision ||
+		!expected.Coordinate.MatchesDurableIdentity(op.Coordinate) ||
+		expected.Coordinate.TargetGeneration != op.Coordinate.TargetGeneration ||
+		activationID == "" || activation.ActivationID != activationID ||
+		activation.OperationRevision < expected.OperationRevision || activation.Revision < expected.ActivationRevision {
+		return AdmissionResponsibility{}, false
+	}
+	if expected.Coordinate.Matches(op.Coordinate) &&
+		(activation.OperationRevision != expected.OperationRevision || activation.Revision != expected.ActivationRevision) {
+		return AdmissionResponsibility{}, false
+	}
+	resumed := expected
+	resumed.Coordinate = op.Coordinate
+	resumed.ActivationRevision = op.ActivationRevision
+	resumed.OperationRevision = activation.OperationRevision
+	if !resumed.MatchesActivation(op, activation) {
+		return AdmissionResponsibility{}, false
+	}
+	return resumed, true
+}

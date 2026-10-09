@@ -72,13 +72,17 @@ func TestWhatsAppHistoricalCaptureRedeliveryRejectsChangedStableEvidence(t *test
 		{"admission_revision", func(e *capturedEvent) { e.Scope.Session.Revision++ }},
 		{"service", func(e *capturedEvent) { e.Scope.PublicationBinding.ServiceID = uuid.NewString() }},
 		{"run", func(e *capturedEvent) { e.Scope.PublicationBinding.RunID = uuid.NewString() }},
-		{"generation", func(e *capturedEvent) { e.Scope.PublicationBinding.Generation++ }},
+		{"generation", func(e *capturedEvent) {
+			e.Scope.PublicationBinding.Generation++
+			e.Source.Coordinate.TargetGeneration++
+		}},
 		{"source", func(e *capturedEvent) {
 			e.Scope.Source.BundleIdentity = "other"
 			e.Source.Coordinate.BundleIdentity = "other"
 		}},
 		{"principal", func(e *capturedEvent) { e.Scope.PrincipalID = uuid.NewString() }},
 		{"operation", func(e *capturedEvent) { e.Scope.OnboardingOperation = uuid.NewString() }},
+		{"activation", func(e *capturedEvent) { e.Scope.ActivationID = uuid.NewString() }},
 		{"binding", func(e *capturedEvent) { e.Scope.BindingRevision++ }},
 	} {
 		t.Run(cell.name, func(t *testing.T) {
@@ -99,6 +103,31 @@ func TestWhatsAppHistoricalCaptureRedeliveryRejectsChangedStableEvidence(t *test
 			pending, err := spool.pending(ctx)
 			if err != nil || len(pending) != 1 || !pending[0].SameCapture(duplicate) {
 				t.Fatal("refusal discarded changed capture evidence", err)
+			}
+		})
+	}
+}
+
+func TestWhatsAppHistoricalCaptureRejectsMalformedRedelivery(t *testing.T) {
+	for _, change := range []string{"operation_revision", "activation_revision", "activation_id", "occurrence", "target_generation"} {
+		t.Run(change, func(t *testing.T) {
+			original := captureFixture(t)
+			request := capturePublicationFixture(t, original)
+			duplicate := original
+			switch change {
+			case "operation_revision":
+				duplicate.Scope.OperationRevision = 0
+			case "activation_revision":
+				duplicate.Scope.ActivationRevision = 0
+			case "activation_id":
+				duplicate.Scope.ActivationID = ""
+			case "occurrence":
+				duplicate.OccurrenceID = ""
+			case "target_generation":
+				duplicate.Source.Coordinate.TargetGeneration = 0
+			}
+			if _, err := verifyHistoricalCapture(duplicate, publishedCaptureFixture(request).record); err == nil {
+				t.Fatal("stable historical comparison admitted malformed capture")
 			}
 		})
 	}
