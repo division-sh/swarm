@@ -36,6 +36,9 @@ func CITier(body string) (string, string) {
 			declarations = append(declarations, line)
 		}
 	}
+	if len(declarations) == 0 {
+		return ProfileCore, "no CI-Tier declaration; core feedback"
+	}
 	if len(declarations) != 1 {
 		return ProfileFull, fmt.Sprintf("CI-Tier declaration count %d; conservative full", len(declarations))
 	}

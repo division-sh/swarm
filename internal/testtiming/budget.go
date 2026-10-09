@@ -95,6 +95,7 @@ type PackageDiagnostic struct {
 }
 
 type BudgetResult struct {
+	TestTime           *TestTimeResult     `json:"test_time_ratchet,omitempty"`
 	Jobs               *JobSummary         `json:"jobs,omitempty"`
 	Version            int                 `json:"version"`
 	Status             BudgetStatus        `json:"status"`
@@ -104,6 +105,7 @@ type BudgetResult struct {
 }
 
 type EvaluationOptions struct {
+	AdvisoryTiming    bool
 	WorkflowRunID     int64
 	WorkflowAttempt   int
 	Plan              testplanning.RunPlan
@@ -485,6 +487,12 @@ func EvaluateBudget(policy BudgetPolicy, opts EvaluationOptions, evidence []Comm
 			budget = override
 		}
 		surfaceResult := evaluateSurface(opts.Plan, unit, budget, grouped[unitID])
+		if opts.AdvisoryTiming && surfaceResult.Status == BudgetFail {
+			// evaluateSurface returns FAIL only after admitting successful proof.
+			surfaceResult.Warnings = append(surfaceResult.Warnings, surfaceResult.Problems...)
+			surfaceResult.Problems = nil
+			surfaceResult.Status = BudgetWarn
+		}
 		result.Surfaces = append(result.Surfaces, surfaceResult)
 		result.Status = mergeStatus(result.Status, surfaceResult.Status)
 	}
@@ -645,6 +653,11 @@ func WriteBudgetMarkdown(w io.Writer, result BudgetResult) error {
 	}
 	if result.Jobs != nil {
 		if err := writeWholeJobMarkdown(w, result); err != nil {
+			return err
+		}
+	}
+	if result.TestTime != nil {
+		if err := WriteTestTimeMarkdown(w, *result.TestTime); err != nil {
 			return err
 		}
 	}

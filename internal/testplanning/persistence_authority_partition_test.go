@@ -45,14 +45,15 @@ func validatePersistenceDebtEnvelopes(policy Policy) error {
 	for _, id := range []string{"store-admission-full", persistenceDebtCensusUnit} {
 		unit, ok := policy.Units[id]
 		packages := []string{policy.Module + "/internal/store"}
-		run, skip := persistenceDebtCensusRun, ""
+		run, skip, timeout := persistenceDebtCensusRun, "", "20m"
 		children := map[string][]string{persistenceNativeFamilyRoot: persistenceNativeFamilyChildren}
 		if id == "store-admission-full" {
 			packages = append(packages, policy.Module+"/internal/testpostgres")
 			run, skip = persistenceDebtAdmissionRun, ""
+			timeout = ""
 			children = nil
 		}
-		if !ok || !slices.Equal(unit.Packages, packages) || unit.Run != run || unit.Skip != skip || unit.CountMode != "count-1" || unit.EnvironmentID != "ci-postgres-gateway-empty-v1" || unit.BudgetClass != "broad" || unit.GoTimeout != "" || !reflect.DeepEqual(unit.RequiredChildren, children) {
+		if !ok || !slices.Equal(unit.Packages, packages) || unit.Run != run || unit.Skip != skip || unit.CountMode != "count-1" || unit.EnvironmentID != "ci-postgres-gateway-empty-v1" || unit.BudgetClass != "broad" || unit.GoTimeout != timeout || !reflect.DeepEqual(unit.RequiredChildren, children) {
 			return fmt.Errorf("%s changed persistence proof envelope: %+v", id, unit)
 		}
 		for _, tier := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {

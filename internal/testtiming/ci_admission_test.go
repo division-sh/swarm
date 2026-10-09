@@ -107,7 +107,7 @@ func TestCITierIncreaseKeepsLateSummaryAndNewHeadEvent(t *testing.T) {
 		t.Fatal("tier increases must use new-head/ready qualification, not redundant edited runs")
 	}
 	summary := workflow.Jobs["required-tests"]
-	wantNeeds := []string{"complexity", "ci-plan", "static-checks", "sqlite-local-dev", "macos-sqlite-possession", "unused-linux", "unused-darwin", "unused-checks", "proof-unit", "mandatory-soak", "semantic-smoke", "timing-budget"}
+	wantNeeds := []string{"complexity", "ci-plan", "static-checks", "sqlite-local-dev", "macos-sqlite-possession", "unused-linux", "unused-darwin", "unused-checks", "proof-unit", "semantic-smoke", "timing-budget"}
 	if summary.TimeoutMinutes != 5 || !slices.Equal(summary.Needs, wantNeeds) {
 		t.Fatalf("summary must remain late and bounded: timeout=%v needs=%v", summary.TimeoutMinutes, summary.Needs)
 	}
@@ -136,7 +136,7 @@ func TestCIDraftAdmissionAndReadyTransitions(t *testing.T) {
 	if !slices.Equal(workflow.On.PullRequest.Types, actions) {
 		t.Fatalf("PR subscriptions = %v, want %v", workflow.On.PullRequest.Types, actions)
 	}
-	heavy := []string{"ci-plan", "sqlite-local-dev", "macos-sqlite-possession", "unused-linux", "unused-darwin", "unused-checks", "proof-unit", "mandatory-soak", "semantic-smoke", "timing-budget"}
+	heavy := []string{"ci-plan", "sqlite-local-dev", "macos-sqlite-possession", "unused-linux", "unused-darwin", "unused-checks", "proof-unit", "semantic-smoke", "timing-budget"}
 	for _, action := range actions {
 		for _, draft := range []bool{false, true} {
 			t.Run(action+"/draft="+strconv.FormatBool(draft), func(t *testing.T) {
@@ -175,13 +175,13 @@ func TestCIDraftSkipsPlanAndProofExpansion(t *testing.T) {
 	workflow := loadAdmissionWorkflow(t)
 	for _, soak := range []string{"", "invalid JSON", `{"include":[]}`, `{"include":[{"unit":"soak"}]}`} {
 		facts := ciEventFacts("pull_request", true, soak)
-		for _, job := range []string{"ci-plan", "proof-unit", "mandatory-soak", "timing-budget"} {
+		for _, job := range []string{"ci-plan", "proof-unit", "timing-budget"} {
 			if evaluateCICondition(t, workflow.Jobs[job].If, facts, true) {
 				t.Fatalf("draft %s evaluated plan/matrix/download with %q", job, soak)
 			}
 		}
 	}
-	for _, job := range []string{"proof-unit", "mandatory-soak", "unused-checks"} {
+	for _, job := range []string{"proof-unit", "unused-checks"} {
 		if evaluateCICondition(t, workflow.Jobs[job].If, ciEventFacts("pull_request", false, "invalid JSON"), false) {
 			t.Fatalf("%s admits a failed/missing dependency before matrix/artifact consumption", job)
 		}
@@ -189,11 +189,13 @@ func TestCIDraftSkipsPlanAndProofExpansion(t *testing.T) {
 	if !evaluateCICondition(t, workflow.Jobs["timing-budget"].If, ciEventFacts("pull_request", false, ""), false) {
 		t.Fatal("ready timing evaluator must still refuse incomplete evidence")
 	}
-	if evaluateCICondition(t, workflow.Jobs["mandatory-soak"].If, ciEventFacts("pull_request", false, `{"include":[]}`), true) {
-		t.Fatal("empty soak selection admitted")
+	facts := ciEventFacts("pull_request", false, `{"include":[]}`)
+	facts["needs.ci-plan.outputs.proof_matrix"] = strconv.Quote(`{"include":[]}`)
+	if evaluateCICondition(t, workflow.Jobs["proof-unit"].If, facts, true) {
+		t.Fatal("empty unified proof selection admitted")
 	}
-	for _, job := range []string{"proof-unit", "mandatory-soak"} {
-		if workflow.Jobs[job].Strategy.FailFast == nil || *workflow.Jobs[job].Strategy.FailFast || workflow.Jobs[job].Strategy.MaxParallel != nil {
+	for _, job := range []string{"proof-unit"} {
+		if workflow.Jobs[job].Strategy.FailFast == nil || *workflow.Jobs[job].Strategy.FailFast != "${{ !inputs.keep_going }}" || workflow.Jobs[job].Strategy.MaxParallel != nil {
 			t.Fatalf("%s lost full matrix evidence", job)
 		}
 	}
@@ -242,7 +244,7 @@ func TestCIRequiredSummaryRefusesDraftQualification(t *testing.T) {
 			})
 		}
 	}
-	if out, err := executeCISummary(t, false, map[string]string{"mandatory-soak": "skipped"}, `{"include":[]}`); err != nil {
+	if out, err := executeCISummary(t, false, nil, `{"include":[]}`); err != nil {
 		t.Fatalf("valid empty soak: %v %s", err, out)
 	}
 }

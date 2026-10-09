@@ -2,8 +2,39 @@ package testplanning
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 )
+
+// SelectTimingCell projects an immutable timing inventory through the same
+// selectors as execution. Only the original soak is split into backend cells.
+func (policy Policy) SelectTimingCell(tier string, root TestRoot, backend string) (bool, error) {
+	profile, ok := policy.Profiles[tier]
+	if !ok {
+		return false, fmt.Errorf("unknown timing tier %q", tier)
+	}
+	special := false
+	for _, pkg := range policy.SpecialPackages {
+		if pkg == root.Package {
+			special = true
+		}
+	}
+	if !special {
+		return backend == "", nil
+	}
+	for _, id := range profile.Units {
+		unit := policy.Units[id]
+		cell, _ := SoakBackend(unit.Run)
+		if cell != backend || !slices.Contains(unit.Packages, root.Package) {
+			continue
+		}
+		selected, err := selectedByUnit(ProofUnit{Run: unit.Run, Skip: unit.Skip}, root.Name)
+		if err != nil || selected {
+			return selected, err
+		}
+	}
+	return false, nil
+}
 
 // Retained ownership is derived from the same policy and active full census.
 // It is not a second list of package names or a change-based selector.

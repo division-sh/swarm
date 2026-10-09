@@ -7,15 +7,16 @@ import (
 )
 
 const (
-	SoakPackage             = "github.com/division-sh/swarm/internal/runtime/conformance"
-	SoakTest                = "TestIssue2394TwentyTwoIntentFifteenMinuteSoakBothStores"
-	SoakRun                 = "^" + SoakTest + "$"
-	SoakGoTimeout           = "22m"
-	ServedReporterPackage   = "github.com/division-sh/swarm/internal/serveapp"
-	ServedReporterRun       = "^TestIssue2394Served(OriginalReporter.*|ReporterTransactionCensusBothStores)$"
-	ServedReporterGoTimeout = "15m"
-	ServedPreservationTest  = "TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores"
-	ServedPreservationRun   = "^" + ServedPreservationTest + "$"
+	SoakPackage              = "github.com/division-sh/swarm/internal/runtime/conformance"
+	SoakTest                 = "TestIssue2394TwentyTwoIntentFifteenMinuteSoakBothStores"
+	SoakRun                  = "^" + SoakTest + "$"
+	SoakGoTimeout            = "22m"
+	ServedReporterPackage    = "github.com/division-sh/swarm/internal/serveapp"
+	ServedReporterRun        = "^TestIssue2394Served(OriginalReporter.*|ReporterTransactionCensusBothStores)$"
+	ServedReporterGoTimeout  = "15m"
+	ServedPreservationTest   = "TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores"
+	ServedPreservationRun    = "^" + ServedPreservationTest + "$"
+	PersistenceDebtGoTimeout = "20m"
 )
 
 // SoakBackend recognizes only the two approved backend-partitioned soak cells.
@@ -41,8 +42,11 @@ func validateSoakSelection(packages []string, run, skip, timeout, count, budget 
 	if timeout == ServedReporterGoTimeout && len(packages) == 1 && packages[0] == ServedReporterPackage && run == ServedReporterRun && skip == "" && count == "count-1" && budget == "full" {
 		return nil
 	}
+	if timeout == PersistenceDebtGoTimeout && len(packages) == 1 && packages[0] == "github.com/division-sh/swarm/internal/store" && run == "^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtRatchet)$" && skip == "" && count == "count-1" && budget == "broad" {
+		return nil
+	}
 	if timeout != "" || strings.Contains(run, "/") {
-		return fmt.Errorf("only the mandatory soak or exact served reporter may set a timeout; only the soak may filter a backend")
+		return fmt.Errorf("only the exact soak, served reporter or persistence census may set its approved timeout; only the soak may filter a backend")
 	}
 	if skip != "" && (skip != SoakRun || len(packages) != 1 || packages[0] != SoakPackage) {
 		return fmt.Errorf("only the exact separately executed soak may be excluded")

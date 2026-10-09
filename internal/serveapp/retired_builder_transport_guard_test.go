@@ -31,6 +31,8 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 	}
 
 	expectedCounts := map[string]int{
+		// Immutable historical test names; timing loader pins every artifact byte.
+		".github/test-time-reference.json":                                             1,
 		".github/audit-artifacts/issue-2550-preimplementation.md":                      5,
 		".github/audit-artifacts/issue-2447-postimplementation.md":                     2,
 		".github/audit-artifacts/issue-2007-failure-class.yaml":                        14,

@@ -51,6 +51,7 @@ func TestCIJobCollectionWaitsOnlyForTerminalEvidence(t *testing.T) {
 	fetchAt := strings.Index(step.Run, "gh api --paginate --slurp")
 	evaluateAt := strings.Index(step.Run, "-evaluate-budget")
 	if assertAt < 0 || fetchAt <= assertAt || evaluateAt <= fetchAt ||
+		!strings.Contains(step.Run, `-event "$GITHUB_EVENT_NAME"`) ||
 		!strings.Contains(step.Run, "attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100") ||
 		!strings.Contains(step.Run, "for check in $(seq 1 12)") ||
 		!strings.Contains(step.Run, "if [ \"$check\" -lt 12 ]; then sleep 5; fi") ||
@@ -204,15 +205,16 @@ func TestCICachesSeparateModulesAndNeverRestoreAnotherProofUnit(t *testing.T) {
 }
 
 type ciWorkflowJob struct {
-	Name           string           `yaml:"name"`
-	If             string           `yaml:"if"`
-	Needs          []string         `yaml:"needs"`
-	Environment    string           `yaml:"environment"`
-	Steps          []ciWorkflowStep `yaml:"steps"`
-	TimeoutMinutes any              `yaml:"timeout-minutes"`
-	RunsOn         string           `yaml:"runs-on"`
+	Name           string            `yaml:"name"`
+	If             string            `yaml:"if"`
+	Needs          []string          `yaml:"needs"`
+	Environment    string            `yaml:"environment"`
+	Env            map[string]string `yaml:"env"`
+	Steps          []ciWorkflowStep  `yaml:"steps"`
+	TimeoutMinutes any               `yaml:"timeout-minutes"`
+	RunsOn         string            `yaml:"runs-on"`
 	Strategy       struct {
-		FailFast    *bool  `yaml:"fail-fast"`
+		FailFast    *any   `yaml:"fail-fast"`
 		Matrix      string `yaml:"matrix"`
 		MaxParallel any    `yaml:"max-parallel"`
 	} `yaml:"strategy"`

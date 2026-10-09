@@ -27,7 +27,10 @@ func TestCIPostgresJobsShareOwnedRunner(t *testing.T) {
 		Jobs map[string]struct {
 			Env      map[string]string `yaml:"env"`
 			Services map[string]any    `yaml:"services"`
-			Steps    []struct {
+			Strategy struct {
+				Matrix string `yaml:"matrix"`
+			} `yaml:"strategy"`
+			Steps []struct {
 				Name string `yaml:"name"`
 				Run  string `yaml:"run"`
 			} `yaml:"steps"`
@@ -37,7 +40,13 @@ func TestCIPostgresJobsShareOwnedRunner(t *testing.T) {
 		t.Fatalf("parse ci.yml: %v", err)
 	}
 
-	for _, jobName := range []string{"proof-unit", "mandatory-soak", "semantic-smoke"} {
+	if _, duplicate := workflow.Jobs["mandatory-soak"]; duplicate {
+		t.Fatal("soak proofs retain a separate lifecycle instead of the unified proof matrix")
+	}
+	if workflow.Jobs["proof-unit"].Strategy.Matrix != "${{ fromJson(needs.ci-plan.outputs.proof_matrix) }}" {
+		t.Fatal("Postgres proof runner does not consume the complete ordinary-and-soak matrix")
+	}
+	for _, jobName := range []string{"proof-unit", "semantic-smoke"} {
 		job, ok := workflow.Jobs[jobName]
 		if !ok {
 			t.Fatalf("missing Postgres-consuming CI job %s", jobName)

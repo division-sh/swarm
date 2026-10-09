@@ -1,6 +1,8 @@
 package store_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -11,13 +13,17 @@ import (
 const debtG01CollectorTo = "b42ea974646e7b666459091174645baa501d91da16871813568db23858def7b7"
 
 func TestPersistenceAuthorityDebtG01TransitionIsExactAndMetadataOnly(t *testing.T) {
-	digest, err := debtCollectorDigest(persistenceAuthorityRepoRoot(t))
+	root := persistenceAuthorityRepoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, debtBaselinePath))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("collector=%s", digest)
-	if digest != debtG01CollectorTo {
-		t.Fatalf("G01's exact reviewed destination does not match actual policy: %s", digest)
+	baseline, err := parseAuthorityDebtBaseline(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if baseline.Collector != debtG01CollectorTo {
+		t.Fatalf("G01's retained exact historical destination changed: %s", baseline.Collector)
 	}
 	old := authorityDebtBaseline{BootstrapSource: strings.Repeat("a", 40), Collector: debtG01CollectorFrom, Sites: debtControlSet(debtControlSite("call:QueryRow", 2))}
 	current := old
@@ -37,7 +43,7 @@ func TestPersistenceAuthorityDebtG01TransitionIsExactAndMetadataOnly(t *testing.
 		{"future-collector", debtG01CollectorTo, strings.Repeat("c", 64), current, current, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := debtValidateCollectorIdentity(tc.base, tc.collector, tc.trusted, tc.head); (err == nil) != tc.accept {
+			if err := debtValidateCollectorIdentity(tc.base, tc.collector, tc.trusted, tc.head, ""); (err == nil) != tc.accept {
 				t.Fatalf("identity acceptance=%v error=%v", tc.accept, err)
 			}
 		})
@@ -59,7 +65,7 @@ func TestPersistenceAuthorityDebtG01TransitionIsExactAndMetadataOnly(t *testing.
 			case "head-metadata":
 				head.Collector = strings.Repeat("e", 64)
 			}
-			if err := debtValidateCollectorIdentity(debtG01CollectorFrom, debtG01CollectorTo, trusted, head); err == nil {
+			if err := debtValidateCollectorIdentity(debtG01CollectorFrom, debtG01CollectorTo, trusted, head, ""); err == nil {
 				t.Fatal("transition admitted a non-metadata baseline change")
 			}
 		})

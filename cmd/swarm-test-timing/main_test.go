@@ -53,6 +53,23 @@ func TestPlanCIEmitsDigestBoundPlanAndMinimalMatrix(t *testing.T) {
 	}
 }
 
+func TestPlanCIInvalidEventRefusesBeforeCorePlanning(t *testing.T) {
+	dir := t.TempDir()
+	policy, model, packages := productionPlannerInputs(t, dir)
+	event := filepath.Join(dir, "event.json")
+	if err := os.WriteFile(event, []byte("{malformed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	plan := filepath.Join(dir, "plan.json")
+	err := run(config{planCI: true, proofPolicyPath: policy, weightModelPath: model, packagesPath: packages, eventPath: event, planPath: plan, matrixPath: filepath.Join(dir, "matrix.json"), event: "pull_request", headSHA: "abc"})
+	if err == nil || !strings.Contains(err.Error(), "invalid PR event JSON") {
+		t.Fatalf("malformed event did not fail closed: %v", err)
+	}
+	if _, err := os.Stat(plan); !os.IsNotExist(err) {
+		t.Fatal("invalid event produced a plan")
+	}
+}
+
 func TestRecordEvidenceBindsPlanIdentity(t *testing.T) {
 	dir := t.TempDir()
 	policyPath, modelPath, packagesPath := productionPlannerInputs(t, dir)

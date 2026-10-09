@@ -23583,10 +23583,25 @@ test_specification:
       owners: [internal/testplanning, internal/testtiming, cmd/swarm-test, cmd/swarm-test-timing, .github/workflows/ci.yml]
       admission: >-
         The reviewer records one plain CI-Tier and one independent Local-Tier line in the PR body, each core,
-        lifecycle or full. CI reads its event JSON as data; missing, malformed or duplicate CI-Tier selects full.
+        lifecycle or full. CI reads its event JSON as data; an absent CI-Tier selects core feedback.
+        Malformed or duplicate declarations select conservative full; invalid event JSON refuses planning.
         Body edits do not trigger CI. The late five-minute summary checks current body/head before success; it cannot revoke completed green.
         An unmet tier increase requires a new signed head and higher-tier qualifying protected checks; keep the PR draft/non-mergeable until qualification.
         Lead's final merge comparison checks current body against successful current-head trusted-App plan/summary, including post-approval edits; completed higher scope can satisfy lower.
+        Full is the default final-head merge gate, separately enforced by the user-run merge orchestrator;
+        a lower merge tier requires an explicit reviewer tier ruling. Core feedback does not by itself waive the default full requirement.
+        The native CI tier: <tier> check records canonical plan selection after the same run's required summary reaches a terminal outcome,
+        including failed proof and fail-fast sibling cancellation. Its success records valid tier metadata, not successful qualification;
+        the separate Required test summary and complete receipts must succeed before merge or nightly credit. Its Actions run/attempt,
+        execution source and plan identity must match that aggregate. No privileged PR checks publisher is required.
+        The tier-check activation marker is temporary bootstrap only and activates after the first full negative/positive hosted control.
+        Original PR proof stays in place until a complete healthy master-nightly and the strict merge-time nightly marker are live.
+        Master nightly proof qualifies the existing ci.yml scheduled or deliberately manually dispatched full owner on master and its same-run tier/summary;
+        establishing this nightly marker does not create a second dispatcher or remove original PR proof obligations.
+        Strict nightly admission uses the newest completed ci.yml run on master from schedule or workflow_dispatch and requires its same-run
+        Master nightly proof job and complete underlying full receipts to succeed, strictly less than 30 hours from creation.
+        A newer pending run may coexist with a fresh completed green; a newer completed red, cancelled or partial run blocks immediately.
+        Missing, foreign, incomplete, stale, future or API-error evidence refuses. A manual recovery clears red only with complete full master-nightly proof.
         Local --tier/--full requires unchanged HEAD and clean tracked/untracked non-ignored source before planning and after execution, retaining actual HEAD and plan/receipts for independent Local-Tier human comparison. No-context core/changed-package execution permits dirty developer feedback, not reviewer-bound proof; no local authorization sidecar, audit locator, GitHub lookup or branch/title inference.
       membership: >-
         Core executes ordinary admitted roots and fixed safety and smoke canaries. Lifecycle adds the retained
@@ -23600,6 +23615,16 @@ test_specification:
         job is matched to its exact planned logical units and counted once, while every logical budget and failure
         remains independent. Build-product reuse requires exact clean source, toolchain, native platform, dependency,
         policy, profile and flags identity plus byte integrity; a miss or mismatch rebuilds, never supplies test credit.
+        Persistence-authority debt analysis may reuse immutable exact-source base findings only with complete analyzer,
+        dependency and toolchain identity and canonical checksummed records. Candidate sources always scan fresh;
+        malformed/unavailable/foreign analysis recomputes the original scan and never grants allowed debt.
+        Protected master alone publishes archive-derived shared entries, including after verified proof replay; PR consumers restore exact keys read-only.
+        Test-only debt-cache environment is supplied only to its owning census command, never globally to ordinary proofs or product subprocesses.
+        Active collector identity lives in an exact-baseline-bound sidecar; historical TSV bytes, rows and multiplicities are not rewritten by cache integration.
+        The original logical proof batches share one hosted execution matrix so native fail-fast cancels ordinary and soak siblings alike;
+        no unit/backend/selector membership changes follow from this scheduling boundary. Each soak retains its 1500-second command envelope,
+        22-minute Go timeout and 30-minute job envelope. Failed receipts are retained; canceled/not-started work earns no credit.
+        Manual diagnostic keep-going retains later receipts but cannot qualify any failed or incomplete run.
       local_completion: >-
         Local completion runs unchanged logical units in bounded subprocess workers, each through the existing
         host/account FIFO admission, exact owned or explicit PostgreSQL service, descendant join and receipt validator.
@@ -23640,6 +23665,21 @@ test_specification:
         expectations retain exact content and semantic IDs while deriving current bundle identity from independent
         fixture admission, never from runtime output. Corpus generation itself grants no execution or closure credit.
       timing_publication_and_cadence: >-
+        PR command-latency overruns become advisory only after complete successful plan-bound proof is admitted;
+        missing, failed, corrupt, duplicate or foreign evidence remains fatal. Schedule/manual/master timing stays enforced.
+        The independent test-time ratchet anchors the full hosted run 37706007387 attempt 1 and its exact execution source,
+        workflow head, plan digest, native build context, count and environment in an immutable approved inventory.
+        Pin each reference cell's core/lifecycle/full membership from the exact policy at that reference execution
+        source. Current selectors project candidate cells only; they must never reclassify the baseline. A promotion
+        into a tier counts as added cost, while a demotion remains reported removed work without granting savings.
+        Count a root and its direct children once and separately executed original soak backend cells separately.
+        Compare retained roots plus measured new cost; report removed/renamed roots separately without granting savings.
+        Unreviewed growth must satisfy both five percent of the pinned tier cost and 600 test-seconds, never a compounded
+        automatically refreshed merge-base anchor. A new or promoted top-level root above 30 seconds requires a Test-Time rationale
+        and an explicit independent reviewer or lead placement decision even below the aggregate limit.
+        A rationale alone grants no exception. A reviewed versioned anchor/policy adjustment must name the explicit
+        approval and exact source evidence; moving correctness coverage also requires the lead's coverage ruling.
+        Over-threshold host variance requires attribution/review rather than silent baseline widening or blind full reruns.
         Timing weights remain useful for partitioning, short-unit packing and ETA. Only exact successful full
         evidence and a model-only diff authorize the master-only publisher; both create/update PR bodies declare
         CI-Tier: core and Local-Tier: core, with ordinary native PR checks and no automatic duplicate dispatch.
