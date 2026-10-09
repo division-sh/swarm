@@ -294,13 +294,3 @@ func selectedRouteHistoryInvalidPaths() []runfork.RunForkSelectedContractExecuti
 		},
 	}
 }
-
-func hasUnsupportedBlocker(blockers []runfork.RunForkUnsupportedBlocker, code string) bool {
-	code = strings.TrimSpace(code)
-	for _, blocker := range blockers {
-		if strings.TrimSpace(blocker.Code) == code {
-			return true
-		}
-	}
-	return false
-}

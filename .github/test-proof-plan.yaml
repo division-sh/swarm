@@ -1043,7 +1043,7 @@ units:
       TestChannelDeliveryEffectCurrentnessSelectedStoreParity: [sqlite/eligibility_before_authorize, sqlite/eligibility_before_launch, sqlite/eligibility_after_launch, sqlite/eligibility_after_observation, sqlite/eligibility_edit, sqlite/eligibility_uncertain, sqlite/eligibility_recover_authorized, sqlite/eligibility_recover_launched, sqlite/eligibility_recover_observed, postgres/eligibility_before_authorize, postgres/eligibility_before_launch, postgres/eligibility_after_launch, postgres/eligibility_after_observation, postgres/eligibility_edit, postgres/eligibility_uncertain, postgres/eligibility_recover_authorized, postgres/eligibility_recover_launched, postgres/eligibility_recover_observed]
       TestConstructedHeaderGateSummaryBothStores: [sqlite, postgres]
       TestConstructedHeaderGateFreezeBothStores: [sqlite/fields=false, sqlite/fields=true, postgres/fields=false, postgres/fields=true]
-      TestGenericConstructedGateForkPreservesRouteHistoryRefusalBothStores: [sqlite, postgres]
+      TestGenericConstructedGateForkUsesFixedSnapshotBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad

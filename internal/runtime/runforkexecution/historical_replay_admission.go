@@ -418,25 +418,6 @@ func historicalReplayConversationFactAdmission(replay runfork.RunForkReplayResum
 	return historicalReplaySplitFact(fact, "session/turn/audit reconstruction remains a split sibling unless the selected-contract lineage policy admits source conversation history as lineage/no-action evidence", "#564")
 }
 
-func historicalReplayFactFromReplay(replay runfork.RunForkReplayResumeAdmission, fact string, replayFacts []string, fallbackAdmission, fallbackMessage, tracker string) runfork.RunForkHistoricalReplayFactAdmission {
-	if blocker, ok := replayBlockerForFacts(replay, replayFacts...); ok {
-		return runfork.RunForkHistoricalReplayFactAdmission{
-			Fact:        fact,
-			Admission:   runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker,
-			SourceOwner: runfork.RunForkReplayResumeAdmissionOwner,
-			BlockerCode: blocker.Code,
-			Message:     blocker.Message,
-		}
-	}
-	return runfork.RunForkHistoricalReplayFactAdmission{
-		Fact:        fact,
-		Admission:   fallbackAdmission,
-		SourceOwner: runfork.RunForkReplayResumeAdmissionOwner,
-		Tracker:     tracker,
-		Message:     fallbackMessage,
-	}
-}
-
 func historicalReplayLineageFact(fact, sourceOwner, message string) runfork.RunForkHistoricalReplayFactAdmission {
 	return runfork.RunForkHistoricalReplayFactAdmission{
 		Fact:        fact,
