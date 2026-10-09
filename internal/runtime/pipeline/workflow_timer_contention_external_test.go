@@ -241,7 +241,17 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 					var cancel context.CancelFunc
 					fireCtx, cancel = context.WithCancel(ctx)
 					defer cancel()
-					owner.commitContext = func(ctx context.Context) context.Context { cancel(); return ctx }
+					owner.commitContext = func(ctx context.Context) context.Context {
+						cancel()
+						// The receiver bridges cancellation asynchronously; join the
+						// mutation context before asserting a pre-commit interruption.
+						select {
+						case <-ctx.Done():
+						case <-time.After(5 * time.Second):
+							t.Fatal("mutation context did not end at the bounded cancellation cut")
+						}
+						return ctx
+					}
 				case "deadline_dispatch":
 					interrupted = context.DeadlineExceeded
 					var cancel context.CancelFunc
@@ -280,7 +290,8 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 					}
 				}
 				if outcome != runtimepipeline.WorkflowTimerFireCommitted || (owner.reject && (err != nil || !runtimefailures.IsStateContention(owner.lastErr))) || (owner.cleanupErr != nil && !errors.Is(err, owner.cleanupErr)) || (!entryCut && interrupted != nil && (!errors.Is(owner.lastErr, interrupted) || (err != nil && !errors.Is(err, interrupted) && !errors.Is(err, fireCtx.Err())))) {
-					t.Fatalf("publication outcome=%s error=%v", outcome, err)
+					t.Fatalf("publication outcome=%s error=%v mutation_error=%v acknowledged=%d intercept_outcome=%+v",
+						outcome, err, owner.lastErr, owner.acknowledged, capture.outcome)
 				}
 				eventID := workflowTimerPersistedEventID(t, selected, runID)
 				if capture.eventID != eventID {
