@@ -12,30 +12,31 @@ import (
 
 // AdmitReplyActionTx transfers one exact verified text occurrence to the action
 // owner. The original text remains evidence; it is never a second pending owner.
-func AdmitReplyActionTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) (render.PendingAction, bool, error) {
+func AdmitReplyActionTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) (render.PendingAction, bool, bool, error) {
 	state, disposition, err := requireExactTextIntentTx(ctx, tx, text, postgres, false)
 	if err != nil {
-		return render.PendingAction{}, false, err
+		return render.PendingAction{}, false, false, err
 	}
 	if text.EntryReference != "" || text.ReplyToReference == "" {
-		return render.PendingAction{}, false, nil
+		return render.PendingAction{}, false, false, nil
 	}
 	if state == "settled" {
 		if disposition != "control" {
-			return render.PendingAction{}, false, nil
+			return render.PendingAction{}, false, false, nil
 		}
-		return loadReplyActionTx(ctx, tx, text, postgres)
+		action, found, err := loadReplyActionTx(ctx, tx, text, postgres)
+		return action, found, false, err
 	}
 	if _, _, _, err := currentTextResponseAudienceTx(ctx, tx, text, postgres); err != nil {
-		return render.PendingAction{}, false, err
+		return render.PendingAction{}, false, false, err
 	}
 	state, _, err = requireExactTextIntentTx(ctx, tx, text, postgres, true)
 	if err != nil || state != "pending" {
-		return render.PendingAction{}, false, fmt.Errorf("reply text changed before control admission: %w", err)
+		return render.PendingAction{}, false, false, fmt.Errorf("reply text changed before control admission: %w", err)
 	}
 	selected, err := findReplyControlTx(ctx, tx, text, postgres)
 	if err != nil || selected.Token == "" {
-		return render.PendingAction{}, false, err
+		return render.PendingAction{}, false, false, err
 	}
 	query := `SELECT recorded_at FROM operator_channel_text_intents WHERE publication_id=?`
 	if postgres {
@@ -43,22 +44,22 @@ func AdmitReplyActionTx(ctx context.Context, tx *sql.Tx, text operatorchannel.In
 	}
 	var rawTime any
 	if err := tx.QueryRowContext(ctx, query, text.PublicationID).Scan(&rawTime); err != nil {
-		return render.PendingAction{}, false, err
+		return render.PendingAction{}, false, false, err
 	}
 	receivedAt, err := decodeActionTime(rawTime)
 	if err != nil {
-		return render.PendingAction{}, false, err
+		return render.PendingAction{}, false, false, err
 	}
 	action := operatorchannel.InboundAction{ActionFact: selected, Provider: text.Provider,
 		ProviderEventID: text.ProviderEventID, PublicationID: text.PublicationID,
 		ProviderAuthorization: text.ProviderAuthorization}
 	if err := InsertActionIntentTx(ctx, tx, action, receivedAt, postgres); err != nil {
-		return render.PendingAction{}, false, err
+		return render.PendingAction{}, false, false, err
 	}
 	if err := SettleTextIntentTx(ctx, tx, text, "control", postgres); err != nil {
-		return render.PendingAction{}, false, err
+		return render.PendingAction{}, false, false, err
 	}
-	return render.PendingAction{PublicationID: text.PublicationID, Fact: action, ReceivedAt: receivedAt}, true, nil
+	return render.PendingAction{PublicationID: text.PublicationID, Fact: action, ReceivedAt: receivedAt}, true, true, nil
 }
 
 func findReplyControlTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) (operatorchannel.ActionFact, error) {

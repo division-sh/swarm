@@ -83,9 +83,9 @@ func Test2376ForkRejectedEffectHistoricalBoundaryBothStores(t *testing.T) {
 					return runSelectedFixtureMutation(targetCtx, selected, "materialize rejected effect history", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 						switch s := selected.(type) {
 						case *PostgresStore:
-							return s.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(ctx, attempt, sourceRun, childRun, target, projection, point, correspondence, now.Add(2*time.Minute))
+							return s.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(ctx, attempt, sourceRun, childRun, target, projection, point, correspondence, now.Add(2*time.Minute), nil)
 						case *SQLiteRuntimeStore:
-							return s.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(ctx, attempt, sourceRun, childRun, target, projection, point, correspondence, now.Add(2*time.Minute))
+							return s.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(ctx, attempt, sourceRun, childRun, target, projection, point, correspondence, now.Add(2*time.Minute), nil)
 						default:
 							t.Fatalf("unsupported selected owner %T", selected)
 							return nil

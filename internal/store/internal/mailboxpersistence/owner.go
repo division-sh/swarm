@@ -5,15 +5,18 @@ package mailboxpersistence
 import (
 	"fmt"
 
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 )
 
 type MailboxPostgresOwner struct {
-	backend     *postgresbackend.Backend
-	schemaGuard func() error
-	idempotency *storeapiidempotency.PostgresOwner
+	backend        *postgresbackend.Backend
+	schemaGuard    func() error
+	idempotency    *storeapiidempotency.PostgresOwner
+	channelChanges *render.ReconcileSignal
 }
 
 func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, idempotency *storeapiidempotency.PostgresOwner) (*MailboxPostgresOwner, error) {
@@ -37,9 +40,26 @@ func (o *MailboxPostgresOwner) requireCurrentSchema() error {
 }
 
 type MailboxSQLiteOwner struct {
-	backend     *sqlitebackend.Backend
-	schemaGuard func() error
-	idempotency *storeapiidempotency.SQLiteOwner
+	backend        *sqlitebackend.Backend
+	schemaGuard    func() error
+	idempotency    *storeapiidempotency.SQLiteOwner
+	channelChanges *render.ReconcileSignal
+}
+
+func (s *MailboxPostgresOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return fmt.Errorf("postgres mailbox reconciliation requires one composition binding")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *MailboxSQLiteOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return fmt.Errorf("sqlite mailbox reconciliation requires one composition binding")
+	}
+	s.channelChanges = signal
+	return nil
 }
 
 func NewSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, idempotency *storeapiidempotency.SQLiteOwner) (*MailboxSQLiteOwner, error) {

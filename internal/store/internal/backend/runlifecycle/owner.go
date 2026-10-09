@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimefanoutbarrier "github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	runtimefanout "github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -26,6 +27,7 @@ type RunLifecyclePostgresOwner struct {
 	delivery               *deliverystore.DeliveryPostgresOwner
 	pipeline               pipelineTerminalizer
 	decisionCards          decisionCardTerminalizer
+	channelChanges         *runtimechanneldelivery.ReconcileSignal
 }
 
 type RunLifecycleSQLiteOwner struct {
@@ -35,6 +37,7 @@ type RunLifecycleSQLiteOwner struct {
 	delivery               *deliverystore.DeliverySQLiteOwner
 	pipeline               pipelineTerminalizer
 	decisionCards          decisionCardTerminalizer
+	channelChanges         *runtimechanneldelivery.ReconcileSignal
 	nowFn                  func() time.Time
 }
 
@@ -47,7 +50,42 @@ type pipelineTerminalizer interface {
 }
 
 type decisionCardTerminalizer interface {
-	SupersedeRunTx(context.Context, *mutationprotocol.Attempt, string, string, time.Time, bool) error
+	SupersedeRunTx(context.Context, *mutationprotocol.Attempt, string, string, time.Time, bool) (bool, error)
+}
+
+// ChannelCardChanges carries borrowed terminalization facts, never COMMIT authority.
+type ChannelCardChanges struct {
+	Changed bool
+}
+
+func (s *RunLifecyclePostgresOwner) BindChannelReconciliation(signal *runtimechanneldelivery.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return errors.New("run lifecycle PostgreSQL channel reconciliation must be bound exactly once")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *RunLifecycleSQLiteOwner) BindChannelReconciliation(signal *runtimechanneldelivery.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return errors.New("run lifecycle SQLite channel reconciliation must be bound exactly once")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *RunLifecyclePostgresOwner) publishChannelChanges(acknowledged bool, changes ChannelCardChanges) error {
+	if s == nil || s.channelChanges == nil || !changes.Changed {
+		return nil
+	}
+	return s.channelChanges.PublishAcknowledged(acknowledged, runtimechanneldelivery.ReconcileOrdinary)
+}
+
+func (s *RunLifecycleSQLiteOwner) publishChannelChanges(acknowledged bool, changes ChannelCardChanges) error {
+	if s == nil || s.channelChanges == nil || !changes.Changed {
+		return nil
+	}
+	return s.channelChanges.PublishAcknowledged(acknowledged, runtimechanneldelivery.ReconcileOrdinary)
 }
 
 func (s *RunLifecyclePostgresOwner) BindPipeline(owner pipelineTerminalizer) error {

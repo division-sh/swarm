@@ -1482,6 +1482,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
 		credentials: providerCredentialOwner, ingress: ready,
 		testBarrier: opts.TestChannelOnboardingBarrier,
+		published:   stores.ChannelDelivery().NotifyChannelPublication,
 	}
 	if !publicIngressEnabled {
 		channelActivationRefresher.preflight = func(_ context.Context, intent servePrebindingActivation) error {
@@ -1588,7 +1589,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		}
 		reconcilePublicIngress = func(reconcileCtx context.Context, generation runtimepublicingress.Generation) error {
 			_, manager := supervisor.PublicIngressState()
-			return reconcileServeProviderRegistrations(reconcileCtx, generation, manager, channelOnboardingStore, operatorChannels, providerCredentialOwner, registrationController)
+			return reconcileServeProviderRegistrations(reconcileCtx, generation, manager, channelOnboardingStore, operatorChannels, providerCredentialOwner, registrationController, stores.ChannelDelivery().NotifyChannelPublication)
 		}
 		publicHandler := http.NotFoundHandler()
 		if inboundHandler != nil {
@@ -1640,6 +1641,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		}
 	}
 	presenter.recordBootWarnings(bootReport)
+	supervisor.resetChannelPublication = stores.ChannelDelivery().NotifyChannelPublication
 	supervisor.resetRefresh = func(refreshCtx context.Context) error {
 		if err := channelActivationRefresher.RefreshChannelActivations(refreshCtx); err != nil {
 			return err
@@ -1868,7 +1870,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		ingress: ready,
 		effects: stores.Effects(), credentials: providerCredentialOwner,
 		posture: posture, runtimeInstanceID: runtimeInstanceID, now: time.Now,
-	}); err != nil {
+	}, channelDeliveryWorkerOptions{cadence: opts.TestChannelReconcileCadence, passed: opts.TestChannelReconcilePass, started: opts.TestChannelReconcileStarted}); err != nil {
 		presenter.runtimeFailure("channel_delivery", err)
 		return 1
 	}

@@ -25,14 +25,14 @@ func requireChannelSourceSettlementTx(ctx context.Context, tx *sql.Tx, s runtime
 	}
 }
 
-func projectChannelSourceSettlementTx(ctx context.Context, tx *sql.Tx, s runtimeeffects.Settlement, postgres bool) error {
+func projectChannelSourceSettlementTx(ctx context.Context, tx *sql.Tx, s runtimeeffects.Settlement, postgres bool) (bool, error) {
 	switch s.Authority.Kind {
 	case runtimeeffects.AuthorityChannelDelivery:
 		return projectChannelDeliverySettlementTx(ctx, tx, s, postgres)
 	case runtimeeffects.AuthorityChannelNativeSetting:
 		return projectChannelNativeSettingSettlementTx(ctx, tx, s, postgres)
 	default:
-		return nil
+		return false, nil
 	}
 }
 
@@ -163,13 +163,13 @@ func loadChannelRecoverySettlementTx(ctx context.Context, tx *sql.Tx, c external
 }
 
 func recoverChannelSourceSettlementTx(ctx context.Context, tx *sql.Tx, c externalEffectRecoveryCandidate,
-	state runtimeeffects.State, failure []byte, now time.Time, postgres bool) (bool, error) {
+	state runtimeeffects.State, failure []byte, now time.Time, postgres bool) (bool, bool, error) {
 	s, err := loadChannelRecoverySettlementTx(ctx, tx, c, state, failure, now, postgres)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if err := requireChannelSourceSettlementTx(ctx, tx, s, postgres); err != nil {
-		return false, err
+		return false, false, err
 	}
 	var changed bool
 	if postgres {
@@ -178,9 +178,10 @@ func recoverChannelSourceSettlementTx(ctx context.Context, tx *sql.Tx, c externa
 		changed, err = settleExternalAttemptSQLiteTx(ctx, tx, s)
 	}
 	if err != nil || !changed {
-		return changed, err
+		return changed, false, err
 	}
-	return true, projectChannelSourceSettlementTx(ctx, tx, s, postgres)
+	projectionChanged, err := projectChannelSourceSettlementTx(ctx, tx, s, postgres)
+	return true, projectionChanged, err
 }
 
 func requireChannelSettlementEvidence(authority runtimeeffects.Authority, attempt, original, operation []byte) error {

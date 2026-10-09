@@ -237,19 +237,19 @@ func requireExactTextIntentTx(ctx context.Context, tx intentQueryer, text operat
 
 // RejectNativeEntryTx settles an exact verified occurrence without publishing
 // a response or granting principal, draft, mailbox or business authority.
-func RejectNativeEntryTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) error {
+func RejectNativeEntryTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) (bool, error) {
 	if text.EntryReference == "" {
-		return fmt.Errorf("native entry rejection requires an entry fact")
+		return false, fmt.Errorf("native entry rejection requires an entry fact")
 	}
 	state, disposition, err := requireExactTextIntentTx(ctx, tx, text, postgres, true)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if state == "settled" {
 		if disposition != "entry_rejected" {
-			return fmt.Errorf("native entry already has another disposition")
+			return false, fmt.Errorf("native entry already has another disposition")
 		}
-		return nil
+		return false, nil
 	}
 	query := `UPDATE operator_channel_text_intents SET state='settled', disposition='entry_rejected', settled_at=? WHERE publication_id=? AND state='pending'`
 	if postgres {
@@ -257,16 +257,16 @@ func RejectNativeEntryTx(ctx context.Context, tx *sql.Tx, text operatorchannel.I
 	}
 	result, err := tx.ExecContext(ctx, query, time.Now().UTC(), text.PublicationID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if rows != 1 {
-		return fmt.Errorf("native entry rejection lost its pending occurrence")
+		return false, fmt.Errorf("native entry rejection lost its pending occurrence")
 	}
-	return nil
+	return true, nil
 }
 
 func LoadChooserTextIntentTx(ctx context.Context, tx *sql.Tx, publicationID string, postgres, lock bool) (render.PendingText, error) {
@@ -310,28 +310,29 @@ func LoadChooserTextIntentTx(ctx context.Context, tx *sql.Tx, publicationID stri
 	return pending, nil
 }
 
-func RejectUnboundTextTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) error {
+func RejectUnboundTextTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) (bool, error) {
 	if text.EntryReference != "" {
-		return fmt.Errorf("unbound text rejection does not interpret inbox entries")
+		return false, fmt.Errorf("unbound text rejection does not interpret inbox entries")
 	}
 	state, disposition, err := requireExactTextIntentTx(ctx, tx, text, postgres, true)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if state == "settled" {
 		if disposition != "rejected" {
-			return fmt.Errorf("unbound text already has another disposition")
+			return false, fmt.Errorf("unbound text already has another disposition")
 		}
-		return nil
+		return false, nil
 	}
 	_, current, err := ResolveCurrentTextTx(ctx, tx, text, postgres)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if current {
-		return fmt.Errorf("unbound text rejection cannot reject a current operator binding")
+		return false, fmt.Errorf("unbound text rejection cannot reject a current operator binding")
 	}
-	return SettleTextIntentTx(ctx, tx, text, "rejected", postgres)
+	err = SettleTextIntentTx(ctx, tx, text, "rejected", postgres)
+	return err == nil, err
 }
 
 func SettleTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, disposition string, postgres bool) error {
@@ -363,20 +364,20 @@ func SettleTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.In
 
 // Only the verified occurrence is settled; no card, response or execution
 // authority is created. A retained chooser answer requires its exact callback.
-func SettleUnsupportedTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) error {
+func SettleUnsupportedTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) (bool, error) {
 	return settleUnsupportedTextIntentTx(ctx, tx, text, false, postgres)
 }
 
-func settleUnsupportedTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, chooser, postgres bool) error {
+func settleUnsupportedTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, chooser, postgres bool) (bool, error) {
 	state, disposition, err := requireExactTextIntentTx(ctx, tx, text, postgres, true)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if state == "settled" && disposition == "unsupported" {
-		return nil
+		return false, nil
 	}
 	if state != "pending" && !(chooser && state == "settled" && disposition == "chooser") {
-		return fmt.Errorf("channel input already has another disposition")
+		return false, fmt.Errorf("channel input already has another disposition")
 	}
 	query := `UPDATE operator_channel_text_intents SET state='settled', disposition='unsupported', settled_at=?
 		WHERE publication_id=? AND state=? AND COALESCE(disposition,'')=?`
@@ -386,16 +387,16 @@ func settleUnsupportedTextIntentTx(ctx context.Context, tx *sql.Tx, text operato
 	}
 	result, err := tx.ExecContext(ctx, query, time.Now().UTC(), text.PublicationID, state, disposition)
 	if err != nil {
-		return err
+		return false, err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if rows != 1 {
-		return fmt.Errorf("unsupported channel input lost its exact occurrence")
+		return false, fmt.Errorf("unsupported channel input lost its exact occurrence")
 	}
-	return nil
+	return true, nil
 }
 
 func decodeActionTime(value any) (time.Time, error) {
@@ -492,13 +493,13 @@ func SettleAppliedActionIntentTx(ctx context.Context, tx *sql.Tx, action operato
 
 // SettleUnappliedActionIntentTx records a terminal non-mutation result for one
 // verified callback. It cannot acknowledge a verdict or grant response content.
-func SettleUnappliedActionIntentTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction, disposition render.ActionDisposition, postgres bool) error {
+func SettleUnappliedActionIntentTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction, disposition render.ActionDisposition, postgres bool) (bool, error) {
 	if disposition != render.ActionStale && disposition != render.ActionRejected && disposition != render.ActionUnsupported {
-		return fmt.Errorf("channel action requires a non-mutation disposition")
+		return false, fmt.Errorf("channel action requires a non-mutation disposition")
 	}
 	state, err := RequireActionIntentTx(ctx, tx, action, postgres, true)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if state == "settled" {
 		query := `SELECT disposition FROM operator_channel_action_intents WHERE publication_id=?`
@@ -507,21 +508,21 @@ func SettleUnappliedActionIntentTx(ctx context.Context, tx *sql.Tx, action opera
 		}
 		var previous string
 		if err := tx.QueryRowContext(ctx, query, action.PublicationID).Scan(&previous); err != nil {
-			return err
+			return false, err
 		}
 		if previous != string(disposition) {
-			return fmt.Errorf("channel action already settled with a different disposition")
+			return false, fmt.Errorf("channel action already settled with a different disposition")
 		}
-		return nil
+		return false, nil
 	}
 	if disposition == render.ActionUnsupported {
 		text, found, err := loadUnsupportedChooserTextTx(ctx, tx, action.ActionFact, postgres)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if found {
-			if err := settleUnsupportedTextIntentTx(ctx, tx, text.Fact, true, postgres); err != nil {
-				return err
+			if _, err := settleUnsupportedTextIntentTx(ctx, tx, text.Fact, true, postgres); err != nil {
+				return false, err
 			}
 		}
 	}
@@ -533,14 +534,14 @@ func SettleUnappliedActionIntentTx(ctx context.Context, tx *sql.Tx, action opera
 	}
 	result, err := tx.ExecContext(ctx, query, string(disposition), time.Now().UTC(), action.PublicationID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if rows != 1 {
-		return fmt.Errorf("channel action non-mutation disposition did not commit")
+		return false, fmt.Errorf("channel action non-mutation disposition did not commit")
 	}
-	return nil
+	return true, nil
 }

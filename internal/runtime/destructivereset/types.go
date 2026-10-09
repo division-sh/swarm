@@ -95,6 +95,7 @@ type CleanupResult struct {
 	AppliedAt              time.Time            `json:"applied_at"`
 	RunIDs                 []string             `json:"run_ids"`
 	Tables                 []CleanupTableResult `json:"tables"`
+	ChannelSourcesChanged  bool                 `json:"-"`
 }
 
 type CleanupTableResult struct {

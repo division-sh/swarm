@@ -60,7 +60,7 @@ func (s *EventSQLiteOwner) CommitInboundPublication(ctx context.Context, command
 	for index, publication := range result.Publications {
 		result.Publications[index] = publication.WithCommitAcknowledgment()
 	}
-	return result, outcome.Err()
+	return result, errors.Join(outcome.Err(), s.publishChannelChanges(acknowledged, result.ChannelChanges()))
 }
 
 func (s *EventSQLiteOwner) LoadInboundPublicationByIdentity(ctx context.Context, identity runtimeinbound.Identity) (runtimeinbound.Record, bool, error) {
