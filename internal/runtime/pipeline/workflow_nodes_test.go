@@ -257,10 +257,10 @@ func TestWorkflowNodeTargetMatchesExactRootRunCoordinate(t *testing.T) {
 	node := pipelineSourceNode(t, source, rootFlowID, "complete-task")
 	runID := eventtest.UUID("root-node-target-run")
 	target := events.RouteIdentity{FlowID: rootFlowID, FlowInstance: runID}
-	if !pc.workflowNodeMatchesDeliveryTarget(node, runID, target) {
+	if matched, err := pc.workflowNodeMatchesDeliveryTarget(context.Background(), node, runID, target); err != nil || !matched {
 		t.Fatalf("exact root target %#v did not match admitted run", target)
 	}
-	if pc.workflowNodeMatchesDeliveryTarget(node, eventtest.UUID("other-root-node-target-run"), target) {
+	if matched, err := pc.workflowNodeMatchesDeliveryTarget(context.Background(), node, eventtest.UUID("other-root-node-target-run"), target); err != nil || matched {
 		t.Fatalf("root target %#v matched a different admitted run", target)
 	}
 }

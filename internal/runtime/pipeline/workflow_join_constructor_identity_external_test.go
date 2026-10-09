@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -27,27 +28,39 @@ func TestWorkflowJoinConstructedDescendantAdmissionOnBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			runID := uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			files := a2ActivationJoinFiles(1)
 			files["orders/child/schema.yaml"] = "name: child\nstages:\n  awaiting: {}\n"
 			files["orders/child/entities.yaml"] = "child_state:\n  final_count: {type: integer, initial: -1}\n"
 			files["orders/child/events.yaml"] = "item.completed:\n  member_id: text\n  result: text\n"
 			files["orders/child/nodes.yaml"] = files["orders/nodes.yaml"]
 			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))
-			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source}, "platform.join_complete", "platform.join_timeout")
+			bundle, _ := semanticview.Bundle(source)
+			fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 			if err != nil {
 				t.Fatal(err)
 			}
-			pc := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source}})
+			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), runID))
+			fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: fact, Artifact: bundle.SourceArtifact}
+			if selected.postgres {
+				runlifecyclefixture.RequirePostgres(t, ctx, selected.db, fixture)
+			} else {
+				runlifecyclefixture.RequireSQLite(t, ctx, selected.db, fixture)
+			}
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact)}, "platform.join_complete", "platform.join_timeout")
+			if err != nil {
+				t.Fatal(err)
+			}
+			pc := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source}, SourceArtifactFact: fact})
 			bus.SetInterceptors(pc)
-			am := a2ActivationJoinManagerFactory(t, ctx, selected, source)(pc, bus)
+			newManager, _ := a2ActivationJoinManagerFactory(t, ctx, selected, source)
+			am := newManager(pc, bus)
 			root := flowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")
 			parent, err := flowidentity.KeyedChild(source, root, "orders", "one")
 			if err != nil {
 				t.Fatal(err)
 			}
 			at := time.Now().UTC().Truncate(time.Microsecond)
+			constructA2StructuralRoot(t, ctx, am, bus, source, root, at)
 			plan, err := am.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
 				ContractBundle: source, Instance: parent, ConstructorInput: "order.created", ResolvedKey: "one",
 				OccurredAt:   at,

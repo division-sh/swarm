@@ -110,16 +110,26 @@ func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback
 func TestSingletonCoordinatorPilotPipelineRejectsContainedItemDeliveryTarget(t *testing.T) {
 	bundle := singletoncoordinatorpilot.LoadBundle(t, singletoncoordinatorpilot.Options{})
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pc, _ := newSingletonCoordinatorPilotPipelineCoordinator(t, db, bundle, source)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pc := &PipelineCoordinator{
+		module:             &previewWorkflowModule{bundle: bundle},
+		sourceArtifactFact: fact,
+		workflowStore:      &workflowInstanceStore{instanceIndex: derivedStaticInstanceIndex{}},
+	}
 
 	containedTarget := events.RouteIdentity{
 		FlowID:       singletoncoordinatorpilot.FlowID,
 		FlowInstance: singletoncoordinatorpilot.FlowInstance + "/lead-42",
 		EntityID:     uuid.NewString(),
 	}
-	if pc.workflowNodeMatchesDeliveryTarget(pipelineNode(t, singletoncoordinatorpilot.FlowID, singletoncoordinatorpilot.NodeID), testPipelineRunID, containedTarget) {
+	matched, err := pc.workflowNodeMatchesDeliveryTarget(context.Background(), pipelineSourceNode(t, source, singletoncoordinatorpilot.FlowID, singletoncoordinatorpilot.NodeID), testPipelineRunID, containedTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if matched {
 		t.Fatalf("contained item target %#v matched singleton coordinator node; contained map entries must not be route recipients", containedTarget)
 	}
 }
