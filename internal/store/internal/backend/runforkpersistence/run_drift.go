@@ -135,6 +135,7 @@ func validateRunMutationCoordinates(ctx context.Context, tx *sql.Tx, runID strin
 		return err
 	}
 	defer rows.Close()
+	seen := map[string]struct{}{}
 	for rows.Next() {
 		var owner, key string
 		var revision int64
@@ -146,6 +147,10 @@ func validateRunMutationCoordinates(ctx context.Context, tx *sql.Tx, runID strin
 		if owner != runID || !committed.Valid || revision <= 0 || revision > head || !present {
 			return runHistoryError(runID, "", key, "invalid_mutation_order", fmt.Sprintf("owner=%s revision=%d committed=%t present=%t head=%d", owner, revision, committed.Valid, present, head))
 		}
+		if _, duplicate := seen[key]; duplicate {
+			return runHistoryError(runID, "", key, "mutation_order_duplicate", "one physical mutation has multiple ordering coordinates")
+		}
+		seen[key] = struct{}{}
 	}
 	return rows.Err()
 }
