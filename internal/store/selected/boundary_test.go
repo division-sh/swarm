@@ -90,6 +90,10 @@ var _ = selected.OpenAdmissionInspection
 import "github.com/division-sh/swarm/internal/store/construction"
 var _ = construction.OpenPostgres
 `,
+		"internal/cliapp/verify_run.go": `package cliapp
+import "github.com/division-sh/swarm/internal/store/construction"
+var _ = construction.OpenPostgres
+`,
 		"internal/runtime/direct_constructor.go": `package runtime
 import "github.com/division-sh/swarm/internal/store/construction"
 var _ = construction.OpenPostgres
@@ -114,6 +118,12 @@ func (o *Owner) BundleWriter() any { return nil }
 			t.Errorf("fixture %s unexpectedly passed the selected-store boundary guard", path)
 		}
 	}
+	for _, carrier := range []string{"store.PostgresStore", "store.SQLiteRuntimeStore"} {
+		body := "package cliapp\nfunc probe(value *" + carrier + ") {}\n"
+		if failures := selectedStoreBoundaryViolations("internal/cliapp/verify_run.go", body); len(failures) == 0 {
+			t.Errorf("approved read consumer leaked concrete backend %s", carrier)
+		}
+	}
 }
 
 func selectedStoreBoundaryViolations(path, body string) []string {
@@ -129,6 +139,7 @@ func selectedStoreBoundaryViolations(path, body string) []string {
 		// Verification borrows a revocable, consistent read-only inspection;
 		// construction and concrete backend handles remain forbidden here.
 		"internal/cliapp/verify_deployment_store.go": true,
+		"internal/cliapp/verify_run.go":              true,
 	}
 	insideSelected := strings.HasPrefix(path, "internal/store/selected/")
 	insideStore := strings.HasPrefix(path, "internal/store/")

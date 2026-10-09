@@ -46,7 +46,8 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 		historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory/reference:runtime/runfork::NewTerminalBarrierHistory":                              {1, "only the complete fixed-revision barrier relation may mint terminal-history admission"},
 		historicalBoundaryOwner + "loadRunForkAdmissionEvidenceFromRevision/reference:" + historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory": {1, "all fixed-revision admission consumes the terminal relation"},
 		historicalBoundaryOwner + "resolveRunForkRevisionPoint/ledger_sql":                                                                               {1, "shared event-point read; contextual admission precedes cursor construction"},
-		historicalBoundaryOwner + "loadRunForkRevisionSnapshot/ledger_sql":                                                                               {1, "rank before filtering tombstones, admit surviving present facts"},
+		historicalBoundaryOwner + "loadRunForkRevisionSnapshotScope/ledger_sql":                                                                          {1, "shared full or mutation-only snapshot ranks before filtering tombstones and admits surviving present facts"},
+		historicalBoundaryOwner + "validateRunMutationCoordinates/ledger_sql":                                                                            {1, "run oracle validates every ordering coordinate without decoding payloads or granting historical execution"},
 		historicalBoundaryOwner + "collectRunForkSourceAdvancedFacts/ledger_sql":                                                                         {1, "post-R family inventory, not payload decoding"},
 		historicalBoundaryOwner + "ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision/ledger_sql":                                              {1, "post-R marker existence, not historical payload admission"},
 		historicalBoundaryOwner + "ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling/ledger_sql":                                          {1, "current coupling revision safety, not historical payload admission"},
@@ -63,7 +64,7 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 		historicalBoundaryWriter + "projectionFactKey/reference:" + historicalBoundaryWriter + "admitFactKeyCoordinates":                                 {1, "decoded projection coordinates consume the same exact key relation"},
 		historicalBoundaryOwner + "appendRunForkHistoricalFact/reference:runtime/deliverylifecycle::DecodeHistoricalSnapshot":                            {1, "typed historical delivery decoding under contextual admission"},
 		historicalBoundaryOwner + "resolveRunForkRevisionPoint/reference:" + historicalBoundaryOwner + "appendRunForkHistoricalFact":                     {1, "event cursor uses the same contextual relation"},
-		historicalBoundaryOwner + "loadRunForkRevisionSnapshot/reference:" + historicalBoundaryOwner + "appendRunForkHistoricalFact":                     {1, "all present snapshot families use contextual admission"},
+		historicalBoundaryOwner + "loadRunForkRevisionSnapshotScope/reference:" + historicalBoundaryOwner + "appendRunForkHistoricalFact":                {1, "both full and mutation-only snapshots use the same contextual admission"},
 	}
 	allowed[historicalBoundaryWriter+"CountWorkflowTimerRevisionFactsForTest/ledger_sql"] = historicalBoundaryAllowance{1, "fixed physical timer-revision witness stays with the canonical ledger owner; no payload decoding or caller selector"}
 	allowed["store/internal/runtimepersistence::ObserveWorkflowTimerReplayStorageForTest/reference:"+historicalBoundaryWriter+"CountWorkflowTimerRevisionFactsForTest"] = historicalBoundaryAllowance{1, "exact selected read transaction delegates physical ledger observation to its canonical owner"}
@@ -575,7 +576,7 @@ func (arbitrary *unexpectedReader) cursor() string {
     return "SELECT MIN(revision) FROM " + "run_fork_fact_revisions WHERE fact_key = $1"
 }
 // Even the exact approved function cannot add an unadmitted decode.
-func loadRunForkRevisionSnapshot(raw []byte) error {
+func loadRunForkRevisionSnapshotScope(raw []byte) error {
     query := "SELECT fact FROM run_fork_fact_revisions"
     _ = query
     var erased map[string]any
@@ -618,7 +619,7 @@ func ordinaryBusiness(raw []byte) error {
 		historicalBoundaryOwner + "unexpectedReader.erased/raw_decode",
 		historicalBoundaryOwner + "unexpectedReader.delivery/reference:runtime/deliverylifecycle::DecodeHistoricalSnapshot",
 		historicalBoundaryOwner + "unexpectedReader.cursor/ledger_sql",
-		historicalBoundaryOwner + "loadRunForkRevisionSnapshot/raw_decode",
+		historicalBoundaryOwner + "loadRunForkRevisionSnapshotScope/raw_decode",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("hostile findings = %v, want exactly %v", got, want)
