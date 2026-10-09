@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -106,6 +107,8 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) runfork.Run
 		hasHistoricalReplayRequirement = true
 	}
 	if evidence.OpenReplyContext {
+		// Only exact child materialization/readback discharges this branch. A
+		// prospective source projection is not reply continuation authority.
 		blocker := runForkReplayResumeBlocker(runfork.RunForkBlockerOpenReplyContextUnsupported)
 		blockers = appendRunForkBlocker(blockers, blocker)
 		dispositions = append(dispositions, runfork.RunForkReplayResumeDisposition{
@@ -128,6 +131,47 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) runfork.Run
 		Dispositions:             dispositions,
 		UnsupportedBlockers:      blockers,
 	}
+}
+
+// Called only after the reply adapter has read back the complete child inventory
+// and its exact request, accepted-event, origin and retained return bindings.
+func dischargeMaterializedRunForkReplyAdmission(admission runfork.RunForkReplayResumeAdmission, records []replycontext.Record) (runfork.RunForkReplayResumeAdmission, error) {
+	hasOpen := false
+	for _, record := range records {
+		if record.State == replycontext.StateOpen {
+			hasOpen = true
+		}
+	}
+	blockers := make([]runfork.RunForkUnsupportedBlocker, 0, len(admission.UnsupportedBlockers))
+	for _, blocker := range admission.UnsupportedBlockers {
+		if blocker.Code != runfork.RunForkBlockerOpenReplyContextUnsupported {
+			blockers = append(blockers, blocker)
+			continue
+		}
+		if !hasOpen {
+			return admission, fmt.Errorf("open-reply admission has no exact materialized open reply evidence")
+		}
+	}
+	dispositions := append([]runfork.RunForkReplayResumeDisposition(nil), admission.Dispositions...)
+	hasReplayableDelivery := false
+	for i, disposition := range dispositions {
+		if disposition.Fact == runfork.RunForkReplayResumeFactOpenReplyContext && disposition.BlockerCode == runfork.RunForkBlockerOpenReplyContextUnsupported {
+			if !hasOpen {
+				return admission, fmt.Errorf("open-reply disposition has no exact materialized open reply evidence")
+			}
+			dispositions[i].Disposition = runfork.RunForkReplayResumeDispositionReconstruct
+			dispositions[i].BlockerCode = ""
+			dispositions[i].Message = "exact fixed-cut child reply authority and its retained request/return bindings have been materialized and read back; no request, provider session or newer return arm is replayed"
+		}
+		if disposition.Disposition == runfork.RunForkReplayResumeDispositionForkReplay {
+			hasReplayableDelivery = true
+		}
+	}
+	admission.UnsupportedBlockers, admission.Dispositions = blockers, dispositions
+	admission.DeliveryEventReplayReady = hasReplayableDelivery && len(blockers) == 0
+	admission.BoundedReplaySupported = admission.DeliveryEventReplayReady
+	admission.StateOnlyExecutionReady = len(blockers) == 0 && !admission.ReplayResumeFactsPresent
+	return admission, nil
 }
 
 // runfork.RunForkReplayResumeAdmissionWithSelectedRouteResolution discharges only the

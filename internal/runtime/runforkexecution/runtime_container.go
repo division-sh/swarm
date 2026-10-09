@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -294,7 +295,7 @@ func (c selectedContractForkLocalRuntimeContainer) Proof() SelectedContractForkL
 	return c.proof
 }
 
-func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx context.Context) error {
+func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx context.Context) (result error) {
 	req := c.req
 	req.RuntimeInstanceID = c.runtimeInstanceID
 	forkOwner := req.Operation.selected
@@ -393,7 +394,18 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	if err := scheduler.PrepareStartup(); err != nil {
 		return err
 	}
-	pipeline := newSelectedContractPipeline(bus, c.ports, req.LoadedSource, req.AgentRuntime.Options, scheduler)
+	schedules, err := genericschedule.NewLifecycle(c.ports.genericSchedules, scheduler, bus, bus.EngineDispatcher(),
+		runtimepkg.NewGenericScheduleRuntimeLogger(runtimepkg.NewRuntimeLogger(c.ports.logs, req.AgentRuntime.Options.ExecutionPosture, payloadAdmitter)), req.AgentRuntime.Options.ExecutionPosture)
+	if err != nil {
+		return err
+	}
+	attached := false
+	defer func() {
+		if !attached {
+			result = errors.Join(result, schedules.Stop(context.Background()))
+		}
+	}()
+	pipeline := newSelectedContractPipeline(bus, c.ports, req.LoadedSource, req.AgentRuntime.Options, scheduler, schedules)
 	bus.SetInterceptors(pipeline)
 
 	lease, err := req.Operation.beginRetainedExecution()
@@ -423,10 +435,15 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(lifecycleManager.FinalizeCommittedAgentReadiness))
 	agentRuntime.executionLease, agentRuntime.cancelExecution = lease, cancelRuntime
 	agentRuntime.scheduler, agentRuntime.timerLifecycle = scheduler, pipeline
+	agentRuntime.genericSchedules = schedules
+	if err := c.prepareCompletionOwner(runCtx, forkOwner, agentRuntime); err != nil {
+		return errors.Join(err, agentRuntime.Shutdown())
+	}
 	c.attachment = &selectedContractRuntimeAttachment{
 		runtime: agentRuntime, pipeline: pipeline, scheduler: scheduler, ctx: runCtx, cancel: cancelRuntime, sourceEvents: sourceEvents, guard: guard,
 		deliveryAuthority: deliveryAuthority, payloadAdmitter: payloadAdmitter,
 	}
+	attached = true
 	return nil
 }
 
@@ -559,6 +576,9 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 	if _, err := c.ports.busDurable.RunLifecycle.RequireActiveRunSource(runCtx, req.ForkRunID); err != nil {
 		return fmt.Errorf("admit activated selected execution: %w", err)
 	}
+	if agentRuntime.completionExecutor == nil {
+		return errors.New("selected serving requires its exact completion owner")
+	}
 	if err := agentRuntime.startExecution(runCtx, attachment.pipeline, c.diagnostics); err != nil {
 		return fmt.Errorf("start activated selected execution: %w", err)
 	}
@@ -605,6 +625,9 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 	}
 	if err := c.publishCommittedInputs(); err != nil {
 		return err
+	}
+	if err := agentRuntime.completionExecutor.Start(runCtx); err != nil {
+		return fmt.Errorf("start activated selected completion owner: %w", err)
 	}
 	if agentRuntime.generationGrant == nil {
 		return errors.New("selected serving requires the admitted runtime generation grant")
@@ -774,6 +797,7 @@ func (c selectedContractForkLocalRuntimeContainer) awaitTerminalSettlement(ctx c
 			return nil
 		case cause := <-failures:
 			return fmt.Errorf("selected delivery continuation: %w", cause)
+		case <-c.attachment.runtime.completionExecutor.CompletionWakeups():
 		case <-ticker.C:
 		}
 	}
