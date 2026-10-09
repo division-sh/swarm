@@ -71,6 +71,8 @@ type runForkRevisionEntityMetadata struct {
 	FlowConfig       json.RawMessage `json:"flow_config"`
 	EntityID         string          `json:"entity_id"`
 	FlowInstance     string          `json:"flow_instance"`
+	ParentInstance   string          `json:"parent_instance"`
+	InstanceKey      string          `json:"instance_key"`
 	EntityType       string          `json:"entity_type"`
 	Slug             string          `json:"slug"`
 	Name             string          `json:"name"`

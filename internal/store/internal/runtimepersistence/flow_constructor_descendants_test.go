@@ -71,7 +71,7 @@ func TestFlowConstructorRootEagerTreeBothStores(t *testing.T) {
 
 func newEagerFlowConstructorFixture(t *testing.T, backend string) receiverConfigActivationFixture {
 	t.Helper()
-	return newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
+	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 		"schema.yaml":                       "name: eager-construction\n",
 		"review/schema.yaml":                "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
 		"review/entities.yaml":              "review_item:\n  request_id: text\n",
@@ -83,6 +83,17 @@ func newEagerFlowConstructorFixture(t *testing.T, backend string) receiverConfig
 		"review/deferred/events.yaml":       "job.started:\n",
 		"review/deferred/entities.yaml":     "job:\n  job_id: text\n",
 	}, nil)
+	runID := correlation.RunIDFromContext(f.ctx)
+	request := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
+	request.Instance = flowidentity.Stored(request.ContractBundle, ".", runID, runID, runID, "")
+	plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	return f
 }
 
 func eagerFlowConstructorPlan(t *testing.T, f receiverConfigActivationFixture) pipeline.FlowInstanceActivationPlan {
@@ -103,7 +114,14 @@ func TestFlowConstructorCommitsKeylessDescendantsBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			f := newEagerFlowConstructorFixture(t, backend)
 			plan := eagerFlowConstructorPlan(t, f)
-			assertConstructorRows(t, f, backend, 0)
+			parentOwner, err := flowidentity.NewRunScopedFlowInstance(correlation.RunIDFromContext(f.ctx), flowidentity.StoredRoute(".", correlation.RunIDFromContext(f.ctx), correlation.RunIDFromContext(f.ctx)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			parent, found, err := f.workflows.Load(f.ctx, parentOwner)
+			if err != nil || !found || parent.EntityID != plan.Identity.ParentEntityID {
+				t.Fatalf("constructor lost its stored parent: %+v found=%t err=%v", parent, found, err)
+			}
 			committed, err := agentFixtureFlowActivationCommitter{store: f.store}.CommitFlowInstanceActivation(f.ctx, plan)
 			if err != nil || !committed.Acknowledged || !committed.Created {
 				t.Fatalf("constructor commit: %+v %v", committed, err)
@@ -123,7 +141,7 @@ func TestFlowConstructorCommitsKeylessDescendantsBothStores(t *testing.T) {
 					t.Fatalf("descendant lost parent: %+v", instance)
 				}
 			}
-			for table, want := range map[string]int{"flow_instances": 3, "entity_state": 2, "workflow_instance_initial_materializations": 3, "flow_instance_runtime_readiness": 3} {
+			for table, want := range map[string]int{"flow_instances": 4, "entity_state": 2, "workflow_instance_initial_materializations": 4, "flow_instance_runtime_readiness": 4} {
 				var count int
 				if err := f.db.QueryRowContext(f.ctx, "SELECT COUNT(*) FROM "+table+" WHERE run_id=$1", runID).Scan(&count); err != nil || count != want {
 					t.Fatalf("atomic constructor %s rows=%d err=%v want=%d", table, count, err, want)
@@ -244,6 +262,10 @@ func TestFlowConstructorDescendantFaultRollsBackTreeBothStores(t *testing.T) {
 			t.Run(backend+"/"+table, func(t *testing.T) {
 				f := newEagerFlowConstructorFixture(t, backend)
 				plan := eagerFlowConstructorPlan(t, f)
+				before, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+				if err != nil {
+					t.Fatal(err)
+				}
 				column := "instance_path"
 				if table == "entity_state" {
 					column = "flow_instance"
@@ -253,7 +275,10 @@ func TestFlowConstructorDescendantFaultRollsBackTreeBothStores(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), "typed_receiver_owner_fault") || result.Acknowledged {
 					t.Fatalf("descendant fault escaped atomic tree: %+v %v", result, err)
 				}
-				assertConstructorRows(t, f, backend, 0)
+				after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatalf("failed tree construction changed its stored parent or children: %v", err)
+				}
 				removeFault()
 				result, err = agentFixtureFlowActivationCommitter{store: f.store}.CommitFlowInstanceActivation(f.ctx, plan)
 				if err != nil || !result.Acknowledged || !result.Created || len(result.Children) != 1 {
@@ -269,13 +294,20 @@ func TestFlowConstructorDescendantCancellationAndCorruptionBothStores(t *testing
 		t.Run(backend, func(t *testing.T) {
 			f := newEagerFlowConstructorFixture(t, backend)
 			plan := eagerFlowConstructorPlan(t, f)
+			before, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+			if err != nil {
+				t.Fatal(err)
+			}
 			canceled, cancel := context.WithCancel(f.ctx)
 			cancel()
 			result, err := agentFixtureFlowActivationCommitter{store: f.store}.CommitFlowInstanceActivation(canceled, plan)
 			if !errors.Is(err, context.Canceled) || result.Acknowledged {
 				t.Fatalf("canceled construction acquired tree: %+v %v", result, err)
 			}
-			assertConstructorRows(t, f, backend, 0)
+			after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("canceled tree construction changed its stored parent or children: %v", err)
+			}
 			if result, err = (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, plan); err != nil || !result.Acknowledged {
 				t.Fatalf("initial construction: %+v %v", result, err)
 			}
@@ -287,7 +319,7 @@ func TestFlowConstructorDescendantCancellationAndCorruptionBothStores(t *testing
 				t.Fatalf("replay repaired corrupt descendant: %+v %v", result, err)
 			}
 			var receipts int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id=$1`, correlation.RunIDFromContext(f.ctx)).Scan(&receipts); err != nil || receipts != 2 {
+			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id=$1`, correlation.RunIDFromContext(f.ctx)).Scan(&receipts); err != nil || receipts != 3 {
 				t.Fatalf("refused replay changed receipt count=%d err=%v", receipts, err)
 			}
 		})

@@ -38,6 +38,9 @@ func FixedConstructionForRoute(source semanticview.Source, plan runfork.RunForkP
 		if err != nil {
 			return flowidentity.Instance{}, matched, false, err
 		}
+		if metadata.ParentInstance != config.ParentRoute().FlowInstance {
+			return flowidentity.Instance{}, matched, false, fmt.Errorf("fixed header parent disagrees with admitted construction")
+		}
 		constructed = flowidentity.Instance{
 			TemplateID: metadata.FlowTemplate, ScopeKey: route.ScopeKey, InstanceID: route.InstanceID,
 			InstancePath: route.InstancePath, EntityID: entity.EntityID, ParentRoute: config.ParentRoute(),
@@ -49,6 +52,9 @@ func FixedConstructionForRoute(source semanticview.Source, plan runfork.RunForkP
 		scope, declared := source.FlowScopeByID(constructed.TemplateID)
 		if !declared || metadata.Mode != scope.Mode {
 			return flowidentity.Instance{}, matched, false, fmt.Errorf("selected header conflicts with declared flow mode")
+		}
+		if (metadata.Mode == "template") != (metadata.InstanceKey != "") {
+			return flowidentity.Instance{}, matched, false, fmt.Errorf("fixed header key presence disagrees with declared flow mode")
 		}
 		contract, declared := entityruntime.ResolveForFlow(source, constructed.TemplateID)
 		if (declared && contract.EntityType != metadata.EntityType) || (!declared && (metadata.EntityType != "" || len(entity.Fields) != 0)) {

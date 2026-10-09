@@ -89,6 +89,8 @@ func WorkflowEngineStateTransitionForPresence(presence WorkflowTargetPersistence
 type WorkflowEngineStateRecord struct {
 	Identity         runtimeflowidentity.RunScopedFlowInstance
 	EntityID         string
+	ParentInstance   string
+	InstanceKey      string
 	WorkflowName     string
 	WorkflowVersion  string
 	Mode             string
@@ -130,12 +132,22 @@ func (r WorkflowEngineStateRecord) Validate() error {
 	if strings.TrimSpace(r.Mode) == "" || strings.TrimSpace(r.Status) == "" {
 		return fmt.Errorf("workflow engine state record requires mode and status")
 	}
+	if (r.Mode == "template") != (r.InstanceKey != "") {
+		return fmt.Errorf("workflow engine state key presence disagrees with its declaration mode")
+	}
 	for name, raw := range map[string]json.RawMessage{
 		"fields": r.Fields, "bookkeeping": r.Bookkeeping, "gates": r.Gates, "accumulator": r.Accumulator, "config": r.Config, "initial_fields": r.InitialFields,
 	} {
 		if len(raw) == 0 || !json.Valid(raw) {
 			return fmt.Errorf("workflow engine state record %s must be valid JSON", name)
 		}
+	}
+	construction, err := DecodeWorkflowInstanceRecordedHeader(r.Identity.Route, r.Config)
+	if err != nil {
+		return err
+	}
+	if construction.ParentRoute().FlowInstance != r.ParentInstance {
+		return fmt.Errorf("workflow engine state parent disagrees with exact construction identity")
 	}
 	if r.EnteredStageAt.IsZero() || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
 		return fmt.Errorf("workflow engine state record requires exact persisted times")
@@ -432,6 +444,7 @@ func workflowEngineStateRecord(
 	}
 	record := WorkflowEngineStateRecord{
 		Identity: owner, EntityID: identity.RowID(),
+		ParentInstance: instance.ParentFlowInstance, InstanceKey: instance.InstanceKey,
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
 		Mode: workflowInstanceMode(instance), Status: status, CurrentState: instance.CurrentState, StageDefined: instance.StageDefined,
 		EntityType: projection.Control.EntityType, Slug: projection.Control.Slug, Name: projection.Control.Name,

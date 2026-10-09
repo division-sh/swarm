@@ -50,6 +50,7 @@ type WorkflowInstance struct {
 	ParentFlowID       string
 	ParentFlowInstance string
 	ParentEntityID     string
+	InstanceKey        string
 	WorkflowName       string
 	WorkflowVersion    string
 	Mode               string
@@ -310,6 +311,8 @@ func (p WorkflowTargetPersistencePresence) Constructed() bool {
 // validation and private store adapters own its representation.
 type WorkflowLifecycleCompanionPersistenceRecord struct {
 	FlowInstance    string
+	ParentInstance  string
+	InstanceKey     string
 	WorkflowName    string
 	WorkflowVersion string
 	Mode            string
@@ -349,6 +352,9 @@ func (r WorkflowTargetPersistenceRecord) Validate(route runtimeflowidentity.Rout
 	if r.Presence.HasLifecycleCompanion() {
 		companion := r.Lifecycle
 		header := companion.State
+		if (companion.Mode == "template") != (companion.InstanceKey != "") {
+			return fmt.Errorf("workflow header key presence disagrees with its declaration mode")
+		}
 		if strings.TrimSpace(companion.FlowInstance) != route.InstancePath || strings.TrimSpace(companion.WorkflowName) == "" ||
 			strings.TrimSpace(companion.Mode) == "" || strings.TrimSpace(companion.Status) == "" ||
 			len(companion.Config) == 0 || !json.Valid(companion.Config) || companion.CreatedAt.IsZero() {
@@ -385,6 +391,7 @@ func (r WorkflowTargetPersistenceRecord) DecodeComplete(route runtimeflowidentit
 	header := r.Lifecycle.State
 	item, err := DecodeWorkflowInstancePersistenceRecord(WorkflowInstancePersistenceRecord{
 		EntityID: header.EntityID, WorkflowName: r.Lifecycle.WorkflowName, WorkflowVersion: r.Lifecycle.WorkflowVersion,
+		ParentInstance: r.Lifecycle.ParentInstance, InstanceKey: r.Lifecycle.InstanceKey,
 		Mode: r.Lifecycle.Mode, Status: r.Lifecycle.Status, TerminatedAt: r.Lifecycle.TerminatedAt,
 		CurrentState: header.CurrentState, StageDefined: r.Lifecycle.StageDefined, Revision: header.Revision, EnteredStageAt: header.EnteredStageAt,
 		Gates: header.Gates, Fields: r.State.Fields, Bookkeeping: header.Bookkeeping, Accumulator: header.Accumulator,
@@ -470,6 +477,8 @@ func DecodeWorkflowEntityStatePersistenceRecord(record WorkflowEntityStatePersis
 // values into this value; runtime owns interpretation of workflow metadata.
 type WorkflowInstancePersistenceRecord struct {
 	EntityID        string
+	ParentInstance  string
+	InstanceKey     string
 	WorkflowName    string
 	WorkflowVersion string
 	Mode            string
@@ -529,6 +538,9 @@ func DecodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceR
 	if err := validateWorkflowTransitionHistoryFlow(projection.Control.TransitionHistory, strings.TrimSpace(record.WorkflowName)); err != nil {
 		return WorkflowInstance{}, err
 	}
+	if record.ParentInstance != projection.Control.ParentFlowInstance {
+		return WorkflowInstance{}, fmt.Errorf("workflow header parent disagrees with exact construction identity")
+	}
 	if got := strings.TrimSpace(projection.Control.InstanceID); got != route.InstanceID {
 		return WorkflowInstance{}, fmt.Errorf("decode workflow instance %s identity: persisted instance_id %q disagrees with exact route instance_id %q", route.InstancePath, got, route.InstanceID)
 	}
@@ -550,6 +562,7 @@ func DecodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceR
 		ParentFlowID:       strings.TrimSpace(projection.Control.ParentFlowID),
 		ParentFlowInstance: strings.TrimSpace(projection.Control.ParentFlowInstance),
 		ParentEntityID:     strings.TrimSpace(projection.Control.ParentEntityID),
+		InstanceKey:        record.InstanceKey,
 		WorkflowName:       strings.TrimSpace(record.WorkflowName),
 		WorkflowVersion:    strings.TrimSpace(record.WorkflowVersion),
 		Mode:               strings.TrimSpace(record.Mode),

@@ -181,7 +181,11 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			}
 
 			forkCtx := runtimecorrelation.WithRunID(ctx, forkRunID)
-			for _, entity := range plan.Entities {
+			orderedEntities, err := runForkEntitiesInConstructionOrder(plan.Entities)
+			if err != nil {
+				return err
+			}
+			for _, entity := range orderedEntities {
 				if err := materializeRunForkEntityState(forkCtx, s.DecisionPostgresOwner, s.MaterializeRunForkProposedEffectCardsTx, true, tx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 					return s.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
 				}), forkRunID, target, plan, entity, metadata[entity.EntityID], now); err != nil {
@@ -349,7 +353,11 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 				}
 			}
 			forkCtx := runtimecorrelation.WithRunID(txctx, forkRunID)
-			for _, entity := range plan.Entities {
+			orderedEntities, err := runForkEntitiesInConstructionOrder(plan.Entities)
+			if err != nil {
+				return err
+			}
+			for _, entity := range orderedEntities {
 				if err := materializeRunForkEntityState(forkCtx, s.DecisionSQLiteOwner, s.MaterializeRunForkProposedEffectCardsTx, false, tx, attempt, source, forkRunID, target, plan, entity, metadata[entity.EntityID], now); err != nil {
 					return err
 				}
