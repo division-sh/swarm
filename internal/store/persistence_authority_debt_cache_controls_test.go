@@ -59,7 +59,7 @@ func TestPersistenceAuthorityDebtAnalysisCachePRCannotPublish(t *testing.T) {
 }
 
 func TestPersistenceAuthorityDebtAnalysisCacheRejectsInvalidEntries(t *testing.T) {
-	for _, name := range []string{"schema", "source", "analyzer", "toolchain", "checksum", "truncated", "duplicate-site", "wrong-payload-source", "wrong-payload-analyzer", "zero-multiplicity", "unknown-field", "duplicate-field", "trailing-json"} {
+	for _, name := range []string{"schema", "source", "analyzer", "toolchain", "checksum", "truncated", "oversized", "duplicate-site", "wrong-payload-source", "wrong-payload-analyzer", "zero-multiplicity", "unknown-field", "duplicate-field", "trailing-json"} {
 		t.Run(name, func(t *testing.T) {
 			cache := debtControlCache(t)
 			source := strings.Repeat("1", 40)
@@ -110,6 +110,8 @@ func TestPersistenceAuthorityDebtAnalysisCacheRejectsInvalidEntries(t *testing.T
 				data = append([]byte(`{"Schema":"persistence-authority-analysis/v1",`), data[1:]...)
 			case "trailing-json":
 				data = append(data, []byte(" {}")...)
+			case "oversized":
+				data = append(data, bytes.Repeat([]byte(" "), 32<<20)...)
 			}
 			if err := os.WriteFile(cache.path(source), data, 0600); err != nil {
 				t.Fatal(err)

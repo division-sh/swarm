@@ -167,3 +167,26 @@ ruling. The user-approved cheaper defaults for ordinary feedback do not lower
 qualification for this harness change. Subsequent ratchet thresholds remain
 unratified; nightly freshness, when implemented, is measured from run creation.
 No CI config, planner, runtime, cache implementation or TSV has changed.
+
+## Superseding Qualification And Nightly Ruling
+
+Reviewer-g 6075506360 and the user's manual-nightly clarification supersede the
+earlier full/full and pending-refusal clauses above. PR-1 requires hosted full
+and local core, supplemented by the named store-root/debt-census controls and
+real cold/warm cache execution. Do not double-count units already run in core;
+final audit must name the exact IDs/selectors and remaining receipts. No local
+full is requested; no runtime/store semantics, logical membership or TSV format
+changes are permitted by this waiver.
+
+Full is the default merge tier, not an exception-free product rule. A lower tier
+needs an explicit reviewer ruling; the orchestrator compares it to actual
+same-head/same-run tier proof. Master nightly proof also runs for deliberate
+full workflow_dispatch on master, allowing recovery without waiting for cron.
+At merge, the newest completed trusted ci.yml master run from schedule/manual
+decides. New pending work can coexist with a fresh completed green. New completed
+red/cancelled/partial blocks; a new completed complete manual master-nightly
+green may clear it. Age is strictly <30h from creation. No eligible result,
+wrong workflow/ref/App, missing/failed proof, stale/future or API error refuses.
+Retain original PR proof until healthy bootstrap and blocking-marker activation.
+The lead will exercise positive/negative tier controls on PR-1's own hosted full
+run before activating enforcement; provide the final pushed head immediately.

@@ -99,8 +99,8 @@ func (cache debtAnalysisCache) read(source string) (map[string]authorityDebtSite
 		return nil, false
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, 32<<20))
-	if err != nil {
+	data, err := io.ReadAll(io.LimitReader(file, (32<<20)+1))
+	if err != nil || len(data) > 32<<20 {
 		return nil, false
 	}
 	var record debtAnalysisRecord
