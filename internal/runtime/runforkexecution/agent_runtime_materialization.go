@@ -206,6 +206,7 @@ func agentPlanDescriptions(plans []agentidentity.Plan) []string {
 
 type selectedContractAgentRuntime struct {
 	mu                  sync.Mutex
+	shutdownMu          sync.Mutex
 	manager             *runtimemanager.AgentManager
 	generationGrant     runtimestartupownership.GenerationGrant
 	cleanup             func()
@@ -934,50 +935,34 @@ func (r *selectedContractAgentRuntime) Shutdown() (result error) {
 	if r == nil {
 		return nil
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.shutdownMu.Lock()
+	defer r.shutdownMu.Unlock()
 	defer func() {
 		if panicked := recover(); panicked != nil {
 			result = errors.Join(result, fmt.Errorf("selected runtime cleanup panicked: %v", panicked))
 		}
 	}()
-	if r.cancelExecution != nil {
-		r.cancelExecution(worklifetime.ErrRetired)
-		if r.executionDone != nil {
-			result = errors.Join(result, <-r.executionDone)
-			r.executionDone = nil
-		}
-		r.cancelExecution = nil
+	r.mu.Lock()
+	cancel, done := r.cancelExecution, r.executionDone
+	r.cancelExecution = nil
+	r.mu.Unlock()
+	if cancel != nil {
+		cancel(worklifetime.ErrRetired)
 	}
+	if done != nil {
+		// Serving reports its business failure through runtime diagnostics.
+		// Receiving it here proves the join, not a failed resource release.
+		<-done
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.executionDone = nil
 	if r.executionLease != nil {
 		result = errors.Join(result, r.executionLease.Done())
 		r.executionLease = nil
 	}
-	if r.timerLifecycle != nil {
-		if err := r.timerLifecycle.StopWorkflowTimerLifecycle(context.Background()); err != nil {
-			return errors.Join(result, err)
-		}
-		r.timerLifecycle = nil
-	}
-	if r.scheduler != nil {
-		r.scheduler.Stop()
-		if err := r.scheduler.Wait(context.Background()); err != nil {
-			return errors.Join(result, err)
-		}
-		r.scheduler = nil
-	}
-	if r.manager != nil {
-		if err := r.manager.Shutdown(); err != nil {
-			return errors.Join(result, err)
-		}
-		r.manager = nil
-	}
-	if len(r.pendingActivations) != 0 {
-		var err error
-		r.pendingActivations, err = retireSelectedFlowActivations(context.Background(), r.bus, r.pipeline, r.pendingActivations)
-		if err != nil {
-			return errors.Join(result, err)
-		}
+	if err := r.stopExecutionWork(); err != nil {
+		return errors.Join(result, err)
 	}
 	if r.cleanup != nil {
 		r.cleanup()
@@ -990,6 +975,36 @@ func (r *selectedContractAgentRuntime) Shutdown() (result error) {
 		r.generationGrant = nil
 	}
 	return errors.Join(result, r.workspaceProjection.Release())
+}
+
+func (r *selectedContractAgentRuntime) stopExecutionWork() error {
+	if r.timerLifecycle != nil {
+		if err := r.timerLifecycle.StopWorkflowTimerLifecycle(context.Background()); err != nil {
+			return err
+		}
+		r.timerLifecycle = nil
+	}
+	if r.scheduler != nil {
+		r.scheduler.Stop()
+		if err := r.scheduler.Wait(context.Background()); err != nil {
+			return err
+		}
+		r.scheduler = nil
+	}
+	if r.manager != nil {
+		if err := r.manager.Shutdown(); err != nil {
+			return err
+		}
+		r.manager = nil
+	}
+	if len(r.pendingActivations) != 0 {
+		var err error
+		r.pendingActivations, err = retireSelectedFlowActivations(context.Background(), r.bus, r.pipeline, r.pendingActivations)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *selectedContractAgentRuntime) WaitForQuiescence(ctx context.Context, bus *runtimebus.EventBus) error {
