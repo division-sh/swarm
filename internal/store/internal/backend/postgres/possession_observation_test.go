@@ -189,12 +189,13 @@ func TestPossessionObservationNativeQueryUnlockCloseAndCancellationFailures(t *t
 
 type possessionFailureSocket struct {
 	net.Conn
-	mu        sync.Mutex
-	boundary  string
-	witness   error
-	cancel    context.CancelFunc
-	failRead  bool
-	readBytes []byte
+	mu            sync.Mutex
+	boundary      string
+	witness       error
+	cancel        context.CancelFunc
+	failRead      bool
+	readBytes     []byte
+	deadlineCalls int
 }
 
 func (s *possessionFailureSocket) Write(data []byte) (int, error) {
@@ -202,13 +203,27 @@ func (s *possessionFailureSocket) Write(data []byte) (int, error) {
 	defer s.mu.Unlock()
 	acquire := bytes.Contains(data, []byte("pg_try_advisory_lock"))
 	unlock := bytes.Contains(data, []byte("pg_advisory_unlock"))
-	if (acquire && s.boundary == "acquire_write") || (unlock && s.boundary == "unlock_write") {
+	query := bytes.Contains(data, []byte("SELECT 1"))
+	rollback := bytes.Contains(data, []byte("ROLLBACK"))
+	if (acquire && s.boundary == "acquire_write") || (unlock && s.boundary == "unlock_write") || (query && s.boundary == "query_write") || (rollback && s.boundary == "rollback_write") {
 		return 0, s.witness
 	}
-	if (acquire && s.boundary == "acquire_read") || (unlock && s.boundary == "unlock_read") {
+	if (acquire && s.boundary == "acquire_read") || (unlock && s.boundary == "unlock_read") || (query && s.boundary == "query_read") || (rollback && s.boundary == "rollback_read") {
 		s.failRead = true
 	}
 	return s.Conn.Write(data)
+}
+
+func (s *possessionFailureSocket) SetDeadline(deadline time.Time) error {
+	s.mu.Lock()
+	s.deadlineCalls++
+	fail := s.boundary == "cleanup_bind" && s.deadlineCalls == 2
+	s.mu.Unlock()
+	err := s.Conn.SetDeadline(deadline)
+	if fail {
+		return errors.Join(err, s.witness)
+	}
+	return err
 }
 
 func (s *possessionFailureSocket) Read(data []byte) (int, error) {

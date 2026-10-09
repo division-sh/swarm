@@ -9541,6 +9541,11 @@ engine:
         a context deadline alone is not proof that driver I/O is bounded. Runtime pools and
         retained process-authority sessions do not inherit verifier deadlines. Cancellation or
         uncertain transaction cleanup disposes the exact observation transport and is visible.
+        Semantic observation refusals do not imply transport failure: healthy read and rollback
+        settlement retains the refusal, allows a later inspection, and closes the pool normally.
+        Observation and cleanup phase evidence, including final settlement, determines native
+        transport health. Real I/O, bind, cancellation, deadline and cleanup failures remain
+        joined and dispose the inspection-only pool and sockets; no unhealthy idle session survives.
       possession_observation: >
         Selected inspection may make one transient nonblocking try-lock and checked immediate
         release through the existing process-possession owner. This is a separately timed kernel

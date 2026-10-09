@@ -63,14 +63,24 @@ func (b *Backend) withInspectionIO(ctx context.Context, operation func(context.C
 		return phaseErr
 	}
 	defer func() {
-		err = errors.Join(err, settle())
-		if err != nil {
-			err = errors.Join(err, b.inspectionDialer.close())
+		observationErr := settle()
+		cleanupErr := errors.Join(b.inspectionDialer.phaseError(), observationContextError(cleanup))
+		disposed := observationErr != nil || cleanupErr != nil
+		if disposed {
+			// Stop failed native I/O before evicting this single-purpose pool;
+			// no unhealthy idle session may survive a completed observation.
+			cleanupErr = errors.Join(cleanupErr, b.inspectionDialer.close(), b.db.Close())
 		}
 		if finish != nil {
-			err = errors.Join(err, finish())
+			cleanupErr = errors.Join(cleanupErr, finish())
 		}
-		err = errors.Join(err, observationContextError(cleanup))
+		cleanupErr = errors.Join(cleanupErr, observationContextError(cleanup))
+		if !disposed && cleanupErr != nil {
+			// Finish can discover a late cleanup failure; the native deadline
+			// remains installed while the failed pool and sockets are disposed.
+			cleanupErr = errors.Join(cleanupErr, b.inspectionDialer.close(), b.db.Close())
+		}
+		err = errors.Join(err, observationErr, cleanupErr, b.inspectionDialer.phaseError(), observationContextError(cleanup))
 		cancelCleanup()
 	}()
 	return operation(context.WithoutCancel(ctx), settle)
