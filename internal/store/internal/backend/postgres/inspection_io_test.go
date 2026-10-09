@@ -6,9 +6,36 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/lib/pq"
 )
+
+func TestInspectionSemanticRefusalDoesNotFabricateTransportFailure(t *testing.T) {
+	dsn, _, _ := testutil.StartEmptyPostgres(t)
+	cfg, err := pq.NewConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := OpenForInspection(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	refusal := &runlifecycle.RunNotFoundError{RunID: "00000000-0000-0000-0000-000000000001"}
+	readErr := b.InspectSnapshot(ctx, func(snapshot context.Context) error {
+		var value int
+		if err := b.QueryRowContext(snapshot, `SELECT 1`).Scan(&value); err != nil {
+			return err
+		}
+		return refusal
+	})
+	closeErr := b.Close()
+	if !errors.Is(readErr, refusal) || closeErr != nil {
+		t.Fatalf("healthy semantic refusal fabricated a transport error: read=%v close=%v", readErr, closeErr)
+	}
+}
 
 func TestInspectionNativeReadCancellationJoinsTransactionAndDisposes(t *testing.T) {
 	dsn, db, _ := testutil.StartEmptyPostgres(t)
