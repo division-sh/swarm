@@ -109,6 +109,18 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			SpecRef:        "platform-spec.yaml#tool_model.hitl_channel_pack_interface.capability_model.session_incoming_capture",
 			Reason:         "connection-private bounded provider handoff owns only incoming capture and callback failure evidence; it is not a selected-store execution or effect journal",
 		},
+		"internal/whatsapp/publication.go": {
+			Classification: rawSQLProviderStateBoundary,
+			Issue:          2577,
+			SpecRef:        "platform-spec.yaml#tool_model.hitl_channel_pack_interface.capability_model.session_capture_publication",
+			Reason:         "connection-private capture staging and retirement mutate only whatsapp_incoming_capture; executable publication and committed receipt verification remain selected-store owner calls",
+		},
+		"internal/whatsapp/session_state_unix.go": {
+			Classification: rawSQLProviderStateBoundary,
+			Issue:          2577,
+			SpecRef:        "platform-spec.yaml#tool_model.hitl_channel_pack_interface.capability_model.session_provider_state_lifetime",
+			Reason:         "exclusive provider.db ownership supplies only the SDK device/session store, with complete occurrence/store-write joining before release; it grants no selected-store execution or account admission",
+		},
 		"internal/testutil/runtimepipelinefixture/context.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          2148,
