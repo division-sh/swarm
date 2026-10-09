@@ -57,6 +57,88 @@ func TestInspectionSemanticRefusalDoesNotFabricateTransportFailure(t *testing.T)
 	}
 }
 
+func TestInspectionInitialBindFailureDisposesReadPool(t *testing.T) {
+	dsn, _, _ := testutil.StartEmptyPostgres(t)
+	cfg, err := pq.NewConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := OpenForInspection(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	witness := errors.New("next observation deadline bind failed")
+	var fault *possessionFailureSocket
+	b.inspectionDialer.dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+		conn, err := (&net.Dialer{}).DialContext(ctx, network, address)
+		if err != nil {
+			return nil, err
+		}
+		fault = &possessionFailureSocket{Conn: conn, witness: witness}
+		return fault, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := b.Ping(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Arm the existing deadline fault for the next observation's initial bind,
+	// after a healthy connection has returned to the idle pool.
+	fault.mu.Lock()
+	fault.boundary, fault.deadlineCalls = "cleanup_bind", 1
+	fault.mu.Unlock()
+	called := false
+	err = b.InspectSnapshot(ctx, func(context.Context) error { called = true; return nil })
+	stats := b.db.Stats()
+	closeErr := b.Close()
+	if !errors.Is(err, witness) || called || stats.OpenConnections != 0 || stats.InUse != 0 || stats.Idle != 0 || closeErr != nil {
+		t.Fatalf("initial bind failure left unhealthy pool/fabricated close: err=%v entered=%t stats=%+v close=%v", err, called, stats, closeErr)
+	}
+	for _, socket := range b.inspectionDialer.sockets {
+		socket.mu.Lock()
+		closed := socket.closed
+		socket.mu.Unlock()
+		if !closed {
+			t.Fatal("initial bind returned without joined native disposal")
+		}
+	}
+}
+
+func TestInspectionPreCanceledContextPreservesHealthyReadPool(t *testing.T) {
+	dsn, _, _ := testutil.StartEmptyPostgres(t)
+	cfg, err := pq.NewConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := OpenForInspection(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := b.Ping(ctx); err != nil {
+		t.Fatal(err)
+	}
+	canceled, stop := context.WithCancel(ctx)
+	stop()
+	called := false
+	err = b.InspectSnapshot(canceled, func(context.Context) error { called = true; return nil })
+	if !errors.Is(err, context.Canceled) || called {
+		t.Fatalf("pre-canceled inspection entered observation or lost cause: err=%v entered=%t", err, called)
+	}
+	if stats := b.db.Stats(); stats.OpenConnections != 1 || stats.InUse != 0 || stats.Idle != 1 {
+		t.Fatalf("pre-canceled inspection disposed a healthy idle session: %+v", stats)
+	}
+	if err := b.InspectSnapshot(ctx, func(snapshot context.Context) error {
+		return b.QueryRowContext(snapshot, `SELECT 1`).Scan(new(int))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestInspectionNativeFailureDisposesReadPool(t *testing.T) {
 	for _, boundary := range []string{"query_read", "query_write", "rollback_read", "rollback_write", "cleanup_bind", "close"} {
 		t.Run(boundary, func(t *testing.T) {
