@@ -7,6 +7,7 @@ import (
 func TestA9CapabilitySubjectDeclarationIdentity(t *testing.T) {
 	left := effectiveTriggerSubject(RequirementStatusUnbound)
 	left.TriggerAdmission.Alias = "shared"
+	left.Capabilities[0].Target = "/webhooks/shared/telegram"
 	right := CloneSubjects([]Subject{left})[0]
 	right.TriggerAdmission.FlowPath = "other"
 	var err error
@@ -27,6 +28,7 @@ func TestA9CapabilitySubjectDeclarationIdentity(t *testing.T) {
 	}
 	changed := CloneSubjects([]Subject{left})[0]
 	changed.TriggerAdmission.Alias = "changed"
+	changed.Capabilities[0].Target = "/webhooks/changed/telegram"
 	if _, err := NormalizeSubjects([]Subject{changed}); err != nil {
 		t.Fatalf("endpoint override changed the declaring identity: %v", err)
 	}

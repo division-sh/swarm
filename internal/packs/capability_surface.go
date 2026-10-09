@@ -374,6 +374,10 @@ func normalizeSubject(subject *Subject) error {
 		return fmt.Errorf("capability subject id, provider, source, and applicability are required")
 	}
 	providedStatus := subject.Status
+	for i := range subject.Capabilities {
+		subject.Capabilities[i].Code = strings.TrimSpace(subject.Capabilities[i].Code)
+		subject.Capabilities[i].Target = strings.TrimSpace(subject.Capabilities[i].Target)
+	}
 	for i := range subject.Requirements {
 		requirement := &subject.Requirements[i]
 		requirement.Kind = strings.TrimSpace(requirement.Kind)
@@ -458,10 +462,6 @@ func normalizeSubject(subject *Subject) error {
 		return fmt.Errorf("capability subject %q status %q contradicts derived status %q", subject.ID, providedStatus, derivedStatus)
 	}
 	subject.Status = derivedStatus
-	for i := range subject.Capabilities {
-		subject.Capabilities[i].Code = strings.TrimSpace(subject.Capabilities[i].Code)
-		subject.Capabilities[i].Target = strings.TrimSpace(subject.Capabilities[i].Target)
-	}
 	for i := range subject.Guarantees {
 		guarantee, err := NewGuarantee(subject.Guarantees[i].Code)
 		if err != nil {
@@ -527,6 +527,9 @@ func normalizeProviderTriggerSubject(subject *Subject) (SubjectStatus, error) {
 		if subject.Source != "trigger_pack" || subject.TriggerAdmission != nil {
 			return "", fmt.Errorf("installed provider trigger subject %q must use trigger_pack source and must not carry target admission", subject.ID)
 		}
+		if err := validateTriggerTransportSubject(*subject); err != nil {
+			return "", err
+		}
 	case "effective":
 		if subject.Source != "trigger_pack_binding" && subject.Source != "raw_declaration" {
 			return "", fmt.Errorf("effective provider trigger subject %q has invalid source %q", subject.ID, subject.Source)
@@ -535,9 +538,6 @@ func normalizeProviderTriggerSubject(subject *Subject) (SubjectStatus, error) {
 			return "", fmt.Errorf("effective provider trigger subject %q requires typed trigger_admission", subject.ID)
 		}
 		admission := subject.TriggerAdmission
-		if err := validateTriggerTransportSubject(*subject); err != nil {
-			return "", err
-		}
 		if admission.BindingBlockReason != "" {
 			if admission.BindingEnabled == nil || *admission.BindingEnabled {
 				return "", fmt.Errorf("effective provider trigger subject %q has a blocked enabled binding", subject.ID)
@@ -562,6 +562,9 @@ func normalizeProviderTriggerSubject(subject *Subject) (SubjectStatus, error) {
 		admission.Event = strings.TrimSpace(admission.Event)
 		admission.SignedPayload = strings.TrimSpace(admission.SignedPayload)
 		admission.DigestEncoding = strings.TrimSpace(admission.DigestEncoding)
+		if err := validateTriggerTransportSubject(*subject); err != nil {
+			return "", err
+		}
 		if admission.BundleHash == "" || admission.Alias == "" || admission.CatalogGeneration == "" || admission.Event == "" {
 			return "", fmt.Errorf("effective provider trigger subject %q requires bundle_hash, alias, catalog_generation, and event", subject.ID)
 		}
@@ -655,9 +658,29 @@ func normalizeProviderTriggerSubject(subject *Subject) (SubjectStatus, error) {
 }
 
 func validateTriggerTransportSubject(subject Subject) error {
+	receiver, err := triggerReceiveTransport(subject)
+	if err != nil {
+		return err
+	}
+	if receiver == ChannelTransportSession {
+		if len(subject.Requirements) != 0 {
+			return fmt.Errorf("session provider trigger subject %q cannot claim secret requirements", subject.ID)
+		}
+		for _, capability := range subject.Capabilities {
+			if capability.Code == CapabilityVerifySecret {
+				return fmt.Errorf("session provider trigger subject %q cannot claim webhook capabilities", subject.ID)
+			}
+		}
+	}
+	if subject.Applicability == "installed" {
+		return nil
+	}
 	admission := subject.TriggerAdmission
 	if _, err := admission.Transport.ActivationPosture(); err != nil {
 		return fmt.Errorf("effective provider trigger subject %q: %w", subject.ID, err)
+	}
+	if admission.Transport != receiver {
+		return fmt.Errorf("effective provider trigger subject %q receive capability contradicts transport %q", subject.ID, admission.Transport)
 	}
 	if admission.Transport == ChannelTransportWebhook {
 		if admission.RequestAuthentication == "SESSION_ACCOUNT" {
@@ -666,25 +689,38 @@ func validateTriggerTransportSubject(subject Subject) error {
 		return nil
 	}
 	if admission.RequestAuthentication != "SESSION_ACCOUNT" || admission.PolicySource != "verified_pack" ||
-		admission.SignedPayload != "" || admission.DigestEncoding != "" || len(subject.Requirements) != 0 {
+		admission.SignedPayload != "" || admission.DigestEncoding != "" {
 		return fmt.Errorf("effective session provider trigger subject %q requires verified account admission without HTTP or secret claims", subject.ID)
 	}
+	return nil
+}
+
+func triggerReceiveTransport(subject Subject) (ChannelTransport, error) {
+	alias := "{alias}"
+	if subject.Applicability == "effective" {
+		alias = subject.TriggerAdmission.Alias
+	}
 	receivers := 0
+	var transport ChannelTransport
 	for _, capability := range subject.Capabilities {
+		var target string
 		switch capability.Code {
-		case CapabilityReceiveHTTPSRoute, CapabilityVerifySecret:
-			return fmt.Errorf("effective session provider trigger subject %q cannot claim webhook capabilities", subject.ID)
+		case CapabilityReceiveHTTPSRoute:
+			transport, target = ChannelTransportWebhook, "/webhooks/"+alias+"/"+subject.Provider
 		case CapabilityReceiveSessionEvents:
-			if capability.Target != subject.Provider {
-				return fmt.Errorf("effective session provider trigger subject %q capability contradicts its provider", subject.ID)
-			}
-			receivers++
+			transport, target = ChannelTransportSession, subject.Provider
+		default:
+			continue
+		}
+		receivers++
+		if capability.Target != target {
+			return "", fmt.Errorf("provider trigger subject %q receiver target %q must be %q", subject.ID, capability.Target, target)
 		}
 	}
 	if receivers != 1 {
-		return fmt.Errorf("effective session provider trigger subject %q requires exactly one session receive capability", subject.ID)
+		return "", fmt.Errorf("provider trigger subject %q requires exactly one HTTP or session receive capability", subject.ID)
 	}
-	return nil
+	return transport, nil
 }
 
 func validateTriggerRequirement(subjectID string, requirement Requirement) error {

@@ -11318,7 +11318,10 @@ tool_model:
         Authenticated request identity, semantic-content digest, acknowledgment posture and challenge evidence are
         read-only owner projections, never writable or serializable authority. Delivery and publication projection
         refuse changed authenticated content before normalization or output sealing; challenge responses are defensive
-        copies rather than writable admission state. Historical receipt lookup consumes that same immutable identity.
+        copies rather than writable admission state. Form admission binds both the signed form view consumed by raw
+        publication and the separately retained payload view consumed by normalization, including nested values and
+        number lexemes; its historical semantic-content identity remains the form identity, not the payload-view check.
+        Historical receipt lookup consumes that same immutable identity.
         An admitted trigger BODY projects the exact captured JSON bytes through the same normalized-field and branch
         owner as webhook delivery. This pure projection grants neither request authentication nor provider-output
         authorization; session admission and the existing normalized-output authorization owner remain mandatory.
@@ -12284,7 +12287,12 @@ tool_model:
         Effective capability readback carries the explicit transport and SESSION_ACCOUNT authentication, claims
         receive_session_events rather than receive_https_route, and has no dummy signing requirement. The base session
         projection is NOT_READY until its existing lifecycle owner admits the exact binding; declaration alone grants
-        no execution. This does not install an arbitrary session provider or weaken webhook signature rules.
+        no execution. Receiver capabilities and authentication are normalized before cross-validation: installed
+        trigger inventory carries exactly one provider-session receiver or conventional HTTP route template and no
+        target admission; effective trigger readback carries exactly one receiver matching its explicit transport and
+        exact provider/alias. Missing, duplicate, mixed or opposite-transport receivers and webhook SESSION_ACCOUNT
+        claims refuse, including whitespace variants. This does not install an arbitrary session provider or weaken
+        webhook signature rules.
       bundle_generation: >
         Each loaded BundleContext owns the immutable trigger catalog, connector registry, channel plans, installed subjects,
         and effective subjects derived from that bundle's exact EffectivePackInventory. Boot compiles each context only from

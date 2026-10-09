@@ -10,6 +10,7 @@ func TestNormalizeSubjectsRejectsGlobalTriggerReadiness(t *testing.T) {
 	subject := Subject{
 		ID: "provider.stripe", Kind: SubjectProviderTrigger, Provider: "stripe",
 		Source: "trigger_pack", Applicability: "installed", Status: StatusReady,
+		Capabilities: []Capability{{Code: CapabilityReceiveHTTPSRoute, Target: "/webhooks/{alias}/stripe"}},
 	}
 	if _, err := NormalizeSubjects([]Subject{subject}); err == nil || !strings.Contains(err.Error(), "contradicts derived status \"AVAILABLE\"") {
 		t.Fatalf("NormalizeSubjects error = %v, want global trigger readiness rejection", err)
@@ -34,6 +35,7 @@ func TestNormalizeSubjectsOwnsEffectiveTriggerAdmissionShape(t *testing.T) {
 			Pack: &TriggerPackIdentity{ID: "provider.acme", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "external"},
 		},
 		Requirements: []Requirement{TargetScopedRequirement(RequirementSecret, "webhook_signing.acme")},
+		Capabilities: []Capability{{Code: CapabilityReceiveHTTPSRoute, Target: "/webhooks/chat/acme"}},
 		TriggerEvents: []TriggerEventDescriptor{
 			{Event: "inbound.acme", Kind: "raw", Fields: []TriggerEventFieldDescriptor{{Name: "payload", Type: "json", Required: true}}},
 			{Event: "inbound.acme.record_created", Kind: "normalized", Fields: []TriggerEventFieldDescriptor{{Name: "record_id", Type: "text", Required: true, CarryEligible: true}}},
@@ -191,7 +193,8 @@ func TestGuaranteeAndRemediationRegistriesFailClosed(t *testing.T) {
 func TestNormalizeSubjectsOrdersDeterministicallyAndRejectsDuplicates(t *testing.T) {
 	items := []Subject{
 		{ID: "z.write", Kind: SubjectProviderConnector, Provider: "z", Source: "flow_local", Applicability: "effective", Status: StatusReady},
-		{ID: "provider.a", Kind: SubjectProviderTrigger, Provider: "a", Source: "trigger_pack", Applicability: "installed", Status: StatusAvailable},
+		{ID: "provider.a", Kind: SubjectProviderTrigger, Provider: "a", Source: "trigger_pack", Applicability: "installed", Status: StatusAvailable,
+			Capabilities: []Capability{{Code: CapabilityReceiveHTTPSRoute, Target: "/webhooks/{alias}/a"}}},
 		{ID: "a.write", Kind: SubjectProviderConnector, Provider: "a", Source: "flow_local", Applicability: "effective", Status: StatusReady},
 	}
 	normalized, err := NormalizeSubjects(items)
@@ -239,6 +242,7 @@ func TestEffectiveTriggerTextAndJSONProjectTheSameTypedFacts(t *testing.T) {
 			Pack: &TriggerPackIdentity{ID: "provider.acme", Version: "1.2.3", ManifestHash: "sha256:" + strings.Repeat("f", 64), Provenance: "external"},
 		},
 		Requirements: []Requirement{TargetScopedRequirement(RequirementSecret, "webhook_signing.acme")},
+		Capabilities: []Capability{{Code: CapabilityReceiveHTTPSRoute, Target: "/webhooks/chat/acme"}},
 		TriggerEvents: []TriggerEventDescriptor{
 			{Event: "inbound.acme", Kind: "raw", Fields: []TriggerEventFieldDescriptor{{Name: "payload", Type: "json", Required: true}}},
 			{Event: "inbound.acme.record_created", Kind: "normalized", Fields: []TriggerEventFieldDescriptor{{Name: "record_id", Type: "text", Required: true, CarryEligible: true}}},
@@ -286,6 +290,7 @@ func TestRenderEffectiveTriggerReadinessIsConciseAndRedacted(t *testing.T) {
 				ID: "ingress:bundle:chat:telegram", Kind: SubjectProviderTrigger, Provider: "telegram",
 				Source: "raw_declaration", Applicability: "effective",
 				TriggerAdmission: &TriggerAdmission{Transport: ChannelTransportWebhook, BundleHash: "bundle", FlowPath: "chat", Alias: "chat", CatalogGeneration: "generation", PolicySource: "raw_declaration", RequestAuthentication: "UNAUTHENTICATED", Event: "inbound.telegram"},
+				Capabilities:     []Capability{{Code: CapabilityReceiveHTTPSRoute, Target: "/webhooks/chat/telegram"}},
 			},
 			want: "READY · UNAUTHENTICATED",
 		},
@@ -311,5 +316,6 @@ func effectiveTriggerSubject(status string) Subject {
 		Source: "raw_declaration", Applicability: "effective",
 		TriggerAdmission: &TriggerAdmission{Transport: ChannelTransportWebhook, BundleHash: "bundle", FlowPath: "chat", Alias: "chat", CatalogGeneration: "generation", PolicySource: "raw_declaration", RequestAuthentication: "HMAC_SHA256", Event: "inbound.telegram"},
 		Requirements:     []Requirement{RequirementWithStatus(RequirementSecret, "webhook_signing.telegram", RequirementScopeTarget, status, "credential_store")},
+		Capabilities:     []Capability{{Code: CapabilityReceiveHTTPSRoute, Target: "/webhooks/chat/telegram"}},
 	}
 }
