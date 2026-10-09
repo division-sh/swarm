@@ -235,8 +235,7 @@ func InsertChildEventRecord(
 func InsertUnrevisionedChildEventRecord(
 	t testing.TB,
 	ctx context.Context,
-	db *sql.DB,
-	dialect authoractivityfixture.Dialect,
+	selected any,
 	eventID string,
 	runID string,
 	parentEventID string,
@@ -247,17 +246,9 @@ func InsertUnrevisionedChildEventRecord(
 	createdAt time.Time,
 ) events.Event {
 	t.Helper()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin unrevisioned child event fixture: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	event, err := eventfixture.InsertUnrevisionedChild(ctx, tx, dialect, eventID, runID, parentEventID, eventType, producer, payload, envelope, createdAt)
+	event, err := private.InsertStagedChildEventForTest(ctx, selected, eventID, runID, parentEventID, eventType, producer, payload, envelope, createdAt)
 	if err != nil {
 		t.Fatalf("insert unrevisioned child event fixture %s: %v", eventID, err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit unrevisioned child event fixture %s: %v", eventID, err)
 	}
 	return event
 }

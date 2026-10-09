@@ -44,7 +44,7 @@ func finalizePostgresRunForkTestRevision(ctx context.Context, tx *sql.Tx, runID 
 	if err := effects.Add(runID, families...); err != nil {
 		return 0, err
 	}
-	results, err := runforkrevision.FinalizePostgres(ctx, tx, effects, nil)
+	results, err := runforkrevision.FinalizePostgres(ctx, tx, effects)
 	if err != nil {
 		return 0, err
 	}
