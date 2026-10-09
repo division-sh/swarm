@@ -93,11 +93,6 @@ func seedRunForkCLIConstruction(t *testing.T, db *sql.DB, runID, bundleHash stri
 		t.Fatal(err)
 	}
 	command := bus.FlowInstanceActivationCommand{Plan: plan}
-	for _, construction := range plan.ConstructionPlans() {
-		command.RouteTopology = append(command.RouteTopology, bus.FlowInstanceRouteRecordSet{
-			Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: construction.Identity.Route()},
-		})
-	}
 	committed, err := selected.CommitFlowInstanceActivation(ctx, command)
 	if err != nil || !committed.Acknowledged || !committed.Created {
 		t.Fatalf("source construction: acknowledged=%v created=%v err=%v", committed.Acknowledged, committed.Created, err)

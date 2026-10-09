@@ -423,7 +423,6 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 		PipelineObligations: backend.obligations,
 		DeliveryStore:       backend.deliveryStore,
 		Credentials:         credentialStore,
-		FlowRoutes:          bus,
 	})
 
 	startConfiguredChannelActivityNode(t, backend.ctx, pc, bus, backend.db)

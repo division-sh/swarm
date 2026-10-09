@@ -1650,11 +1650,6 @@ func (b *flowActivationTestBus) RemoveFlowInstanceRoute(identity runtimeflowiden
 	return b.RemoveFlowInstanceRouteContext(context.Background(), identity)
 }
 
-func (b *flowActivationTestBus) RetireCommittedFlowInstanceRoute(retirement runtimepipeline.WorkflowEngineRouteRetirement) error {
-	b.removedPairs = append(b.removedPairs, retirement.Identity.Route.ScopeKey+"/"+retirement.Identity.Route.InstanceID)
-	return b.RetirePublishedFlowInstanceRoute(retirement.Identity)
-}
-
 func (b *flowActivationTestBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	if b.removeErr != nil {
 		return b.removeErr
@@ -3879,10 +3874,10 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 	}
 }
 
-func TestDynamicFlowRuntimeReadinessTerminalRaceRetiresProcessRoute(t *testing.T) {
+func TestDynamicFlowRuntimeReadinessTerminalRaceDoesNotArmOrEmit(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
-	agents := &flowActivationTestStore{}
-	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}, addErr: errors.New("seed pending readiness")}
+	agents := &flowActivationTestStore{failAgentID: "writer"}
+	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
 	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
@@ -3890,12 +3885,7 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceRetiresProcessRoute(t *testing.T
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err == nil {
 		t.Fatal("activation unexpectedly completed the readiness plan")
 	}
-	bus.addErr = nil
-	if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: testActivationFlowIdentity(req),
-	}); err != nil {
-		t.Fatalf("seed stale process route: %v", err)
-	}
+	agents.failAgentID = ""
 	stageEntered := make(chan struct{})
 	stageRelease := make(chan struct{})
 	defer func() {
@@ -3905,10 +3895,9 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceRetiresProcessRoute(t *testing.T
 			close(stageRelease)
 		}
 	}()
-	bus.stageRoute = func(runtimebus.FlowInstanceRouteMaterializationRequest) error {
+	am.testAfterDynamicFlowReadinessAdmission = func() {
 		close(stageEntered)
 		<-stageRelease
-		return nil
 	}
 	reconciled := make(chan error, 1)
 	go func() {
@@ -3930,8 +3919,9 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceRetiresProcessRoute(t *testing.T
 	if err := receiveFlowActivationResult(t, reconciled); err != nil {
 		t.Fatalf("terminal reconciliation: %v", err)
 	}
-	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-		t.Fatal("terminal readiness left a process-visible route")
+	current, found, err := instances.LoadDynamicFlowRuntimeReadiness(context.Background(), req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil || !found || !current.Terminal() {
+		t.Fatalf("terminal authority lost after admission race: found=%v row=%+v err=%v", found, current, err)
 	}
 	if len(instances.armedEntries) != 0 || len(bus.published) != 0 {
 		t.Fatalf("terminal readiness side effects: armed=%#v published=%#v", instances.armedEntries, bus.published)

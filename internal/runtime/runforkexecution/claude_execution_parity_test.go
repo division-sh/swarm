@@ -52,7 +52,6 @@ func seedSelectedAgentExecutionSource(t *testing.T, ctx context.Context, selecte
 	rootCommand := selectedExecutionSourceFlowCommand(t, ctx, loaded, event, root)
 	workerCommand := selectedExecutionSourceFlowCommand(t, ctx, loaded, event, worker)
 	rootCommand.Plan.Children = append(rootCommand.Plan.Children, workerCommand.Plan)
-	rootCommand.RouteTopology = append(rootCommand.RouteTopology, workerCommand.RouteTopology...)
 	if err := rootCommand.Validate(); err != nil {
 		t.Fatal(err)
 	}

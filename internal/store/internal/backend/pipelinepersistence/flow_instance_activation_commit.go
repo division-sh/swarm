@@ -108,11 +108,7 @@ func commitOneFlowInstanceActivation(
 		if len(committed) != 1 {
 			return runtimepipeline.CommittedFlowInstanceActivation{}, fmt.Errorf("flow instance activation commit returned %d results", len(committed))
 		}
-		err = attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			_, err := replaceFlowInstanceRouteTopologyTx(txctx, tx, postgres, command.RouteTopology)
-			return err
-		})
-		return committed[0], err
+		return committed[0], nil
 	})
 	result, acknowledged := outcome.Value()
 	if !acknowledged {
