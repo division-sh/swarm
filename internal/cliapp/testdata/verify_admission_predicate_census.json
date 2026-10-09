@@ -3402,10 +3402,16 @@
     "body_sha256": "80ba2b5313e07fec792730bfed94850e600962ea32420fc85c1b9bf3ce17218c"
   },
   {
+    "owner": "internal/store/internal/backend/postgres/inspection_io.go::*Backend.disposeInspectionIO",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24,2591-PG-IO",
+    "body_sha256": "056f0a5ca6568f9389fb238c9ff7a16534e6017f8bd8142af52787c460952d38"
+  },
+  {
     "owner": "internal/store/internal/backend/postgres/inspection_io.go::*Backend.withInspectionIO",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24,2591-PG-IO",
-    "body_sha256": "48c9c3c4a04e2f46ac3e64675afc302a9c029f9e396043b2f426a44d43c302f6"
+    "body_sha256": "a12b92b07f46f2903707b7a145d06bdda9959e0945d68649060e2cd44089ea0c"
   },
   {
     "owner": "internal/store/internal/backend/postgres/inspection_io.go::OpenForInspection",
