@@ -434,9 +434,22 @@ func (c selectedContractForkLocalRuntimeContainer) RetainActivated(prepared *Pre
 	c.diagnostics.add(diagnostic)
 	if err := c.req.Owner.retainPrepared(prepared); err != nil {
 		c.diagnostics.add(err)
+		c.retainHandoffFailure(err)
 		return
 	}
-	c.diagnostics.add(c.Serve())
+	if err := c.Serve(); err != nil {
+		c.diagnostics.add(err)
+		c.retainHandoffFailure(err)
+	}
+}
+
+func (c selectedContractForkLocalRuntimeContainer) retainHandoffFailure(err error) {
+	if selectedStopOwnsDisposition(c.attachment.ctx) {
+		c.req.Prepared.retainExecutionFailure(c, context.Canceled)
+	} else if !errors.Is(context.Cause(c.attachment.ctx), worklifetime.ErrRetired) {
+		c.req.Prepared.retainExecutionFailure(c, err)
+	}
+	c.retireServedPreparation()
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Serve() error {
@@ -466,17 +479,18 @@ func (c selectedContractForkLocalRuntimeContainer) serveRetained(done chan<- err
 		}
 		if errors.Is(cause, worklifetime.ErrRetired) {
 			err = nil
+			if selectedStopOwnsDisposition(c.attachment.ctx) {
+				c.req.Prepared.retainExecutionFailure(c, context.Canceled)
+			}
 		} else if err != nil {
-			err = errors.Join(err, c.Fail(context.WithoutCancel(c.attachment.ctx), err))
+			c.req.Prepared.retainExecutionFailure(c, err)
 			c.diagnostics.add(err)
 		}
 		c.attachment.cancel(err)
 		done <- err
-		if err == nil && cause == nil {
-			// Serving and its subordinate work are joined. The preparation still
-			// owns resource retirement, including retry of failed releases.
-			c.diagnostics.add(c.req.Owner.disposePreparation(c.req.Prepared))
-		}
+		// Publish the serving join before cleanup; Shutdown must never join its
+		// own caller. Failed releases remain owned by the exact preparation.
+		c.retireServedPreparation()
 	}()
 	stopHeartbeat, heartbeatDone := make(chan struct{}), make(chan error, 1)
 	go c.heartbeatRetained(stopHeartbeat, heartbeatDone)
@@ -485,6 +499,17 @@ func (c selectedContractForkLocalRuntimeContainer) serveRetained(done chan<- err
 		err = errors.Join(err, <-heartbeatDone)
 	}()
 	err = c.serveCommittedAttachment()
+}
+
+func (c selectedContractForkLocalRuntimeContainer) retireServedPreparation() {
+	defer func() {
+		if panicked := recover(); panicked != nil {
+			// Close has already retained the exact unfinished resources. Report
+			// its panic without abandoning retry ownership or crashing the daemon.
+			c.diagnostics.add(fmt.Errorf("retained selected cleanup panicked: %v", panicked))
+		}
+	}()
+	c.diagnostics.add(c.req.Owner.disposePreparation(c.req.Prepared))
 }
 
 func (c selectedContractForkLocalRuntimeContainer) heartbeatRetained(stop <-chan struct{}, done chan<- error) {
@@ -948,6 +973,15 @@ func (c selectedContractForkLocalRuntimeContainer) Fail(ctx context.Context, cau
 		return err
 	}
 	return c.Close(ctx)
+}
+
+func (c selectedContractForkLocalRuntimeContainer) FailActivated(ctx context.Context, cause error) (bool, error) {
+	failure := runtimefailures.FromError(cause, runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, "execute")
+	raw, err := json.Marshal(failure.Failure)
+	if err != nil {
+		return false, err
+	}
+	return c.ports.runtimeExecution.FailActivatedRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority, raw)
 }
 
 type selectedContractRuntimeContainerLoggerHook struct {
