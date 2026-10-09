@@ -95,8 +95,8 @@ func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fo
 		durable := runtimebus.DurableDependencies{
 			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteTopology: selected,
-			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+			FlowRouteTopology: selected,
+			ActiveAgents:      selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
 			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 			Instances: workflow, ConstructionPublications: workflow,
 		}
@@ -119,8 +119,8 @@ func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fo
 		durable := runtimebus.DurableDependencies{
 			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteTopology: selected,
-			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+			FlowRouteTopology: selected,
+			ActiveAgents:      selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
 			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 			Instances: workflow, ConstructionPublications: workflow,
 		}

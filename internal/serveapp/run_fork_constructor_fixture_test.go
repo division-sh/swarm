@@ -62,8 +62,8 @@ func seedRunForkCLIConstruction(t *testing.T, db *sql.DB, runID, bundleHash stri
 		RuntimeInstanceID: runtimeID, DeliveryAuthority: authority, ReceiverExecution: eventreceiver.NormalExecution(),
 		Durable: bus.DurableDependencies{
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteTopology: selected,
-			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+			FlowRouteTopology: selected,
+			ActiveAgents:      selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
 			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 			Instances: workflow, ConstructionPublications: workflow,
 		},

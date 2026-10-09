@@ -1469,21 +1469,6 @@ func (b *flowActivationSemanticRouteBus) HasFlowInstanceRoute(identity runtimefl
 	return b != nil && b.process != nil && b.process.HasFlowInstanceRoute(identity)
 }
 
-func (b *flowActivationSemanticRouteBus) VerifyFlowInstanceRoute(
-	_ context.Context,
-	identity runtimeflowidentity.RunScopedFlowInstance,
-) error {
-	if !b.HasFlowInstanceRoute(identity) {
-		return errors.New("semantic route is not process-ready")
-	}
-	durable := b.durableRoutes[identity.Key()]
-	process := b.process.MaterializedRoutes(identity)
-	if !reflect.DeepEqual(durable, process) {
-		return fmt.Errorf("semantic durable/process route mismatch: durable=%#v process=%#v", durable, process)
-	}
-	return nil
-}
-
 func (b *flowActivationTestBus) StageFlowInstanceRouteContext(ctx context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) (runtimebus.FlowInstanceRouteTopologyResult, error) {
 	req = req.Normalized()
 	if b.addErr != nil {
@@ -1573,25 +1558,6 @@ func (b *flowActivationTestBus) HasFlowInstanceRoute(identity runtimeflowidentit
 		}
 	}
 	return false
-}
-
-func (b *flowActivationTestBus) VerifyFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	if !b.HasFlowInstanceRoute(identity) {
-		return errors.New("route not process-ready")
-	}
-	if b.routeStore != nil {
-		routes, err := b.routeStore.ListFlowInstanceRoutes(ctx)
-		if err != nil {
-			return err
-		}
-		for _, route := range routes {
-			if route == identity {
-				return nil
-			}
-		}
-		return errors.New("route not durably registered")
-	}
-	return nil
 }
 
 func (b *flowActivationTestBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
@@ -2066,7 +2032,7 @@ func findPublishedFlowActivationEvent(t *testing.T, bus *flowActivationTestBus, 
 	return eventtest.RunCreatingRootIngress("", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 }
 
-func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
+func TestActivateFlowInstanceUsesConstructedAttachmentEvidence(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
 	am := newFlowActivationManager(t, bus, instances)
@@ -2082,8 +2048,16 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if len(bus.addedPaths) != 1 || bus.addedPaths[0] != "review/inst-1" {
-		t.Fatalf("added paths = %#v, want [review/inst-1]", bus.addedPaths)
+	stored, found, err := instances.Load(flowActivationRunContext(), testActivationFlowIdentity(req))
+	if err != nil || !found || stored.StorageRef != req.Instance.InstancePath || stored.EntityID != req.Instance.EntityID {
+		t.Fatalf("constructed instance evidence = %+v found=%t err=%v", stored, found, err)
+	}
+	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(flowActivationRunContext(), req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil || !found || readiness.Phase != runtimepipeline.FlowAttachmentReady || readiness.Plan.Identity != req.Instance {
+		t.Fatalf("exact attachment evidence = %+v found=%t err=%v", readiness, found, err)
+	}
+	if len(bus.addedPaths) != 0 {
+		t.Fatalf("activation published non-authoritative route membership: %#v", bus.addedPaths)
 	}
 	if len(instances.creates) != 1 || instances.creates[0].EntityType != "review_entity" {
 		t.Fatalf("activation entity contract = %#v, want canonical review_entity and no schema.Entity interpretation", instances.creates)
@@ -2158,7 +2132,8 @@ func TestActivateFlowInstanceRejectsMissingCanonicalEntityContract(t *testing.T)
 
 func TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
+	instances := &flowActivationTestInstanceStore{}
+	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 	ctx := runtimepipelinefixture.WithSQLTx(testAuthorActivityContext(context.Background()), &sql.Tx{})
@@ -2170,8 +2145,12 @@ func TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority(t *testin
 	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("flow agent did not start from the closed activation result")
 	}
-	if len(bus.addedPaths) != 1 || bus.addedPaths[0] != "review/inst-1" {
-		t.Fatalf("committed route materialization = %#v, want review/inst-1", bus.addedPaths)
+	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(flowActivationRunContext(), flowActivationTestRunID, runtimeflowidentity.DeriveRoute("review", "inst-1"))
+	if err != nil || !found || readiness.Phase != runtimepipeline.FlowAttachmentReady {
+		t.Fatalf("committed attachment evidence = %+v found=%t err=%v", readiness, found, err)
+	}
+	if len(bus.addedPaths) != 0 {
+		t.Fatalf("activation published non-authoritative route membership: %#v", bus.addedPaths)
 	}
 	if len(postCommit) != 0 {
 		t.Fatalf("ambient post-commit actions = %d, want zero", len(postCommit))

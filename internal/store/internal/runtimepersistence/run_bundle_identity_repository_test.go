@@ -532,7 +532,6 @@ func eventBusSourceOperationLedger() map[string]string {
 		"SweepPipelineObligations":                    operationMutation,
 		"WaitForOutboxSweeper":                        operationMutation,
 		"WaitForQuiescence":                           operationMutation,
-		"VerifyFlowInstanceRoute":                     operationPureRead,
 		"SetupScenarioEntities":                       operationMutation,
 	}
 }

@@ -106,8 +106,6 @@ func TestEventBusConstructorsDoNotClassifyStoreCapabilities(t *testing.T) {
 func TestEventBusRoutePersistenceDependenciesAreExplicit(t *testing.T) {
 	root := persistenceOwnershipRepoRoot(t)
 	assertOwnershipStructFields(t, root, "internal/runtime/bus/eventbus.go", "DurableDependencies", map[string]string{
-		"FlowRoutes":        "FlowInstanceRoutePersistence",
-		"FlowRouteRecords":  "FlowInstanceRouteRecordReader",
 		"FlowRouteTopology": "FlowInstanceRouteTopologyPersistence",
 		"ActiveAgents":      "ActiveAgentDescriptorLister",
 		"ActiveFlows":       "ActiveFlowInstanceDescriptorLister",

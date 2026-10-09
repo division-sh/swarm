@@ -342,7 +342,7 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 				EmitFeedback:             selected,
 				ScenarioSetup:            selected,
 				ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-				FlowRoutes: selected, FlowRouteRecords: selected,
+
 				FlowRouteTopology: selected,
 				ActiveAgents:      selected, ActiveFlows: selected, TargetOwners: selected,
 				PreparedEvents:        selected,
@@ -400,7 +400,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 				EmitFeedback:             selected,
 				ScenarioSetup:            selected,
 				ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-				FlowRoutes: selected, FlowRouteRecords: selected,
+
 				FlowRouteTopology: selected,
 				ActiveAgents:      selected, ActiveFlows: selected, TargetOwners: selected,
 				PreparedEvents:        selected,
@@ -464,7 +464,7 @@ func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipelin
 		ConstructionPublications: workflow,
 		EmitFeedback:             selected,
 		ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-		FlowRoutes: selected, FlowRouteRecords: selected,
+
 		FlowRouteTopology: selected, ActiveAgents: selected,
 		ActiveFlows: selected, TargetOwners: selected,
 		PreparedEvents: selected, TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
@@ -486,7 +486,7 @@ func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipe
 		ConstructionPublications: workflow,
 		EmitFeedback:             selected,
 		ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-		FlowRoutes: selected, FlowRouteRecords: selected,
+
 		FlowRouteTopology: selected, ActiveAgents: selected,
 		ActiveFlows: selected, TargetOwners: selected,
 		PreparedEvents: selected, TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,

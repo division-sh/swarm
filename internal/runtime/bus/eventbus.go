@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -109,8 +108,6 @@ type DurableDependencies struct {
 	ReplyContext             runtimereplycontext.Store
 	RunLifecycle             runtimerunlifecycle.OperationOwner
 	DeliveryLifecycle        runtimedelivery.Store
-	FlowRoutes               FlowInstanceRoutePersistence
-	FlowRouteRecords         FlowInstanceRouteRecordReader
 	FlowRouteTopology        FlowInstanceRouteTopologyPersistence
 	ActiveAgents             ActiveAgentDescriptorLister
 	ActiveFlows              ActiveFlowInstanceDescriptorLister
@@ -130,8 +127,6 @@ func (d DurableDependencies) validate() error {
 		{"construction publication reader", d.ConstructionPublications},
 		{"run lifecycle owner", d.RunLifecycle},
 		{"delivery lifecycle owner", d.DeliveryLifecycle},
-		{"flow route owner", d.FlowRoutes},
-		{"flow route record reader", d.FlowRouteRecords},
 		{"flow route topology owner", d.FlowRouteTopology},
 		{"active agent descriptor reader", d.ActiveAgents},
 		{"active flow descriptor reader", d.ActiveFlows},
@@ -705,77 +700,6 @@ func (eb *EventBus) RouteTable() *RouteTable {
 func (eb *EventBus) HasFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) bool {
 	table := eb.RouteTable()
 	return table != nil && table.HasFlowInstanceRoute(identity)
-}
-
-func (eb *EventBus) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	if eb == nil || eb.store == nil {
-		return nil, errors.New("event bus store is required")
-	}
-	store := eb.durable.FlowRoutes
-	if store == nil {
-		return nil, errors.New("event bus store does not support flow-instance route persistence")
-	}
-	return store.ListFlowInstanceRoutes(ctx)
-}
-
-func (eb *EventBus) VerifyFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	if eb == nil || eb.store == nil {
-		return errors.New("event bus store is required")
-	}
-	table := eb.RouteTable()
-	if table == nil || !table.HasFlowInstanceRoute(identity) {
-		return fmt.Errorf("flow-instance route %s is not process-ready", identity.Key())
-	}
-	expected := table.MaterializedRoutes(identity)
-	reader := eb.durable.FlowRouteRecords
-	if reader == nil {
-		return errors.New("event bus store does not expose exact flow-instance route records")
-	}
-	actual, err := reader.ListFlowInstanceRouteRecords(ctx, identity)
-	if err != nil {
-		return err
-	}
-	if !slices.Equal(flowInstanceRouteRecordKeys(actual), flowInstanceRouteRecordKeys(expected)) {
-		return fmt.Errorf("flow-instance route %s persisted topology does not match process topology", identity.Key())
-	}
-	return nil
-}
-
-type flowInstanceRouteRecordIdentity struct {
-	instancePath   string
-	eventPattern   string
-	subscriberType string
-	subscriberID   string
-	sourceFlow     string
-}
-
-func flowInstanceRouteRecordKeys(records []FlowInstanceRouteRecord) []flowInstanceRouteRecordIdentity {
-	keys := make([]flowInstanceRouteRecordIdentity, 0, len(records))
-	for _, record := range records {
-		keys = append(keys, flowInstanceRouteRecordIdentity{
-			instancePath:   strings.Trim(record.Identity.Route.InstancePath, "/"),
-			eventPattern:   strings.TrimSpace(record.EventPattern),
-			subscriberType: strings.TrimSpace(record.SubscriberType),
-			subscriberID:   strings.TrimSpace(record.SubscriberID),
-			sourceFlow:     strings.TrimSpace(record.SourceFlow),
-		})
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].instancePath != keys[j].instancePath {
-			return keys[i].instancePath < keys[j].instancePath
-		}
-		if keys[i].eventPattern != keys[j].eventPattern {
-			return keys[i].eventPattern < keys[j].eventPattern
-		}
-		if keys[i].subscriberType != keys[j].subscriberType {
-			return keys[i].subscriberType < keys[j].subscriberType
-		}
-		if keys[i].subscriberID != keys[j].subscriberID {
-			return keys[i].subscriberID < keys[j].subscriberID
-		}
-		return keys[i].sourceFlow < keys[j].sourceFlow
-	})
-	return keys
 }
 
 func (eb *EventBus) activeFlowInstanceDescriptorsForSemanticSource(

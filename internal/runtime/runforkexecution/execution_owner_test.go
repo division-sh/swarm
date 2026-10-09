@@ -67,8 +67,8 @@ func newSelectedContractExecutionOwnerForTest(t testing.TB, selected *store.Post
 		EmitFeedback: selected,
 		Instances: workflow, ConstructionPublications: workflow,
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteTopology: selected,
-		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+		FlowRouteTopology: selected,
+		ActiveAgents:      selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
 		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 	}
 	roles := runtimemanager.PersistenceRoles{
@@ -106,8 +106,8 @@ func newSelectedContractSQLiteExecutionOwnerForTest(t testing.TB, selected *stor
 		EmitFeedback: selected,
 		Instances: workflow, ConstructionPublications: workflow,
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteTopology: selected,
-		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+		FlowRouteTopology: selected,
+		ActiveAgents:      selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
 		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 	}
 	roles := runtimemanager.PersistenceRoles{

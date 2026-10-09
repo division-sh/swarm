@@ -6034,6 +6034,9 @@ engine:
           operation-local admitted observations instantiate their recipients. No mutable or persisted per-instance route
           membership proves existence, construction, source authority or executable readiness. Declaration applicability
           is not concrete existence, and existence is not attachment permission.
+          EventBus MUST NOT require a route-mirror listing or use persisted-versus-process route equality as an
+          attachment check. Static-agent declaration plans derive from the admitted source once and remain independent
+          of concrete route publication or removal; callers receive detached declaration observations.
           Constructor, deployment-root, scenario-setup and publication commands MUST NOT carry a derived route-topology
           passenger or persist a parallel subscriber mirror. The existing native transaction retains run/source/grant
           fencing, exact constructor election, immutable creating receipts, initial lifecycle work, delivery evidence,

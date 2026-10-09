@@ -163,16 +163,15 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 		ReplyContext:             eventStore,
 		RunLifecycle:             eventStore,
 		DeliveryLifecycle:        eventStore,
-		FlowRoutes:               eventStore,
-		FlowRouteRecords:         eventStore,
-		FlowRouteTopology:        eventStore,
-		ActiveAgents:             eventStore,
-		ActiveFlows:              eventStore,
-		TargetOwners:             eventStore,
-		PreparedEvents:           eventStore,
-		TargetFailureRecorder:    eventStore,
-		RunOrigins:               eventStore,
-		StandingRestarts:         eventStore,
+
+		FlowRouteTopology:     eventStore,
+		ActiveAgents:          eventStore,
+		ActiveFlows:           eventStore,
+		TargetOwners:          eventStore,
+		PreparedEvents:        eventStore,
+		TargetFailureRecorder: eventStore,
+		RunOrigins:            eventStore,
+		StandingRestarts:      eventStore,
 	}
 	if opts.PayloadAdmitter == nil {
 		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
