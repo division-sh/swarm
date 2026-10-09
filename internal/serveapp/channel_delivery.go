@@ -560,7 +560,7 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 	if err != nil {
 		return err
 	}
-	projection, ok := tool.CompiledResultExecution()
+	_, ok := tool.CompiledResultExecution()
 	if !ok {
 		return fmt.Errorf("channel delivery connector has no compiled receipt projection")
 	}
@@ -602,7 +602,7 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 	effectCtx = runtimeauthoractivity.WithScope(effectCtx, runtimeauthoractivity.BundleScope(d.runtimeInstanceID, selected.Coordinate.BundleHash))
 	_, err = channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, selected.CredentialAdmissions, tool).DeliverChannelMessage(
 		effectCtx, toolID, tool, input, credentials,
-		map[string]string{"delivery_id": candidate.DeliveryID, "render_id": prepared.RenderID}, projection.Project,
+		map[string]string{"delivery_id": candidate.DeliveryID, "render_id": prepared.RenderID},
 	)
 	return err
 }
