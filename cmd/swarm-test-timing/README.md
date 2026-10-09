@@ -86,3 +86,26 @@ The output preserves original full failure and never changes protected
 checks. Archive the inputs, reviewed attribution and outputs together with the
 run/attempt links. A successful command is report generation, not proof that a
 regression, rate or lag is known.
+
+## Recorded PR #2595 Qualification Amendment
+
+[Reviewer-g's ruling](https://github.com/division-sh/swarm/pull/2595#issuecomment-6090325132)
+requires one ordinary hosted full PR qualification for the unchanged implementation
+at `0ce844da1670b565409295a253d1d3ca8257a570`. Its hosted core run
+`37997577951` passed all 35 proof units but could not qualify against the pinned
+full reference: existing core `local-*` environment declarations are outside that
+reference's CI scope. The two stale-package diagnostics are advisory, not package
+removals. The underlying core/reference mismatch remains tracked under #2535.
+
+This audit-only commit changes no source, policy, reference, selector, threshold,
+environment identity or backend obligation. Local qualification retains exactly
+21 reviewer-approved units at `ed14c060c` plus the three fresh units and registry
+race/count-three proof at `0ce844da1`; receipts are not relabeled to this commit.
+The full run must retain actual required SQLite/PostgreSQL child evidence and
+pass its own timing ratchet, `CI tier: full` and `Required test summary`.
+
+The temporary hosted tier escalation is ratchet compatibility, not an intrinsic
+runtime-risk ruling or a general waiver. An ordinary PR event is necessary:
+workflow dispatch publishes `Full dispatch summary`, which does not satisfy the
+protected `Required test summary`, and the merged-proof selector admits only a
+successful exact-head `pull_request` run. Earlier failed receipts remain failed.
