@@ -59,7 +59,9 @@ func TestWhatsAppCaptureScopeAndReceiptAreClosedProducts(t *testing.T) {
 	bootstrap.Scope.Kind = channelonboarding.SessionInputOnboarding
 	bootstrap.Scope.PublicationBinding = runtimeinbound.BindingGeneration{}
 	bootstrap.Scope.BindingRevision, bootstrap.Scope.ActivationRevision = 0, 0
-	for _, event := range []capturedEvent{bootstrap, business} {
+	claimed := bootstrap
+	claimed.Scope.BindingRevision = 1
+	for _, event := range []capturedEvent{bootstrap, claimed, business} {
 		if err := event.validate(); err != nil {
 			t.Fatal(err)
 		}
