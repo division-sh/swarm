@@ -164,6 +164,7 @@ func ObserveH2NodeDeliveries(ctx context.Context, selected any, runID string) ([
 }
 
 type H2WorkloadSnapshotEvidence = private.H2WorkloadSnapshotEvidence
+type H2TransitionCutsEvidence = private.H2TransitionCutsEvidence
 type H2SessionEvidence = private.H2SessionEvidence
 type H2SessionObservation = private.H2SessionObservation
 

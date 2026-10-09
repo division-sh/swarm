@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/operatorread"
@@ -11,6 +12,7 @@ import (
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	storerevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 type Issue2564WorkloadReader interface {
@@ -312,14 +314,16 @@ func ObserveH2NodeDeliveriesForTest(ctx context.Context, selected any, runID str
 }
 
 type H2TimersEvidence = storepipeline.H2TimersEvidence
+type H2TransitionCutsEvidence = storerevision.WorkflowMetadataRevisionEvidence
 type H2WorkloadSnapshotEvidence struct {
-	Hubs   []H2HubsEvidence
-	Timers []H2TimersEvidence
-	Events []H2OccurrencesEvidence
+	Hubs           []H2HubsEvidence
+	Timers         []H2TimersEvidence
+	Events         []H2OccurrencesEvidence
+	TransitionCuts []H2TransitionCutsEvidence
 }
 
-// All three original H2 joins share the same repeatable read, including the
-// published-but-unadvanced SIGKILL cut and restart readback.
+// Current state, timer occurrences and immutable transition cuts must share
+// one repeatable read, including the published-but-unadvanced SIGKILL cut.
 func ObserveH2WorkloadSnapshotForTest(ctx context.Context, selected any, runID string) (H2WorkloadSnapshotEvidence, error) {
 	var out H2WorkloadSnapshotEvidence
 	var err error
@@ -333,8 +337,13 @@ func ObserveH2WorkloadSnapshotForTest(ctx context.Context, selected any, runID s
 			if out.Timers, err = s.pipelinePostgresOwner.ObserveH2TimersForTest(ctx, runID); err != nil {
 				return err
 			}
-			out.Events, err = s.pipelinePostgresOwner.ObserveH2OccurrencesForTest(ctx, runID)
-			return err
+			if out.Events, err = s.pipelinePostgresOwner.ObserveH2OccurrencesForTest(ctx, runID); err != nil {
+				return err
+			}
+			return s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				out.TransitionCuts, err = storerevision.ObserveWorkflowMetadataRevisionsForTest(ctx, tx, runID)
+				return err
+			})
 		})
 	case *SQLiteRuntimeStore:
 		err = s.InspectSnapshot(ctx, func(ctx context.Context) error {
@@ -345,8 +354,13 @@ func ObserveH2WorkloadSnapshotForTest(ctx context.Context, selected any, runID s
 			if out.Timers, err = s.pipelineSQLiteOwner.ObserveH2TimersForTest(ctx, runID); err != nil {
 				return err
 			}
-			out.Events, err = s.pipelineSQLiteOwner.ObserveH2OccurrencesForTest(ctx, runID)
-			return err
+			if out.Events, err = s.pipelineSQLiteOwner.ObserveH2OccurrencesForTest(ctx, runID); err != nil {
+				return err
+			}
+			return s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				out.TransitionCuts, err = storerevision.ObserveWorkflowMetadataRevisionsForTest(ctx, tx, runID)
+				return err
+			})
 		})
 	default:
 		err = fmt.Errorf("H2 snapshot requires exact selected native owner, got %T", selected)
