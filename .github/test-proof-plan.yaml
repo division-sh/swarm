@@ -27,6 +27,8 @@ profiles:
     units:
     - catalog-required-inventory
     - catalog-required-verify
+    - verify-run-native
+    - verify-run-registry
     - catalog-oracle-guards
     - core-structural-owner-guards
     - local-generated-fanout-fixture
@@ -431,6 +433,71 @@ units:
   catalog-required-verify:
     packages:
       - github.com/division-sh/swarm/internal/cliapp
+    required_children:
+      TestVerifyRunPublicAdmissionBothStores:
+        - sqlite/mutations_false/missing_false/json/uppercase_false
+        - sqlite/mutations_false/missing_false/json/uppercase_true
+        - sqlite/mutations_false/missing_false/text/uppercase_false
+        - sqlite/mutations_false/missing_false/text/uppercase_true
+        - sqlite/mutations_false/missing_false/quiet/uppercase_false
+        - sqlite/mutations_false/missing_false/quiet/uppercase_true
+        - sqlite/mutations_false/missing_true/json/uppercase_false
+        - sqlite/mutations_false/missing_true/json/uppercase_true
+        - sqlite/mutations_false/missing_true/text/uppercase_false
+        - sqlite/mutations_false/missing_true/text/uppercase_true
+        - sqlite/mutations_false/missing_true/quiet/uppercase_false
+        - sqlite/mutations_false/missing_true/quiet/uppercase_true
+        - sqlite/mutations_true/missing_false/json/uppercase_false
+        - sqlite/mutations_true/missing_false/json/uppercase_true
+        - sqlite/mutations_true/missing_false/text/uppercase_false
+        - sqlite/mutations_true/missing_false/text/uppercase_true
+        - sqlite/mutations_true/missing_false/quiet/uppercase_false
+        - sqlite/mutations_true/missing_false/quiet/uppercase_true
+        - sqlite/mutations_true/missing_true/json/uppercase_false
+        - sqlite/mutations_true/missing_true/json/uppercase_true
+        - sqlite/mutations_true/missing_true/text/uppercase_false
+        - sqlite/mutations_true/missing_true/text/uppercase_true
+        - sqlite/mutations_true/missing_true/quiet/uppercase_false
+        - sqlite/mutations_true/missing_true/quiet/uppercase_true
+        - postgres/mutations_false/missing_false/json/uppercase_false
+        - postgres/mutations_false/missing_false/json/uppercase_true
+        - postgres/mutations_false/missing_false/text/uppercase_false
+        - postgres/mutations_false/missing_false/text/uppercase_true
+        - postgres/mutations_false/missing_false/quiet/uppercase_false
+        - postgres/mutations_false/missing_false/quiet/uppercase_true
+        - postgres/mutations_false/missing_true/json/uppercase_false
+        - postgres/mutations_false/missing_true/json/uppercase_true
+        - postgres/mutations_false/missing_true/text/uppercase_false
+        - postgres/mutations_false/missing_true/text/uppercase_true
+        - postgres/mutations_false/missing_true/quiet/uppercase_false
+        - postgres/mutations_false/missing_true/quiet/uppercase_true
+        - postgres/mutations_true/missing_false/json/uppercase_false
+        - postgres/mutations_true/missing_false/json/uppercase_true
+        - postgres/mutations_true/missing_false/text/uppercase_false
+        - postgres/mutations_true/missing_false/text/uppercase_true
+        - postgres/mutations_true/missing_false/quiet/uppercase_false
+        - postgres/mutations_true/missing_false/quiet/uppercase_true
+        - postgres/mutations_true/missing_true/json/uppercase_false
+        - postgres/mutations_true/missing_true/json/uppercase_true
+        - postgres/mutations_true/missing_true/text/uppercase_false
+        - postgres/mutations_true/missing_true/text/uppercase_true
+        - postgres/mutations_true/missing_true/quiet/uppercase_false
+        - postgres/mutations_true/missing_true/quiet/uppercase_true
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  # Core canaries; lifecycle/full retain their existing disjoint package partitions.
+  verify-run-native:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    run: '^(TestVerifyRunNativeConstructionBothStores|TestMutationDomainsReachBothForkConsumersBothStores|TestForkActivationInventoriesConstructedHeadersBothStores|TestOrdinaryReplayInitializedReceiversBothStores|TestActivityAdmissionConsumesConstructedHeaderBothStores|TestConstructedHeaderGateSummaryBothStores|TestConstructedHeaderGateFreezeBothStores|TestFanOutBarrierConsumesConstructedHeaderBothStores|TestSelectedContractActivitySourceProjectionBothStores|TestSelectedContractActivitySourceProjectionPreservesNumericPayloadBothStores|TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  verify-run-registry:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestVerifyRunJobflowRegistryIntegrationBothStores$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
