@@ -189,7 +189,7 @@ func TestLLMSQLiteGeneratedSessionBusyRetry(t *testing.T) {
 					oldID, identity = seedLLMExactSession(t, s, f.runID, "rotating-agent", "active")
 					exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 						effects := exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyAgentSessions, oldID))
-						if _, err := runforkrevision.FinalizeSQLite(ctx, tx, effects); err != nil {
+						if _, err := runforkrevision.FinalizeSQLite(ctx, tx, effects, nil); err != nil {
 							t.Fatal(err)
 						}
 					})

@@ -13,6 +13,20 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 )
 
+type Delta struct {
+	RunID  string
+	Amount int64
+}
+
+func ApplyAll(ctx context.Context, tx *sql.Tx, dialect authoractivity.Dialect, deltas []Delta) error {
+	for _, delta := range deltas {
+		if err := Apply(ctx, tx, dialect, delta.RunID, delta.Amount); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func Apply(ctx context.Context, tx *sql.Tx, dialect authoractivity.Dialect, runID string, delta int64) error {
 	if tx == nil || strings.TrimSpace(runID) == "" {
 		return errors.New("run event-count projection requires transaction and run_id")

@@ -44,14 +44,14 @@ func TestRevisionObservationCountsActualSQLAndFailedFinalizer(t *testing.T) {
 	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("count=%d err=%v", count, err)
 	}
-	if _, err := FinalizeSQLite(ctx, tx, NewEffects()); err != nil {
+	if _, err := FinalizeSQLite(ctx, tx, NewEffects(), nil); err != nil {
 		t.Fatal(err)
 	}
 	effects := NewEffects()
 	if err := effects.Add("11111111-1111-4111-8111-111111111111", FamilyEventReceipts); err != nil {
 		t.Fatal(err)
 	}
-	_, finalErr := FinalizeSQLite(ctx, tx, effects)
+	_, finalErr := FinalizeSQLite(ctx, tx, effects, nil)
 	if finalErr == nil {
 		t.Fatal("missing parent accepted")
 	}

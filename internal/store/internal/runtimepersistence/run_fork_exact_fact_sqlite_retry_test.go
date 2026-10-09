@@ -110,7 +110,7 @@ func TestRunForkExactFactsSQLiteBusyRetryGeneratedIDs(t *testing.T) {
 					return err
 				}
 				mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE entity_state SET name='After Retry' WHERE run_id=$1 AND entity_id=$2`, f.runID, f.entityID)
-				if _, err := runforkrevision.FinalizeSQLite(ctx, tx, effects); err != nil {
+				if _, err := runforkrevision.FinalizeSQLite(ctx, tx, effects, nil); err != nil {
 					return err
 				}
 				if phase != "commit" {

@@ -8,9 +8,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/counterprojection"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
@@ -130,6 +132,11 @@ func InsertUnrevisioned(ctx context.Context, tx *sql.Tx, dialect authoractivityf
 	}
 	if !found || !record.Equal(existing) {
 		return false, fmt.Errorf("unrevisioned event fixture %s conflicts with canonical readback", record.EventID)
+	}
+	if rows == 1 && record.RunID != "" {
+		if err := counterprojection.Apply(ctx, tx, authoractivity.Dialect(dialect), record.RunID, rows); err != nil {
+			return false, err
+		}
 	}
 	return rows == 1, nil
 }

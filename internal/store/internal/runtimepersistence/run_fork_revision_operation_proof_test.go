@@ -176,9 +176,9 @@ func publishCompleteRunForkRevisionBaseline(t testing.TB, ctx context.Context, d
 		t.Fatal(err)
 	}
 	if postgres {
-		_, err = privaterunforkrevision.FinalizePostgres(ctx, tx, effects)
+		_, err = privaterunforkrevision.FinalizePostgres(ctx, tx, effects, nil)
 	} else {
-		_, err = privaterunforkrevision.FinalizeSQLite(ctx, tx, effects)
+		_, err = privaterunforkrevision.FinalizeSQLite(ctx, tx, effects, nil)
 	}
 	if err != nil {
 		t.Fatalf("finalize run-fork revision baseline: %v", err)

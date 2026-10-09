@@ -248,10 +248,10 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 		t.Fatal(err)
 	}
 	if postgres {
-		if _, err := runforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
+		if _, err := runforkrevision.FinalizePostgres(ctx, tx, effects, nil); err != nil {
 			t.Fatalf("finalize PostgreSQL fork source revision: %v", err)
 		}
-	} else if _, err := runforkrevision.FinalizeSQLite(ctx, tx, effects); err != nil {
+	} else if _, err := runforkrevision.FinalizeSQLite(ctx, tx, effects, nil); err != nil {
 		t.Fatalf("finalize SQLite fork source revision: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -386,7 +386,7 @@ func TestGoldenRuntimeRunsRemainForkPlannablePostgres(t *testing.T) {
 			if err != nil {
 				t.Fatalf("declare representative workload effects: %v", err)
 			}
-			results, err := runforkrevision.FinalizePostgres(ctx, tx, effects)
+			results, err := runforkrevision.FinalizePostgres(ctx, tx, effects, nil)
 			if err != nil {
 				t.Fatalf("finalize representative workload revision: %v", err)
 			}
@@ -609,9 +609,9 @@ func proveRunForkRevisionMultiRunFinalization(t *testing.T, ctx context.Context,
 
 func finalizeRunForkRevisionMatrix(ctx context.Context, tx *sql.Tx, postgres bool, effects *runforkrevision.Effects) (map[string]runforkrevision.Result, error) {
 	if postgres {
-		return runforkrevision.FinalizePostgres(ctx, tx, effects)
+		return runforkrevision.FinalizePostgres(ctx, tx, effects, nil)
 	}
-	return runforkrevision.FinalizeSQLite(ctx, tx, effects)
+	return runforkrevision.FinalizeSQLite(ctx, tx, effects, nil)
 }
 
 func validateRunForkRevisionMatrix(ctx context.Context, tx *sql.Tx, postgres bool, runID string) error {

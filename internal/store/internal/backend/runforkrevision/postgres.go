@@ -4,15 +4,25 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/counterprojection"
 )
 
-type postgresAdapter struct{ tx revisionSQL }
+type postgresAdapter struct {
+	tx       revisionSQL
+	nativeTx *sql.Tx
+}
 
-func FinalizePostgres(ctx context.Context, tx *sql.Tx, effects *Effects) (map[string]Result, error) {
+func FinalizePostgres(ctx context.Context, tx *sql.Tx, effects *Effects, deltas []counterprojection.Delta) (map[string]Result, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("run fork revision finalization requires an existing PostgreSQL transaction")
 	}
-	return finalize(ctx, &postgresAdapter{tx: revisionQueryOwner(ctx, tx)}, effects)
+	return finalize(ctx, &postgresAdapter{tx: revisionQueryOwner(ctx, tx), nativeTx: tx}, effects, deltas)
+}
+
+func (a *postgresAdapter) applyEventCounts(ctx context.Context, deltas []counterprojection.Delta) error {
+	return counterprojection.ApplyAll(ctx, a.nativeTx, authoractivity.DialectPostgres, deltas)
 }
 
 func ValidateCompletePostgres(ctx context.Context, tx *sql.Tx, runID string) error {

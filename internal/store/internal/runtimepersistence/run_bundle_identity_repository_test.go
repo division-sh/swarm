@@ -1,6 +1,9 @@
 package runtimepersistence
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -21,6 +24,7 @@ func TestRepositoryRunCreationHasCanonicalOwnersOnly(t *testing.T) {
 	root := repositoryRootForBundleIdentityTest(t)
 	wantOwners := map[string]bool{
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_mutation.go": false,
+		"internal/store/internal/backend/runlifecycle/test_snapshot_fault.go":    false,
 		"internal/testutil/runlifecyclefixture/fixture.go":                       false,
 	}
 	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
@@ -82,21 +86,133 @@ func TestRepositoryRunInsertFixturesHaveExplicitCanonicalIdentity(t *testing.T) 
 		if rel == "internal/store/internal/backend/runlifecycle/run_lifecycle_mutation.go" {
 			return nil
 		}
-		source := readRepositoryFile(t, path)
-		for _, match := range runInsertPattern.FindAllStringSubmatch(source, -1) {
-			columns := normalizedSQLColumns(match[1])
-			if !columns["bundle_hash"] {
-				t.Errorf("%s contains a run fixture insert without explicit bundle_hash", rel)
-			}
-			if columns["bundle_source"] {
-				t.Errorf("%s contains retired bundle_source identity", rel)
-			}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			return err
+		}
+		violations, err := runFixtureIdentityViolations(rel, file)
+		if err != nil {
+			return err
+		}
+		for _, violation := range violations {
+			t.Errorf("%s: %s", rel, violation)
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("walk run fixture inserts: %v", err)
 	}
+}
+
+func runFixtureIdentityViolations(path string, file *ast.File) ([]string, error) {
+	minimal, err := classifyBackendMinimalRunLiterals(path, file)
+	if err != nil {
+		return nil, err
+	}
+	oracles := classifyRunFixtureIdentityOracleLiterals(path, file)
+	var violations []string
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING || minimal[literal.Pos()] || oracles[literal.Pos()] {
+			return true
+		}
+		value, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			return true
+		}
+		for _, match := range runInsertPattern.FindAllStringSubmatch(value, -1) {
+			columns := normalizedSQLColumns(match[1])
+			if !columns["bundle_hash"] {
+				violations = append(violations, "run fixture insert lacks explicit bundle_hash")
+			}
+			if columns["bundle_source"] {
+				violations = append(violations, "retired bundle_source identity")
+			}
+		}
+		return true
+	})
+	return violations, nil
+}
+
+// Guard counterexamples describe SQL without executing it. The exemption is
+// declaration-local, and disappears if the declaration acquires a SQL caller.
+func classifyRunFixtureIdentityOracleLiterals(path string, file *ast.File) map[token.Pos]bool {
+	approved := map[token.Pos]bool{}
+	if path != "internal/store/internal/runtimepersistence/run_lifecycle_ownership_guard_test.go" &&
+		path != "internal/store/internal/runtimepersistence/run_bundle_identity_repository_test.go" {
+		return approved
+	}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		switch fn.Name.Name {
+		case "TestRunFixtureIdentityGuardRejectsNewWriters":
+			if path != "internal/store/internal/runtimepersistence/run_bundle_identity_repository_test.go" {
+				continue
+			}
+		case "classifyBackendMinimalRunLiterals", "classifyA2CollectionMinimalRunLiterals",
+			"TestA2CollectionMinimalRunFixtureClassificationIsExact", "classifyReceiverHistoryMinimalRunLiterals",
+			"TestReceiverHistoryMinimalRunFixtureClassificationIsExact", "allowedSemanticRunFixtureLiteral":
+			if path != "internal/store/internal/runtimepersistence/run_lifecycle_ownership_guard_test.go" {
+				continue
+			}
+		default:
+			continue
+		}
+		literals := map[token.Pos]bool{}
+		nonExecuting := true
+		ast.Inspect(fn, func(node ast.Node) bool {
+			if selector, ok := node.(*ast.SelectorExpr); ok {
+				switch selector.Sel.Name {
+				case "Exec", "ExecContext", "Query", "QueryContext", "QueryRow", "QueryRowContext",
+					"Prepare", "PrepareContext", "Begin", "BeginTx", "WithSQL":
+					nonExecuting = false
+				}
+			}
+			if literal, ok := node.(*ast.BasicLit); ok && literal.Kind == token.STRING {
+				literals[literal.Pos()] = true
+			}
+			return true
+		})
+		if nonExecuting {
+			for pos := range literals {
+				approved[pos] = true
+			}
+		}
+	}
+	return approved
+}
+
+func TestRunFixtureIdentityGuardRejectsNewWriters(t *testing.T) {
+	const oraclePath = "internal/store/internal/runtimepersistence/run_lifecycle_ownership_guard_test.go"
+	const source = "package fixture\nfunc allowedSemanticRunFixtureLiteral() { use(`INSERT INTO runs (run_id) VALUES ($1)`) }"
+	const projectionPath = "internal/store/internal/backend/mutationprotocol/event_counts_test.go"
+	const projection = "package fixture\nvar ddl = `CREATE TABLE runs (run_id UUID PRIMARY KEY, event_count INTEGER NOT NULL DEFAULT 0 CHECK (event_count >= 0))`\nvar insert = `INSERT INTO runs (run_id) VALUES ($1)`"
+	for _, tc := range []struct {
+		name, path, source string
+		want               int
+	}{
+		{"oracle", oraclePath, source, 0},
+		{"wrong-owner", "internal/runtime/other_test.go", source, 1},
+		{"sql-in-oracle", oraclePath, strings.Replace(source, "use(", "db.Exec(", 1), 1},
+		{"additional-writer", oraclePath, source + "\nfunc other() { db.Exec(`INSERT INTO runs (run_id) VALUES ($1)`) }", 1},
+		{"minimal-projection", projectionPath, projection, 0},
+		{"extra-projection-writer", projectionPath, projection + "\nvar extra = `INSERT INTO runs (run_id, status) VALUES ($1, 'running')`", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", tc.source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			violations, err := runFixtureIdentityViolations(tc.path, file)
+			if err != nil || len(violations) != tc.want {
+				t.Fatalf("violations=%v, want %d, err=%v", violations, tc.want, err)
+			}
+		})
+	}
+
 }
 
 func TestRepositoryContainsNoLegacyBundleIdentityInterpreter(t *testing.T) {

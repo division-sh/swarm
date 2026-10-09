@@ -261,7 +261,7 @@ func TestRunForkRevisionCaptureReusesTransactionRevisionAndRollbackPublishesNoth
 	if err := effects.Add(runID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations); err != nil {
 		t.Fatalf("declare transaction revision effects: %v", err)
 	}
-	results, err := runforkrevision.FinalizePostgres(ctx, tx, effects)
+	results, err := runforkrevision.FinalizePostgres(ctx, tx, effects, nil)
 	if err != nil {
 		t.Fatalf("finalize transaction revision: %v", err)
 	}
@@ -436,7 +436,7 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 			deliveryCapture <- captureResult{err: err}
 			return
 		}
-		results, err := runforkrevision.FinalizePostgres(deliveryTxCtx, deliveryTx, deliveryEffects)
+		results, err := runforkrevision.FinalizePostgres(deliveryTxCtx, deliveryTx, deliveryEffects, nil)
 		deliveryCapture <- captureResult{revision: results[runID].Revision, err: err}
 	}()
 	waitForPostgresBackendLock(t, ctx, db, deliveryBackendPID)
@@ -581,7 +581,7 @@ func TestRunForkRevisionCaptureOrdersMultiRunLocksDeterministically(t *testing.T
 				return
 			}
 		}
-		finalized, err := runforkrevision.FinalizePostgres(ctx, tx, effects)
+		finalized, err := runforkrevision.FinalizePostgres(ctx, tx, effects, nil)
 		revisions := make(map[string]int64, len(finalized))
 		for runID, result := range finalized {
 			revisions[runID] = result.Revision
