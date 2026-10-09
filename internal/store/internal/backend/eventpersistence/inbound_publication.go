@@ -28,39 +28,42 @@ type inboundPublicationTransactionStore interface {
 	finalizeInboundPublicationTx(context.Context, *sql.Tx, *mutationprotocol.Attempt, runtimeinbound.Request, int) (runtimeinbound.Record, error)
 }
 
-func commitOperatorChannelIntentsTx(ctx context.Context, tx *sql.Tx, eventStore eventCommitTxStore, command runtimeinbound.CommitCommand, request runtimeinbound.Request) error {
+func commitOperatorChannelIntentsTx(ctx context.Context, tx *sql.Tx, eventStore eventCommitTxStore, command runtimeinbound.CommitCommand, request runtimeinbound.Request) (bool, error) {
+	changed := false
 	if command.OperatorChannelAction != nil {
 		_, postgres := any(eventStore).(*EventPostgresOwner)
 		if err := storechanneldelivery.InsertActionIntentTx(ctx, tx, *command.OperatorChannelAction, request.OriginalReceivedAt, postgres); err != nil {
-			return err
+			return false, err
 		}
+		changed = true
 	}
 	if command.OperatorChannelText != nil {
 		_, postgres := any(eventStore).(*EventPostgresOwner)
 		if command.OperatorChannelText.EntryReference == "" && command.OperatorChannelText.ReplyToReference == "" {
 			current, err := storechanneldelivery.HasCurrentBareInputDraftTx(ctx, tx, *command.OperatorChannelText, request.OriginalReceivedAt, postgres)
 			if err != nil {
-				return err
+				return false, err
 			}
 			if !current {
-				return fmt.Errorf("bare channel input draft changed before publication")
+				return false, fmt.Errorf("bare channel input draft changed before publication")
 			}
 		}
 		if err := storechanneldelivery.InsertTextIntentTx(ctx, tx, *command.OperatorChannelText, request.OriginalReceivedAt, postgres); err != nil {
-			return err
+			return false, err
 		}
+		changed = true
 	}
 	if command.PotentialBareText != nil {
 		_, postgres := any(eventStore).(*EventPostgresOwner)
 		current, err := storechanneldelivery.HasCurrentBareInputDraftTx(ctx, tx, *command.PotentialBareText, request.OriginalReceivedAt, postgres)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if current {
-			return fmt.Errorf("bare channel text became operator input before publication")
+			return false, fmt.Errorf("bare channel text became operator input before publication")
 		}
 	}
-	return nil
+	return changed, nil
 }
 
 func commitInboundPublicationTx(
@@ -116,7 +119,8 @@ func commitInboundPublicationSQL(
 		}
 		settledClaim = &settlement
 	}
-	if err := commitOperatorChannelIntentsTx(ctx, tx, eventStore, command, request); err != nil {
+	channelChanged, err := commitOperatorChannelIntentsTx(ctx, tx, eventStore, command, request)
+	if err != nil {
 		return runtimeinbound.CommitResult{}, err
 	}
 	committed := make([]runtimebus.CommittedPublication, len(command.Publications))
@@ -165,7 +169,7 @@ func commitInboundPublicationSQL(
 		return runtimeinbound.CommitResult{}, err
 	}
 	record.Created = true
-	return runtimeinbound.CommitResult{Record: record, Publications: committed, OperatorChannelClaim: settledClaim}, nil
+	return runtimeinbound.CommitResult{Record: record, Publications: committed, OperatorChannelClaim: settledClaim, ChannelIntentsChanged: channelChanged}, nil
 }
 
 func (s *EventPostgresOwner) CommitInboundPublication(ctx context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
@@ -215,7 +219,7 @@ func (s *EventPostgresOwner) CommitInboundPublication(ctx context.Context, comma
 	for index, publication := range result.Publications {
 		result.Publications[index] = publication.WithCommitAcknowledgment()
 	}
-	return result, outcome.Err()
+	return result, errors.Join(outcome.Err(), s.publishChannelChanges(acknowledged, result.ChannelChanges()))
 }
 
 func rolledBackInboundConstruction(phase mutationprotocol.Phase, err error) runtimeinbound.CommitResult {

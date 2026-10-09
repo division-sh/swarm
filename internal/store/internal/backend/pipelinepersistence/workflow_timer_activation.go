@@ -254,15 +254,17 @@ func commitWorkflowTimerReconciliation(
 }
 
 func (s *PipelinePostgresOwner) CommitWorkflowTimerReconciliation(ctx context.Context, command runtimepipeline.WorkflowTimerReconciliationCommand) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
-	return commitWorkflowTimerReconciliation(ctx, s.DecisionPostgresOwner, s.genericScheduleTxOwner(), true, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowLifecycleMutation, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowLifecycleMutation] {
+	result, err := commitWorkflowTimerReconciliation(ctx, s.DecisionPostgresOwner, s.genericScheduleTxOwner(), true, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowLifecycleMutation, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowLifecycleMutation] {
 		return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, write)
 	}, s.RunLifecyclePostgresOwner, command)
+	return result, errors.Join(err, s.publishCardChanges(result.Committed, result.ChannelCardsChanged))
 }
 
 func (s *PipelineSQLiteOwner) CommitWorkflowTimerReconciliation(ctx context.Context, command runtimepipeline.WorkflowTimerReconciliationCommand) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
-	return commitWorkflowTimerReconciliation(ctx, s.DecisionSQLiteOwner, s.genericScheduleTxOwner(), false, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowLifecycleMutation, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowLifecycleMutation] {
+	result, err := commitWorkflowTimerReconciliation(ctx, s.DecisionSQLiteOwner, s.genericScheduleTxOwner(), false, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowLifecycleMutation, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowLifecycleMutation] {
 		return mutationprotocol.RunSQLite(ctx, s.backend, "sqlite workflow timer reconciliation", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, write)
 	}, s.RunLifecycleSQLiteOwner, command)
+	return result, errors.Join(err, s.publishCardChanges(result.Committed, result.ChannelCardsChanged))
 }
 
 var _ runtimepipeline.WorkflowTimerActivationPersistence = (*PipelinePostgresOwner)(nil)

@@ -214,6 +214,8 @@ func (p WorkflowLifecycleMutationPlan) ValidateState(record WorkflowEngineStateR
 }
 
 type CommittedWorkflowLifecycleMutation struct {
+	// ChannelCardsChanged is a borrowed write fact, never execution authority.
+	ChannelCardsChanged bool `json:"-"`
 	// Committed distinguishes an acknowledged empty mutation from refusal.
 	Committed                    bool
 	Wakeups                      []timeridentity.WorkflowTimerActivationRef

@@ -26,6 +26,7 @@ type terminalRunMutation struct {
 	ContinuedAsRunID              string
 	EndedAt                       time.Time
 	IncludeCommittedDecisionCards bool
+	ChannelCardChanges            *ChannelCardChanges `json:"-"`
 }
 
 func (m terminalRunMutation) terminalizesDeliveries() (bool, error) {
@@ -335,11 +336,13 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalTx(
 	tx *sql.Tx,
 	attempt *mutationprotocol.Attempt,
 	request runtimerunlifecycle.TerminalRequest,
+	changes *ChannelCardChanges,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	mutation, err := terminalRunMutationFromRequest(request)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
+	mutation.ChannelCardChanges = changes
 	return s.markRunTerminalStateTx(ctx, tx, attempt, mutation)
 }
 
@@ -348,11 +351,13 @@ func (s *RunLifecyclePostgresOwner) markForkSourceTx(
 	tx *sql.Tx,
 	attempt *mutationprotocol.Attempt,
 	request runtimerunlifecycle.ForkSourceRequest,
+	changes *ChannelCardChanges,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	mutation, err := terminalRunMutationFromForkSource(request)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
+	mutation.ChannelCardChanges = changes
 	return s.markRunTerminalStateTx(ctx, tx, attempt, mutation)
 }
 
@@ -361,11 +366,13 @@ func (s *RunLifecycleSQLiteOwner) markForkSourceTx(
 	tx *sql.Tx,
 	attempt *mutationprotocol.Attempt,
 	request runtimerunlifecycle.ForkSourceRequest,
+	changes *ChannelCardChanges,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	mutation, err := terminalRunMutationFromForkSource(request)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
+	mutation.ChannelCardChanges = changes
 	return s.markRunTerminalStateTx(ctx, tx, attempt, mutation)
 }
 
@@ -375,11 +382,13 @@ func (s *RunLifecyclePostgresOwner) completeRunTx(
 	attempt *mutationprotocol.Attempt,
 	runID string,
 	endedAt time.Time,
+	changes *ChannelCardChanges,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	mutation, err := terminalRunMutationForCompletion(runID, endedAt)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
+	mutation.ChannelCardChanges = changes
 	return s.markRunTerminalStateTx(ctx, tx, attempt, mutation)
 }
 
@@ -424,9 +433,10 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 			return runtimerunlifecycle.Snapshot{}, "", err
 		}
 	}
-	if err := s.decisionCards.SupersedeRunTx(
+	cardsChanged, err := s.decisionCards.SupersedeRunTx(
 		ctx, attempt, request.RunID, "run_"+string(request.State), request.EndedAt.UTC(), request.IncludeCommittedDecisionCards,
-	); err != nil {
+	)
+	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	failureJSON, err := marshalRunLifecycleFailure(request.Failure)
@@ -458,6 +468,9 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 	if err := recordTerminalRunActivity(ctx, attempt, snapshot, request.Failure); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
+	if request.ChannelCardChanges != nil {
+		request.ChannelCardChanges.Changed = request.ChannelCardChanges.Changed || cardsChanged
+	}
 	return snapshot, runtimerunlifecycle.MutationApplied, nil
 }
 
@@ -466,11 +479,13 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalTx(
 	tx *sql.Tx,
 	attempt *mutationprotocol.Attempt,
 	request runtimerunlifecycle.TerminalRequest,
+	changes *ChannelCardChanges,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	mutation, err := terminalRunMutationFromRequest(request)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
+	mutation.ChannelCardChanges = changes
 	return s.markRunTerminalStateTx(ctx, tx, attempt, mutation)
 }
 
@@ -515,9 +530,10 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 			return runtimerunlifecycle.Snapshot{}, "", err
 		}
 	}
-	if err := s.decisionCards.SupersedeRunTx(
+	cardsChanged, err := s.decisionCards.SupersedeRunTx(
 		ctx, attempt, request.RunID, "run_"+string(request.State), request.EndedAt.UTC(), request.IncludeCommittedDecisionCards,
-	); err != nil {
+	)
+	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	failureJSON, err := marshalRunLifecycleFailure(request.Failure)
@@ -549,6 +565,9 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 	if err := recordTerminalRunActivity(ctx, attempt, snapshot, request.Failure); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
+	if request.ChannelCardChanges != nil {
+		request.ChannelCardChanges.Changed = request.ChannelCardChanges.Changed || cardsChanged
+	}
 	return snapshot, runtimerunlifecycle.MutationApplied, nil
 }
 
@@ -558,11 +577,13 @@ func (s *RunLifecycleSQLiteOwner) completeRunTx(
 	attempt *mutationprotocol.Attempt,
 	runID string,
 	endedAt time.Time,
+	changes *ChannelCardChanges,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	mutation, err := terminalRunMutationForCompletion(runID, endedAt)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
+	mutation.ChannelCardChanges = changes
 	return s.markRunTerminalStateTx(ctx, tx, attempt, mutation)
 }
 
@@ -625,15 +646,15 @@ func withTerminalAttemptSQL(ctx context.Context, attempt *mutationprotocol.Attem
 	return snapshot, disposition, err
 }
 
-func (s *RunLifecyclePostgresOwner) CompleteRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string, endedAt time.Time) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+func (s *RunLifecyclePostgresOwner) CompleteRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string, endedAt time.Time, changes *ChannelCardChanges) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	return withTerminalAttemptSQL(ctx, attempt, func(tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-		return s.completeRunTx(ctx, tx, attempt, runID, endedAt)
+		return s.completeRunTx(ctx, tx, attempt, runID, endedAt, changes)
 	})
 }
 
-func (s *RunLifecycleSQLiteOwner) CompleteRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string, endedAt time.Time) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+func (s *RunLifecycleSQLiteOwner) CompleteRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string, endedAt time.Time, changes *ChannelCardChanges) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	return withTerminalAttemptSQL(ctx, attempt, func(tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-		return s.completeRunTx(ctx, tx, attempt, runID, endedAt)
+		return s.completeRunTx(ctx, tx, attempt, runID, endedAt, changes)
 	})
 }
 

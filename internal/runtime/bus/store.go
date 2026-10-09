@@ -268,6 +268,10 @@ type CommittedPublication struct {
 	Acknowledged bool
 }
 
+func (r CommittedPublication) ChannelCardsChanged() bool {
+	return runtimepipeline.ChannelCardsChanged(r.Activations)
+}
+
 func (r CommittedPublication) WithCommitAcknowledgment() CommittedPublication {
 	r.Acknowledged = true
 	activations := make([]CommittedFlowInstanceActivation, len(r.Activations))

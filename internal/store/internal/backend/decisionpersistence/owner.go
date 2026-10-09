@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -17,6 +18,7 @@ type DecisionPostgresOwner struct {
 	requireCurrent    func() error
 	candidateRequests mutationprotocol.CandidateWriter
 	candidates        *runhandoff.CandidateCoordinator
+	channelChanges    *render.ReconcileSignal
 }
 
 type DecisionSQLiteOwner struct {
@@ -25,6 +27,37 @@ type DecisionSQLiteOwner struct {
 	candidateRequests mutationprotocol.CandidateWriter
 	candidates        *runhandoff.CandidateCoordinator
 	nowFn             func() time.Time
+	channelChanges    *render.ReconcileSignal
+}
+
+func (s *DecisionPostgresOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return errors.New("postgres decision reconciliation requires one composition binding")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *DecisionSQLiteOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return errors.New("sqlite decision reconciliation requires one composition binding")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *DecisionPostgresOwner) publishChannelChange(acknowledged, changed bool) error {
+	if s == nil {
+		return nil
+	}
+	return s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary)
+}
+
+func (s *DecisionSQLiteOwner) publishChannelChange(acknowledged, changed bool) error {
+	if s == nil {
+		return nil
+	}
+	return s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary)
 }
 
 func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, candidateWriter mutationprotocol.CandidateWriter, candidates *runhandoff.CandidateCoordinator) (*DecisionPostgresOwner, error) {
@@ -82,14 +115,14 @@ func withDecisionSQL[T any](ctx context.Context, attempt *mutationprotocol.Attem
 	return value, err
 }
 
-func writePostgresDecision(ctx context.Context, s *DecisionPostgresOwner, withCandidates bool, write func(context.Context, *mutationprotocol.Attempt) error) error {
-	return postgresDecisionMutation(ctx, s, withCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-		return struct{}{}, write(txctx, attempt)
-	}).Err()
+func writePostgresDecision(ctx context.Context, s *DecisionPostgresOwner, withCandidates bool, write func(context.Context, *mutationprotocol.Attempt) (bool, error)) error {
+	result := postgresDecisionMutation(ctx, s, withCandidates, write)
+	changed, acknowledged := result.Value()
+	return errors.Join(result.Err(), s.publishChannelChange(acknowledged, changed))
 }
 
-func writeSQLiteDecision(ctx context.Context, s *DecisionSQLiteOwner, label string, withCandidates bool, write func(context.Context, *mutationprotocol.Attempt) error) error {
-	return sqliteDecisionMutation(ctx, s, label, withCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-		return struct{}{}, write(txctx, attempt)
-	}).Err()
+func writeSQLiteDecision(ctx context.Context, s *DecisionSQLiteOwner, label string, withCandidates bool, write func(context.Context, *mutationprotocol.Attempt) (bool, error)) error {
+	result := sqliteDecisionMutation(ctx, s, label, withCandidates, write)
+	changed, acknowledged := result.Value()
+	return errors.Join(result.Err(), s.publishChannelChange(acknowledged, changed))
 }
