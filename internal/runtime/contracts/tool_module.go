@@ -59,7 +59,11 @@ func (e ToolSchemaEntry) Module() (PolicyModule, bool) {
 }
 
 func (e ToolSchemaEntry) AgentExposable() bool {
-	return !e.Handler().isComputeModule() && e.Handler() != ToolHandlerInProcess
+	return e.Handler().AgentExposable()
+}
+
+func (h ToolHandlerKind) AgentExposable() bool {
+	return !h.isComputeModule() && h != ToolHandlerInProcess
 }
 
 func (h ToolHandlerKind) isComputeModule() bool {

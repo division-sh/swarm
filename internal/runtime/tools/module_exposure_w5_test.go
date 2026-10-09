@@ -45,7 +45,7 @@ func TestW5ModulesCannotAcquireAgentAuthorityThroughGrantsCandidatesOrNativeFall
 					t.Fatalf("discovery resurrected module: %v", err)
 				}
 				unprojected := semanticview.Wrap(&contracts.WorkflowContractBundle{Tools: entries})
-				if _, ok, err := resolveExecutionToolForActor(unprojected, actor, name, nil); err != nil || ok {
+				if _, ok, err := resolveExecutionToolForActor(unprojected, actor, name, nil); err == nil || !strings.Contains(err.Error(), "private tool") || ok {
 					t.Fatalf("unprojected actor resurrected module/native binding: %t %v", ok, err)
 				}
 				toolTestDeclareAgent(t, bundle, actor.ID, ".")
@@ -74,7 +74,7 @@ func TestW5ModulesCannotAcquireAgentAuthorityThroughGrantsCandidatesOrNativeFall
 						t.Fatal(err)
 					}
 				}
-				if _, ok, err := resolveExecutionToolForActor(source, actor, name, nil); err != nil || ok {
+				if _, ok, err := resolveExecutionToolForActor(source, actor, name, nil); err == nil || !strings.Contains(err.Error(), "private tool") || ok {
 					t.Fatalf("module resolved for direct call: %t %v", ok, err)
 				}
 				var effects atomic.Int32
@@ -110,7 +110,7 @@ func TestW5ModuleAncestorShadowsGlobalAndNativeAgentBindings(t *testing.T) {
 	toolTestDeclareAgent(t, bundle, "worker", "child")
 	source := semanticview.Wrap(bundle)
 	actor := actors.AgentConfig{ID: "worker", FlowID: "child", NativeTools: actors.NativeToolConfig{Bash: true}}
-	if _, ok, err := resolveExecutionToolForActor(source, actor, "bash", nil); err != nil || ok {
+	if _, ok, err := resolveExecutionToolForActor(source, actor, "bash", nil); err == nil || !strings.Contains(err.Error(), "private tool") || ok {
 		t.Fatalf("ancestor module resurrected native binding: %t %v", ok, err)
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
+	sessionexecution "github.com/division-sh/swarm/internal/sessionprovider/execution"
 )
 
 type servePrebindingActivation struct {
@@ -719,12 +720,13 @@ type channelConfirmationEffectStore interface {
 }
 
 type serveChannelConfirmationDispatcher struct {
-	effects           channelConfirmationEffectStore
-	credentials       *runtimecredentials.SnapshotOwner
-	posture           executionposture.Posture
-	runtimeInstanceID string
-	httpClient        *http.Client
-	now               func() time.Time
+	effects              channelConfirmationEffectStore
+	credentials          *runtimecredentials.SnapshotOwner
+	posture              executionposture.Posture
+	runtimeInstanceID    string
+	httpClient           *http.Client
+	sessionChannelWrites map[string]sessionexecution.Channel
+	now                  func() time.Time
 }
 
 func newServeChannelConfirmationDispatcher(
@@ -921,8 +923,8 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 	effectCtx = runtimeeffects.WithController(effectCtx, runtimeeffects.NewController(d.effects).WithExecutionPosture(d.posture))
 	effectCtx = runtimeeffects.WithAuthority(effectCtx, authority)
 	effectCtx = runtimeauthoractivity.WithScope(effectCtx, runtimeauthoractivity.BundleScope(d.runtimeInstanceID, op.Coordinate.BundleHash))
-	delivery, err := channelCredentialHTTPExecutor(d.httpClient, d.credentials, compiled.Plan, activation.CredentialAdmissions, tool).DeliverChannelConfirmation(
-		effectCtx, toolID, tool, providerInput, credentials,
+	delivery, err := executeChannelWrite(
+		effectCtx, activation.OperationID, request.Candidate.ConfirmationOperation, toolID, tool, providerInput, credentials,
 		map[string]string{
 			"onboarding_operation_id": op.OperationID,
 			"activation_id":           activation.ActivationID,
@@ -930,6 +932,8 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 			"bundle_hash":             op.Coordinate.BundleHash,
 			"plan_generation":         op.Coordinate.PlanGeneration.Diagnostic(),
 		},
+		d.sessionChannelWrites[activation.OperationID],
+		channelCredentialHTTPExecutor(d.httpClient, d.credentials, compiled.Plan, activation.CredentialAdmissions, tool),
 	)
 	if err != nil {
 		return channelonboarding.ConfirmationResult{OperationID: operationID}, err

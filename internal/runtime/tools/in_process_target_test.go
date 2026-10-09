@@ -138,7 +138,7 @@ func TestInProcessScopedOwnerBlocksGlobalWrongKindAndPermissionGrants(t *testing
 	toolTestDeclareAgent(t, bundle, "caller", "child")
 	source := semanticview.Wrap(bundle)
 	actor := actors.AgentConfig{ID: "caller", FlowID: "child", NativeTools: actors.NativeToolConfig{FileIO: true}}
-	if _, found, err := resolveExecutionToolForActor(source, actor, "read_file", nil); err != nil || found {
+	if _, found, err := resolveExecutionToolForActor(source, actor, "read_file", nil); err == nil || found {
 		t.Fatalf("global wrong-kind projection replaced nearest private target: found=%t %v", found, err)
 	}
 	if err := agentModuleGrantError(source, "child", "read_file"); err == nil || !strings.Contains(err.Error(), "private activities") {
