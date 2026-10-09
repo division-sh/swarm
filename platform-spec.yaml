@@ -23639,11 +23639,13 @@ test_specification:
         missing, failed, corrupt, duplicate or foreign evidence remains fatal. Schedule/manual/master timing stays enforced.
         The independent test-time ratchet anchors the full hosted run 37706007387 attempt 1 and its exact execution source,
         workflow head, plan digest, native build context, count and environment in an immutable approved inventory.
-        Project that full inventory through canonical core/lifecycle/full selectors for each affected tier, counting a
-        root and its direct children once and separately executed original soak backend cells separately.
+        Pin each reference cell's core/lifecycle/full membership from the exact policy at that reference execution
+        source. Current selectors project candidate cells only; they must never reclassify the baseline. A promotion
+        into a tier counts as added cost, while a demotion remains reported removed work without granting savings.
+        Count a root and its direct children once and separately executed original soak backend cells separately.
         Compare retained roots plus measured new cost; report removed/renamed roots separately without granting savings.
         Unreviewed growth must satisfy both five percent of the pinned tier cost and 600 test-seconds, never a compounded
-        automatically refreshed merge-base anchor. A new top-level root above 30 seconds requires a Test-Time rationale
+        automatically refreshed merge-base anchor. A new or promoted top-level root above 30 seconds requires a Test-Time rationale
         and an explicit independent reviewer or lead placement decision even below the aggregate limit.
         A rationale alone grants no exception. A reviewed versioned anchor/policy adjustment must name the explicit
         approval and exact source evidence; moving correctness coverage also requires the lead's coverage ruling.
