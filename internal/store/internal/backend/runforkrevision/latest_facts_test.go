@@ -106,9 +106,9 @@ func TestLatestFactsQueryPreservesAllFamiliesAndTombstones(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer tx.Rollback()
-			var adapter ledgerAdapter = &sqliteAdapter{tx}
+			var adapter ledgerAdapter = &sqliteAdapter{tx: tx}
 			if backend == "postgres" {
-				adapter = &postgresAdapter{tx}
+				adapter = &postgresAdapter{tx: tx}
 			}
 			for _, run := range []string{"selected", "foreign", "absent"} {
 				want := originalLatestFacts(t, tx, run)
@@ -219,7 +219,7 @@ func BenchmarkLatestFactsSQLite(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				facts, err := (&sqliteAdapter{tx}).latestFacts(context.Background(), "selected", families)
+				facts, err := (&sqliteAdapter{tx: tx}).latestFacts(context.Background(), "selected", families)
 				if err != nil || len(facts) != len(families) {
 					b.Fatalf("%v %d", err, len(facts))
 				}

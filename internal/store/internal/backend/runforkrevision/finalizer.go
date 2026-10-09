@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/counterprojection"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
@@ -23,18 +24,22 @@ type ledgerAdapter interface {
 	projectionQueryer() queryer
 	lockParents(context.Context, []string) error
 	lockRevisionState(context.Context, []string) error
+	applyEventCounts(context.Context, []counterprojection.Delta) error
 	latestRevision(context.Context, string) (int64, bool, error)
 	latestFacts(context.Context, string, []Family) (ledgerFactsByFamily, error)
 	allocate(context.Context, string) (int64, error)
 	insertFacts(context.Context, string, int64, []revisionFactInsert) error
 }
 
-func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects) (map[string]Result, error) {
+func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects, deltas []counterprojection.Delta) (map[string]Result, error) {
 	phase := transactiontest.BeginRevision(ctx)
 	defer phase.End()
 	changes := effects.normalized()
 	results := make(map[string]Result, len(changes))
 	if len(changes) == 0 {
+		if len(deltas) != 0 {
+			return nil, fmt.Errorf("event-count finalization requires declared revision effects")
+		}
 		return results, nil
 	}
 	runIDs := make([]string, len(changes))
@@ -49,6 +54,11 @@ func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects) (map
 		}
 		return adapter.lockRevisionState(ctx, runIDs)
 	}(); err != nil {
+		return nil, err
+	}
+	// Existing canonical parent/head locks serialize multi-run finalizers before
+	// counter updates take stronger row locks, irrespective of contribution order.
+	if err := adapter.applyEventCounts(ctx, deltas); err != nil {
 		return nil, err
 	}
 	for _, change := range changes {

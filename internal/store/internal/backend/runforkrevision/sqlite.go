@@ -5,15 +5,25 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/counterprojection"
 )
 
-type sqliteAdapter struct{ tx revisionSQL }
+type sqliteAdapter struct {
+	tx       revisionSQL
+	nativeTx *sql.Tx
+}
 
-func FinalizeSQLite(ctx context.Context, tx *sql.Tx, effects *Effects) (map[string]Result, error) {
+func FinalizeSQLite(ctx context.Context, tx *sql.Tx, effects *Effects, deltas []counterprojection.Delta) (map[string]Result, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("run fork revision finalization requires an existing SQLite transaction")
 	}
-	return finalize(ctx, &sqliteAdapter{tx: revisionQueryOwner(ctx, tx)}, effects)
+	return finalize(ctx, &sqliteAdapter{tx: revisionQueryOwner(ctx, tx), nativeTx: tx}, effects, deltas)
+}
+
+func (a *sqliteAdapter) applyEventCounts(ctx context.Context, deltas []counterprojection.Delta) error {
+	return counterprojection.ApplyAll(ctx, a.nativeTx, authoractivity.DialectSQLite, deltas)
 }
 
 func ValidateCompleteSQLite(ctx context.Context, tx *sql.Tx, runID string) error {

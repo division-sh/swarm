@@ -305,20 +305,20 @@ func (a *Attempt) finalize(ctx context.Context, phase *Phase) error {
 	if a.kind == RetainedForkCleanup && !a.cleanup {
 		return errors.New("retained fork cleanup did not finalize activity before deletion")
 	}
-	if err := a.FlushEventCounts(ctx); err != nil {
-		return err
-	}
 	if a.effects.HasDeclarations() {
 		*phase = RevisionFinalize
 		if a.dialect == privateactivity.DialectPostgres {
-			if _, err := privatefork.FinalizePostgres(ctx, a.tx, a.effects); err != nil {
+			if _, err := privatefork.FinalizePostgres(ctx, a.tx, a.effects, a.pendingEventCounts()); err != nil {
 				return err
 			}
 		} else {
-			if _, err := privatefork.FinalizeSQLite(ctx, a.tx, a.effects); err != nil {
+			if _, err := privatefork.FinalizeSQLite(ctx, a.tx, a.effects, a.pendingEventCounts()); err != nil {
 				return err
 			}
 		}
+		clear(a.eventCounts)
+	} else if err := a.FlushEventCounts(ctx); err != nil {
+		return err
 	}
 	if a.story != nil && !a.cleanup {
 		*phase = ActivityFinalize
