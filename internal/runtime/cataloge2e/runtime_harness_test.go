@@ -465,7 +465,7 @@ func catalogPostgresRuntimeDeps(cfg *config.Config, pg *store.PostgresStore, wor
 		EventStore:          pg,
 		EventBusDurable: runtimebus.DurableDependencies{
 			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
-			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteSets: pg, FlowRouteTopology: pg, FlowRouteRollback: pg,
+			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteTopology: pg,
 			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, PreparedEvents: pg,
 			TargetFailureRecorder: pg, RunOrigins: pg, StandingRestarts: pg, ConstructionPublications: pg, Instances: pg, EmitFeedback: pg,
 		},
@@ -484,7 +484,7 @@ func catalogPostgresRuntimeDeps(cfg *config.Config, pg *store.PostgresStore, wor
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
 			LifecycleCensus: pg, LifecycleState: pg, LifecycleEffects: pg,
 			LifecycleDiagnostics: pg, EffectsRecovery: pg, DeliveryQuiescence: pg,
-			EventExistence: pg, DirectiveOperations: pg, DirectiveTargets: pg, FlowRoutes: pg,
+			EventExistence: pg, DirectiveOperations: pg, DirectiveTargets: pg,
 			StandingRestarts: pg,
 		},
 		EffectsStore:             pg,
@@ -524,7 +524,7 @@ func catalogSQLiteRuntimeDeps(cfg *config.Config, sqlite *store.SQLiteRuntimeSto
 		EventStore:          sqlite,
 		EventBusDurable: runtimebus.DurableDependencies{
 			ReplyContext: sqlite, RunLifecycle: sqlite, DeliveryLifecycle: sqlite,
-			FlowRoutes: sqlite, FlowRouteRecords: sqlite, FlowRouteSets: sqlite, FlowRouteTopology: sqlite, FlowRouteRollback: sqlite,
+			FlowRoutes: sqlite, FlowRouteRecords: sqlite, FlowRouteTopology: sqlite,
 			ActiveAgents: sqlite, ActiveFlows: sqlite, TargetOwners: sqlite, PreparedEvents: sqlite,
 			TargetFailureRecorder: sqlite, RunOrigins: sqlite, StandingRestarts: sqlite, ConstructionPublications: sqlite, Instances: sqlite, EmitFeedback: sqlite,
 		},
@@ -543,7 +543,7 @@ func catalogSQLiteRuntimeDeps(cfg *config.Config, sqlite *store.SQLiteRuntimeSto
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
 			LifecycleCensus: sqlite, LifecycleState: sqlite, LifecycleEffects: sqlite,
 			LifecycleDiagnostics: sqlite, EffectsRecovery: sqlite, DeliveryQuiescence: sqlite,
-			EventExistence: sqlite, DirectiveOperations: sqlite, DirectiveTargets: sqlite, FlowRoutes: sqlite,
+			EventExistence: sqlite, DirectiveOperations: sqlite, DirectiveTargets: sqlite,
 			StandingRestarts: sqlite,
 		},
 		EffectsStore:             sqlite,

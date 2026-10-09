@@ -401,9 +401,9 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 	}
 	durable := bus.DurableDependencies{
 		ReplyContext: f.selected, RunLifecycle: f.selected, DeliveryLifecycle: delivery,
-		FlowRoutes: f.selected, FlowRouteRecords: f.selected, FlowRouteSets: f.selected,
-		FlowRouteTopology: f.selected, FlowRouteRollback: f.selected,
-		ActiveAgents: f.selected, ActiveFlows: f.selected, TargetOwners: f.selected,
+		FlowRoutes: f.selected, FlowRouteRecords: f.selected,
+		FlowRouteTopology: f.selected,
+		ActiveAgents:      f.selected, ActiveFlows: f.selected, TargetOwners: f.selected,
 		PreparedEvents: f.selected, TargetFailureRecorder: f.selected,
 		RunOrigins: f.selected, StandingRestarts: f.selected, ConstructionPublications: f.selected,
 	}
@@ -419,7 +419,7 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 		roles := manager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
 			EffectsRecovery: selected, DeliveryQuiescence: selected, EventExistence: selected,
-			DirectiveOperations: selected, DirectiveTargets: selected, FlowRoutes: selected,
+			DirectiveOperations: selected, DirectiveTargets: selected,
 			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(
@@ -437,7 +437,7 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 		roles := manager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
 			EffectsRecovery: selected, DeliveryQuiescence: selected, EventExistence: selected,
-			DirectiveOperations: selected, DirectiveTargets: selected, FlowRoutes: selected,
+			DirectiveOperations: selected, DirectiveTargets: selected,
 			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(

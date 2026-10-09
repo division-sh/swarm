@@ -114,9 +114,7 @@ type scopedTestDurableStore interface {
 	runtimedelivery.Store
 	runtimebus.FlowInstanceRoutePersistence
 	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteSetPersistence
 	runtimebus.FlowInstanceRouteTopologyPersistence
-	runtimebus.FlowInstanceRouteRollbackPersistence
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.SelectedRunTargetOwnerLister
@@ -167,9 +165,7 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 		DeliveryLifecycle:        eventStore,
 		FlowRoutes:               eventStore,
 		FlowRouteRecords:         eventStore,
-		FlowRouteSets:            eventStore,
 		FlowRouteTopology:        eventStore,
-		FlowRouteRollback:        eventStore,
 		ActiveAgents:             eventStore,
 		ActiveFlows:              eventStore,
 		TargetOwners:             eventStore,

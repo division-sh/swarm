@@ -34,7 +34,7 @@ type forkedDomainConsumerSurface interface {
 	ListBudgetProjectionTargets(context.Context) ([]budgetspend.ProjectionTarget, error)
 	UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error
 	DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
-	RollbackFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
+	ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) (runtimebus.FlowInstanceRouteTopologyResult, error)
 	ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error)
 	RecordDeadLetter(context.Context, runtimedeadletters.Record) error
 }
@@ -142,7 +142,8 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 
 			requireForkedSourceRefusal(t, "upsert flow route", surface.UpsertFlowInstanceRoute(ctx, route))
 			requireForkedSourceRefusal(t, "delete flow route", surface.DeleteFlowInstanceRoute(ctx, route.Identity))
-			requireForkedSourceRefusal(t, "rollback flow route", surface.RollbackFlowInstanceRoute(ctx, route.Identity))
+			_, err = surface.ReplaceFlowInstanceRouteTopology(ctx, []runtimebus.FlowInstanceRouteRecordSet{{Identity: route.Identity}})
+			requireForkedSourceRefusal(t, "replace flow topology", err)
 			routes, err := surface.ListFlowInstanceRoutes(ctx)
 			if err != nil {
 				t.Fatal(err)

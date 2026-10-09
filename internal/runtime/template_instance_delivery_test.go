@@ -334,7 +334,6 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	proofStore := routeMaterializationDBProofStore{pg: pg}
 	durable := externalRuntimeTestDurableDependencies(pg)
 	durable.FlowRoutes = proofStore
-	durable.FlowRouteSets = proofStore
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
@@ -895,14 +894,6 @@ func (s routeMaterializationDBProofStore) ListEventDeliveryRecipients(ctx contex
 
 func (s routeMaterializationDBProofStore) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
 	return s.pg.UpsertFlowInstanceRoute(ctx, route)
-}
-
-func (s routeMaterializationDBProofStore) ReplaceFlowInstanceRouteRecords(
-	ctx context.Context,
-	identity runtimeflowidentity.RunScopedFlowInstance,
-	routes []runtimebus.FlowInstanceRouteRecord,
-) error {
-	return s.pg.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
 }
 
 func (s routeMaterializationDBProofStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {

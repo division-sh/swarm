@@ -439,7 +439,6 @@ type routePersistenceTestStore struct {
 	deliveries         map[string][]string
 	upsertErr          error
 	deleteErr          error
-	rollbackCalls      []string
 	deleteCalls        []runtimeflowidentity.RunScopedFlowInstance
 	replaceCalls       []runtimeflowidentity.RunScopedFlowInstance
 	upsertCalls        int
@@ -526,25 +525,6 @@ func (s *routePersistenceTestStore) UpsertFlowInstanceRoute(_ context.Context, r
 	return nil
 }
 
-func (s *routePersistenceTestStore) ReplaceFlowInstanceRouteRecords(
-	ctx context.Context,
-	identity runtimeflowidentity.RunScopedFlowInstance,
-	routes []runtimebus.FlowInstanceRouteRecord,
-) error {
-	s.replaceCalls = append(s.replaceCalls, identity)
-	for key, route := range s.routes {
-		if route.Identity == identity {
-			delete(s.routes, key)
-		}
-	}
-	for _, route := range routes {
-		if err := s.UpsertFlowInstanceRoute(ctx, route); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (s *routePersistenceTestStore) ReplaceFlowInstanceRouteTopology(
 	ctx context.Context,
 	sets []runtimebus.FlowInstanceRouteRecordSet,
@@ -554,9 +534,17 @@ func (s *routePersistenceTestStore) ReplaceFlowInstanceRouteTopology(
 		before[key] = route
 	}
 	for _, set := range sets {
-		if err := s.ReplaceFlowInstanceRouteRecords(ctx, set.Identity, set.Routes); err != nil {
-			s.routes = before
-			return runtimebus.FlowInstanceRouteTopologyResult{}, err
+		s.replaceCalls = append(s.replaceCalls, set.Identity)
+		for key, route := range s.routes {
+			if route.Identity == set.Identity {
+				delete(s.routes, key)
+			}
+		}
+		for _, route := range set.Routes {
+			if err := s.UpsertFlowInstanceRoute(ctx, route); err != nil {
+				s.routes = before
+				return runtimebus.FlowInstanceRouteTopologyResult{}, err
+			}
 		}
 	}
 	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
@@ -763,12 +751,6 @@ func TestEventBusFlowInstanceRouteRejectsUnknownCanonicalTemplateWithoutMutation
 	}
 }
 
-func (s *routePersistenceTestStore) RollbackFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	s.rollbackCalls = append(s.rollbackCalls, identity.Key())
-	delete(s.routes, identity.Key())
-	return nil
-}
-
 func (s *routePersistenceTestStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	s.deleteCalls = append(s.deleteCalls, identity)
 	if s.deleteErr != nil {
@@ -904,8 +886,8 @@ func TestEventBusAddFlowInstanceRouteDoesNotPublishWhenTopologyCommitFails(t *te
 	if len(store.routes) != 0 {
 		t.Fatalf("persisted routes after rollback = %#v, want none", store.routes)
 	}
-	if len(store.rollbackCalls) != 0 {
-		t.Fatalf("external rollback calls = %#v, want none because the named operation owns rollback", store.rollbackCalls)
+	if len(store.deleteCalls) != 0 {
+		t.Fatalf("external delete calls = %#v, want none because the named operation owns rollback", store.deleteCalls)
 	}
 	if got := eb.RouteTable().ResolveForRun(eventBusTestRunID, "review/inst-1/task.started"); len(got) != 0 {
 		t.Fatalf("resolved subscribers after failed add = %#v, want none", got)

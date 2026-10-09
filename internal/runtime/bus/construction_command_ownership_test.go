@@ -32,3 +32,12 @@ func TestEventBusDoesNotOwnInstanceRoutePublication(t *testing.T) {
 		}
 	}
 }
+
+func TestEventBusDoesNotRequireStandaloneInstanceRouteMutation(t *testing.T) {
+	owner := reflect.TypeOf(DurableDependencies{})
+	for _, name := range []string{"FlowRouteSets", "FlowRouteRollback"} {
+		if _, present := owner.FieldByName(name); present {
+			t.Fatalf("EventBus restores standalone instance-route mutation dependency %s", name)
+		}
+	}
+}

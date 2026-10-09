@@ -111,9 +111,7 @@ type DurableDependencies struct {
 	DeliveryLifecycle        runtimedelivery.Store
 	FlowRoutes               FlowInstanceRoutePersistence
 	FlowRouteRecords         FlowInstanceRouteRecordReader
-	FlowRouteSets            FlowInstanceRouteSetPersistence
 	FlowRouteTopology        FlowInstanceRouteTopologyPersistence
-	FlowRouteRollback        FlowInstanceRouteRollbackPersistence
 	ActiveAgents             ActiveAgentDescriptorLister
 	ActiveFlows              ActiveFlowInstanceDescriptorLister
 	TargetOwners             SelectedRunTargetOwnerLister
@@ -134,9 +132,7 @@ func (d DurableDependencies) validate() error {
 		{"delivery lifecycle owner", d.DeliveryLifecycle},
 		{"flow route owner", d.FlowRoutes},
 		{"flow route record reader", d.FlowRouteRecords},
-		{"flow route set owner", d.FlowRouteSets},
 		{"flow route topology owner", d.FlowRouteTopology},
-		{"flow route rollback owner", d.FlowRouteRollback},
 		{"active agent descriptor reader", d.ActiveAgents},
 		{"active flow descriptor reader", d.ActiveFlows},
 		{"selected-run target owner reader", d.TargetOwners},

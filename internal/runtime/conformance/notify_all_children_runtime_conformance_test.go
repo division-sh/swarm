@@ -83,18 +83,6 @@ type failingNotifyAllChildrenPostgresStore struct {
 	transientRouteFailures   atomic.Int32
 }
 
-func (s *failingNotifyAllChildrenPostgresStore) ReplaceFlowInstanceRouteRecords(
-	ctx context.Context,
-	identity runtimeflowidentity.RunScopedFlowInstance,
-	routes []runtimebus.FlowInstanceRouteRecord,
-) error {
-	if s.failNextRouteReplacement.Swap(false) {
-		s.transientRouteFailures.Add(1)
-		return fmt.Errorf("injected transient postgres exact route replacement failure")
-	}
-	return s.PostgresStore.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
-}
-
 func (s *failingNotifyAllChildrenPostgresStore) ReplaceFlowInstanceRouteTopology(
 	ctx context.Context,
 	sets []runtimebus.FlowInstanceRouteRecordSet,
@@ -110,18 +98,6 @@ type failingNotifyAllChildrenSQLiteStore struct {
 	*store.SQLiteRuntimeStore
 	failNextRouteReplacement atomic.Bool
 	transientRouteFailures   atomic.Int32
-}
-
-func (s *failingNotifyAllChildrenSQLiteStore) ReplaceFlowInstanceRouteRecords(
-	ctx context.Context,
-	identity runtimeflowidentity.RunScopedFlowInstance,
-	routes []runtimebus.FlowInstanceRouteRecord,
-) error {
-	if s.failNextRouteReplacement.Swap(false) {
-		s.transientRouteFailures.Add(1)
-		return fmt.Errorf("injected transient sqlite exact route replacement failure")
-	}
-	return s.SQLiteRuntimeStore.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
 }
 
 func (s *failingNotifyAllChildrenSQLiteStore) ReplaceFlowInstanceRouteTopology(

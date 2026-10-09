@@ -200,7 +200,17 @@ func (s *targetRouteMemoryStore) UpsertFlowInstanceRoute(_ context.Context, rout
 }
 
 func (s *targetRouteMemoryStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	return s.RollbackFlowInstanceRoute(context.Background(), identity)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	identity = targetRouteIdentity(identity)
+	retained := s.flowRoutes[:0]
+	for _, existing := range s.flowRoutes {
+		if !sameTargetRoute(existing.Identity, identity) {
+			retained = append(retained, existing)
+		}
+	}
+	s.flowRoutes = retained
+	return nil
 }
 
 func (s *targetRouteMemoryStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
@@ -219,24 +229,6 @@ func (s *targetRouteMemoryStore) ListFlowInstanceRoutes(context.Context) ([]runt
 	return routes, nil
 }
 
-func (s *targetRouteMemoryStore) ReplaceFlowInstanceRouteRecords(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance, routes []FlowInstanceRouteRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	identity = targetRouteIdentity(identity)
-	retained := s.flowRoutes[:0]
-	for _, existing := range s.flowRoutes {
-		if !sameTargetRoute(existing.Identity, identity) {
-			retained = append(retained, existing)
-		}
-	}
-	s.flowRoutes = retained
-	for _, route := range routes {
-		route.Identity = targetRouteIdentity(route.Identity)
-		s.flowRoutes = append(s.flowRoutes, route)
-	}
-	return nil
-}
-
 func (s *targetRouteMemoryStore) ListFlowInstanceRouteRecords(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]FlowInstanceRouteRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -248,20 +240,6 @@ func (s *targetRouteMemoryStore) ListFlowInstanceRouteRecords(_ context.Context,
 		}
 	}
 	return routes, nil
-}
-
-func (s *targetRouteMemoryStore) RollbackFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	identity = targetRouteIdentity(identity)
-	retained := s.flowRoutes[:0]
-	for _, existing := range s.flowRoutes {
-		if !sameTargetRoute(existing.Identity, identity) {
-			retained = append(retained, existing)
-		}
-	}
-	s.flowRoutes = retained
-	return nil
 }
 
 func newTargetRouteMemoryStore() *targetRouteMemoryStore {

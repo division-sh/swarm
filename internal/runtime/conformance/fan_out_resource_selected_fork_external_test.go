@@ -263,16 +263,16 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 		durable := bus.DurableDependencies{
 			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
-			FlowRouteTopology: selected, FlowRouteRollback: selected,
-			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
+			FlowRoutes: selected, FlowRouteRecords: selected,
+			FlowRouteTopology: selected,
+			ActiveAgents:      selected, ActiveFlows: selected, TargetOwners: selected,
 			PreparedEvents: selected, TargetFailureRecorder: selected,
 			RunOrigins: selected, StandingRestarts: selected, ConstructionPublications: selected,
 		}
 		roles := manager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
 			EffectsRecovery: selected, DeliveryQuiescence: selected, EventExistence: selected,
-			DirectiveOperations: selected, DirectiveTargets: selected, FlowRoutes: selected,
+			DirectiveOperations: selected, DirectiveTargets: selected,
 			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(
@@ -289,16 +289,16 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 		durable := bus.DurableDependencies{
 			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
-			FlowRouteTopology: selected, FlowRouteRollback: selected,
-			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
+			FlowRoutes: selected, FlowRouteRecords: selected,
+			FlowRouteTopology: selected,
+			ActiveAgents:      selected, ActiveFlows: selected, TargetOwners: selected,
 			PreparedEvents: selected, TargetFailureRecorder: selected,
 			RunOrigins: selected, StandingRestarts: selected, ConstructionPublications: selected,
 		}
 		roles := manager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
 			EffectsRecovery: selected, DeliveryQuiescence: selected, EventExistence: selected,
-			DirectiveOperations: selected, DirectiveTargets: selected, FlowRoutes: selected,
+			DirectiveOperations: selected, DirectiveTargets: selected,
 			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(
