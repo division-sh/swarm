@@ -148,7 +148,7 @@ func classifyRunFixtureIdentityOracleLiterals(path string, file *ast.File) map[t
 			continue
 		}
 		switch fn.Name.Name {
-		case "TestRunFixtureIdentityGuardRejectsNewWriters":
+		case "TestRepositoryRunFixtureIdentityGuardRejectsNewWriters":
 			if path != "internal/store/internal/runtimepersistence/run_bundle_identity_repository_test.go" {
 				continue
 			}
@@ -185,7 +185,7 @@ func classifyRunFixtureIdentityOracleLiterals(path string, file *ast.File) map[t
 	return approved
 }
 
-func TestRunFixtureIdentityGuardRejectsNewWriters(t *testing.T) {
+func TestRepositoryRunFixtureIdentityGuardRejectsNewWriters(t *testing.T) {
 	const oraclePath = "internal/store/internal/runtimepersistence/run_lifecycle_ownership_guard_test.go"
 	const source = "package fixture\nfunc allowedSemanticRunFixtureLiteral() { use(`INSERT INTO runs (run_id) VALUES ($1)`) }"
 	const projectionPath = "internal/store/internal/backend/mutationprotocol/event_counts_test.go"
