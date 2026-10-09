@@ -74,8 +74,26 @@ func NewDeclaredFlowInstanceLookup(source semanticview.Source, fact correlation.
 	}
 	request.parent = parent.InstancePath
 	request.parentIdentity = parent
+	if field := flow.Instance; field.Empty() {
+		child, err := flowidentity.KeylessChild(source, parent, flowID)
+		if err != nil {
+			return FlowInstanceLookupRequest{}, err
+		}
+		request.path = child.InstancePath
+	}
 	return request, nil
 }
+
+type FlowInstanceConstructionCorruption struct {
+	RunID, FlowID, InstancePath string
+	Cause                       error
+}
+
+func (e *FlowInstanceConstructionCorruption) Error() string {
+	return fmt.Sprintf("corrupt flow construction run=%s flow=%s instance=%s: %v", e.RunID, e.FlowID, e.InstancePath, e.Cause)
+}
+
+func (e *FlowInstanceConstructionCorruption) Unwrap() error { return e.Cause }
 
 func admitFlowInstanceLookupKey(source semanticview.Source, flowID string, field contracts.TemplateInstanceField, keys []contracts.TemplateInstanceKeyValue) (string, error) {
 	if field.Empty() {

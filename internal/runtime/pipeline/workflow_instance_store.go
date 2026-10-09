@@ -504,6 +504,14 @@ type WorkflowInstancePersistenceRecord struct {
 // DecodeWorkflowInstancePersistenceRecord converts one exact selected-store
 // record into the canonical runtime workflow value.
 func DecodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceRecord) (WorkflowInstance, error) {
+	instance, err := decodeWorkflowInstancePersistenceRecord(record)
+	if err != nil {
+		return WorkflowInstance{}, &FlowInstanceConstructionCorruption{FlowID: record.WorkflowName, InstancePath: record.FlowInstance, Cause: err}
+	}
+	return instance, nil
+}
+
+func decodeWorkflowInstancePersistenceRecord(record WorkflowInstancePersistenceRecord) (WorkflowInstance, error) {
 	if strings.TrimSpace(record.EntityType) != "" && len(record.Fields) == 0 {
 		return WorkflowInstance{}, fmt.Errorf("constructed workflow %s is missing its declared field row", record.FlowInstance)
 	}

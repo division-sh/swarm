@@ -18872,6 +18872,12 @@ platform_tables:
         material, or NULL for a keyless declaration. Both are immutable construction facts;
         changing business fields cannot change instance selection. Lookup bounds the declaration
         by run, actual parent and key, and rejects ambiguous occupancy rather than selecting one.
+        Selector filtering cannot hide contradictory construction as absence: bounded candidate
+        occupancy and native companion evidence must be admitted before absence is reported.
+        Malformed construction returns typed corruption, distinct from cancellation or store I/O
+        failure. Inventory validates every requested coordinate before deduplicating storage
+        identity. Observations defensively isolate all nested mutable data on admission and return;
+        neither an observation nor successful read admission grants mutation or execution authority.
         Historical header projection carries these fixed-revision facts without manufacturing
         fresh construction receipts or readiness. Native missing companions remain corruption;
         admitted historical provenance is not inferred from their absence.
