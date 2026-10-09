@@ -1148,3 +1148,60 @@ Reviewer-G must decide whether61e's22 core and12 supplements carry; none is
 self-approved. Exact-head hosted full, final proof audit and formal closure
 remain pending. Parent2535 and2250 stay open; core timing environment defect
 6090327487 is the next separate item, not absorbed into this channel PR.
+
+## Integrated Core And Subscription Stop Counterexample
+
+Reviewer6090922606 requires fresh whole core plus all12 complete named
+supplements at f431, with NO61e carry. Fresh whole core PASSES22/22 units,
+7505 required/7522 selected roots, plan digest
+a2f1decaca5957bd92fb40b1e6120702250bdba1777f57916802c5756ad63db9.
+All22 primary receipts bind f4314748ecbda07b8d59b3956362e1420b75a3a2 and
+exit0. Server2 Go1.25.5/native PG16/capacity4/short disk TMPDIR; complete
+receipts retained in core-20261009T232215.019320795 and copied to local state.
+No supplement began after the OWNED hosted failure was identified; server2
+was released immediately, no runner and admission active0/waiting0.
+
+The identical8m/count1 four-root comparison on vemew PASSes42 records/no
+skips at each source: integration base4d129afac262.262s, frozen f431164.954s,
+37.1% lower in ONE sample. This is neither fleet-p90 nor corrected-head credit.
+
+Hosted full38003723055 at f431 FAILS in serveapp-runtime:
+TestRunLocalRuntimeFreshEmptySQLiteBootsWithDevAbandon reaches ready, then
+returns1 with `subscribe channel delivery worker: context canceled`.
+The new synchronous subscription is reached after ready presentation. An
+immediate graceful stop cancels its admitted worker context before Subscribe
+completes, but the caller incorrectly reports that exact cancellation as a
+runtime failure. This is the slice's OWNED M21/M33 partial-start/stop path,
+not a run-lifecycle conflict defect or the earlier unclassified publish timeout.
+The timing artifact is INCOMPLETE because this required root fails and
+fail-fast cancels other units; it is not measured budget growth.
+
+Two deterministic counterexamples FAIL before repair: cancel the caller or
+retire the exact Process inside Subscribe AFTER its lease is admitted. The
+existing TestChannelWorkerDoesNotCreditFailedPass now owns these subcases,
+plus foreign cancellation on a live lease, genuine and combined independent
+failure, failure during retirement and deadline expiry. Each asserts lease
+settlement, no retained subscription, no worker startup/scan or pass credit.
+Both worker roots PASS race50 on the repair tree. No sleep/retry, root-selection
+change, weaker exit assertion, deadline extension or altered backstop.
+The unchanged four fresh-boot/stop roots (SQLite dev/direct abandon and
+PostgreSQL fresh schema/dev abandon) PASS race10,40 passing records with
+zero failures/skips,158.067s. API-spec3.073s, Process owner1.531s and channel
+owner1.080s also pass on this repair tree; final committed-head controls follow.
+
+The bounded owner repair checks the exact context.Canceled against the
+admitted lease BEFORE Done itself cancels that context, then returns Done's
+cleanup result. Only that pure own stop is graceful; foreign/combined errors
+and deadline expiry still return their original failure joined with cleanup.
+Canonical Process admission and retirement, business authority, startup
+publication ordering and every store/transaction finalizer are unchanged.
+The authoritative channel scheduling contract records this same distinction.
+No second worker, cancellation framework, generic filter, schema or vendor.
+
+#2595 master44c4047f0 combines cleanly: merge-tree succeeds with tree
+403355abba7eee0c412ee133be68c21a163e1aa4 and GitHub reports MERGEABLE.
+No rebase or unnecessary source movement is needed. Focused final-head
+guards and a reviewer decision on corrected-head matrix/receipt carry still
+precede further server2 qualification; f431 core is NOT relabeled automatically.
+Exact-head hosted full, all12 supplements and final proof-audit addendum remain
+required. Parent2535/2250 and the distinct original2353 timeout remain open.

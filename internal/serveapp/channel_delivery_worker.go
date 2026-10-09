@@ -540,6 +540,10 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 	}
 	subscription, err := dispatcher.store.SubscribeChannelReconciliation(lease.Context())
 	if err != nil {
+		// Check before Done cancels the lease: only its own stop is graceful.
+		if err == context.Canceled && lease.Context().Err() == context.Canceled {
+			return lease.Done()
+		}
 		return errors.Join(fmt.Errorf("subscribe channel delivery worker: %w", err), lease.Done())
 	}
 	if options.started != nil {

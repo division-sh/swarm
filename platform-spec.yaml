@@ -41136,6 +41136,9 @@ managed_external_effect_authority:
       A hint is consumed before its pass; an in-pass action creating work after delivery scanning remains
       pending for a later pass. Idempotent qualification, attach, render and planning observations do not
       generate a self-sustaining wake. Subscription and worker retire and join with the exact Process;
+      cancellation of that admitted worker before subscription completes is a graceful stop only when
+      the subscription returns that owned context's exact cancellation. The lease is still settled;
+      independent or combined failures, deadline expiry and lease cleanup failures remain reported.
       retained runtime reset does not imply worker replacement and wakes after exact completed publication.
       Private test cadence affects observation frequency only, never source time, TTL, deadlines or authority.
       Negative pass credit requires successful relevant reconciliation started after its durable mutation cut;

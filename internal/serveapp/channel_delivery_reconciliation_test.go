@@ -14,12 +14,16 @@ import (
 
 type channelWorkerControlStore struct {
 	render.Store
-	signal  render.ReconcileSignal
-	actions func(context.Context) error
-	texts   func() error
+	signal    render.ReconcileSignal
+	actions   func(context.Context) error
+	texts     func() error
+	subscribe func(context.Context) (*render.ReconcileSubscription, error)
 }
 
 func (s *channelWorkerControlStore) SubscribeChannelReconciliation(ctx context.Context) (*render.ReconcileSubscription, error) {
+	if s.subscribe != nil {
+		return s.subscribe(ctx)
+	}
 	return s.signal.Subscribe(ctx)
 }
 
@@ -139,6 +143,7 @@ func TestChannelWorkerKeepsInPassHintAndJoinsExactProcess(t *testing.T) {
 }
 
 func TestChannelWorkerDoesNotCreditFailedPass(t *testing.T) {
+	t.Run("subscription_shutdown", testChannelWorkerSubscriptionShutdown)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	process := worklifetime.NewProcess()
@@ -182,5 +187,88 @@ func TestChannelWorkerDoesNotCreditFailedPass(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
+	}
+}
+
+func testChannelWorkerSubscriptionShutdown(t *testing.T) {
+	failed := errors.New("controlled subscription failure")
+	for _, tc := range []struct {
+		name     string
+		cancel   bool
+		retire   bool
+		deadline bool
+		failure  error
+		want     error
+	}{
+		{name: "caller_cancel", cancel: true},
+		{name: "process_retire", retire: true},
+		{name: "foreign_cancel", failure: context.Canceled, want: context.Canceled},
+		{name: "independent_failure", failure: failed, want: failed},
+		{name: "failure_during_cancel", cancel: true, failure: errors.Join(failed, context.Canceled), want: failed},
+		{name: "failure_during_retire", retire: true, failure: failed, want: failed},
+		{name: "deadline", deadline: true, want: context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.deadline {
+				var stop context.CancelFunc
+				ctx, stop = context.WithDeadline(ctx, time.Now().Add(-time.Second))
+				defer stop()
+			}
+			process := worklifetime.NewProcess()
+			t.Cleanup(func() {
+				process.Retire()
+				joinctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+				defer stop()
+				if err := process.Wait(joinctx); err != nil {
+					t.Error(err)
+				}
+			})
+			store := &channelWorkerControlStore{}
+			subscribed := false
+			store.subscribe = func(owned context.Context) (*render.ReconcileSubscription, error) {
+				subscribed = true
+				if process.ActiveCount() != 1 {
+					t.Fatal("subscription did not retain the exact worker lease")
+				}
+				if tc.cancel {
+					cancel()
+				}
+				if tc.retire {
+					process.Retire()
+					<-owned.Done()
+				}
+				if tc.failure != nil {
+					return nil, tc.failure
+				}
+				return store.signal.Subscribe(owned)
+			}
+			store.actions = func(context.Context) error {
+				t.Error("failed subscription launched a scan")
+				return nil
+			}
+			err := startServeChannelDelivery(ctx, process, channelWorkerControlDispatcher(store), channelDeliveryWorkerOptions{
+				started: func(render.Store, func() (render.ReconcileMark, bool)) {
+					t.Error("failed subscription reported worker startup")
+				},
+				passed: func(render.ReconcilePass) {
+					t.Error("failed subscription credited a reconciliation pass")
+				},
+			})
+			if !subscribed || process.ActiveCount() != 0 {
+				t.Fatal("subscription failure did not join its admitted worker lease")
+			}
+			if _, active := store.signal.Mark(); active {
+				t.Fatal("failed subscription retained reconciliation authority")
+			}
+			if tc.want == nil {
+				if err != nil {
+					t.Fatalf("graceful subscription stop returned %v", err)
+				}
+			} else if !errors.Is(err, tc.want) {
+				t.Fatalf("subscription error=%v, want preserved %v", err, tc.want)
+			}
+		})
 	}
 }
