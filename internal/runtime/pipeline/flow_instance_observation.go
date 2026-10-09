@@ -93,15 +93,11 @@ func admitFlowInstanceObservation(request FlowInstanceLookupRequest, instance Wo
 	if err := identity.ValidateConstruction(request.source, run.RunID); err != nil {
 		return FlowInstanceObservation{}, err
 	}
-	if !request.declared && identity.Route() != request.exactRoute {
-		return FlowInstanceObservation{}, fmt.Errorf("instance observation contradicts its requested route coordinate")
-	}
 	if err := validateIndexedHeaderDeclaration(request, instance); err != nil {
 		return FlowInstanceObservation{}, err
 	}
-	if request.path != "" && instance.StorageRef != request.path ||
-		request.declared && (instance.ParentFlowInstance != request.parent || instance.InstanceKey != request.key) {
-		return FlowInstanceObservation{}, fmt.Errorf("instance observation contradicts its exact selection")
+	if err := validateObservedInstanceSelection(request, identity, instance); err != nil {
+		return FlowInstanceObservation{}, err
 	}
 	isolated, err := cloneIndexWorkflowInstance(instance)
 	if err != nil {
@@ -120,6 +116,27 @@ func validateIndexedHeaderDeclaration(request FlowInstanceLookupRequest, instanc
 		return fmt.Errorf("instance observation contradicts its declared entity owner")
 	}
 	return nil
+}
+
+func validateObservedInstanceSelection(request FlowInstanceLookupRequest, identity flowidentity.Instance, instance WorkflowInstance) error {
+	if !request.Valid() || instance.WorkflowName != request.flowID {
+		return fmt.Errorf("instance observation contradicts its requested declaration")
+	}
+	if !request.declared && identity.Route() != request.exactRoute {
+		return fmt.Errorf("instance observation contradicts its requested route coordinate")
+	}
+	if request.path != "" && instance.StorageRef != request.path ||
+		request.declared && (instance.ParentFlowInstance != request.parent || instance.InstanceKey != request.key) {
+		return fmt.Errorf("instance observation contradicts its exact selection")
+	}
+	return nil
+}
+
+func (o FlowInstanceObservation) ValidateSelection(request FlowInstanceLookupRequest) error {
+	if !o.Valid() || request.runID != o.request.runID || !request.fact.Matches(o.request.fact) {
+		return fmt.Errorf("instance observation contradicts its requested source or run")
+	}
+	return validateObservedInstanceSelection(request, o.identity, o.instance)
 }
 
 func (o *FlowInstanceObservation) admitReadiness(readiness DynamicFlowRuntimeReadiness) error {
@@ -188,6 +205,9 @@ func cloneIndexWorkflowInstance(instance WorkflowInstance) (WorkflowInstance, er
 	}
 	instance.Gates = cloneWorkflowGates(instance.Gates)
 	instance.TransitionHistory = slices.Clone(instance.TransitionHistory)
+	for index := range instance.TransitionHistory {
+		instance.TransitionHistory[index].GuardsEvaluated = slices.Clone(instance.TransitionHistory[index].GuardsEvaluated)
+	}
 	if instance.RuntimeReadiness != nil {
 		readiness := cloneIndexReadinessPlan(*instance.RuntimeReadiness)
 		instance.RuntimeReadiness = &readiness

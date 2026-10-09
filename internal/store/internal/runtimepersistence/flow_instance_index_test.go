@@ -3,6 +3,8 @@ package runtimepersistence
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -13,6 +15,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/google/uuid"
 )
 
@@ -283,6 +287,275 @@ func TestR7ConstructionAddressImmutableBothStores(t *testing.T) {
 			stored, found, err = f.workflows.Load(f.ctx, owner)
 			if err != nil || !found || stored.InstanceKey != "original" || stored.Revision != 2 {
 				t.Fatalf("rejected key update mutated state: %+v found=%t err=%v", stored, found, err)
+			}
+		})
+	}
+}
+
+func newR7KeylessIndexProof(t *testing.T, backend string) (receiverConfigActivationFixture, pipeline.FlowInstanceActivationPlan) {
+	t.Helper()
+	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
+		"schema.yaml":         "name: keyless-index-proof\n",
+		"detail/schema.yaml":  "name: detail\n",
+		"sibling/schema.yaml": "name: sibling\n",
+	}, nil)
+	runID := correlation.RunIDFromContext(f.ctx)
+	request := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
+	request.Instance = flowidentity.Stored(request.ContractBundle, ".", runID, runID, runID, "")
+	plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	return f, plan
+}
+
+func TestR7DirectoryCanceledLookupIsNotConstructionCorruptionBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f, root := newR7KeylessIndexProof(t, backend)
+			fact, present := correlation.SourceArtifactFactFromContext(f.ctx)
+			if !present {
+				t.Fatal("cancellation proof requires admitted source")
+			}
+			owner := flowidentity.RunScopedFlowInstance{RunID: correlation.RunIDFromContext(f.ctx), Route: root.Identity.Route()}
+			request, err := pipeline.NewExactFlowInstanceLookup(semanticview.Wrap(f.bundle), fact, owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(f.ctx)
+			cancel()
+			observed, found, err := f.store.(pipeline.FlowInstanceIndexReader).LookupFlowInstance(ctx, request)
+			var corruption *pipeline.FlowInstanceConstructionCorruption
+			if !errors.Is(err, context.Canceled) || errors.As(err, &corruption) || found || observed.Valid() {
+				t.Fatalf("cancellation lost its independent classification: found=%t err=%v", found, err)
+			}
+		})
+	}
+}
+
+func TestR7DirectoryInventoryValidatesEveryCoordinateBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f, root := newR7KeylessIndexProof(t, backend)
+			runID := correlation.RunIDFromContext(f.ctx)
+			fact, present := correlation.SourceArtifactFactFromContext(f.ctx)
+			if !present {
+				t.Fatal("inventory proof requires admitted source")
+			}
+			source := semanticview.Wrap(f.bundle)
+			child, err := flowidentity.KeylessChild(source, root.Identity, "detail")
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: child.Route()}
+			index := f.store.(pipeline.FlowInstanceIndexReader)
+			valid, err := pipeline.NewFlowInstanceLookupScope(source, fact, runID, []string{"detail"}, []flowidentity.RunScopedFlowInstance{owner, owner})
+			if err != nil {
+				t.Fatal(err)
+			}
+			observations, err := index.ListFlowInstances(f.ctx, valid)
+			if err != nil || len(observations) != 1 || observations[0].Identity() != child {
+				t.Fatalf("consistent overlap changed inventory: %+v %v", observations, err)
+			}
+			for _, fault := range []struct {
+				name  string
+				owner flowidentity.RunScopedFlowInstance
+			}{
+				{"discriminator", flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute("detail", "different-instance", "detail")}},
+				{"declared_scope", flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute("sibling", "detail", "detail")}},
+			} {
+				t.Run(fault.name, func(t *testing.T) {
+					request, err := pipeline.NewExactFlowInstanceLookup(source, fact, fault.owner)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if observed, found, err := index.LookupFlowInstance(f.ctx, request); err == nil || found || observed.Valid() {
+						t.Fatalf("standalone invalid coordinate accepted: %+v found=%t err=%v", observed, found, err)
+					}
+					for _, flows := range [][]string{nil, {"detail"}} {
+						scope, err := pipeline.NewFlowInstanceLookupScope(source, fact, runID, flows, []flowidentity.RunScopedFlowInstance{fault.owner})
+						if err != nil {
+							t.Fatal(err)
+						}
+						if observed, err := index.ListFlowInstances(f.ctx, scope); err == nil || len(observed) != 0 {
+							t.Fatalf("overlap hid invalid coordinate: %+v %v", observed, err)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestR7DirectoryDeclarationCannotHideCorruptKeylessConstructionBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f, root := newR7KeylessIndexProof(t, backend)
+			runID := correlation.RunIDFromContext(f.ctx)
+			fact, present := correlation.SourceArtifactFactFromContext(f.ctx)
+			if !present {
+				t.Fatal("corruption proof requires admitted source")
+			}
+			source := semanticview.Wrap(f.bundle)
+			child, err := flowidentity.KeylessChild(source, root.Identity, "detail")
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: child.Route()}
+			exact, err := pipeline.NewExactFlowInstanceLookup(source, fact, owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			declared, err := pipeline.NewDeclaredFlowInstanceLookup(source, fact, runID, "detail", root.Identity, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scope, err := pipeline.NewFlowInstanceLookupScope(source, fact, runID, []string{"detail"}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			index := f.store.(pipeline.FlowInstanceIndexReader)
+			for _, fault := range []struct {
+				field pipelinepersistence.FlowConstructorHeaderFaultField
+				value any
+			}{
+				{"parent_instance", nil}, {"instance_key", "foreign"},
+			} {
+				t.Run(string(fault.field), func(t *testing.T) {
+					restore, err := FaultFlowConstructorHeaderForTest(f.ctx, f.store, owner, fault.field, fault.value)
+					if err != nil {
+						t.Fatal(err)
+					}
+					before, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, request := range []pipeline.FlowInstanceLookupRequest{exact, declared} {
+						observed, found, err := index.LookupFlowInstance(f.ctx, request)
+						var corruption *pipeline.FlowInstanceConstructionCorruption
+						if !errors.As(err, &corruption) || found || observed.Valid() {
+							t.Fatalf("contradictory construction became absence: %+v found=%t err=%v", observed, found, err)
+						}
+					}
+					observed, err := index.ListFlowInstances(f.ctx, scope)
+					var corruption *pipeline.FlowInstanceConstructionCorruption
+					if !errors.As(err, &corruption) || len(observed) != 0 {
+						t.Fatalf("inventory hid corrupt construction: %+v %v", observed, err)
+					}
+					after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(before, after) {
+						t.Fatal("corruption refusal repaired or mutated evidence")
+					}
+					if err := restore(f.ctx); err != nil {
+						t.Fatal(err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestR7DirectoryDeclarationCannotHideCorruptKeyedConstructionBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
+				"schema.yaml":          "name: keyed-corruption-proof\n",
+				"worker/schema.yaml":   "name: worker\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"worker/entities.yaml": "item:\n  item_id: text\n",
+				"worker/events.yaml":   "item.created:\n  item_id: text\n",
+			}, nil)
+			runID := correlation.RunIDFromContext(f.ctx)
+			rootRequest := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
+			rootRequest.Instance = flowidentity.Stored(rootRequest.ContractBundle, ".", runID, runID, runID, "")
+			root, err := f.manager.PrepareFlowInstanceActivation(f.ctx, rootRequest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			committer := agentFixtureFlowActivationCommitter{store: f.store}
+			if _, err := committer.CommitFlowInstanceActivation(f.ctx, root); err != nil {
+				t.Fatal(err)
+			}
+			request := sqliteFlowActivationRequest(f.bundle, "worker", "actual-stored-slot", "", "")
+			request.Instance, err = flowidentity.KeyedChild(request.ContractBundle, root.Identity, "worker", "actual-stored-slot")
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Instance.EntityID = uuid.NewString()
+			request.ConstructorInput, request.ResolvedKey = "item.created", "business-key"
+			request.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "item.created", "constructor-fixture", "", []byte(`{"item_id":"business-key"}`), 0, runID, events.EventEnvelope{}, request.OccurredAt)
+			plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := committer.CommitFlowInstanceActivation(f.ctx, plan); err != nil {
+				t.Fatal(err)
+			}
+			fact, present := correlation.SourceArtifactFactFromContext(f.ctx)
+			if !present {
+				t.Fatal("keyed corruption proof requires admitted source")
+			}
+			keys, err := pipeline.AdmitFlowInstanceKeyMaterial(request.ContractBundle, "worker", "business-key")
+			if err != nil {
+				t.Fatal(err)
+			}
+			declared, err := pipeline.NewDeclaredFlowInstanceLookup(request.ContractBundle, fact, runID, "worker", root.Identity, keys)
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: plan.Identity.Route()}
+			exact, err := pipeline.NewExactFlowInstanceLookup(request.ContractBundle, fact, owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scope, err := pipeline.NewFlowInstanceLookupScope(request.ContractBundle, fact, runID, []string{"worker"}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			index := f.store.(pipeline.FlowInstanceIndexReader)
+			for _, fault := range []struct {
+				field pipelinepersistence.FlowConstructorHeaderFaultField
+				value any
+			}{
+				{"parent_instance", nil}, {"instance_key", "foreign"},
+			} {
+				t.Run(string(fault.field), func(t *testing.T) {
+					restore, err := FaultFlowConstructorHeaderForTest(f.ctx, f.store, owner, fault.field, fault.value)
+					if err != nil {
+						t.Fatal(err)
+					}
+					before, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, lookup := range []pipeline.FlowInstanceLookupRequest{exact, declared} {
+						observed, found, err := index.LookupFlowInstance(f.ctx, lookup)
+						var corruption *pipeline.FlowInstanceConstructionCorruption
+						if !errors.As(err, &corruption) || found || observed.Valid() {
+							t.Fatalf("corrupt keyed winner became absence: %+v found=%t err=%v", observed, found, err)
+						}
+					}
+					observed, err := index.ListFlowInstances(f.ctx, scope)
+					var corruption *pipeline.FlowInstanceConstructionCorruption
+					if !errors.As(err, &corruption) || len(observed) != 0 {
+						t.Fatalf("inventory hid corrupt keyed winner: %+v %v", observed, err)
+					}
+					after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(before, after) {
+						t.Fatal("keyed corruption refusal repaired evidence")
+					}
+					if err := restore(f.ctx); err != nil {
+						t.Fatal(err)
+					}
+				})
 			}
 		})
 	}

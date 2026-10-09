@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/google/uuid"
 )
 
@@ -228,11 +229,9 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 			{"accumulator", "accumulator", `{"foreign":true}`}, {"slug", "slug", "foreign"}, {"name", "name", "foreign"},
 		} {
 			t.Run("reuse_rejects/"+fault.name, func(t *testing.T) {
-				var original any
-				if err := f.db.QueryRowContext(f.ctx, "SELECT "+fault.column+" FROM flow_instances WHERE run_id=$1 AND instance_path='detail'", fork.ForkRunID).Scan(&original); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := f.db.ExecContext(f.ctx, "UPDATE flow_instances SET "+fault.column+"=$1 WHERE run_id=$2 AND instance_path='detail'", fault.value, fork.ForkRunID); err != nil {
+				coordinate := flowidentity.RunScopedFlowInstance{RunID: fork.ForkRunID, Route: flowidentity.StoredRoute("detail", "detail", "detail")}
+				restore, err := FaultFlowConstructorHeaderForTest(f.ctx, f.store, coordinate, pipelinepersistence.FlowConstructorHeaderFaultField(fault.column), fault.value)
+				if err != nil {
 					t.Fatal(err)
 				}
 				before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
@@ -242,7 +241,7 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
 					t.Fatal("historical evidence refusal repaired or changed state")
 				}
-				if _, err := f.db.ExecContext(f.ctx, "UPDATE flow_instances SET "+fault.column+"=$1 WHERE run_id=$2 AND instance_path='detail'", original, fork.ForkRunID); err != nil {
+				if err := restore(f.ctx); err != nil {
 					t.Fatal(err)
 				}
 			})

@@ -137,3 +137,23 @@ func TestFlowInstanceObservationRefusesCrossedHeaderAndRoute(t *testing.T) {
 		t.Fatal("observed header accepted a different declared entity owner")
 	}
 }
+
+func TestFlowInstanceObservationTransitionHistoryIsDetached(t *testing.T) {
+	request, instance, run, receipt, readiness := instanceObservationTestFixture(t)
+	instance.TransitionHistory = []WorkflowTransitionRecord{{GuardsEvaluated: []string{"original"}}}
+	observation, err := AdmitNativeFlowInstanceObservation(request, instance, run, 3, receipt, readiness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance.TransitionHistory[0].GuardsEvaluated[0] = "mutated-input"
+	for range 2 {
+		stored, err := observation.WorkflowInstance()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.TransitionHistory[0].GuardsEvaluated[0] != "original" {
+			t.Fatalf("detached observation changed through history: %s", stored.TransitionHistory[0].GuardsEvaluated[0])
+		}
+		stored.TransitionHistory[0].GuardsEvaluated[0] = "mutated-output"
+	}
+}

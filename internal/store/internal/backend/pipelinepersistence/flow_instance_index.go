@@ -3,6 +3,7 @@ package pipelinepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -183,9 +184,14 @@ func (s *flowInstanceIndexSnapshot) lookup(ctx context.Context, request pipeline
 		return pipeline.FlowInstanceObservation{}, false, err
 	}
 	if len(headers) > 1 {
-		return pipeline.FlowInstanceObservation{}, false, fmt.Errorf("instance selector has ambiguous stored receivers")
+		return pipeline.FlowInstanceObservation{}, false, &pipeline.FlowInstanceConstructionCorruption{RunID: request.RunID(), FlowID: request.FlowID(), Cause: fmt.Errorf("instance selector has ambiguous stored receivers")}
 	}
 	if len(headers) == 0 {
+		if request.DeclaredSelection() && request.ExactPath() == "" {
+			if err := s.validateDeclaredAbsence(ctx, request); err != nil {
+				return pipeline.FlowInstanceObservation{}, false, err
+			}
+		}
 		if err := s.requireAbsentCoordinate(ctx, request.ExactPath()); err != nil {
 			return pipeline.FlowInstanceObservation{}, false, err
 		}
@@ -193,6 +199,15 @@ func (s *flowInstanceIndexSnapshot) lookup(ctx context.Context, request pipeline
 	}
 	observation, err := s.observe(ctx, request, headers[0])
 	return observation, err == nil, err
+}
+
+func (s *flowInstanceIndexSnapshot) validateDeclaredAbsence(ctx context.Context, request pipeline.FlowInstanceLookupRequest) error {
+	scope, err := pipeline.NewFlowInstanceLookupScope(s.source, request.SourceFact(), s.run.RunID, []string{request.FlowID()}, nil)
+	if err != nil {
+		return err
+	}
+	_, err = s.observeDeclaration(ctx, scope, request.FlowID())
+	return err
 }
 
 func (s *flowInstanceIndexSnapshot) headers(ctx context.Context, predicate string, args ...any) ([]pipeline.WorkflowInstance, error) {
@@ -239,16 +254,19 @@ func (s *flowInstanceIndexSnapshot) observe(ctx context.Context, request pipelin
 		observation, err = pipeline.AdmitHistoricalFlowInstanceObservation(request, header, s.run, s.revision, historical, desired)
 	} else {
 		if !readyFound {
-			return pipeline.FlowInstanceObservation{}, fmt.Errorf("native instance %s lacks desired attachment evidence", header.StorageRef)
+			return pipeline.FlowInstanceObservation{}, &pipeline.FlowInstanceConstructionCorruption{RunID: request.RunID(), FlowID: request.FlowID(), InstancePath: header.StorageRef, Cause: fmt.Errorf("native instance lacks desired attachment evidence")}
 		}
 		receipt, readErr := ReadFlowConstructionPublicationTx(ctx, s.tx, flowidentity.RunScopedFlowInstance{RunID: s.run.RunID, Route: route}, header.EntityID)
 		if readErr != nil {
+			if errors.Is(readErr, sql.ErrNoRows) {
+				return pipeline.FlowInstanceObservation{}, &pipeline.FlowInstanceConstructionCorruption{RunID: request.RunID(), FlowID: request.FlowID(), InstancePath: header.StorageRef, Cause: readErr}
+			}
 			return pipeline.FlowInstanceObservation{}, readErr
 		}
 		observation, err = pipeline.AdmitNativeFlowInstanceObservation(request, header, s.run, s.revision, receipt, readiness)
 	}
 	if err != nil {
-		return pipeline.FlowInstanceObservation{}, err
+		return pipeline.FlowInstanceObservation{}, &pipeline.FlowInstanceConstructionCorruption{RunID: request.RunID(), FlowID: request.FlowID(), InstancePath: header.StorageRef, Cause: err}
 	}
 	identity := observation.Identity()
 	if !identity.ParentRoute.Empty() {
@@ -297,7 +315,7 @@ func (s *flowInstanceIndexSnapshot) requireAbsentCoordinate(ctx context.Context,
 		return err
 	}
 	if occupied {
-		return fmt.Errorf("instance coordinate %s has incomplete native construction", path)
+		return &pipeline.FlowInstanceConstructionCorruption{RunID: s.run.RunID, InstancePath: path, Cause: fmt.Errorf("instance coordinate has incomplete native construction")}
 	}
 	return nil
 }
@@ -314,12 +332,15 @@ func (s *flowInstanceIndexSnapshot) list(ctx context.Context, scope pipeline.Flo
 		}
 	}
 	for _, owner := range scope.Coordinates() {
-		if _, found := selected[owner.Key()]; found {
-			continue
-		}
 		request, err := pipeline.NewExactFlowInstanceLookup(s.source, scope.SourceFact(), owner)
 		if err != nil {
 			return nil, err
+		}
+		if observed, found := selected[owner.Key()]; found {
+			if err := observed.ValidateSelection(request); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		observation, found, err := s.lookup(ctx, request)
 		if err != nil {
