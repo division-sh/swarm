@@ -26861,11 +26861,31 @@
         "source_file": "embedded://swarm/platform-spec.yaml",
         "source_line": 1,
         "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.author_activity_story.transaction_contract[12]",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.author_activity_story.transaction_contract[13]",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
         "source_presence": "mapping"
       }
     },
     {
-      "path": "platform.platform_tables.author_activity_story.transaction_contract[11][\"No ordinary domain mutation may occur after story finalization. The named selected-contract fork discard is the sole destructive exception\"]",
+      "path": "platform.platform_tables.author_activity_story.transaction_contract[13][\"No ordinary domain mutation may occur after story finalization. The named selected-contract fork discard is the sole destructive exception\"]",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",

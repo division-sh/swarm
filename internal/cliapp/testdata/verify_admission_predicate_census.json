@@ -3513,7 +3513,7 @@
     "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.runTransactionOutcome",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
-    "body_sha256": "762a013cc8a0c9971af8e42e0023b5b735c9accfd6717f6f9d450184e6f0ea71"
+    "body_sha256": "e50e8ede4f0c44411504484c0085a3f456238bd639370d67c157d312d4e1b48f"
   },
   {
     "owner": "internal/store/internal/backend/postgres/transaction.go::*rolledBackSerializationConflict.Error",
