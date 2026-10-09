@@ -1595,7 +1595,7 @@ func standingResult(candidate runtimepipeline.StandingServiceCandidate, runID st
 	return runtimepipeline.StandingServiceReconciliation{
 		BindingEnabled: candidate.BindingEnabled,
 		ServiceID:      candidate.ServiceID, FlowPath: candidate.FlowPath,
-		RunID: runID,
+		RunID:      runID,
 		Generation: generation, PublicationSequence: publicationSequence, Transition: transition,
 		EffectiveState: effectiveState, BundleHash: candidate.Source.BundleHash(), Reason: reason,
 	}

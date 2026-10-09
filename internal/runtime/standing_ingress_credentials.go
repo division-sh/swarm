@@ -624,7 +624,7 @@ func (rt *Runtime) projectCommittedStandingTargets(planned []StandingTarget, cur
 	activation := StandingActivation{
 		BundleHash: current.BundleHash, ServiceID: current.ServiceID, FlowPath: current.FlowPath,
 		RunID: current.RunID, Generation: current.Generation, PublicationSequence: current.PublicationSequence,
-		Construction: instance,
+		Construction:   instance,
 		EffectiveState: current.EffectiveState, RestartDisposition: current.RestartDisposition,
 	}
 	targets := append([]StandingTarget(nil), planned...)

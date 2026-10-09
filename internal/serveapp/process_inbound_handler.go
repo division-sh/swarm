@@ -51,7 +51,7 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 		BundleHash: target.BundleHash, ServiceID: target.ServiceID, FlowPath: target.FlowPath,
 		RunID: target.RunID, Generation: target.Generation,
 		PublicationSequence: target.PublicationSequence,
-		Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
+		Alias:               target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
 	}, use.Context.Source)
 }
 

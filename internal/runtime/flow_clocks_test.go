@@ -102,7 +102,7 @@ func TestClockDeploymentDeclarationsAndExactPublication(t *testing.T) {
 			}
 			activation := StandingActivation{
 				ServiceID: serviceID, RunID: runID, Generation: 1, FlowPath: schedule.FlowID,
-				Construction: instance,
+				Construction:       instance,
 				RestartDisposition: disposition,
 			}
 			command, err := flowClockCommand(source, activation, schedule, executionmode.Live)
