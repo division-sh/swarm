@@ -57,7 +57,7 @@ func inspectRunMutationDrift(ctx context.Context, tx *sql.Tx, runID string) (mut
 	if revision > 0 {
 		snapshot, err = loadRunForkRevisionSnapshotScope(ctx, tx, runID, revision, true)
 		if err != nil {
-			return mutationlog.DriftReport{}, runHistoryError(runID, "", "", "invalid_mutation_order", err.Error())
+			return mutationlog.DriftReport{}, err
 		}
 	}
 	for i, fact := range snapshot.EntityMutations {
@@ -96,16 +96,16 @@ func runHistoryError(run, entity, mutation, code, reason string) error {
 	return &mutationlog.HistoryError{RunID: run, EntityID: entity, MutationID: mutation, Code: code, Reason: reason}
 }
 
-func readPhysicalRunMutations(ctx context.Context, tx *sql.Tx, runID string) (map[string]runForkRevisionEntityMutation, error) {
+func readPhysicalRunMutations(ctx context.Context, tx *sql.Tx, runID string) (_ map[string]runForkRevisionEntityMutation, err error) {
 	rows, err := tx.QueryContext(ctx, `SELECT CAST(mutation_id AS TEXT),CAST(entity_id AS TEXT),domain,path,new_value,created_at FROM entity_mutations WHERE run_id=$1`, runID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { err = errors.Join(err, rows.Close()) }()
 	out := map[string]runForkRevisionEntityMutation{}
 	for rows.Next() {
 		var row runForkRevisionEntityMutation
-		var raw []byte
+		var raw sql.NullString
 		var at any
 		if err := rows.Scan(&row.MutationID, &row.EntityID, &row.Domain, &row.Path, &raw, &at); err != nil {
 			return nil, err
@@ -118,23 +118,27 @@ func readPhysicalRunMutations(ctx context.Context, tx *sql.Tx, runID string) (ma
 		if err != nil {
 			return nil, runHistoryError(runID, row.EntityID, row.MutationID, "invalid_mutation_history", err.Error())
 		}
-		row.NewValue = append(json.RawMessage(nil), raw...)
-		if len(raw) == 0 {
+		if !raw.Valid {
 			row.NewValue = json.RawMessage("null")
+		} else {
+			row.NewValue = json.RawMessage(raw.String)
+			if !json.Valid(row.NewValue) {
+				return nil, runHistoryError(runID, row.EntityID, row.MutationID, "invalid_mutation_history", "physical new_value must be valid JSON or SQL NULL")
+			}
 		}
 		out[row.MutationID] = row
 	}
 	return out, rows.Err()
 }
 
-func validateRunMutationCoordinates(ctx context.Context, tx *sql.Tx, runID string, head int64) error {
+func validateRunMutationCoordinates(ctx context.Context, tx *sql.Tx, runID string, head int64) (err error) {
 	rows, err := tx.QueryContext(ctx, `SELECT CAST(f.run_id AS TEXT),f.fact_key,f.revision,f.present,r.revision
 		FROM run_fork_fact_revisions f LEFT JOIN run_fork_revisions r ON r.run_id=f.run_id AND r.revision=f.revision
 		WHERE f.family='entity_mutations' AND (f.run_id=$1 OR f.fact_key IN (SELECT CAST(mutation_id AS TEXT) FROM entity_mutations WHERE run_id=$1))`, runID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { err = errors.Join(err, rows.Close()) }()
 	seen := map[string]struct{}{}
 	for rows.Next() {
 		var owner, key string
@@ -155,12 +159,12 @@ func validateRunMutationCoordinates(ctx context.Context, tx *sql.Tx, runID strin
 	return rows.Err()
 }
 
-func readPhysicalRunState(ctx context.Context, tx *sql.Tx, runID string) (map[string]mutationlog.EntityStateProjection, error) {
+func readPhysicalRunState(ctx context.Context, tx *sql.Tx, runID string) (_ map[string]mutationlog.EntityStateProjection, err error) {
 	rows, err := tx.QueryContext(ctx, `SELECT CAST(entity_id AS TEXT),COALESCE(current_state,''),fields,bookkeeping,gates,accumulator FROM entity_state WHERE run_id=$1`, runID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { err = errors.Join(err, rows.Close()) }()
 	out := map[string]mutationlog.EntityStateProjection{}
 	for rows.Next() {
 		var entity string
