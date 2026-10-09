@@ -21,8 +21,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/counterprojection"
+	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -216,7 +219,7 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 	defer func() { _ = tx.Rollback() }()
 	seedWorkflowHeaderProjectionFixture(t, ctx, tx, runID, entityID, "flow-a/1", "flow-a", "fork_entity", "ready", "{}", at)
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE flow_instances SET name='Snapshot Entity' WHERE run_id=$1 AND instance_path='flow-a/1'`, runID)
-	mustExecRunForkRevisionMatrix(t, ctx, tx, `
+	physicalEvent := mustExecRunForkRevisionMatrix(t, ctx, tx, `
 		INSERT INTO events (
 			event_class,event_id,run_id,event_name,entity_id,scope,payload,payload_bytes,execution_mode,
 			payload_schema_bundle_hash,payload_schema_flow_id,payload_schema_event_key,
@@ -230,6 +233,17 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 	`, eventID, runID, entityID, `{"name":"Snapshot Entity"}`, []byte(`{"name":"Snapshot Entity"}`),
 		authorActivityTestBundleHash, "sha256:"+strings.Repeat("0", 64), at, `{}`, `[]`,
 		`{"write_class":"historical_run_fork_replay","arm":"delivery"}`)
+	rows, err := physicalEvent.RowsAffected()
+	if err != nil || rows != 1 {
+		t.Fatalf("selected lifecycle fixture event rows=%d err=%v", rows, err)
+	}
+	dialect := authoractivity.DialectSQLite
+	if postgres {
+		dialect = authoractivity.DialectPostgres
+	}
+	if err := counterprojection.Apply(ctx, tx, dialect, runID, rows); err != nil {
+		t.Fatal(err)
+	}
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `
 		INSERT INTO entity_mutations (
 			mutation_id,run_id,entity_id,domain,path,old_value,new_value,caused_by_event,writer_type,writer_id,handler_step,created_at
@@ -717,27 +731,12 @@ func seedRunForkRevisionMatrixEvent(t *testing.T, ctx context.Context, tx *sql.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := tx.ExecContext(ctx, `
-		INSERT INTO events (
-			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
-			payload_schema_bundle_hash, payload_schema_flow_id, payload_schema_event_key, payload_schema_digest, payload_schema_class,
-			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
-			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
-			route_settlement, operator_reference_event_id, inherited_fan_out_origin
-		) VALUES (?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))
-	`, record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,
-		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload,
-		record.PayloadSchemaBundleHash, record.PayloadSchemaFlowID, record.PayloadSchemaEventKey,
-		record.PayloadSchemaDigest, record.PayloadSchemaClass, record.ExecutionMode, record.ChainDepth,
-		record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt.UTC(),
-		record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
-		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement),
-		record.OperatorReferencedEventID, string(record.InheritedFanOutOrigin))
+	inserted, err := eventfixture.InsertUnrevisioned(ctx, tx, authoractivityfixture.DialectSQLite, record)
 	if err != nil {
 		t.Fatalf("seed SQLite run-fork revision event: %v", err)
 	}
-	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
-		t.Fatalf("seed SQLite run-fork revision event rows=%d err=%v", rows, err)
+	if !inserted {
+		t.Fatal("seed SQLite run-fork revision event was not inserted")
 	}
 }
 
@@ -766,11 +765,13 @@ func deleteRunForkRevisionMatrixFacts(t *testing.T, ctx context.Context, tx *sql
 	}
 }
 
-func mustExecRunForkRevisionMatrix(t *testing.T, ctx context.Context, tx *sql.Tx, query string, args ...any) {
+func mustExecRunForkRevisionMatrix(t *testing.T, ctx context.Context, tx *sql.Tx, query string, args ...any) sql.Result {
 	t.Helper()
-	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
 		t.Fatalf("execute revision matrix statement %q: %v", strings.Join(strings.Fields(query), " "), err)
 	}
+	return result
 }
 
 func loadRunForkRevisionMatrixFacts(t *testing.T, ctx context.Context, db *sql.DB, runID string, revision int64) []runForkRevisionMatrixFact {
