@@ -72,6 +72,7 @@ type runForkSourceStateAdmission struct {
 	forkRunID string
 	snapshot  *runForkRevisionSnapshot
 	postgres  bool
+	firstTurn *runfork.InputPublication
 }
 
 type runForkProjectedSourceState struct {
@@ -89,18 +90,22 @@ func loadRunForkSourceStateAdmission(ctx context.Context, tx *sql.Tx, forkRunID 
 	if err := validate(ctx, tx, binding.SourceRunID); err != nil {
 		return runForkSourceStateAdmission{}, err
 	}
-	point, err := resolveFixedRunForkRevisionPoint(ctx, tx, binding.SourceRunID, binding.ForkPoint, resolve)
+	_, err = resolveFixedRunForkRevisionPoint(ctx, tx, binding.SourceRunID, binding.ForkPoint, resolve)
 	if err != nil {
 		return runForkSourceStateAdmission{}, err
 	}
-	snapshot, err := loadRunForkRevisionSnapshot(ctx, tx, binding.SourceRunID, point.Revision)
+	snapshot, err := loadRunForkPointSnapshot(ctx, tx, binding.SourceRunID, binding.ForkPoint)
 	if err != nil {
 		return runForkSourceStateAdmission{}, err
 	}
 	if err := validateRunForkEntityMetadataOwners(snapshot); err != nil {
 		return runForkSourceStateAdmission{}, err
 	}
-	return runForkSourceStateAdmission{forkRunID: forkRunID, snapshot: snapshot, postgres: postgres}, nil
+	firstTurn, err := loadRunForkStartFirstTurn(ctx, tx, snapshot)
+	if err != nil {
+		return runForkSourceStateAdmission{}, err
+	}
+	return runForkSourceStateAdmission{forkRunID: forkRunID, snapshot: snapshot, postgres: postgres, firstTurn: firstTurn}, nil
 }
 
 // Presence comes only from the bound source snapshot. Neither a producer root
@@ -123,7 +128,15 @@ func (a runForkSourceStateAdmission) project(event runfork.RunForkSelectedContra
 		}
 	}
 	if !found {
-		return event, nil, fmt.Errorf("source event %s is outside the bound fork revision", event.SourceEventID)
+		if a.firstTurn == nil {
+			return event, nil, fmt.Errorf("source event %s is outside the bound fork revision", event.SourceEventID)
+		}
+		original, present := a.firstTurn.Event()
+		if !present || original.ID() != event.SourceEventID || original.RunID() != a.snapshot.RunID ||
+			string(original.Type()) != event.EventName || original.RoutingSource() != event.RoutingSource ||
+			!bytes.Equal(original.Payload(), event.Payload) || original.ExecutionMode() != event.ExecutionMode {
+			return event, nil, fmt.Errorf("source event %s contradicts the exact original first turn", event.SourceEventID)
+		}
 	}
 	projected, err := runfork.ProjectSelectedContractSourceEvent(a.snapshot.RunID, a.forkRunID, event)
 	if err != nil {
@@ -468,6 +481,12 @@ func projectDeclaredForkPayload(raw json.RawMessage, role semanticview.LoopRevis
 }
 
 func (a runForkSourceStateAdmission) eventRole(eventID string) (semanticview.LoopRevisionRole, bool, error) {
+	if a.firstTurn != nil {
+		original, present := a.firstTurn.Event()
+		if present && original.ID() == eventID {
+			return a.carriage.ResolveEvent(original.RoutingSource(), string(original.Type()), identity.ExecutableNode{}, "")
+		}
+	}
 	for _, event := range a.snapshot.Events {
 		if event.EventID != eventID {
 			continue

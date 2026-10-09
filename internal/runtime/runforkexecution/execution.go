@@ -24,6 +24,7 @@ type SelectedContractExecutionRequest struct {
 	Recovery                *runfork.SelectedForkRecoveryResult
 	SourceRunID             string
 	At                      string
+	AtStart                 bool
 	ExpectedBundleHash      string
 	SourceArtifactFact      runtimecorrelation.SourceArtifactFact
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
@@ -228,6 +229,16 @@ func validateSelectedContractExecutionFrontierForMutation(frontier runfork.RunFo
 func admitSelectedDeploymentRevisionFrontier(plan runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission) error {
 	if frontier.FrontierEventCount > 0 {
 		return nil
+	}
+	if plan.ForkPoint.Kind == runfork.RunForkPointRunStart {
+		_, present, err := plan.OriginalStartFirstTurn()
+		if err != nil {
+			return err
+		}
+		if present {
+			return fmt.Errorf("run-start first turn is missing from selected frontier")
+		}
+		return plan.ForkPoint.Validate()
 	}
 	if plan.ForkPoint.Kind != runfork.RunForkPointDeploymentRevision {
 		return fmt.Errorf("selected-contract event-point execution requires selected frontier events")

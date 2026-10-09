@@ -157,7 +157,8 @@ func workflowTimerSelectColumns() string {
 			COALESCE(CAST(t.source_timer_id AS TEXT), ''),
 			COALESCE(CAST(t.forked_from_run_id AS TEXT), ''),
 			COALESCE(CAST(t.forked_from_event_id AS TEXT), ''),
-			COALESCE(t.reconstruction_owner, '')
+			COALESCE(t.reconstruction_owner, ''), COALESCE(t.forked_from_point_kind, ''),
+			COALESCE(t.forked_from_point_revision, 0), t.source_armed_at, COALESCE(t.cancel_cause, ''), t.cancelled_at
 		FROM timers t
 		LEFT JOIN runs run ON run.run_id = t.run_id
 	`
@@ -165,8 +166,8 @@ func workflowTimerSelectColumns() string {
 
 func scanWorkflowTimerActivation(scanner workflowTimerScanner) (runtimepipeline.WorkflowTimerActivation, error) {
 	var (
-		record                                                            runtimepipeline.WorkflowTimerActivationPersistenceRecord
-		payloadRaw, routingSourceRaw, fireAtRaw, firedAtRaw, createdAtRaw any
+		record                                                                                              runtimepipeline.WorkflowTimerActivationPersistenceRecord
+		payloadRaw, routingSourceRaw, fireAtRaw, firedAtRaw, createdAtRaw, sourceArmedAtRaw, cancelledAtRaw any
 	)
 	if err := scanner.Scan(
 		&record.ActivationID, &record.TaskID, &record.RunID, &record.EntityID, &record.Route.ScopeKey,
@@ -175,6 +176,8 @@ func scanWorkflowTimerActivation(scanner workflowTimerScanner) (runtimepipeline.
 		&record.OwnerNode, &record.OwnerAgent, &record.TaskType, &record.Status, &firedAtRaw, &createdAtRaw,
 		&record.SourceTimerID, &record.ForkedFromRunID, &record.ForkedFromEventID,
 		&record.ReconstructionOwner,
+		&record.ForkedFromPointKind, &record.ForkedFromPointRevision, &sourceArmedAtRaw,
+		&record.CancelCause, &cancelledAtRaw,
 	); err != nil {
 		return runtimepipeline.WorkflowTimerActivation{}, err
 	}
@@ -190,6 +193,12 @@ func scanWorkflowTimerActivation(scanner workflowTimerScanner) (runtimepipeline.
 		return runtimepipeline.WorkflowTimerActivation{}, err
 	}
 	if record.CreatedAt, _, err = sqliteTimeValue(createdAtRaw); err != nil {
+		return runtimepipeline.WorkflowTimerActivation{}, err
+	}
+	if record.SourceArmedAt, _, err = sqliteTimeValue(sourceArmedAtRaw); err != nil {
+		return runtimepipeline.WorkflowTimerActivation{}, err
+	}
+	if record.CancelledAt, _, err = sqliteTimeValue(cancelledAtRaw); err != nil {
 		return runtimepipeline.WorkflowTimerActivation{}, err
 	}
 	return runtimepipeline.DecodeWorkflowTimerActivationPersistenceRecord(record)

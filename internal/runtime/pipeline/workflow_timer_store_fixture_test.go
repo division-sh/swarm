@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -42,17 +43,18 @@ func (s *workflowInstanceStore) insertWorkflowTimerActivation(ctx context.Contex
 				flow_instance, fire_event, fire_payload, routing_source,
 				fire_at, recurring, recurrence_interval, owner_node, owner_agent, owner_kind, task_type,
 				execution_mode, status, created_at, source_timer_id, forked_from_run_id, forked_from_event_id,
-				reconstruction_owner
+				reconstruction_owner, forked_from_point_kind, forked_from_point_revision, source_armed_at
 			)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULL, ?, 'system', ?, ?, 'active', ?,
-			        NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))
+			        NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), ?)
 			ON CONFLICT(timer_id) DO NOTHING
 		`, activation.Ref.ActivationID, activation.RunID, activation.Ref.TaskID(), activation.EntityID,
 			activation.Route.ScopeKey, activation.Route.InstanceID, activation.Route.InstancePath,
 			activation.EventType, string(activation.Payload), string(routingSource), activation.FireAt,
 			activation.Recurring, workflowTimerIntervalString(activation), activation.OwnerAgent,
 			workflowTimerTaskFamily, activation.ExecutionMode, activation.CreatedAt, activation.SourceTimerID,
-			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner)
+			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner,
+			activation.ForkedFromPointKind, activation.ForkedFromPointRevision, nullableFixtureTimerSourceArmedAt(activation.SourceArmedAt))
 	} else {
 		result, err = tx.ExecContext(ctx, `
 			INSERT INTO timers (
@@ -60,18 +62,19 @@ func (s *workflowInstanceStore) insertWorkflowTimerActivation(ctx context.Contex
 				flow_instance, fire_event, fire_payload, routing_source,
 				fire_at, recurring, recurrence_interval, owner_node, owner_agent, owner_kind, task_type,
 				execution_mode, status, created_at, source_timer_id, forked_from_run_id, forked_from_event_id,
-				reconstruction_owner
+				reconstruction_owner, forked_from_point_kind, forked_from_point_revision, source_armed_at
 			)
 		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, NULLIF($13, ''),
 		        NULL, $14, 'system', $15, $16, 'active', $17, NULLIF($18, '')::uuid, NULLIF($19, '')::uuid,
-		        NULLIF($20, '')::uuid, NULLIF($21, ''))
+		        NULLIF($20, '')::uuid, NULLIF($21, ''), NULLIF($22, ''), NULLIF($23, 0), $24)
 			ON CONFLICT(timer_id) DO NOTHING
 		`, activation.Ref.ActivationID, activation.RunID, activation.Ref.TaskID(), activation.EntityID,
 			activation.Route.ScopeKey, activation.Route.InstanceID, activation.Route.InstancePath,
 			activation.EventType, string(activation.Payload), string(routingSource), activation.FireAt,
 			activation.Recurring, workflowTimerIntervalString(activation), activation.OwnerAgent,
 			workflowTimerTaskFamily, activation.ExecutionMode, activation.CreatedAt, activation.SourceTimerID,
-			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner)
+			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner,
+			activation.ForkedFromPointKind, activation.ForkedFromPointRevision, nullableFixtureTimerSourceArmedAt(activation.SourceArmedAt))
 	}
 	if err != nil {
 		return WorkflowTimerActivation{}, false, fmt.Errorf("insert workflow timer activation: %w", err)
@@ -234,7 +237,8 @@ func workflowTimerSelectColumns() string {
 			COALESCE(CAST(t.source_timer_id AS TEXT), ''),
 			COALESCE(CAST(t.forked_from_run_id AS TEXT), ''),
 			COALESCE(CAST(t.forked_from_event_id AS TEXT), ''),
-			COALESCE(t.reconstruction_owner, '')
+			COALESCE(t.reconstruction_owner, ''), COALESCE(t.forked_from_point_kind, ''),
+			COALESCE(t.forked_from_point_revision, 0), t.source_armed_at, COALESCE(t.cancel_cause, ''), t.cancelled_at
 		FROM timers t
 		LEFT JOIN runs run ON run.run_id = t.run_id
 	`
@@ -242,10 +246,10 @@ func workflowTimerSelectColumns() string {
 
 func scanWorkflowTimerActivation(scanner workflowTimerScanner) (WorkflowTimerActivation, error) {
 	var (
-		activation                                                        WorkflowTimerActivation
-		activationID, taskID, ownerNode, taskType                         string
-		payloadRaw, routingSourceRaw, fireAtRaw, firedAtRaw, createdAtRaw any
-		intervalRaw                                                       string
+		activation                                                                                          WorkflowTimerActivation
+		activationID, taskID, ownerNode, taskType                                                           string
+		payloadRaw, routingSourceRaw, fireAtRaw, firedAtRaw, createdAtRaw, sourceArmedAtRaw, cancelledAtRaw any
+		intervalRaw                                                                                         string
 	)
 	if err := scanner.Scan(
 		&activationID, &taskID, &activation.RunID, &activation.EntityID, &activation.Route.ScopeKey,
@@ -254,6 +258,8 @@ func scanWorkflowTimerActivation(scanner workflowTimerScanner) (WorkflowTimerAct
 		&ownerNode, &activation.OwnerAgent, &taskType, &activation.ExecutionMode, &activation.Status, &firedAtRaw, &createdAtRaw,
 		&activation.SourceTimerID, &activation.ForkedFromRunID, &activation.ForkedFromEventID,
 		&activation.ReconstructionOwner,
+		&activation.ForkedFromPointKind, &activation.ForkedFromPointRevision, &sourceArmedAtRaw,
+		&activation.CancelCause, &cancelledAtRaw,
 	); err != nil {
 		return WorkflowTimerActivation{}, err
 	}
@@ -282,6 +288,12 @@ func scanWorkflowTimerActivation(scanner workflowTimerScanner) (WorkflowTimerAct
 	if activation.CreatedAt, _, err = sqliteWorkflowTimeValue(createdAtRaw); err != nil {
 		return WorkflowTimerActivation{}, err
 	}
+	if activation.SourceArmedAt, _, err = sqliteWorkflowTimeValue(sourceArmedAtRaw); err != nil {
+		return WorkflowTimerActivation{}, err
+	}
+	if activation.CancelledAt, _, err = sqliteWorkflowTimeValue(cancelledAtRaw); err != nil {
+		return WorkflowTimerActivation{}, err
+	}
 	intervalRaw = strings.TrimSpace(intervalRaw)
 	if intervalRaw != "" {
 		interval, ok := timeridentity.ParseDelayDuration(intervalRaw)
@@ -295,6 +307,13 @@ func scanWorkflowTimerActivation(scanner workflowTimerScanner) (WorkflowTimerAct
 		return WorkflowTimerActivation{}, err
 	}
 	return activation, nil
+}
+
+func nullableFixtureTimerSourceArmedAt(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.UTC()
 }
 
 func (s *workflowInstanceStore) cancelWorkflowTimerActivation(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) (WorkflowTimerActivation, bool, error) {

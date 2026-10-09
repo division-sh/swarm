@@ -220,6 +220,7 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 					}},
 					{"lineage", func(a *runtimepipeline.WorkflowTimerActivation) {
 						a.SourceTimerID, a.ForkedFromRunID, a.ForkedFromEventID, a.ReconstructionOwner = uuid.NewString(), uuid.NewString(), uuid.NewString(), "fork-owner"
+						a.ForkedFromPointKind, a.ForkedFromPointRevision, a.SourceArmedAt = "event", 1, a.CreatedAt
 					}},
 					{"requested_ahead", func(a *runtimepipeline.WorkflowTimerActivation) {
 						a.FireAt = before.FireAt.Add(time.Hour)

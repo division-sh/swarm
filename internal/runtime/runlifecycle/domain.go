@@ -35,6 +35,7 @@ type ForkOriginPointKind = forkpoint.Kind
 const (
 	ForkOriginPointEvent              ForkOriginPointKind = forkpoint.Event
 	ForkOriginPointDeploymentRevision ForkOriginPointKind = forkpoint.DeploymentRevision
+	ForkOriginPointRunStart           ForkOriginPointKind = forkpoint.RunStart
 )
 
 const (

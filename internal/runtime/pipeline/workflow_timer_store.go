@@ -10,8 +10,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 )
 
 const (
@@ -20,56 +22,60 @@ const (
 	workflowTimerStatusCancelled = "cancelled"
 )
 
+type WorkflowTimerCancelCause = timerobligation.WorkflowTimerCancelCause
+
+const WorkflowTimerCancelCauseRuleRemoved = timerobligation.WorkflowTimerCancelCauseRuleRemoved
+
 // WorkflowTimerActivation is the only workflow interpretation of a
 // task_type=workflow_timer row.
 type WorkflowTimerActivation struct {
-	Ref                 timeridentity.WorkflowTimerActivationRef
-	RunID               string
-	EntityID            string
-	Route               runtimeflowidentity.Route
-	RoutingSource       events.RoutingSource
-	OwnerAgent          string
-	EventType           string
-	ExecutionMode       executionmode.Mode
-	Payload             []byte
-	FireAt              time.Time
-	Recurring           bool
-	RecurrenceInterval  time.Duration
-	Status              string
-	FiredAt             time.Time
-	CreatedAt           time.Time
-	SourceTimerID       string
-	ForkedFromRunID     string
-	ForkedFromEventID   string
+	Ref                     timeridentity.WorkflowTimerActivationRef
+	RunID                   string
+	EntityID                string
+	Route                   runtimeflowidentity.Route
+	RoutingSource           events.RoutingSource
+	OwnerAgent              string
+	EventType               string
+	ExecutionMode           executionmode.Mode
+	Payload                 []byte
+	FireAt                  time.Time
+	Recurring               bool
+	RecurrenceInterval      time.Duration
+	Status                  string
+	FiredAt                 time.Time
+	CancelCause             WorkflowTimerCancelCause
+	CancelledAt             time.Time
+	CreatedAt               time.Time
+	SourceTimerID           string
+	ForkedFromRunID         string
+	ForkedFromPointKind     forkpoint.Kind
+	ForkedFromPointRevision int64
+	ForkedFromEventID       string
+	// SourceArmedAt retains the original arm; CreatedAt remains the child row's birth.
+	SourceArmedAt       time.Time
 	ReconstructionOwner string
 }
 
 // WorkflowTimerActivationPersistenceRecord is the exact primitive record read
 // by a selected-store adapter. Semantic task identity is decoded only here,
 // not by SQL adapters.
-type WorkflowTimerActivationPersistenceRecord struct {
-	ActivationID        string
-	TaskID              string
-	RunID               string
-	EntityID            string
-	Route               runtimeflowidentity.Route
-	RoutingSource       events.RoutingSource
-	EventType           string
-	ExecutionMode       executionmode.Mode
-	Payload             []byte
-	FireAt              time.Time
-	Recurring           bool
-	RecurrenceInterval  string
-	OwnerNode           string
-	OwnerAgent          string
-	TaskType            string
-	Status              string
-	FiredAt             time.Time
-	CreatedAt           time.Time
-	SourceTimerID       string
-	ForkedFromRunID     string
-	ForkedFromEventID   string
-	ReconstructionOwner string
+type WorkflowTimerActivationPersistenceRecord = timerobligation.WorkflowTimerActivationRecord
+
+func (a WorkflowTimerActivation) PersistenceRecord() WorkflowTimerActivationPersistenceRecord {
+	a = a.Canonical()
+	interval := ""
+	if a.Recurring {
+		interval = a.RecurrenceInterval.String()
+	}
+	return WorkflowTimerActivationPersistenceRecord{
+		ActivationID: a.Ref.ActivationID, TaskID: a.Ref.TaskID(), RunID: a.RunID, EntityID: a.EntityID,
+		Route: a.Route, RoutingSource: a.RoutingSource, EventType: a.EventType, ExecutionMode: a.ExecutionMode, Payload: a.Payload,
+		FireAt: a.FireAt, Recurring: a.Recurring, RecurrenceInterval: interval, OwnerAgent: a.OwnerAgent, TaskType: workflowTimerTaskFamily,
+		Status: a.Status, FiredAt: a.FiredAt, CancelCause: a.CancelCause, CancelledAt: a.CancelledAt, CreatedAt: a.CreatedAt,
+		SourceTimerID: a.SourceTimerID, ForkedFromRunID: a.ForkedFromRunID, ForkedFromPointKind: a.ForkedFromPointKind,
+		ForkedFromPointRevision: a.ForkedFromPointRevision, ForkedFromEventID: a.ForkedFromEventID,
+		SourceArmedAt: a.SourceArmedAt, ReconstructionOwner: a.ReconstructionOwner,
+	}
 }
 
 func DecodeWorkflowTimerActivationPersistenceRecord(record WorkflowTimerActivationPersistenceRecord) (WorkflowTimerActivation, error) {
@@ -88,7 +94,10 @@ func DecodeWorkflowTimerActivationPersistenceRecord(record WorkflowTimerActivati
 		RoutingSource: record.RoutingSource, OwnerAgent: record.OwnerAgent, EventType: record.EventType, ExecutionMode: record.ExecutionMode, Payload: record.Payload,
 		FireAt: record.FireAt, Recurring: record.Recurring, Status: record.Status,
 		FiredAt: record.FiredAt, CreatedAt: record.CreatedAt, SourceTimerID: record.SourceTimerID,
+		CancelCause: record.CancelCause, CancelledAt: record.CancelledAt,
 		ForkedFromRunID: record.ForkedFromRunID, ForkedFromEventID: record.ForkedFromEventID,
+		ForkedFromPointKind: record.ForkedFromPointKind, ForkedFromPointRevision: record.ForkedFromPointRevision,
+		SourceArmedAt:       record.SourceArmedAt,
 		ReconstructionOwner: record.ReconstructionOwner,
 	}
 	if interval := strings.TrimSpace(record.RecurrenceInterval); interval != "" {
@@ -158,8 +167,10 @@ func (a WorkflowTimerActivation) normalized() WorkflowTimerActivation {
 	a.EventType = strings.TrimSpace(a.EventType)
 	a.ExecutionMode = executionmode.Mode(strings.TrimSpace(string(a.ExecutionMode)))
 	a.Status = strings.ToLower(strings.TrimSpace(a.Status))
+	a.CancelCause = WorkflowTimerCancelCause(strings.TrimSpace(string(a.CancelCause)))
 	a.SourceTimerID = strings.TrimSpace(a.SourceTimerID)
 	a.ForkedFromRunID = strings.TrimSpace(a.ForkedFromRunID)
+	a.ForkedFromPointKind = forkpoint.Kind(strings.TrimSpace(string(a.ForkedFromPointKind)))
 	a.ForkedFromEventID = strings.TrimSpace(a.ForkedFromEventID)
 	a.ReconstructionOwner = strings.TrimSpace(a.ReconstructionOwner)
 	if len(a.Payload) == 0 {
@@ -169,7 +180,9 @@ func (a WorkflowTimerActivation) normalized() WorkflowTimerActivation {
 	}
 	a.FireAt = canonicalWorkflowTimerTime(a.FireAt)
 	a.FiredAt = canonicalWorkflowTimerTime(a.FiredAt)
+	a.CancelledAt = canonicalWorkflowTimerTime(a.CancelledAt)
 	a.CreatedAt = canonicalWorkflowTimerTime(a.CreatedAt)
+	a.SourceArmedAt = canonicalWorkflowTimerTime(a.SourceArmedAt)
 	return a
 }
 
@@ -205,21 +218,28 @@ func (a WorkflowTimerActivation) validate() error {
 	if a.FireAt.IsZero() || a.CreatedAt.IsZero() {
 		return fmt.Errorf("workflow timer activation requires created_at and fire_at")
 	}
-	if a.FireAt.Before(a.CreatedAt) {
-		return fmt.Errorf("workflow timer fire_at cannot precede created_at")
-	}
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(a.Payload, &payload); err != nil || payload == nil {
 		return fmt.Errorf("workflow timer business payload must be a JSON object")
 	}
-	lineageFacts := 0
-	for _, fact := range []string{a.SourceTimerID, a.ForkedFromRunID, a.ForkedFromEventID, a.ReconstructionOwner} {
-		if fact != "" {
-			lineageFacts++
+	hasLineage := a.SourceTimerID != "" || a.ForkedFromRunID != "" || a.ForkedFromPointKind != "" ||
+		a.ForkedFromPointRevision != 0 || a.ForkedFromEventID != "" || a.ReconstructionOwner != "" || !a.SourceArmedAt.IsZero()
+	if hasLineage {
+		if a.SourceTimerID == "" || a.ForkedFromRunID == "" || a.ReconstructionOwner == "" || a.SourceArmedAt.IsZero() {
+			return fmt.Errorf("workflow timer fork lineage requires exact source timer, run, point, owner, and armed_at")
+		}
+		if err := forkpoint.ValidateIdentity(a.ForkedFromPointKind, a.ForkedFromPointRevision, a.ForkedFromEventID); err != nil {
+			return fmt.Errorf("workflow timer fork source point: %w", err)
+		}
+		if a.SourceTimerID == a.Ref.ActivationID || a.ForkedFromRunID == a.RunID {
+			return fmt.Errorf("workflow timer fork lineage must identify a different source timer and run")
+		}
+		if a.SourceArmedAt.After(a.CreatedAt) {
+			return fmt.Errorf("workflow timer source armed_at cannot follow child created_at")
 		}
 	}
-	if lineageFacts != 0 && lineageFacts != 4 {
-		return fmt.Errorf("workflow timer fork lineage must be complete or absent")
+	if a.FireAt.Before(a.armedAt()) {
+		return fmt.Errorf("workflow timer fire_at cannot precede its original arming coordinate")
 	}
 	if a.Recurring && a.RecurrenceInterval <= 0 {
 		return fmt.Errorf("recurring workflow timer requires a positive interval")
@@ -229,6 +249,18 @@ func (a WorkflowTimerActivation) validate() error {
 	}
 	if !a.Recurring && a.RecurrenceInterval != 0 {
 		return fmt.Errorf("one-shot workflow timer cannot carry recurrence")
+	}
+	if a.CancelCause == "" {
+		if !a.CancelledAt.IsZero() {
+			return fmt.Errorf("workflow timer cancellation cause and time must be stamped together")
+		}
+	} else {
+		if !a.CancelCause.Valid() || a.CancelledAt.IsZero() || a.Status != workflowTimerStatusCancelled {
+			return fmt.Errorf("workflow timer requires a known cause and exact time only on cancelled status")
+		}
+		if !hasLineage || a.CancelledAt.Before(a.CreatedAt) || (!a.FiredAt.IsZero() && a.CancelledAt.Before(a.FiredAt)) {
+			return fmt.Errorf("rule_removed cancellation requires inherited lineage and cannot precede child birth or accepted fire")
+		}
 	}
 	if a.Recurring {
 		if a.Status != workflowTimerStatusActive && a.Status != workflowTimerStatusCancelled {
@@ -255,6 +287,16 @@ func (a WorkflowTimerActivation) validate() error {
 		return fmt.Errorf("workflow timer activation has unsupported status %q", a.Status)
 	}
 	return nil
+}
+
+// Empty cause/time retains ordinary lifecycle cancellation; rule removal carries
+// the exact child-history disposition, not a new arming or firing coordinate.
+func (a WorkflowTimerActivation) ValidateCancellation(cause WorkflowTimerCancelCause, at time.Time) error {
+	if err := a.Validate(); err != nil {
+		return err
+	}
+	a.Status, a.CancelCause, a.CancelledAt = workflowTimerStatusCancelled, cause, at
+	return a.Validate()
 }
 
 func (a WorkflowTimerActivation) occurrence() timeridentity.WorkflowTimerOccurrenceRef {
@@ -312,6 +354,8 @@ func (actual WorkflowTimerActivation) ValidateCauseReplay(expected WorkflowTimer
 		actual.EventType != expected.EventType || actual.ExecutionMode != expected.ExecutionMode || actual.Recurring != expected.Recurring ||
 		actual.RecurrenceInterval != expected.RecurrenceInterval || !actual.CreatedAt.Equal(expected.CreatedAt) ||
 		actual.SourceTimerID != expected.SourceTimerID || actual.ForkedFromRunID != expected.ForkedFromRunID ||
+		actual.ForkedFromPointKind != expected.ForkedFromPointKind || actual.ForkedFromPointRevision != expected.ForkedFromPointRevision ||
+		!actual.SourceArmedAt.Equal(expected.SourceArmedAt) ||
 		actual.ForkedFromEventID != expected.ForkedFromEventID || actual.ReconstructionOwner != expected.ReconstructionOwner ||
 		!workflowTimerJSONEqual(actual.Payload, expected.Payload) || !workflowTimerReplayCoordinateMatches(actual, expected) {
 		return fmt.Errorf("workflow timer activation %s conflicts with persisted facts", expected.Ref.ActivationID)
@@ -334,11 +378,18 @@ func workflowTimerRecurringCoordinateValid(activation WorkflowTimerActivation) b
 	if !activation.Recurring || activation.RecurrenceInterval <= 0 {
 		return false
 	}
-	firstDue := canonicalWorkflowTimerTime(activation.CreatedAt.Add(activation.RecurrenceInterval))
+	firstDue := canonicalWorkflowTimerTime(activation.armedAt().Add(activation.RecurrenceInterval))
 	if activation.FireAt.Before(firstDue) {
 		return false
 	}
 	return activation.FireAt.Sub(firstDue)%activation.RecurrenceInterval == 0
+}
+
+func (a WorkflowTimerActivation) armedAt() time.Time {
+	if a.SourceTimerID != "" {
+		return a.SourceArmedAt
+	}
+	return a.CreatedAt
 }
 
 func workflowTimerJSONEqual(left, right []byte) bool {
