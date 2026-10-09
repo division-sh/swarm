@@ -20,6 +20,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
+	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 
 	"sort"
 	"strings"
@@ -190,6 +192,7 @@ const (
 )
 
 type RunForkMaterializedEntitySnapshotMetadata struct {
+	InitialMaterialization json.RawMessage `json:"initial_materialization,omitempty"`
 	// FlowConfig is the exact flow_instances.config envelope recorded with
 	// the entity metadata at the selected revision, not current flow state.
 	FlowConfig     json.RawMessage `json:"flow_config,omitempty"`
@@ -217,6 +220,7 @@ type RunForkMaterializeRequest struct {
 	OriginalLoopCarriage    semanticview.OriginalLoopCarriage `json:"-"`
 	SourceRunID             string
 	At                      string
+	AtStart                 bool `json:"at_start,omitempty"`
 	ContractSelection       *RunForkContractSelection
 	SourceArtifactFact      runtimecorrelation.SourceArtifactFact
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
@@ -255,30 +259,34 @@ const (
 type RunForkPlanRequest struct {
 	SourceRunID   string
 	At            string
+	AtStart       bool `json:"at_start,omitempty"`
 	ResolvedPoint *RunForkPoint
 }
 
 type RunForkPlan struct {
-	SourceRunID               string                            `json:"source_run_id"`
-	SourceRunStatus           string                            `json:"source_run_status,omitempty"`
-	SourceRunStartedAt        *time.Time                        `json:"source_run_started_at,omitempty"`
-	SourceRunEndedAt          *time.Time                        `json:"source_run_ended_at,omitempty"`
-	ForkPoint                 RunForkPoint                      `json:"fork_point"`
-	EventCountAtFork          int                               `json:"event_count_at_fork"`
-	ReconstructedEntityCount  int                               `json:"reconstructed_entity_count"`
-	PendingWorkCount          int                               `json:"pending_work_count"`
-	FanOutObligationCount     int                               `json:"fan_out_obligation_count"`
-	UnsupportedBlockerCount   int                               `json:"unsupported_blocker_count"`
-	ExecutionReady            bool                              `json:"execution_ready"`
-	ReplayResumeAdmission     RunForkReplayResumeAdmission      `json:"replay_resume_admission"`
-	ContractFrontierAdmission *RunForkContractFrontierAdmission `json:"contract_frontier_admission,omitempty"`
-	SelectedContractExecution *RunForkSelectedContractExecution `json:"selected_contract_execution,omitempty"`
-	SelectedContractReadiness *RunForkSelectedContractReadiness `json:"selected_contract_readiness,omitempty"`
-	Entities                  []RunForkEntityState              `json:"entities,omitempty"`
-	PendingWork               []RunForkPendingWork              `json:"pending_work,omitempty"`
-	FanOutObligations         []RunForkFanOutObligation         `json:"fan_out_obligations,omitempty"`
-	UnsupportedBlockers       []RunForkUnsupportedBlocker       `json:"unsupported_blockers,omitempty"`
-	RouteHistory              RunForkRouteHistoryProjection     `json:"route_history"`
+	SourceRunID               string                                          `json:"source_run_id"`
+	SourceRunStatus           string                                          `json:"source_run_status,omitempty"`
+	SourceRunStartedAt        *time.Time                                      `json:"source_run_started_at,omitempty"`
+	SourceRunEndedAt          *time.Time                                      `json:"source_run_ended_at,omitempty"`
+	ForkPoint                 RunForkPoint                                    `json:"fork_point"`
+	StartFirstTurn            *InputPublication                               `json:"-"`
+	ReplyContexts             []replycontext.Record                           `json:"-"`
+	WorkflowTimers            []timerobligation.WorkflowTimerActivationRecord `json:"-"`
+	EventCountAtFork          int                                             `json:"event_count_at_fork"`
+	ReconstructedEntityCount  int                                             `json:"reconstructed_entity_count"`
+	PendingWorkCount          int                                             `json:"pending_work_count"`
+	FanOutObligationCount     int                                             `json:"fan_out_obligation_count"`
+	UnsupportedBlockerCount   int                                             `json:"unsupported_blocker_count"`
+	ExecutionReady            bool                                            `json:"execution_ready"`
+	ReplayResumeAdmission     RunForkReplayResumeAdmission                    `json:"replay_resume_admission"`
+	ContractFrontierAdmission *RunForkContractFrontierAdmission               `json:"contract_frontier_admission,omitempty"`
+	SelectedContractExecution *RunForkSelectedContractExecution               `json:"selected_contract_execution,omitempty"`
+	SelectedContractReadiness *RunForkSelectedContractReadiness               `json:"selected_contract_readiness,omitempty"`
+	Entities                  []RunForkEntityState                            `json:"entities,omitempty"`
+	PendingWork               []RunForkPendingWork                            `json:"pending_work,omitempty"`
+	FanOutObligations         []RunForkFanOutObligation                       `json:"fan_out_obligations,omitempty"`
+	UnsupportedBlockers       []RunForkUnsupportedBlocker                     `json:"unsupported_blockers,omitempty"`
+	RouteHistory              RunForkRouteHistoryProjection                   `json:"route_history"`
 	historicalRevision        int64
 	historicalEventIDs        []string
 	historicalInputs          map[string]InputPublication
@@ -492,6 +500,7 @@ type RunForkPointKind = forkpoint.Kind
 const (
 	RunForkPointEvent              RunForkPointKind = forkpoint.Event
 	RunForkPointDeploymentRevision RunForkPointKind = forkpoint.DeploymentRevision
+	RunForkPointRunStart           RunForkPointKind = forkpoint.RunStart
 )
 
 type RunForkPoint struct {
@@ -513,10 +522,14 @@ func (p RunForkPoint) Validate() error {
 	}
 	switch p.Kind {
 	case RunForkPointEvent:
-	case RunForkPointDeploymentRevision:
+	case RunForkPointDeploymentRevision, RunForkPointRunStart:
 		if p.Input != "" || p.EventName != "" || p.SourceEventID != "" ||
 			p.ProducedBy != "" || p.ProducedByType != "" || p.RoutingSource != (events.RoutingSource{}) || !p.Timestamp.IsZero() {
-			return fmt.Errorf("deployment revision fork point cannot carry event evidence")
+			label := "deployment revision"
+			if p.Kind == RunForkPointRunStart {
+				label = "run start"
+			}
+			return fmt.Errorf("%s fork point cannot carry event evidence", label)
 		}
 	}
 	return nil

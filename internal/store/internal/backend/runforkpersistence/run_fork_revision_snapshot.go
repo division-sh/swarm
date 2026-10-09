@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
@@ -68,22 +69,24 @@ type runForkRevisionEntityMutation struct {
 
 type runForkRevisionEntityMetadata struct {
 	runForkRevisionedFact
-	FlowConfig       json.RawMessage `json:"flow_config"`
-	EntityID         string          `json:"entity_id"`
-	FlowInstance     string          `json:"flow_instance"`
-	EntityType       string          `json:"entity_type"`
-	Slug             string          `json:"slug"`
-	Name             string          `json:"name"`
-	CreatedAt        time.Time       `json:"created_at"`
-	ConstructionKind string          `json:"construction_kind"`
-	StageDefined     bool            `json:"stage_defined"`
-	FlowTemplate     string          `json:"flow_template"`
-	Mode             string          `json:"mode"`
-	Status           string          `json:"status"`
-	CurrentState     string          `json:"current_state"`
-	EnteredStateAt   time.Time       `json:"entered_state_at"`
-	UpdatedAt        time.Time       `json:"updated_at"`
-	TerminatedAt     time.Time       `json:"terminated_at"`
+	InitialProjectionVersion int             `json:"initial_projection_version"`
+	InitialMaterialization   json.RawMessage `json:"initial_materialization"`
+	FlowConfig               json.RawMessage `json:"flow_config"`
+	EntityID                 string          `json:"entity_id"`
+	FlowInstance             string          `json:"flow_instance"`
+	EntityType               string          `json:"entity_type"`
+	Slug                     string          `json:"slug"`
+	Name                     string          `json:"name"`
+	CreatedAt                time.Time       `json:"created_at"`
+	ConstructionKind         string          `json:"construction_kind"`
+	StageDefined             bool            `json:"stage_defined"`
+	FlowTemplate             string          `json:"flow_template"`
+	Mode                     string          `json:"mode"`
+	Status                   string          `json:"status"`
+	CurrentState             string          `json:"current_state"`
+	EnteredStateAt           time.Time       `json:"entered_state_at"`
+	UpdatedAt                time.Time       `json:"updated_at"`
+	TerminatedAt             time.Time       `json:"terminated_at"`
 }
 
 type runForkRevisionDelivery struct {
@@ -127,55 +130,7 @@ type runForkRevisionDeadLetter struct {
 
 type runForkRevisionTimer struct {
 	runForkRevisionedFact
-	TimerID              string          `json:"timer_id"`
-	TimerName            string          `json:"timer_name"`
-	ScheduleScope        string          `json:"schedule_scope"`
-	ScheduleKey          string          `json:"schedule_key"`
-	ImmutableHash        string          `json:"immutable_hash"`
-	RunID                string          `json:"run_id"`
-	SourceTimerID        string          `json:"source_timer_id"`
-	ForkedFromRunID      string          `json:"forked_from_run_id"`
-	ForkedFromEventID    string          `json:"forked_from_event_id"`
-	ReconstructionOwner  string          `json:"reconstruction_owner"`
-	EntityID             string          `json:"entity_id"`
-	FlowScopeKey         string          `json:"flow_scope_key"`
-	FlowInstanceID       string          `json:"flow_instance_id"`
-	FlowInstance         string          `json:"flow_instance"`
-	FireEvent            string          `json:"fire_event"`
-	FirePayload          json.RawMessage `json:"fire_payload"`
-	RoutingSource        json.RawMessage `json:"routing_source"`
-	ExecutionMode        string          `json:"execution_mode"`
-	FireAt               time.Time       `json:"fire_at"`
-	InitialFireAt        *time.Time      `json:"initial_fire_at"`
-	Recurring            bool            `json:"recurring"`
-	RecurrenceInterval   string          `json:"recurrence_interval"`
-	OwnerNode            string          `json:"owner_node"`
-	OwnerAgent           string          `json:"owner_agent"`
-	OwnerKind            string          `json:"owner_kind"`
-	AgentNameOwner       string          `json:"agent_name_owner"`
-	AgentNameSource      string          `json:"agent_name_source"`
-	AgentRoutePresence   string          `json:"agent_route_presence"`
-	AgentFlowScopeKey    string          `json:"agent_flow_scope_key"`
-	AgentFlowInstanceID  string          `json:"agent_flow_instance_id"`
-	ReplyContextID       string          `json:"reply_context_id"`
-	TaskID               string          `json:"task_id"`
-	DueBasisKind         string          `json:"due_basis_kind"`
-	DueBasisAbsolute     *time.Time      `json:"due_basis_absolute"`
-	DueBasisDuration     string          `json:"due_basis_duration"`
-	DueBasisCron         string          `json:"due_basis_cron"`
-	OccurrenceEventID    string          `json:"occurrence_event_id"`
-	OccurrenceAdmittedAt *time.Time      `json:"occurrence_admitted_at"`
-	AcceptedAt           *time.Time      `json:"accepted_at"`
-	CancelCause          string          `json:"cancel_cause"`
-	CancelledAt          *time.Time      `json:"cancelled_at"`
-	FailureCode          string          `json:"failure_code"`
-	FailureMessage       string          `json:"failure_message"`
-	FailedAt             *time.Time      `json:"failed_at"`
-	ClockSuspension      json.RawMessage `json:"clock_suspension"`
-	TaskType             string          `json:"task_type"`
-	Status               string          `json:"status"`
-	FiredAt              *time.Time      `json:"fired_at"`
-	CreatedAt            time.Time       `json:"created_at"`
+	runforkrevision.TimerSnapshot
 }
 
 type runForkRevisionSession struct {
@@ -202,13 +157,7 @@ type runForkRevisionConversationAudit struct {
 }
 
 type runForkRevisionReplyContext struct {
-	runForkRevisionedFact
-	ReplyContextID string     `json:"reply_context_id"`
-	RequestEventID string     `json:"request_event_id"`
-	State          string     `json:"state"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	TerminalAt     *time.Time `json:"terminal_at"`
+	runForkHistoricalReplyFact
 }
 
 type runForkRevisionFanOutFact struct {
@@ -263,6 +212,7 @@ type runForkRevisionFanOutFact struct {
 }
 
 type runForkRevisionSnapshot struct {
+	StartProjection       *runforkrevision.StartProjection
 	RunID                 string
 	Revision              int64
 	Events                []runForkRevisionEvent
@@ -498,6 +448,17 @@ func appendRunForkHistoricalFact(snapshot *runForkRevisionSnapshot, context runF
 			return err
 		}
 		if fact.ConstructionKind == "constructed" {
+			if fact.InitialProjectionVersion != pipeline.FlowConstructionReceiptVersion {
+				return fmt.Errorf("constructed historical header requires its immutable constructor receipt")
+			}
+			receipt, err := pipeline.DecodeStoredFlowConstructionReceipt(fact.InitialMaterialization,
+				snapshot.RunID, fact.EntityID, fact.FlowInstance, fact.FlowTemplate)
+			if err != nil {
+				return fmt.Errorf("historical construction receipt: %w", err)
+			}
+			if !receipt.OccurredAt.Equal(fact.CreatedAt) || receipt.Persisted.Control.EntityType != fact.EntityType {
+				return fmt.Errorf("historical constructor contradicts fixed header birth or field contract")
+			}
 			var nullable struct {
 				EntityType json.RawMessage `json:"entity_type"`
 			}
@@ -544,6 +505,9 @@ func appendRunForkHistoricalFact(snapshot *runForkRevisionSnapshot, context runF
 		if err := decode(&fact); err != nil {
 			return err
 		}
+		if _, err := decodeRunForkTimerSnapshot(raw); err != nil {
+			return err
+		}
 		fact.runForkRevisionedFact = stamp
 		snapshot.Timers = append(snapshot.Timers, fact)
 	case runforkrevision.FamilyAgentSessions:
@@ -568,12 +532,11 @@ func appendRunForkHistoricalFact(snapshot *runForkRevisionSnapshot, context runF
 		fact.runForkRevisionedFact = stamp
 		snapshot.ConversationAudits = append(snapshot.ConversationAudits, fact)
 	case runforkrevision.FamilyReplyContexts:
-		var fact runForkRevisionReplyContext
-		if err := decode(&fact); err != nil {
+		fact, err := decodeRunForkHistoricalReplyFact(snapshot, context, raw)
+		if err != nil {
 			return err
 		}
-		fact.runForkRevisionedFact = stamp
-		snapshot.ReplyContexts = append(snapshot.ReplyContexts, fact)
+		snapshot.ReplyContexts = append(snapshot.ReplyContexts, runForkRevisionReplyContext{runForkHistoricalReplyFact: fact})
 	case runforkrevision.FamilyFanOutObligations:
 		var fact runForkRevisionFanOutFact
 		if err := decode(&fact); err != nil {
