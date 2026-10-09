@@ -10,12 +10,41 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/counterprojection"
 )
 
 // Insert stages a validated fixture event and its exact counter in the caller's
 // native transaction. The caller retains its later explicit history cut.
 func Insert(ctx context.Context, tx *sql.Tx, dialect authoractivity.Dialect, record eventrecord.Record) (bool, error) {
+	inserted, err := insertRecord(ctx, tx, dialect, record)
+	if err != nil || !inserted || record.RunID == "" {
+		return inserted, err
+	}
+	if err := counterprojection.Apply(ctx, tx, dialect, record.RunID, 1); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// InsertWithinAttempt leaves counter finalization with the native attempt,
+// without declaring the history cut that the fixture's caller captures later.
+func InsertWithinAttempt(ctx context.Context, attempt *mutationprotocol.Attempt, dialect authoractivity.Dialect, record eventrecord.Record) (bool, error) {
+	var inserted bool
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		inserted, err = insertRecord(ctx, tx, dialect, record)
+		return err
+	})
+	if err != nil || !inserted || record.RunID == "" {
+		return inserted, err
+	}
+	if err := attempt.AddEventCountDelta(record.RunID, 1); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func insertRecord(ctx context.Context, tx *sql.Tx, dialect authoractivity.Dialect, record eventrecord.Record) (bool, error) {
 	if tx == nil {
 		return false, fmt.Errorf("unrevisioned event fixture requires a transaction")
 	}
@@ -79,11 +108,6 @@ func Insert(ctx context.Context, tx *sql.Tx, dialect authoractivity.Dialect, rec
 	}
 	if !found || !record.Equal(existing) {
 		return false, fmt.Errorf("unrevisioned event fixture %s conflicts with canonical readback", record.EventID)
-	}
-	if rows == 1 && record.RunID != "" {
-		if err := counterprojection.Apply(ctx, tx, authoractivity.Dialect(dialect), record.RunID, rows); err != nil {
-			return false, err
-		}
 	}
 	return rows == 1, nil
 }

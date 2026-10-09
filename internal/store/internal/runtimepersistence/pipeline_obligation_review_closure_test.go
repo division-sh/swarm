@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -470,18 +471,7 @@ func TestPostgresPipelineScanSnapshotExcludesEarlierSequenceCommittedAfterBounda
 		}
 	}()
 	go func() {
-		txDone <- postgres.runPostgresRuntimeMutation(context.Background(), func(txctx context.Context, tx *sql.Tx) error {
-			if err := insertPostgresPipelineSnapshotFixtureTx(txctx, tx, lateCommit); err != nil {
-				return err
-			}
-			close(inserted)
-			select {
-			case <-commit:
-				return nil
-			case <-txctx.Done():
-				return txctx.Err()
-			}
-		})
+		txDone <- insertPostgresPipelineSnapshotFixture(context.Background(), postgres, lateCommit, inserted, commit)
 	}()
 	select {
 	case <-inserted:
@@ -493,9 +483,7 @@ func TestPostgresPipelineScanSnapshotExcludesEarlierSequenceCommittedAfterBounda
 	}
 
 	visibleAtBoundary := reviewClosureEvent(runID, base)
-	if err := postgres.runPostgresRuntimeMutation(context.Background(), func(txctx context.Context, tx *sql.Tx) error {
-		return insertPostgresPipelineSnapshotFixtureTx(txctx, tx, visibleAtBoundary)
-	}); err != nil {
+	if err := insertPostgresPipelineSnapshotFixture(context.Background(), postgres, visibleAtBoundary, nil, nil); err != nil {
 		t.Fatalf("commit boundary-visible event: %v", err)
 	}
 	scan, err := owner.OpenScan(ctx, runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(executionposture.Live))
@@ -528,6 +516,10 @@ func TestPostgresPipelineScanSnapshotExcludesEarlierSequenceCommittedAfterBounda
 	txFinished = true
 	if txErr != nil {
 		t.Fatalf("commit earlier-sequence transaction: %v", txErr)
+	}
+	snapshot, err := postgres.LoadRunLifecycleSnapshot(ctx, runID)
+	if err != nil || snapshot.EventCount != 2 {
+		t.Fatalf("commit-inversion event count = %d, want 2; err=%v", snapshot.EventCount, err)
 	}
 	var lateSequence, visibleSequence int64
 	if err := fixture.db.QueryRowContext(ctx, `
@@ -821,26 +813,23 @@ func TestSQLitePipelineClaimMutationSerializesWithReleaseAndCloseScan(t *testing
 	}
 }
 
-func insertPostgresPipelineSnapshotFixtureTx(ctx context.Context, tx *sql.Tx, event events.Event) error {
-	if _, ok := event.PayloadAdmission(); !ok {
-		admission, err := eventtest.PayloadAdmission(event, "", string(event.Type()))
-		if err != nil {
-			return err
-		}
-		event, err = events.ApplyPayloadAdmission(event, admission)
-		if err != nil {
-			return err
-		}
-	}
-	// Snapshot fixtures intentionally omit history publication.
-	if err := insertPostgresCanonicalEventRecordFixtureTx(ctx, tx, event); err != nil {
+func insertPostgresPipelineSnapshotFixture(ctx context.Context, store *PostgresStore, event events.Event, inserted chan<- struct{}, commit <-chan struct{}) error {
+	event, err := bindSemanticEventFixturePayload(event)
+	if err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `
-		INSERT INTO committed_replay_scopes (event_id, run_id, scope, created_at, updated_at)
-		SELECT e.event_id, e.run_id, $2, $3, $3 FROM events e WHERE e.event_id = $1::uuid
-	`, event.ID(), string(runtimepipelineobligation.ScopeDirect), event.CreatedAt())
-	return err
+	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		return err
+	}
+	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
+		return fmt.Errorf("selected-fork replay fixture requires exact lineage persistence")
+	}
+	record, err := eventrecord.FromAdmitted(admitted, testRouteSettlement(admitted.Event(), nil))
+	if err != nil {
+		return err
+	}
+	return store.pipelinePostgresOwner.InsertSnapshotEventForTest(ctx, record, inserted, commit)
 }
 
 func TestPipelineScanCancellationAndAbandonmentReleaseClaimsOnSQLiteAndPostgres(t *testing.T) {

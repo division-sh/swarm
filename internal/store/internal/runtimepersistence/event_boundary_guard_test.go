@@ -50,6 +50,8 @@ var admittedEventCallsites = map[eventBoundaryCallsite]int{
 var eventRecordImportFiles = map[string]struct{}{
 	"internal/store/eventfixture/unrevisioned.go":                             {},
 	"internal/store/internal/runtimepersistence/test_staged_event_fixture.go": {},
+	// Snapshot inversion fixtures stage validated records through their native attempt.
+	"internal/store/internal/backend/pipelinepersistence/test_snapshot_fixture.go": {},
 	// Barrier outcomes load canonical complete records through LoadAdmittedMany.
 	"internal/store/internal/backend/pipelinepersistence/fan_out_barrier_owner.go": {},
 	// Sealed-group readback uses LoadAdmitted before comparing exact member integrity.
@@ -162,7 +164,7 @@ var unrevisionedEventFixtureSQL = map[string]string{
 }
 
 func classifiedUnrevisionedEventFixtureSQL(path, scope, query string) string {
-	if path != unrevisionedEventFixturePath || scope != "Insert" {
+	if path != unrevisionedEventFixturePath || scope != "insertRecord" {
 		return ""
 	}
 	for name, allowed := range unrevisionedEventFixtureSQL {
@@ -269,13 +271,14 @@ func TestEventAdmittedPersistenceBoundaryGuard(t *testing.T) {
 func TestUnrevisionedEventFixtureSQLAllowanceIsExact(t *testing.T) {
 	for name, allowed := range unrevisionedEventFixtureSQL {
 		t.Run(name, func(t *testing.T) {
-			if got := classifiedUnrevisionedEventFixtureSQL(unrevisionedEventFixturePath, "Insert", allowed); got != name {
+			if got := classifiedUnrevisionedEventFixtureSQL(unrevisionedEventFixturePath, "insertRecord", allowed); got != name {
 				t.Fatalf("fixture SQL classification = %q, want %q", got, name)
 			}
 			for _, hostile := range []struct{ path, scope, query string }{
-				{"internal/store/internal/backend/eventrecord/staged/sibling.go", "Insert", allowed},
+				{"internal/store/internal/backend/eventrecord/staged/sibling.go", "insertRecord", allowed},
 				{unrevisionedEventFixturePath, "siblingFixture", allowed},
-				{unrevisionedEventFixturePath, "Insert", allowed + " RETURNING event_id"},
+				{unrevisionedEventFixturePath, "Insert", allowed},
+				{unrevisionedEventFixturePath, "insertRecord", allowed + " RETURNING event_id"},
 			} {
 				if got := classifiedUnrevisionedEventFixtureSQL(hostile.path, hostile.scope, hostile.query); got != "" {
 					t.Fatalf("hostile fixture SQL classified as %q: %#v", got, hostile)
