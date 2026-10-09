@@ -3,13 +3,13 @@ package bus
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -17,7 +17,7 @@ import (
 
 // The creating root input prepares the whole keyless tree before recipient
 // classification. Publication commits that tree and its deliveries atomically.
-func (p deliveryPlanner) prepareRootConstruction(ctx context.Context, event events.Event, projection selectedRunTargetOwnerProjection) ([]pipeline.FlowInstanceActivationPlan, error) {
+func (p deliveryPlanner) prepareRootConstruction(ctx context.Context, event events.Event) ([]pipeline.FlowInstanceActivationPlan, error) {
 	sourceKind := event.RoutingSource().Kind()
 	if sourceKind != events.RoutingSourceRoot && sourceKind != events.RoutingSourceExternalIngress {
 		return nil, nil
@@ -37,21 +37,31 @@ func (p deliveryPlanner) prepareRootConstruction(ctx context.Context, event even
 	}
 	flowID := semanticview.RootExecutionFlowID(source)
 	schema, found := source.FlowSchemaByID(flowID)
-	if !found || !projection.targetsAvailable {
-		return nil, fmt.Errorf("root construction requires the admitted schema and selected-store ownership snapshot")
+	if !found {
+		return nil, fmt.Errorf("root construction requires its admitted schema")
 	}
-	identity := flowidentity.Stored(source, flowID, event.RunID(), event.RunID(), "", "")
-	for _, descriptor := range projection.descriptors {
-		if descriptor.FlowInstance != identity.InstancePath {
-			continue
-		}
-		if descriptor.EntityID != identity.EntityID {
-			return nil, fmt.Errorf("root construction identity contradicts its persisted owner")
-		}
-		if err := descriptor.Availability.Validate(source, flowID); err != nil {
+	fact, present := correlation.SourceArtifactFactFromContext(ctx)
+	if !present || p.connectPlanner.lifecycle.index == nil {
+		return nil, fmt.Errorf("root construction requires its admitted source and native index")
+	}
+	owner, err := flowidentity.NewRunScopedFlowInstance(event.RunID(), flowidentity.StoredRoute(flowidentity.ScopeKey(source, flowID), event.RunID(), event.RunID()))
+	if err != nil {
+		return nil, err
+	}
+	lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, owner)
+	if err != nil {
+		return nil, err
+	}
+	observed, exists, err := p.connectPlanner.lifecycle.index.LookupFlowInstance(ctx, lookup)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		if err := observed.ValidateSelection(lookup); err != nil {
 			return nil, err
 		}
-		if err := p.validateRootConstructionReuse(ctx, event, identity, schema.Instance.Path()); err != nil {
+		identity := observed.Identity()
+		if err := p.validateRootConstructionReuse(ctx, event, observed, schema.Instance.Path()); err != nil {
 			return nil, err
 		}
 		if err := p.connectPlanner.installConstructionIdentityPreview(ctx, event.RunID(), identity, nil); err != nil {
@@ -59,6 +69,7 @@ func (p deliveryPlanner) prepareRootConstruction(ctx context.Context, event even
 		}
 		return nil, nil
 	}
+	identity := flowidentity.Stored(source, flowID, event.RunID(), event.RunID(), "", "")
 	if p.connectPlanner.lifecycle.plan == nil {
 		return nil, fmt.Errorf("root construction requires its canonical activation planner")
 	}
@@ -98,32 +109,24 @@ func prepareRootConstructorArguments(ctx context.Context, request pipeline.FlowI
 	return request, false, nil
 }
 
-func (p deliveryPlanner) validateRootConstructionReuse(ctx context.Context, event events.Event, instance flowidentity.Instance, key string) error {
-	reader := p.connectPlanner.lifecycle.reader
-	if reader == nil {
-		return fmt.Errorf("root reuse requires its immutable construction receipt owner")
-	}
-	owner, err := flowidentity.NewRunScopedFlowInstance(event.RunID(), instance.Route())
+func (p deliveryPlanner) validateRootConstructionReuse(ctx context.Context, event events.Event, observed pipeline.FlowInstanceObservation, key string) error {
+	instance, err := observed.WorkflowInstance()
 	if err != nil {
 		return err
 	}
-	receipt, err := reader.LoadFlowConstructionPublication(ctx, owner, instance.EntityID)
-	if err != nil {
-		return fmt.Errorf("root reuse construction receipt: %w", err)
+	stage := ""
+	if instance.StageDefined {
+		stage = instance.CurrentState
 	}
-	if receipt.Identity != instance {
-		return fmt.Errorf("root reuse contradicts its immutable construction identity")
+	if err := pipeline.NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(p.recipientPolicy.semanticSource, observed.Identity().TemplateID); err != nil {
+		return err
 	}
 	if key == "" {
 		return nil
 	}
-	contract, found := entityruntime.ResolveForFlow(p.recipientPolicy.semanticSource, instance.TemplateID)
-	if !found || receipt.CreatingInput.EventID == "" || receipt.Fields[key] == nil {
-		return fmt.Errorf("keyed root reuse requires its exact immutable creating input and key")
-	}
-	stored, err := entityruntime.NormalizeFieldValue(contract, key, receipt.Fields[key])
-	if err != nil {
-		return fmt.Errorf("root construction receipt key: %w", err)
+	contract, found := entityruntime.ResolveForFlow(p.recipientPolicy.semanticSource, observed.Identity().TemplateID)
+	if !found || observed.InstanceKey() == "" {
+		return fmt.Errorf("keyed root reuse requires its admitted immutable key")
 	}
 	var payload map[string]any
 	if err := canonicaljson.DecodePreservingNumberLexemes(event.Payload(), &payload); err != nil {
@@ -131,7 +134,11 @@ func (p deliveryPlanner) validateRootConstructionReuse(ctx context.Context, even
 	}
 	if supplied, present := payload[key]; present {
 		candidate, err := entityruntime.NormalizeFieldValue(contract, key, supplied)
-		if err != nil || !reflect.DeepEqual(candidate, stored) {
+		if err != nil {
+			return err
+		}
+		keys, err := pipeline.AdmitFlowInstanceKeyMaterial(p.recipientPolicy.semanticSource, observed.Identity().TemplateID, candidate)
+		if err != nil || len(keys) != 1 || keys[0].Value != observed.InstanceKey() {
 			return fmt.Errorf("root input key %s contradicts its immutable constructor key", key)
 		}
 	}

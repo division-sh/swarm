@@ -5,14 +5,17 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 // Connection permission remains compiled-graph-owned. This lookup consumes
 // actual constructor ownership, never a causal sender as a structural parent.
-func (o templateInstanceLifecycleOwner) constructionParent(ctx context.Context, event events.Event, plan pinrouting.ConnectRoutePlan) (flowidentity.Instance, error) {
+func (o connectInstanceSelector) constructionParent(ctx context.Context, event events.Event, plan pinrouting.ConnectRoutePlan) (flowidentity.Instance, error) {
 	bundle, found := semanticview.Bundle(o.source)
 	if !found {
 		return flowidentity.Instance{}, fmt.Errorf("connection construction requires its admitted tree")
@@ -38,7 +41,7 @@ func (o templateInstanceLifecycleOwner) constructionParent(ctx context.Context, 
 	return o.constructedDescendant(ctx, event.RunID(), owner, parentFlow, instances, selected)
 }
 
-func (o templateInstanceLifecycleOwner) connectionLexicalOwner(ctx context.Context, event events.Event, ownerFlow string, instances map[string]flowidentity.Instance, selected map[string][]flowidentity.Instance) (flowidentity.Instance, error) {
+func (o connectInstanceSelector) connectionLexicalOwner(ctx context.Context, event events.Event, ownerFlow string, instances map[string]flowidentity.Instance, selected map[string][]flowidentity.Instance) (flowidentity.Instance, error) {
 	route := event.RoutingSource().Route()
 	if route.FlowInstance == "" {
 		root, err := o.constructionInstance(ctx, event.RunID(), semanticview.RootExecutionFlowID(o.source), event.RunID(), flowidentity.EntityID(event.RunID()), instances)
@@ -64,7 +67,7 @@ func (o templateInstanceLifecycleOwner) connectionLexicalOwner(ctx context.Conte
 	return flowidentity.Instance{}, fmt.Errorf("connection construction ancestry is cyclic")
 }
 
-func (o templateInstanceLifecycleOwner) constructedDescendant(ctx context.Context, runID string, owner flowidentity.Instance, targetFlow string, instances map[string]flowidentity.Instance, selected map[string][]flowidentity.Instance) (flowidentity.Instance, error) {
+func (o connectInstanceSelector) constructedDescendant(ctx context.Context, runID string, owner flowidentity.Instance, targetFlow string, instances map[string]flowidentity.Instance, selected map[string][]flowidentity.Instance) (flowidentity.Instance, error) {
 	bundle, found := semanticview.Bundle(o.source)
 	if !found {
 		return flowidentity.Instance{}, fmt.Errorf("construction selection requires its admitted tree")
@@ -90,24 +93,29 @@ func (o templateInstanceLifecycleOwner) constructedDescendant(ctx context.Contex
 	return owner, nil
 }
 
-func (o templateInstanceLifecycleOwner) selectedConstructionChild(ctx context.Context, runID string, parent flowidentity.Instance, flowID string, instances map[string]flowidentity.Instance, selected map[string][]flowidentity.Instance) (flowidentity.Instance, error) {
+func (o connectInstanceSelector) selectedConstructionChild(ctx context.Context, runID string, parent flowidentity.Instance, flowID string, instances map[string]flowidentity.Instance, selected map[string][]flowidentity.Instance) (flowidentity.Instance, error) {
 	schema, found := o.source.FlowSchemaByID(flowID)
 	if !found {
 		return flowidentity.Instance{}, fmt.Errorf("construction selection has an unknown flow %s", flowID)
 	}
 	if schema.Instance.Empty() {
-		child, err := flowidentity.KeylessChild(o.source, parent, flowID)
+		fact, present := correlation.SourceArtifactFactFromContext(ctx)
+		if !present {
+			return flowidentity.Instance{}, fmt.Errorf("connection ancestry requires its admitted source fact")
+		}
+		lookup, err := pipeline.NewDeclaredFlowInstanceLookup(o.source, fact, runID, flowID, parent, nil)
 		if err != nil {
 			return flowidentity.Instance{}, err
 		}
-		stored, err := o.constructionInstance(ctx, runID, flowID, child.InstancePath, child.EntityID, instances)
+		var prepared []pipeline.FlowInstanceActivationPlan
+		if preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil {
+			prepared = preview.plans
+		}
+		selected, err := pipeline.PrepareFlowInstanceSelection(ctx, o.index, o.plan, pipeline.FlowInstanceSelectionRequest{Lookup: lookup, Mode: contracts.FlowInputResolutionModeSelect, Prepared: prepared})
 		if err != nil {
 			return flowidentity.Instance{}, fmt.Errorf("connection keyless ancestor %s is not constructed: %w", flowID, err)
 		}
-		if stored != child {
-			return flowidentity.Instance{}, fmt.Errorf("connection keyless ancestor %s contradicts its structural parent", flowID)
-		}
-		return stored, nil
+		return selected.Identity(), nil
 	}
 	return selectedKeyedConstructionChild(parent, flowID, selected[flowID])
 }
@@ -131,57 +139,65 @@ func selectedKeyedConstructionChild(parent flowidentity.Instance, flowID string,
 	return child, nil
 }
 
-func (o templateInstanceLifecycleOwner) constructionInstance(ctx context.Context, runID, flowID, path, entityID string, instances map[string]flowidentity.Instance) (flowidentity.Instance, error) {
+func (o connectInstanceSelector) constructionInstance(ctx context.Context, runID, flowID, path, entityID string, instances map[string]flowidentity.Instance) (flowidentity.Instance, error) {
 	if instance, found := instances[path]; found {
 		if instance.TemplateID != flowID || entityID != "" && instance.EntityID != entityID {
 			return flowidentity.Instance{}, fmt.Errorf("construction selection contradicts its exact receiver")
 		}
 		return instance, nil
 	}
-	if o.reader == nil || entityID == "" {
-		return flowidentity.Instance{}, fmt.Errorf("construction selection requires its exact durable receipt")
+	if o.index == nil {
+		return flowidentity.Instance{}, fmt.Errorf("construction selection requires its native index owner")
 	}
 	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flowidentity.ScopeKey(o.source, flowID), "", path))
 	if err != nil {
 		return flowidentity.Instance{}, err
 	}
-	evidence, err := o.reader.LoadFlowConstructionPublication(ctx, owner, entityID)
+	fact, present := correlation.SourceArtifactFactFromContext(ctx)
+	if !present {
+		return flowidentity.Instance{}, fmt.Errorf("construction selection requires its admitted source fact")
+	}
+	request, err := pipeline.NewExactFlowInstanceLookup(o.source, fact, owner)
 	if err != nil {
 		return flowidentity.Instance{}, err
 	}
-	instance := evidence.Identity
-	if instance.Route() != owner.Route || instance.EntityID != entityID || instance.TemplateID != flowID {
+	observed, found, err := o.index.LookupFlowInstance(ctx, request)
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	if !found {
+		return flowidentity.Instance{}, &pipeline.WorkflowInstanceLookupMiss{RequestedKey: path}
+	}
+	if err := observed.ValidateSelection(request); err != nil {
+		return flowidentity.Instance{}, err
+	}
+	instance := observed.Identity()
+	if instance.Route() != owner.Route || entityID != "" && instance.EntityID != entityID || instance.TemplateID != flowID {
 		return flowidentity.Instance{}, fmt.Errorf("durable construction contradicts its selected receiver")
 	}
 	if err := instance.ValidateConstruction(o.source, runID); err != nil {
 		return flowidentity.Instance{}, err
 	}
-	instances[path] = instance
 	return instance, nil
 }
 
-func (o templateInstanceLifecycleOwner) constructionOwners(ctx context.Context, runID string) (map[string]flowidentity.Instance, error) {
+func (o connectInstanceSelector) constructionOwners(ctx context.Context, runID string) (map[string]flowidentity.Instance, error) {
 	owners := make(map[string]flowidentity.Instance)
-	var tables []*RouteTable
-	if preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil && preview.table != nil {
-		tables = append(tables, preview.table)
+	preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes)
+	if preview == nil {
+		return owners, nil
 	}
-	for _, table := range tables {
-		if table == nil {
-			continue
-		}
-		table.mu.RLock()
-		for coordinate, instance := range table.instanceOwners {
-			if coordinate.RunID != runID {
-				continue
+	for _, tree := range preview.plans {
+		for _, plan := range tree.ConstructionPlans() {
+			if plan.Readiness.RunID != runID || plan.Validate() != nil {
+				return nil, fmt.Errorf("prepared construction has a crossed run or invalid tree")
 			}
+			instance := plan.Identity
 			if previous, found := owners[instance.InstancePath]; found && previous != instance {
-				table.mu.RUnlock()
-				return nil, fmt.Errorf("construction lookup has conflicting owner at %s", instance.InstancePath)
+				return nil, fmt.Errorf("prepared construction has conflicting owner at %s", instance.InstancePath)
 			}
 			owners[instance.InstancePath] = instance
 		}
-		table.mu.RUnlock()
 	}
 	return owners, nil
 }

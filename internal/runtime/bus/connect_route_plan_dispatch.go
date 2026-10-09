@@ -32,6 +32,7 @@ type connectRoutePlanPreviewRoutes struct {
 	table          *RouteTable
 	inputProducers *runtimepinrouting.FlowInputProducerResolver
 	selected       map[string][]runtimeflowidentity.Instance
+	plans          []runtimepipeline.FlowInstanceActivationPlan
 }
 
 func withConnectRoutePlanPreview(ctx context.Context) context.Context {
@@ -86,7 +87,7 @@ type connectRoutePlanResolver struct {
 	issues          []runtimepinrouting.ConnectRoutePlanIssue
 	loadDescriptors connectRoutePlanDescriptorLoader
 	loadAgents      connectAgentDescriptorLoader
-	lifecycle       templateInstanceLifecycleOwner
+	lifecycle       connectInstanceSelector
 	replyStore      runtimereplycontext.Store
 }
 
@@ -104,7 +105,7 @@ type connectRoutePlanDispatch struct {
 	ReplyClaims          []runtimereplycontext.ClaimCommand
 }
 
-func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, planner runtimepipeline.FlowInstanceActivationPlanner, reader runtimepipeline.FlowConstructionPublicationReader, replyStore runtimereplycontext.Store) connectRoutePlanResolver {
+func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, planner runtimepipeline.FlowInstanceActivationPlanner, index runtimepipeline.FlowInstanceIndexReader, replyStore runtimereplycontext.Store) connectRoutePlanResolver {
 	if source == nil {
 		return connectRoutePlanResolver{routeTable: routeTable, loadDescriptors: loadDescriptors, replyStore: replyStore}
 	}
@@ -116,7 +117,7 @@ func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTa
 		graph:           graph,
 		issues:          append([]runtimepinrouting.ConnectRoutePlanIssue(nil), issues...),
 		loadDescriptors: loadDescriptors,
-		lifecycle:       newTemplateInstanceLifecycleOwner(source, routeTable, planner, reader),
+		lifecycle:       connectInstanceSelector{source: source, plan: planner, index: index},
 		replyStore:      replyStore,
 	}
 }
@@ -173,7 +174,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		if err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
-		evaluationCtx = withTemplateInstanceLifecyclePreview(evaluationCtx)
+		evaluationCtx = withConnectPlanningPreview(evaluationCtx)
 		evaluationCtx = withConnectRoutePlanPreview(evaluationCtx)
 		evaluated, err := r.planMatched(evaluationCtx, evt, matched, descriptors, connectRoutePlanMatchValues(evt), replyRecord)
 		if err != nil {
@@ -182,7 +183,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		if memo != nil {
 			memo.eventID, memo.dispatch, memo.snapshot, memo.ready, memo.applied = evt.ID(), evaluated, snapshot, true, false
 		}
-		if !evaluated.Failure.Empty() || templateInstanceLifecyclePreview(ctx) || r.routeTable.snapshotGenerationCurrent(snapshot.base) {
+		if !evaluated.Failure.Empty() || connectPlanningPreview(ctx) || r.routeTable.snapshotGenerationCurrent(snapshot.base) {
 			return evaluated, nil
 		}
 		if memo != nil {
@@ -334,22 +335,21 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 				return connectRoutePlanDispatch{}, err
 			}
 		}
-		action := decision.Action
-		if action == templateInstanceLifecycleActionPreviewCreate || action == templateInstanceLifecycleActionCreated {
+		if decision.Activation != nil {
 			if route := decision.Route(); route.Valid() {
 				createdRoutes[route] = struct{}{}
 			}
 		}
-		if action == templateInstanceLifecycleActionPreviewCreate {
+		if decision.Activation != nil {
 			addresses, err := runtimepinrouting.DescriptorAddressFields(decision.Activation.Instance.Fields)
 			if err != nil {
 				return connectRoutePlanDispatch{}, err
 			}
 			descriptors = append(descriptors, runtimepinrouting.Descriptor{
 				FlowID:        decision.identity.TemplateID,
-				ID:            strings.TrimSpace(decision.InstanceID),
-				EntityID:      strings.TrimSpace(decision.EntityID),
-				FlowInstance:  strings.Trim(strings.TrimSpace(decision.InstancePath), "/"),
+				ID:            decision.InstanceID(),
+				EntityID:      decision.EntityID(),
+				FlowInstance:  decision.InstancePath(),
 				AddressFields: addresses,
 			})
 		}
@@ -378,13 +378,6 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 		liveRoutes, err = stampConnectExecutionClaims(plan, liveRoutes)
 		if err != nil {
 			return connectRoutePlanDispatch{}, err
-		}
-		if action == templateInstanceLifecycleActionCreated {
-			refreshed, err := r.descriptorsForPlans(ctx, matched)
-			if err != nil {
-				return connectRoutePlanDispatch{}, err
-			}
-			descriptors = refreshed
 		}
 		if len(routes) == 0 {
 			out.ExtraDetail["connect_route_plan_source_event"] = plan.SourceEndpoint().Readback().ResolvedEvent
@@ -502,7 +495,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	}
 	claimed := record
 	outcome := runtimereplycontext.ClaimAccepted
-	if templateInstanceLifecyclePreview(ctx) {
+	if connectPlanningPreview(ctx) {
 		if record.State == runtimereplycontext.StateTerminal {
 			if record.AcceptedReplyEventID == evt.ID() {
 				outcome = runtimereplycontext.ClaimIdempotent
@@ -523,7 +516,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	returnEvent := string(plan.ReceiverLocalEvent())
 	routes := make([]runtimepinrouting.ConnectDeliveryRoute, 0, len(subscribers))
 	for _, subscriber := range subscribers {
-		identity, _, err := r.resolveAgentCarrierIdentity(ctx, subscriber, target, TemplateInstanceLifecycleDecision{}, false)
+		identity, _, err := r.resolveAgentCarrierIdentity(ctx, subscriber, target, connectInstanceSelection{}, false)
 		if err != nil {
 			return nil, nil, nil, 0, nil, err
 		}
@@ -566,39 +559,39 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	return runtimepinrouting.NormalizeConnectDeliveryRoutes(routes), dedupeSubscribers(subscribers), &claim, 0, detail, nil
 }
 
-func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, descriptors []runtimepinrouting.Descriptor) (runtimepinrouting.ConnectRoutePlanMaterialization, TemplateInstanceLifecycleDecision, error) {
+func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, descriptors []runtimepinrouting.Descriptor) (runtimepinrouting.ConnectRoutePlanMaterialization, connectInstanceSelection, error) {
 	if plan.ReceiverEndpoint().IsRoot() {
 		rootInstance := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 		coordinate, err := semanticview.AdmitRootExecutionCoordinate(r.source, rootInstance)
 		if err != nil {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, errors.New("root connect receiver requires canonical workflow identity")
+			return runtimepinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, errors.New("root connect receiver requires canonical workflow identity")
 		}
 		if eventRunID := strings.TrimSpace(evt.RunID()); eventRunID != coordinate.RunID() {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, errors.New("root connect receiver event and context run identities disagree")
+			return runtimepinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, errors.New("root connect receiver event and context run identities disagree")
 		}
 		// Composition selects the root instance, not its state owner. The shared
 		// receiver classifier admits existing, initializing or entityless state.
 		return runtimepinrouting.ConnectRoutePlanMaterialization{Target: events.RouteIdentity{
 			FlowID: coordinate.FlowID(), FlowInstance: coordinate.RunID(),
-		}}, TemplateInstanceLifecycleDecision{}, nil
+		}}, connectInstanceSelection{}, nil
 	}
-	if materialized, decision, handled, err := r.lifecycle.Materialize(ctx, evt, plan, values, descriptors); handled || err != nil {
+	if materialized, decision, handled, err := r.lifecycle.Materialize(ctx, evt, plan, values); handled || err != nil {
 		return materialized, decision, err
 	}
 	if !plan.RequiresRuntimeResolution() && r.routeTable != nil {
-		parent := templateInstanceLifecycleParentRoute(evt, plan)
+		parent := connectSourceParentRoute(evt, plan)
 		target, found, err := r.routeTable.constructedChildConnectTarget(evt.RunID(), plan.ReceiverEndpoint().Readback().FlowID, parent)
 		if err != nil {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, err
+			return runtimepinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, err
 		}
 		if found {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{Target: target}, TemplateInstanceLifecycleDecision{}, nil
+			return runtimepinrouting.ConnectRoutePlanMaterialization{Target: target}, connectInstanceSelection{}, nil
 		}
 	}
 	return runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
 		MatchValues: runtimepinrouting.AdmitConnectRouteMatchValues(values),
 		Descriptors: descriptors,
-	}), TemplateInstanceLifecycleDecision{}, nil
+	}), connectInstanceSelection{}, nil
 }
 
 // A matched compiled connection supplies permission; the constructor supplies
@@ -627,11 +620,11 @@ func (rt *RouteTable) constructedChildConnectTarget(runID, flowID string, parent
 	return target, !target.Empty(), nil
 }
 
-func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(ctx context.Context, runID string, decision TemplateInstanceLifecycleDecision) error {
-	if decision.Action == templateInstanceLifecycleActionReused || decision.Action == templateInstanceLifecycleActionSelectedExisting {
+func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(ctx context.Context, runID string, decision connectInstanceSelection) error {
+	if !decision.Empty() && decision.Activation == nil {
 		return r.installConstructionIdentityPreview(ctx, runID, decision.identity, nil)
 	}
-	if decision.Action != templateInstanceLifecycleActionPreviewCreate {
+	if decision.Empty() {
 		return nil
 	}
 	if decision.Activation == nil {
@@ -641,6 +634,11 @@ func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(ctx co
 }
 
 func (r connectRoutePlanResolver) installFlowConstructionPreview(ctx context.Context, runID string, plan runtimepipeline.FlowInstanceActivationPlan) error {
+	preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes)
+	if preview == nil {
+		return fmt.Errorf("construction preparation requires its operation-local tree")
+	}
+	preview.plans = append(preview.plans, plan)
 	for _, construction := range plan.ConstructionPlans() {
 		if err := construction.Validate(); err != nil {
 			return err
@@ -733,7 +731,7 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 	for _, plan := range matched {
 		if !plan.RequiresRuntimeResolution() {
 			if r.routeTable != nil {
-				target, found, err := r.routeTable.constructedChildConnectTarget(evt.RunID(), plan.ReceiverEndpoint().Readback().FlowID, templateInstanceLifecycleParentRoute(evt, plan))
+				target, found, err := r.routeTable.constructedChildConnectTarget(evt.RunID(), plan.ReceiverEndpoint().Readback().FlowID, connectSourceParentRoute(evt, plan))
 				if err == nil && found {
 					add(target)
 					continue
@@ -749,7 +747,7 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 		if plan.InstanceKey() == nil {
 			return selectedTargetOwnerLookupScope{}, false
 		}
-		material, failure := instanceKeyMaterialForTemplateLifecycle(evt, plan, connectRoutePlanMatchValues(evt))
+		material, failure := instanceKeyMaterialForConnectSelection(evt, plan, connectRoutePlanMatchValues(evt))
 		if !failure.Empty() {
 			continue
 		}
@@ -771,7 +769,7 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 		if err != nil {
 			continue
 		}
-		instance, err := runtimeflowidentity.KeyedChild(r.source, parent, contract.FlowID, templateInstanceLifecycleInstanceID(plan, keys))
+		instance, err := runtimeflowidentity.KeyedChild(r.source, parent, contract.FlowID, connectMissingInstanceID(plan, keys))
 		if err == nil {
 			paths[instance.InstancePath] = struct{}{}
 		}
@@ -833,7 +831,7 @@ func (r connectRoutePlanResolver) descriptorsForPlans(ctx context.Context, plans
 	return r.loadDescriptors(ctx)
 }
 
-func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.Context, runID string, plan runtimepinrouting.ConnectRoutePlan, materialized runtimepinrouting.ConnectRoutePlanMaterialization, decision TemplateInstanceLifecycleDecision, routeCreatedInPlan bool) ([]runtimepinrouting.ConnectDeliveryRoute, []runtimepinrouting.ConnectDeliveryRoute, []Subscriber, events.ConnectEvaluationLedger, error) {
+func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.Context, runID string, plan runtimepinrouting.ConnectRoutePlan, materialized runtimepinrouting.ConnectRoutePlanMaterialization, decision connectInstanceSelection, routeCreatedInPlan bool) ([]runtimepinrouting.ConnectDeliveryRoute, []runtimepinrouting.ConnectDeliveryRoute, []Subscriber, events.ConnectEvaluationLedger, error) {
 	targets := connectMaterializedTargets(materialized)
 	if plan.ReceiverEndpoint().IsRoot() && len(targets) == 0 {
 		targets = []events.RouteIdentity{{}}
@@ -901,7 +899,7 @@ func (r connectRoutePlanResolver) resolveAgentCarrierIdentity(
 	ctx context.Context,
 	subscriber Subscriber,
 	target events.RouteIdentity,
-	decision TemplateInstanceLifecycleDecision,
+	decision connectInstanceSelection,
 	routeCreatedInPlan bool,
 ) (agentidentity.Identity, bool, error) {
 	if !subscriber.Recipient.IsAgent() {
@@ -951,7 +949,7 @@ func (r connectRoutePlanResolver) resolveAgentCarrierIdentity(
 		if !available {
 			return agentidentity.Identity{}, false, fmt.Errorf(
 				"connect agent carrier identity is unavailable for lifecycle action %q and route %q",
-				templateInstanceLifecycleActionCode(decision.Action),
+				decision.ActionCode(),
 				subscriber.AgentPlan.FlowInstance(),
 			)
 		}
@@ -968,7 +966,7 @@ func (r connectRoutePlanResolver) resolveAgentCarrierIdentity(
 func plannedCreateAgentCarrierIdentity(
 	subscriber Subscriber,
 	target events.RouteIdentity,
-	decision TemplateInstanceLifecycleDecision,
+	decision connectInstanceSelection,
 	routeCreatedInPlan bool,
 	runID string,
 	root semanticview.RootExecutionCoordinate,
@@ -1022,7 +1020,7 @@ func plannedCreateAgentCarrierIdentity(
 	return identity, true, nil
 }
 
-func syntheticDeliveryPayloadProjection(plan runtimepinrouting.ConnectRoutePlan, decision TemplateInstanceLifecycleDecision) (events.DeliveryPayloadProjection, error) {
+func syntheticDeliveryPayloadProjection(plan runtimepinrouting.ConnectRoutePlan, decision connectInstanceSelection) (events.DeliveryPayloadProjection, error) {
 	if plan.InstanceKey() == nil || !plan.InstanceKey().RequiresDeliveryProjection() {
 		return events.DeliveryPayloadProjection{}, nil
 	}

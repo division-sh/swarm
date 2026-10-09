@@ -93,6 +93,7 @@ type connectRoutePlanDescriptorStore struct {
 
 func (s *connectRoutePlanDescriptorStore) setTestConstructionSource(source semanticview.Source) {
 	s.constructionSource = source
+	s.targetRouteMemoryStore.setTestConstructionSource(source)
 }
 
 func (s *connectRoutePlanDescriptorStore) setTestSemanticSource(fact runtimecorrelation.SourceArtifactFact, workflowVersion string) {
@@ -773,6 +774,11 @@ func installConnectionSourceConstructionForRun(t testing.TB, eb *EventBus, sourc
 		}); ok {
 			reader.installConstructionReceipt(owner, runtimepipeline.FlowConstructionPublicationEvidence{Identity: instance})
 		}
+		if index, ok := eb.durable.Instances.(interface {
+			installIndexObservation(runtimepipeline.FlowInstanceObservation)
+		}); ok {
+			index.installIndexObservation(constructionIndexObservation(t, source, runID, instance, ""))
+		}
 	}
 	return instance
 }
@@ -1342,7 +1348,7 @@ func connectRoutePlanLifecycleAgentRoute(
 ) (agentidentity.Identity, semanticview.FlowOwnedAgentSubscriptionAdmission, string) {
 	t.Helper()
 	plan := mustInstanceKeyConnectRoutePlan(t, source)
-	instanceID := templateInstanceLifecycleInstanceID(plan, []runtimecontracts.TemplateInstanceKeyValue{{
+	instanceID := connectMissingInstanceID(plan, []runtimecontracts.TemplateInstanceKeyValue{{
 		Field: mustBusTemplateInstanceField(t, "vertical_id"), Value: "v-1",
 	}})
 	instance := runtimeflowidentity.Derive(source, "consumer", instanceID)
@@ -2955,11 +2961,11 @@ func TestTemplateInstanceLifecycleUsesResolutionModeWithoutContractPolicyFallbac
 		name        string
 		mode        runtimecontracts.FlowInputResolutionMode
 		wantFailure runtimepinrouting.ConnectRoutePlanFailure
-		wantAction  TemplateInstanceLifecycleAction
+		wantAction  string
 	}{
 		{name: "create conflicts", mode: runtimecontracts.FlowInputResolutionModeCreate, wantFailure: runtimepinrouting.ConnectFailureInstanceConflict},
-		{name: "select selects", mode: runtimecontracts.FlowInputResolutionModeSelect, wantAction: templateInstanceLifecycleActionSelectedExisting},
-		{name: "select-or-create reuses", mode: runtimecontracts.FlowInputResolutionModeSelectOrCreate, wantAction: templateInstanceLifecycleActionReused},
+		{name: "select selects", mode: runtimecontracts.FlowInputResolutionModeSelect, wantAction: "selected_existing"},
+		{name: "select-or-create reuses", mode: runtimecontracts.FlowInputResolutionModeSelectOrCreate, wantAction: "reused"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
@@ -2971,14 +2977,16 @@ func TestTemplateInstanceLifecycleUsesResolutionModeWithoutContractPolicyFallbac
 				AddressFields: map[string]string{"entity.account_id": "acct-1"},
 			}}
 			values := map[string]string{"payload.account_id": "acct-1"}
+			key := "acct-1"
 			var source semanticview.Source
 			if tc.mode == runtimecontracts.FlowInputResolutionModeCreate {
+				key = eventtest.UUID("create-conflict-key")
 				source = connectRoutePlanPayloadCreateResolutionSource(t)
 				evt = connectRoutePlanStaticProducerEvent(uuid.NewString(),
-					events.EventType("producer/validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+					events.EventType("producer/validation.requested"), "", "", json.RawMessage(`{"candidate":"`+key+`"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 				descriptors[0].FlowInstance = "validator/one"
 				descriptors[0].AddressFields = map[string]string{"entity.validation_case_id": "acct-1"}
-				values = map[string]string{"payload.candidate": "acct-1"}
+				values = map[string]string{"payload.candidate": key}
 			} else {
 				source = connectRoutePlanCarriedKeyResolutionSource(t, tc.mode)
 			}
@@ -2991,12 +2999,12 @@ func TestTemplateInstanceLifecycleUsesResolutionModeWithoutContractPolicyFallbac
 				t.Fatal(err)
 			}
 			evt = eventtest.ExistingRunRootIngressWithRoutingSource(evt.ID(), evt.Type(), "", "", evt.Payload(), 0, busInternalTestRunID, events.EventEnvelope{}, sourceRoute, evt.CreatedAt())
-			table := &RouteTable{instanceOwners: map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance{
-				testRunScopedFlowRoute(root.Route()): root, testRunScopedFlowRoute(producer.Route()): producer,
-				testRunScopedFlowRoute(instance.Route()): instance,
-			}}
-			owner := newTemplateInstanceLifecycleOwner(source, table, nil, constructionReceiptTestReader{root, producer, instance})
-			materialization, decision, handled, err := owner.Materialize(context.Background(), evt, plan, values, descriptors)
+			owner := connectInstanceSelector{source: source, index: constructionIndexTestReader{observations: []runtimepipeline.FlowInstanceObservation{
+				constructionIndexObservation(t, source, busInternalTestRunID, root, ""),
+				constructionIndexObservation(t, source, busInternalTestRunID, producer, ""),
+				constructionIndexObservation(t, source, busInternalTestRunID, instance, key),
+			}}}
+			materialization, decision, handled, err := owner.Materialize(constructionIndexContext(t, source), evt, plan, values)
 			if err != nil {
 				t.Fatalf("Materialize: %v", err)
 			}
@@ -3006,8 +3014,8 @@ func TestTemplateInstanceLifecycleUsesResolutionModeWithoutContractPolicyFallbac
 			if materialization.Failure != tc.wantFailure {
 				t.Fatalf("failure = %q, want %q", materialization.Failure, tc.wantFailure)
 			}
-			if decision.Action != tc.wantAction {
-				t.Fatalf("action = %q, want %q", templateInstanceLifecycleActionCode(decision.Action), templateInstanceLifecycleActionCode(tc.wantAction))
+			if decision.ActionCode() != tc.wantAction {
+				t.Fatalf("action = %q, want %q", decision.ActionCode(), tc.wantAction)
 			}
 		})
 	}
@@ -3026,21 +3034,18 @@ func TestTemplateInstanceLifecycleDecisionAndActivationConfigContainNoPolicyFact
 	}
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil)
 	keys := []runtimecontracts.TemplateInstanceKeyValue{{
 		Field: plan.InstanceKey().Field(),
 		Value: "acct-1",
 	}}
 	root := runtimeflowidentity.Stored(source, ".", evt.RunID(), evt.RunID(), evt.RunID(), "")
-	instance, err := runtimeflowidentity.KeyedChild(source, root, plan.ReceiverEndpoint().Readback().FlowID, templateInstanceLifecycleInstanceID(plan, keys))
+	instance, err := runtimeflowidentity.KeyedChild(source, root, plan.ReceiverEndpoint().Readback().FlowID, connectMissingInstanceID(plan, keys))
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, decision, err := owner.activationRequest(evt, plan, instance, keys)
-	if err != nil {
-		t.Fatalf("activationRequest failure = %v", err)
-	}
-	for _, typ := range []reflect.Type{reflect.TypeOf(TemplateInstanceLifecycleDecision{}), reflect.TypeOf(runtimepipeline.FlowInstanceActivationRequest{})} {
+	request := runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: instance, ConstructorInput: string(plan.ReceiverLocalEvent()), ResolvedKey: "acct-1", TriggerEvent: evt, Bookkeeping: map[string]any{"last_source_event": evt.ID()}}
+	decision := connectInstanceSelection{identity: instance, KeyMaterial: keys, receiver: plan.ReceiverEndpoint()}
+	for _, typ := range []reflect.Type{reflect.TypeOf(connectInstanceSelection{}), reflect.TypeOf(runtimepipeline.FlowInstanceActivationRequest{})} {
 		if typ == reflect.TypeOf(runtimepipeline.FlowInstanceActivationRequest{}) {
 			if _, retained := typ.FieldByName("Fields"); retained {
 				t.Fatal("activation request retained caller-authored constructor fields")
@@ -3198,6 +3203,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "account", "one", busInternalTestRunID, eventtest.UUID("ent-1")), "acct-1"))
 	store.bus = eb
 	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "account", "one", busInternalTestRunID, eventtest.UUID("ent-1"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
@@ -3402,6 +3408,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "account", "one", busInternalTestRunID, eventtest.UUID("ent-1")), "acct-1"))
 	store.bus = eb
 	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "account", "one", busInternalTestRunID, eventtest.UUID("ent-1"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(one): %v", err)

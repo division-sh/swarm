@@ -256,7 +256,7 @@ func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event)
 		})
 		return projection.resolveRoutePlan(routePlan)
 	}
-	rootPlans, err := p.prepareRootConstruction(ctx, evt, projection)
+	rootPlans, err := p.prepareRootConstruction(ctx, evt)
 	if err != nil {
 		return RoutePlan{}, err
 	}

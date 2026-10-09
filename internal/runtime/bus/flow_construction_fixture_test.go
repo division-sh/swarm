@@ -27,6 +27,11 @@ func seedComponentFlowConstruction(t *testing.T, ctx context.Context, selected c
 	if !found {
 		t.Fatal("component construction requires an admitted bundle")
 	}
+	schema, found := source.FlowSchemaByID(instance.WorkflowName)
+	if !found {
+		t.Fatal("component construction requires its declared flow")
+	}
+	instance.Mode = schema.EffectiveMode()
 	bus, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatal(err)

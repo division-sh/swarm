@@ -204,7 +204,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 				})
 			}
 			seedComponentFlowConstruction(t, ctx, selected, source, runtimepipeline.WorkflowInstance{
-				InstanceID: "one", StorageRef: "account/one", EntityID: entityID, WorkflowName: "account",
+				InstanceID: "one", StorageRef: "account/one", EntityID: entityID, WorkflowName: "account", InstanceKey: "acct-1",
 				WorkflowVersion: source.WorkflowVersion(), InstanceKind: "template", EntityType: contract.EntityType,
 				ParentFlowID: ".", ParentFlowInstance: runID, ParentEntityID: runtimeflowidentity.EntityID(runID),
 				Fields: fields, EnteredStageAt: at, CreatedAt: at,
