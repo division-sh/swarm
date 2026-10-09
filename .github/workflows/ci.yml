@@ -460,7 +460,6 @@ jobs:
         env:
           BATCH_ID: ${{ matrix.unit }}
           SWARM_TEST_BUILD_CACHE: ${{ runner.temp }}/swarm-build-products
-          SWARM_DEBT_CACHE_DIR: ${{ runner.temp }}/debt-analysis
           KEEP_GOING: ${{ inputs.keep_going }}
           SWARM_TOOL_GATEWAY_URL: ""
           SWARM_TOOL_GATEWAY_CONTAINER_URL: ""

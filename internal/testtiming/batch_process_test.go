@@ -96,6 +96,81 @@ done
 			}
 		})
 	}
+	t.Run("debt cache environment is exact child scope", proveProofBatchDebtCacheEnvironmentScope)
+}
+
+func proveProofBatchDebtCacheEnvironmentScope(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "test-results/plan"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	units := []string{"serveapp-publication-text", "persistence-authority-debt-census", "conformance-soak-sqlite", "persistence-authority-debt-census-sibling", "serveapp-channel-delivery"}
+	var members []map[string]string
+	for _, id := range units {
+		budget := "broad"
+		if id == "conformance-soak-sqlite" {
+			budget = "soak"
+		}
+		members = append(members, map[string]string{"id": id, "budget_class": budget, "count_mode": "count-1"})
+	}
+	plan, err := json.Marshal(map[string]any{"batches": []map[string]any{{"id": "batch", "units": units}}, "units": members})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "test-results/plan/proof-plan.json"), plan, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Real shell/process environment proof, not Go workload qualification.
+	shims := map[string]string{
+		"git": "#!/usr/bin/env bash\nprintf 'fixture-sha\\n'\n",
+		"go": `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$2" = ./cmd/swarm-test ]; then
+  printf '%s=%s\n' "$5" "${SWARM_DEBT_CACHE_DIR-unset}" >> "$PROBE_LOG"
+  printf '{}\n'
+else
+  test "${SWARM_DEBT_CACHE_DIR+x}" != x
+fi
+previous=''
+for arg in "$@"; do
+  if [ "$previous" = -evidence ] || [ "$previous" = -markdown ]; then printf '{}\n' > "$arg"; fi
+  previous="$arg"
+done
+`,
+	}
+	for name, body := range shims {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	log := filepath.Join(root, "probe.log")
+	runnerTemp := filepath.Join(root, "runner temp")
+	command := exec.Command("bash", filepath.Join(testTimingRepoRoot(t), ".github/scripts/run-proof-batch.sh"))
+	command.Dir = root
+	for _, value := range os.Environ() {
+		if !strings.HasPrefix(value, "SWARM_DEBT_CACHE_DIR=") {
+			command.Env = append(command.Env, value)
+		}
+	}
+	command.Env = append(command.Env, "PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"), "RUNNER_TEMP="+runnerTemp, "BATCH_ID=batch", "GITHUB_RUN_ID=1", "GITHUB_RUN_ATTEMPT=1", "GITHUB_STEP_SUMMARY="+filepath.Join(root, "summary"), "PROBE_LOG="+log)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("scoped dispatcher refused: %v %s", err, output)
+	}
+	raw, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []string
+	for _, id := range units {
+		value := "unset"
+		if id == "persistence-authority-debt-census" {
+			value = filepath.Join(runnerTemp, "debt-analysis")
+		}
+		want = append(want, id+"="+value)
+	}
+	if string(raw) != strings.Join(want, "\n")+"\n" {
+		t.Fatalf("cache environment crosses unit boundaries:\n%s\nwant:\n%s", raw, strings.Join(want, "\n"))
+	}
 }
 
 func TestProofBatchCollectsLaterUnitAfterFailureWithFreshProcessesAndTemps(t *testing.T) {

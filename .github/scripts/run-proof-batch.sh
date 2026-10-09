@@ -16,6 +16,9 @@ for UNIT_ID in "${units[@]}"; do
   primary_evidence="test-results/evidence/${UNIT_ID}-primary-evidence.json"
   unit_tmp=$(mktemp -d)
   command=(go run ./cmd/swarm-test --planned "$plan" "$UNIT_ID")
+  if [ "$UNIT_ID" = persistence-authority-debt-census ]; then
+    command=(env "SWARM_DEBT_CACHE_DIR=$RUNNER_TEMP/debt-analysis" "${command[@]}")
+  fi
   if jq -e --arg id "$UNIT_ID" '.units[] | select(.id == $id) | .budget_class == "soak"' "$plan" >/dev/null; then
     unit=$(jq -cer --arg id "$UNIT_ID" '.units[] | select(.id == $id)' "$plan")
     test "$(jq -r '.count_mode' <<<"$unit")" = count-1
