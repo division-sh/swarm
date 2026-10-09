@@ -162,6 +162,7 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 			violations = append(violations, relative+": "+err.Error())
 		}
 		counterOracles := classifyCounterOracleRunLiterals(relative, file)
+		identityOracles := classifyRunFixtureIdentityOracleLiterals(relative, file)
 		ast.Inspect(file, func(node ast.Node) bool {
 			literal, ok := node.(*ast.BasicLit)
 			if !ok || literal.Kind != token.STRING {
@@ -171,7 +172,7 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 			if err != nil || !runWrite.MatchString(value) {
 				return true
 			}
-			if hostile[literal.Pos()] || minimalHistory[literal.Pos()] || minimalProjection[literal.Pos()] || counterOracles[literal.Pos()] || allowedSemanticRunFixtureLiteral(relative, value) {
+			if hostile[literal.Pos()] || minimalHistory[literal.Pos()] || minimalProjection[literal.Pos()] || counterOracles[literal.Pos()] || identityOracles[literal.Pos()] || allowedSemanticRunFixtureLiteral(relative, value) {
 				return true
 			}
 			violations = append(violations, relative+": "+compactSQLForLifecycleGuard(value))
@@ -201,6 +202,9 @@ func classifyCounterOracleRunLiterals(path string, file *ast.File) map[token.Pos
 			(fn.Name.Name == "TestEventCountDeltasBatchOrderAndForeignReadRefusal" ||
 				fn.Name.Name == "TestEventCountDeltasPhysicalIdentityAndOrder" ||
 				fn.Name.Name == "TestEventCountDeltasUnrecognizedIdentityPreservesSQLValidation") {
+			mockOracles[`UPDATE runs SET event_count = event_count \+`] = true
+		}
+		if path == "internal/store/internal/backend/runforkrevision/counter_order_test.go" && fn.Name.Name == "TestRevisionCountersFollowCanonicalLocksBeforeProjection" {
 			mockOracles[`UPDATE runs SET event_count = event_count \+`] = true
 		}
 		if path == "internal/store/internal/backend/runlifecycle/run_admission_test.go" && fn.Name.Name == "TestRunAdmissionCanonicalSourceRevisionReloads" {
