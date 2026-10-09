@@ -642,6 +642,9 @@ func testContractFrontierSource(nodeID string) semanticview.Source {
 		Schema:   runtimecontracts.FlowSchemaDocument{Connect: []runtimecontracts.FlowConnect{{SourceLine: 1, Event: "scan.requested", From: "producer", To: "consumer"}}},
 		Children: []runtimecontracts.FlowContractView{producer, consumer},
 	}
+	for i := range root.Children {
+		root.Children[i].Parent = &root
+	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics:   runtimecontracts.WorkflowSemanticView{Name: "test-workflow", Version: "v-test"},
 		Events:      map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
@@ -800,6 +803,15 @@ func testContractFrontierConnectSource(t testing.TB, producerMode string) semant
 }
 
 func mustCompileContractFrontierBundle(bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
+	if root := bundle.FlowTree.Root; root != nil {
+		if bundle.FlowTree.ByID == nil {
+			bundle.FlowTree.ByID = make(map[string]*runtimecontracts.FlowContractView)
+		}
+		bundle.FlowTree.ByID[root.Paths.FlowPath] = root
+		for i := range root.Children {
+			root.Children[i].Parent = root
+		}
+	}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		panic(err)
 	}

@@ -22,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-type connectRoutePlanDescriptorLoader func(context.Context) ([]runtimepinrouting.Descriptor, error)
 type connectAgentDescriptorLoader func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error)
 
 type connectRoutePlanPreviewRoutesKey struct{}
@@ -40,20 +39,6 @@ func withConnectRoutePlanPreview(ctx context.Context) context.Context {
 		return ctx
 	}
 	return context.WithValue(ctx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{})
-}
-
-type connectRoutePlanEvaluationMemoKey struct{}
-
-type connectRoutePlanEvaluationMemo struct {
-	eventID  string
-	dispatch connectRoutePlanDispatch
-	snapshot connectRoutePlanSnapshot
-	ready    bool
-	applied  bool
-}
-
-type connectRoutePlanSnapshot struct {
-	base routeTableSnapshotGeneration
 }
 
 type staleConnectRoutePlanSnapshotError struct{}
@@ -81,14 +66,13 @@ func withClosedPublicationPlanning(ctx context.Context) context.Context {
 }
 
 type connectRoutePlanResolver struct {
-	source          semanticview.Source
-	routeTable      *RouteTable
-	graph           runtimepinrouting.CompiledConnectGraph
-	issues          []runtimepinrouting.ConnectRoutePlanIssue
-	loadDescriptors connectRoutePlanDescriptorLoader
-	loadAgents      connectAgentDescriptorLoader
-	lifecycle       connectInstanceSelector
-	replyStore      runtimereplycontext.Store
+	source     semanticview.Source
+	routeTable *RouteTable
+	graph      runtimepinrouting.CompiledConnectGraph
+	issues     []runtimepinrouting.ConnectRoutePlanIssue
+	loadAgents connectAgentDescriptorLoader
+	lifecycle  connectInstanceSelector
+	replyStore runtimereplycontext.Store
 }
 
 type connectRoutePlanDispatch struct {
@@ -105,20 +89,19 @@ type connectRoutePlanDispatch struct {
 	ReplyClaims          []runtimereplycontext.ClaimCommand
 }
 
-func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, planner runtimepipeline.FlowInstanceActivationPlanner, index runtimepipeline.FlowInstanceIndexReader, replyStore runtimereplycontext.Store) connectRoutePlanResolver {
+func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, planner runtimepipeline.FlowInstanceActivationPlanner, index runtimepipeline.FlowInstanceIndexReader, replyStore runtimereplycontext.Store) connectRoutePlanResolver {
 	if source == nil {
-		return connectRoutePlanResolver{routeTable: routeTable, loadDescriptors: loadDescriptors, replyStore: replyStore}
+		return connectRoutePlanResolver{routeTable: routeTable, replyStore: replyStore}
 	}
 	graph := runtimepinrouting.CompileConnectGraph(source)
 	issues := graph.Issues()
 	return connectRoutePlanResolver{
-		source:          source,
-		routeTable:      routeTable,
-		graph:           graph,
-		issues:          append([]runtimepinrouting.ConnectRoutePlanIssue(nil), issues...),
-		loadDescriptors: loadDescriptors,
-		lifecycle:       connectInstanceSelector{source: source, plan: planner, index: index},
-		replyStore:      replyStore,
+		source:     source,
+		routeTable: routeTable,
+		graph:      graph,
+		issues:     append([]runtimepinrouting.ConnectRoutePlanIssue(nil), issues...),
+		lifecycle:  connectInstanceSelector{source: source, plan: planner, index: index},
+		replyStore: replyStore,
 	}
 }
 
@@ -151,14 +134,6 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		}
 	}
 
-	memo, _ := ctx.Value(connectRoutePlanEvaluationMemoKey{}).(*connectRoutePlanEvaluationMemo)
-	if memo != nil && memo.ready && memo.eventID == evt.ID() {
-		if r.routeTable.snapshotGenerationCurrent(memo.snapshot.base) {
-			return memo.dispatch, nil
-		}
-		memo.ready = false
-	}
-
 	matched := r.matchedPlans(ctx, evt)
 	if len(matched) == 0 {
 		return connectRoutePlanDispatch{Evaluation: emptyEvaluation}, nil
@@ -167,30 +142,10 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	if err != nil {
 		return connectRoutePlanDispatch{}, err
 	}
-	for attempt := 0; attempt < 3; attempt++ {
-		snapshot := connectRoutePlanSnapshot{base: r.routeTable.snapshotGeneration()}
-		evaluationCtx := runtimecorrelation.WithInboundEvent(ctx, evt)
-		descriptors, err := r.descriptorsForPlans(evaluationCtx, matched)
-		if err != nil {
-			return connectRoutePlanDispatch{}, err
-		}
-		evaluationCtx = withConnectPlanningPreview(evaluationCtx)
-		evaluationCtx = withConnectRoutePlanPreview(evaluationCtx)
-		evaluated, err := r.planMatched(evaluationCtx, evt, matched, descriptors, connectRoutePlanMatchValues(evt), replyRecord)
-		if err != nil {
-			return connectRoutePlanDispatch{}, err
-		}
-		if memo != nil {
-			memo.eventID, memo.dispatch, memo.snapshot, memo.ready, memo.applied = evt.ID(), evaluated, snapshot, true, false
-		}
-		if !evaluated.Failure.Empty() || connectPlanningPreview(ctx) || r.routeTable.snapshotGenerationCurrent(snapshot.base) {
-			return evaluated, nil
-		}
-		if memo != nil {
-			memo.ready = false
-		}
-	}
-	return connectRoutePlanDispatch{}, exhaustedConnectRoutePlanSnapshotError()
+	evaluationCtx := runtimecorrelation.WithInboundEvent(ctx, evt)
+	evaluationCtx = withConnectPlanningPreview(evaluationCtx)
+	evaluationCtx = withConnectRoutePlanPreview(evaluationCtx)
+	return r.planMatched(evaluationCtx, evt, matched, connectRoutePlanMatchValues(evt), replyRecord)
 }
 
 // A paired response resumes retained return authority, not every ordinary edge
@@ -228,7 +183,7 @@ func (r connectRoutePlanResolver) resolveReplyPlans(ctx context.Context, matched
 	return exact, record, nil
 }
 
-func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Event, matched []runtimepinrouting.ConnectRoutePlan, descriptors []runtimepinrouting.Descriptor, values map[string]string, replyRecord runtimereplycontext.Record) (connectRoutePlanDispatch, error) {
+func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Event, matched []runtimepinrouting.ConnectRoutePlan, values map[string]string, replyRecord runtimereplycontext.Record) (connectRoutePlanDispatch, error) {
 	emptyEvaluation, err := events.NewConnectEvaluationLedger(nil)
 	if err != nil {
 		return connectRoutePlanDispatch{}, err
@@ -297,7 +252,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			out.RoutedRecipients = append(out.RoutedRecipients, subscribers...)
 			continue
 		}
-		materialized, decision, err := r.materializeConnectRoutePlan(ctx, evt, plan, values, descriptors)
+		materialized, decision, err := r.materializeConnectRoutePlan(ctx, evt, plan, values)
 		if err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
@@ -309,7 +264,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			out.ExtraDetail["connect_route_plan_failure"] = materialized.Failure.Code()
 			out.ExtraDetail["connect_route_plan_source_event"] = plan.SourceEndpoint().Readback().ResolvedEvent
 			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.ReceiverEndpoint().Readback().ResolvedEvent
-			for key, value := range connectRoutePlanFailureDetail(plan, materialized.Failure, values, descriptors) {
+			for key, value := range connectRoutePlanFailureDetail(plan, materialized.Failure, values) {
 				out.ExtraDetail[key] = value
 			}
 			return out, nil
@@ -327,8 +282,10 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 		if decision.Activation != nil {
 			out.ActivationPlans = append(out.ActivationPlans, *decision.Activation)
 		}
-		if err := r.installTemplateInstanceLifecyclePreview(ctx, evt.RunID(), decision); err != nil {
-			return connectRoutePlanDispatch{}, err
+		if decision.Activation != nil {
+			if err := r.installFlowConstructionPreview(ctx, evt.RunID(), *decision.Activation); err != nil {
+				return connectRoutePlanDispatch{}, err
+			}
 		}
 		if !decision.Empty() {
 			if err := selectConnectionConstruction(ctx, decision.identity); err != nil {
@@ -339,19 +296,6 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			if route := decision.Route(); route.Valid() {
 				createdRoutes[route] = struct{}{}
 			}
-		}
-		if decision.Activation != nil {
-			addresses, err := runtimepinrouting.DescriptorAddressFields(decision.Activation.Instance.Fields)
-			if err != nil {
-				return connectRoutePlanDispatch{}, err
-			}
-			descriptors = append(descriptors, runtimepinrouting.Descriptor{
-				FlowID:        decision.identity.TemplateID,
-				ID:            decision.InstanceID(),
-				EntityID:      decision.EntityID(),
-				FlowInstance:  decision.InstancePath(),
-				AddressFields: addresses,
-			})
 		}
 		_, routeCreatedInPlan := createdRoutes[decision.Route()]
 		routes, liveRoutes, subscribers, evaluation, err := r.deliveryRoutesForMaterialization(ctx, evt.RunID(), plan, materialized, decision, routeCreatedInPlan)
@@ -559,78 +503,14 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	return runtimepinrouting.NormalizeConnectDeliveryRoutes(routes), dedupeSubscribers(subscribers), &claim, 0, detail, nil
 }
 
-func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, descriptors []runtimepinrouting.Descriptor) (runtimepinrouting.ConnectRoutePlanMaterialization, connectInstanceSelection, error) {
-	if plan.ReceiverEndpoint().IsRoot() {
-		rootInstance := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-		coordinate, err := semanticview.AdmitRootExecutionCoordinate(r.source, rootInstance)
-		if err != nil {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, errors.New("root connect receiver requires canonical workflow identity")
-		}
-		if eventRunID := strings.TrimSpace(evt.RunID()); eventRunID != coordinate.RunID() {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, errors.New("root connect receiver event and context run identities disagree")
-		}
-		// Composition selects the root instance, not its state owner. The shared
-		// receiver classifier admits existing, initializing or entityless state.
-		return runtimepinrouting.ConnectRoutePlanMaterialization{Target: events.RouteIdentity{
-			FlowID: coordinate.FlowID(), FlowInstance: coordinate.RunID(),
-		}}, connectInstanceSelection{}, nil
+func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string) (runtimepinrouting.ConnectRoutePlanMaterialization, connectInstanceSelection, error) {
+	if plan.ReceiverEndpoint().IsRoot() || !plan.RequiresRuntimeResolution() {
+		return r.materializeKeylessConnect(ctx, evt, plan)
 	}
 	if materialized, decision, handled, err := r.lifecycle.Materialize(ctx, evt, plan, values); handled || err != nil {
 		return materialized, decision, err
 	}
-	if !plan.RequiresRuntimeResolution() && r.routeTable != nil {
-		parent := connectSourceParentRoute(evt, plan)
-		target, found, err := r.routeTable.constructedChildConnectTarget(evt.RunID(), plan.ReceiverEndpoint().Readback().FlowID, parent)
-		if err != nil {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, err
-		}
-		if found {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{Target: target}, connectInstanceSelection{}, nil
-		}
-	}
-	return runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
-		MatchValues: runtimepinrouting.AdmitConnectRouteMatchValues(values),
-		Descriptors: descriptors,
-	}), connectInstanceSelection{}, nil
-}
-
-// A matched compiled connection supplies permission; the constructor supplies
-// the already-installed child's concrete coordinate. Parent context grants none.
-func (rt *RouteTable) constructedChildConnectTarget(runID, flowID string, parent runtimeflowidentity.ParentRoute) (events.RouteIdentity, bool, error) {
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	var target events.RouteIdentity
-	parentRelative := false
-	for owner, instance := range rt.instanceOwners {
-		if owner.RunID != runID || instance.TemplateID != flowID || instance.InstancePath == instance.ScopeKey {
-			continue
-		}
-		parentRelative = true
-		if instance.ParentRoute != parent || parent.Empty() {
-			continue
-		}
-		if !target.Empty() {
-			return events.RouteIdentity{}, false, fmt.Errorf("constructed child connection has ambiguous exact parent ownership for %s", flowID)
-		}
-		target = events.RouteIdentity{FlowID: instance.TemplateID, FlowInstance: instance.InstancePath, EntityID: instance.EntityID}
-	}
-	if parentRelative && target.Empty() {
-		return events.RouteIdentity{}, false, fmt.Errorf("constructed child connection has no exact parent ownership for %s", flowID)
-	}
-	return target, !target.Empty(), nil
-}
-
-func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(ctx context.Context, runID string, decision connectInstanceSelection) error {
-	if !decision.Empty() && decision.Activation == nil {
-		return r.installConstructionIdentityPreview(ctx, runID, decision.identity, nil)
-	}
-	if decision.Empty() {
-		return nil
-	}
-	if decision.Activation == nil {
-		return errors.New("connect route preview requires its canonical construction plan")
-	}
-	return r.installFlowConstructionPreview(ctx, runID, *decision.Activation)
+	return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureReceiverResolutionMissing}, connectInstanceSelection{}, nil
 }
 
 func (r connectRoutePlanResolver) installFlowConstructionPreview(ctx context.Context, runID string, plan runtimepipeline.FlowInstanceActivationPlan) error {
@@ -703,10 +583,9 @@ func (r connectRoutePlanResolver) matchedPlans(ctx context.Context, evt events.E
 	return out
 }
 
-// selectedTargetScope uses compiled plan targets and the canonical instance
-// materialization owner. It is only a lookup scope; the later selected-run
-// projection still admits exact entity ownership and rejects contradictions.
-func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt events.Event) (selectedTargetOwnerLookupScope, bool) {
+// This scope supplies lookup candidates, never execution permission. Native
+// headers supply actual paths; later target admission still checks ownership.
+func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt events.Event) (selectedTargetOwnerLookupScope, bool, error) {
 	paths := make(map[string]struct{})
 	scope := selectedTargetOwnerLookupScope{}
 	add := func(route events.RouteIdentity) {
@@ -715,7 +594,6 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 		}
 	}
 	add(evt.RoutingSource().Route())
-	r.addProviderSourceLookupPaths(ctx, evt, paths)
 	add(evt.SourceRoute())
 	add(evt.TargetRoute())
 	for _, route := range evt.TargetRoutes() {
@@ -727,55 +605,20 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 			paths[runID] = struct{}{}
 		}
 	}
-	matched := r.matchedPlans(ctx, evt)
-	for _, plan := range matched {
-		if !plan.RequiresRuntimeResolution() {
-			if r.routeTable != nil {
-				target, found, err := r.routeTable.constructedChildConnectTarget(evt.RunID(), plan.ReceiverEndpoint().Readback().FlowID, connectSourceParentRoute(evt, plan))
-				if err == nil && found {
-					add(target)
-					continue
-				}
-			}
-			materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{})
-			add(materialized.Target)
-			for _, route := range materialized.TargetSet {
-				add(route)
-			}
-			continue
-		}
-		if plan.InstanceKey() == nil {
-			return selectedTargetOwnerLookupScope{}, false
-		}
-		material, failure := instanceKeyMaterialForConnectSelection(evt, plan, connectRoutePlanMatchValues(evt))
-		if !failure.Empty() {
-			continue
-		}
-		contract, failure := r.lifecycle.resolveInstanceContract(plan, material)
-		if !failure.Empty() {
-			continue
-		}
-		keys, err := contract.CanonicalKeyMaterial(material.CanonicalValues())
-		if err != nil {
-			continue
-		}
-		if len(keys) != 1 {
-			return selectedTargetOwnerLookupScope{}, false
-		}
-		scope.keys = append(scope.keys, selectedDescriptorKeyQuery{
-			flowTemplate: contract.FlowID, field: "entity." + keys[0].Field.Path(), value: keys[0].Value,
-		})
-		parent, err := r.lifecycle.constructionParent(ctx, evt, plan)
-		if err != nil {
-			continue
-		}
-		instance, err := runtimeflowidentity.KeyedChild(r.source, parent, contract.FlowID, connectMissingInstanceID(plan, keys))
-		if err == nil {
-			paths[instance.InstancePath] = struct{}{}
+	flows := make(map[string]struct{})
+	for _, plan := range r.matchedPlans(ctx, evt) {
+		flows[plan.ReceiverEndpoint().Readback().FlowID] = struct{}{}
+	}
+	if evt.RoutingSource().Kind() == events.RoutingSourceExternalIngress {
+		flows[evt.RoutingSource().Route().FlowID] = struct{}{}
+	}
+	if len(flows) > 0 {
+		if err := r.addIndexedLookupPaths(ctx, evt.RunID(), flows, paths); err != nil {
+			return selectedTargetOwnerLookupScope{}, false, err
 		}
 	}
-	if len(matched) == 0 && len(paths) == 0 && scope.sourceEntityID == "" {
-		return selectedTargetOwnerLookupScope{}, false
+	if len(flows) == 0 && len(paths) == 0 {
+		return selectedTargetOwnerLookupScope{}, false, nil
 	}
 	out := make([]string, 0, len(paths))
 	for path := range paths {
@@ -783,52 +626,7 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 	}
 	sort.Strings(out)
 	scope.instancePaths = out
-	return scope, true
-}
-
-func (r connectRoutePlanResolver) addProviderSourceLookupPaths(ctx context.Context, evt events.Event, paths map[string]struct{}) {
-	if evt.RoutingSource().Kind() != events.RoutingSourceExternalIngress {
-		return
-	}
-	flowID := evt.RoutingSource().Route().FlowID
-	if flowID == semanticview.RootExecutionFlowID(r.source) {
-		paths[evt.RunID()] = struct{}{}
-		return
-	}
-	projection := selectedRunTargetOwnerProjection{source: r.source}
-	if instance, err := projection.providerExecutionIdentity(evt, flowID, false); err == nil {
-		if path := (events.RouteIdentity{FlowInstance: instance.InstancePath}).Normalized().FlowInstance; path != "" {
-			paths[path] = struct{}{}
-		}
-	}
-	if owners, err := r.lifecycle.constructionOwners(ctx, evt.RunID()); err == nil {
-		// Read candidates only; the compiled path still selects exact ancestry.
-		for _, instance := range owners {
-			if instance.TemplateID == flowID {
-				paths[instance.InstancePath] = struct{}{}
-			}
-		}
-	}
-}
-
-func (r connectRoutePlanResolver) descriptorsForPlans(ctx context.Context, plans []runtimepinrouting.ConnectRoutePlan) ([]runtimepinrouting.Descriptor, error) {
-	needsDescriptors := false
-	for _, plan := range plans {
-		if plan.RequiresRuntimeResolution() {
-			needsDescriptors = true
-			break
-		}
-	}
-	if !needsDescriptors {
-		return nil, nil
-	}
-	if projection, ok := selectedRunTargetOwnerProjectionFromContext(ctx); ok {
-		return projection.pinRoutingDescriptors()
-	}
-	if r.loadDescriptors == nil {
-		return nil, nil
-	}
-	return r.loadDescriptors(ctx)
+	return scope, true, nil
 }
 
 func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.Context, runID string, plan runtimepinrouting.ConnectRoutePlan, materialized runtimepinrouting.ConnectRoutePlanMaterialization, decision connectInstanceSelection, routeCreatedInPlan bool) ([]runtimepinrouting.ConnectDeliveryRoute, []runtimepinrouting.ConnectDeliveryRoute, []Subscriber, events.ConnectEvaluationLedger, error) {
@@ -837,7 +635,10 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.C
 		targets = []events.RouteIdentity{{}}
 	}
 	if len(targets) == 0 {
-		evaluation := r.evaluateSelectedReceiverCarriers(ctx, runID, plan, nil)
+		evaluation, err := r.evaluateSelectedReceiverCarriers(ctx, runID, plan, nil)
+		if err != nil {
+			return nil, nil, nil, events.ConnectEvaluationLedger{}, err
+		}
 		ledger, err := evaluation.Ledger()
 		return nil, nil, nil, ledger, err
 	}
@@ -845,7 +646,10 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.C
 	for _, target := range targets {
 		selectionTargets = append(selectionTargets, target.Normalized())
 	}
-	evaluation := r.evaluateSelectedReceiverCarriers(ctx, runID, plan, selectionTargets)
+	evaluation, err := r.evaluateSelectedReceiverCarriers(ctx, runID, plan, selectionTargets)
+	if err != nil {
+		return nil, nil, nil, events.ConnectEvaluationLedger{}, err
+	}
 	ledger, err := evaluation.Ledger()
 	if err != nil {
 		return nil, nil, nil, events.ConnectEvaluationLedger{}, err
@@ -1040,7 +844,11 @@ func syntheticDeliveryPayloadProjection(plan runtimepinrouting.ConnectRoutePlan,
 }
 
 func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Context, runID string, plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) ([]Subscriber, error) {
-	subscribers := connectRecipientSubscribers(r.evaluateSelectedReceiverCarriers(ctx, runID, plan, []events.RouteIdentity{target}))
+	evaluation, err := r.evaluateSelectedReceiverCarriers(ctx, runID, plan, []events.RouteIdentity{target})
+	if err != nil {
+		return nil, err
+	}
+	subscribers := connectRecipientSubscribers(evaluation)
 	for index := range subscribers {
 		subscriber := &subscribers[index]
 		if !subscriber.Recipient.IsNode() {
@@ -1057,32 +865,42 @@ func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Co
 	return subscribers, nil
 }
 
-func (r connectRoutePlanResolver) evaluateSelectedReceiverCarriers(ctx context.Context, runID string, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) runtimepinrouting.ConnectRecipientEvaluation {
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return runtimepinrouting.ConnectRecipientEvaluation{}
+func (r connectRoutePlanResolver) evaluateSelectedReceiverCarriers(ctx context.Context, runID string, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) (runtimepinrouting.ConnectRecipientEvaluation, error) {
+	if len(targets) == 0 {
+		return r.graph.EvaluateMaterializedRecipients(plan, nil, nil), nil
 	}
-	tables := []*RouteTable{r.routeTable}
-	if ctx != nil {
-		if preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil && preview.table != nil {
-			tables = append(tables, preview.table)
+	orderedTargets := append([]events.RouteIdentity(nil), targets...)
+	sort.Slice(orderedTargets, func(i, j int) bool {
+		left, right := orderedTargets[i].Normalized(), orderedTargets[j].Normalized()
+		if left.FlowID != right.FlowID {
+			return left.FlowID < right.FlowID
 		}
-	}
-	if len(tables) == 0 {
-		return runtimepinrouting.ConnectRecipientEvaluation{}
-	}
-	registrations := make([]runtimepinrouting.ConnectRecipientRegistration, 0)
-	for _, routeTable := range tables {
-		if routeTable == nil {
-			continue
+		if left.FlowInstance != right.FlowInstance {
+			return left.FlowInstance < right.FlowInstance
 		}
-		registrations = append(registrations, routeTable.connectRecipientAdmissionsForTargets(runID, plan, targets)...)
+		return left.EntityID < right.EntityID
+	})
+	var registrations []runtimepinrouting.ConnectRecipientRegistration
+	for _, target := range orderedTargets {
+		instance, err := r.indexedConnectIdentity(ctx, runID, target)
+		if err != nil {
+			return runtimepinrouting.ConnectRecipientEvaluation{}, err
+		}
+		bound, err := r.routeTable.ConnectReceiverDefinitions(runID, instance)
+		if err != nil {
+			return runtimepinrouting.ConnectRecipientEvaluation{}, err
+		}
+		registrations = append(registrations, bound...)
 	}
-	return r.graph.EvaluateMaterializedRecipients(plan, targets, registrations)
+	return r.graph.EvaluateMaterializedRecipients(plan, targets, registrations), nil
 }
 
 func (r connectRoutePlanResolver) appendMaterializedPlanEvaluation(ctx context.Context, runID string, out *connectRoutePlanDispatch, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) error {
-	ledger, err := r.evaluateSelectedReceiverCarriers(ctx, runID, plan, targets).Ledger()
+	evaluation, err := r.evaluateSelectedReceiverCarriers(ctx, runID, plan, targets)
+	if err != nil {
+		return err
+	}
+	ledger, err := evaluation.Ledger()
 	if err != nil {
 		return err
 	}
@@ -1196,7 +1014,7 @@ func connectRoutePlanTargetFailure(failure runtimepinrouting.ConnectRoutePlanFai
 	return runtimepinrouting.TargetFailureFromConnect(failure)
 }
 
-func connectRoutePlanFailureDetail(plan runtimepinrouting.ConnectRoutePlan, failure runtimepinrouting.ConnectRoutePlanFailure, values map[string]string, descriptors []runtimepinrouting.Descriptor) map[string]any {
+func connectRoutePlanFailureDetail(plan runtimepinrouting.ConnectRoutePlan, failure runtimepinrouting.ConnectRoutePlanFailure, values map[string]string) map[string]any {
 	if plan.InstanceKey() == nil {
 		return nil
 	}
@@ -1230,9 +1048,6 @@ func connectRoutePlanFailureDetail(plan runtimepinrouting.ConnectRoutePlan, fail
 	}
 	if keyValue != "" {
 		out["connect_route_plan_instance_key_value"] = keyValue
-	}
-	if failure == runtimepinrouting.ConnectFailureTargetAmbiguous {
-		out["connect_route_plan_matched_instance_count"] = len(runtimepinrouting.InstanceKeyDescriptorRoutesForConnectRoutePlan(plan, material.Keys, descriptors))
 	}
 	out["connect_route_plan_failure_remediation"] = connectRoutePlanInstanceResolutionRemediation(plan, failure, keyField, keyValue, mode)
 	return out

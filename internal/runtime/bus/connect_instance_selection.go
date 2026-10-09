@@ -174,33 +174,10 @@ func instanceKeyMaterialForConnectSelection(event events.Event, plan pinrouting.
 	return pinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, pinrouting.AdmitConnectRouteMatchValues(values))
 }
 
-func connectSourceParentRoute(event events.Event, plan pinrouting.ConnectRoutePlan) flowidentity.ParentRoute {
-	source, err := pinrouting.SourceEventFromEvent(event)
-	if err != nil {
-		return flowidentity.ParentRoute{}
-	}
-	return plan.SourceParentRoute(source)
-}
-
 func connectMissingInstanceID(plan pinrouting.ConnectRoutePlan, keys []contracts.TemplateInstanceKeyValue) string {
 	digest := plan.ReceiverKeyDigest(keys)
 	if digest == "" {
 		return ""
 	}
 	return "ti-" + digest[:min(24, len(digest))]
-}
-
-func (o connectInstanceSelector) resolveInstanceContract(plan pinrouting.ConnectRoutePlan, material pinrouting.ConnectRoutePlanInstanceKeyMaterial) (contracts.TemplateInstanceContract, pinrouting.ConnectRoutePlanFailure) {
-	bundle, found := semanticview.Bundle(o.source)
-	if !found {
-		return contracts.TemplateInstanceContract{}, pinrouting.ConnectFailureLifecycleUnavailable
-	}
-	contract, err := plan.ReceiverTemplate(bundle)
-	if err != nil {
-		return contracts.TemplateInstanceContract{}, pinrouting.ConnectFailureLifecycleUnavailable
-	}
-	if _, err := contract.CanonicalKeyMaterial(material.CanonicalValues()); err != nil {
-		return contracts.TemplateInstanceContract{}, pinrouting.ConnectFailureInstanceSourceValueMissing
-	}
-	return contract, 0
 }

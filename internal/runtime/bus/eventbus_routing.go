@@ -403,13 +403,6 @@ type selectedTargetOwnerLookupScopeKey struct{}
 type selectedTargetOwnerLookupScope struct {
 	instancePaths  []string
 	sourceEntityID string
-	keys           []selectedDescriptorKeyQuery
-}
-
-type selectedDescriptorKeyQuery struct {
-	flowTemplate string
-	field        string
-	value        string
 }
 
 func withSelectedTargetOwnerLookupScope(ctx context.Context, scope selectedTargetOwnerLookupScope) context.Context {
@@ -427,27 +420,6 @@ func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTarget
 	runID := inbound.RunID()
 	scope, scoped := ctx.Value(selectedTargetOwnerLookupScopeKey{}).(selectedTargetOwnerLookupScope)
 	lister := eb.durable.ActiveFlows
-	var keyDescriptors []ActiveFlowInstanceDescriptor
-	if scoped && len(scope.keys) > 0 {
-		selected, ok := lister.(KeyedActiveFlowInstanceDescriptorLister)
-		if !ok {
-			return nil, true, errors.New("selected store lacks graph-scoped key descriptor lookup")
-		}
-		for _, key := range scope.keys {
-			matched, err := selected.ListActiveFlowInstanceDescriptorsForKey(ctx, runID, key.flowTemplate, key.field, key.value)
-			if err != nil {
-				return nil, true, err
-			}
-			matched, err = eb.validateActiveFlowInstanceDescriptorsForSemanticSource(runID, matched)
-			if err != nil {
-				return nil, true, err
-			}
-			keyDescriptors = append(keyDescriptors, matched...)
-			for _, descriptor := range matched {
-				scope.instancePaths = append(scope.instancePaths, descriptor.FlowInstance)
-			}
-		}
-	}
 	ordered := newOrderedActiveTargetDescriptors([]ActiveTargetDescriptor{})
 	available := false
 	targetOwners := eb.durable.TargetOwners
@@ -496,7 +468,6 @@ func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTarget
 	if err != nil {
 		return nil, true, err
 	}
-	flowDescriptors = append(flowDescriptors, keyDescriptors...)
 	for _, descriptor := range flowDescriptors {
 		if descriptor.RunID == runID {
 			ordered.add(descriptor.TargetDescriptor())

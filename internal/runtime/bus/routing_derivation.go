@@ -100,43 +100,29 @@ func (s subscriberRouteSource) code() string {
 }
 
 type RouteTable struct {
-	mu                          sync.RWMutex
-	generationMu                sync.RWMutex
-	generation                  uint64
-	source                      semanticview.Source
-	routes                      map[routeResolutionKey][]Subscriber
-	patterns                    []routePattern
-	exactPatternIndexes         map[string][]int
-	wildcardPatternIndexes      []int
-	resolutionIndexDirty        bool
-	eventPath                   map[string]struct{}
-	authoredEventPath           map[string]struct{}
-	authoredScopes              map[string]struct{}
-	templates                   map[string]routeFlowTemplate
-	instanceOwners              map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance
-	publications                map[runtimeflowidentity.RunScopedFlowInstance]flowRoutePublicationRecord
-	fencedPublications          map[flowRoutePublicationFence]struct{}
-	nextPublication             uint64
-	instanceEventPath           map[runtimeflowidentity.RunScopedFlowInstance][]string
-	templateObservers           map[string][]routeTemplateSourceObserver
-	connectGraph                runtimepinrouting.CompiledConnectGraph
-	inputProducers              runtimepinrouting.FlowInputProducerResolver
-	compiledSourceReady         bool
-	connectRecipients           []routeConnectRecipientRegistration
-	connectRecipientsByInstance map[routeConnectRecipientKey][]routeConnectRecipientRegistration
-	nextConnectRecipientOrdinal uint64
-}
-
-type routeConnectRecipientKey struct {
-	runID        string
-	instancePath string
-}
-
-type routeConnectRecipientRegistration struct {
-	registration runtimepinrouting.ConnectRecipientRegistration
-	runID        string
-	instancePath string
-	ordinal      uint64
+	mu                     sync.RWMutex
+	generationMu           sync.RWMutex
+	generation             uint64
+	source                 semanticview.Source
+	routes                 map[routeResolutionKey][]Subscriber
+	patterns               []routePattern
+	exactPatternIndexes    map[string][]int
+	wildcardPatternIndexes []int
+	resolutionIndexDirty   bool
+	eventPath              map[string]struct{}
+	authoredEventPath      map[string]struct{}
+	authoredScopes         map[string]struct{}
+	templates              map[string]routeFlowTemplate
+	connectDefinitions     map[string][]runtimepinrouting.ConnectRecipientRegistration
+	instanceOwners         map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance
+	publications           map[runtimeflowidentity.RunScopedFlowInstance]flowRoutePublicationRecord
+	fencedPublications     map[flowRoutePublicationFence]struct{}
+	nextPublication        uint64
+	instanceEventPath      map[runtimeflowidentity.RunScopedFlowInstance][]string
+	templateObservers      map[string][]routeTemplateSourceObserver
+	connectGraph           runtimepinrouting.CompiledConnectGraph
+	inputProducers         runtimepinrouting.FlowInputProducerResolver
+	compiledSourceReady    bool
 }
 
 type routeResolutionKey struct {
@@ -291,6 +277,14 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 			LocalEvents: cloneStringSet(localEvents),
 			Subscribers: subscribers,
 		}
+		definitions, err := compileRouteConnectDefinitions(graph, scope, subscribers)
+		if err != nil {
+			return nil, err
+		}
+		if rt.connectDefinitions == nil {
+			rt.connectDefinitions = make(map[string][]runtimepinrouting.ConnectRecipientRegistration)
+		}
+		rt.connectDefinitions[scope.ID] = definitions
 		if strings.EqualFold(scope.Mode, "template") {
 			continue
 		}
@@ -312,6 +306,80 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 
 	rt.rebuildLocked()
 	return rt, nil
+}
+
+func compileRouteConnectDefinitions(graph runtimepinrouting.CompiledConnectGraph, scope semanticview.FlowScope, subscribers []routeSubscriberTemplate) ([]runtimepinrouting.ConnectRecipientRegistration, error) {
+	var definitions []runtimepinrouting.ConnectRecipientRegistration
+	path := scope.Path
+	if scope.ID == "." {
+		path = "."
+	}
+	for _, subscriber := range subscribers {
+		var recipient runtimepinrouting.ConnectRecipient
+		var err error
+		if subscriber.Kind == subscriberNode {
+			recipient, err = runtimepinrouting.NewConnectNodeRecipient(subscriber.HandlerNode, path)
+		} else {
+			name, nameErr := subscriber.AgentNamePlan.Materialize()
+			if nameErr != nil {
+				return nil, nameErr
+			}
+			route, routeErr := runtimeflowidentity.StoredRoute("", "", path).AgentIdentityRoute()
+			if routeErr != nil {
+				return nil, routeErr
+			}
+			plan, planErr := agentidentity.NewPlan(name, route)
+			if planErr != nil {
+				return nil, planErr
+			}
+			recipient, err = runtimepinrouting.NewConnectAgentRecipient(name.AgentID, path, plan)
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, pattern := range subscriber.Patterns {
+			eventsForPattern := []string{pattern.raw}
+			if pattern.admission.Pattern() {
+				eventsForPattern = nil
+				for _, input := range scope.InputEvents {
+					if eventidentity.MatchPattern(pattern.raw, input) {
+						eventsForPattern = append(eventsForPattern, input)
+					}
+				}
+			}
+			for _, event := range eventsForPattern {
+				definitions = append(definitions, graph.AdmitReceiverRecipient(scope.ID, events.EventType(event), recipient)...)
+			}
+		}
+	}
+	return definitions, nil
+}
+
+// ConnectDeclarationDefinitions is source-only descriptive data. It cannot
+// establish a constructed receiver, attachment, or execution permission.
+func (rt *RouteTable) ConnectDeclarationDefinitions(flowID string) []runtimepinrouting.ConnectRecipientRegistration {
+	return append([]runtimepinrouting.ConnectRecipientRegistration(nil), rt.connectDefinitions[flowID]...)
+}
+
+// ConnectReceiverDefinitions binds immutable compiled definitions to data
+// admitted by the caller's native or fixed-revision owner. It cannot establish
+// instance existence, readiness, or execution authority.
+func (rt *RouteTable) ConnectReceiverDefinitions(runID string, instance runtimeflowidentity.Instance) ([]runtimepinrouting.ConnectRecipientRegistration, error) {
+	if rt == nil {
+		return nil, fmt.Errorf("receiver binding requires its compiled source table")
+	}
+	if err := instance.ValidateConstruction(rt.source, runID); err != nil {
+		return nil, err
+	}
+	var bound []runtimepinrouting.ConnectRecipientRegistration
+	for _, definition := range rt.connectDefinitions[instance.TemplateID] {
+		registration, err := rt.connectGraph.BindReceiverInstance(definition, instance)
+		if err != nil {
+			return nil, err
+		}
+		bound = append(bound, registration)
+	}
+	return bound, nil
 }
 
 func (rt *RouteTable) Resolve(eventType string) []Subscriber {
@@ -397,94 +465,6 @@ func projectSubscriberEvents(subscribers []Subscriber, eventType string) []Subsc
 			subscriber.LocalizedEvent = local
 		}
 		out = appendUniqueSubscriber(out, subscriber)
-	}
-	return out
-}
-
-func (rt *RouteTable) EvaluateConnectSource(runID string, sourceEvent runtimepinrouting.SourceEvent) runtimepinrouting.ConnectRecipientEvaluation {
-	if rt == nil || strings.TrimSpace(runID) == "" {
-		return runtimepinrouting.ConnectRecipientEvaluation{}
-	}
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	return rt.connectGraph.EvaluateSourceRecipients(sourceEvent, rt.connectRecipientAdmissionsForRunLocked(runID))
-}
-
-// EvaluateConnectPlan uses the same run-scoped registrations and evaluator as
-// live delivery planning; targets must come from canonical materialization.
-func (rt *RouteTable) EvaluateConnectPlan(runID string, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) runtimepinrouting.ConnectRecipientEvaluation {
-	return rt.evaluateConnectPlan(runID, plan, targets)
-}
-
-func (rt *RouteTable) evaluateConnectPlan(runID string, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) runtimepinrouting.ConnectRecipientEvaluation {
-	if rt == nil || strings.TrimSpace(runID) == "" {
-		return runtimepinrouting.ConnectRecipientEvaluation{}
-	}
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	return rt.connectGraph.EvaluateMaterializedRecipients(plan, targets, rt.connectRecipientAdmissionsForRunLocked(runID))
-}
-
-func (rt *RouteTable) connectRecipientAdmissionsForRunLocked(runID string) []runtimepinrouting.ConnectRecipientRegistration {
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return nil
-	}
-	out := make([]runtimepinrouting.ConnectRecipientRegistration, 0, len(rt.connectRecipients))
-	for _, registration := range rt.connectRecipients {
-		if registration.runID != "" && registration.runID != runID {
-			continue
-		}
-		out = append(out, registration.registration)
-	}
-	return out
-}
-
-func (rt *RouteTable) connectRecipientAdmissionsForRun(runID string) []runtimepinrouting.ConnectRecipientRegistration {
-	if rt == nil || strings.TrimSpace(runID) == "" {
-		return nil
-	}
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	return rt.connectRecipientAdmissionsForRunLocked(runID)
-}
-
-func (rt *RouteTable) connectRecipientAdmissionsForTargets(runID string, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) []runtimepinrouting.ConnectRecipientRegistration {
-	if rt == nil || len(targets) == 0 {
-		return rt.connectRecipientAdmissionsForRun(runID)
-	}
-	paths := make(map[string]struct{}, len(targets))
-	for _, target := range targets {
-		target = target.Normalized()
-		if target.Empty() || target.FlowInstance == "" {
-			return rt.connectRecipientAdmissionsForRun(runID)
-		}
-		path := target.FlowInstance
-		if target.FlowID == "." {
-			path = "."
-		}
-		paths[path] = struct{}{}
-	}
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	var selected []routeConnectRecipientRegistration
-	selected = append(selected, rt.connectRecipientsByInstance[routeConnectRecipientKey{}]...)
-	if runID != "" {
-		selected = append(selected, rt.connectRecipientsByInstance[routeConnectRecipientKey{runID: runID}]...)
-	}
-	for path := range paths {
-		if path == "" {
-			continue
-		}
-		selected = append(selected, rt.connectRecipientsByInstance[routeConnectRecipientKey{instancePath: path}]...)
-		if runID != "" {
-			selected = append(selected, rt.connectRecipientsByInstance[routeConnectRecipientKey{runID: runID, instancePath: path}]...)
-		}
-	}
-	sort.Slice(selected, func(i, j int) bool { return selected[i].ordinal < selected[j].ordinal })
-	out := make([]runtimepinrouting.ConnectRecipientRegistration, 0, len(selected))
-	for _, item := range selected {
-		out = append(out, item.registration)
 	}
 	return out
 }
@@ -627,9 +607,6 @@ func (rt *RouteTable) addFlowInstanceRouteLocked(req FlowInstanceRouteMaterializ
 			if admittedSubscriber.Recipient.IsNode() {
 				admittedSubscriber.targetHandler = subscriberTemplate.TargetHandler
 			}
-			if err := rt.addConnectRecipientLocked(templateDef.FlowID, templateDef.InputEvents, pattern.raw, admittedSubscriber, identity.RunID, instancePath); err != nil {
-				return false, nil, err
-			}
 			resolvedPatterns := routeProjectAdmittedSubscriberPatterns(pattern.admission, templateDef.FlowID, instancePath, pattern.inputEvent, *inputProducers)
 			for _, resolved := range resolvedPatterns {
 				if strings.TrimSpace(resolved.EventPattern) == "" {
@@ -718,15 +695,6 @@ func (rt *RouteTable) removeFlowInstanceRoute(identity runtimeflowidentity.RunSc
 		filtered = append(filtered, pattern)
 	}
 	rt.patterns = filtered
-	filteredConnect := rt.connectRecipients[:0]
-	for _, registration := range rt.connectRecipients {
-		if registration.runID == owner.RunID && registration.instancePath == instancePath {
-			continue
-		}
-		filteredConnect = append(filteredConnect, registration)
-	}
-	rt.connectRecipients = filteredConnect
-	delete(rt.connectRecipientsByInstance, routeConnectRecipientKey{runID: owner.RunID, instancePath: instancePath})
 	for sourceTemplatePath, observers := range rt.templateObservers {
 		filteredObservers := observers[:0]
 		for _, observer := range observers {
@@ -853,21 +821,20 @@ func newRouteTable(source semanticview.Source) *RouteTable {
 
 func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.CompiledConnectGraph) *RouteTable {
 	return &RouteTable{
-		generation:                  1,
-		resolutionIndexDirty:        true,
-		source:                      source,
-		routes:                      make(map[routeResolutionKey][]Subscriber),
-		eventPath:                   make(map[string]struct{}),
-		authoredEventPath:           make(map[string]struct{}),
-		authoredScopes:              make(map[string]struct{}),
-		templates:                   make(map[string]routeFlowTemplate),
-		instanceOwners:              make(map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance),
-		publications:                make(map[runtimeflowidentity.RunScopedFlowInstance]flowRoutePublicationRecord),
-		fencedPublications:          make(map[flowRoutePublicationFence]struct{}),
-		instanceEventPath:           make(map[runtimeflowidentity.RunScopedFlowInstance][]string),
-		templateObservers:           make(map[string][]routeTemplateSourceObserver),
-		connectGraph:                graph,
-		connectRecipientsByInstance: make(map[routeConnectRecipientKey][]routeConnectRecipientRegistration),
+		generation:           1,
+		resolutionIndexDirty: true,
+		source:               source,
+		routes:               make(map[routeResolutionKey][]Subscriber),
+		eventPath:            make(map[string]struct{}),
+		authoredEventPath:    make(map[string]struct{}),
+		authoredScopes:       make(map[string]struct{}),
+		templates:            make(map[string]routeFlowTemplate),
+		instanceOwners:       make(map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance),
+		publications:         make(map[runtimeflowidentity.RunScopedFlowInstance]flowRoutePublicationRecord),
+		fencedPublications:   make(map[flowRoutePublicationFence]struct{}),
+		instanceEventPath:    make(map[runtimeflowidentity.RunScopedFlowInstance][]string),
+		templateObservers:    make(map[string][]routeTemplateSourceObserver),
+		connectGraph:         graph,
 	}
 }
 
@@ -1124,9 +1091,6 @@ func (rt *RouteTable) addAgentPatternsLocked(
 			return fmt.Errorf("route subscriber agent %s concrete identity: %w", key, err)
 		}
 		for _, rawPattern := range normalizeStringList(entry.Subscriptions) {
-			if err := rt.addConnectRecipientLocked(agentFlowID, inputEvents, rawPattern, subscriber, "", ""); err != nil {
-				return err
-			}
 			resolvedPatterns, err := routeResolveSubscriberPatternsWithInputProducers(source, subscriberAgent, agentFlowID, inputEvents, agentPath, agentPath, localEvents, rawPattern, inputProducers)
 			if err != nil {
 				return err
@@ -1168,9 +1132,6 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, routingF
 				return fmt.Errorf("admit route subscriber target handler %s for %s: %w", semanticNodeID, rawPattern, err)
 			}
 			admittedSubscriber.targetHandler = targetHandler
-			if err := rt.addConnectRecipientLocked(connectFlowID, inputEvents, rawPattern, admittedSubscriber, "", ""); err != nil {
-				return err
-			}
 			resolvedPatterns, err := routeResolveSubscriberPatternsWithInputProducers(source, subscriberNode, routingFlowID, inputEvents, basePath, basePath, localEvents, rawPattern, inputProducers)
 			if err != nil {
 				return err
@@ -1181,49 +1142,6 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, routingF
 				}
 				rt.addResolvedPatternLocked(admittedSubscriber, resolved, "", "")
 			}
-		}
-	}
-	return nil
-}
-
-func (rt *RouteTable) addConnectRecipientLocked(flowID string, inputEvents []string, eventPattern string, subscriber Subscriber, runID, instancePath string) error {
-	var recipient runtimepinrouting.ConnectRecipient
-	var err error
-	switch {
-	case subscriber.Recipient.IsNode():
-		recipient, err = runtimepinrouting.NewConnectNodeRecipient(
-			subscriber.handlerNode, subscriber.Path,
-		)
-	case subscriber.Recipient.IsAgent():
-		recipient, err = runtimepinrouting.NewConnectAgentRecipient(subscriber.Recipient.ID(), subscriber.Path, subscriber.AgentPlan)
-	default:
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	eventPattern = eventidentity.Normalize(eventPattern)
-	eventTypes := []string{eventPattern}
-	if strings.Contains(eventPattern, "*") {
-		eventTypes = nil
-		for _, eventType := range normalizeStringList(inputEvents) {
-			if eventidentity.MatchPattern(eventPattern, eventType) {
-				eventTypes = append(eventTypes, eventType)
-			}
-		}
-	}
-	for _, eventType := range eventTypes {
-		for _, registration := range rt.connectGraph.AdmitReceiverRecipient(strings.TrimSpace(flowID), events.EventType(eventType), recipient) {
-			rt.nextConnectRecipientOrdinal++
-			item := routeConnectRecipientRegistration{
-				registration: registration,
-				runID:        strings.TrimSpace(runID),
-				instancePath: strings.Trim(strings.TrimSpace(instancePath), "/"),
-				ordinal:      rt.nextConnectRecipientOrdinal,
-			}
-			rt.connectRecipients = append(rt.connectRecipients, item)
-			key := routeConnectRecipientKey{runID: item.runID, instancePath: item.instancePath}
-			rt.connectRecipientsByInstance[key] = append(rt.connectRecipientsByInstance[key], item)
 		}
 	}
 	return nil
