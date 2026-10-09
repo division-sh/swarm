@@ -88,10 +88,13 @@ func (a providerRawSettlementAdmission) authorizes(projected, inbound events.Eve
 // publication operation. The selected store receives only CommitCommands;
 // PreparedPublications remain EventBus-owned for post-commit dispatch.
 type InboundDeliveryPlan struct {
-	events   []InboundDeliveryEvent
-	prepared []PreparedPublish
-	commands []PublicationCommand
+	admission providertriggers.PublicationAdmission
+	events    []InboundDeliveryEvent
+	prepared  []PreparedPublish
+	commands  []PublicationCommand
 }
+
+func (p InboundDeliveryPlan) Admission() providertriggers.PublicationAdmission { return p.admission }
 
 func (p InboundDeliveryPlan) PreparedPublications() []PreparedPublish {
 	return append([]PreparedPublish(nil), p.prepared...)
@@ -213,7 +216,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 			return InboundDeliveryPlan{}, err
 		}
 	}
-	plan := InboundDeliveryPlan{events: append([]InboundDeliveryEvent(nil), validated.Events...)}
+	plan := InboundDeliveryPlan{admission: validated.Admission, events: append([]InboundDeliveryEvent(nil), validated.Events...)}
 	activationOwners := make(map[runtimeflowidentity.Route]int)
 	release := func(cause error) (InboundDeliveryPlan, error) {
 		for _, prepared := range plan.prepared {
@@ -259,6 +262,9 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		}
 		if err := command.Validate(); err != nil {
 			return release(fmt.Errorf("canonicalize inbound activation ownership: %w", err))
+		}
+		if input, native := validated.Admission.NativeInput(); native {
+			command.nativeInput = &input
 		}
 		plan.prepared = append(plan.prepared, prepared)
 		plan.commands = append(plan.commands, command)
