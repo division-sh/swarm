@@ -3404,91 +3404,97 @@
   {
     "owner": "internal/store/internal/backend/postgres/inspection_io.go::*Backend.withInspectionIO",
     "audit_rows": "A19,A28",
-    "proof_families": "P18,P24",
-    "body_sha256": "6c868c0af6436d45db952fb3e1cd63cc721e76eab66569bb93d7f01e2cf8a44a"
+    "proof_families": "P18,P24,2591-PG-IO",
+    "body_sha256": "48c9c3c4a04e2f46ac3e64675afc302a9c029f9e396043b2f426a44d43c302f6"
   },
   {
     "owner": "internal/store/internal/backend/postgres/inspection_io.go::OpenForInspection",
     "audit_rows": "A19,A28",
-    "proof_families": "P18,P24",
+    "proof_families": "P18,P24,2591-PG-IO",
     "body_sha256": "934acd92b97a1a2ee4ff0e984aa9520f6e4fca1358099fa505c7b9d248003c26"
   },
   {
     "owner": "internal/store/internal/backend/postgres/possession_observation.go::*Backend.ObserveAdvisoryLock",
     "audit_rows": "A20,A28",
-    "proof_families": "P19,P22,P24",
+    "proof_families": "P19,P22,P24,2591-PG-IO",
     "body_sha256": "6dd5a1356ec87c1773024cbd2e221288b4955c2733adcf6e53c2307e16e8d57f"
   },
   {
     "owner": "internal/store/internal/backend/postgres/possession_observation.go::*Backend.observeAdvisoryLock",
     "audit_rows": "A20,A28",
-    "proof_families": "P19,P22,P24",
+    "proof_families": "P19,P22,P24,2591-PG-IO",
     "body_sha256": "c33175c88f4920b744902a73f527e800ea8b77941ed5eab8bd81cf59e04b6bc2"
   },
   {
     "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationDialer.Dial",
     "audit_rows": "A20,A28",
-    "proof_families": "P19,P22,P24",
+    "proof_families": "P19,P22,P24,2591-PG-IO",
     "body_sha256": "7564996d1a831e9b4ed366aed555624307ab510a5469a9f5ae5357746280688a"
   },
   {
     "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationDialer.DialContext",
     "audit_rows": "A20,A28",
-    "proof_families": "P19,P22,P24",
+    "proof_families": "P19,P22,P24,2591-PG-IO",
     "body_sha256": "99aa2a7615b9044749da58c4df450b01e3cedc1a96628b3bb7bb0343110691ce"
   },
   {
     "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationDialer.DialTimeout",
     "audit_rows": "A20,A28",
-    "proof_families": "P19,P22,P24",
+    "proof_families": "P19,P22,P24,2591-PG-IO",
     "body_sha256": "9f3480f4f6e7f5617a5cd61ab2f3359f172cacf7c97e5761f979d8b6363e739c"
   },
   {
     "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationDialer.bind",
     "audit_rows": "A20,A28",
-    "proof_families": "P19,P22,P24",
-    "body_sha256": "819bd0c5f324efcbd569d1413e35a32af113e6771d500abbae68f453d74edeb1"
+    "proof_families": "P19,P22,P24,2591-PG-IO",
+    "body_sha256": "e10d83ee55ae39fd49c644e2f66a79811f7c5dfde973fb6dfd1ef9f2846b2f20"
   },
   {
     "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationDialer.close",
     "audit_rows": "A20,A28",
-    "proof_families": "P19,P22,P24",
+    "proof_families": "P19,P22,P24,2591-PG-IO",
     "body_sha256": "8117d5e88f6e65ec3dccfc878232936013dc3bfadfd1e92c98dc9b874aad249a"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationDialer.phaseError",
+    "audit_rows": "A20,A28",
+    "proof_families": "P19,P22,P24,2591-PG-IO",
+    "body_sha256": "2827611f348ad5e0191a1dbb289624a488cfdaee9dc305237b3e61564c7738f2"
   },
   {
     "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationSocket.Close",
     "audit_rows": "A20,A28",
-    "proof_families": "P19,P22,P24",
+    "proof_families": "P19,P22,P24,2591-PG-IO",
     "body_sha256": "eb0832e206ea48f230db869bfde12ead94bb27b3e206c136b332616a7e5869fd"
   },
   {
     "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationSocket.Read",
     "audit_rows": "A20,A28",
-    "proof_families": "P19,P22,P24",
+    "proof_families": "P19,P22,P24,2591-PG-IO",
     "body_sha256": "019729aa85d6f9d8745f06b58c1226eb04bddeeaf5f2e08574e4a6569ef91777"
   },
   {
     "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationSocket.SetDeadline",
     "audit_rows": "A20,A28",
-    "proof_families": "P19,P22,P24",
+    "proof_families": "P19,P22,P24,2591-PG-IO",
     "body_sha256": "cb8a53ee9ebdb91cde868cb3977c08bdb8fe9e6bedda22387f07b37f61f227b3"
   },
   {
     "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationSocket.Write",
     "audit_rows": "A20,A28",
-    "proof_families": "P19,P22,P24",
+    "proof_families": "P19,P22,P24,2591-PG-IO",
     "body_sha256": "f47e7fc87b13c33b5d5bc35ed220fa7ba1d772e2413ecaa1996119db14b967f8"
   },
   {
     "owner": "internal/store/internal/backend/postgres/possession_observation.go::*observationSocket.bound",
     "audit_rows": "A20,A28",
-    "proof_families": "P19,P22,P24",
+    "proof_families": "P19,P22,P24,2591-PG-IO",
     "body_sha256": "4d4eff6615106dd498852683866e6b375512a9fdb0620b78a49948eb3dec1db8"
   },
   {
     "owner": "internal/store/internal/backend/postgres/possession_observation.go::observationContextError",
     "audit_rows": "A20,A28",
-    "proof_families": "P19,P22,P24",
+    "proof_families": "P19,P22,P24,2591-PG-IO",
     "body_sha256": "cc43f947a6538fe8fb3d357a347deaaab28cb9f326e2db08db33511510366360"
   },
   {
