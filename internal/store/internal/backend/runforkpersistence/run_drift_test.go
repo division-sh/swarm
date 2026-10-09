@@ -160,6 +160,49 @@ func TestVerifyRunHistoryAdmissionBothStores(t *testing.T) {
 	}
 }
 
+func TestVerifyRunPhysicalJSONAdmissionBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			for _, tc := range []struct {
+				name    string
+				value   any
+				invalid bool
+			}{
+				{"sql_null", nil, false}, {"json_null", "null", false},
+				{"empty_text", "", true}, {"empty_blob", []byte{}, true},
+				{"whitespace", " \n\t", true}, {"malformed", "{", true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					db, run, entity := runDriftDatabase(t, backend)
+					id := uuid.NewString()
+					insertRunDriftMutation(t, db, run, runForkRevisionEntityMutation{MutationID: id, EntityID: entity, Domain: "bookkeeping", Path: "removed", NewValue: json.RawMessage("null"), CreatedAt: time.Now().UTC()}, 1)
+					_, err := db.Exec(`UPDATE entity_mutations SET new_value=$1 WHERE mutation_id=$2`, tc.value, id)
+					if backend == "postgres" && tc.invalid {
+						if err == nil {
+							t.Fatal("JSONB admitted corrupt JSON")
+						}
+						return
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					report, err := inspectRunDriftTest(t, db, run)
+					if !tc.invalid {
+						if err != nil || len(report.Rows) != 0 || report.EntitiesChecked != 1 {
+							t.Fatalf("valid removal refused: %+v %v", report, err)
+						}
+						return
+					}
+					var history *mutationlog.HistoryError
+					if !errors.As(err, &history) || history.Code != "invalid_mutation_history" || history.RunID != run || history.EntityID != entity || history.MutationID != id || report.EntitiesChecked != 0 || len(report.Rows) != 0 {
+						t.Fatalf("corrupt physical JSON was clean or lost coordinates: report=%+v error=%v", report, err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestVerifyRunSharedForkOrderBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
