@@ -396,9 +396,17 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 	if err != nil {
 		t.Fatal(err)
 	}
+	instanceKey := ""
+	if mode == "template" {
+		instanceKey, err = pipeline.AdmitFlowInstanceKey(source, flow, "item")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{Revision: 7}, Entities: []runfork.RunForkEntityState{{EntityID: entityID, CurrentState: initial.ID(), EnteredStateAt: &enteredAt, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 		Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: path, EntityType: entityType, StageDefined: graph.StageCount() != 0,
 		FlowTemplate: flow, Mode: mode, FlowConfig: config,
+		ParentInstance: instance.ParentRoute.FlowInstance, InstanceKey: instanceKey,
 	}}}}
 	if flow == "branch/left" || flow == "branch/right" {
 		sibling := "branch/right"
@@ -411,6 +419,7 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 		metadata := *other.MaterializationMetadata
 		metadata.FlowInstance = otherInstance.InstancePath
 		metadata.FlowTemplate = sibling
+		metadata.ParentInstance = otherInstance.ParentRoute.FlowInstance
 		payload, err := pipeline.WorkflowInstanceHeaderPayloadForIdentity(otherInstance, source.WorkflowVersion())
 		if err != nil {
 			t.Fatal(err)

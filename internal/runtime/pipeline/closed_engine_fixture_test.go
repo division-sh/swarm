@@ -575,7 +575,7 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 		return err
 	}
 	if record.Transition.CreatesState() {
-		flowQuery := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at, entity_id, entity_type, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, updated_at, stage_defined, slug, name, terminated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, 1, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?) ON CONFLICT(run_id, instance_path) DO NOTHING`
+		flowQuery := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at, entity_id, entity_type, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, updated_at, stage_defined, slug, name, terminated_at, parent_instance, instance_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, 1, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, '')) ON CONFLICT(run_id, instance_path) DO NOTHING`
 		entityQuery := `
 			INSERT INTO entity_state (
 				run_id, entity_id, flow_instance, entity_type, slug, name,
@@ -584,7 +584,7 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 			) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, 1, ?, ?, ?)
 		`
 		if store.testDialect() == workflowStoreDialectPostgres {
-			flowQuery = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at, entity_id, entity_type, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, updated_at, stage_defined, slug, name, terminated_at) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7, $8::uuid, NULLIF($9, ''), $10, $11::jsonb, $12::jsonb, $13::jsonb, 1, $14, $15, $16, NULLIF($17, ''), NULLIF($18, ''), $19) ON CONFLICT (run_id, instance_path) DO NOTHING`
+			flowQuery = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at, entity_id, entity_type, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, updated_at, stage_defined, slug, name, terminated_at, parent_instance, instance_key) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7, $8::uuid, NULLIF($9, ''), $10, $11::jsonb, $12::jsonb, $13::jsonb, 1, $14, $15, $16, NULLIF($17, ''), NULLIF($18, ''), $19, NULLIF($20, ''), NULLIF($21, '')) ON CONFLICT (run_id, instance_path) DO NOTHING`
 			entityQuery = `
 				INSERT INTO entity_state (
 					run_id, entity_id, flow_instance, entity_type, slug, name,
@@ -593,7 +593,7 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 				) VALUES ($1::uuid, $2::uuid, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, 1, $12, $13, $13)
 			`
 		}
-		result, err := tx.ExecContext(ctx, flowQuery, record.Identity.RunID, record.Identity.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt, record.EntityID, record.EntityType, record.CurrentState, string(record.Gates), string(record.Bookkeeping), string(record.Accumulator), record.EnteredStageAt, record.UpdatedAt, record.StageDefined, record.Slug, record.Name, nullablePipelineTestWorkflowTerminationTime(record.TerminatedAt))
+		result, err := tx.ExecContext(ctx, flowQuery, record.Identity.RunID, record.Identity.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt, record.EntityID, record.EntityType, record.CurrentState, string(record.Gates), string(record.Bookkeeping), string(record.Accumulator), record.EnteredStageAt, record.UpdatedAt, record.StageDefined, record.Slug, record.Name, nullablePipelineTestWorkflowTerminationTime(record.TerminatedAt), record.ParentInstance, record.InstanceKey)
 		if err != nil {
 			return fmt.Errorf("insert pipeline test workflow flow instance: %w", err)
 		}
