@@ -58,6 +58,32 @@ func TestPersistenceAuthorityDebtAnalysisCachePRCannotPublish(t *testing.T) {
 	}
 }
 
+func TestPersistenceAuthorityDebtAnalysisCachePublicationAdmission(t *testing.T) {
+	for _, test := range []struct {
+		name, publish, actions, ref, event string
+		allowed                            bool
+	}{
+		{"ordinary local", "", "", "", "", false},
+		{"no opt-in", "", "true", "refs/heads/master", "push", false},
+		{"local opt-in", "1", "", "refs/heads/master", "push", false},
+		{"PR", "1", "true", "refs/heads/master", "pull_request", false},
+		{"foreign ref", "1", "true", "refs/heads/feature", "push", false},
+		{"manual", "1", "true", "refs/heads/master", "workflow_dispatch", false},
+		{"master push", "1", "true", "refs/heads/master", "push", true},
+		{"master schedule", "1", "true", "refs/heads/master", "schedule", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("SWARM_DEBT_CACHE_PUBLISH", test.publish)
+			t.Setenv("GITHUB_ACTIONS", test.actions)
+			t.Setenv("GITHUB_REF", test.ref)
+			t.Setenv("GITHUB_EVENT_NAME", test.event)
+			if got := debtProtectedMasterPublicationAllowed(); got != test.allowed {
+				t.Fatalf("publication admission=%v want=%v", got, test.allowed)
+			}
+		})
+	}
+}
+
 func TestPersistenceAuthorityDebtAnalysisCacheRejectsInvalidEntries(t *testing.T) {
 	for _, name := range []string{"schema", "source", "analyzer", "toolchain", "checksum", "truncated", "oversized", "duplicate-site", "wrong-payload-source", "wrong-payload-analyzer", "zero-multiplicity", "unknown-field", "duplicate-field", "trailing-json"} {
 		t.Run(name, func(t *testing.T) {
