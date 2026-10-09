@@ -58,7 +58,7 @@ func requireSupplementalForkAcquisitionSettlement(t *testing.T, rt servedControl
 	}
 	var publicEntity operatorread.OperatorEntityFull
 	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &publicEntity)
-	if publicEntity.Entity.RunID != runID || publicEntity.Entity.EntityID != entityID || publicEntity.Entity.FlowInstance != "consumer" || publicEntity.Entity.EntityType != "receipt" || publicEntity.Entity.CurrentState != "active" || !reflect.DeepEqual(publicEntity.Fields, row.Fields) {
+	if publicEntity.Entity.RunID != runID || publicEntity.Entity.EntityID != entityID || publicEntity.Entity.FlowInstance != "consumer" || publicEntity.Entity.EntityType != "receipt" || publicEntity.Entity.CurrentState == nil || *publicEntity.Entity.CurrentState != "active" || !reflect.DeepEqual(publicEntity.Fields, row.Fields) {
 		t.Fatalf("public acquired receiver: %+v", publicEntity)
 	}
 	type markerMutation struct {

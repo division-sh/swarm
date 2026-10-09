@@ -73,27 +73,6 @@ func (s *PipelinePostgresOwner) LoadWorkflowInstance(ctx context.Context, identi
 	return item, err == nil, err
 }
 
-func (s *PipelinePostgresOwner) LoadWorkflowEntityState(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
-	if s == nil || s.backend == nil {
-		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("postgres workflow entity state reader is required")
-	}
-	identity = identity.Normalize()
-	entityID = runtimeidentity.NormalizeEntityID(entityID.String())
-	if err := identity.Validate(); err != nil || entityID.IsZero() {
-		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("workflow entity state lookup requires exact route and entity identity")
-	}
-	record, err := scanPostgresWorkflowEntityState(s.backend.QueryRowContext(ctx, postgresWorkflowEntityStateSelect+`
-		WHERE es.run_id = $1::uuid AND es.entity_id = $2::uuid AND es.flow_instance = $3
-	`, identity.RunID, entityID.String(), identity.Route.InstancePath))
-	if err == sql.ErrNoRows {
-		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, nil
-	}
-	if err != nil {
-		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, err
-	}
-	return record, true, nil
-}
-
 func (s *PipelinePostgresOwner) LoadWorkflowTargetPersistence(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (runtimepipeline.WorkflowTargetPersistenceRecord, error) {
 	if s == nil || s.backend == nil {
 		return runtimepipeline.WorkflowTargetPersistenceRecord{}, fmt.Errorf("postgres workflow target persistence reader is required")
@@ -395,27 +374,6 @@ func (s *PipelineSQLiteOwner) LoadWorkflowInstance(ctx context.Context, identity
 		return runtimepipeline.WorkflowInstance{}, false, err
 	}
 	return items[0], true, nil
-}
-
-func (s *PipelineSQLiteOwner) LoadWorkflowEntityState(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
-	if s == nil || s.backend == nil {
-		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("sqlite workflow entity state reader is required")
-	}
-	identity = identity.Normalize()
-	entityID = runtimeidentity.NormalizeEntityID(entityID.String())
-	if err := identity.Validate(); err != nil || entityID.IsZero() {
-		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("workflow entity state lookup requires exact route and entity identity")
-	}
-	record, err := scanSQLiteWorkflowEntityState(s.backend.QueryRowContext(ctx, sqliteWorkflowEntityStateSelect+`
-		WHERE es.run_id = ? AND es.entity_id = ? AND es.flow_instance = ?
-	`, identity.RunID, entityID.String(), identity.Route.InstancePath))
-	if err == sql.ErrNoRows {
-		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, nil
-	}
-	if err != nil {
-		return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, err
-	}
-	return record, true, nil
 }
 
 func (s *PipelineSQLiteOwner) LoadWorkflowTargetPersistence(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (runtimepipeline.WorkflowTargetPersistenceRecord, error) {

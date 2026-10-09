@@ -127,9 +127,12 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 							}
 							waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 							requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
-							won := entity.Entity.CurrentState == "done"
+							if entity.Entity.CurrentState == nil {
+								t.Fatal("competing exit lost its constructed lifecycle")
+							}
+							won := *entity.Entity.CurrentState == "done"
 							if (order == "gate_first" && !won) || (order == "exit_first" && won) {
-								t.Fatalf("ordered winner changed: %s -> %s", order, entity.Entity.CurrentState)
+								t.Fatalf("ordered winner changed: %s -> %s", order, *entity.Entity.CurrentState)
 							}
 							count, target := 0, "cancelled"
 							if won {
@@ -287,7 +290,7 @@ func lifecycleCompetingTerminalEntity(t *testing.T, rt servedControlProofRuntime
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
 		var entity operatorread.OperatorEntityFull
 		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
-		if entity.Entity.CurrentState == "done" || entity.Entity.CurrentState == "cancelled" {
+		if entity.Entity.CurrentState != nil && (*entity.Entity.CurrentState == "done" || *entity.Entity.CurrentState == "cancelled") {
 			return entity
 		}
 		time.Sleep(20 * time.Millisecond)

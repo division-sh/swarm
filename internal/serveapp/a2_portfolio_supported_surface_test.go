@@ -517,12 +517,12 @@ func requireA2PortfolioJoin(t *testing.T, rt servedControlProofRuntime, period o
 	}
 	if closed {
 		actual, err := join.Results()
-		if period.Entity.CurrentState != "complete" || join.Status != joinruntime.StatusClosed || join.CloseReason != joinruntime.CloseReasonComplete ||
+		if period.Entity.CurrentState == nil || *period.Entity.CurrentState != "complete" || join.Status != joinruntime.StatusClosed || join.CloseReason != joinruntime.CloseReasonComplete ||
 			!join.TimerCancelled || join.OutcomePending || !join.OutcomeFired || err != nil || !reflect.DeepEqual(actual, results) {
-			t.Fatalf("real join continuation and ordered typed results: state=%s join=%+v results=%#v want=%#v err=%v", period.Entity.CurrentState, join, actual, results, err)
+			t.Fatalf("real join continuation and ordered typed results: entity=%+v join=%+v results=%#v want=%#v err=%v", period.Entity, join, actual, results, err)
 		}
-	} else if period.Entity.CurrentState != "awaiting" || join.Status != joinruntime.StatusOpen || join.CloseReason != "" || join.TimerCancelled || join.OutcomePending || join.OutcomeFired {
-		t.Fatalf("ordinary incomplete period: state=%s join=%+v", period.Entity.CurrentState, join)
+	} else if period.Entity.CurrentState == nil || *period.Entity.CurrentState != "awaiting" || join.Status != joinruntime.StatusOpen || join.CloseReason != "" || join.TimerCancelled || join.OutcomePending || join.OutcomeFired {
+		t.Fatalf("ordinary incomplete period: entity=%+v join=%+v", period.Entity, join)
 	}
 	return join
 }
@@ -537,7 +537,7 @@ func waitA2PortfolioComplete(t *testing.T, rt servedControlProofRuntime, runID, 
 		if period.Entity.RunID != runID || period.Entity.FlowInstance != path || period.Entity.EntityID != flowidentity.EntityID(path) {
 			t.Fatalf("completion poll lost the exact receiver: %+v, want %s/%s", period.Entity, runID, path)
 		}
-		if period.Entity.CurrentState == "complete" {
+		if period.Entity.CurrentState != nil && *period.Entity.CurrentState == "complete" {
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			return requireA2PortfolioEntity(t, rt, runID, path)
 		}

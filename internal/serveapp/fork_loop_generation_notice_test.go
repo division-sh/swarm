@@ -119,7 +119,7 @@ func requireForkLoopStateEffect(t *testing.T, rt servedControlProofRuntime, runI
 	entityID := flowidentity.EntityID("review")
 	var entity operatorread.OperatorEntityFull
 	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
-	if entity.Entity.RunID != runID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != "review" || entity.Entity.CurrentState != "reviewing" || entity.Fields["observed_revision"] != revision || entity.Fields["observed_token"] != "loop-notice-proof" {
+	if entity.Entity.RunID != runID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != "review" || entity.Entity.CurrentState == nil || *entity.Entity.CurrentState != "reviewing" || entity.Fields["observed_revision"] != revision || entity.Fields["observed_token"] != "loop-notice-proof" {
 		t.Fatalf("loop business fields lost current generation: %+v", entity)
 	}
 	activation := readForkLoopActivation(t, rt, runID)
