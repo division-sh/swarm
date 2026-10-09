@@ -26,7 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -60,11 +60,12 @@ func TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), runID))
-				fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: fact, Artifact: bundle.SourceArtifact}
-				if selected.postgres {
-					runlifecyclefixture.RequirePostgres(t, ctx, selected.db, fixture)
-				} else {
-					runlifecyclefixture.RequireSQLite(t, ctx, selected.db, fixture)
+				runOwner, ok := selected.events.(storetest.RunFixtureStore)
+				if !ok {
+					t.Fatal("A2 native fixture requires the original selected run owner")
+				}
+				if err := storetest.MaterializeRun(ctx, runOwner, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()}); err != nil {
+					t.Fatal(err)
 				}
 				targetFlow := "orders"
 				if scenario.descendant != "" {
