@@ -2229,6 +2229,11 @@ func (eb *EventBus) planSubscribedRoutePlan(ctx context.Context, evt events.Even
 }
 
 func (eb *EventBus) planSubscribedRoutePlanWithPlanner(ctx context.Context, evt events.Event, recordDiagnostic bool, planner deliveryPlanner) (RoutePlan, error) {
+	var err error
+	ctx, err = eb.admitSourceArtifactFact(ctx)
+	if err != nil {
+		return RoutePlan{}, err
+	}
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	if err := eb.authorizePublishRecipientPlanning(ctx, evt); err != nil {
 		return RoutePlan{}, err
@@ -2731,7 +2736,7 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 			return result, nil
 		}
 	}
-	plan, err := eb.planSubscribedRoutePlan(withTemplateInstanceLifecyclePreview(ictx), evt, false)
+	plan, err := eb.planSubscribedRoutePlan(withConnectPlanningPreview(ictx), evt, false)
 	if err != nil {
 		return PublishRecipientPlan{}, err
 	}

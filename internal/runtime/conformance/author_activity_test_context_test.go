@@ -288,6 +288,7 @@ type testAuthorActivityCatalogRegistrar interface {
 }
 
 type conformanceDurableEventBusStore interface {
+	runtimepipeline.FlowInstanceIndexReader
 	runtimepipeline.FlowConstructionPublicationReader
 	runtimebus.EventStore
 	runtimereplycontext.Store
@@ -323,6 +324,7 @@ func durableConformanceEventBusOptions(store conformanceDurableEventBusStore, op
 
 func conformanceDurableEventBusDependencies(store conformanceDurableEventBusStore) runtimebus.DurableDependencies {
 	return runtimebus.DurableDependencies{
+		Instances:                store,
 		ConstructionPublications: store,
 		ReplyContext:             store, RunLifecycle: store, DeliveryLifecycle: store,
 		FlowRoutes: store, FlowRouteRecords: store, FlowRouteSets: store, FlowRouteTopology: store, FlowRouteRollback: store,

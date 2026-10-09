@@ -102,6 +102,7 @@ type EventBus struct {
 // DurableDependencies is the exact selected-store contract consumed by a
 // durable EventBus. EventStore is never inspected to discover these roles.
 type DurableDependencies struct {
+	Instances                runtimepipeline.FlowInstanceIndexReader
 	ConstructionPublications runtimepipeline.FlowConstructionPublicationReader
 	EmitFeedback             runtimepipeline.WorkflowEmitFeedbackOwner
 	ScenarioSetup            ScenarioSetupCommitOwner
@@ -127,6 +128,7 @@ func (d DurableDependencies) validate() error {
 		name  string
 		value any
 	}{
+		{"instance index reader", d.Instances},
 		{"construction publication reader", d.ConstructionPublications},
 		{"run lifecycle owner", d.RunLifecycle},
 		{"delivery lifecycle owner", d.DeliveryLifecycle},
@@ -611,7 +613,7 @@ func (eb *EventBus) rebuildRoutePlanners() {
 	if eb == nil {
 		return
 	}
-	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.PinRoutingDescriptors, eb.templateInstancePlanner, eb.durable.ConstructionPublications, eb.durable.ReplyContext)
+	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.PinRoutingDescriptors, eb.templateInstancePlanner, eb.durable.Instances, eb.durable.ReplyContext)
 	eb.connectRoutePlanner.loadAgents = eb.activeAgentDescriptors
 	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
 }

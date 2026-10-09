@@ -485,8 +485,7 @@ func TestRoutePlanTargetProjectionPreservesExplicitlyAbsentIngressSource(t *test
 
 func TestPayloadCarriesAreNotPersistedInDeliveryProjection(t *testing.T) {
 	plan := mustInstanceKeyConnectRoutePlan(t, connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelect))
-	projection, err := syntheticDeliveryPayloadProjection(plan, TemplateInstanceLifecycleDecision{
-		Action:      templateInstanceLifecycleActionSelectedExisting,
+	projection, err := syntheticDeliveryPayloadProjection(plan, connectInstanceSelection{
 		KeyMaterial: []runtimecontracts.TemplateInstanceKeyValue{{Field: mustBusTemplateInstanceField(t, "account_id"), Value: "acct-1"}},
 	})
 	if err != nil {

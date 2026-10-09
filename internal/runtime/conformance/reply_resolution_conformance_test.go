@@ -88,6 +88,7 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
 		Durable: bus.DurableDependencies{
+			Instances:                receipts,
 			ConstructionPublications: receipts,
 			ReplyContext:             store,
 			ActiveFlows:              store,
@@ -172,6 +173,7 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
 		Durable: bus.DurableDependencies{
+			Instances:                receipts,
 			ConstructionPublications: receipts,
 			ReplyContext:             store,
 			ActiveFlows:              store,
@@ -1106,14 +1108,14 @@ func replyConformanceConstructionReceipts(t *testing.T, source semanticview.Sour
 	t.Helper()
 	receipts := conformanceConstructionReceipts{}
 	root := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")
-	receipts.add(t, source, runID, root)
+	receipts.add(t, source, runID, root, "")
 	provider, err := runtimeflowidentity.KeylessChild(source, root, templatereply.ProviderFlowID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipts.add(t, source, runID, provider)
+	receipts.add(t, source, runID, provider, "")
 	for _, key := range []string{"account-a", "account-b"} {
-		receipts.add(t, source, runID, replyConformanceRequesterIdentity(t, source, runID, key))
+		receipts.add(t, source, runID, replyConformanceRequesterIdentity(t, source, runID, key), key)
 	}
 	return receipts
 }

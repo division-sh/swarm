@@ -418,9 +418,9 @@ func TestConnectPreviewUsesPairedRouteTableSource(t *testing.T) {
 		ctx := context.WithValue(context.Background(), connectRoutePlanPreviewRoutesKey{}, current)
 		constructed := ConstructedFlowInstanceIdentityFixture(source, "workers", id, busInternalTestRunID)
 		at := time.Unix(1700000000, 0).UTC()
-		decision := TemplateInstanceLifecycleDecision{
-			Action: templateInstanceLifecycleActionPreviewCreate, InstanceID: id, InstancePath: "workers/" + id,
-			Activation: &runtimepipeline.FlowInstanceActivationPlan{
+		decision := connectInstanceSelection{
+			identity: constructed,
+			FlowInstanceSelection: runtimepipeline.FlowInstanceSelection{Activation: &runtimepipeline.FlowInstanceActivationPlan{
 				Identity: constructed,
 				Instance: runtimepipeline.WorkflowInstance{StorageRef: constructed.InstancePath, InstanceID: constructed.InstanceID},
 				Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
@@ -428,7 +428,7 @@ func TestConnectPreviewUsesPairedRouteTableSource(t *testing.T) {
 					BundleHash: eb.sourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(),
 				},
 				OccurredAt: at,
-			},
+			}},
 		}
 		if err := resolver.installTemplateInstanceLifecyclePreview(ctx, busInternalTestRunID, decision); err != nil {
 			t.Fatal(err)

@@ -39,24 +39,26 @@ import (
 )
 
 type targetRouteMemoryStore struct {
-	mu                sync.Mutex
-	constructions     map[runtimeflowidentity.RunScopedFlowInstance]runtimepipeline.FlowConstructionPublicationEvidence
-	events            map[string]events.Event
-	settlements       map[string]events.RouteSettlement
-	routes            map[string][]events.DeliveryRoute
-	scopes            map[string]runtimepipelineobligation.CommittedScope
-	missing           []events.PersistedReplayEvent
-	receipts          map[string]string
-	receiptErrs       map[string]*runtimefailures.Envelope
-	claimIssuer       *runtimepipelineobligation.ClaimIssuer
-	scanIssuer        *runtimepipelineobligation.ScanIssuer
-	claims            map[string]runtimepipelineobligation.Claim
-	scans             map[string]runtimepipelineobligation.ScanRequest
-	active            map[string]bool
-	flowRoutes        []FlowInstanceRouteRecord
-	targetOwners      []ActiveTargetDescriptor
-	workflowInstances []runtimepipeline.WorkflowInstance
-	workflowStates    []runtimepipeline.WorkflowEntityStatePersistenceRecord
+	mu                      sync.Mutex
+	instanceObservations    []runtimepipeline.FlowInstanceObservation
+	constructionIndexSource semanticview.Source
+	constructions           map[runtimeflowidentity.RunScopedFlowInstance]runtimepipeline.FlowConstructionPublicationEvidence
+	events                  map[string]events.Event
+	settlements             map[string]events.RouteSettlement
+	routes                  map[string][]events.DeliveryRoute
+	scopes                  map[string]runtimepipelineobligation.CommittedScope
+	missing                 []events.PersistedReplayEvent
+	receipts                map[string]string
+	receiptErrs             map[string]*runtimefailures.Envelope
+	claimIssuer             *runtimepipelineobligation.ClaimIssuer
+	scanIssuer              *runtimepipelineobligation.ScanIssuer
+	claims                  map[string]runtimepipelineobligation.Claim
+	scans                   map[string]runtimepipelineobligation.ScanRequest
+	active                  map[string]bool
+	flowRoutes              []FlowInstanceRouteRecord
+	targetOwners            []ActiveTargetDescriptor
+	workflowInstances       []runtimepipeline.WorkflowInstance
+	workflowStates          []runtimepipeline.WorkflowEntityStatePersistenceRecord
 }
 
 func (s *targetRouteMemoryStore) installConstructionReceipt(owner runtimeflowidentity.RunScopedFlowInstance, evidence runtimepipeline.FlowConstructionPublicationEvidence) {
@@ -319,9 +321,14 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 			s.constructions = make(map[runtimeflowidentity.RunScopedFlowInstance]runtimepipeline.FlowConstructionPublicationEvidence)
 		}
 		for _, constructor := range plan.ConstructionPlans() {
+			observed, err := admitConstructionIndexTestObservation(s.constructionIndexSource, constructor.Readiness.RunID, constructor.Identity, constructor.Instance.InstanceKey)
+			if err != nil {
+				return CommittedPublication{}, err
+			}
+			s.instanceObservations = append(s.instanceObservations, observed)
 			owner := runtimeflowidentity.RunScopedFlowInstance{RunID: constructor.Readiness.RunID, Route: constructor.Identity.Route()}
 			if _, exists := s.constructions[owner]; !exists {
-				s.constructions[owner] = runtimepipeline.FlowConstructionPublicationEvidence{Identity: constructor.Identity, CreatingInput: constructor.CreatingInput, Fields: constructor.Instance.Fields}
+				s.constructions[owner] = runtimepipeline.FlowConstructionPublicationEvidence{Identity: constructor.Identity, InstanceKey: constructor.Instance.InstanceKey, CreatingInput: constructor.CreatingInput, Fields: constructor.Instance.Fields}
 			}
 		}
 	}
