@@ -51,7 +51,9 @@ func (s *MailboxPostgresOwner) acknowledgeMailboxNotice(ctx context.Context, req
 		return completion, false, err
 	}
 	defer func() { err = errors.Join(err, lease.Release(ctx)) }()
-	err = s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		changed = false
 		if err := storesource.RequirePostgresSourceArtifactTx(txctx, tx, fact.BundleHash()); err != nil {
 			return err
 		}
@@ -75,7 +77,7 @@ func (s *MailboxPostgresOwner) acknowledgeMailboxNotice(ctx context.Context, req
 			return fmt.Errorf("channel notice action already settled without completion")
 		}
 		var err error
-		completion, err = acknowledgeNoticeTx(txctx, tx, req.ResourceID, true)
+		completion, changed, err = acknowledgeNoticeTx(txctx, tx, req.ResourceID, true)
 		if err != nil {
 			return err
 		}
@@ -83,9 +85,11 @@ func (s *MailboxPostgresOwner) acknowledgeMailboxNotice(ctx context.Context, req
 			if err := storechannel.SettleAppliedActionIntentTx(txctx, tx, *action, channelrender.ActionApplied, true); err != nil {
 				return err
 			}
+			changed = true
 		}
 		return storeapiidempotency.StorePostgresCompletionTx(txctx, lease, tx, completion)
 	})
+	err = errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, channelrender.ReconcileOrdinary))
 	if err != nil {
 		return apiidempotency.Completion{}, false, err
 	}
@@ -112,7 +116,9 @@ func (s *MailboxSQLiteOwner) acknowledgeMailboxNotice(ctx context.Context, req a
 	defer lease.Release()
 	var completion apiidempotency.Completion
 	var replayed bool
-	err = s.backend.RunTransaction(ctx, "sqlite notice acknowledgment", func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "sqlite notice acknowledgment", func(txctx context.Context, tx *sql.Tx) error {
+		changed = false
 		if err := storesource.RequireSQLiteSourceArtifactTx(txctx, tx, fact.BundleHash()); err != nil {
 			return err
 		}
@@ -136,7 +142,7 @@ func (s *MailboxSQLiteOwner) acknowledgeMailboxNotice(ctx context.Context, req a
 			return fmt.Errorf("channel notice action already settled without completion")
 		}
 		var err error
-		completion, err = acknowledgeNoticeTx(txctx, tx, req.ResourceID, false)
+		completion, changed, err = acknowledgeNoticeTx(txctx, tx, req.ResourceID, false)
 		if err != nil {
 			return err
 		}
@@ -144,48 +150,51 @@ func (s *MailboxSQLiteOwner) acknowledgeMailboxNotice(ctx context.Context, req a
 			if err := storechannel.SettleAppliedActionIntentTx(txctx, tx, *action, channelrender.ActionApplied, false); err != nil {
 				return err
 			}
+			changed = true
 		}
 		return storeapiidempotency.StoreSQLiteCompletionTx(txctx, lease, tx, completion)
 	})
+	err = errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, channelrender.ReconcileOrdinary))
 	if err != nil {
 		return apiidempotency.Completion{}, false, err
 	}
 	return completion, replayed, nil
 }
 
-func acknowledgeNoticeTx(ctx context.Context, tx *sql.Tx, id string, postgres bool) (apiidempotency.Completion, error) {
+func acknowledgeNoticeTx(ctx context.Context, tx *sql.Tx, id string, postgres bool) (apiidempotency.Completion, bool, error) {
 	var isCard bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM decision_cards WHERE card_id=$1)`, id).Scan(&isCard); err != nil {
-		return apiidempotency.Completion{}, err
+		return apiidempotency.Completion{}, false, err
 	}
 	if isCard {
-		return apiidempotency.Completion{}, mailbox.ErrNotNotice
+		return apiidempotency.Completion{}, false, mailbox.ErrNotNotice
 	}
-	query := `SELECT item_type,CAST(payload AS TEXT) FROM mailbox WHERE item_id=$1`
+	query := `SELECT item_type,CAST(payload AS TEXT),notified FROM mailbox WHERE item_id=$1`
 	if postgres {
 		query += ` FOR UPDATE`
 	}
 	var itemType, payload string
-	if err := tx.QueryRowContext(ctx, query, id).Scan(&itemType, &payload); err != nil {
+	var notified bool
+	if err := tx.QueryRowContext(ctx, query, id).Scan(&itemType, &payload, &notified); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return apiidempotency.Completion{}, mailbox.ErrV1NotFound
+			return apiidempotency.Completion{}, false, mailbox.ErrV1NotFound
 		}
-		return apiidempotency.Completion{}, err
+		return apiidempotency.Completion{}, false, err
 	}
 	if err := validateGenericMailboxNotice(itemType, []byte(payload)); err != nil {
-		return apiidempotency.Completion{}, err
+		return apiidempotency.Completion{}, false, err
 	}
 	updated, err := tx.ExecContext(ctx, `UPDATE mailbox SET notified=true WHERE item_id=$1`, id)
 	if err != nil {
-		return apiidempotency.Completion{}, err
+		return apiidempotency.Completion{}, false, err
 	}
 	count, err := updated.RowsAffected()
 	if err != nil {
-		return apiidempotency.Completion{}, err
+		return apiidempotency.Completion{}, false, err
 	}
 	if count != 1 {
-		return apiidempotency.Completion{}, mailbox.ErrV1NotFound
+		return apiidempotency.Completion{}, false, mailbox.ErrV1NotFound
 	}
 	raw, err := canonicaljson.Bytes(map[string]any{"ok": true, "mailbox_id": id, "kind": decisioncard.KindNotice})
-	return apiidempotency.Completion{ResourceID: id, Response: raw}, err
+	return apiidempotency.Completion{ResourceID: id, Response: raw}, !notified, err
 }

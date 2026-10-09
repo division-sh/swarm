@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -43,6 +44,7 @@ type EventCommitOwner interface {
 }
 
 type eventCommitTxStore interface {
+	publishCardChanges(bool, bool) error
 	RequireActiveSourceTx(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error)
 	resourceSourceOwner() *storedurabledata.Owner
 	commitFanOutPublicationTx(context.Context, *mutationprotocol.Attempt, runtimebus.PublicationCommand, fanoutobligation.OrdinalEmission) (runtimebus.CommittedPublication, error)
@@ -122,6 +124,7 @@ func nullUUIDString(raw string) string {
 }
 
 type PipelinePostgresOwner struct {
+	channelChanges  *render.ReconcileSignal
 	fanOutReadiness FanOutReadiness
 	apiIdempotency  *storeapiidempotency.PostgresOwner
 	*storerunlifecycle.RunLifecyclePostgresOwner
@@ -143,6 +146,7 @@ type PipelinePostgresOwner struct {
 }
 
 type PipelineSQLiteOwner struct {
+	channelChanges          *render.ReconcileSignal
 	activeFlowDescriptors   sqlitebackend.FixedReadStatement
 	selectedRunTargetOwners sqlitebackend.FixedReadStatement
 	fanOutReadiness         FanOutReadiness
@@ -172,6 +176,36 @@ type PipelineSQLiteOwner struct {
 	pipelineScanIssuer     *runtimepipelineobligation.ScanIssuer
 	pipelineScans          map[string]*pipelineScanState
 	testPipelineReleaseErr func() error
+}
+
+func (s *PipelinePostgresOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return errors.New("postgres pipeline channel reconciliation requires one composition binding")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *PipelineSQLiteOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return errors.New("sqlite pipeline channel reconciliation requires one composition binding")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *PipelinePostgresOwner) publishCardChanges(acknowledged, changed bool) error {
+	if s == nil {
+		return nil
+	}
+	return s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary)
+}
+
+func (s *PipelineSQLiteOwner) publishCardChanges(acknowledged, changed bool) error {
+	if s == nil {
+		return nil
+	}
+	return s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary)
 }
 
 func (s *PipelinePostgresOwner) BindGenericScheduleTxOwner(owner GenericScheduleTxOwner) error {

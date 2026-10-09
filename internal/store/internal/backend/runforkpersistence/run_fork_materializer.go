@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	"github.com/google/uuid"
@@ -97,6 +99,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 
 	forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
 	var materialization runfork.RunForkMaterialization
+	var changes privaterunlifecycle.ChannelCardChanges
 	result := mutationprotocol.RunPostgresWithOptions(ctx, s.backend, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 		err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 			if err := requirePostgresRunActive(ctx, tx, plan.SourceRunID); err != nil {
@@ -184,7 +187,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			for _, entity := range plan.Entities {
 				if err := materializeRunForkEntityState(forkCtx, s.DecisionPostgresOwner, s.MaterializeRunForkProposedEffectCardsTx, true, tx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 					return s.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
-				}), forkRunID, target, plan, entity, metadata[entity.EntityID], now); err != nil {
+				}), forkRunID, target, plan, entity, metadata[entity.EntityID], now, &changes); err != nil {
 					return err
 				}
 			}
@@ -226,7 +229,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 	if !result.Acknowledged() {
 		return runfork.RunForkMaterialization{}, result.Err()
 	}
-	return materialization, result.Err()
+	return materialization, errors.Join(result.Err(), s.publishChannelChanges(result.Acknowledged(), changes.Changed))
 }
 
 func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork.RunForkMaterializeRequest) (materialization runfork.RunForkMaterialization, err error) {
@@ -266,6 +269,7 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 	}
 
 	forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
+	var changes privaterunlifecycle.ChannelCardChanges
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite run fork materialization", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := requireSQLiteRunActive(txctx, tx, plan.SourceRunID); err != nil {
@@ -350,7 +354,7 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 			}
 			forkCtx := runtimecorrelation.WithRunID(txctx, forkRunID)
 			for _, entity := range plan.Entities {
-				if err := materializeRunForkEntityState(forkCtx, s.DecisionSQLiteOwner, s.MaterializeRunForkProposedEffectCardsTx, false, tx, attempt, source, forkRunID, target, plan, entity, metadata[entity.EntityID], now); err != nil {
+				if err := materializeRunForkEntityState(forkCtx, s.DecisionSQLiteOwner, s.MaterializeRunForkProposedEffectCardsTx, false, tx, attempt, source, forkRunID, target, plan, entity, metadata[entity.EntityID], now, &changes); err != nil {
 					return err
 				}
 			}
@@ -382,7 +386,7 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 	if !result.Acknowledged() {
 		return runfork.RunForkMaterialization{}, result.Err()
 	}
-	return materialization, result.Err()
+	return materialization, errors.Join(result.Err(), s.publishChannelChanges(result.Acknowledged(), changes.Changed))
 }
 
 func loadExactRunForkMaterialization(
@@ -692,7 +696,7 @@ func projectRunForkEntityIdentity(sourceRunID, forkRunID, entityID, flowInstance
 	return projection.Fork, err
 }
 
-func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisionMaterializer, materializeProposed runForkProposedEffectMaterializer, postgres bool, tx *sql.Tx, attempt *mutationprotocol.Attempt, runLifecycle privatemutationlog.ActiveRunSourceOwner, forkRunID string, target contracts.BundleIdentity, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {
+func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisionMaterializer, materializeProposed runForkProposedEffectMaterializer, postgres bool, tx *sql.Tx, attempt *mutationprotocol.Attempt, runLifecycle privatemutationlog.ActiveRunSourceOwner, forkRunID string, target contracts.BundleIdentity, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time, changes *privaterunlifecycle.ChannelCardChanges) error {
 	projection, err := projectRunForkEntityOwnership(plan.SourceRunID, forkRunID, entity.EntityID, meta.FlowInstance)
 	if err != nil {
 		return err
@@ -741,13 +745,13 @@ func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisio
 	if err := attempt.AddFact(forkRunID, privaterunforkrevision.FamilyEntityMetadata, entityID); err != nil {
 		return err
 	}
-	if err := materializeRunForkDecisionCards(ctx, decisions, attempt, forkRunID, target, projection, fields.GateBindings, now); err != nil {
+	if err := materializeRunForkDecisionCards(ctx, decisions, attempt, forkRunID, target, projection, fields.GateBindings, now, changes); err != nil {
 		return err
 	}
 	if materializeProposed == nil {
 		return fmt.Errorf("fork proposed-effect materialization owner is required")
 	}
-	if err := materializeProposed(ctx, attempt, plan.SourceRunID, forkRunID, target, projection, plan.ForkPoint, fields.Correspondence, now); err != nil {
+	if err := materializeProposed(ctx, attempt, plan.SourceRunID, forkRunID, target, projection, plan.ForkPoint, fields.Correspondence, now, changes); err != nil {
 		return err
 	}
 	writer := runtimemutationlog.Writer{

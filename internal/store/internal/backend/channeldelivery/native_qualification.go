@@ -16,7 +16,7 @@ const nativeQualificationSelect = `SELECT o.client_language, o.client_locale_rev
 	a.activation_revision, a.context_publication_generation, a.binding_revision,
 	c.qualification_state, c.qualification_locale_revision, c.qualification_setting_generation,
 	c.qualification_activation_revision, c.qualification_binding_revision, c.qualification_context_generation, c.qualification_contract_hash,
-	c.qualification_reason, c.qualification_observed_at
+	c.qualification_reason, c.qualification_observed_at, c.qualification_readback_hash
 	FROM connected_channel_activations a
 	JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id AND o.phase='succeeded'
 	JOIN operator_channel_bindings b ON b.interface_key=a.interface_key AND b.status='current'
@@ -39,6 +39,7 @@ type nativeQualificationFacts struct {
 	localeRevision, settingGeneration, qualifiedActivation, qualifiedContext int64
 	qualifiedBinding                                                         int64
 	qualifiedContract                                                        string
+	readbackHash                                                             string
 }
 
 func validateNativeQualificationRequest(tx *sql.Tx, req channelnative.QualificationRequest) error {
@@ -66,7 +67,7 @@ func loadNativeQualification(ctx context.Context, tx *sql.Tx, activationID strin
 		&p.SettingID, &p.SettingGeneration, &facts.settingState, &facts.contractHash,
 		&facts.activationRevision, &facts.contextGeneration, &facts.bindingRevision,
 		&p.State, &facts.localeRevision, &facts.settingGeneration, &facts.qualifiedActivation,
-		&facts.qualifiedBinding, &facts.qualifiedContext, &facts.qualifiedContract, &p.Reason, &observed)
+		&facts.qualifiedBinding, &facts.qualifiedContext, &facts.qualifiedContract, &p.Reason, &observed, &facts.readbackHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return facts, false, nil
 	}
@@ -114,13 +115,13 @@ func ReadNativeInboxQualificationTx(ctx context.Context, tx *sql.Tx, activationI
 	return p, nil
 }
 
-func RecordNativeInboxQualificationTx(ctx context.Context, tx *sql.Tx, req channelnative.QualificationRequest, postgres bool) error {
+func RecordNativeInboxQualificationTx(ctx context.Context, tx *sql.Tx, req channelnative.QualificationRequest, postgres bool) (bool, error) {
 	if err := validateNativeQualificationRequest(tx, req); err != nil {
-		return err
+		return false, err
 	}
 	facts, found, err := loadNativeQualification(ctx, tx, req.ActivationID, postgres, true)
 	if err != nil {
-		return err
+		return false, err
 	}
 	p := facts.projection
 	if !found || p.SettingID != req.SettingID || p.SettingGeneration != req.SettingGeneration ||
@@ -128,12 +129,17 @@ func RecordNativeInboxQualificationTx(ctx context.Context, tx *sql.Tx, req chann
 		facts.activationRevision != req.ActivationRevision || facts.contextGeneration != req.ContextGeneration ||
 		facts.bindingRevision != req.BindingRevision || facts.contractHash != req.EntryContractHash ||
 		(req.State == channelnative.QualificationQualified && facts.settingState != "installed" && facts.settingState != "retired") {
-		return fmt.Errorf("native qualification contradicts current declaration or setting authority")
+		return false, fmt.Errorf("native qualification contradicts current declaration or setting authority")
 	}
+	changed := p.State != req.State || p.Reason != req.Reason || facts.readbackHash != req.ReadbackHash ||
+		facts.localeRevision != req.LocaleRevision || facts.settingGeneration != req.SettingGeneration ||
+		facts.qualifiedActivation != req.ActivationRevision || facts.qualifiedBinding != req.BindingRevision ||
+		facts.qualifiedContext != req.ContextGeneration || facts.qualifiedContract != req.EntryContractHash
 	if req.State == channelnative.QualificationQualified && facts.settingState == "retired" {
 		if err := reactivateAcknowledgedNativeInboxSettingTx(ctx, tx, req.SettingID, req.SettingGeneration, postgres); err != nil {
-			return err
+			return false, err
 		}
+		changed = true
 	}
 	query := `UPDATE channel_native_setting_consumers SET qualification_state=?, qualification_locale_revision=?,
 		qualification_setting_generation=?, qualification_activation_revision=?, qualification_binding_revision=?, qualification_context_generation=?,
@@ -149,10 +155,10 @@ func RecordNativeInboxQualificationTx(ctx context.Context, tx *sql.Tx, req chann
 		req.ActivationRevision, req.BindingRevision, req.ContextGeneration, req.EntryContractHash, req.ReadbackHash, req.Reason,
 		req.ObservedAt.UTC().Format(time.RFC3339Nano), req.SettingID, req.ActivationID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if count, err := result.RowsAffected(); err != nil || count != 1 {
-		return fmt.Errorf("native qualification current consumer changed: %w", err)
+		return false, fmt.Errorf("native qualification current consumer changed: %w", err)
 	}
-	return nil
+	return changed, nil
 }
