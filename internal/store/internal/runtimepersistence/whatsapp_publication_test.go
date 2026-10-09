@@ -46,7 +46,10 @@ func TestWhatsAppInboundPublicationRollbackAndLostAcknowledgmentBothStores(t *te
 			}
 			request := inboundPublicationProofRequest(t, candidate, standing.RunID, standing.Generation, sequence, "WHATSAPP_CAPTURED_EVENT")
 			request.Provider, request.TargetAlias = "whatsapp", "whatsapp"
-			request.PublicationID, request.MarkerEventID = runtimeinbound.DeterministicIDs(request.Provider, request.EntityID, request.ProviderEventID)
+			request.PublicationID, request.MarkerEventID, err = runtimeinbound.DeterministicIDs(request.Identity())
+			if err != nil {
+				t.Fatal(err)
+			}
 			request.OriginalTransportMetadata = []byte(`{"transport":"managed_session"}`)
 			body := []byte(`{ "conversation" : "original", "text" : "exact captured bytes" }`)
 			request.RequestFingerprint, err = runtimeinbound.SemanticFingerprint(struct {
@@ -64,22 +67,26 @@ func TestWhatsAppInboundPublicationRollbackAndLostAcknowledgmentBothStores(t *te
 			if err != nil {
 				t.Fatal(err)
 			}
+			source, err := events.NewExternalIngressRoutingSource(request.FlowPath, events.RoutingSourceAuthorityProviderAdmissionPlan)
+			if err != nil {
+				t.Fatal(err)
+			}
 			finalization := runtimeinbound.Finalization{
 				EvidenceEvent: eventtest.DiagnosticDirect(request.MarkerEventID, events.EventTypePlatformInboundRecord,
 					"runtime", "", payload, 0, request.ResolvedRunID, "",
-					events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), request.OriginalReceivedAt),
+					events.EventEnvelope{}, request.OriginalReceivedAt),
 				Events: []runtimeinbound.EventFinalization{{Ordinal: 0, Kind: runtimeprovideroutput.KindRaw,
-					Event: eventtest.ExistingRunRootIngress(childID, "inbound.whatsapp.message", "inbound-gateway", "", body, 0,
-						request.ResolvedRunID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{
-							EntityID: request.EntityID, FlowInstance: request.TargetFlowInstance,
-						}), request.OriginalReceivedAt)}},
+					Event: eventtest.ExistingRunRootIngressWithRoutingSource(childID, "inbound.whatsapp.message", "inbound-gateway", "", body, 0,
+						request.ResolvedRunID, events.EventEnvelope{}, source, request.OriginalReceivedAt)}},
 			}
 			eventBus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{
-				SourceArtifactFact: candidate.Source, ProviderOutputVerifier: inboundPublicationProofAuthorizationVerifier{},
+				SourceArtifactFact: candidate.Source,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Managed-session publication admission is still required here; the
+			// retired verifier double must not substitute webhook authority.
 			plan, err := eventBus.PrepareInboundDeliveryBatch(ctx, runtimebus.InboundDeliveryBatch{
 				Provider: request.Provider, Events: []runtimebus.InboundDeliveryEvent{
 					{Event: finalization.Events[0].Event, Kind: runtimeprovideroutput.KindRaw},
@@ -122,7 +129,7 @@ func TestWhatsAppInboundPublicationRollbackAndLostAcknowledgmentBothStores(t *te
 			}
 			// Model a lost application acknowledgment: reload through the canonical
 			// durable owner and retry, without treating current health as evidence.
-			recovered, found, err := store.LoadInboundPublicationByIdentity(context.Background(), request.Provider, request.EntityID, request.ProviderEventID)
+			recovered, found, err := store.LoadInboundPublicationByIdentity(context.Background(), request.Identity())
 			if err != nil || !found || recovered.State != "committed" || len(recovered.Events) != 1 || !bytes.Equal(recovered.Events[0].Event.Payload(), body) {
 				t.Fatalf("durable exact-byte readback: %+v, found=%t, %v", recovered, found, err)
 			}
