@@ -114,34 +114,41 @@ func (a runForkSourceStateAdmission) project(event runfork.RunForkSelectedContra
 	if a.snapshot == nil || a.snapshot.Revision <= 0 || a.forkRunID == "" {
 		return event, nil, fmt.Errorf("source event preparation requires fixed-revision source-state admission")
 	}
-	found := false
-	for _, historical := range a.snapshot.Events {
-		if historical.EventID == event.SourceEventID {
-			if historical.RoutingSource != event.RoutingSource || historical.EventName != event.EventName {
-				return event, nil, fmt.Errorf("source event %s disagrees with bound revision producer evidence", event.SourceEventID)
-			}
-			if !bytes.Equal(historical.Payload, event.Payload) {
-				return event, nil, fmt.Errorf("source event %s payload disagrees with bound revision evidence", event.SourceEventID)
-			}
-			found = true
-			break
-		}
-	}
-	if !found {
-		if a.firstTurn == nil {
-			return event, nil, fmt.Errorf("source event %s is outside the bound fork revision", event.SourceEventID)
-		}
-		original, present := a.firstTurn.Event()
-		if !present || original.ID() != event.SourceEventID || original.RunID() != a.snapshot.RunID ||
-			string(original.Type()) != event.EventName || original.RoutingSource() != event.RoutingSource ||
-			!bytes.Equal(original.Payload(), event.Payload) || original.ExecutionMode() != event.ExecutionMode {
-			return event, nil, fmt.Errorf("source event %s contradicts the exact original first turn", event.SourceEventID)
-		}
+	if err := a.requireEventAtCut(event); err != nil {
+		return event, nil, err
 	}
 	projected, err := runfork.ProjectSelectedContractSourceEvent(a.snapshot.RunID, a.forkRunID, event)
 	if err != nil {
 		return event, nil, err
 	}
+	return a.projectSourceState(event, projected)
+}
+
+func (a runForkSourceStateAdmission) requireEventAtCut(event runfork.RunForkSelectedContractSourceEvent) error {
+	for _, historical := range a.snapshot.Events {
+		if historical.EventID == event.SourceEventID {
+			if historical.RoutingSource != event.RoutingSource || historical.EventName != event.EventName {
+				return fmt.Errorf("source event %s disagrees with bound revision producer evidence", event.SourceEventID)
+			}
+			if !bytes.Equal(historical.Payload, event.Payload) {
+				return fmt.Errorf("source event %s payload disagrees with bound revision evidence", event.SourceEventID)
+			}
+			return nil
+		}
+	}
+	if a.firstTurn == nil {
+		return fmt.Errorf("source event %s is outside the bound fork revision", event.SourceEventID)
+	}
+	original, present := a.firstTurn.Event()
+	if !present || original.ID() != event.SourceEventID || original.RunID() != a.snapshot.RunID ||
+		string(original.Type()) != event.EventName || original.RoutingSource() != event.RoutingSource ||
+		!bytes.Equal(original.Payload(), event.Payload) || original.ExecutionMode() != event.ExecutionMode {
+		return fmt.Errorf("source event %s contradicts the exact original first turn", event.SourceEventID)
+	}
+	return nil
+}
+
+func (a runForkSourceStateAdmission) projectSourceState(event, projected runfork.RunForkSelectedContractSourceEvent) (runfork.RunForkSelectedContractSourceEvent, *runForkProjectedSourceState, error) {
 	entityID := event.RoutingSource.Route().EntityID
 	for _, meta := range a.snapshot.EntityMetadata {
 		if meta.EntityID != entityID {
