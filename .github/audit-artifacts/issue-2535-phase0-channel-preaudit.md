@@ -889,3 +889,72 @@ Clean-head core plus six unchanged channel units/named supplements remain
 pending. G can now request the server2 qualification window; none has been
 taken yet. No PR, final audit, performance savings or whole-class closure is
 claimed. This receipt update changes the audit only, not executable proof.
+
+## First Server2 Core Attempt And Test-Authority Repair
+
+The c29dccd99478fbb944de7994217d0e21073654c5 qualification did not pass.
+Both original aggregates are retained on server2 in the disk worktree
+/home/youmew/dev/swarm/worktrees/agent-g-phase0-c29dccd99/test-results/local/:
+core-20261009T211744.416354140 and core-20261009T212335.288095091.
+No failing aggregate, canceled sibling, or earlier focused receipt is being
+relabeled Local core. No receipt carry has been requested or approved.
+
+The first attempt refused the runner's overlong TMPDIR in
+TestCapacityProbeQuotedTemporaryPath. A short writable disk TMPDIR
+(/home/youmew/g-tmp) passed the unchanged control0.644s, then the same source
+was retried. This is a runner-configuration error, not a product defect or
+reason to relax the Unix-socket-path refusal.
+
+The second attempt exposed seven OWNED new authority-debt sites in
+TestPersistenceAuthorityDebtRatchet122.54s: the new M36 journey held a raw db
+and called raw startup/card/receipt helpers; the new callback parameter also
+changed three existing raw-startup call identities. The earlier
+Census/Inventory/Registry/Guard regex sweep did not select this Ratchet root.
+Neither an inherited-flake classification nor a baseline increase is valid.
+Server2 was released immediately after joined fail-fast cleanup: no swarm-test
+process and admission active=0/waiting=0. No channel supplement was started.
+
+The bounded fixture repair consumes existing owners, with no new observation
+port or classifier exception:
+
+| Observation | Canonical owner and actual consumption |
+| --- | --- |
+| Exact pending run/kind/flow card, including stage/human/proposed anchors | Existing public mailbox.list paged reader; original stage helper delegates with unchanged inputs; ambiguity and cursor advance remain fail-closed |
+| Exact durable sent copy and physical provider message | Existing storetest.ChannelObservation, current plan and receipt projections; exact delivery/operation/render identities and real numeric provider ID are checked |
+| Approved terminal card | Public mailbox.get checks exact card identity, decided state and approve verdict; original15s deadline retained |
+| Duplicate callback non-mutation | Existing typed intent observation uses the actual public channel interface and exact Telegram update ID; durable settled stale/rejected disposition required, original15s deadline retained |
+| Completion cardinality after duplicate callback | Public event.list filters the exact run/name, bounded to2; exactly1 and no further cursor plus exact run/name required, rather than a loose membership assertion |
+| Unchanged raw consumers outside this delta | Original five-argument startup helper retains its original raw operations and signature; no new proof consumes that carrier, and the old temporal journey returns to its original call shape |
+
+The clean public journey composition returns only the process harness and
+admitted source hash. Both new/modified supported proofs install the existing
+Process observation and one-hour repair ticks BEFORE startup, retaining the
+real webhook/HTTP/provider path. M36 still holds the actual provider response,
+observes Dispatch: started, drains earlier successful passes, then requires
+the completion-only wake and succeeded edit. The three-anchor journey retains
+every original provider-call, terminal-edit, stale-action and cardinality
+assertion. No deadline, M30 adverse window, business semantic or runtime code
+changes in this repair.
+
+Focused repaired-source control:
+go run ./cmd/swarm-test -- ./internal/serveapp -run
+'^(TestChannelDeliveryRealAnchorProducersPublicJourney|TestChannelDeliveryReconciliationActivityDispatchPublicJourney|TestChannelDraftTerminalRestartPublicJourney)$'
+-count=1 -timeout=15m
+PASS76.740s on both stores after ordinary admission19ms; the original8-cell
+draft/restart root is included. TestScalar2556ChannelAnchorSourcePreservesGateText
+also passes2.701s. These are focused fixture controls, not clean-head tier
+qualification. The explicit TestPersistenceAuthorityDebtRatchet now PASSES
+123.963s through the ordinary runner (admission1m5s), with the collector,
+registry, raw-method classifiers and debt baseline UNCHANGED. Independent
+TestPersistenceEffectiveMethodSetsDoNotExposeRawAuthority passes6.150s; full
+API-spec package passes3.614s; gofmt and diff checks pass. Logs/checksums:
+channel-authority-repair-journeys.log SHA256
+28c2cee75fd7ca5dd6b31b3ff621bed21a74d6fc88508cf703b9a31e087b5ee6;
+channel-authority-repair-debt.log SHA256
+557c314458c9cb9766d90632c11d4c44d5272f96f6e6215561be534f9e07a595.
+Race repetitions and fresh complete structural/census proof are still pending
+in vemew's regular admission queue before the next server2 request. The
+diagnostic all-package sweep expands go list's package set explicitly because
+the runner correctly refuses raw ./... passthrough; this is not completion
+credit, does not change root selection, and leaves the refused invocation
+recorded rather than weakening the runner.

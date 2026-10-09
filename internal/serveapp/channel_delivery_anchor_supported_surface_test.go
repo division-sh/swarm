@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -27,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
@@ -81,10 +83,19 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			observation := &channelReconcileObservation{}
-			h, db, bundleHash := startChannelAnchorJourneyWithDraftTTL(t, backend, "anchor-token", false, 0, func(opts *cliapp.ServeOptions) {
+			h, bundleHash := startChannelAnchorPublicJourney(t, backend, "anchor-token", false, 0, func(opts *cliapp.ServeOptions) {
 				observation.configure(opts)
 				opts.TestChannelReconcileCadence = render.ReconcileCadence{Ordinary: time.Hour, Native: time.Hour}
 			})
+			reader := openChannelAnchorObservation(t, h)
+			var channels struct {
+				Channels []channelonboarding.ConnectedChannelReadback `json:"channels"`
+			}
+			requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.list", map[string]any{}, &channels)
+			if len(channels.Channels) != 1 {
+				t.Fatalf("anchor journey requires one exact channel identity: %+v", channels)
+			}
+			interfaceKey := channels.Channels[0].Identity.Interface.Key()
 			for _, kind := range []decisioncard.AnchorKind{decisioncard.AnchorKindStageGate, decisioncard.AnchorKindHumanTask, decisioncard.AnchorKindProposedEffect} {
 				t.Run(string(kind), func(t *testing.T) {
 					flowInstance := "reviews"
@@ -95,8 +106,8 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 						"event_name": "work.requested", "bundle_hash": bundleHash,
 						"payload": map[string]any{"seed": true}, "idempotency_key": "channel-anchor-" + string(kind),
 					})
-					gateID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
-					waitChannelAnchorReceipt(t, db, gateID)
+					gateID := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+					waitChannelAnchorObservedReceipt(t, reader, gateID)
 					if kind != decisioncard.AnchorKindStageGate {
 						event := "observer.requested"
 						if kind == decisioncard.AnchorKindProposedEffect {
@@ -107,8 +118,8 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 							"payload": map[string]any{"seed": true}, "idempotency_key": "producer-" + string(kind),
 						})
 					}
-					cardID := waitChannelAnchorCard(t, db, seed.RunID, kind, flowInstance)
-					messageID := waitChannelAnchorReceipt(t, db, cardID)
+					cardID := waitChannelPublicCard(t, h, seed.RunID, kind, flowInstance)
+					messageID := waitChannelAnchorObservedReceipt(t, reader, cardID)
 					message := h.provider.Delivery(messageID - 1)
 					label := "Approve"
 					if kind == decisioncard.AnchorKindStageGate {
@@ -140,7 +151,7 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 						}
 					}
 					post(837000+messageID, "anchor-"+cardID)
-					waitChannelAnchorDecision(t, db, cardID)
+					waitChannelAnchorPublicApproval(t, h, cardID)
 					if arrived != nil {
 						select {
 						case <-arrived:
@@ -199,10 +210,19 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 						observation.oneAfter(t, dispatchCut, render.ReconcileOrdinary)
 					}
 					post(838000+messageID, "double-tap-"+cardID)
-					waitChannelRejectedCallback(t, db, token)
-					var count int
-					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&count); err != nil || count != 1 {
-						t.Fatalf("double tap changed completion cardinality: count=%d err=%v", count, err)
+					waitChannelAnchorRejectedIntent(t, reader, interfaceKey, fmt.Sprint(838000+messageID))
+					var events struct {
+						Events []struct {
+							RunID     string `json:"run_id"`
+							EventName string `json:"event_name"`
+						} `json:"events"`
+						NextCursor string `json:"next_cursor"`
+					}
+					requireServedJSONRPCResult(t, h.rpcEndpoint(), "event.list", map[string]any{
+						"filter": map[string]any{"run_id": seed.RunID, "event_name": "mailbox.card_decided"}, "limit": 2,
+					}, &events)
+					if len(events.Events) != 1 || events.NextCursor != "" || events.Events[0].RunID != seed.RunID || events.Events[0].EventName != "mailbox.card_decided" {
+						t.Fatalf("double tap changed exact completion cardinality: %+v", events)
 					}
 				})
 			}
@@ -214,10 +234,11 @@ func TestChannelDeliveryReconciliationActivityDispatchPublicJourney(t *testing.T
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			observation := &channelReconcileObservation{}
-			h, db, hash := startChannelAnchorJourneyWithDraftTTL(t, backend, "activity-wake-token", false, 0, func(opts *cliapp.ServeOptions) {
+			h, hash := startChannelAnchorPublicJourney(t, backend, "activity-wake-token", false, 0, func(opts *cliapp.ServeOptions) {
 				observation.configure(opts)
 				opts.TestChannelReconcileCadence = render.ReconcileCadence{Ordinary: time.Hour, Native: time.Hour}
 			})
+			reader := openChannelAnchorObservation(t, h)
 			seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 				"event_name": "work.requested", "bundle_hash": hash,
 				"payload": map[string]any{"seed": true}, "idempotency_key": "isolated-activity-wake",
@@ -226,8 +247,8 @@ func TestChannelDeliveryReconciliationActivityDispatchPublicJourney(t *testing.T
 				"event_name": "effect.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 				"payload": map[string]any{"seed": true}, "idempotency_key": "isolated-proposal-wake",
 			})
-			cardID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindProposedEffect, "reviews")
-			messageID := waitChannelAnchorReceipt(t, db, cardID)
+			cardID := waitChannelPublicCard(t, h, seed.RunID, decisioncard.AnchorKindProposedEffect, "reviews")
+			messageID := waitChannelAnchorObservedReceipt(t, reader, cardID)
 			var item struct {
 				Card struct {
 					CardContentHash string `json:"card_content_hash"`
@@ -290,10 +311,25 @@ func waitChannelAnchorDispatchEdit(t *testing.T, h *channelOnboardingE2EHarness,
 
 func startChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool) (*channelOnboardingE2EHarness, *sql.DB, string) {
 	t.Helper()
-	return startChannelAnchorJourneyWithDraftTTL(t, backend, token, withSummary, 0, nil)
+	return startChannelAnchorJourneyWithDraftTTL(t, backend, token, withSummary, 0)
 }
 
-func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration, configure func(*cliapp.ServeOptions)) (*channelOnboardingE2EHarness, *sql.DB, string) {
+func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration) (*channelOnboardingE2EHarness, *sql.DB, string) {
+	t.Helper()
+	h, hash := startChannelAnchorPublicJourney(t, backend, token, withSummary, draftTTL, nil)
+	driver := "sqlite"
+	if backend == servedparity.BackendExplicitPostgres {
+		driver = "postgres"
+	}
+	db, err := sql.Open(driver, h.storeDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return h, db, hash
+}
+
+func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration, configure func(*cliapp.ServeOptions)) (*channelOnboardingE2EHarness, string) {
 	t.Helper()
 	h := newChannelOnboardingE2EHarness(t, backend, true)
 	h.opts.AbandonActiveRuns = false
@@ -333,15 +369,6 @@ func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Ba
 	}
 	h.start(t)
 	t.Cleanup(func() { h.stop(t) })
-	driver := "sqlite"
-	if backend == servedparity.BackendExplicitPostgres {
-		driver = "postgres"
-	}
-	db, err := sql.Open(driver, h.storeDSN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
 	var identity apiv1.RuntimeIdentityResult
 	requireServedJSONRPCResult(t, h.rpcEndpoint(), "runtime.identity", map[string]any{}, &identity)
 	if len(identity.SourceArtifacts) != 1 {
@@ -355,7 +382,90 @@ func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Ba
 		onlyPublicChannelNoticeID(t, h.rpcEndpoint(), "")
 	}
 	runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider, "connect", token, 1001, "private", 0)
-	return h, db, identity.SourceArtifacts[0].BundleHash
+	return h, identity.SourceArtifacts[0].BundleHash
+}
+
+func openChannelAnchorObservation(t *testing.T, h *channelOnboardingE2EHarness) storetest.ChannelObservation {
+	t.Helper()
+	driver := "sqlite"
+	if h.backend == servedparity.BackendExplicitPostgres {
+		driver = "postgres"
+	}
+	reader, err := storetest.OpenChannelObservation(driver, h.storeDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := reader.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return reader
+}
+
+func waitChannelAnchorObservedReceipt(t *testing.T, reader render.Observer, cardID string) int {
+	t.Helper()
+	plans := waitTextReplyCardCopies(t, reader, cardID, 1)
+	receipt, found, err := reader.GetCurrentChannelSentReceipt(context.Background(), plans[0].DeliveryID, plans[0].CurrentReceiptID)
+	if err != nil || !found || receipt.DeliveryID != plans[0].DeliveryID || receipt.OperationID != plans[0].CurrentReceiptID || receipt.RenderID != plans[0].CurrentRenderID {
+		t.Fatalf("card %s has no exact current sent receipt: %+v found=%t err=%v", cardID, receipt, found, err)
+	}
+	raw, err := json.Marshal(receipt.DeliveryReference)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reference struct {
+		ID int `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &reference); err != nil || reference.ID < 1 {
+		t.Fatalf("receipt has no real provider message: %s %v", raw, err)
+	}
+	return reference.ID
+}
+
+func waitChannelAnchorPublicApproval(t *testing.T, h *channelOnboardingE2EHarness, cardID string) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		var result struct {
+			Card struct {
+				CardID  string `json:"card_id"`
+				Status  string `json:"status"`
+				Verdict string `json:"verdict"`
+			} `json:"decision_card"`
+		}
+		requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.get", map[string]any{"mailbox_id": cardID}, &result)
+		if result.Card.CardID != cardID {
+			t.Fatal("public card readback changed identity")
+		}
+		if result.Card.Status == decisioncard.StatusDecided && result.Card.Verdict == "approve" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("authenticated channel action did not decide actual card: %+v", result)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func waitChannelAnchorRejectedIntent(t *testing.T, reader render.Observer, interfaceKey, providerEventID string) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		result, found, err := reader.ObserveChannelIntent(context.Background(), render.IntentObservationQuery{
+			Kind: render.IntentAction, Provider: "telegram", ProviderEventID: providerEventID, InterfaceKey: interfaceKey,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if found && result.State == "settled" && (result.Disposition == "stale" || result.Disposition == "rejected") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("exact stale callback has no durable non-mutation disposition: %+v found=%t", result, found)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func writeChannelAnchorJourneySource(t *testing.T, root string, withNotice bool) {
