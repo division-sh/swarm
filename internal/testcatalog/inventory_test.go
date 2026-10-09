@@ -541,7 +541,13 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read CI workflow: %v", err)
 	}
-	if !strings.Contains(string(workflow), `go run ./cmd/swarm-test --planned "$plan" "$UNIT_ID"`) {
+	batch, err := os.ReadFile(filepath.Join(catalogRepoRoot(t), ".github", "scripts", "run-proof-batch.sh"))
+	if err != nil {
+		t.Fatalf("read CI proof dispatcher: %v", err)
+	}
+	if !strings.Contains(string(workflow), `run: bash .github/scripts/run-proof-batch.sh`) ||
+		!strings.Contains(string(batch), `command=(go run ./cmd/swarm-test --planned "$plan" "$UNIT_ID")`) ||
+		!strings.Contains(string(batch), `-assert-execution-sha -plan "$plan" -execution-sha "$(git rev-parse HEAD)"`) {
 		t.Fatal("CI proof units do not consume the canonical digest-bound plan")
 	}
 }

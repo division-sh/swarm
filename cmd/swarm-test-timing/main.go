@@ -138,24 +138,7 @@ func run(cfg config) error {
 		return fmt.Errorf("exactly one command mode may be selected")
 	}
 	if cfg.captureTestTimeReference {
-		plan, err := readPlan(cfg.planPath)
-		if err != nil {
-			return err
-		}
-		evidence, problems := readEvidenceTree(cfg.evidenceRoot)
-		if len(problems) != 0 {
-			return fmt.Errorf("reference evidence: %s", strings.Join(problems, "; "))
-		}
-		reference, err := testtiming.CaptureTestTimeReference(plan, evidence)
-		if err != nil {
-			return err
-		}
-		file, err := os.Create(cfg.testTimeReferencePath)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-		return testtiming.WriteTestTimeReference(file, reference)
+		return captureTestTimeReference(cfg)
 	}
 	if cfg.verifyMerged {
 		return verifyMergedProof(cfg)
@@ -219,6 +202,27 @@ func run(cfg config) error {
 	default:
 		return writeTimingReport(cfg)
 	}
+}
+
+func captureTestTimeReference(cfg config) error {
+	plan, err := readPlan(cfg.planPath)
+	if err != nil {
+		return err
+	}
+	evidence, problems := readEvidenceTree(cfg.evidenceRoot)
+	if len(problems) != 0 {
+		return fmt.Errorf("reference evidence: %s", strings.Join(problems, "; "))
+	}
+	reference, err := testtiming.CaptureTestTimeReference(plan, evidence)
+	if err != nil {
+		return err
+	}
+	file, err := os.Create(cfg.testTimeReferencePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return testtiming.WriteTestTimeReference(file, reference)
 }
 
 func planCI(cfg config) error {
