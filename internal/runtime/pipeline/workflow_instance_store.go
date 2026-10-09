@@ -1127,7 +1127,6 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 		ParentFlowID:       strings.TrimSpace(persistedIdentity.ParentRoute.FlowID),
 		ParentFlowInstance: strings.Trim(strings.TrimSpace(persistedIdentity.ParentRoute.FlowInstance), "/"),
 		ParentEntityID:     strings.TrimSpace(instance.ParentEntityID),
-		TransitionHistory:  append([]WorkflowTransitionRecord{}, instance.TransitionHistory...),
 	}
 	if persistedIdentity.HasStoredPath {
 		control.FlowPath = strings.TrimSpace(persistedIdentity.InstancePath)
@@ -1135,8 +1134,13 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 	if control.EntityType == "" && len(instance.Fields) != 0 {
 		return workflowInstancePersistedProjection{}, fmt.Errorf("fieldless workflow header cannot carry entity fields")
 	}
-	if err := validateWorkflowTransitionHistoryFlow(control.TransitionHistory, strings.TrimSpace(instance.WorkflowName)); err != nil {
+	if err := validateWorkflowTransitionHistoryFlow(instance.TransitionHistory, strings.TrimSpace(instance.WorkflowName)); err != nil {
 		return workflowInstancePersistedProjection{}, err
+	}
+	// The header is current evidence, not a cumulative trajectory. Validate the
+	// entire transient input before retaining the last admitted append.
+	if count := len(instance.TransitionHistory); count > 0 {
+		control.TransitionHistory = []WorkflowTransitionRecord{instance.TransitionHistory[count-1]}
 	}
 	return workflowInstancePersistedProjection{
 		Fields:      cloneStringAnyMap(instance.Fields),
@@ -1402,6 +1406,9 @@ func workflowInstanceTransitionHistoryFromConfig(config map[string]any) ([]Workf
 	var out []WorkflowTransitionRecord
 	if err := json.Unmarshal(encoded, &out); err != nil {
 		return nil, fmt.Errorf("flow_instances.config transition_history must be an array of workflow transition records: %w", err)
+	}
+	if len(out) > 1 {
+		return nil, fmt.Errorf("flow_instances.config transition_history must contain at most one current transition record")
 	}
 	for _, record := range out {
 		if err := validateWorkflowTransitionRecord(record); err != nil {

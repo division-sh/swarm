@@ -19,13 +19,16 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 			params := func(event, key string, payload map[string]any) map[string]any {
 				return map[string]any{"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": key}
 			}
-			requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.start", "start", map[string]any{"seed": true}))
+			started := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.start", "start", map[string]any{"seed": true}))
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
+			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), started.EventID, "waiting", "drafting")
 			first := readLifecycleLoop(t, rt, seed.RunID, entityID)
-			requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", "admit-1", map[string]any{"revision_id": first.RevisionID}))
+			admit := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", "admit-1", map[string]any{"revision_id": first.RevisionID}))
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
+			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), admit.EventID, "drafting", "review")
 			repeated := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.repeat", "repeat-1", map[string]any{"revision_id": first.RevisionID}))
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
+			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), repeated.EventID, "review", "drafting")
 			requireLifecycleFlowEntity(t, rt, seed.RunID, "ordinary/", "observed")
 			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
@@ -47,8 +50,9 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 				t.Fatalf("accepted ordinary repeat node deliveries=%d", replayFailures)
 			}
 			current := readLifecycleLoop(t, rt, seed.RunID, entityID)
-			requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", "admit-2", map[string]any{"revision_id": current.RevisionID}))
+			admit = requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", "admit-2", map[string]any{"revision_id": current.RevisionID}))
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
+			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), admit.EventID, "drafting", "review")
 			var replies [2]servedJSONRPCEnvelope
 			start := make(chan struct{})
 			var workers sync.WaitGroup
@@ -85,22 +89,22 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 				t.Fatalf("race loop=%#v", closed)
 			}
 			history := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
-			if len(history) != 5 || !accepted[history[4].TriggerEventID] {
+			if len(history) != 1 || !accepted[history[0].TriggerEventID] {
 				t.Fatalf("race committed extra/missing cause=%#v", history)
 			}
-			compiled, ok := history[4].Evidence.Compiled()
+			compiled, ok := history[0].Evidence.Compiled()
 			if !ok || compiled.FlowID() != "." || compiled.Edge().LoopID != "revision" {
 				t.Fatalf("race selected owner=%#v", compiled)
 			}
 			escapeCount := 0
 			if closed.CloseReason == "escaped" {
 				escapeCount = 1
-				if history[4].To != "escaped" || compiled.Edge().Source != "loop.escape" {
+				if history[0].To != "escaped" || compiled.Edge().Source != "loop.escape" {
 					t.Fatal("escape winner lost exact cause")
 				}
 				requireLifecycleFlowEntity(t, rt, seed.RunID, "sink/", "done")
 			} else {
-				if history[4].To != "done" || string(compiled.Edge().LoopOperation) != "close" {
+				if history[0].To != "done" || string(compiled.Edge().LoopOperation) != "close" {
 					t.Fatalf("close winner lost exact cause=%#v", compiled)
 				}
 			}

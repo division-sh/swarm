@@ -41,18 +41,19 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 			for _, scope := range scopes {
 				entityID := requireLifecycleFlowEntity(t, rt, fork.ForkRunID, scope, "done")
 				history := readLifecycleTransitionHistory(t, rt, fork.ForkRunID, entityID)
-				if len(history) != 2 {
+				if len(history) != 1 || history[0].From != "active" || history[0].To != "done" {
 					t.Fatalf("scope %q history: %+v", scope, history)
 				}
 				flow := strings.TrimSuffix(scope, "/")
 				if flow == "" {
 					flow = "."
 				}
-				selected := history[0].Evidence.RuleSelection()
-				if history[0].From != "waiting" || history[0].To != "active" || history[0].TriggerEventID != childEvent ||
-					history[0].Evidence.FlowID() != flow || selected.Ref().Flow().String() != flow || selected.DisplayLabel() != "alpha" ||
+				first := readLifecycleTransitionAtCut(t, rt, fork.ForkRunID, entityID, history[0].TriggerEventID)
+				selected := first.Evidence.RuleSelection()
+				if first.From != "waiting" || first.To != "active" || first.TriggerEventID != childEvent ||
+					first.Evidence.FlowID() != flow || selected.Ref().Flow().String() != flow || selected.DisplayLabel() != "alpha" ||
 					selected.Ref().SemanticPath() != `nodes["controller"].handlers["work.first"].rules[0]` ||
-					!reflect.DeepEqual(history[0].GuardsEvaluated, []string{"first_choice", "first_nonempty"}) || history[1].From != "active" || history[1].To != "done" {
+					!reflect.DeepEqual(first.GuardsEvaluated, []string{"first_choice", "first_nonempty"}) {
 					t.Fatalf("scope %q lost exact child transition cause: %+v", scope, history)
 				}
 				var entity operatorread.OperatorEntityFull

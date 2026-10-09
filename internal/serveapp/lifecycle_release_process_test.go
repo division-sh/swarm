@@ -49,12 +49,13 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
 					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
 					history := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
-					if len(history) != 3 {
+					if len(history) != 1 || history[0].From != "approved" || history[0].To != "done" {
 						t.Fatalf("nested gate history: %+v", history)
 					}
-					cause, ok := history[1].Evidence.Compiled()
-					if !ok || cause.FlowID() != "outer/inner" || cause.Edge().Source != "gate" || cause.Edge().Verdict != "approve" || history[1].From != "review" || history[1].To != "approved" {
-						t.Fatalf("nested gate lost its exact compiled cause: %+v", history[1])
+					gateRecord := readLifecycleTransitionAtCut(t, rt, seed.RunID, entityID, history[0].TriggerEventID)
+					cause, ok := gateRecord.Evidence.Compiled()
+					if !ok || cause.FlowID() != "outer/inner" || cause.Edge().Source != "gate" || cause.Edge().Verdict != "approve" || gateRecord.From != "review" || gateRecord.To != "approved" {
+						t.Fatalf("nested gate lost its exact compiled cause: %+v", gateRecord)
 					}
 					var entity operatorread.OperatorEntityFull
 					requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
@@ -77,8 +78,9 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 						"payload": payload, "idempotency_key": key,
 					})
 				}
-				publish("loop.start", "release-start", map[string]any{"seed": true})
+				started := publish("loop.start", "release-start", map[string]any{"seed": true})
 				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
+				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), started.EventID, "waiting", "drafting")
 				var finalEvent string
 				for attempt := 1; attempt <= 2; attempt++ {
 					current := readLifecycleLoop(t, rt, seed.RunID, entityID)
@@ -86,14 +88,16 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 						t.Fatalf("wrong public loop generation: %+v", current)
 					}
 					payload := map[string]any{"revision_id": current.RevisionID}
-					publish("loop.admit", fmt.Sprintf("release-admit-%d", attempt), payload)
+					admit := publish("loop.admit", fmt.Sprintf("release-admit-%d", attempt), payload)
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
+					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), admit.EventID, "drafting", "review")
 					finalEvent = publish("loop.repeat", fmt.Sprintf("release-repeat-%d", attempt), payload).EventID
 					next := "drafting"
 					if attempt == 2 {
 						next = "escaped"
 					}
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, next)
+					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), finalEvent, "review", next)
 				}
 				closed := readLifecycleLoop(t, rt, seed.RunID, entityID)
 				if closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" || closed.Attempt != 2 {
@@ -105,7 +109,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 				}
 				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
 				history := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
-				if len(history) != 5 {
+				if len(history) != 1 {
 					t.Fatalf("loop transition history: %+v", history)
 				}
 				last := history[len(history)-1]

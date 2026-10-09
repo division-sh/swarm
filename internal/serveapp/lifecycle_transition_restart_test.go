@@ -153,10 +153,14 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 				t.Fatalf("ambient gate replaced frozen result: %#v", entity)
 			}
 			history := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
-			if len(history) != 3 || history[1].From != "review" || history[1].To != "approved" || history[1].Evidence.FlowID() != "." {
+			if len(history) != 1 || history[0].From != "approved" || history[0].To != "done" {
 				t.Fatalf("frozen transition history=%#v", history)
 			}
-			compiled, ok := history[1].Evidence.Compiled()
+			gateRecord := readLifecycleTransitionAtCut(t, rt, seed.RunID, entityID, history[0].TriggerEventID)
+			if gateRecord.From != "review" || gateRecord.To != "approved" || gateRecord.Evidence.FlowID() != "." {
+				t.Fatalf("frozen historical gate transition=%#v", gateRecord)
+			}
+			compiled, ok := gateRecord.Evidence.Compiled()
 			if !ok || compiled.Edge().Source != "gate" || compiled.Edge().DecisionID != "review_decision" || compiled.Edge().Verdict != "approve" {
 				t.Fatalf("frozen selected gate cause=%#v", compiled)
 			}
@@ -218,22 +222,25 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 				params := func(event, key string, payload map[string]any) map[string]any {
 					return map[string]any{"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": key}
 				}
-				requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.start", "restart-start", map[string]any{"seed": true}))
+				started := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.start", "restart-start", map[string]any{"seed": true}))
 				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
+				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), started.EventID, "waiting", "drafting")
 				var capParams map[string]any
 				var capRevision string
 				for attempt := 1; attempt <= 2; attempt++ {
 					loop := readLifecycleLoop(t, rt, seed.RunID, entityID)
 					capRevision = loop.RevisionID
 					payload := map[string]any{"revision_id": loop.RevisionID}
-					requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", fmt.Sprintf("restart-admit-%d", attempt), payload))
+					admit := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", fmt.Sprintf("restart-admit-%d", attempt), payload))
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
+					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), admit.EventID, "drafting", "review")
 					capParams = params("loop.repeat", fmt.Sprintf("restart-repeat-%d", attempt), payload)
 					if attempt == 2 {
 						break
 					}
-					requireServedEventPublishRPCResult(t, rt.Endpoint, capParams)
+					repeated := requireServedEventPublishRPCResult(t, rt.Endpoint, capParams)
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
+					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), repeated.EventID, "review", "drafting")
 					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
 				}
 				armed.Store(true)
@@ -267,10 +274,10 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 					t.Fatalf("consumer=%#v", entity)
 				}
 				history := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
-				if len(history) != 5 || history[4].TriggerEventID != cap.EventID || history[4].From != "review" || history[4].To != "escaped" {
+				if len(history) != 1 || history[0].TriggerEventID != cap.EventID || history[0].From != "review" || history[0].To != "escaped" {
 					t.Fatalf("restart history=%#v", history)
 				}
-				compiled, ok := history[4].Evidence.Compiled()
+				compiled, ok := history[0].Evidence.Compiled()
 				if !ok || compiled.Edge().Source != "loop.escape" || compiled.Edge().LoopID != "revision" {
 					t.Fatalf("restart escape cause=%#v", compiled)
 				}
