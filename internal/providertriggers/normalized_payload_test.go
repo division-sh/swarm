@@ -16,7 +16,7 @@ func TestManifestNormalizedPayloadProjectionSharesWebhookOwner(t *testing.T) {
 	if err := decoder.Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
-	delivery, err := manifest.Accept(Request{Target: Target{EntityID: "fixture"}, Payload: payload})
+	delivery, err := manifest.Accept(Request{Target: Target{}, Payload: payload})
 	if err != nil {
 		t.Fatal(err)
 	}
