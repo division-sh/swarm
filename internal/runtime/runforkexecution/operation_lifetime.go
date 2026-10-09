@@ -179,9 +179,16 @@ func selectedStopOwnsDisposition(ctx context.Context) bool {
 	if !ok {
 		return false
 	}
-	op.mu.Lock()
-	defer op.mu.Unlock()
-	return op.stopRequested
+	return op.stopOwnsDisposition()
+}
+
+func (o *selectedContractOperation) stopOwnsDisposition() bool {
+	if o == nil {
+		return false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.stopRequested
 }
 
 func (o *selectedContractOperation) releaseOrchestration() error {
