@@ -537,6 +537,10 @@ func TestWhatsAppHistoricalPublicationStableScopeRefusalsBothStores(t *testing.T
 						changed.Scope.PublicationBinding.RunID = uuid.NewString()
 					case "generation":
 						changed.Scope.PublicationBinding.Generation++
+						changed.Source.Coordinate.TargetGeneration++
+					}
+					if err := changed.Validate(); err != nil {
+						t.Fatal("namespace probe must have internally consistent capture evidence", err)
 					}
 					// The admitted connection owner checks its complete frozen scope;
 					// an altered namespace cannot become an original-scope retry.
