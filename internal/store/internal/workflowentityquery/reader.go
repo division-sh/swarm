@@ -95,14 +95,18 @@ func count(request entityquery.Request, query func(string) (rowIterator, error))
 		if err != nil {
 			return 0, err
 		}
-		if entityquery.Matches(map[string]any{
+		matches, err := entityquery.Matches(map[string]any{
 			"fields":         materialized,
 			"current_state":  strings.TrimSpace(currentState),
 			"entity_type":    request.Contract.EntityType,
 			"flow_instance":  flowRoot,
 			"workflow_name":  request.Contract.FlowID,
 			"workflow_state": strings.TrimSpace(currentState),
-		}, request.Predicate) {
+		}, request.Predicate)
+		if err != nil {
+			return 0, err
+		}
+		if matches {
 			matched++
 		}
 	}

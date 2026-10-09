@@ -250,11 +250,11 @@ func createOperatorReadbackEntities(t *testing.T, ctx context.Context, selected 
 		Entities: []pipeline.ScenarioSetupEntityRequest{
 			{
 				Alias: "a", EntityID: entityA, FlowInstance: "scoring/vertical-a", EntityType: "vertical",
-				CurrentState: "discovered", Fields: map[string]any{"vertical_id": "vertical-a", "vertical_name": "Healthcare"},
+				Fields: map[string]any{"vertical_id": "vertical-a", "vertical_name": "Healthcare"},
 			},
 			{
 				Alias: "b", EntityID: entityB, FlowInstance: "scoring/vertical-b", EntityType: "vertical",
-				CurrentState: "pending", Fields: map[string]any{"vertical_id": "vertical-b", "vertical_name": "Manufacturing"},
+				Fields: map[string]any{"vertical_id": "vertical-b", "vertical_name": "Manufacturing"},
 			},
 		},
 	}); err != nil {
