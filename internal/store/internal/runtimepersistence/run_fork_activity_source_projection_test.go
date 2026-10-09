@@ -581,6 +581,10 @@ func selectedActivityProducerSourceWithLoops(t *testing.T, ordinaryRootLoop, act
 }
 
 func selectedActivityProducerSourceWithRootFields(t *testing.T, ordinaryRootLoop, activityLoop, rootFields bool) semanticview.Source {
+	return selectedActivityProducerSourceOptions(t, ordinaryRootLoop, activityLoop, rootFields, false)
+}
+
+func selectedActivityProducerSourceOptions(t *testing.T, ordinaryRootLoop, activityLoop, rootFields, rootWrite bool) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
@@ -632,6 +636,16 @@ telegram.send_message:
 	}
 	if !rootFields {
 		delete(files, "entities.yaml")
+	}
+	if rootWrite {
+		files["events.yaml"] += "review.accepted:\n"
+		files["nodes.yaml"] += `writer:
+  execution_type: system_node
+  subscribes_to: [review.accepted]
+  event_handlers:
+    review.accepted:
+      activity: {id: commit, tool: provider.write}
+`
 	}
 	if ordinaryRootLoop {
 		files["schema.yaml"] += "  closed: {final: true}\n  exhausted: {final: true}\nloops:\n  revision:\n    revision_field: opaque_revision\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n"
