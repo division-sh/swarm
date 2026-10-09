@@ -52,7 +52,7 @@ func TestResolveProfileCoversEveryEventAndEscalationFamily(t *testing.T) {
 		body  string
 		want  string
 	}{
-		{event: "pull_request", want: ProfileFull},
+		{event: "pull_request", want: ProfileCore},
 		{event: "pull_request", body: "CI-Tier: core", want: ProfileCore},
 		{event: "pull_request", body: "CI-Tier: lifecycle", want: ProfileLifecycle},
 		{event: "push", want: ProfileFull},

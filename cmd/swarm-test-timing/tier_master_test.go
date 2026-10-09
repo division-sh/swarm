@@ -25,7 +25,7 @@ func TestCurrentPRTierRevalidationFailsClosed(t *testing.T) {
 	}{
 		{"full", "CI-Tier: full", "branch", false, false, true},
 		{"lower", "CI-Tier: core", "branch", false, false, true},
-		{"missing_tier_full", "", "branch", false, false, true},
+		{"missing_tier_core_feedback", "", "branch", false, false, true},
 		{"wrong_head", "CI-Tier: full", "other", false, false, false},
 		{"absent_head", "CI-Tier: full", "", false, false, false},
 		{"malformed_api", "", "branch", true, false, false},

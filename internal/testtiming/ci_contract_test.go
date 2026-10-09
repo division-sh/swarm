@@ -212,7 +212,7 @@ type ciWorkflowJob struct {
 	TimeoutMinutes any              `yaml:"timeout-minutes"`
 	RunsOn         string           `yaml:"runs-on"`
 	Strategy       struct {
-		FailFast    *bool  `yaml:"fail-fast"`
+		FailFast    *any   `yaml:"fail-fast"`
 		Matrix      string `yaml:"matrix"`
 		MaxParallel any    `yaml:"max-parallel"`
 	} `yaml:"strategy"`

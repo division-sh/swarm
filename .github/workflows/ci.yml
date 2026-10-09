@@ -13,6 +13,10 @@ on:
         default: full
         type: choice
         options: [full]
+      keep_going:
+        description: Diagnostic run; collect failures instead of cancelling sibling proofs
+        default: false
+        type: boolean
   schedule:
     - cron: "17 3 * * *"
 
@@ -176,7 +180,7 @@ jobs:
               "${profile_args[@]}"
           fi
 
-          echo "proof_matrix=$(jq -c '{include: [.include[] | select(.budget_class != "soak")]}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "proof_matrix=$(jq -c '{include: .include}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
           echo "soak_matrix=$(jq -c '{include: [.include[] | select(.budget_class == "soak")]}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
           echo "profile=$(jq -r .profile test-results/proof-plan.json)" >> "$GITHUB_OUTPUT"
           echo "plan_digest=$(jq -r .digest test-results/proof-plan.json)" >> "$GITHUB_OUTPUT"
@@ -400,7 +404,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
-      fail-fast: false
+      fail-fast: ${{ !inputs.keep_going }}
       matrix: ${{ fromJson(needs.ci-plan.outputs.proof_matrix) }}
     steps:
       - uses: actions/checkout@v4
@@ -437,11 +441,27 @@ jobs:
             go-production-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
             go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ matrix.unit }}-${{ github.ref_name }}-
             go-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ matrix.unit }}-
+      - name: Resolve exact trusted-base analysis key
+        id: debt-identity
+        if: matrix.unit == 'persistence-authority-debt-census'
+        env:
+          SWARM_DEBT_CACHE_DIR: ${{ runner.temp }}/debt-analysis
+        run: |
+          SWARM_DEBT_CACHE_OUTPUT="$GITHUB_OUTPUT" go test ./internal/store \
+            -run '^TestPersistenceAuthorityDebtAnalysisCacheIdentity$' -count=1
+      - name: Restore exact trusted-base analysis read-only
+        if: matrix.unit == 'persistence-authority-debt-census'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/debt-analysis
+          key: ${{ steps.debt-identity.outputs.key }}
       - name: Run exact planned proof unit
         shell: bash
         env:
           BATCH_ID: ${{ matrix.unit }}
           SWARM_TEST_BUILD_CACHE: ${{ runner.temp }}/swarm-build-products
+          SWARM_DEBT_CACHE_DIR: ${{ runner.temp }}/debt-analysis
+          KEEP_GOING: ${{ inputs.keep_going }}
           SWARM_TOOL_GATEWAY_URL: ""
           SWARM_TOOL_GATEWAY_CONTAINER_URL: ""
           SWARM_TOOL_GATEWAY_TOKEN: ""
@@ -460,80 +480,6 @@ jobs:
           path: test-results/evidence
           if-no-files-found: error
 
-  mandatory-soak:
-    name: Go proof ${{ matrix.unit }}
-    needs: [ci-plan]
-    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.soak_matrix != '{"include":[]}' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.ci-plan.outputs.soak_matrix) }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.ci-plan.outputs.execution_sha }}
-      - uses: actions/setup-go@v5
-        id: go
-        with:
-          go-version-file: go.mod
-          cache: false
-      - name: Download exact proof plan
-        uses: actions/download-artifact@v4
-        with:
-          name: ci-plan
-          path: test-results/plan
-      - name: Restore shared Go modules
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/go/pkg/mod
-          key: go-mod-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
-      - name: Restore exact-head production Go cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.cache/go-build
-          key: go-production-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
-      - name: Run exact planned proof unit
-        shell: bash
-        env:
-          UNIT_ID: ${{ matrix.unit }}
-          SWARM_TOOL_GATEWAY_URL: ""
-          SWARM_TOOL_GATEWAY_CONTAINER_URL: ""
-          SWARM_TOOL_GATEWAY_TOKEN: ""
-        run: |
-          set -euo pipefail
-          mkdir -p test-results/evidence
-          plan=test-results/plan/proof-plan.json
-          go run ./cmd/swarm-test-timing -assert-execution-sha \
-            -plan "$plan" -execution-sha "$(git rev-parse HEAD)"
-          unit=$(jq -cer --arg id "$UNIT_ID" '.units[] | select(.id == $id)' "$plan")
-          test "$(jq -r '.budget_class' <<<"$unit")" = soak
-          test "$(jq -r '.count_mode' <<<"$unit")" = count-1
-          test -z "$(jq -r '.skip // empty' <<<"$unit")"
-          primary_json="test-results/evidence/${UNIT_ID}-primary.json"
-          primary_evidence="test-results/evidence/${UNIT_ID}-primary-evidence.json"
-          start=$(date +%s)
-          set +e
-          timeout --signal=TERM --kill-after=30s 1500s \
-            go run ./cmd/swarm-test --planned "$plan" "$UNIT_ID" | tee "$primary_json"
-          status=${PIPESTATUS[0]}
-          set -e
-          elapsed=$(( $(date +%s) - start ))
-          go run ./cmd/swarm-test-timing -record-evidence \
-            -workflow-run-id "$GITHUB_RUN_ID" -workflow-attempt "$GITHUB_RUN_ATTEMPT" \
-            -plan "$plan" -unit "$UNIT_ID" -attempt primary \
-            -input "$primary_json" -evidence "$primary_evidence" \
-            -elapsed-seconds "$elapsed" -exit-code "$status"
-          go run ./cmd/swarm-test-timing -input "$primary_json" -markdown "test-results/evidence/${UNIT_ID}-timing.md"
-          cat "test-results/evidence/${UNIT_ID}-timing.md" >> "$GITHUB_STEP_SUMMARY"
-          test "$status" -eq 0
-      - name: Upload proof evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: proof-${{ matrix.unit }}-timing
-          path: test-results/evidence
-          if-no-files-found: error
 
   semantic-smoke:
     needs: [ci-plan]
@@ -594,7 +540,7 @@ jobs:
   timing-budget:
     name: CI timing budget
     if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.master_replay != 'true' }}
-    needs: [ci-plan, proof-unit, mandatory-soak]
+    needs: [ci-plan, proof-unit]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -683,7 +629,7 @@ jobs:
   required-tests:
     name: ${{ github.event_name == 'workflow_dispatch' && 'Full dispatch summary' || 'Required test summary' }}
     if: always()
-    needs: [complexity, ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, unused-linux, unused-darwin, unused-checks, proof-unit, mandatory-soak, semantic-smoke, timing-budget]
+    needs: [complexity, ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, unused-linux, unused-darwin, unused-checks, proof-unit, semantic-smoke, timing-budget]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -748,7 +694,7 @@ jobs:
           for native in '${{ needs.unused-linux.result }}' '${{ needs.unused-darwin.result }}' '${{ needs.unused-checks.result }}'; do
             if [ "$native" != "$native_expected" ]; then failed=1; fi
           done
-          if [ '${{ needs.ci-plan.outputs.soak_matrix }}' != '{"include":[]}' ] && [ "${{ needs.mandatory-soak.result }}" != success ]; then failed=1; fi
+          if [ '${{ needs.ci-plan.outputs.soak_matrix }}' != '{"include":[]}' ] && [ "${{ needs.proof-unit.result }}" != success ]; then failed=1; fi
           for item in \
             "complexity:${{ needs.complexity.result }}" \
             "static-checks:${{ needs.static-checks.result }}" \
@@ -769,10 +715,90 @@ jobs:
           done
           exit "$failed"
 
+  ci-tier:
+    name: 'CI tier: ${{ needs.ci-plan.outputs.profile }}'
+    needs: [ci-plan, required-tests]
+    if: ${{ always() && needs.ci-plan.result == 'success' && needs.required-tests.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Publish only completed same-run tier evidence
+        env:
+          TIER: ${{ needs.ci-plan.outputs.profile }}
+          PLAN_DIGEST: ${{ needs.ci-plan.outputs.plan_digest }}
+          EXECUTION_SHA: ${{ needs.ci-plan.outputs.execution_sha }}
+        run: |
+          set -euo pipefail
+          case "$TIER" in core|lifecycle|full) ;; *) exit 1 ;; esac
+          test -n "$PLAN_DIGEST"
+          test -n "$EXECUTION_SHA"
+          printf 'Tier %s qualified by run %s attempt %s; execution %s; plan %s.\n' \
+            "$TIER" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$EXECUTION_SHA" "$PLAN_DIGEST" >> "$GITHUB_STEP_SUMMARY"
+
+  nightly-proof:
+    name: Master nightly proof
+    needs: [ci-plan, required-tests, ci-tier]
+    if: ${{ always() && github.event_name == 'schedule' && github.ref == 'refs/heads/master' && needs.ci-plan.outputs.profile == 'full' && needs.required-tests.result == 'success' && needs.ci-tier.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Bind complete nightly to the existing exhaustive owner
+        env:
+          EXECUTION_SHA: ${{ needs.ci-plan.outputs.execution_sha }}
+          PLAN_DIGEST: ${{ needs.ci-plan.outputs.plan_digest }}
+        run: |
+          set -euo pipefail
+          test "$EXECUTION_SHA" = "$GITHUB_SHA"
+          test -n "$PLAN_DIGEST"
+          printf 'Complete full master-nightly: run %s attempt %s source %s plan %s. Original PR proofs remain retained.\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$EXECUTION_SHA" "$PLAN_DIGEST" >> "$GITHUB_STEP_SUMMARY"
+
+  publish-debt-analysis:
+    name: Publish protected-master immutable debt analysis
+    needs: [ci-plan, required-tests]
+    if: ${{ github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'schedule') && needs.required-tests.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      SWARM_DEBT_CACHE_DIR: ${{ runner.temp }}/debt-analysis
+      SWARM_DEBT_CACHE_PUBLISH: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.ci-plan.outputs.execution_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Resolve exact protected-master cache key
+        id: identity
+        run: |
+          SWARM_DEBT_CACHE_OUTPUT="$GITHUB_OUTPUT" go test ./internal/store \
+            -run '^TestPersistenceAuthorityDebtAnalysisCacheIdentity$' -count=1
+      - name: Restore exact immutable analysis
+        id: analysis
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/debt-analysis
+          key: ${{ steps.identity.outputs.key }}
+      - name: Analyze protected-master archive even after proof replay
+        run: go test ./internal/store -run '^TestPersistenceAuthorityDebtAnalysisCachePublishMaster$' -count=1 -timeout=20m
+      - name: Publish exact immutable analysis
+        if: steps.analysis.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/debt-analysis
+          key: ${{ steps.identity.outputs.key }}
+
   publish-timing-model:
     name: Publish generated timing model
     if: github.event_name == 'schedule' && needs.required-tests.result == 'success'
-    needs: [required-tests, ci-plan, proof-unit, mandatory-soak]
+    needs: [required-tests, ci-plan, proof-unit]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: timing-model-publisher

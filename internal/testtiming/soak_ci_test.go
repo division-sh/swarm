@@ -182,17 +182,17 @@ func TestMandatorySoakWorkflowRequiredExactHeadAndBudgets(t *testing.T) {
 	if err := yaml.Unmarshal(raw, &workflow); err != nil {
 		t.Fatal(err)
 	}
-	job := workflow.Jobs["mandatory-soak"]
-	if job.If != `${{ (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.soak_matrix != '{"include":[]}' }}` || job.TimeoutMinutes != 30 || job.RunsOn != "ubuntu-latest" || job.Strategy.FailFast == nil || *job.Strategy.FailFast || job.Strategy.Matrix != "${{ fromJson(needs.ci-plan.outputs.soak_matrix) }}" || !slices.Equal(job.Needs, []string{"ci-plan"}) || job.Name != "Go proof ${{ matrix.unit }}" {
+	job := workflow.Jobs["proof-unit"]
+	if job.If != `(github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.proof_matrix != '{"include":[]}'` || job.TimeoutMinutes != "${{ matrix.timeout_minutes }}" || job.RunsOn != "ubuntu-latest" || job.Strategy.FailFast == nil || *job.Strategy.FailFast != "${{ !inputs.keep_going }}" || job.Strategy.Matrix != "${{ fromJson(needs.ci-plan.outputs.proof_matrix) }}" || !slices.Equal(job.Needs, []string{"ci-plan"}) || job.Name != "Go proof ${{ matrix.unit }}" {
 		t.Fatalf("mandatory isolated soak job changed: %+v", job)
 	}
 	for _, name := range []string{"timing-budget", "required-tests", "publish-timing-model"} {
-		if !slices.Contains(workflow.Jobs[name].Needs, "mandatory-soak") {
+		if !slices.Contains(workflow.Jobs[name].Needs, "proof-unit") {
 			t.Fatalf("%s does not await mandatory soak", name)
 		}
 	}
 	planner := findWorkflowStep(workflow.Jobs["ci-plan"].Steps, "Plan proof topology")
-	for _, selection := range []string{`.budget_class != "soak"`, `.budget_class == "soak"`, `test-results/proof-matrix.json`} {
+	for _, selection := range []string{`{include: .include}`, `.budget_class == "soak"`, `test-results/proof-matrix.json`} {
 		if planner == nil || !strings.Contains(planner.Run, selection) {
 			t.Fatalf("matrix partition missing %s", selection)
 		}
@@ -209,8 +209,8 @@ func TestMandatorySoakWorkflowRequiredExactHeadAndBudgets(t *testing.T) {
 	if proof == nil || proof.If != "" || proof.ContinueOnError {
 		t.Fatal("soak proof may be skipped/ignored")
 	}
-	for _, want := range []string{"-assert-execution-sha", `git rev-parse HEAD`, `.budget_class`, `1500s`, `--kill-after=30s`, `go run ./cmd/swarm-test --planned "$plan" "$UNIT_ID"`, `status=${PIPESTATUS[0]}`, `-record-evidence`, `-attempt primary`, `test "$status" -eq 0`} {
-		if !strings.Contains(proof.Run, want) {
+	for _, want := range []string{"-assert-execution-sha", `git rev-parse HEAD`, `.budget_class`, `1500s`, `--kill-after=30s`, `go run ./cmd/swarm-test --planned "$plan" "$UNIT_ID"`, `status=${statuses[0]}`, `-record-evidence`, `-attempt primary`, `if [ "$status" -ne 0 ]; then failed=1; fi`} {
+		if !strings.Contains(string(batch), want) {
 			t.Fatalf("soak proof missing %s", want)
 		}
 	}
@@ -222,7 +222,7 @@ func TestMandatorySoakWorkflowRequiredExactHeadAndBudgets(t *testing.T) {
 		t.Fatal("soak evidence upload missing/fail-open")
 	}
 	summary := findWorkflowStep(workflow.Jobs["required-tests"].Steps, "Summarize required checks")
-	if summary == nil || !strings.Contains(summary.Run, `if [ '${{ needs.ci-plan.outputs.soak_matrix }}' != '{"include":[]}' ] && [ "${{ needs.mandatory-soak.result }}" != success ]; then failed=1; fi`) {
+	if summary == nil || !strings.Contains(summary.Run, `if [ '${{ needs.ci-plan.outputs.soak_matrix }}' != '{"include":[]}' ] && [ "${{ needs.proof-unit.result }}" != success ]; then failed=1; fi`) {
 		t.Fatal("planned soak may pass required aggregation when skipped")
 	}
 	f, err := os.Open(filepath.Join(root, ".github/test-timing-budgets.yaml"))
@@ -251,7 +251,7 @@ func TestMandatorySoakWorkflowMatrixExecutionAndShellSyntax(t *testing.T) {
 	if err := yaml.Unmarshal(raw, &workflow); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"ci-plan", "proof-unit", "mandatory-soak", "required-tests"} {
+	for _, name := range []string{"ci-plan", "proof-unit", "proof-unit", "required-tests"} {
 		for _, step := range workflow.Jobs[name].Steps {
 			if step.Run == "" {
 				continue
@@ -302,6 +302,7 @@ func TestMandatorySoakWorkflowMatrixExecutionAndShellSyntax(t *testing.T) {
 				t.Fatal(err)
 			}
 			seen := map[string]bool{}
+			declaredSoaks := map[string]bool{}
 			soaks := 0
 			for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 				lane, raw, ok := strings.Cut(line, "=")
@@ -317,7 +318,14 @@ func TestMandatorySoakWorkflowMatrixExecutionAndShellSyntax(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if seen[u.ID] || (lane == "soak_matrix") != (u.BudgetClass == "soak") {
+					if lane == "soak_matrix" {
+						if declaredSoaks[u.ID] || u.BudgetClass != "soak" {
+							t.Fatalf("duplicate/foreign soak declaration %s", u.ID)
+						}
+						declaredSoaks[u.ID] = true
+						continue // Inventory only; the unified matrix owns execution once.
+					}
+					if seen[u.ID] {
 						t.Fatalf("duplicated/misrouted unit %s", u.ID)
 					}
 					seen[u.ID] = true
@@ -330,7 +338,7 @@ func TestMandatorySoakWorkflowMatrixExecutionAndShellSyntax(t *testing.T) {
 			if profile == testplanning.ProfileFull {
 				wantSoaks = 2
 			}
-			if len(seen) != len(plan.Units) || soaks != wantSoaks {
+			if len(seen) != len(plan.Units) || soaks != wantSoaks || len(declaredSoaks) != wantSoaks {
 				t.Fatalf("incomplete matrices: %d/%d units, %d soak cells", len(seen), len(plan.Units), soaks)
 			}
 		})

@@ -143,7 +143,7 @@ fi
 			command := exec.Command("bash", filepath.Join(testTimingRepoRoot(t), ".github/scripts/run-proof-batch.sh"))
 			command.Dir = root
 			log := filepath.Join(root, "probe.log")
-			command.Env = append(os.Environ(), "PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"), "BATCH_ID=batch", "GITHUB_RUN_ID=1", "GITHUB_RUN_ATTEMPT=1", "GITHUB_STEP_SUMMARY="+filepath.Join(root, "summary"), "PROBE_LOG="+log, "FAIL_UNIT="+failure)
+			command.Env = append(os.Environ(), "PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"), "BATCH_ID=batch", "KEEP_GOING=true", "GITHUB_RUN_ID=1", "GITHUB_RUN_ATTEMPT=1", "GITHUB_STEP_SUMMARY="+filepath.Join(root, "summary"), "PROBE_LOG="+log, "FAIL_UNIT="+failure)
 			if output, err := command.CombinedOutput(); err == nil {
 				t.Fatalf("failed member %s was suppressed: %s", failure, output)
 			}

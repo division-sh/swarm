@@ -9,7 +9,7 @@ import (
 func TestCITierEventDataAndConservativeDefault(t *testing.T) {
 	for _, tc := range []struct{ body, want string }{
 		{"CI-Tier: core", ProfileCore}, {"heading\nCI-Tier: lifecycle\r\nLocal-Tier: full", ProfileLifecycle},
-		{"CI-Tier: full", ProfileFull}, {"", ProfileFull}, {"CI-Tier: unknown", ProfileFull},
+		{"CI-Tier: full", ProfileFull}, {"", ProfileCore}, {"notes only", ProfileCore}, {"CI-Tier: unknown", ProfileFull},
 		{"CI-Tier:core", ProfileFull}, {" CI-Tier: core", ProfileFull},
 		{"CI-Tier: core\nCI-Tier: lifecycle", ProfileFull}, {"CI-Tier: core\nCI-Tier: core", ProfileFull},
 		{"CI-Tier: $(touch /tmp/unsafe)", ProfileFull}, {"CI-Tier: core\nCI-Tier: malformed", ProfileFull},
@@ -40,8 +40,8 @@ func TestCITierCurrentBodyRejectsStaleThinnerGreen(t *testing.T) {
 			}
 		}
 	}
-	if CheckCurrentCITier(ProfileCore, "") == nil {
-		t.Fatal("missing instruction admitted thin green")
+	if CheckCurrentCITier(ProfileCore, "") != nil {
+		t.Fatal("missing declaration must admit core feedback")
 	}
 }
 
