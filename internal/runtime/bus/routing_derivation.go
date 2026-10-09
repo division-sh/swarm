@@ -315,25 +315,7 @@ func compileRouteConnectDefinitions(graph runtimepinrouting.CompiledConnectGraph
 		path = "."
 	}
 	for _, subscriber := range subscribers {
-		var recipient runtimepinrouting.ConnectRecipient
-		var err error
-		if subscriber.Kind == subscriberNode {
-			recipient, err = runtimepinrouting.NewConnectNodeRecipient(subscriber.HandlerNode, path)
-		} else {
-			name, nameErr := subscriber.AgentNamePlan.Materialize()
-			if nameErr != nil {
-				return nil, nameErr
-			}
-			route, routeErr := runtimeflowidentity.StoredRoute("", "", path).AgentIdentityRoute()
-			if routeErr != nil {
-				return nil, routeErr
-			}
-			plan, planErr := agentidentity.NewPlan(name, route)
-			if planErr != nil {
-				return nil, planErr
-			}
-			recipient, err = runtimepinrouting.NewConnectAgentRecipient(name.AgentID, path, plan)
-		}
+		recipient, err := connectDeclarationRecipient(path, subscriber)
 		if err != nil {
 			return nil, err
 		}
@@ -353,6 +335,25 @@ func compileRouteConnectDefinitions(graph runtimepinrouting.CompiledConnectGraph
 		}
 	}
 	return definitions, nil
+}
+
+func connectDeclarationRecipient(path string, subscriber routeSubscriberTemplate) (runtimepinrouting.ConnectRecipient, error) {
+	if subscriber.Kind == subscriberNode {
+		return runtimepinrouting.NewConnectNodeRecipient(subscriber.HandlerNode, path)
+	}
+	name, err := subscriber.AgentNamePlan.Materialize()
+	if err != nil {
+		return runtimepinrouting.ConnectRecipient{}, err
+	}
+	route, err := runtimeflowidentity.StoredRoute("", "", path).AgentIdentityRoute()
+	if err != nil {
+		return runtimepinrouting.ConnectRecipient{}, err
+	}
+	plan, err := agentidentity.NewPlan(name, route)
+	if err != nil {
+		return runtimepinrouting.ConnectRecipient{}, err
+	}
+	return runtimepinrouting.NewConnectAgentRecipient(name.AgentID, path, plan)
 }
 
 // ConnectDeclarationDefinitions is source-only descriptive data. It cannot
