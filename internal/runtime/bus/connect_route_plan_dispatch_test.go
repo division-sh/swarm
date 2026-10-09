@@ -2409,6 +2409,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1")), "v-1"))
 	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
@@ -3100,6 +3101,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionUsesRenamedPayloadSourc
 			installConnectionSourceConstruction(t, eb, source, "producer")
 			store.bus = eb
 			for index, instanceID := range []string{"authoritative", "conflicting"} {
+				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID), []string{"acct-authoritative", "acct-conflicting"}[index]))
 				if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID)), Instance: StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)}); err != nil {
 					t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
 				}
@@ -3336,6 +3338,11 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 			installConnectionSourceConstruction(t, eb, source, "producer")
 			store.bus = eb
 			for index, instanceID := range tc.addRoutes {
+				key := "acct-1"
+				if instanceID == "other" {
+					key = "acct-2"
+				}
+				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID), key))
 				if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID)), Instance: StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)}); err != nil {
 					t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
 				}
@@ -3344,6 +3351,13 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 			evt := connectRoutePlanStaticProducerEvent(eventID,
 				events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
+			if tc.name == "ambiguous existing instances fail closed" {
+				requireCorruptConnectSelectionNoMutation(t, eb, store.connectRoutePlanDescriptorStore, evt)
+				if len(store.activations) != 0 {
+					t.Fatal("corruption activated a receiver")
+				}
+				return
+			}
 			routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
 			if err != nil {
 				t.Fatalf("planSubscribedRoutePlan: %v", err)
@@ -3592,6 +3606,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForA
 	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.bus = eb
 	for index, instanceID := range []string{"one", "two"} {
+		store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID), "acct-1"))
 		if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID)), Instance: StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)}); err != nil {
 			t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
 		}
@@ -3600,27 +3615,9 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForA
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
-	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
-	if err != nil {
-		t.Fatalf("planSubscribedRoutePlan: %v", err)
-	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.TargetFailure != runtimepinrouting.TargetFailureFromConnect(runtimepinrouting.ConnectFailureTargetAmbiguous) {
-		t.Fatalf("route plan authority/failure = %q/%q, want fail-closed ambiguous", routePlan.AuthorityState, routePlan.TargetFailure)
-	}
-	if got := routePlan.ExtraDetail["connect_route_plan_matched_instance_count"]; got != 2 {
-		t.Fatalf("matched count detail = %#v, want 2; all detail %#v", got, routePlan.ExtraDetail)
-	}
-	if remediation, _ := routePlan.ExtraDetail["connect_route_plan_failure_remediation"].(string); !strings.Contains(remediation, "select-or-create") || !strings.Contains(remediation, "account") || !strings.Contains(remediation, "account_id") {
-		t.Fatalf("remediation = %q, want select-or-create/account/account_id detail", remediation)
-	}
-	if err := eb.Publish(context.Background(), evt); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	if got := len(store.activations); got != 0 {
-		t.Fatalf("activations = %d, want 0 on ambiguous fail-closed", got)
-	}
-	if routes := store.routes[eventID]; len(routes) != 0 {
-		t.Fatalf("persisted routes = %#v, want none for ambiguous fail-closed", routes)
+	requireCorruptConnectSelectionNoMutation(t, eb, store.connectRoutePlanDescriptorStore, evt)
+	if len(store.activations) != 0 {
+		t.Fatal("corruption activated a receiver")
 	}
 }
 
@@ -4182,6 +4179,7 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1")), "v-1"))
 	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
 	}
@@ -4253,6 +4251,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarge
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1")), "v-1"))
 	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
@@ -4412,6 +4411,11 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 			}
 			installConnectionSourceConstruction(t, eb, source, "producer")
 			for index, instanceID := range tc.addRoutes {
+				key := "v-1"
+				if tc.name == "no receiver instance under rejecting policy" {
+					key = "v-2"
+				}
+				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "consumer", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID), key))
 				if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", instanceID)), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)}); err != nil {
 					t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
 				}
@@ -4420,6 +4424,10 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 			evt := connectRoutePlanStaticProducerEvent(eventID,
 				events.EventType("producer/deploy.done"), "", "", json.RawMessage(tc.payload), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
+			if tc.name == "ambiguous receiver instance key" {
+				requireCorruptConnectSelectionNoMutation(t, eb, store, evt)
+				return
+			}
 			routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
 			if err != nil {
 				t.Fatalf("planSubscribedRoutePlan: %v", err)

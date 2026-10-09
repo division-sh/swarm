@@ -1256,127 +1256,13 @@ func TestNormalizeJSONPayload_RedactsSensitiveText(t *testing.T) {
 	}
 }
 
-func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
+func TestManagerStore_RejectsIncompleteLifecycleTransition(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), specEntityStateRunID)
-
-	entityID := uuid.NewString()
-	seedSpecEntityState(t, ctx, db, entityID, "v-flow", "v", "V", "operating")
-
-	if err := pg.UpsertRoutingRule(ctx, runtimemanager.PersistedRoutingRule{
-		EntityID:     entityID,
-		EventPattern: "x.*",
-		SubscriberID: "sub",
-		InstalledBy:  "inst",
-		Status:       "active",
-		Source:       "discovered",
-	}); err != nil {
-		t.Fatalf("UpsertRoutingRule: %v", err)
-	}
-	if err := pg.UpsertRoutingRule(ctx, runtimemanager.PersistedRoutingRule{
-		EntityID:     entityID,
-		EventPattern: "y.*",
-		SubscriberID: "sub",
-		InstalledBy:  "inst",
-		Status:       "deactivated",
-		Source:       "discovered",
-	}); err != nil {
-		t.Fatalf("UpsertRoutingRule deactivated: %v", err)
-	}
-	rules, err := pg.LoadRoutingRules(ctx)
-	if err != nil {
-		t.Fatalf("LoadRoutingRules: %v", err)
-	}
-	if len(rules) != 1 || rules[0].EventPattern != "x.*" {
-		t.Fatalf("expected only active/proposed rules, got %#v", rules)
-	}
 	if _, err := agentfixture.CommitExact(t, ctx, pg, runtimemanager.AgentLifecycleTransition{}); err == nil {
-		t.Fatalf("expected lifecycle transition fields required")
+		t.Fatal("expected lifecycle transition fields required")
 	}
-
-}
-
-func TestManagerStore_LoadRoutingRules_DoesNotJoinRunScopedEntityState(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-
-	runA := uuid.NewString()
-	runB := uuid.NewString()
-	entityID := uuid.NewString()
-	requireRunningRunForTest(t, ctx, pg, runA, time.Now().UTC())
-	requireRunningRunForTest(t, ctx, pg, runB, time.Now().UTC())
-	for _, runID := range []string{runA, runB} {
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO entity_state (
-				run_id, entity_id, flow_instance, entity_type, slug, name, current_state
-			)
-			VALUES ($1::uuid, $2::uuid, 'shared-flow', 'default', 'shared', 'Shared', 'active')
-		`, runID, entityID); err != nil {
-			t.Fatalf("insert entity_state for run %s: %v", runID, err)
-		}
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO routing_rules (
-			event_pattern, subscriber_type, subscriber_id, flow_instance,
-			is_wildcard, is_materialized, status, created_at
-		)
-		VALUES ('work.*', 'agent', 'worker', 'shared-flow', true, false, 'active', now())
-	`); err != nil {
-		t.Fatalf("insert routing rule: %v", err)
-	}
-
-	rules, err := pg.LoadRoutingRules(ctx)
-	if err != nil {
-		t.Fatalf("LoadRoutingRules: %v", err)
-	}
-	if len(rules) != 1 {
-		t.Fatalf("LoadRoutingRules returned %d rules, want 1: %#v", len(rules), rules)
-	}
-	if rules[0].EntityID != "" {
-		t.Fatalf("LoadRoutingRules entity_id = %q, want empty persisted route identity", rules[0].EntityID)
-	}
-}
-
-func TestManagerStore_RoutingRules_DeactivateAndBootstrapVersion(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := newTestPostgresStore(t, db)
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), specEntityStateRunID)
-
-	entityID := uuid.NewString()
-	seedSpecEntityState(t, ctx, db, entityID, "vslug-flow", "vslug", "V", "operating")
-
-	r := runtimemanager.PersistedRoutingRule{
-		EntityID:         entityID,
-		EventPattern:     "inbound.*",
-		SubscriberID:     "sub",
-		InstalledBy:      "inst",
-		Reason:           "r",
-		Status:           "active",
-		Source:           "bootstrap",
-		BootstrapVersion: 2,
-	}
-	if err := pg.UpsertRoutingRule(ctx, r); err != nil {
-		t.Fatalf("UpsertRoutingRule: %v", err)
-	}
-
-	r.Status = "inactive"
-	if err := pg.UpsertRoutingRule(ctx, r); err != nil {
-		t.Fatalf("UpsertRoutingRule deactivate: %v", err)
-	}
-	var status string
-	if err := db.QueryRowContext(ctx, `
-		SELECT status
-		FROM routing_rules
-		WHERE event_pattern='inbound.*' AND subscriber_id='sub'
-	`).Scan(&status); err != nil {
-		t.Fatalf("load routing rule status: %v", err)
-	}
-	if status != "inactive" {
-		t.Fatalf("expected inactive status, got %q", status)
-	}
-
 }
 
 func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
@@ -2786,17 +2672,6 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		StartedAt:       time.Now().UTC(),
 		TemplateVersion: "v2",
 	})
-	if err := pg.UpsertRoutingRule(ctx, runtimemanager.PersistedRoutingRule{
-		EntityID:     entityID,
-		EventPattern: "review.*",
-		SubscriberID: ceoID,
-		InstalledBy:  ceoID,
-		Reason:       "tests",
-		Status:       "active",
-		Source:       "seeded",
-	}); err != nil {
-		t.Fatalf("UpsertRoutingRule: %v", err)
-	}
 	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		"review.requested",

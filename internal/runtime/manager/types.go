@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -73,29 +72,6 @@ type PersistedAgent struct {
 }
 
 type ProcessExecutionBinding = runtimeprocessbinding.Binding
-
-type PersistedRoutingRule struct {
-	EntityID         string
-	EventPattern     string
-	SubscriberID     string
-	InstalledBy      string
-	Reason           string
-	Status           string
-	Source           string
-	BootstrapVersion int
-}
-
-func (r PersistedRoutingRule) EffectiveEntityID() string {
-	return strings.TrimSpace(r.EntityID)
-}
-
-func (r *PersistedRoutingRule) NormalizeEntityID() {
-	if r == nil {
-		return
-	}
-	entityID := r.EffectiveEntityID()
-	r.EntityID = entityID
-}
 
 type EventReceipt struct {
 	EventID    string
