@@ -44,30 +44,8 @@ func admitTriggerDefinition(root yamlsource.Value) (manifestDefinition, error) {
 		return manifestDefinition{}, err
 	}
 	var out manifestDefinition
-	transport := "webhook"
-	if err := triggerEnum(f, "transport", &transport, "webhook", "session"); err != nil {
+	if out.Transport, err = admitTriggerTransport(f); err != nil {
 		return out, err
-	}
-	out.Transport = packs.ChannelTransport(transport)
-	if out.Transport == packs.ChannelTransportSession {
-		for _, name := range []string{"secret", "signature", "challenge", "payload_source"} {
-			if field, present := f[name]; present {
-				return out, triggerSourceError(field, "session transport forbids HTTP policy field "+name)
-			}
-		}
-		for _, name := range []string{"delivery_id", "event_type"} {
-			if block, present := f[name]; present {
-				for _, member := range []string{"header", "query_param", "form_param"} {
-					field, err := block.Lookup(member)
-					if err != nil {
-						return out, err
-					}
-					if field.Presence != yamlsource.PresenceMissing {
-						return out, triggerSourceError(field.Value, "session transport forbids HTTP identity source "+member)
-					}
-				}
-			}
-		}
 	}
 	if err := triggerScalars(f, map[string]*string{"provider": &out.Provider, "payload_object_error": &out.PayloadObjectError}, map[string]*bool{"payload_object_required": &out.PayloadObjectRequired}); err != nil {
 		return out, err
@@ -99,6 +77,42 @@ func admitTriggerDefinition(root yamlsource.Value) (manifestDefinition, error) {
 		}
 	}
 	return out, admitTriggerCollections(f, &out)
+}
+
+func admitTriggerTransport(fields map[string]yamlsource.Value) (packs.ChannelTransport, error) {
+	transport := "webhook"
+	if err := triggerEnum(fields, "transport", &transport, "webhook", "session"); err != nil {
+		return "", err
+	}
+	if transport != string(packs.ChannelTransportSession) {
+		return packs.ChannelTransport(transport), nil
+	}
+	for _, name := range []string{"secret", "signature", "challenge", "payload_source"} {
+		if field, present := fields[name]; present {
+			return "", triggerSourceError(field, "session transport forbids HTTP policy field "+name)
+		}
+	}
+	for _, name := range []string{"delivery_id", "event_type"} {
+		if block, present := fields[name]; present {
+			if err := rejectSessionHTTPIdentitySource(block); err != nil {
+				return "", err
+			}
+		}
+	}
+	return packs.ChannelTransportSession, nil
+}
+
+func rejectSessionHTTPIdentitySource(block yamlsource.Value) error {
+	for _, member := range []string{"header", "query_param", "form_param"} {
+		field, err := block.Lookup(member)
+		if err != nil {
+			return err
+		}
+		if field.Presence != yamlsource.PresenceMissing {
+			return triggerSourceError(field.Value, "session transport forbids HTTP identity source "+member)
+		}
+	}
+	return nil
 }
 
 func admitTriggerCollections(f map[string]yamlsource.Value, out *manifestDefinition) error {

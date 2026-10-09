@@ -674,19 +674,9 @@ func parseManifestStrict(body []byte) (Manifest, error) {
 }
 
 func (m manifestDefinition) validate() error {
-	provider := NormalizeProviderName(m.Provider)
-	if provider == "" {
-		return fmt.Errorf("provider is required")
-	}
-	if m.Transport == packs.ChannelTransportSession {
-		for _, source := range []ValueSource{m.DeliveryID, m.EventType} {
-			if source.Header != "" || source.QueryParam != "" || source.FormParam != "" || !source.Required || source.sourceCount() != 1 {
-				return fmt.Errorf("%s session manifest requires exact payload delivery_id and event_type; HTTP sources are forbidden", provider)
-			}
-		}
-		if m.Ack.Mode != "durable_before_dispatch" {
-			return fmt.Errorf("%s session manifest requires ack.mode durable_before_dispatch", provider)
-		}
+	provider, err := m.validateProviderTransport()
+	if err != nil {
+		return err
 	}
 	signatureType := strings.TrimSpace(m.Signature.Type)
 	if m.Secret.Required && signatureType == "" {
@@ -809,6 +799,25 @@ func (m manifestDefinition) validate() error {
 		return err
 	}
 	return nil
+}
+
+func (m manifestDefinition) validateProviderTransport() (string, error) {
+	provider := NormalizeProviderName(m.Provider)
+	if provider == "" {
+		return "", fmt.Errorf("provider is required")
+	}
+	if m.Transport != packs.ChannelTransportSession {
+		return provider, nil
+	}
+	for _, source := range []ValueSource{m.DeliveryID, m.EventType} {
+		if source.Header != "" || source.QueryParam != "" || source.FormParam != "" || !source.Required || source.sourceCount() != 1 {
+			return "", fmt.Errorf("%s session manifest requires exact payload delivery_id and event_type; HTTP sources are forbidden", provider)
+		}
+	}
+	if m.Ack.Mode != "durable_before_dispatch" {
+		return "", fmt.Errorf("%s session manifest requires ack.mode durable_before_dispatch", provider)
+	}
+	return provider, nil
 }
 
 type manifestAdmission struct {
