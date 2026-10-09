@@ -20,7 +20,7 @@ func TestWhatsAppClientOccurrenceShutdownInterleavings(t *testing.T) {
 				device := newSDKDeviceFixture(t, container)
 				ctx, cancel := context.WithCancel(peer.ctx)
 				defer cancel()
-				o, err := newClientOccurrence(ctx, uuid.NewString(), uuid.NewString(), device, container.LIDMap, nil)
+				o, err := newClientOccurrence(ctx, uuid.NewString(), uuid.NewString(), device, container.LIDMap(), nil)
 				if err != nil {
 					t.Fatal(err)
 				}

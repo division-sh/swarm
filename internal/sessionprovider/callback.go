@@ -6,15 +6,12 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/sessioncapture"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow"
 )
 
-type callbackFailure struct {
-	ConnectionID string
-	OccurrenceID string
-	Reason       string
-}
+type callbackFailure = sessioncapture.CallbackFailure
 
 // callbackGuard catches inside the SDK's success-status handler. The SDK's
 // outer panic recovery does not change its successful return value.

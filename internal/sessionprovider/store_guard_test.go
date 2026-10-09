@@ -2,55 +2,38 @@ package sessionprovider
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/store/sessionstate"
+
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/store"
-	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
-	_ "modernc.org/sqlite"
 )
 
-func openSDKStoreFixture(t *testing.T, path string) (*sql.DB, *sqlstore.Container) {
+func openSDKStoreFixture(t *testing.T, path string) (*sessionstate.Fixture, *sessionstate.Owner) {
 	t.Helper()
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := file.Close(); err != nil {
-			t.Fatal(err)
-		}
-	}
-	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?_pragma=foreign_keys(1)")
+	fixture, owner, err := sessionstate.OpenSDKFixture(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	db.SetMaxOpenConns(1)
-	container := sqlstore.NewWithDB(db, "sqlite", nil)
-	if err := container.Upgrade(context.Background()); err != nil {
-		_ = db.Close()
-		t.Fatal(err)
-	}
 	t.Cleanup(func() {
-		if err := db.Close(); err != nil {
+		if err := fixture.Close(); err != nil {
 			t.Error(err)
 		}
 	})
-	return db, container
+	return fixture, owner
 }
 
-func newSDKDeviceFixture(t *testing.T, container *sqlstore.Container) *store.Device {
+func newSDKDeviceFixture(t *testing.T, container *sessionstate.Owner) *store.Device {
 	t.Helper()
 	device := container.NewDevice()
 	jid := types.NewJID("synthetic_test_account", types.DefaultUserServer)
@@ -72,6 +55,49 @@ func newSDKDeviceFixture(t *testing.T, container *sqlstore.Container) *store.Dev
 		t.Fatal(err)
 	}
 	return device
+}
+
+func TestWhatsAppPrivateSDKCapabilitiesCannotExportContainerAdministration(t *testing.T) {
+	_, owner := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
+	device := newSDKDeviceFixture(t, owner)
+	check := func() {
+		t.Helper()
+		for name, capability := range map[string]any{
+			"container": device.Container, "identities": device.Identities, "sessions": device.Sessions,
+			"prekeys": device.PreKeys, "sender_keys": device.SenderKeys, "app_state_keys": device.AppStateKeys,
+			"app_state": device.AppState, "contacts": device.Contacts, "settings": device.ChatSettings,
+			"message_secrets": device.MsgSecrets, "privacy": device.PrivacyTokens, "salt": device.NCTSalt,
+			"event_buffer": device.EventBuffer, "lids": device.LIDs, "global_lids": owner.LIDMap(),
+		} {
+			if _, exposed := capability.(interface{ Upgrade(context.Context) error }); exposed {
+				t.Fatalf("%s exposes the SDK container's schema authority", name)
+			}
+		}
+	}
+	check()
+	if err := device.Save(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	check()
+	guard, err := guardSDKStores(device, owner.LIDMap())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := device.Save(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if device.Container != guard || device.Identities != guard || device.LIDs != guard {
+			t.Fatal("private persistence resealing erased the runtime write fence")
+		}
+		check()
+	}
+	if err := guard.fence.join(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := device.Save(context.Background()); !errors.Is(err, errSDKStoreFenced) {
+		t.Fatalf("late save bypassed the runtime write fence: %v", err)
+	}
 }
 
 func TestWhatsAppPinnedSDKDatabaseCloseDoesNotJoinTransaction(t *testing.T) {
@@ -110,7 +136,7 @@ func TestWhatsAppSDKStoreJoinWaitsForNestedTransactionAndRejectsLateWrites(t *te
 	path := filepath.Join(t.TempDir(), "provider.db")
 	db, container := openSDKStoreFixture(t, path)
 	device := newSDKDeviceFixture(t, container)
-	guard, err := guardSDKStores(device, container.LIDMap)
+	guard, err := guardSDKStores(device, container.LIDMap())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +198,7 @@ func TestWhatsAppSDKStoreJoinWaitsForNestedTransactionAndRejectsLateWrites(t *te
 func TestWhatsAppSDKStoreDeviceSaveKeepsEveryStateFieldGuarded(t *testing.T) {
 	_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
 	device := container.NewDevice()
-	guard, err := guardSDKStores(device, container.LIDMap)
+	guard, err := guardSDKStores(device, container.LIDMap())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +231,7 @@ func TestWhatsAppSDKStoreRefusesImplicitAndRetiredLogout(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
 			device := newSDKDeviceFixture(t, container)
-			guard, err := guardSDKStores(device, container.LIDMap)
+			guard, err := guardSDKStores(device, container.LIDMap())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -286,7 +312,7 @@ func TestWhatsAppSDKStoreInterfaceInventoryHasNoPromotedBypass(t *testing.T) {
 func TestWhatsAppSDKStoreDisablesHiddenPlaintextAndRetrySpools(t *testing.T) {
 	_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
 	device := newSDKDeviceFixture(t, container)
-	_, err := guardSDKStores(device, container.LIDMap)
+	_, err := guardSDKStores(device, container.LIDMap())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +327,7 @@ func TestWhatsAppSDKStoreDisablesHiddenPlaintextAndRetrySpools(t *testing.T) {
 func TestWhatsAppEverySDKStateMethodRefusesAfterFence(t *testing.T) {
 	_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
 	device := newSDKDeviceFixture(t, container)
-	guard, err := guardSDKStores(device, container.LIDMap)
+	guard, err := guardSDKStores(device, container.LIDMap())
 	if err != nil {
 		t.Fatal(err)
 	}

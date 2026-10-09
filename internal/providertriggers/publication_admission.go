@@ -67,6 +67,9 @@ func (p InboundAdmissionPlan) ProjectPublication(admitted AdmittedRequest, bundl
 }
 
 func (a PublicationAdmission) ValidateOutput(bundleHash, provider string, ordinal, count int, event events.Event, kind provideroutput.Kind, authorization provideroutput.Authorization) error {
+	if event.EntityID() != "" || event.FlowInstance() != "" {
+		return fmt.Errorf("provider input cannot claim a concrete sender or receiver before route planning")
+	}
 	if a.nativeInput != nil {
 		if err := a.nativeInput.RequireBusiness(a.nativeInput.Context(), provider, a.generation); err != nil {
 			return err
@@ -87,9 +90,18 @@ func (a PublicationAdmission) NativeInput() (nativeinput.Admission, bool) {
 	return *a.nativeInput, true
 }
 
+// SameOwner compares the immutable output seal issued by ProjectPublication,
+// not reconstructed provider coordinates or a caller's copy of output facts.
+func (a PublicationAdmission) SameOwner(other PublicationAdmission) bool {
+	return len(a.outputs) > 0 && len(a.outputs) == len(other.outputs) && &a.outputs[0] == &other.outputs[0]
+}
+
 // ValidateCommitOutput is store-safe: selected responsibility is checked by its
 // transaction owner, not by re-entering a root-store reader under SQL locks.
 func (a PublicationAdmission) ValidateCommitOutput(ctx context.Context, bundleHash, provider string, ordinal, count int, event events.Event, kind provideroutput.Kind, authorization provideroutput.Authorization) error {
+	if (event.EntityID() != "" || event.FlowInstance() != "") && event.TargetRoute().Empty() {
+		return fmt.Errorf("prepared provider output requires canonical receiver coordinates, not a concrete sender claim")
+	}
 	if a.nativeInput != nil && (!a.nativeInput.LifetimeCurrent(ctx) || event.RunID() != a.nativeInput.PublicationRunID()) {
 		return fmt.Errorf("native publication no longer owns its admitted lifetime and run")
 	}
@@ -102,7 +114,7 @@ func (a PublicationAdmission) validateOutput(bundleHash, provider string, ordina
 	}
 	source := event.RoutingSource()
 	if source.Kind() != events.RoutingSourceExternalIngress || source.Authority() != events.RoutingSourceAuthorityProviderAdmissionPlan ||
-		source.Route() != (events.RouteIdentity{FlowID: a.flowID}) || event.EntityID() != "" || event.FlowInstance() != "" {
+		source.Route() != (events.RouteIdentity{FlowID: a.flowID}) || !event.SourceRoute().Empty() {
 		return fmt.Errorf("provider publication contradicts its admitted declaration")
 	}
 	output := a.outputs[ordinal]

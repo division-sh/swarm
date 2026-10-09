@@ -20,7 +20,7 @@ import (
 func newPairingOccurrenceFixture(t *testing.T, peer *sdkPeer) *clientOccurrence {
 	t.Helper()
 	_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
-	o, err := newClientOccurrence(peer.ctx, uuid.NewString(), uuid.NewString(), container.NewDevice(), container.LIDMap, nil)
+	o, err := newClientOccurrence(peer.ctx, uuid.NewString(), uuid.NewString(), container.NewDevice(), container.LIDMap(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

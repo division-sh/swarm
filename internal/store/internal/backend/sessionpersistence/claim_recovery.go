@@ -1,4 +1,4 @@
-package sessionprovider
+package sessionpersistence
 
 import (
 	"context"
@@ -8,21 +8,21 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 )
 
-type claimReceiptReader interface {
+type ClaimReceiptReader interface {
 	LoadOperatorChannelClaimReceipt(context.Context, string) (operatorchannel.ClaimReceipt, bool, error)
 }
 
 // A committed claim is historical evidence, not a reason to re-admit old input
 // under a later activation. Uncommitted captures remain with their original owner.
-func (s *captureStore) reconcileSessionClaim(ctx context.Context, event capturedEvent, reader claimReceiptReader) (bool, error) {
+func (s *CaptureStore) ReconcileSessionClaim(ctx context.Context, event capturedEvent, reader ClaimReceiptReader) (bool, error) {
 	if reader == nil || event.Scope.Kind != channelonboarding.SessionInputOnboarding {
 		return false, fmt.Errorf("onboarding claim history requires its original scope and receipt owner")
 	}
-	providerID, err := event.publicationProviderEventID()
+	providerID, err := event.PublicationProviderEventID()
 	if err != nil {
 		return false, err
 	}
-	fingerprint, err := event.publicationFingerprint()
+	fingerprint, err := event.PublicationFingerprint()
 	if err != nil {
 		return false, err
 	}
@@ -36,7 +36,7 @@ func (s *captureStore) reconcileSessionClaim(ctx context.Context, event captured
 		return false, err
 	}
 	for _, row := range rows {
-		if !row.event.sameCapture(event) {
+		if !row.event.SameCapture(event) {
 			continue
 		}
 		id := operatorchannel.SessionClaimReceiptID(event.Scope.OnboardingOperation, providerID)

@@ -19,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	nativeinput "github.com/division-sh/swarm/internal/sessionprovider/input"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -71,9 +70,7 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 			if backend == "sqlite" {
 				selected = storetest.StartSQLiteRuntimeStore(t)
 			} else {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			}
 			ctx, now := context.Background(), time.Now().UTC()
 			source := sourceartifactfixture.Require(t, ctx, selected)
@@ -86,7 +83,7 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 				t.Fatal(err)
 			}
 			state := sessionStateFixture(t, base, connectionID, "")
-			device := newSDKDeviceFixture(t, state.container)
+			device := newSDKDeviceFixture(t, state.database)
 			account := operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: connectionID,
 				AccountRef: device.ID.ToNonAD().String(), AdmissionID: uuid.NewString(), Revision: 1}
 			generation, err := plangeneration.FromCanonicalValue(map[string]string{"native": "session-input"})

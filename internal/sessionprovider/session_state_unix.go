@@ -4,23 +4,20 @@ package sessionprovider
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"go.mau.fi/whatsmeow/store"
-	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"golang.org/x/sys/unix"
-	_ "modernc.org/sqlite"
 )
 
-var errSessionAccount = errors.New("WhatsApp private state does not match its exact retained account")
+var errSessionAccount = sessionstate.ErrSessionAccount
 
 // sessionState possesses the provider database, not executable admission. The
 // onboarding/activation owner must reserve responsibility before opening it.
@@ -29,8 +26,7 @@ type sessionState struct {
 	mu              sync.Mutex
 	directory       *sessionDirectory
 	file            *os.File
-	database        *sql.DB
-	container       *sqlstore.Container
+	database        *sessionstate.Owner
 	expectedAccount string
 	occurrence      *clientOccurrence
 	retiring        bool
@@ -83,54 +79,16 @@ func (s *sessionState) openDatabase(ctx context.Context) error {
 			return err
 		}
 	}
-	address := url.URL{Scheme: "file", Path: filepath.Join(s.directory.path, "provider.db")}
-	query := url.Values{"mode": {"rw"}, "_pragma": {"foreign_keys(1)", "busy_timeout(5000)"}}
-	address.RawQuery = query.Encode()
-	database, err := sql.Open("sqlite", address.String())
-	if err != nil {
-		return err
-	}
-	s.database = database
-	database.SetMaxOpenConns(1)
-	s.container = sqlstore.NewWithDB(database, "sqlite", waLog.Noop)
 	info, err := s.file.Stat()
 	if err != nil {
 		return err
 	}
-	if info.Size() != 0 {
-		if _, err := s.device(ctx); err != nil {
-			return err
-		}
-	} else if s.expectedAccount != "" {
-		return errSessionAccount
-	}
-	if err := s.container.Upgrade(ctx); err != nil {
-		return err
-	}
-	_, err = s.device(ctx)
+	s.database, err = sessionstate.Open(ctx, filepath.Join(s.directory.path, "provider.db"), s.expectedAccount, info.Size() != 0)
 	return err
 }
 
 func (s *sessionState) device(ctx context.Context) (*store.Device, error) {
-	devices, err := s.container.GetAllDevices(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if len(devices) > 1 {
-		return nil, errSessionAccount
-	}
-	if len(devices) == 0 {
-		if s.expectedAccount != "" {
-			return nil, errSessionAccount
-		}
-		return s.container.NewDevice(), nil
-	}
-	device := devices[0]
-	if device.ID == nil || device.ID.User == "" || device.ID.Server != types.DefaultUserServer ||
-		s.expectedAccount != "" && device.ID.ToNonAD().String() != s.expectedAccount {
-		return nil, errSessionAccount
-	}
-	return device, nil
+	return s.database.CurrentDevice(ctx, s.expectedAccount)
 }
 
 func (s *sessionState) newOccurrence(ctx context.Context, occurrenceID string) (*clientOccurrence, error) {
@@ -146,7 +104,7 @@ func (s *sessionState) newOccurrence(ctx context.Context, occurrenceID string) (
 	if err != nil {
 		return nil, err
 	}
-	occurrence, err := newClientOccurrence(ctx, s.directory.connectionID, occurrenceID, device, s.container.LIDMap, waLog.Noop)
+	occurrence, err := newClientOccurrence(ctx, s.directory.connectionID, occurrenceID, device, s.database.LIDMap(), waLog.Noop)
 	if err != nil {
 		return nil, err
 	}

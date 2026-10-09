@@ -14,19 +14,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/google/uuid"
 	waBinary "go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
-	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 )
 
-func newOccurrenceFixture(t *testing.T, peer *sdkPeer, device *store.Device, container *sqlstore.Container, connectionID string, log waLog.Logger) *clientOccurrence {
+func newOccurrenceFixture(t *testing.T, peer *sdkPeer, device *store.Device, container *sessionstate.Owner, connectionID string, log waLog.Logger) *clientOccurrence {
 	t.Helper()
-	o, err := newClientOccurrence(peer.ctx, connectionID, uuid.NewString(), device, container.LIDMap, log)
+	o, err := newClientOccurrence(peer.ctx, connectionID, uuid.NewString(), device, container.LIDMap(), log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestWhatsAppClientOccurrenceJoinRetainsDelayedSDKWork(t *testing.T) {
 func TestWhatsAppClientOccurrencePinnedConfigurationInventory(t *testing.T) {
 	_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
 	device := newSDKDeviceFixture(t, container)
-	o, err := newClientOccurrence(context.Background(), uuid.NewString(), uuid.NewString(), device, container.LIDMap, nil)
+	o, err := newClientOccurrence(context.Background(), uuid.NewString(), uuid.NewString(), device, container.LIDMap(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

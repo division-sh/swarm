@@ -39,7 +39,7 @@ func TestWhatsAppSessionStateRealSDKRestartRetainsExactAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := sessionStateFixture(t, base, connectionID, "")
-	device := newSDKDeviceFixture(t, state.container)
+	device := newSDKDeviceFixture(t, state.database)
 	account, originalNoise := device.ID.ToNonAD().String(), *device.NoiseKey.Priv
 	peer := newSDKPeer(t)
 	first, err := state.newOccurrence(peer.ctx, uuid.NewString())
@@ -90,7 +90,7 @@ func TestWhatsAppSessionStateFailedJoinRetainsDatabaseAndPossession(t *testing.T
 				t.Fatal(err)
 			}
 			state := sessionStateFixture(t, base, connectionID, "")
-			paired := newSDKDeviceFixture(t, state.container)
+			paired := newSDKDeviceFixture(t, state.database)
 			account := paired.ID.ToNonAD().String()
 			occurrence, err := state.newOccurrence(context.Background(), uuid.NewString())
 			if err != nil {
@@ -166,10 +166,10 @@ func TestWhatsAppSessionStateRefusesUnsafeOrConflictingState(t *testing.T) {
 			state := sessionStateFixture(t, base, connectionID, "")
 			account := "synthetic_test_account@" + types.DefaultUserServer
 			if cell != "missing_account" {
-				device := newSDKDeviceFixture(t, state.container)
+				device := newSDKDeviceFixture(t, state.database)
 				account = device.ID.ToNonAD().String()
 				if cell == "multiple_accounts" {
-					second := state.container.NewDevice()
+					second := state.database.NewDevice()
 					jid := types.NewJID("another_test_account", types.DefaultUserServer)
 					second.ID, second.Account = &jid, device.Account
 					if err := second.Save(context.Background()); err != nil {
@@ -257,7 +257,7 @@ func TestWhatsAppSessionStateCloseJoinsCallbackWithoutBlockingIdentityRead(t *te
 		t.Fatal(err)
 	}
 	state := sessionStateFixture(t, base, connectionID, "")
-	newSDKDeviceFixture(t, state.container)
+	newSDKDeviceFixture(t, state.database)
 	occurrence, err := state.newOccurrence(context.Background(), uuid.NewString())
 	if err != nil {
 		t.Fatal(err)

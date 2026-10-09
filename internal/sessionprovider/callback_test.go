@@ -27,7 +27,7 @@ func TestWhatsAppCallbackPanicsReturnFailureAndFenceOccurrence(t *testing.T) {
 					panic("private message must never appear in failure evidence")
 				}, func(_ context.Context, failure callbackFailure) error {
 					recorded++
-					if failure != (callbackFailure{connectionID, occurrenceID, "crash"}) {
+					if failure != (callbackFailure{ConnectionID: connectionID, OccurrenceID: occurrenceID, Reason: "crash"}) {
 						t.Fatalf("wrong failure authority: %+v", failure)
 					}
 					if failRecord {
@@ -123,7 +123,7 @@ func TestWhatsAppPinnedSDKDispatchUsesFailureReturningCallback(t *testing.T) {
 	}
 	select {
 	case failure := <-recorded:
-		if failure != (callbackFailure{connectionID, occurrenceID, "crash"}) {
+		if failure != (callbackFailure{ConnectionID: connectionID, OccurrenceID: occurrenceID, Reason: "crash"}) {
 			t.Fatalf("wrong callback failure: %+v", failure)
 		}
 	case <-ctx.Done():

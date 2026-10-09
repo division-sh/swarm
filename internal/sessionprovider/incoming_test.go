@@ -207,7 +207,7 @@ func TestWhatsAppIncomingImmutableCaptureDuplicateAndPublicationIdentity(t *test
 	if err != nil || len(rows) != 1 || !reflect.DeepEqual(rows[0], original) {
 		t.Fatal("duplicate/conflict changed retained original capture")
 	}
-	key, err := original.publicationProviderEventID()
+	key, err := original.PublicationProviderEventID()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestWhatsAppIncomingImmutableCaptureDuplicateAndPublicationIdentity(t *test
 	} {
 		other := original
 		mutate(&other)
-		key, err := other.publicationProviderEventID()
+		key, err := other.PublicationProviderEventID()
 		if err != nil {
 			t.Fatal(err)
 		}

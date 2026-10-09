@@ -44,7 +44,7 @@ func prepareSessionBusinessPublication(ctx context.Context, input input.Admissio
 	if err := json.Unmarshal(input.OriginalCapture(), &event); err != nil {
 		return absent, err
 	}
-	identity, err := event.publicationIdentity()
+	identity, err := event.PublicationIdentity()
 	if err != nil {
 		return absent, err
 	}
@@ -109,7 +109,7 @@ func sessionBusinessRequest(ctx context.Context, event capturedEvent, alias stri
 	if !found || standing.RunID != event.Scope.PublicationBinding.RunID || standing.Generation != event.Scope.PublicationBinding.Generation {
 		return request, errCaptureScopeChanged
 	}
-	identity, err := event.publicationIdentity()
+	identity, err := event.PublicationIdentity()
 	if err != nil {
 		return request, err
 	}
@@ -117,7 +117,7 @@ func sessionBusinessRequest(ctx context.Context, event capturedEvent, alias stri
 	if err != nil {
 		return request, err
 	}
-	fingerprint, err := event.publicationFingerprint()
+	fingerprint, err := event.PublicationFingerprint()
 	if err != nil {
 		return request, err
 	}

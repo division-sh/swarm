@@ -1,6 +1,7 @@
 package providertriggers
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -60,6 +61,26 @@ func TestA9DeclarationPublicationRequiresAuthenticatedExactOutputs(t *testing.T)
 	if err := admission.ValidateOutput(bundleHash, "partner", 0, 1, event, provideroutput.KindRaw, provideroutput.Authorization{}); err != nil {
 		t.Fatalf("exact authenticated output: %v", err)
 	}
+	t.Run("prepared receiver is not a sender", func(t *testing.T) {
+		receiver := events.RouteIdentity{FlowID: ".", FlowInstance: event.RunID(), EntityID: eventtest.UUID("receiver")}
+		prepared, err := events.ResolveEnvelope(event, events.EnvelopeForTargetRoute(event.NormalizedEnvelope(), receiver))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := admission.ValidateOutput(bundleHash, "partner", 0, 1, prepared, provideroutput.KindRaw, provideroutput.Authorization{}); err == nil {
+			t.Fatal("input admission accepted a preclaimed receiver")
+		}
+		if err := admission.ValidateCommitOutput(context.Background(), bundleHash, "partner", 0, 1, prepared, provideroutput.KindRaw, provideroutput.Authorization{}); err != nil {
+			t.Fatal("prepared receiver rejected", err)
+		}
+		bare, err := events.ResolveEnvelope(event, events.EnvelopeForEntityID(event.NormalizedEnvelope(), receiver.EntityID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := admission.ValidateCommitOutput(context.Background(), bundleHash, "partner", 0, 1, bare, provideroutput.KindRaw, provideroutput.Authorization{}); err == nil {
+			t.Fatal("commit admission accepted a bare concrete claim")
+		}
+	})
 	for _, test := range []struct {
 		name   string
 		change func(*PublicationAdmission, *events.Event, *string, *string, *int, *int)

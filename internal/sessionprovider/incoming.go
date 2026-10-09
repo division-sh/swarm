@@ -7,7 +7,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -34,7 +33,7 @@ type incomingPayload struct {
 
 func captureSDKMessage(scope captureScope, source captureSource, occurrenceID string, event *events.Message, receivedAt time.Time) (capturedEvent, error) {
 	var result capturedEvent
-	if err := scope.validate(); err != nil {
+	if err := scope.Validate(); err != nil {
 		return result, err
 	}
 	if event == nil || event.Message == nil || !exactMessageID(event.Info.ID) || event.Info.Timestamp.IsZero() || event.Info.Timestamp.UnixMilli() < 1 {
@@ -75,7 +74,7 @@ func captureSDKMessage(scope captureScope, source captureSource, occurrenceID st
 	}
 	result = capturedEvent{Scope: scope, OccurrenceID: occurrenceID, Conversation: payload.Conversation,
 		EventID: event.Info.ID, Kind: kind, Body: body, ReceivedAt: receivedAt.UTC(), Source: source}
-	return result, result.validate()
+	return result, result.Validate()
 }
 
 func exactMessageID(id string) bool {
@@ -162,24 +161,4 @@ func onlyMessageFields(message *waE2E.Message, allowed ...protoreflect.Name) boo
 		return false
 	})
 	return ok
-}
-
-// Match the existing capture key dimensions without introducing another hash
-// or UUID owner. Runtime's canonical publication identity owner consumes this.
-func (event capturedEvent) publicationProviderEventID() (string, error) {
-	if err := event.validate(); err != nil {
-		return "", err
-	}
-	key, err := json.Marshal([]string{event.Scope.Session.ConnectionID, event.Scope.Session.AccountRef,
-		event.Conversation, event.EventID, event.Kind})
-	return string(key), err
-}
-
-func (event capturedEvent) publicationIdentity() (runtimeinbound.Identity, error) {
-	key, err := event.publicationProviderEventID()
-	if err != nil {
-		return runtimeinbound.Identity{}, err
-	}
-	identity := event.Scope.PublicationBinding.Identity("whatsapp", key)
-	return identity, identity.Validate()
 }
