@@ -17980,7 +17980,7 @@ platform_tables:
       description: >-
         Immutable run-scoped construction identity for a workflow instance. The canonical activation transaction inserts
         exactly one projection of the original workflow, state, config, entity fields, bookkeeping, gates, accumulator,
-        control facts, creating input and exact occurrence coordinate together with the complete header and declared field
+        control facts, immutable instance key, creating input and exact occurrence coordinate together with the complete header and declared field
         row, if any. Exact replay compares this receipt and requires valid paired target evidence and a valid attachment
         owner. Missing fields, a contradictory field contract, a foreign workflow header or an incomplete receipt fail
         closed without repair. Later workflow progress never updates or reconstructs this receipt and never participates
@@ -17993,7 +17993,7 @@ platform_tables:
             run_id             UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
             entity_id          UUID NOT NULL,
             instance_path      TEXT NOT NULL,
-            projection_version INTEGER NOT NULL CHECK (projection_version = 2),
+            projection_version INTEGER NOT NULL CHECK (projection_version = 3),
             projection         JSONB NOT NULL,
             occurred_at        TIMESTAMPTZ NOT NULL,
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -18867,6 +18867,14 @@ platform_tables:
         Lifecycle counts include staged headers independently of field-row presence and exclude
         inert no-stage headers. Identity is the exact
         `(run_id, instance_path)` tuple; no reader may infer run authority from ambient context or path shape.
+        parent_instance is the exact admitted structural parent's instance_path, or NULL for
+        the selected root. instance_key is the constructor's type-admitted canonical scalar
+        material, or NULL for a keyless declaration. Both are immutable construction facts;
+        changing business fields cannot change instance selection. Lookup bounds the declaration
+        by run, actual parent and key, and rejects ambiguous occupancy rather than selecting one.
+        Historical header projection carries these fixed-revision facts without manufacturing
+        fresh construction receipts or readiness. Native missing companions remain corruption;
+        admitted historical provenance is not inferred from their absence.
         `mode=template` is selected at initial
         construction only by the exact dynamic runtime-readiness fact committed with that instance; slash/path shape is not
         a mode classifier. Later state upserts preserve the persisted mode rather than reinterpreting identity text.
@@ -18881,6 +18889,7 @@ platform_tables:
             flow_template     TEXT NOT NULL,
             mode              TEXT NOT NULL CHECK (mode IN ('static', 'template')),
             parent_instance   TEXT,
+            instance_key      TEXT CHECK (instance_key IS NULL OR LENGTH(TRIM(instance_key)) > 0),
             config            JSONB NOT NULL DEFAULT '{}',
             status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'draining', 'terminated')),
             stage_defined     BOOLEAN NOT NULL,
@@ -18896,7 +18905,8 @@ platform_tables:
             PRIMARY KEY (run_id, instance_path),
             UNIQUE (run_id, entity_id),
             CHECK (updated_at >= created_at),
-            FOREIGN KEY (run_id, parent_instance) REFERENCES flow_instances (run_id, instance_path)
+            FOREIGN KEY (run_id, parent_instance) REFERENCES flow_instances (run_id, instance_path),
+            INDEX idx_flow_instances_selection (run_id, flow_template, parent_instance, instance_key)
         );
     flow_instance_runtime_readiness:
       description: >-

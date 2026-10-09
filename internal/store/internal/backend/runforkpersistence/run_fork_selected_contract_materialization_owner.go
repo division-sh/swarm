@@ -293,7 +293,11 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			meta.PreparedHeader = &header
 			metadata[state.History.EntityID] = meta
 		}
-		for _, entity := range plan.Entities {
+		orderedEntities, err := runForkEntitiesInConstructionOrder(plan.Entities)
+		if err != nil {
+			return err
+		}
+		for _, entity := range orderedEntities {
 			if err := port.materializeEntity(forkCtx, tx, attempt, forkMutationSource, forkRunID, target, plan, entity, metadata[entity.EntityID], now); err != nil {
 				return err
 			}

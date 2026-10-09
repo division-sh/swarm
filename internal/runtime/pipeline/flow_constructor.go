@@ -40,6 +40,38 @@ func (c FlowConstructor) SuppliedFields() []string {
 	return c.analysis.ConstructorSuppliedFields()
 }
 
+// AdmitFlowInstanceKey validates the scalar before the shared key formatter.
+// Its material is construction identity, never a projection of mutable fields.
+func AdmitFlowInstanceKey(source semanticview.Source, flowID string, value any) (string, error) {
+	if source == nil {
+		return "", fmt.Errorf("instance key requires an admitted source")
+	}
+	flow, found := source.FlowSchemaByID(flowID)
+	if !found {
+		return "", fmt.Errorf("instance key flow %s is absent", flowID)
+	}
+	if flow.Instance.Empty() {
+		if value != nil {
+			return "", fmt.Errorf("keyless flow %s cannot accept an instance key", flowID)
+		}
+		return "", nil
+	}
+	contract, found := entityruntime.ResolveForFlow(source, flowID)
+	if !found {
+		return "", fmt.Errorf("keyed flow %s requires its admitted field contract", flowID)
+	}
+	field := flow.Instance.Path()
+	normalized, err := entityruntime.NormalizeFieldValue(contract, field, value)
+	if err != nil {
+		return "", err
+	}
+	keys, err := (c.TemplateInstanceContract{FlowID: flowID, Field: flow.Instance}).CanonicalKeyMaterial(map[string]any{field: normalized})
+	if err != nil {
+		return "", err
+	}
+	return keys[0].Value, nil
+}
+
 // StandingConstructionIsKeyless classifies declaration ancestry, not executable
 // readiness. A keyed edge requires an admitted creating input at request time.
 func StandingConstructionIsKeyless(source semanticview.Source, flowID string) (bool, error) {

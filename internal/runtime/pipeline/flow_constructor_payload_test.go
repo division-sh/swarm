@@ -79,6 +79,43 @@ func TestFlowConstructorPayloadConsumesExactDeliveryProjection(t *testing.T) {
 	}
 }
 
+func TestFlowInstanceKeyRequiresScalarAdmissionBeforeFormatting(t *testing.T) {
+	for _, test := range []struct {
+		name, fieldType, material string
+		value                     any
+		invalid                   any
+	}{
+		{"text", "text", "business-key", "business-key", 123},
+		{"integer", "integer", "7", int64(7), "7"},
+		{"numeric", "double", "7.5", json.Number("7.5"), "7.5"},
+		{"boolean", "boolean", "true", true, "true"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := loadWorkflowTempSource(t, map[string]string{
+				"schema.yaml":   "name: typed-instance-key\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"entities.yaml": "item:\n  item_id: " + test.fieldType + "\n",
+				"events.yaml":   "item.created:\n  item_id: " + test.fieldType + "\n",
+			})
+			material, err := AdmitFlowInstanceKey(source, ".", test.value)
+			if err != nil || material != test.material {
+				t.Fatalf("typed key material=%q err=%v, want %q", material, err, test.material)
+			}
+			for _, value := range []any{test.invalid, nil, map[string]any{"item_id": test.value}, []any{test.value}} {
+				if material, err := AdmitFlowInstanceKey(source, ".", value); err == nil {
+					t.Fatalf("unadmitted %T became identity %q", value, material)
+				}
+			}
+		})
+	}
+	source := loadWorkflowTempSource(t, map[string]string{"schema.yaml": "name: keyless\n"})
+	if material, err := AdmitFlowInstanceKey(source, ".", nil); err != nil || material != "" {
+		t.Fatalf("keyless admission: material=%q err=%v", material, err)
+	}
+	if _, err := AdmitFlowInstanceKey(source, ".", "foreign"); err == nil {
+		t.Fatal("keyless admission accepted a key")
+	}
+}
+
 func TestFlowConstructorResolvedKeySatisfiesOnlyItsDeclaredSlot(t *testing.T) {
 	for _, declaresKey := range []bool{false, true} {
 		name := "message_only_input"

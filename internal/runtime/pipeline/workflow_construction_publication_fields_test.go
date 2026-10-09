@@ -25,6 +25,7 @@ func constructionPublicationFieldsFixture(t *testing.T) (workflowInitialMaterial
 	return workflowInitialMaterializationProjection{
 		Version: workflowInitialMaterializationProjectionVersion,
 		RunID:   run, FlowInstance: path, EntityID: entity, WorkflowName: "account", WorkflowVersion: "1",
+		InstanceKey:   "business-key",
 		OccurredAt:    time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC),
 		CreatingInput: FlowConstructionInput{EventID: "22222222-2222-4222-8222-222222222222", Input: "account.initialized"},
 		Persisted: workflowInstancePersistedProjection{
@@ -75,18 +76,50 @@ func TestFlowConstructionPublicationDiscoversDetachedCreatingInput(t *testing.T)
 		t.Fatal(err)
 	}
 	evidence, err := ProjectFlowConstructionPublication(raw, owner, receipt.EntityID)
-	if err != nil || evidence.CreatingInput != receipt.CreatingInput || !reflect.DeepEqual(evidence.Fields, receipt.Persisted.Fields) {
+	if err != nil || evidence.CreatingInput != receipt.CreatingInput || evidence.InstanceKey != receipt.InstanceKey || !reflect.DeepEqual(evidence.Fields, receipt.Persisted.Fields) {
 		t.Fatalf("receipt discovery changed original provenance or precise fields: %#v %v", evidence, err)
 	}
 	evidence.CreatingInput.EventID = "33333333-3333-4333-8333-333333333333"
 	evidence.CreatingInput.Input = "different.input"
+	evidence.InstanceKey = "foreign-key"
 	evidence.Fields["nested"].(map[string]any)["values"].([]any)[0] = int64(99)
 	again, err := ProjectFlowConstructionPublication(raw, owner, receipt.EntityID)
-	if err != nil || again.CreatingInput != receipt.CreatingInput || !reflect.DeepEqual(again.Fields, receipt.Persisted.Fields) {
+	if err != nil || again.CreatingInput != receipt.CreatingInput || again.InstanceKey != receipt.InstanceKey || !reflect.DeepEqual(again.Fields, receipt.Persisted.Fields) {
 		t.Fatalf("caller mutation changed original provenance or fields: %#v %v", again, err)
 	}
 	if err := ValidateFlowConstructionPublication(raw, owner, receipt.EntityID, evidence.CreatingInput.EventID); err == nil {
 		t.Fatal("discovery weakened rejection of a later incoming publication")
+	}
+}
+
+func TestFlowConstructionPublicationRequiresImmutableKeyMember(t *testing.T) {
+	receipt, owner := constructionPublicationFieldsFixture(t)
+	raw, err := canonicaljson.MarshalPreservingNumberKinds(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, variant := range []string{"missing", "null", "retired_version"} {
+		t.Run(variant, func(t *testing.T) {
+			var document map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &document); err != nil {
+				t.Fatal(err)
+			}
+			switch variant {
+			case "missing":
+				delete(document, "instance_key")
+			case "null":
+				document["instance_key"] = json.RawMessage(`null`)
+			case "retired_version":
+				document["version"] = json.RawMessage(`2`)
+			}
+			invalid, err := json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if evidence, err := ProjectFlowConstructionPublication(invalid, owner, receipt.EntityID); err == nil || !reflect.DeepEqual(evidence, FlowConstructionPublicationEvidence{}) {
+				t.Fatalf("accepted incomplete construction key %s: %+v %v", variant, evidence, err)
+			}
+		})
 	}
 }
 

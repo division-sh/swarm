@@ -236,6 +236,7 @@ func loadFlowInstanceActivationEqual(
 		return false, true, fmt.Errorf("constructed workflow target: %w", err)
 	}
 	if target.Lifecycle.WorkflowName != want.WorkflowName || target.Lifecycle.Mode != want.Mode ||
+		target.Lifecycle.ParentInstance != want.State.ParentInstance || target.Lifecycle.InstanceKey != want.State.InstanceKey ||
 		!canonicalActivationTime(target.Lifecycle.CreatedAt).Equal(canonicalActivationTime(want.CreatedAt)) {
 		return false, true, nil
 	}
