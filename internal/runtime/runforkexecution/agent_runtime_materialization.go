@@ -213,6 +213,11 @@ type selectedContractAgentRuntime struct {
 	bus                 *runtimebus.EventBus
 	pipeline            selectedFlowActivationRetirementStore
 	pendingActivations  []selectedFlowActivation
+	executionLease      *worklifetime.Lease
+	cancelExecution     context.CancelCauseFunc
+	executionDone       chan error
+	scheduler           *runtimepipeline.Scheduler
+	timerLifecycle      *runtimepipeline.PipelineCoordinator
 }
 
 type selectedContractWorkspaceProjection struct {
@@ -479,7 +484,7 @@ func agentIdentityDescriptions(identities []agentidentity.Identity) []string {
 	return out
 }
 
-func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator, diagnostics *selectedForkCommitDiagnostics) (_ *selectedContractAgentRuntime, _ managedexecution.Admission, resultErr error) {
+func prepareSelectedContractAgentRuntime(ctx context.Context, req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator, diagnostics *selectedForkCommitDiagnostics) (_ *selectedContractAgentRuntime, _ managedexecution.Admission, resultErr error) {
 	ports, err := req.Owner.require()
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
@@ -533,16 +538,6 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		}
 		return nil
 	}
-	transferRoutes := func(manager *runtimemanager.AgentManager) error {
-		for len(runtimeOwner.pendingActivations) > 0 {
-			activation := runtimeOwner.pendingActivations[0]
-			if err := manager.AdoptSelectedFlowActivation(activation.identity, activation.attempt, activation.publication, activation.timersProjected); err != nil {
-				return err
-			}
-			runtimeOwner.pendingActivations = runtimeOwner.pendingActivations[1:]
-		}
-		return nil
-	}
 	if len(req.AgentRuntime.Records) == 0 {
 		options := selectedContractManagerOptions(runtimemanager.AgentManagerOptions{
 			LifecycleDiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{
@@ -568,12 +563,6 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			return nil, managedexecution.Admission{}, err
 		}
 		if err := publishRoutes(); err != nil {
-			return nil, managedexecution.Admission{}, err
-		}
-		if err := completeSelectedContractFlowRoutes(ctx, pipeline, bus, runtimeOwner.pendingActivations, diagnostics); err != nil {
-			return nil, managedexecution.Admission{}, err
-		}
-		if err := transferRoutes(manager); err != nil {
 			return nil, managedexecution.Admission{}, err
 		}
 		return runtimeOwner, admission, nil
@@ -644,12 +633,6 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			EntityID: rec.Config.EffectiveEntityID(),
 		})
 	}
-	if err := completeSelectedContractFlowRoutes(ctx, pipeline, bus, runtimeOwner.pendingActivations, diagnostics); err != nil {
-		return nil, managedexecution.Admission{}, err
-	}
-	if err := transferRoutes(manager); err != nil {
-		return nil, managedexecution.Admission{}, err
-	}
 	receiverExecution, err := builder.options.ReceiverExecution.WithSelectedAdmission(admission)
 	if err != nil {
 		return nil, managedexecution.Admission{}, fmt.Errorf("finalize selected-contract manager receiver execution: %w", err)
@@ -657,10 +640,24 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	if err := manager.SetReceiverExecution(receiverExecution); err != nil {
 		return nil, managedexecution.Admission{}, fmt.Errorf("install selected-contract manager receiver execution: %w", err)
 	}
-	if err := manager.RunAuthoritativeDeliveryOnly(ctx); err != nil {
-		return nil, managedexecution.Admission{}, err
-	}
 	return runtimeOwner, admission, nil
+}
+
+func (r *selectedContractAgentRuntime) startExecution(ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator, diagnostics *selectedForkCommitDiagnostics) error {
+	if r == nil || r.manager == nil {
+		return errors.New("selected execution requires its prepared lifecycle manager")
+	}
+	if err := completeSelectedContractFlowRoutes(ctx, pipeline, r.bus, r.pendingActivations, diagnostics); err != nil {
+		return err
+	}
+	for len(r.pendingActivations) > 0 {
+		activation := r.pendingActivations[0]
+		if err := r.manager.AdoptSelectedFlowActivation(activation.identity, activation.attempt, activation.publication, activation.timersProjected); err != nil {
+			return err
+		}
+		r.pendingActivations = r.pendingActivations[1:]
+	}
+	return r.manager.RunAuthoritativeDeliveryOnly(ctx)
 }
 
 func issueSelectedContractAgentRuntimeGenerationGrant(
@@ -944,9 +941,34 @@ func (r *selectedContractAgentRuntime) Shutdown() (result error) {
 			result = errors.Join(result, fmt.Errorf("selected runtime cleanup panicked: %v", panicked))
 		}
 	}()
+	if r.cancelExecution != nil {
+		r.cancelExecution(worklifetime.ErrRetired)
+		if r.executionDone != nil {
+			result = errors.Join(result, <-r.executionDone)
+			r.executionDone = nil
+		}
+		r.cancelExecution = nil
+	}
+	if r.executionLease != nil {
+		result = errors.Join(result, r.executionLease.Done())
+		r.executionLease = nil
+	}
+	if r.timerLifecycle != nil {
+		if err := r.timerLifecycle.StopWorkflowTimerLifecycle(context.Background()); err != nil {
+			return errors.Join(result, err)
+		}
+		r.timerLifecycle = nil
+	}
+	if r.scheduler != nil {
+		r.scheduler.Stop()
+		if err := r.scheduler.Wait(context.Background()); err != nil {
+			return errors.Join(result, err)
+		}
+		r.scheduler = nil
+	}
 	if r.manager != nil {
 		if err := r.manager.Shutdown(); err != nil {
-			return err
+			return errors.Join(result, err)
 		}
 		r.manager = nil
 	}
@@ -954,7 +976,7 @@ func (r *selectedContractAgentRuntime) Shutdown() (result error) {
 		var err error
 		r.pendingActivations, err = retireSelectedFlowActivations(context.Background(), r.bus, r.pipeline, r.pendingActivations)
 		if err != nil {
-			return err
+			return errors.Join(result, err)
 		}
 	}
 	if r.cleanup != nil {
@@ -963,11 +985,11 @@ func (r *selectedContractAgentRuntime) Shutdown() (result error) {
 	}
 	if r.generationGrant != nil {
 		if err := r.generationGrant.Retire(context.Background()); err != nil {
-			return err
+			return errors.Join(result, err)
 		}
 		r.generationGrant = nil
 	}
-	return r.workspaceProjection.Release()
+	return errors.Join(result, r.workspaceProjection.Release())
 }
 
 func (r *selectedContractAgentRuntime) WaitForQuiescence(ctx context.Context, bus *runtimebus.EventBus) error {

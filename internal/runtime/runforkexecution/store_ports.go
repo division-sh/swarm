@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebudgetspend "github.com/division-sh/swarm/internal/runtime/budgetspend"
@@ -59,6 +60,7 @@ type SelectedContractRuntimeExecutionLifecycle interface {
 	IssueRunForkSelectedContractRuntimeExecution(context.Context, runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error)
 	ClaimRunForkSelectedContractRuntimeExecution(context.Context, runfork.SelectedContractRuntimeExecution, string, time.Duration) (runtimeeffects.Authority, error)
 	HeartbeatRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, time.Duration) error
+	RequireRunForkSelectedContractExecutionSettlement(context.Context, runtimeeffects.Authority, []string, semanticview.Source) error
 	QuiesceRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority) error
 	CloseRunForkSelectedContractRuntimeExecution(context.Context, string) error
 	FailRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, json.RawMessage) error
@@ -70,6 +72,7 @@ type SelectedContractReplayPersistence interface {
 	EnsureRunForkNoPostForkCommittedReplayScopeMarkers(context.Context, string, string) error
 	LoadRunForkSelectedContractSourceEventModes(context.Context, string, []string) ([]executionmode.Mode, error)
 	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error)
+	RequireSelectedForkInputPublished(context.Context, runtimeeffects.Authority, runfork.RunForkSelectedContractSourceEvent, events.PayloadSchemaBinding) (bool, error)
 	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error)
 }
 

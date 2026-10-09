@@ -9,34 +9,43 @@ import (
 	"github.com/google/uuid"
 )
 
-func selectedFiniteFeedRecoveryEvidence() (runfork.SelectedForkRecoveryResult, runfork.SelectedForkRecoveryEntry) {
+func selectedRecoveryEvidence() (runfork.SelectedForkRecoveryResult, runfork.SelectedForkRecoveryEntry) {
 	point := runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 3}
 	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 	bundle := "bundle-v2:sha256:" + strings.Repeat("a", 64)
 	entry := runfork.SelectedForkRecoveryEntry{
 		BundleHash: bundle,
 		Binding: runfork.RunForkSelectedContractBinding{
-			ForkRunID: uuid.NewString(), SourceRunID: uuid.NewString(),
+			BindingID: uuid.NewString(), ForkRunID: uuid.NewString(), SourceRunID: uuid.NewString(),
 			ForkPoint: point, ContractSelection: selection,
 		},
 	}
+	pin := durabledata.Pin{
+		RunID: entry.Binding.ForkRunID, RunState: "paused", Declaration: durabledata.DeclarationRef{FlowPath: ".", EventName: "root.ready"},
+		SchemaDigest: durabledata.SchemaDigest("resource-schema-v1:sha256:" + strings.Repeat("b", 64)),
+		VersionID:    durabledata.VersionID("resource-version-v1:sha256:" + strings.Repeat("c", 64)), Selection: "fork_override",
+	}
+	operation := runfork.ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "operator", TransportHash: "transport-hash",
+		SourceRunID: entry.Binding.SourceRunID, ResolvedPoint: &point,
+		TargetBundleHash: bundle, ContractSelection: selection,
+		DataPinOverrides: []durabledata.ExplicitPin{{Declaration: pin.Declaration, VersionID: pin.VersionID}},
+	}
+	operation, hash, err := operation.Canonical()
+	if err != nil {
+		panic(err)
+	}
 	return runfork.SelectedForkRecoveryResult{
 		RunID: entry.Binding.ForkRunID, ExecutionID: uuid.NewString(),
-		Disposition: runfork.SelectedForkRecoveryResumeFiniteFeed,
-		Resume: &runfork.SelectedForkFiniteFeedResume{ForkRunStatus: runfork.RunForkMaterializedStatus, Pins: []durabledata.Pin{{
-			RunID: entry.Binding.ForkRunID, RunState: "paused", Declaration: durabledata.DeclarationRef{FlowPath: ".", EventName: "root.ready"},
-			SchemaDigest: durabledata.SchemaDigest("resource-schema-v1:sha256:" + strings.Repeat("b", 64)),
-			VersionID:    durabledata.VersionID("resource-version-v1:sha256:" + strings.Repeat("c", 64)), Selection: "fork_override",
-		}}, Operation: runfork.ForkOperationRequest{
-			OperationID: uuid.NewString(), Actor: "operator", TransportHash: "transport-hash",
-			SourceRunID: entry.Binding.SourceRunID, ResolvedPoint: &point,
-			TargetBundleHash: bundle, ContractSelection: selection,
-		}},
+		Disposition: runfork.SelectedForkRecoveryResume,
+		Operation: &runfork.ForkOperationRecord{Request: operation, SemanticHash: hash, ForkRunID: entry.Binding.ForkRunID,
+			BindingID: entry.Binding.BindingID, Status: runfork.ForkOperationMaterialized},
+		Continuation: &runfork.SelectedForkContinuation{ForkRunStatus: runfork.RunForkMaterializedStatus, Pins: []durabledata.Pin{pin}},
 	}, entry
 }
 
 func TestSelectedRecoveryBootActionsAreClosed(t *testing.T) {
-	_, entry := selectedFiniteFeedRecoveryEvidence()
+	_, entry := selectedRecoveryEvidence()
 	for _, tc := range []struct {
 		name        string
 		disposition runfork.SelectedForkRecoveryDisposition
@@ -63,13 +72,13 @@ func TestSelectedRecoveryBootActionsAreClosed(t *testing.T) {
 }
 
 func TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation(t *testing.T) {
-	valid, entry := selectedFiniteFeedRecoveryEvidence()
+	valid, entry := selectedRecoveryEvidence()
 	for _, tc := range []struct {
 		disposition runfork.SelectedForkRecoveryDisposition
 		want        selectedRecoveryAction
 	}{
-		{runfork.SelectedForkRecoveryResumeFiniteFeed, selectedRecoveryResumeFiniteFeed},
-		{runfork.SelectedForkRecoveryActivateFiniteFeed, selectedRecoveryActivateFiniteFeed},
+		{runfork.SelectedForkRecoveryResume, selectedRecoveryResume},
+		{runfork.SelectedForkRecoveryActivate, selectedRecoveryActivate},
 	} {
 		result := valid
 		result.Disposition = tc.disposition
@@ -81,37 +90,113 @@ func TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation(t *testing.T) {
 		name   string
 		mutate func(*runfork.SelectedForkRecoveryResult)
 	}{
-		{"missing_resume", func(r *runfork.SelectedForkRecoveryResult) { r.Resume = nil }},
-		{"wrong_child_status", func(r *runfork.SelectedForkRecoveryResult) { r.Resume.ForkRunStatus = "running" }},
+		{"missing_resume", func(r *runfork.SelectedForkRecoveryResult) { r.Continuation = nil }},
+		{"wrong_child_status", func(r *runfork.SelectedForkRecoveryResult) { r.Continuation.ForkRunStatus = "running" }},
 		{"foreign_run", func(r *runfork.SelectedForkRecoveryResult) { r.RunID = uuid.NewString() }},
-		{"missing_execution", func(r *runfork.SelectedForkRecoveryResult) { r.ExecutionID = "" }},
-		{"foreign_source", func(r *runfork.SelectedForkRecoveryResult) { r.Resume.Operation.SourceRunID = uuid.NewString() }},
-		{"wrong_revision", func(r *runfork.SelectedForkRecoveryResult) { r.Resume.Operation.ResolvedPoint.Revision++ }},
-		{"missing_point", func(r *runfork.SelectedForkRecoveryResult) { r.Resume.Operation.ResolvedPoint = nil }},
-		{"wrong_bundle", func(r *runfork.SelectedForkRecoveryResult) { r.Resume.Operation.TargetBundleHash = "other" }},
+		{"invalid_execution", func(r *runfork.SelectedForkRecoveryResult) { r.ExecutionID = "not-a-predecessor" }},
+		{"foreign_source", func(r *runfork.SelectedForkRecoveryResult) { r.Operation.Request.SourceRunID = uuid.NewString() }},
+		{"wrong_revision", func(r *runfork.SelectedForkRecoveryResult) { r.Operation.Request.ResolvedPoint.Revision++ }},
+		{"missing_point", func(r *runfork.SelectedForkRecoveryResult) { r.Operation.Request.ResolvedPoint = nil }},
+		{"wrong_bundle", func(r *runfork.SelectedForkRecoveryResult) { r.Operation.Request.TargetBundleHash = "other" }},
 		{"wrong_selection", func(r *runfork.SelectedForkRecoveryResult) {
-			r.Resume.Operation.ContractSelection.Mode = runfork.RunForkContractSelectionModeBundleHash
+			r.Operation.Request.ContractSelection.Mode = runfork.RunForkContractSelectionModeBundleHash
 		}},
-		{"invalid_operation", func(r *runfork.SelectedForkRecoveryResult) { r.Resume.Operation.Actor = "" }},
-		{"missing_pins", func(r *runfork.SelectedForkRecoveryResult) { r.Resume.Pins = nil }},
-		{"foreign_pin", func(r *runfork.SelectedForkRecoveryResult) { r.Resume.Pins[0].RunID = uuid.NewString() }},
-		{"duplicate_pin", func(r *runfork.SelectedForkRecoveryResult) { r.Resume.Pins = append(r.Resume.Pins, r.Resume.Pins[0]) }},
+		{"invalid_operation", func(r *runfork.SelectedForkRecoveryResult) { r.Operation.Request.Actor = "" }},
+		{"missing_pins", func(r *runfork.SelectedForkRecoveryResult) { r.Continuation.Pins = nil }},
+		{"foreign_pin", func(r *runfork.SelectedForkRecoveryResult) { r.Continuation.Pins[0].RunID = uuid.NewString() }},
+		{"duplicate_pin", func(r *runfork.SelectedForkRecoveryResult) {
+			r.Continuation.Pins = append(r.Continuation.Pins, r.Continuation.Pins[0])
+		}},
 		{"payload_on_terminal", func(r *runfork.SelectedForkRecoveryResult) { r.Disposition = runfork.SelectedForkRecoveryTerminal }},
 	} {
-		for _, disposition := range []runfork.SelectedForkRecoveryDisposition{runfork.SelectedForkRecoveryResumeFiniteFeed, runfork.SelectedForkRecoveryActivateFiniteFeed} {
+		for _, disposition := range []runfork.SelectedForkRecoveryDisposition{runfork.SelectedForkRecoveryResume, runfork.SelectedForkRecoveryActivate} {
 			t.Run(string(disposition)+"/"+tc.name, func(t *testing.T) {
 				result := valid
 				result.Disposition = disposition
-				resume := *valid.Resume
-				resume.Pins = append([]durabledata.Pin(nil), valid.Resume.Pins...)
-				point := *valid.Resume.Operation.ResolvedPoint
-				resume.Operation.ResolvedPoint = &point
-				result.Resume = &resume
+				resume := *valid.Continuation
+				resume.Pins = append([]durabledata.Pin(nil), valid.Continuation.Pins...)
+				operation := *valid.Operation
+				point := *operation.Request.ResolvedPoint
+				operation.Request.ResolvedPoint = &point
+				result.Operation = &operation
+				result.Continuation = &resume
 				tc.mutate(&result)
 				if action, err := selectedRecoveryActionFor(result, entry); err == nil || action != 0 {
 					t.Fatalf("contradictory recovery action=%d err=%v", action, err)
 				}
 			})
 		}
+	}
+	valid.ExecutionID = ""
+	if action, err := selectedRecoveryActionFor(valid, entry); err != nil || action != selectedRecoveryResume {
+		t.Fatalf("first attachment without predecessor rejected: action=%d err=%v", action, err)
+	}
+	valid.Disposition = runfork.SelectedForkRecoveryActivate
+	if _, err := selectedRecoveryActionFor(valid, entry); err == nil {
+		t.Fatal("quiesced activation without predecessor was admitted")
+	}
+}
+
+func TestSelectedRecoveryAllTypedCutsAndActivatedAcknowledgment(t *testing.T) {
+	for _, kind := range []runfork.RunForkPointKind{runfork.RunForkPointRunStart, runfork.RunForkPointEvent, runfork.RunForkPointDeploymentRevision} {
+		t.Run(string(kind), func(t *testing.T) {
+			recovered, entry := selectedRecoveryEvidence()
+			point := runfork.RunForkPoint{Kind: kind, Revision: 4}
+			if kind == runfork.RunForkPointEvent {
+				point.EventID = uuid.NewString()
+			}
+			entry.Binding.ForkPoint, entry.Binding.ForkEventID = point, point.EventID
+			recovered.Operation.Request.ResolvedPoint = &point
+			recovered.Operation.Request.AtStart = kind == runfork.RunForkPointRunStart
+			recovered.Operation.Request.ForkEventID = point.EventID
+			recovered.Operation.Request.DataPinOverrides = nil
+			operation, hash, err := recovered.Operation.Request.Canonical()
+			if err != nil {
+				t.Fatal(err)
+			}
+			recovered.Operation.Request, recovered.Operation.SemanticHash = operation, hash
+			recovered.Continuation.Pins = nil
+			recovered.ExecutionID = ""
+			if action, err := selectedRecoveryActionFor(recovered, entry); err != nil || action != selectedRecoveryResume {
+				t.Fatalf("eventless first attachment requires no invented feed: action=%d err=%v", action, err)
+			}
+			recovered.ExecutionID = uuid.NewString()
+			recovered.Operation.Status = runfork.ForkOperationActivated
+			recovered.Operation.Result = &runfork.ForkOperationResult{
+				SourceRunID: operation.SourceRunID, SourceRunStatus: runfork.RunForkSourceFrozenStatus, SourceFrozen: true,
+				ForkRunID: recovered.RunID, ForkRunStatus: runfork.RunForkActivatedStatus,
+				ForkPoint: point, ForkEventID: point.EventID, BundleHash: entry.BundleHash, ExecutedEventCount: 2,
+			}
+			recovered.Continuation.ForkRunStatus = runfork.RunForkActivatedStatus
+			if action, err := selectedRecoveryActionFor(recovered, entry); err != nil || action != selectedRecoveryResume {
+				t.Fatalf("activated running child rejected: action=%d err=%v", action, err)
+			}
+			recovered.Continuation.ForkRunStatus = runfork.RunForkMaterializedStatus
+			if action, err := selectedRecoveryActionFor(recovered, entry); err != nil || action != selectedRecoveryResume {
+				t.Fatalf("paused-after-activation child rejected: action=%d err=%v", action, err)
+			}
+			ack, present, err := recovered.ActivatedResult()
+			if err != nil || !present || ack.ExecutedEventCount != 2 || ack.ForkPoint != point || ack.ForkRunStatus != runfork.RunForkActivatedStatus {
+				t.Fatalf("activated acknowledgment was reconstructed: result=%+v present=%t err=%v", ack, present, err)
+			}
+			recovered.ExecutionID = ""
+			if _, err := selectedRecoveryActionFor(recovered, entry); err == nil {
+				t.Fatal("activated child resumed without predecessor")
+			}
+			recovered.ExecutionID = uuid.NewString()
+			recovered.Disposition = runfork.SelectedForkRecoveryActivate
+			if _, err := selectedRecoveryActionFor(recovered, entry); err == nil {
+				t.Fatal("activated child was readmitted to activation")
+			}
+			for _, disposition := range []runfork.SelectedForkRecoveryDisposition{runfork.SelectedForkRecoveryTerminal, runfork.SelectedForkRecoveryControlOnly} {
+				recovered.Disposition, recovered.Continuation = disposition, nil
+				if _, err := selectedRecoveryActionFor(recovered, entry); err != nil {
+					t.Fatalf("read/control-only recovery rejected: %v", err)
+				}
+				if _, present, err := recovered.ActivatedResult(); err != nil || !present {
+					t.Fatalf("read/control-only recovery lost acknowledgment: present=%t err=%v", present, err)
+				}
+			}
+		})
 	}
 }
