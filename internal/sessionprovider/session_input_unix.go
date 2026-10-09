@@ -15,25 +15,26 @@ import (
 )
 
 type nativeSessionInput struct {
-	Scope              channelonboarding.SessionInputScope
-	Account            operatorchannel.SessionAccountAdmission
-	OperationID        string
-	OperationRevision  int64
-	ActivationID       string
-	ActivationRevision int64
-	TargetSelector     string
-	PrincipalID        string
-	Source             channelonboarding.ChannelDurableContextIdentity
-	PublicationBinding runtimeinbound.BindingGeneration
-	BindingRevision    int64
-	Body               []byte
-	ReceivedAt         time.Time
-	Context            context.Context
-	Release            func()
-	SourceContext      captureSource
-	OriginalCapture    capturedEvent
-	OwnedSource        correlation.SourceArtifactFact
-	NativeCurrent      func() bool
+	Scope                      channelonboarding.SessionInputScope
+	Account                    operatorchannel.SessionAccountAdmission
+	OperationID                string
+	OperationRevision          int64
+	ActivationID               string
+	ActivationRevision         int64
+	TargetSelector             string
+	PrincipalID                string
+	Source                     channelonboarding.ChannelDurableContextIdentity
+	PublicationBinding         runtimeinbound.BindingGeneration
+	BindingRevision            int64
+	Body                       []byte
+	ReceivedAt                 time.Time
+	Context                    context.Context
+	Release                    func()
+	SourceContext              captureSource
+	OriginalCapture            capturedEvent
+	OriginalPublicationRequest []byte
+	OwnedSource                correlation.SourceArtifactFact
+	NativeCurrent              func() bool
 }
 
 func (input nativeSessionInput) matchesOriginalOperation(op channelonboarding.Operation, coordinate channelonboarding.ChannelRuntimeContextCoordinate) bool {
@@ -104,11 +105,12 @@ func (r *sessionInputReader) readRetainedInput(ctx context.Context, reference Se
 	}
 	account := device.ID.ToNonAD().String()
 	ownedSource, _ := correlation.SourceArtifactFactFromContext(occurrence.ctx)
-	events, err := r.spool.pending(workContext)
+	rows, err := r.spool.pendingPublications(workContext)
 	if err != nil {
 		return result, err
 	}
-	for _, event := range events {
+	for _, row := range rows {
+		event := row.event
 		if event.Conversation != reference.Conversation || event.EventID != reference.EventID || event.Kind != reference.Kind {
 			continue
 		}
@@ -122,12 +124,13 @@ func (r *sessionInputReader) readRetainedInput(ctx context.Context, reference Se
 		return nativeSessionInput{Scope: event.Scope.Kind, Account: event.Scope.Session, OperationID: event.Scope.OnboardingOperation,
 			OperationRevision: event.Scope.OperationRevision, ActivationID: event.Scope.ActivationID, ActivationRevision: event.Scope.ActivationRevision, TargetSelector: event.Scope.TargetSelector,
 			PrincipalID: event.Scope.PrincipalID, Source: event.Scope.Source, BindingRevision: event.Scope.BindingRevision,
-			PublicationBinding: event.Scope.PublicationBinding,
-			SourceContext:      event.Source,
-			OriginalCapture:    event,
-			OwnedSource:        ownedSource,
-			NativeCurrent:      nativeCurrent,
-			Body:               event.Body, ReceivedAt: event.ReceivedAt, Context: workContext, Release: release}, nil
+			PublicationBinding:         event.Scope.PublicationBinding,
+			SourceContext:              event.Source,
+			OriginalCapture:            event,
+			OriginalPublicationRequest: row.requestBytes,
+			OwnedSource:                ownedSource,
+			NativeCurrent:              nativeCurrent,
+			Body:                       event.Body, ReceivedAt: event.ReceivedAt, Context: workContext, Release: release}, nil
 	}
 	return result, fmt.Errorf("WhatsApp authenticated input requires its verified retained capture")
 }

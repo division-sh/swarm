@@ -16,19 +16,21 @@ import (
 // Capture is accessible only inside the native owner's Go internal boundary.
 // It is not exported through the read-only consumption facade.
 type Capture struct {
-	Store            channelonboarding.Store
-	Responsibility   channelonboarding.AdmissionResponsibility
-	Scope            channelonboarding.SessionInputScope
-	BindingRevision  int64
-	PublicationRunID string
-	Body             []byte
-	OriginalCapture  []byte
-	ReceivedAt       time.Time
-	Generation       triggergeneration.Generation
-	Context          context.Context
-	Release          func()
-	RunCurrent       func(context.Context) error
-	NativeCurrent    func() bool
+	Store                      channelonboarding.Store
+	Responsibility             channelonboarding.AdmissionResponsibility
+	Scope                      channelonboarding.SessionInputScope
+	BindingRevision            int64
+	PublicationRunID           string
+	PublicationSequence        int64
+	OriginalPublicationRequest []byte
+	Body                       []byte
+	OriginalCapture            []byte
+	ReceivedAt                 time.Time
+	Generation                 triggergeneration.Generation
+	Context                    context.Context
+	Release                    func()
+	RunCurrent                 func(context.Context) error
+	NativeCurrent              func() bool
 }
 
 type admittedInput struct {
@@ -45,6 +47,7 @@ func (a Admission) SameOwner(other Admission) bool { return a.value != nil && a.
 func SealOwnedCapture(capture Capture) Admission {
 	capture.Body = bytes.Clone(capture.Body)
 	capture.OriginalCapture = bytes.Clone(capture.OriginalCapture)
+	capture.OriginalPublicationRequest = bytes.Clone(capture.OriginalPublicationRequest)
 	return Admission{value: &admittedInput{capture: capture}}
 }
 
@@ -77,7 +80,7 @@ func (a Admission) RequireBusiness(ctx context.Context, provider string, generat
 	}
 	capture := a.value.capture
 	if capture.Scope != channelonboarding.SessionInputBusiness || capture.Responsibility.ActivationRevision < 1 ||
-		capture.BindingRevision < 1 || capture.PublicationRunID == "" {
+		capture.BindingRevision < 1 || capture.PublicationRunID == "" || capture.PublicationSequence < 1 {
 		return fmt.Errorf("business publication requires explicit activated native business scope")
 	}
 	op, err := capture.Store.GetChannelOnboarding(ctx, capture.Responsibility.OperationID)
@@ -145,6 +148,20 @@ func (a Admission) OriginalCapture() []byte {
 		return nil
 	}
 	return bytes.Clone(a.value.capture.OriginalCapture)
+}
+
+func (a Admission) OriginalPublicationRequest() []byte {
+	if a.value == nil {
+		return nil
+	}
+	return bytes.Clone(a.value.capture.OriginalPublicationRequest)
+}
+
+func (a Admission) PublicationSequence() int64 {
+	if a.value == nil {
+		return 0
+	}
+	return a.value.capture.PublicationSequence
 }
 func (a Admission) ReceivedAt() time.Time {
 	if a.value == nil {

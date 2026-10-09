@@ -194,6 +194,10 @@ func TestWhatsAppNativeBusinessHandoffProcessDeathBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				var frozen []byte
+				if len(rows) == 2 {
+					frozen = bytes.Clone(rows[1].requestBytes)
+				}
 				if phase == "after_retirement" {
 					if len(rows) != 1 {
 						t.Fatal("retired business reappeared or setup capture vanished")
@@ -208,6 +212,7 @@ func TestWhatsAppNativeBusinessHandoffProcessDeathBothStores(t *testing.T) {
 						t.Fatal("unfinished native restart", err)
 					}
 				} else if phase == "after_commit" {
+					f.republishBusinessStanding(t)
 					// Committed evidence needs neither a live SDK nor reminted input.
 					if f.state.currentOccurrence() != nil {
 						t.Fatal("history proof unexpectedly installed a live SDK")
@@ -215,8 +220,18 @@ func TestWhatsAppNativeBusinessHandoffProcessDeathBothStores(t *testing.T) {
 					if settled, err := f.spool.reconcilePublished(f.ctx, event, f.selected.(sessionBusinessStore)); err != nil || !settled {
 						t.Fatalf("committed native restart: %t %v", settled, err)
 					}
+				} else {
+					f.republishBusinessStanding(t)
 				}
 				requireNativeBusinessReceipt(t, f, event)
+				if len(frozen) > 0 {
+					identity, _ := event.PublicationIdentity()
+					record, _, err := f.selected.(sessionBusinessStore).LoadInboundPublicationByIdentity(f.ctx, identity)
+					actual, encodeErr := publicationRequestBytes(record.Request)
+					if err != nil || encodeErr != nil || !bytes.Equal(actual, frozen) {
+						t.Fatal("process restart changed staged request evidence", err, encodeErr)
+					}
+				}
 			})
 		}
 	}

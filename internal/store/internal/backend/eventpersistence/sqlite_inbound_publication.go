@@ -260,7 +260,7 @@ func admitSQLiteInboundStandingTargetTx(ctx context.Context, s *EventSQLiteOwner
 	if err != nil {
 		return fmt.Errorf("lock sqlite inbound standing service: %w", err)
 	}
-	if flowPath != request.FlowPath || runID != request.ResolvedRunID || generation != request.ExpectedGeneration || publicationSequence != request.ExpectedPublicationSequence {
+	if flowPath != request.FlowPath || runID != request.ResolvedRunID || generation != request.ExpectedGeneration || publicationSequence != command.PublicationSequence() {
 		return fmt.Errorf("stale or conflicting sqlite inbound standing target")
 	}
 	disposition, err := storestandingdisposition.ReadByRun(ctx, tx, false, request.ResolvedRunID)

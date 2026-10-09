@@ -11387,7 +11387,14 @@ tool_model:
         The exact retained activation may advance its operation/activation revisions only through its authorized
         process-coordinate refresh; unchanged coordinates cannot justify adopting different revisions.
         The original capture, SDK occurrence, receipt time, staged request bytes and publication identity never
-        change during resumption. Fresh input still requires its original live occurrence; only the private
+        change during resumption. Normal restart republishes the standing service even when its run and generation
+        are unchanged. The closed input owner seals that exact current publication sequence separately from the
+        immutable request's original sequence; only the verified private pending request supplies original bytes.
+        Both selected-store commit owners require exact equality with the transaction-locked current sequence.
+        Republication after preparation invalidates that attempt without rewriting evidence, while a fresh exact
+        admission may resume the same request. No caller-supplied refresh, wildcard, older-sequence tolerance or
+        evidence overwrite is permitted. Historical committed reconciliation requires no current publication fence
+        and grants no new execution or redispatch. Fresh input still requires its original live occurrence; only the private
         pending-business consumer may resume verified durable capture. Preparation, durable staging, atomic
         publication and post-commit dispatch use their existing owners; refusal, rollback and conflicting
         staged requests retain evidence. Setup rows belong to claim reconciliation and are not business work.

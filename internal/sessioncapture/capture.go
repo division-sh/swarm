@@ -251,15 +251,7 @@ func PublicationRequestBytes(request runtimeinbound.Request) ([]byte, error) {
 	if !request.OriginalReceivedAt.Equal(request.OriginalReceivedAt.Truncate(time.Microsecond)) {
 		return nil, fmt.Errorf("WhatsApp publication receipt time must have microsecond precision")
 	}
-	raw, err := json.Marshal(request)
-	if err != nil {
-		return nil, err
-	}
-	value, err := canonicaljson.Decode(raw)
-	if err != nil {
-		return nil, err
-	}
-	return canonicaljson.Encode(value)
+	return request.CanonicalBytes()
 }
 
 func ValidateCapturePublication(event Event, request runtimeinbound.Request) error {

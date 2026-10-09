@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/sessioncapture"
 	"github.com/division-sh/swarm/internal/sessionprovider/input"
 )
 
@@ -62,7 +63,7 @@ func prepareSessionBusinessPublication(ctx context.Context, input input.Admissio
 	if err != nil {
 		return absent, err
 	}
-	request, err := sessionBusinessRequest(ownedContext, event, alias, store)
+	request, err := sessionBusinessRequest(ownedContext, event, alias, store, input)
 	if err != nil {
 		return absent, err
 	}
@@ -94,7 +95,7 @@ func prepareSessionBusinessPublication(ctx context.Context, input input.Admissio
 	return preparedSessionBusiness{ctx: ownedContext, bus: eventBus, store: store, plan: plan, command: command}, nil
 }
 
-func sessionBusinessRequest(ctx context.Context, event capturedEvent, alias string, store sessionBusinessStore) (inbound.Request, error) {
+func sessionBusinessRequest(ctx context.Context, event capturedEvent, alias string, store sessionBusinessStore, admitted input.Admission) (inbound.Request, error) {
 	var request inbound.Request
 	target, err := packs.ParseChannelRegistrationTarget(event.Scope.TargetSelector)
 	source, found := correlation.SourceArtifactFactFromContext(ctx)
@@ -106,8 +107,18 @@ func sessionBusinessRequest(ctx context.Context, event capturedEvent, alias stri
 	if err != nil {
 		return request, err
 	}
-	if !found || standing.RunID != event.Scope.PublicationBinding.RunID || standing.Generation != event.Scope.PublicationBinding.Generation {
+	if !found || standing.RunID != event.Scope.PublicationBinding.RunID || standing.Generation != event.Scope.PublicationBinding.Generation ||
+		standing.PublicationSequence != admitted.PublicationSequence() {
 		return request, errCaptureScopeChanged
+	}
+	if original := admitted.OriginalPublicationRequest(); len(original) > 0 {
+		if err := json.Unmarshal(original, &request); err != nil {
+			return request, err
+		}
+		if request.TargetAlias != alias || request.FlowPath != target.FlowPath {
+			return inbound.Request{}, inbound.ErrRequestIdentityConflict
+		}
+		return request, sessioncapture.ValidateCapturePublication(event, request)
 	}
 	identity, err := event.PublicationIdentity()
 	if err != nil {
