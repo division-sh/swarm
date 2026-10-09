@@ -12,6 +12,7 @@ import (
 )
 
 const triggerAllFieldsFixture = `provider: github
+transport: webhook
 payload_object_required: false
 payload_object_error: invalid object
 payload_source: form
@@ -63,7 +64,7 @@ type triggerFieldCase struct {
 	accepted            int
 }
 
-// IDs are the accepted #2487/#2533 denominator, not a fresh census or inferred oracle.
+// Preserve the #2487/#2533 IDs; #2577 adds one explicit transport field.
 var triggerBodyFieldCases = []triggerFieldCase{
 	{"F209", "ack", "{mode: durable_before_dispatch}", fieldMissing | fieldEmptyMap},
 	{"F210", "ack.mode", "durable_before_dispatch", fieldMissing},
@@ -144,10 +145,11 @@ var triggerBodyFieldCases = []triggerFieldCase{
 	{"F285", "signature.timestamp.stale_error", "diagnostic", fieldMissing | fieldEmptyText},
 	{"F286", "signature.timestamp.tolerance", "5m", fieldMissing | fieldEmptyText},
 	{"F287", "signature.type", "hmac_sha256", 0},
+	{"W2577-T01", "transport", "webhook", fieldMissing},
 }
 
 func TestTriggerBodyFieldAdmissionMatrix(t *testing.T) {
-	if len(triggerBodyFieldCases) != 79 {
+	if len(triggerBodyFieldCases) != 80 {
 		t.Fatal("BODY denominator changed")
 	}
 	for _, field := range triggerBodyFieldCases {

@@ -28,6 +28,7 @@ func TestNormalizeSubjectsOwnsEffectiveTriggerAdmissionShape(t *testing.T) {
 		ID: "ingress:" + bundleHash + ":chat:acme", Kind: SubjectProviderTrigger, Provider: "acme",
 		Source: "trigger_pack_binding", Provenance: "external", Applicability: "effective",
 		TriggerAdmission: &TriggerAdmission{
+			Transport:  ChannelTransportWebhook,
 			BundleHash: bundleHash, FlowPath: "chat", Alias: "chat", CatalogGeneration: strings.Repeat("b", 64),
 			PolicySource: "verified_pack", RequestAuthentication: "TOKEN_EQUALITY", Event: "inbound.acme",
 			Pack: &TriggerPackIdentity{ID: "provider.acme", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "external"},
@@ -66,6 +67,7 @@ func TestNormalizeSubjectsOwnsEffectiveTriggerAdmissionShape(t *testing.T) {
 	}
 	invalid = base
 	invalid.TriggerAdmission = &TriggerAdmission{
+		Transport:  ChannelTransportWebhook,
 		BundleHash: bundleHash, FlowPath: "chat", Alias: "chat", CatalogGeneration: strings.Repeat("b", 64),
 		PolicySource: "raw_declaration", RequestAuthentication: "UNAUTHENTICATED", Event: "inbound.acme",
 	}
@@ -231,6 +233,7 @@ func TestEffectiveTriggerTextAndJSONProjectTheSameTypedFacts(t *testing.T) {
 		Source: "trigger_pack_binding", Provenance: "external", Applicability: "effective",
 		TriggerAdmission: &TriggerAdmission{
 			BundleHash: bundleHash, FlowPath: "chat", Alias: "chat", CatalogGeneration: strings.Repeat("e", 64),
+			Transport:    ChannelTransportWebhook,
 			PolicySource: "verified_pack", RequestAuthentication: "HMAC_SHA256", Event: "inbound.acme",
 			SignedPayload: "raw_body", DigestEncoding: "base64",
 			Pack: &TriggerPackIdentity{ID: "provider.acme", Version: "1.2.3", ManifestHash: "sha256:" + strings.Repeat("f", 64), Provenance: "external"},
@@ -282,7 +285,7 @@ func TestRenderEffectiveTriggerReadinessIsConciseAndRedacted(t *testing.T) {
 			subject: Subject{
 				ID: "ingress:bundle:chat:telegram", Kind: SubjectProviderTrigger, Provider: "telegram",
 				Source: "raw_declaration", Applicability: "effective",
-				TriggerAdmission: &TriggerAdmission{BundleHash: "bundle", FlowPath: "chat", Alias: "chat", CatalogGeneration: "generation", PolicySource: "raw_declaration", RequestAuthentication: "UNAUTHENTICATED", Event: "inbound.telegram"},
+				TriggerAdmission: &TriggerAdmission{Transport: ChannelTransportWebhook, BundleHash: "bundle", FlowPath: "chat", Alias: "chat", CatalogGeneration: "generation", PolicySource: "raw_declaration", RequestAuthentication: "UNAUTHENTICATED", Event: "inbound.telegram"},
 			},
 			want: "READY · UNAUTHENTICATED",
 		},
@@ -306,7 +309,7 @@ func effectiveTriggerSubject(status string) Subject {
 	return Subject{
 		ID: "ingress:bundle:chat:telegram", Kind: SubjectProviderTrigger, Provider: "telegram",
 		Source: "raw_declaration", Applicability: "effective",
-		TriggerAdmission: &TriggerAdmission{BundleHash: "bundle", FlowPath: "chat", Alias: "chat", CatalogGeneration: "generation", PolicySource: "raw_declaration", RequestAuthentication: "HMAC_SHA256", Event: "inbound.telegram"},
+		TriggerAdmission: &TriggerAdmission{Transport: ChannelTransportWebhook, BundleHash: "bundle", FlowPath: "chat", Alias: "chat", CatalogGeneration: "generation", PolicySource: "raw_declaration", RequestAuthentication: "HMAC_SHA256", Event: "inbound.telegram"},
 		Requirements:     []Requirement{RequirementWithStatus(RequirementSecret, "webhook_signing.telegram", RequirementScopeTarget, status, "credential_store")},
 	}
 }

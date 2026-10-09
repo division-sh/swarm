@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -38,11 +39,36 @@ func parseManifestAt(body []byte, file string) (Manifest, error) {
 }
 
 func admitTriggerDefinition(root yamlsource.Value) (manifestDefinition, error) {
-	f, err := triggerFields(root, "provider", "payload_object_required", "payload_object_error", "payload_source", "secret", "signature", "challenge", "delivery_condition", "delivery_id", "event_type", "event_name", "normalized_events", "ack", "redact_keys", "metadata")
+	f, err := triggerFields(root, "provider", "transport", "payload_object_required", "payload_object_error", "payload_source", "secret", "signature", "challenge", "delivery_condition", "delivery_id", "event_type", "event_name", "normalized_events", "ack", "redact_keys", "metadata")
 	if err != nil {
 		return manifestDefinition{}, err
 	}
 	var out manifestDefinition
+	transport := "webhook"
+	if err := triggerEnum(f, "transport", &transport, "webhook", "session"); err != nil {
+		return out, err
+	}
+	out.Transport = packs.ChannelTransport(transport)
+	if out.Transport == packs.ChannelTransportSession {
+		for _, name := range []string{"secret", "signature", "challenge", "payload_source"} {
+			if field, present := f[name]; present {
+				return out, triggerSourceError(field, "session transport forbids HTTP policy field "+name)
+			}
+		}
+		for _, name := range []string{"delivery_id", "event_type"} {
+			if block, present := f[name]; present {
+				for _, member := range []string{"header", "query_param", "form_param"} {
+					field, err := block.Lookup(member)
+					if err != nil {
+						return out, err
+					}
+					if field.Presence != yamlsource.PresenceMissing {
+						return out, triggerSourceError(field.Value, "session transport forbids HTTP identity source "+member)
+					}
+				}
+			}
+		}
+	}
 	if err := triggerScalars(f, map[string]*string{"provider": &out.Provider, "payload_object_error": &out.PayloadObjectError}, map[string]*bool{"payload_object_required": &out.PayloadObjectRequired}); err != nil {
 		return out, err
 	}

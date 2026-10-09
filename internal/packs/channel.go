@@ -159,6 +159,7 @@ type TriggerEvent struct {
 type TriggerPackDescriptor struct {
 	Identity   PackIdentity                 `json:"identity"`
 	Provider   string                       `json:"provider"`
+	Transport  ChannelTransport             `json:"transport"`
 	Generation triggergeneration.Generation `json:"generation"`
 	Events     map[string]TriggerEvent      `json:"events"`
 }
@@ -1465,6 +1466,9 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 	if err := validateAcceptedTriggerDescriptor(trigger); err != nil {
 		return SatisfactionPlan{}, err
 	}
+	if channel.Manifest.Transport != trigger.Transport {
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q transport %q does not match verified trigger %q transport %q", channel.Envelope.ID, channel.Manifest.Transport, trigger.Identity.ID(), trigger.Transport)
+	}
 	if err := validateAcceptedConnectorDescriptor(connector); err != nil {
 		return SatisfactionPlan{}, err
 	}
@@ -1610,6 +1614,9 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 }
 
 func validateAcceptedTriggerDescriptor(trigger TriggerPackDescriptor) error {
+	if _, err := trigger.Transport.ActivationPosture(); err != nil {
+		return fmt.Errorf("accepted trigger %q: %w", trigger.Identity.ID(), err)
+	}
 	if !trigger.Generation.Valid() {
 		return fmt.Errorf("accepted trigger %q generation is missing", trigger.Identity.ID())
 	}
