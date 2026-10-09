@@ -1,4 +1,5 @@
 artifacts:
+  - {root: internal/serveapp/testdata/verify-run-jobflow-registry, disposition: canonical-owner, owner: serveapp.verify_run_registry, proof: internal/serveapp/verify_run_registry_integration_test.go:TestVerifyRunJobflowRegistryIntegrationBothStores}
   - {root: internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment, disposition: canonical-overlay, owner: runtime.declared_clock_deployment, proof: internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestClockDeploymentFixturesLoadAndVerify}
   - {root: examples/routing/policy-rules, disposition: canonical-owner, owner: examples.routing.policy_rules, proof: internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestCanonicalRoutingExamplesLoadAndVerify}
   - {root: tests/tier11-flow-composition/test-numeric-data-scatter-park, disposition: different-concept, owner: releasee2e.numeric_data_scatter_park, proof: internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestNumericFeedFixtureLoadsAndVerifies}
