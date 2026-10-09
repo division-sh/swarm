@@ -26,7 +26,7 @@ func (p *PreparedSelectedFork) settleExecutionFailure() error {
 		return nil
 	}
 	ctx := pending.container.failureDispositionContext(context.WithoutCancel(p.operation.preparation.Context()))
-	if selectedStopOwnsDisposition(ctx) {
+	if p.operation.stopOwnsDisposition() {
 		// The accepted stop owns the child's terminal outcome, not this executor.
 		if err := pending.container.Fail(ctx, context.Canceled); err != nil {
 			return err
