@@ -42,6 +42,13 @@ type nativeQualificationFacts struct {
 	readbackHash                                                             string
 }
 
+func (facts nativeQualificationFacts) qualificationChanged(req channelnative.QualificationRequest) bool {
+	return facts.projection.State != req.State || facts.projection.Reason != req.Reason || facts.readbackHash != req.ReadbackHash ||
+		facts.localeRevision != req.LocaleRevision || facts.settingGeneration != req.SettingGeneration ||
+		facts.qualifiedActivation != req.ActivationRevision || facts.qualifiedBinding != req.BindingRevision ||
+		facts.qualifiedContext != req.ContextGeneration || facts.qualifiedContract != req.EntryContractHash
+}
+
 func validateNativeQualificationRequest(tx *sql.Tx, req channelnative.QualificationRequest) error {
 	if tx == nil || uuid.Validate(req.ActivationID) != nil || uuid.Validate(req.SettingID) != nil ||
 		req.SettingGeneration < 1 || req.LocaleRevision < 1 || req.ObservedAt.IsZero() ||
@@ -131,10 +138,7 @@ func RecordNativeInboxQualificationTx(ctx context.Context, tx *sql.Tx, req chann
 		(req.State == channelnative.QualificationQualified && facts.settingState != "installed" && facts.settingState != "retired") {
 		return false, fmt.Errorf("native qualification contradicts current declaration or setting authority")
 	}
-	changed := p.State != req.State || p.Reason != req.Reason || facts.readbackHash != req.ReadbackHash ||
-		facts.localeRevision != req.LocaleRevision || facts.settingGeneration != req.SettingGeneration ||
-		facts.qualifiedActivation != req.ActivationRevision || facts.qualifiedBinding != req.BindingRevision ||
-		facts.qualifiedContext != req.ContextGeneration || facts.qualifiedContract != req.EntryContractHash
+	changed := facts.qualificationChanged(req)
 	if req.State == channelnative.QualificationQualified && facts.settingState == "retired" {
 		if err := reactivateAcknowledgedNativeInboxSettingTx(ctx, tx, req.SettingID, req.SettingGeneration, postgres); err != nil {
 			return false, err

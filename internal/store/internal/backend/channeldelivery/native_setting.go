@@ -82,6 +82,17 @@ func admitNativeSettingScopeTx(ctx context.Context, tx *sql.Tx, admission channe
 	return setting, nil
 }
 
+type nativeSettingDeclaration struct {
+	principal, pack, version, manifest, contract, command string
+	commands                                              []byte
+}
+
+func (stored nativeSettingDeclaration) matches(admission channelnative.Admission, entryCommand string, canonical, desired []byte) bool {
+	return stored.principal == admission.PrincipalID && stored.pack == admission.PackID &&
+		stored.version == admission.PackVersion && stored.manifest == admission.PackManifestHash &&
+		stored.contract == admission.EntryContractHash && stored.command == entryCommand && bytes.Equal(canonical, desired)
+}
+
 func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, postgres bool) (channelnative.Setting, bool, error) {
 	if tx == nil {
 		return channelnative.Setting{}, false, fmt.Errorf("native inbox setting requires selected transaction")
@@ -110,12 +121,11 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 			FROM channel_native_settings WHERE provider=$1 AND resource_slot_id=$2 AND conversation_reference=$3
 			AND scope_kind=$4 AND member_reference=$5 AND language_code='' FOR UPDATE`
 	}
-	var existingPrincipal, existingPack, existingVersion, existingHash, contract, existingCommand string
-	var raw []byte
+	var stored nativeSettingDeclaration
 	var readbackHash sql.NullString
 	err = tx.QueryRowContext(ctx, query, admission.Provider, admission.ResourceSlotID, admission.ConversationReference, setting.ScopeKind, setting.MemberReference).
-		Scan(&setting.SettingID, &existingPrincipal, &existingPack, &existingVersion, &existingHash,
-			&contract, &existingCommand, &raw, &setting.Generation, &setting.State, &setting.InstallOperationID, &readbackHash)
+		Scan(&setting.SettingID, &stored.principal, &stored.pack, &stored.version, &stored.manifest,
+			&stored.contract, &stored.command, &stored.commands, &setting.Generation, &setting.State, &setting.InstallOperationID, &readbackHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		setting, err = createNativeInboxSettingTx(ctx, tx, admission, setting, postgres)
 		if err != nil {
@@ -137,13 +147,11 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 		if err != nil {
 			return channelnative.Setting{}, false, err
 		}
-		canonical, err := canonicaljson.Canonicalize(raw)
+		canonical, err := canonicaljson.Canonicalize(stored.commands)
 		if err != nil {
 			return channelnative.Setting{}, false, err
 		}
-		compatible := existingPrincipal == admission.PrincipalID && existingPack == admission.PackID &&
-			existingVersion == admission.PackVersion && existingHash == admission.PackManifestHash &&
-			contract == admission.EntryContractHash && existingCommand == setting.EntryCommand && bytes.Equal(canonical, desired)
+		compatible := stored.matches(admission, setting.EntryCommand, canonical, desired)
 		if unresolved && setting.State != "uncertain" {
 			setting, err = markNativeSettingUncertainTx(ctx, tx, setting, postgres)
 			if err != nil {

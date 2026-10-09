@@ -513,6 +513,12 @@ type channelDeliveryWorkerOptions struct {
 	started func(runtimechanneldelivery.Store, func() (runtimechanneldelivery.ReconcileMark, bool))
 }
 
+func (options channelDeliveryWorkerOptions) observePass(ctx context.Context, scope runtimechanneldelivery.ReconcileDemand, start runtimechanneldelivery.ReconcileMark, err error) {
+	if err == nil && ctx.Err() == nil && options.passed != nil {
+		options.passed(runtimechanneldelivery.ReconcilePass{Scope: scope, Start: start})
+	}
+}
+
 func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process, dispatcher *serveChannelDeliveryDispatcher, options channelDeliveryWorkerOptions) error {
 	if owner == nil || dispatcher == nil || dispatcher.store == nil {
 		return fmt.Errorf("channel delivery worker requires process and dispatcher")
@@ -560,13 +566,11 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 				err := dispatcher.reconcileNativeInboxSettings(workCtx)
 				if err != nil && workCtx.Err() == nil {
 					log.Printf("native inbox setting reconciliation: %v", err)
-				} else if err == nil && workCtx.Err() == nil && options.passed != nil {
-					options.passed(runtimechanneldelivery.ReconcilePass{Scope: runtimechanneldelivery.ReconcileNative, Start: start})
 				}
+				options.observePass(workCtx, runtimechanneldelivery.ReconcileNative, start, err)
 			}
-			if err := dispatcher.reconcileOrdinaryChannelWork(workCtx); err == nil && workCtx.Err() == nil && options.passed != nil {
-				options.passed(runtimechanneldelivery.ReconcilePass{Scope: runtimechanneldelivery.ReconcileOrdinary, Start: start})
-			}
+			err := dispatcher.reconcileOrdinaryChannelWork(workCtx)
+			options.observePass(workCtx, runtimechanneldelivery.ReconcileOrdinary, start, err)
 			nativeDue = false
 			select {
 			case <-workCtx.Done():
