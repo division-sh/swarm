@@ -63,7 +63,7 @@ func channelUncertaintySummaryEntry(t *testing.T, provider *telegramapi.Double) 
 	}
 }
 
-func proveChannelUncertainNoticeReadback(t *testing.T, provider *telegramapi.Double, backend, dsn, endpoint, seedID string, restart func()) {
+func proveChannelUncertainNoticeReadback(t *testing.T, provider *telegramapi.Double, backend, dsn, endpoint, seedID string, observation *channelReconcileObservation, restart func()) {
 	t.Helper()
 	id := onlyPublicChannelNoticeID(t, endpoint, seedID)
 	db, err := sql.Open(backend, dsn)
@@ -86,7 +86,7 @@ func proveChannelUncertainNoticeReadback(t *testing.T, provider *telegramapi.Dou
 		t.Fatalf("opening inbox granted fresh-copy consent: %d physical notices", got)
 	}
 	callback, signing, _ := provider.Registration()
-	proveChannelManualResendAfterLostNotice(t, provider, callback, signing)
+	proveChannelManualResendAfterLostNotice(t, provider, callback, signing, observation)
 	waitChannelUncertainNoticeFact(t, db, id, false, true)
 	readback("Not acknowledged", false)
 	restart()

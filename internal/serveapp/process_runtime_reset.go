@@ -231,6 +231,9 @@ func (r *serveRuntimeReset) Complete(ctx context.Context, retainSources bool) er
 		s.mu.Unlock()
 	}
 	s.resetConverged = true
+	if s.resetChannelPublication != nil {
+		return s.resetChannelPublication()
+	}
 	return nil
 }
 

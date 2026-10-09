@@ -146,27 +146,27 @@ func start(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun Re
 	return actual, rows > 0, nil
 }
 
-func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun RequireActiveRun, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, error) {
+func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun RequireActiveRun, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
 	record = runtimepipeline.NormalizeActivityAttemptRecord(record)
 	if err := runtimepipeline.ValidateActivityAttemptTerminal(record); err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	if err := requireMutation(tx, dialect, requireActiveRun); err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	if err := requireActiveRun(ctx, record.RunID); err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	payload, err := canonicaljson.MarshalPreservingNumberKinds(record.ResultPayload)
 	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("marshal activity attempt result payload: %w", err)
+		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("marshal activity attempt result payload: %w", err)
 	}
 	failure, err := failureJSON(record.Failure)
 	if record.Status == runtimepipeline.ActivityAttemptStatusSucceeded {
 		failure, err = "", nil
 	}
 	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	query := `
 		UPDATE activity_attempts
@@ -185,55 +185,55 @@ func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun
 	completedAt := terminalTimestamp()
 	result, err := tx.ExecContext(ctx, query, record.Status, record.ResultEventID, record.ResultEventType, string(payload), nullableString(failure), completedAt, completedAt, record.RequestEventID, record.ExecutionMode)
 	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("complete activity attempt %s: %w", record.RequestEventID, err)
+		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("complete activity attempt %s: %w", record.RequestEventID, err)
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("read activity attempt completion disposition %s: %w", record.RequestEventID, err)
+		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("read activity attempt completion disposition %s: %w", record.RequestEventID, err)
 	}
 	actual, found, err := Load(ctx, tx, dialect, record.RequestEventID)
 	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	if !found {
-		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("activity attempt %s was not found for completion", record.RequestEventID)
+		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("activity attempt %s was not found for completion", record.RequestEventID)
 	}
 	if err := runtimepipeline.ValidateActivityAttemptTerminalMode(actual, record); err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	if rows == 0 && actual.Status == runtimepipeline.ActivityAttemptStatusStarted {
-		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("activity attempt %s remained started after terminal update", record.RequestEventID)
+		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("activity attempt %s remained started after terminal update", record.RequestEventID)
 	}
 	if story == nil {
-		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("activity attempt story owner is required")
+		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("activity attempt story owner is required")
 	}
 	if rows > 0 {
 		if err := story.Record(ctx, runtimepipeline.ActivityAttemptStoryDraft(actual, actual.Status)); err != nil {
-			return runtimepipeline.ActivityAttemptRecord{}, err
+			return runtimepipeline.ActivityAttemptRecord{}, false, err
 		}
 	}
-	return actual, nil
+	return actual, rows > 0, nil
 }
 
-func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun RequireActiveRun, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, error) {
+func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun RequireActiveRun, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
 	record = runtimepipeline.NormalizeActivityAttemptRecord(record)
 	record.Status = runtimepipeline.ActivityAttemptStatusUncertain
 	if err := runtimepipeline.ValidateActivityAttemptTerminal(record); err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	if err := requireMutation(tx, dialect, requireActiveRun); err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	if err := requireActiveRun(ctx, record.RunID); err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	payload, err := canonicaljson.MarshalPreservingNumberKinds(record.ResultPayload)
 	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("marshal activity attempt uncertain payload: %w", err)
+		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("marshal activity attempt uncertain payload: %w", err)
 	}
 	failure, err := failureJSON(record.Failure)
 	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	query := `
 		UPDATE activity_attempts
@@ -252,31 +252,31 @@ func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActi
 	completedAt := terminalTimestamp()
 	result, err := tx.ExecContext(ctx, query, record.ResultEventID, record.ResultEventType, string(payload), failure, completedAt, completedAt, record.RequestEventID, record.ExecutionMode)
 	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("mark activity attempt %s uncertain: %w", record.RequestEventID, err)
+		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("mark activity attempt %s uncertain: %w", record.RequestEventID, err)
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("read activity attempt uncertain disposition %s: %w", record.RequestEventID, err)
+		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("read activity attempt uncertain disposition %s: %w", record.RequestEventID, err)
 	}
 	actual, found, err := Load(ctx, tx, dialect, record.RequestEventID)
 	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	if !found {
-		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("activity attempt %s was not found for uncertain transition", record.RequestEventID)
+		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("activity attempt %s was not found for uncertain transition", record.RequestEventID)
 	}
 	if err := runtimepipeline.ValidateActivityAttemptTerminalMode(actual, record); err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	if story == nil {
-		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("activity attempt story owner is required")
+		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("activity attempt story owner is required")
 	}
 	if rows > 0 {
 		if err := story.Record(ctx, runtimepipeline.ActivityAttemptStoryDraft(actual, runtimepipeline.ActivityAttemptStatusUncertain)); err != nil {
-			return runtimepipeline.ActivityAttemptRecord{}, err
+			return runtimepipeline.ActivityAttemptRecord{}, false, err
 		}
 	}
-	return actual, nil
+	return actual, rows > 0, nil
 }
 
 // Capture once after admission; dialect defaults cannot define immutable result time.

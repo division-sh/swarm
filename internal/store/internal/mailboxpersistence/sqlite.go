@@ -3,11 +3,13 @@ package mailboxpersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/google/uuid"
@@ -40,7 +42,9 @@ func (s *MailboxSQLiteOwner) InsertMailboxItem(ctx context.Context, item runtime
 		scope = "entity"
 	}
 	status, decision := mailboxStateForStoredStatus(item.Status, item.Decision)
-	if err := s.backend.RunTransaction(ctx, "sqlite mailbox insert", func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "sqlite mailbox insert", func(txctx context.Context, tx *sql.Tx) error {
+		changed = false
 		_, err := tx.ExecContext(txctx, `
 			INSERT INTO mailbox (
 				item_id, entity_id, flow_instance, scope, item_type, source_event_id,
@@ -54,9 +58,11 @@ func (s *MailboxSQLiteOwner) InsertMailboxItem(ctx context.Context, item runtime
 		if err != nil {
 			return err
 		}
-		_, err = channeldelivery.PlanNoticeTx(txctx, tx, item.ID, false)
+		changed, err = channeldelivery.PlanNoticeTx(txctx, tx, item.ID, false)
 		return err
-	}); err != nil {
+	})
+	err = errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
+	if err != nil {
 		return "", fmt.Errorf("insert sqlite mailbox item: %w", err)
 	}
 	return item.ID, nil
@@ -140,7 +146,9 @@ func (s *MailboxSQLiteOwner) ExpireMailboxItems(ctx context.Context, limit int) 
 		limit = 200
 	}
 	var items []runtimetools.MailboxItem
-	if err := s.backend.RunTransaction(ctx, "sqlite mailbox expiry", func(txctx context.Context, tx *sql.Tx) error {
+	var changed bool
+	acknowledged, err := s.backend.RunTransactionOutcome(ctx, "sqlite mailbox expiry", func(txctx context.Context, tx *sql.Tx) error {
+		changed = false
 		rows, err := tx.QueryContext(txctx, sqliteMailboxSelectSQL(`status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?`)+` ORDER BY expires_at ASC LIMIT ?`, time.Now().UTC(), limit)
 		if err != nil {
 			return fmt.Errorf("query expiring sqlite mailbox items: %w", err)
@@ -163,12 +171,15 @@ func (s *MailboxSQLiteOwner) ExpireMailboxItems(ctx context.Context, limit int) 
 				return fmt.Errorf("expire sqlite mailbox item: %w", err)
 			}
 			items[i].Status = "expired"
+			changed = true
 			if strings.TrimSpace(items[i].DecisionNotes) == "" {
 				items[i].DecisionNotes = "Timed out without human decision"
 			}
 		}
 		return nil
-	}); err != nil {
+	})
+	err = errors.Join(err, s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary))
+	if err != nil {
 		return nil, err
 	}
 	return items, nil
