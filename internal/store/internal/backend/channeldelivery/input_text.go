@@ -115,32 +115,32 @@ func RequireChosenInputDraftTx(ctx context.Context, tx *sql.Tx, action operatorc
 // AdvancePartialInputDraftTextTx settles an answer and advances one field in
 // one transaction. A final answer belongs to the canonical decision mutation.
 func AdvancePartialInputDraftTextTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText,
-	at time.Time, draftID string, postgres bool) (decisioncard.InputFieldProgress, error) {
+	at time.Time, draftID string, postgres bool) (decisioncard.InputFieldProgress, bool, error) {
 	candidate, resolved, err := RequireCurrentInputDraftTx(ctx, tx, text, at, draftID, true, postgres)
 	if err != nil {
-		return decisioncard.InputFieldProgress{}, err
+		return decisioncard.InputFieldProgress{}, false, err
 	}
 	preview, err := decisionpersistence.PreviewInputDraftTextTx(ctx, tx, draftID, resolved.PrincipalID, text.Text, at, postgres)
 	if err != nil {
-		return decisioncard.InputFieldProgress{}, err
+		return decisioncard.InputFieldProgress{}, false, err
 	}
 	if preview.Complete {
-		return decisioncard.InputFieldProgress{}, fmt.Errorf("final channel input requires canonical decision mutation")
+		return decisioncard.InputFieldProgress{}, false, fmt.Errorf("final channel input requires canonical decision mutation")
 	}
 	progress, err := decisionpersistence.AdvanceInputDraftTextTx(ctx, tx, draftID, resolved.PrincipalID, text.Text, at, postgres)
 	if err != nil {
-		return decisioncard.InputFieldProgress{}, err
+		return decisioncard.InputFieldProgress{}, false, err
 	}
 	if !progress.Fields.Equal(preview.Fields) || progress.NextFieldIndex != preview.NextFieldIndex {
-		return decisioncard.InputFieldProgress{}, fmt.Errorf("channel input progress changed before settlement")
+		return decisioncard.InputFieldProgress{}, false, fmt.Errorf("channel input progress changed before settlement")
 	}
 	if err := SettleTextIntentTx(ctx, tx, text, "input_progressed", postgres); err != nil {
-		return decisioncard.InputFieldProgress{}, err
+		return decisioncard.InputFieldProgress{}, false, err
 	}
 	if err := PlanInputPromptForTextTx(ctx, tx, text, candidate.CardID, draftID, postgres); err != nil {
-		return decisioncard.InputFieldProgress{}, err
+		return decisioncard.InputFieldProgress{}, false, err
 	}
-	return progress, nil
+	return progress, true, nil
 }
 
 func PreviewChosenInputDraftTextTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction,
@@ -202,55 +202,55 @@ func RequireCurrentSkipActionTx(ctx context.Context, tx *sql.Tx, action operator
 }
 
 func AdvancePartialSkipActionTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction,
-	at time.Time, postgres bool) (decisioncard.InputFieldProgress, error) {
+	at time.Time, postgres bool) (decisioncard.InputFieldProgress, bool, error) {
 	resolved, preview, draft, err := RequireCurrentSkipActionTx(ctx, tx, action, at, true, postgres)
 	if err != nil {
-		return decisioncard.InputFieldProgress{}, err
+		return decisioncard.InputFieldProgress{}, false, err
 	}
 	if preview.Complete {
-		return decisioncard.InputFieldProgress{}, fmt.Errorf("final skip requires canonical decision mutation")
+		return decisioncard.InputFieldProgress{}, false, fmt.Errorf("final skip requires canonical decision mutation")
 	}
 	progress, err := decisionpersistence.AdvanceInputDraftSkipTx(ctx, tx, draft.InputDraftID, resolved.PrincipalID, at, postgres)
 	if err != nil {
-		return decisioncard.InputFieldProgress{}, err
+		return decisioncard.InputFieldProgress{}, false, err
 	}
 	if !progress.Fields.Equal(preview.Fields) || progress.NextFieldIndex != preview.NextFieldIndex {
-		return decisioncard.InputFieldProgress{}, fmt.Errorf("channel skip progress changed before settlement")
+		return decisioncard.InputFieldProgress{}, false, fmt.Errorf("channel skip progress changed before settlement")
 	}
 	if err := SettleAppliedActionIntentTx(ctx, tx, action, render.ActionApplied, postgres); err != nil {
-		return decisioncard.InputFieldProgress{}, err
+		return decisioncard.InputFieldProgress{}, false, err
 	}
 	if err := PlanInputPromptForActionTx(ctx, tx, action, draft.CardID, draft.InputDraftID, postgres); err != nil {
-		return decisioncard.InputFieldProgress{}, err
+		return decisioncard.InputFieldProgress{}, false, err
 	}
-	return progress, nil
+	return progress, true, nil
 }
 
 func AdvancePartialChosenInputDraftTextTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction,
-	at time.Time, postgres bool) (decisioncard.InputFieldProgress, error) {
+	at time.Time, postgres bool) (decisioncard.InputFieldProgress, bool, error) {
 	candidate, text, bound, err := RequireChosenInputDraftTx(ctx, tx, action, at, true, postgres)
 	if err != nil {
-		return decisioncard.InputFieldProgress{}, err
+		return decisioncard.InputFieldProgress{}, false, err
 	}
 	preview, err := decisionpersistence.PreviewInputDraftTextTx(ctx, tx, candidate.DraftID, bound.PrincipalID, text.Fact.Text, at, postgres)
 	if err != nil {
-		return decisioncard.InputFieldProgress{}, err
+		return decisioncard.InputFieldProgress{}, false, err
 	}
 	if preview.Complete {
-		return decisioncard.InputFieldProgress{}, fmt.Errorf("final chosen input requires canonical decision mutation")
+		return decisioncard.InputFieldProgress{}, false, fmt.Errorf("final chosen input requires canonical decision mutation")
 	}
 	progress, err := decisionpersistence.AdvanceInputDraftTextTx(ctx, tx, candidate.DraftID, bound.PrincipalID, text.Fact.Text, at, postgres)
 	if err != nil {
-		return decisioncard.InputFieldProgress{}, err
+		return decisioncard.InputFieldProgress{}, false, err
 	}
 	if !progress.Fields.Equal(preview.Fields) || progress.NextFieldIndex != preview.NextFieldIndex {
-		return decisioncard.InputFieldProgress{}, fmt.Errorf("chosen input progress changed before settlement")
+		return decisioncard.InputFieldProgress{}, false, fmt.Errorf("chosen input progress changed before settlement")
 	}
 	if err := SettleAppliedActionIntentTx(ctx, tx, action, render.ActionApplied, postgres); err != nil {
-		return decisioncard.InputFieldProgress{}, err
+		return decisioncard.InputFieldProgress{}, false, err
 	}
 	if err := PlanInputPromptForActionTx(ctx, tx, action, candidate.CardID, candidate.DraftID, postgres); err != nil {
-		return decisioncard.InputFieldProgress{}, err
+		return decisioncard.InputFieldProgress{}, false, err
 	}
-	return progress, nil
+	return progress, true, nil
 }

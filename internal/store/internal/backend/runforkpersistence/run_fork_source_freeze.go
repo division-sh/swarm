@@ -11,11 +11,12 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 )
 
 // applyRunForkSourceFreeze is the only writer of the terminal forked source
 // state. The caller owns the surrounding serializable transaction.
-func (s *RunForkPostgresOwner) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, lineage runForkActivationLineage, now time.Time, confirmed bool) error {
+func (s *RunForkPostgresOwner) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, lineage runForkActivationLineage, now time.Time, confirmed bool, changes *privaterunlifecycle.ChannelCardChanges) error {
 	if tx == nil {
 		return fmt.Errorf("run fork source freeze transaction is required")
 	}
@@ -37,7 +38,7 @@ func (s *RunForkPostgresOwner) applyRunForkSourceFreeze(ctx context.Context, tx 
 		RunID:            lineage.SourceRunID,
 		ContinuedAsRunID: lineage.ForkRunID,
 		EndedAt:          now,
-	}); err != nil {
+	}, changes); err != nil {
 		return fmt.Errorf("freeze source run lifecycle: %w", err)
 	}
 	if _, err := s.RunLifecyclePostgresOwner.TransitionActiveTx(ctx, attempt, runtimerunlifecycle.ActiveTransitionRequest{
@@ -52,7 +53,7 @@ func (s *RunForkPostgresOwner) applyRunForkSourceFreeze(ctx context.Context, tx 
 	return nil
 }
 
-func (s *RunForkSQLiteOwner) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, lineage runForkActivationLineage, now time.Time, confirmed bool) error {
+func (s *RunForkSQLiteOwner) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, lineage runForkActivationLineage, now time.Time, confirmed bool, changes *privaterunlifecycle.ChannelCardChanges) error {
 	if tx == nil {
 		return fmt.Errorf("run fork source freeze transaction is required")
 	}
@@ -72,7 +73,7 @@ func (s *RunForkSQLiteOwner) applyRunForkSourceFreeze(ctx context.Context, tx *s
 	}
 	if _, _, err := s.RunLifecycleSQLiteOwner.ForkSourceTx(ctx, attempt, runtimerunlifecycle.ForkSourceRequest{
 		RunID: lineage.SourceRunID, ContinuedAsRunID: lineage.ForkRunID, EndedAt: now,
-	}); err != nil {
+	}, changes); err != nil {
 		return fmt.Errorf("freeze source run lifecycle: %w", err)
 	}
 	if _, err := s.RunLifecycleSQLiteOwner.TransitionActiveTx(ctx, attempt, runtimerunlifecycle.ActiveTransitionRequest{
@@ -83,9 +84,9 @@ func (s *RunForkSQLiteOwner) applyRunForkSourceFreeze(ctx context.Context, tx *s
 	return recordRunForkActivationAuthorActivity(ctx, attempt, lineage, now)
 }
 
-func (s *RunForkPostgresOwner) ApplyRunForkSourceFreezeTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage RunForkActivationLineage, now time.Time, confirmed bool) error {
+func (s *RunForkPostgresOwner) ApplyRunForkSourceFreezeTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage RunForkActivationLineage, now time.Time, confirmed bool, changes *privaterunlifecycle.ChannelCardChanges) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return s.applyRunForkSourceFreeze(ctx, tx, attempt, lineage, now, confirmed)
+		return s.applyRunForkSourceFreeze(ctx, tx, attempt, lineage, now, confirmed, changes)
 	})
 }
 

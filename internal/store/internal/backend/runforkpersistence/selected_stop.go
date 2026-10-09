@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storestartup "github.com/division-sh/swarm/internal/store/internal/startupownership"
 )
 
@@ -21,19 +23,20 @@ func (s *RunForkPostgresOwner) StopSelectedFork(ctx context.Context, req runcont
 	if err := s.requireCurrentSchema(); err != nil {
 		return runcontrol.State{}, err
 	}
+	var changes privaterunlifecycle.ChannelCardChanges
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runcontrol.State, error) {
 		if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			return requireSelectedStopTx(txctx, tx, req, false)
 		}); err != nil {
 			return runcontrol.State{}, err
 		}
-		return s.StopSelectedRunTx(txctx, attempt, selectedStopTransition(req.Transition))
+		return s.StopSelectedRunTx(txctx, attempt, selectedStopTransition(req.Transition), &changes)
 	})
 	if !result.Acknowledged() {
 		return runcontrol.State{}, result.Err()
 	}
 	state, _ := result.Value()
-	return state, result.Err()
+	return state, errors.Join(result.Err(), s.publishChannelChanges(result.Acknowledged(), changes.Changed))
 }
 
 func (s *RunForkSQLiteOwner) StopSelectedFork(ctx context.Context, req runcontrol.SelectedStopRequest) (runcontrol.State, error) {
@@ -43,19 +46,20 @@ func (s *RunForkSQLiteOwner) StopSelectedFork(ctx context.Context, req runcontro
 	if err := s.requireCurrentSchema(); err != nil {
 		return runcontrol.State{}, err
 	}
+	var changes privaterunlifecycle.ChannelCardChanges
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "stop selected fork", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runcontrol.State, error) {
 		if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			return requireSelectedStopTx(txctx, tx, req, true)
 		}); err != nil {
 			return runcontrol.State{}, err
 		}
-		return s.StopSelectedRunTx(txctx, attempt, selectedStopTransition(req.Transition))
+		return s.StopSelectedRunTx(txctx, attempt, selectedStopTransition(req.Transition), &changes)
 	})
 	if !result.Acknowledged() {
 		return runcontrol.State{}, result.Err()
 	}
 	state, _ := result.Value()
-	return state, result.Err()
+	return state, errors.Join(result.Err(), s.publishChannelChanges(result.Acknowledged(), changes.Changed))
 }
 
 func requireSelectedStopTx(ctx context.Context, tx *sql.Tx, req runcontrol.SelectedStopRequest, sqlite bool) error {
