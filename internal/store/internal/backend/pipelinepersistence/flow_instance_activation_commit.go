@@ -161,6 +161,9 @@ func commitFlowInstanceActivation(
 	} else if err := requireSQLiteRunActive(ctx, tx, record.Identity.RunID); err != nil {
 		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
+	if err := requireFlowInstanceConstructionSelector(ctx, tx, postgres, record); err != nil {
+		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
+	}
 
 	equal, found, err := loadFlowInstanceActivationEqual(ctx, tx, postgres, record)
 	if err != nil {
