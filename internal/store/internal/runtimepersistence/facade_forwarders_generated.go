@@ -575,6 +575,10 @@ func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]flowident
 	return s.pipelinePostgresOwner.ListFlowInstanceRoutes(ctx)
 }
 
+func (s *PostgresStore) ListFlowInstances(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error) {
+	return s.pipelinePostgresOwner.ListFlowInstances(ctx, scope)
+}
+
 func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, limit int) ([]tools.MailboxItem, error) {
 	return s.mailboxPostgresOwner.ListMailboxItems(ctx, status, limit)
 }
@@ -873,6 +877,10 @@ func (s *PostgresStore) LoadWorkflowTimerActivation(ctx context.Context, activat
 
 func (s *PostgresStore) LookupAPIEventPublication(ctx context.Context, request apiidempotency.Request) (apiidempotency.Completion, bool, error) {
 	return s.eventPostgresOwner.LookupAPIEventPublication(ctx, request)
+}
+
+func (s *PostgresStore) LookupFlowInstance(ctx context.Context, request pipeline.FlowInstanceLookupRequest) (pipeline.FlowInstanceObservation, bool, error) {
+	return s.pipelinePostgresOwner.LookupFlowInstance(ctx, request)
 }
 
 func (s *PostgresStore) MarkActivityAttemptUncertain(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
@@ -1851,6 +1859,10 @@ func (s *SQLiteRuntimeStore) ListFlowInstanceRoutes(ctx context.Context) ([]flow
 	return s.pipelineSQLiteOwner.ListFlowInstanceRoutes(ctx)
 }
 
+func (s *SQLiteRuntimeStore) ListFlowInstances(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error) {
+	return s.pipelineSQLiteOwner.ListFlowInstances(ctx, scope)
+}
+
 func (s *SQLiteRuntimeStore) ListMailboxItems(ctx context.Context, status string, limit int) ([]tools.MailboxItem, error) {
 	return s.mailboxSQLiteOwner.ListMailboxItems(ctx, status, limit)
 }
@@ -2125,6 +2137,10 @@ func (s *SQLiteRuntimeStore) LoadWorkflowTimerActivation(ctx context.Context, ac
 
 func (s *SQLiteRuntimeStore) LookupAPIEventPublication(ctx context.Context, request apiidempotency.Request) (apiidempotency.Completion, bool, error) {
 	return s.eventSQLiteOwner.LookupAPIEventPublication(ctx, request)
+}
+
+func (s *SQLiteRuntimeStore) LookupFlowInstance(ctx context.Context, request pipeline.FlowInstanceLookupRequest) (pipeline.FlowInstanceObservation, bool, error) {
+	return s.pipelineSQLiteOwner.LookupFlowInstance(ctx, request)
 }
 
 func (s *SQLiteRuntimeStore) MarkActivityAttemptUncertain(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {

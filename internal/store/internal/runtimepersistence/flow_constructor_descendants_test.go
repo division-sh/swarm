@@ -201,6 +201,18 @@ func TestA9StoredKeyedParentConstructsAndRestoresDescendantsBothStores(t *testin
 			}
 			for _, plan := range plans {
 				owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: plan.Identity.Route()}
+				fact, present := correlation.SourceArtifactFactFromContext(f.ctx)
+				if !present {
+					t.Fatal("stored-ancestor directory proof requires admitted source")
+				}
+				lookup, err := pipeline.NewExactFlowInstanceLookup(child.ContractBundle, fact, owner)
+				if err != nil {
+					t.Fatal(err)
+				}
+				observation, found, err := f.store.(pipeline.FlowInstanceIndexReader).LookupFlowInstance(f.ctx, lookup)
+				if err != nil || !found || observation.Identity() != plan.Identity {
+					t.Fatalf("directory substituted stored ancestor identity: %+v found=%t err=%v", observation, found, err)
+				}
 				evidence, err := ReadReceiverConstructionPublicationForTest(f.ctx, f.store, owner, plan.Identity.EntityID)
 				if err != nil || evidence.Identity != plan.Identity || evidence.CreatingInput != plan.CreatingInput {
 					t.Fatalf("native receipt lost actual parent: %#v want=%+v err=%v", evidence, plan.Identity, err)

@@ -43,33 +43,37 @@ func (c FlowConstructor) SuppliedFields() []string {
 // AdmitFlowInstanceKey validates the scalar before the shared key formatter.
 // Its material is construction identity, never a projection of mutable fields.
 func AdmitFlowInstanceKey(source semanticview.Source, flowID string, value any) (string, error) {
+	keys, err := AdmitFlowInstanceKeyMaterial(source, flowID, value)
+	if err != nil || len(keys) == 0 {
+		return "", err
+	}
+	return keys[0].Value, nil
+}
+
+func AdmitFlowInstanceKeyMaterial(source semanticview.Source, flowID string, value any) ([]c.TemplateInstanceKeyValue, error) {
 	if source == nil {
-		return "", fmt.Errorf("instance key requires an admitted source")
+		return nil, fmt.Errorf("instance key requires an admitted source")
 	}
 	flow, found := source.FlowSchemaByID(flowID)
 	if !found {
-		return "", fmt.Errorf("instance key flow %s is absent", flowID)
+		return nil, fmt.Errorf("instance key flow %s is absent", flowID)
 	}
 	if flow.Instance.Empty() {
 		if value != nil {
-			return "", fmt.Errorf("keyless flow %s cannot accept an instance key", flowID)
+			return nil, fmt.Errorf("keyless flow %s cannot accept an instance key", flowID)
 		}
-		return "", nil
+		return nil, nil
 	}
 	contract, found := entityruntime.ResolveForFlow(source, flowID)
 	if !found {
-		return "", fmt.Errorf("keyed flow %s requires its admitted field contract", flowID)
+		return nil, fmt.Errorf("keyed flow %s requires its admitted field contract", flowID)
 	}
 	field := flow.Instance.Path()
 	normalized, err := entityruntime.NormalizeFieldValue(contract, field, value)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	keys, err := (c.TemplateInstanceContract{FlowID: flowID, Field: flow.Instance}).CanonicalKeyMaterial(map[string]any{field: normalized})
-	if err != nil {
-		return "", err
-	}
-	return keys[0].Value, nil
+	return (c.TemplateInstanceContract{FlowID: flowID, Field: flow.Instance}).CanonicalKeyMaterial(map[string]any{field: normalized})
 }
 
 // StandingConstructionIsKeyless classifies declaration ancestry, not executable
