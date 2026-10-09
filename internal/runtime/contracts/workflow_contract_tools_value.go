@@ -10,7 +10,8 @@ var toolEntryFields = map[string]struct{}{
 	"category": {}, "description": {}, "handler_type": {}, "effect_class": {}, "permission": {},
 	"rate_limit": {}, "rate_limit_max_wait": {}, "input_schema": {}, "output_schema": {},
 	"http": {}, "response_mapping": {}, "response_success": {}, "credentials": {}, "managed_credential": {},
-	"path": {}, "abi": {}, "entry": {}, "digest": {}, "source_path": {}, "source_hash": {}, "runtime": {}, "limits": {},
+	"in_process": {},
+	"path":       {}, "abi": {}, "entry": {}, "digest": {}, "source_path": {}, "source_hash": {}, "runtime": {}, "limits": {},
 }
 
 func projectToolDeclarationsValue(root yamlsource.Value) (map[string]ToolSchemaEntry, error) {
@@ -110,6 +111,17 @@ func projectToolValue(value yamlsource.Value) (ToolSchemaEntry, error) {
 
 func projectToolTransportOptions(fields map[string]yamlsource.Value) ([]ToolSchemaEntryOption, error) {
 	options := []ToolSchemaEntryOption{}
+	if field, present := fields["in_process"]; present {
+		raw, err := nodeValueText(field, "in_process")
+		if err != nil {
+			return nil, err
+		}
+		target, err := ParseToolInProcessTarget(raw)
+		if err != nil {
+			return nil, nodeValueError(field, err)
+		}
+		options = append(options, WithToolInProcessTarget(target))
+	}
 	for _, name := range []string{"path", "abi", "entry", "digest", "source_path", "source_hash", "runtime", "limits"} {
 		if field, present := fields[name]; present {
 			return nil, nodeValueError(field, fmt.Errorf("%s requires handler_type wasm or python", name))
@@ -272,7 +284,7 @@ func ProjectToolManagedCredentialValue(value yamlsource.Value) (ManagedCredentia
 }
 
 func projectToolModuleValue(value yamlsource.Value, fields map[string]yamlsource.Value, handler ToolHandlerKind, schemas map[string]ToolInputSchema) (PolicyModule, error) {
-	for _, name := range []string{"http", "response_mapping", "response_success", "credentials", "managed_credential", "category", "permission", "effect_class", "rate_limit", "rate_limit_max_wait"} {
+	for _, name := range []string{"http", "in_process", "response_mapping", "response_success", "credentials", "managed_credential", "category", "permission", "effect_class", "rate_limit", "rate_limit_max_wait"} {
 		if field, present := fields[name]; present {
 			return PolicyModule{}, nodeValueError(field, fmt.Errorf("module tools cannot declare %s", name))
 		}
