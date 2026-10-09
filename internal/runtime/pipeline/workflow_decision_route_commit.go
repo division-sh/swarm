@@ -27,7 +27,8 @@ func (c ProposedEffectRouteCommand) Validate() error {
 }
 
 type CommittedProposedEffectRoute struct {
-	Publication runtimeengine.CommittedDurablePublication
+	ChannelCardsChanged bool `json:"-"`
+	Publication         runtimeengine.CommittedDurablePublication
 }
 
 func (r CommittedProposedEffectRoute) Validate() error {

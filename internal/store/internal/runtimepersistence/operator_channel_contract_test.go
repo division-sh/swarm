@@ -20,6 +20,7 @@ import (
 
 type operatorChannelContractStore interface {
 	operatorchannel.Store
+	SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
 }
 
 type operatorChannelContractFixture struct {
@@ -125,6 +126,7 @@ func TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := context.Background()
 			fixture := openOperatorChannelContractFixture(t, backend)
+			hints := observeChannelHints(t, fixture.store)
 			notice := func(summary string) string {
 				t.Helper()
 				id, err := fixture.insertNotice(ctx, runtimetools.MailboxItem{Type: runtimetools.NotifyHumanMailboxItemType, Summary: summary, Context: []byte(`{"message":"` + summary + `"}`)})
@@ -142,6 +144,7 @@ func TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores(t *testing.T) {
 			}
 			beforePrincipal := notice("before principal")
 			assertPlans(beforePrincipal, 0)
+			hints.expect(t, 0)
 			now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
 			principal, err := fixture.store.EnsureOperatorPrincipal(ctx, now)
 			if err != nil {
@@ -149,6 +152,7 @@ func TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores(t *testing.T) {
 			}
 			beforeDefault := notice("before default")
 			assertPlans(beforeDefault, 0)
+			hints.expect(t, 0)
 			identity := operatorChannelContractIdentity("notice-cut-" + backend)
 			operationID := uuid.NewString()
 			op, err := fixture.store.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
@@ -170,6 +174,7 @@ func TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			hints.expect(t, render.ReconcileOrdinary|render.ReconcileNative)
 			summary, found, err := fixture.loadSummary(ctx, operationID)
 			if err != nil || !found || summary.SourceKind != channeldelivery.PlanSummary ||
 				summary.SourceID != operationID || summary.SummaryCount != 2 || summary.DeliveryEpoch != 1 ||
@@ -194,8 +199,18 @@ func TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores(t *testing.T) {
 			}
 			assertPlans(beforePrincipal, 0)
 			assertPlans(beforeDefault, 0)
+			hints.subscription.Close()
+			hints = observeChannelHints(t, fixture.store)
 			afterDefault := notice("after default")
 			assertPlans(afterDefault, 1)
+			hints.expect(t, render.ReconcileOrdinary)
+			if _, err := fixture.insertNotice(ctx, runtimetools.MailboxItem{
+				ID: afterDefault, Type: runtimetools.NotifyHumanMailboxItemType, Summary: "duplicate", Context: []byte(`{"message":"duplicate"}`),
+			}); err == nil {
+				t.Fatal("duplicate notice insert was accepted")
+			}
+			hints.expect(t, 0)
+			hints.subscription.Close()
 			plan, found, err := fixture.loadPlan(ctx, afterDefault)
 			if err != nil || !found || plan.SourceKind != channeldelivery.PlanNotice || plan.SourceID != afterDefault ||
 				plan.PrincipalID != principal.ID || plan.InterfaceKey != identity.Key() || plan.BindingRevision != binding.Revision || plan.DeliveryEpoch != 1 ||

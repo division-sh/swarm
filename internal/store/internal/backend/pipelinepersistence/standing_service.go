@@ -21,6 +21,7 @@ import (
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 	storeworkflowtimer "github.com/division-sh/swarm/internal/store/internal/backend/workflowtimer"
 	"github.com/google/uuid"
@@ -35,6 +36,7 @@ type standingServiceAdapter struct {
 	attempt                      *mutationprotocol.Attempt
 	deliveryContinuationRequired bool
 	committed                    bool
+	channelCardChanges           privaterunlifecycle.ChannelCardChanges
 }
 
 func newPostgresStandingServiceAdapter(store *PipelinePostgresOwner) *standingServiceAdapter {
@@ -52,6 +54,7 @@ func newPostgresStandingServiceAdapter(store *PipelinePostgresOwner) *standingSe
 		}
 		result := mutationprotocol.RunPostgres(ctx, store.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 			adapter.deliveryContinuationRequired = false
+			adapter.channelCardChanges = privaterunlifecycle.ChannelCardChanges{}
 			adapter.attempt = attempt
 			defer func() { adapter.attempt = nil }()
 			return struct{}{}, attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -59,7 +62,7 @@ func newPostgresStandingServiceAdapter(store *PipelinePostgresOwner) *standingSe
 			})
 		})
 		adapter.committed = result.Acknowledged()
-		return standalonePipelineMutationError(result)
+		return errors.Join(standalonePipelineMutationError(result), store.publishCardChanges(result.Acknowledged(), adapter.channelCardChanges.Changed))
 	}
 	return adapter
 }
@@ -78,6 +81,7 @@ func newSQLiteStandingServiceAdapter(store *PipelineSQLiteOwner) *standingServic
 		}
 		result := mutationprotocol.RunSQLite(ctx, store.backend, "sqlite standing service mutation", mutationprotocol.Story, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 			adapter.deliveryContinuationRequired = false
+			adapter.channelCardChanges = privaterunlifecycle.ChannelCardChanges{}
 			adapter.attempt = attempt
 			defer func() { adapter.attempt = nil }()
 			return struct{}{}, attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -85,7 +89,7 @@ func newSQLiteStandingServiceAdapter(store *PipelineSQLiteOwner) *standingServic
 			})
 		})
 		adapter.committed = result.Acknowledged()
-		return standalonePipelineMutationError(result)
+		return errors.Join(standalonePipelineMutationError(result), store.publishCardChanges(result.Acknowledged(), adapter.channelCardChanges.Changed))
 	}
 	return adapter
 }
@@ -166,9 +170,9 @@ func (s *standingServiceAdapter) markTerminalRun(ctx context.Context, tx *sql.Tx
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("standing run lifecycle mutation owner is required")
 	}
 	if s.postgresStore != nil {
-		return s.postgresStore.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, s.attempt, request)
+		return s.postgresStore.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, s.attempt, request, &s.channelCardChanges)
 	}
-	return s.sqliteStore.RunLifecycleSQLiteOwner.MarkTerminalTx(ctx, s.attempt, request)
+	return s.sqliteStore.RunLifecycleSQLiteOwner.MarkTerminalTx(ctx, s.attempt, request, &s.channelCardChanges)
 }
 
 func standingServiceResultEvidence(result runtimepipeline.StandingServiceReconciliation, adapter *standingServiceAdapter, err error) (runtimepipeline.StandingServiceReconciliation, error) {

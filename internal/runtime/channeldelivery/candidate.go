@@ -166,6 +166,8 @@ func (d ActionDisposition) Valid() bool {
 }
 
 type Store interface {
+	SubscribeChannelReconciliation(context.Context) (*ReconcileSubscription, error)
+	NotifyChannelPublication() error
 	CurrentChannelDeliveryActivationID(context.Context) (string, bool, error)
 	CurrentChannelCardChangeCursor(context.Context) (int64, bool, error)
 	PlanChangedChannelCard(context.Context, int64, string) error
