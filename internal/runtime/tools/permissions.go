@@ -128,6 +128,9 @@ func agentModuleGrantError(source semanticview.Source, flowID, name string) erro
 		return nil
 	}
 	if tool, found := bundle.ToolEntryForFlow(flowID, name); found && !tool.AgentExposable() {
+		if tool.Handler() == runtimecontracts.ToolHandlerInProcess {
+			return fmt.Errorf("declares native provider tool %s; provider operations are private activities", name)
+		}
 		return fmt.Errorf("declares module tool %s; modules are compute_module-only", name)
 	}
 	return nil

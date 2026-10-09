@@ -320,7 +320,7 @@ func executionToolsForRuntime(source semanticview.Source, discovered map[string]
 			continue
 		}
 		if declaration, ok := declarations[name]; ok && !declaration.AgentExposable() {
-			return nil, fmt.Errorf("module tool %s cannot acquire a discovered agent binding", name)
+			return nil, fmt.Errorf("private tool %s cannot acquire a discovered agent binding", name)
 		}
 		execution, include := executionToolFromAdmitted(name, tool.Contract)
 		if err := mergeExecutionTool(entries, name, execution, include, executionToolOwnerDiscovered); err != nil {
@@ -403,7 +403,7 @@ func mergeScopedActorTools(source semanticview.Source, actor models.AgentConfig,
 			delete(entries, name)
 			blocked[name] = struct{}{}
 			if _, granted := allowed[name]; granted {
-				return nil, fmt.Errorf("module tool %s cannot be granted to an agent", name)
+				return nil, fmt.Errorf("private tool %s cannot be granted to an agent", name)
 			}
 			continue
 		}
@@ -436,7 +436,7 @@ func resolveExecutionToolForActor(source semanticview.Source, actor models.Agent
 
 func executionToolFromAdmitted(name string, entry runtimecontracts.ToolSchemaEntry) (ExecutionTool, bool) {
 	handlerType := entry.Handler()
-	if handlerType == runtimecontracts.ToolHandlerUnspecified || !entry.AgentExposable() {
+	if handlerType == runtimecontracts.ToolHandlerUnspecified || !entry.AgentExposable() && handlerType != runtimecontracts.ToolHandlerInProcess {
 		return ExecutionTool{}, false
 	}
 	mcpBinding, hasMCPBinding := entry.MCP()
@@ -461,7 +461,7 @@ func executionToolFromAdmitted(name string, entry runtimecontracts.ToolSchemaEnt
 		mcp:        mcpBinding,
 		inProcess:  inProcess,
 	}
-	return ExecutionTool{value: &value}, true
+	return ExecutionTool{value: &value}, entry.AgentExposable()
 }
 
 func deepCloneMap(in map[string]any) map[string]any {

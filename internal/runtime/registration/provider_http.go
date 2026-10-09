@@ -3,7 +3,6 @@ package registration
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -201,69 +200,15 @@ func (e HTTPExecutor) deliverChannelWrite(ctx context.Context, toolID string, to
 	if err != nil {
 		return DeliveryResult{}, err
 	}
-	operationID := handle.Attempt().OperationID
 	response, raw, launched, launchErr, err := e.executeProviderApply(ctx, prepared, handle)
 	if err != nil {
-		if !launched {
-			if launchErr != nil {
-				return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, handle.Fail(
-					context.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict,
-					source+"_launch_dispatch_blocked", source, "dispatch",
-					map[string]any{"tool": strings.TrimSpace(toolID), "no_dispatch": true}, err,
-				))
-			}
-			return DeliveryResult{OperationID: operationID}, handle.Fail(
-				ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable,
-				source+"_prelaunch_rejected", source, "dispatch",
-				map[string]any{"tool": strings.TrimSpace(toolID), "launch_rejected": true}, err,
-			)
+		if launched {
+			err = redactProviderError(err, secrets)
 		}
-		return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, handle.Fail(
-			ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
-			source+"_acknowledgment_lost", source, "dispatch",
-			map[string]any{"tool": strings.TrimSpace(toolID)}, redactProviderError(err, secrets),
-		))
-	}
-	observationErr := handle.MarkResponseObserved(ctx, map[string]any{"status": response.StatusCode})
-	if observationErr != nil && !runtimeeffects.CommittedMutationPhase(observationErr, runtimeeffects.MutationObservation, handle.Attempt()) {
-		return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, observationErr)
+		return FailChannelWrite(ctx, handle, toolID, launched, launchErr, err)
 	}
 	output, err := projectProviderResponse(toolID, tool, response, raw, secrets)
-	if err != nil {
-		return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, observationErr, handle.Fail(
-			ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
-			source+"_response_unconfirmed", source, "validate_response",
-			map[string]any{"tool": strings.TrimSpace(toolID), "status": response.StatusCode}, err,
-		))
-	}
-	settlement := map[string]any{"status": response.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(raw)}
-	if source == "channel_delivery" {
-		output, err = project(output)
-		if err != nil {
-			return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, observationErr, handle.Fail(
-				ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
-				"channel_delivery_projection_unconfirmed", source, "project_result",
-				map[string]any{"tool": strings.TrimSpace(toolID)}, err,
-			))
-		}
-		projected, encodeErr := json.Marshal(output)
-		if encodeErr == nil {
-			projected, encodeErr = canonicaljson.Canonicalize(projected)
-		}
-		if encodeErr != nil {
-			return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, observationErr, handle.Fail(
-				ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
-				"channel_delivery_receipt_unconfirmed", source, "validate_response",
-				map[string]any{"tool": strings.TrimSpace(toolID)}, encodeErr,
-			))
-		}
-		settlement["projected_output"] = json.RawMessage(projected)
-	}
-	settleErr := handle.Succeed(ctx, settlement)
-	if settleErr != nil && !runtimeeffects.CommittedMutationPhase(settleErr, runtimeeffects.MutationSettlement, handle.Attempt()) {
-		return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, observationErr, settleErr)
-	}
-	return DeliveryResult{OperationID: operationID, Output: output}, errors.Join(launchErr, observationErr, settleErr)
+	return CompleteChannelWrite(ctx, handle, toolID, tool, output, map[string]any{"status": response.StatusCode}, raw, launchErr, err, project)
 }
 
 func (p *PendingApply) SettleReadback(ctx context.Context, exact bool, cause error) error {
