@@ -115,20 +115,30 @@ func TestVerifyRunMutationDriftBothStores(t *testing.T) {
 func TestVerifyRunHistoryAdmissionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			for _, cut := range []string{"changed_physical", "deleted_physical", "missing_order", "uncommitted_order", "tombstone", "foreign_order"} {
+			for _, cut := range []string{"changed_physical", "deleted_physical", "missing_order", "uncommitted_order", "tombstone", "foreign_order", "duplicate_order", "inconsistent_domain"} {
 				t.Run(cut, func(t *testing.T) {
 					db, run, _ := runDriftDatabase(t, backend)
 					var mutation string
 					if err := db.QueryRow(`SELECT mutation_id FROM entity_mutations WHERE run_id=$1 AND domain='authored_field'`, run).Scan(&mutation); err != nil {
 						t.Fatal(err)
 					}
+					if cut == "duplicate_order" {
+						if _, err := db.Exec(`INSERT INTO run_fork_revisions VALUES($1,2)`, run); err != nil {
+							t.Fatal(err)
+						}
+						if _, err := db.Exec(`UPDATE run_fork_revision_heads SET last_revision=2 WHERE run_id=$1`, run); err != nil {
+							t.Fatal(err)
+						}
+					}
 					query := map[string]string{
-						"changed_physical":  `UPDATE entity_mutations SET new_value='"changed"' WHERE mutation_id=$1`,
-						"deleted_physical":  `DELETE FROM entity_mutations WHERE mutation_id=$1`,
-						"missing_order":     `DELETE FROM run_fork_fact_revisions WHERE fact_key=$1`,
-						"uncommitted_order": `UPDATE run_fork_fact_revisions SET revision=2 WHERE fact_key=$1`,
-						"tombstone":         `UPDATE run_fork_fact_revisions SET present=false WHERE fact_key=$1`,
-						"foreign_order":     `UPDATE run_fork_fact_revisions SET run_id='00000000-0000-0000-0000-000000000001' WHERE fact_key=$1`,
+						"changed_physical":    `UPDATE entity_mutations SET new_value='"changed"' WHERE mutation_id=$1`,
+						"deleted_physical":    `DELETE FROM entity_mutations WHERE mutation_id=$1`,
+						"missing_order":       `DELETE FROM run_fork_fact_revisions WHERE fact_key=$1`,
+						"uncommitted_order":   `UPDATE run_fork_fact_revisions SET revision=2 WHERE fact_key=$1`,
+						"tombstone":           `UPDATE run_fork_fact_revisions SET present=false WHERE fact_key=$1`,
+						"foreign_order":       `UPDATE run_fork_fact_revisions SET run_id='00000000-0000-0000-0000-000000000001' WHERE fact_key=$1`,
+						"duplicate_order":     `INSERT INTO run_fork_fact_revisions SELECT run_id,family,fact_key,2,fact,present FROM run_fork_fact_revisions WHERE fact_key=$1`,
+						"inconsistent_domain": `UPDATE entity_mutations SET domain='bookkeeping' WHERE mutation_id=$1`,
 					}[cut]
 					if _, err := db.Exec(query, mutation); err != nil {
 						t.Fatal(err)
@@ -194,6 +204,78 @@ func TestVerifyRunMissingAndEmptyExistingRunBothStores(t *testing.T) {
 			got, err = inspectRunDriftTest(t, db, run)
 			if err != nil || got.EntitiesChecked != 0 || len(got.Rows) != 0 {
 				t.Fatalf("empty existing run=%+v %v", got, err)
+			}
+		})
+	}
+}
+
+func TestVerifyRunOverlappingForkOrderBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			for _, parentFirst := range []bool{true, false} {
+				t.Run(fmt.Sprintf("parent_first_%t", parentFirst), func(t *testing.T) {
+					db, run, entity := runDriftDatabase(t, backend)
+					if _, err := db.Exec(`INSERT INTO run_fork_revisions VALUES($1,2)`, run); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := db.Exec(`UPDATE run_fork_revision_heads SET last_revision=2 WHERE run_id=$1`, run); err != nil {
+						t.Fatal(err)
+					}
+					parentID, childID := "ffffffff-ffff-ffff-ffff-ffffffffffff", "00000000-0000-0000-0000-000000000001"
+					parentAt, childAt := time.Unix(10, 0).UTC(), time.Unix(11, 0).UTC()
+					stored, folded := "child", "parent"
+					if !parentFirst {
+						parentID, childID = childID, parentID
+						parentAt, childAt = childAt, parentAt
+						stored, folded = "parent", "child"
+					}
+					for _, row := range []runForkRevisionEntityMutation{
+						{MutationID: parentID, EntityID: entity, Domain: "authored_field", Path: "profile", NewValue: json.RawMessage(`{"name":"parent"}`), CreatedAt: parentAt},
+						{MutationID: childID, EntityID: entity, Domain: "authored_field", Path: "profile.name", NewValue: json.RawMessage(`"child"`), CreatedAt: childAt},
+					} {
+						insertRunDriftMutation(t, db, run, row, 2)
+					}
+					fields := fmt.Sprintf(`{"value":"original","profile":{"name":%q}}`, stored)
+					if _, err := db.Exec(`UPDATE entity_state SET fields=$1 WHERE run_id=$2 AND entity_id=$3`, fields, run, entity); err != nil {
+						t.Fatal(err)
+					}
+					got, err := inspectRunDriftTest(t, db, run)
+					if err != nil || len(got.Rows) != 1 || *got.Rows[0].Path != "profile.name" || got.Rows[0].FoldedValue != folded || got.Rows[0].StoredValue != stored {
+						t.Fatalf("overlapping order was hidden: %+v %v", got, err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestVerifyRunCrossRunIsolationBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db, run, entity := runDriftDatabase(t, backend)
+			foreign := uuid.NewString()
+			requireHistoricalSnapshotRun(t, db, foreign)
+			for _, query := range []string{`INSERT INTO run_fork_revision_heads VALUES($1,1)`, `INSERT INTO run_fork_revisions VALUES($1,1)`} {
+				if _, err := db.Exec(query, foreign); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := db.Exec(`INSERT INTO entity_state VALUES($1,$2,'queued','{"value":"foreign-bypass"}','{}','{}','{}')`, foreign, entity); err != nil {
+				t.Fatal(err)
+			}
+			for _, row := range []runForkRevisionEntityMutation{
+				{MutationID: uuid.NewString(), EntityID: entity, Domain: "lifecycle_state", NewValue: json.RawMessage(`"queued"`), CreatedAt: time.Now().UTC()},
+				{MutationID: uuid.NewString(), EntityID: entity, Domain: "authored_field", Path: "value", NewValue: json.RawMessage(`"foreign-original"`), CreatedAt: time.Now().UTC()},
+			} {
+				insertRunDriftMutation(t, db, foreign, row, 1)
+			}
+			clean, err := inspectRunDriftTest(t, db, run)
+			if err != nil || clean.RunID != run || clean.EntitiesChecked != 1 || len(clean.Rows) != 0 {
+				t.Fatalf("sibling history/state leaked into run: %+v %v", clean, err)
+			}
+			drift, err := inspectRunDriftTest(t, db, foreign)
+			if err != nil || drift.RunID != foreign || drift.EntitiesChecked != 1 || len(drift.Rows) != 1 || drift.Rows[0].FoldedValue != "foreign-original" || drift.Rows[0].StoredValue != "foreign-bypass" {
+				t.Fatalf("foreign run did not retain its own disagreement: %+v %v", drift, err)
 			}
 		})
 	}
