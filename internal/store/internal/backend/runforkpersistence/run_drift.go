@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 	"github.com/google/uuid"
 )
 
@@ -159,38 +160,58 @@ func validateRunMutationCoordinates(ctx context.Context, tx *sql.Tx, runID strin
 	return rows.Err()
 }
 
-func readPhysicalRunState(ctx context.Context, tx *sql.Tx, runID string) (_ map[string]mutationlog.EntityStateProjection, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT CAST(entity_id AS TEXT),COALESCE(current_state,''),fields,bookkeeping,gates,accumulator FROM entity_state WHERE run_id=$1`, runID)
+func readPhysicalRunState(ctx context.Context, tx *sql.Tx, runID string) (map[string]mutationlog.EntityStateProjection, error) {
+	inventory, err := workflowheader.InventoryForRead(ctx, tx, runID)
 	if err != nil {
-		return nil, err
+		return nil, runProjectionError(err)
 	}
-	defer func() { err = errors.Join(err, rows.Close()) }()
 	out := map[string]mutationlog.EntityStateProjection{}
-	for rows.Next() {
-		var entity string
-		var state mutationlog.EntityStateProjection
-		var fields, bookkeeping, gates, accumulator []byte
-		if err := rows.Scan(&entity, &state.CurrentState, &fields, &bookkeeping, &gates, &accumulator); err != nil {
-			return nil, err
-		}
+	for _, member := range append(inventory.Constructed, inventory.StateOnly...) {
+		state := mutationlog.EntityStateProjection{CurrentState: member.Stage, Fields: map[string]any{}}
 		for _, bucket := range []struct {
-			raw    []byte
+			raw    any
 			target *map[string]any
-		}{{fields, &state.Fields}, {bookkeeping, &state.Bookkeeping}, {gates, &state.Gates}, {accumulator, &state.Accumulator}} {
-			value, err := decodeRunForkMutationValue(bucket.raw)
+		}{{member.Fields, &state.Fields}, {member.Bookkeeping, &state.Bookkeeping}, {member.Gates, &state.Gates}, {member.Accumulator, &state.Accumulator}} {
+			if bucket.raw == nil {
+				continue // A fieldless header has no business-field operand.
+			}
+			var raw []byte
+			switch value := bucket.raw.(type) {
+			case []byte:
+				raw = value
+			case string:
+				raw = []byte(value)
+			}
+			value, err := decodeRunForkMutationValue(raw)
 			if err != nil {
-				return nil, runHistoryError(runID, entity, "", "invalid_entity_projection", err.Error())
+				return nil, runHistoryError(runID, member.EntityID, "", "invalid_entity_projection", err.Error())
 			}
 			object, ok := value.(map[string]any)
 			if !ok {
-				return nil, runHistoryError(runID, entity, "", "invalid_entity_projection", "domain bucket must be an object")
+				return nil, runHistoryError(runID, member.EntityID, "", "invalid_entity_projection", "domain bucket must be an object")
 			}
 			*bucket.target = object
 		}
-		if _, duplicate := out[entity]; duplicate {
-			return nil, runHistoryError(runID, entity, "", "duplicate_entity_projection", "multiple state rows for one entity")
+		if _, duplicate := out[member.EntityID]; duplicate {
+			return nil, runHistoryError(runID, member.EntityID, "", "duplicate_entity_projection", "multiple current owners for one entity")
 		}
-		out[entity] = state
+		out[member.EntityID] = state
 	}
-	return out, rows.Err()
+	return out, nil
+}
+
+// Translate semantic owner refusals without discarding joined cleanup causes.
+func runProjectionError(err error) error {
+	switch cause := err.(type) {
+	case *workflowheader.ProjectionError:
+		return runHistoryError(cause.RunID, cause.EntityID, "", "invalid_entity_projection", cause.Error())
+	case interface{ Unwrap() []error }:
+		var causes []error
+		for _, child := range cause.Unwrap() {
+			causes = append(causes, runProjectionError(child))
+		}
+		return errors.Join(causes...)
+	default:
+		return err
+	}
 }
