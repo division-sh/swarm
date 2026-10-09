@@ -1120,15 +1120,6 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 		handle.deactivate()
 		internalHandles = append(internalHandles, handle)
 	}
-	if eb.routeTable != nil {
-		eb.routeTable.generationMu.RLock()
-		eb.routeTable.mu.RLock()
-		for fence := range eb.routeTable.fencedPublications {
-			routeTable.fencedPublications[fence] = struct{}{}
-		}
-		eb.routeTable.mu.RUnlock()
-		eb.routeTable.generationMu.RUnlock()
-	}
 	eb.channels = make(map[events.EventType]map[subscriberKey]chan *LocalDelivery)
 	eb.agentChans = make(map[agentidentity.Identity]chan *LocalDelivery)
 	eb.agentRouteHandles = make(map[agentidentity.Identity]*agentRouteHandle)
