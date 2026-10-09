@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store"
@@ -83,6 +84,9 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 				}
 			})
 			fresh, err := inspection.Inspect(ctx, request, func(snapshot *AdmissionSnapshot) error {
+				if _, err := snapshot.InspectRunMutationDrift(ctx, "00000000-0000-0000-0000-000000000001"); err == nil {
+					t.Fatal("fresh store admitted mutation drift reads")
+				}
 				if _, err := snapshot.ActiveNonStandingRunBundleAvailabilities(ctx); err == nil {
 					t.Fatal("fresh store admitted unprepared domain reads")
 				}
@@ -97,6 +101,11 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			var retained *AdmissionSnapshot
 			result, err := inspection.Inspect(ctx, request, func(snapshot *AdmissionSnapshot) error {
 				retained = snapshot
+				_, driftErr := snapshot.InspectRunMutationDrift(ctx, "00000000-0000-0000-0000-000000000001")
+				var missing *runlifecycle.RunNotFoundError
+				if !errors.As(driftErr, &missing) {
+					t.Fatalf("missing run lost its typed identity: %v", driftErr)
+				}
 				if _, ok := any(snapshot).(manager.RunExecutionOwner); ok {
 					t.Fatal("inspection exposed generation-grant ownership")
 				}
@@ -155,6 +164,9 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 				if _, err := snapshot.ActiveNonStandingRunBundleAvailabilities(cancelled); !errors.Is(err, context.Canceled) {
 					t.Fatalf("caller cancellation lost: %v", err)
 				}
+				if _, err := snapshot.InspectRunMutationDrift(cancelled, "00000000-0000-0000-0000-000000000001"); !errors.Is(err, context.Canceled) {
+					t.Fatalf("drift read lost cancellation: %v", err)
+				}
 				return nil
 			})
 			if err != nil || result.Fresh {
@@ -162,6 +174,9 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			}
 			if _, err := retained.InspectAuthority(context.Background()); !errors.Is(err, context.Canceled) {
 				t.Fatalf("expired snapshot escaped to authority reader: %v", err)
+			}
+			if _, err := retained.InspectRunMutationDrift(context.Background(), "00000000-0000-0000-0000-000000000001"); !errors.Is(err, context.Canceled) {
+				t.Fatalf("expired snapshot escaped to mutation drift reader: %v", err)
 			}
 			if _, err := retained.PendingResetOperations(context.Background()); !errors.Is(err, context.Canceled) {
 				t.Fatalf("expired snapshot escaped to reset ledger reader: %v", err)

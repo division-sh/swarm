@@ -364,8 +364,8 @@ func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 	opts := defaultVerifyCommandOptions()
 	cmd := &cobra.Command{
 		Use:     "verify [directory]",
-		Short:   "Validate contract files before boot.",
-		Example: `  swarm verify .`,
+		Short:   "Validate contract files or compare a run's state with its history.",
+		Example: "  swarm verify .\n  swarm verify --run <run_id> --json",
 		Args:    argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
@@ -375,6 +375,7 @@ func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 				opts.configPath = rootOpts.rootFlags.configPath
 			}
 			opts.swarmDir = rootOpts.swarmDirResolutionOptions()
+			opts.runRequested = cmd.Flags().Changed("run")
 			code := runVerifyCommandWithOutput(ctx, root.Path(), opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if code != 0 {
 				return commandExitError{code: code}
@@ -383,6 +384,7 @@ func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCom
 		},
 	}
 	cmd.Flags().BoolVar(&opts.portable, "portable", false, "Validate source structure only; do not observe deployment prerequisites")
+	cmd.Flags().StringVar(&opts.runID, "run", "", "Compare a run's entity state with its committed mutation history (read-only)")
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLILoggingFlags(cmd, &opts.logging)
 	return cmd
