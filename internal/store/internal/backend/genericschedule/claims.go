@@ -28,9 +28,7 @@ func (o *PostgresOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup r
 	o.claims.mu.Lock()
 	defer o.claims.mu.Unlock()
 	defer func() {
-		if len(o.claims.keys) == 0 {
-			err = errors.Join(err, o.closeClaimConn())
-		}
+		err = errors.Join(err, o.closeIdleClaimConn())
 	}()
 	if err := ctx.Err(); err != nil {
 		return false, err
@@ -92,6 +90,14 @@ func (o *PostgresOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup r
 	}
 	o.claims.keys[key] = struct{}{}
 	return true, nil
+}
+
+// The admission or release owner holds claims.mu while inspecting possession.
+func (o *PostgresOwner) closeIdleClaimConn() error {
+	if len(o.claims.keys) == 0 {
+		return o.closeClaimConn()
+	}
+	return nil
 }
 
 func (o *SQLiteOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (bool, error) {
