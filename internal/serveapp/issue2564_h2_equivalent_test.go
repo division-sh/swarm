@@ -194,13 +194,24 @@ func issue2564H2Harness(t *testing.T, backend, root string) (func(bool) (*channe
 		if observations == nil {
 			observations = storetest.OpenIssue2564WorkloadObservation(t, backend, location)
 		}
-		return process, issue2564H2Fixture{Endpoint: endpoint, selected: observations.Reader, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root)}
+		return process, issue2564H2Fixture{Endpoint: endpoint, selected: observations.Reader, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root), cuts: map[issue2564H2CutCoordinate]issue2564H2CutWitness{}}
 	}, armW, cutR
 }
 
 type issue2564H2Fixture struct {
 	Endpoint, Backend, BundleHash string
 	selected                      storetest.Issue2564WorkloadReader
+	cuts                          map[issue2564H2CutCoordinate]issue2564H2CutWitness
+}
+
+type issue2564H2CutCoordinate struct {
+	run, entity, instance string
+	revision              int64
+}
+
+type issue2564H2CutWitness struct {
+	fact   []byte
+	record pipeline.WorkflowTransitionRecord
 }
 
 func (f issue2564H2Fixture) debug(t *testing.T, runID string) string {
@@ -323,7 +334,7 @@ func issue2564H2Read(ctx context.Context, rt issue2564H2Fixture, run string) (is
 		}
 		snapshot.Events[event.ID] = event
 	}
-	if err := issue2564H2BindFixedCuts(ctx, rt, run, &snapshot); err != nil {
+	if err := issue2564H2BindFixedCuts(run, evidence.TransitionCuts, rt.cuts, &snapshot); err != nil {
 		return issue2564H2Snapshot{}, err
 	}
 	return snapshot, nil
@@ -331,21 +342,7 @@ func issue2564H2Read(ctx context.Context, rt issue2564H2Fixture, run string) (is
 
 // This witnesses the known H2 occurrences at immutable metadata cuts; it does
 // not restore an accumulated header trajectory or implement historical folding.
-func issue2564H2BindFixedCuts(ctx context.Context, rt issue2564H2Fixture, run string, snapshot *issue2564H2Snapshot) error {
-	physical, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, rt.selected)
-	if err != nil {
-		return err
-	}
-	table := physical["run_fork_fact_revisions"]
-	columns := map[string]int{}
-	for index, name := range table.Columns {
-		columns[name] = index
-	}
-	for _, name := range []string{"run_id", "family", "fact_key", "fact", "revision", "present"} {
-		if _, found := columns[name]; !found {
-			return fmt.Errorf("H2 fixed-cut witness omitted %s", name)
-		}
-	}
+func issue2564H2BindFixedCuts(run string, cuts []storetest.H2TransitionCutsEvidence, admitted map[issue2564H2CutCoordinate]issue2564H2CutWitness, snapshot *issue2564H2Snapshot) error {
 	byEntity := map[string]string{}
 	for id, hub := range snapshot.Hubs {
 		byEntity[hub.Entity] = id
@@ -353,53 +350,47 @@ func issue2564H2BindFixedCuts(ctx context.Context, rt issue2564H2Fixture, run st
 		hub.CutRevisions = map[string]int64{}
 		snapshot.Hubs[id] = hub
 	}
-	for _, row := range table.Rows {
-		var values []any
-		decoder := json.NewDecoder(strings.NewReader(row))
-		decoder.UseNumber()
-		if err := decoder.Decode(&values); err != nil {
-			return err
-		}
-		if values[columns["run_id"]] != run || values[columns["family"]] != "entity_metadata" {
-			continue
-		}
-		present := values[columns["present"]]
-		if present == false || present == json.Number("0") {
-			continue
-		}
-		if present != true && present != json.Number("1") {
-			return fmt.Errorf("H2 metadata witness has invalid native presence")
-		}
-		entity, _ := values[columns["fact_key"]].(string)
-		id, found := byEntity[entity]
+	for _, row := range cuts {
+		id, found := byEntity[row.EntityID]
 		if !found {
 			continue
 		}
-		raw, ok := values[columns["fact"]].(string)
-		if !ok {
+		if len(row.Fact) == 0 {
 			return fmt.Errorf("H2 fixed-cut metadata bytes are missing")
 		}
-		var metadata struct {
-			Config json.RawMessage `json:"flow_config"`
-		}
-		if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
-			return err
-		}
 		hub := snapshot.Hubs[id]
-		owner := flowidentity.RunScopedFlowInstance{RunID: run, Route: flowidentity.StoredRoute("hub", flowidentity.LogicalInstanceID(hub.Instance), hub.Instance)}
-		if _, err := pipeline.DecodeWorkflowInstanceRecordedHeader(owner.Route, metadata.Config); err != nil {
-			return err
+		coordinate := issue2564H2CutCoordinate{run: run, entity: row.EntityID, instance: hub.Instance, revision: row.Revision}
+		witness, known := admitted[coordinate]
+		if known && !bytes.Equal(witness.fact, row.Fact) {
+			return fmt.Errorf("H2 immutable metadata changed at %+v", coordinate)
 		}
-		var header struct {
-			History []pipeline.WorkflowTransitionRecord `json:"transition_history"`
+		if !known {
+			var metadata struct {
+				Config json.RawMessage `json:"flow_config"`
+			}
+			if err := json.Unmarshal(row.Fact, &metadata); err != nil {
+				return err
+			}
+			owner := flowidentity.RunScopedFlowInstance{RunID: run, Route: flowidentity.StoredRoute("hub", flowidentity.LogicalInstanceID(hub.Instance), hub.Instance)}
+			if _, err := pipeline.DecodeWorkflowInstanceRecordedHeader(owner.Route, metadata.Config); err != nil {
+				return err
+			}
+			var header struct {
+				History []pipeline.WorkflowTransitionRecord `json:"transition_history"`
+			}
+			if err := json.Unmarshal(metadata.Config, &header); err != nil {
+				return err
+			}
+			witness.fact = append([]byte(nil), row.Fact...)
+			if len(header.History) != 0 {
+				witness.record = header.History[0]
+			}
+			admitted[coordinate] = witness
 		}
-		if err := json.Unmarshal(metadata.Config, &header); err != nil {
-			return err
-		}
-		if len(header.History) == 0 {
+		record := witness.record
+		if record.TriggerEventID == "" {
 			continue
 		}
-		record := header.History[0]
 		if _, known := snapshot.Events[record.TriggerEventID]; !known {
 			continue
 		}
@@ -407,15 +398,10 @@ func issue2564H2BindFixedCuts(ctx context.Context, rt issue2564H2Fixture, run st
 			return fmt.Errorf("H2 immutable cuts disagree for occurrence %s", record.TriggerEventID)
 		}
 		if _, found := hub.CutRevisions[record.TriggerEventID]; !found {
-			revision, ok := values[columns["revision"]].(json.Number)
-			if !ok {
-				return fmt.Errorf("H2 fixed metadata revision is missing")
+			if row.Revision <= 0 {
+				return fmt.Errorf("H2 fixed metadata revision is invalid: %d", row.Revision)
 			}
-			cut, err := revision.Int64()
-			if err != nil || cut <= 0 {
-				return fmt.Errorf("H2 fixed metadata revision is invalid: %v", err)
-			}
-			hub.CutRevisions[record.TriggerEventID] = cut
+			hub.CutRevisions[record.TriggerEventID] = row.Revision
 		}
 		hub.Cuts[record.TriggerEventID] = record
 		snapshot.Hubs[id] = hub
@@ -587,17 +573,49 @@ func TestIssue2564H2FixedCutTimerPrefixBothStores(t *testing.T) {
 			for hub := 2; hub <= 6; hub++ {
 				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "hub.start", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"hub_id": fmt.Sprintf("h%02d", hub)}, "idempotency_key": fmt.Sprintf("q6-hub-%d", hub)})
 			}
-			var before issue2564H2Snapshot
-			for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
-				candidate := issue2564H2WaitAccounting(t, rt, seed.RunID, false, keys)
-				if len(candidate.Events) >= 12 {
-					before = candidate
-					break
+			waitProgress := func(previous int) {
+				t.Helper()
+				ctx, cancel := context.WithTimeout(t.Context(), servedProofPollDeadline)
+				defer cancel()
+				for ctx.Err() == nil {
+					candidate, err := issue2564H2Read(ctx, rt, seed.RunID)
+					if err != nil {
+						t.Fatalf("read H2 progress: %v", err)
+					}
+					if len(candidate.Events) > previous {
+						return
+					}
+					time.Sleep(100 * time.Millisecond)
 				}
-				time.Sleep(100 * time.Millisecond)
+				t.Fatal("Q6 H2 proof never reached the required timer progression")
 			}
-			if len(before.Events) < 12 {
-				t.Fatal("Q6 H2 proof never reached two exact transitions per hub")
+			waitProgress(11)
+			// Joined shutdown fences accepted publication settlement; a live
+			// timer snapshot may legitimately precede its pipeline receipt.
+			if err := process.stop(); err != nil {
+				t.Fatal(err)
+			}
+			before := issue2564H2WaitAccounting(t, rt, seed.RunID, false, keys)
+			// Reusing admitted bytes must not conceal a changed immutable cut.
+			checked := false
+			for coordinate, witness := range rt.cuts {
+				if witness.record.TriggerEventID == "" {
+					continue
+				}
+				probe := issue2564H2Snapshot{Hubs: map[string]issue2564H2Hub{}, Events: before.Events}
+				for id, hub := range before.Hubs {
+					probe.Hubs[id] = hub
+				}
+				changed := append(append([]byte(nil), witness.fact...), ' ')
+				rows := []storetest.H2TransitionCutsEvidence{{EntityID: coordinate.entity, Revision: coordinate.revision, Fact: changed}}
+				if err := issue2564H2BindFixedCuts(seed.RunID, rows, rt.cuts, &probe); err == nil || !strings.Contains(err.Error(), "immutable metadata changed") {
+					t.Fatalf("H2 reused a changed immutable cut: %v", err)
+				}
+				checked = true
+				break
+			}
+			if !checked {
+				t.Fatal("H2 proof omitted admitted cut witnesses")
 			}
 			// Reconstruct explicit recorded cuts once, not in the polling loop.
 			// The pressure journey's repeated snapshots bind immutable copies;
@@ -616,6 +634,11 @@ func TestIssue2564H2FixedCutTimerPrefixBothStores(t *testing.T) {
 					break
 				}
 			}
+			process, rt = start(false)
+			waitProgress(len(before.Events))
+			if err := process.stop(); err != nil {
+				t.Fatal(err)
+			}
 			after := issue2564H2WaitAccounting(t, rt, seed.RunID, false, keys)
 			for id, hub := range before.Hubs {
 				current := after.Hubs[id]
@@ -632,18 +655,25 @@ func issue2564H2WaitAccounting(t *testing.T, rt issue2564H2Fixture, run string, 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	var last error
+	var lastAccounting error
+	var reads int
+	var lastRead time.Duration
 	for ctx.Err() == nil {
+		started := time.Now()
 		snapshot, err := issue2564H2Read(ctx, rt, run)
+		lastRead = time.Since(started)
+		reads++
 		if err == nil {
 			err = issue2564H2Accounting(run, snapshot, closed, keys)
 			if err == nil {
 				return snapshot
 			}
+			lastAccounting = err
 		}
 		last = err
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("exact H2 accounting never settled: %v\n%s", last, rt.debug(t, run))
+	t.Fatalf("exact H2 accounting never settled: %v; accounting=%v reads=%d last_read=%s\n%s", last, lastAccounting, reads, lastRead, rt.debug(t, run))
 	return issue2564H2Snapshot{}
 }
 
