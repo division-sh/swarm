@@ -87,11 +87,17 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.operatorChannelPostgresOwner = operatorChannels
+	if err := operatorChannels.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	channelOnboarding, err := storechannelonboarding.NewPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.channelOnboardingPostgresOwner = channelOnboarding
+	if err := channelOnboarding.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	sourceArtifacts, err := storesourceartifact.NewPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -137,16 +143,25 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.mailboxPostgresOwner = mailbox
+	if err := mailbox.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	destructiveResetOwner, err := storeadmin.NewDestructiveResetPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.destructiveResetPostgresOwner = destructiveResetOwner
+	if err := destructiveResetOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	activityJournal, err := storeactivityjournal.NewPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.activityPostgresOwner = activityJournal
+	if err := activityJournal.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	activityResult, err := storeactivityresult.NewPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -190,6 +205,9 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.effectPostgresOwner = effectOwner
+	if err := effectOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	deliveryOwner, err := storedelivery.NewDeliveryPostgresOwner(deadLetterOwner, runLifecycle, candidates, agentOwner)
 	if err != nil {
 		return nil, err
@@ -210,6 +228,9 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	}
 	pipelineOwner, err := storepipeline.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, candidates, decisionOwner, deliveryOwner, replyContexts, workflowEntityQueries, workflowRoutes, eventOwner, apiIdempotency, durableData)
 	if err != nil {
+		return nil, err
+	}
+	if err := pipelineOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
 	if err := pipelineOwner.BindGenericScheduleTxOwner(genericSchedules); err != nil {
@@ -236,8 +257,17 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.eventPostgresOwner = eventOwner
+	if err := eventOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	store.decisionPostgresOwner = decisionOwner
+	if err := decisionOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	store.runLifecyclePostgresOwner = runLifecycle
+	if err := runLifecycle.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	operatorRun, err := storeoperatorsurface.NewRunPostgres(backend, store.requireCurrentSchema, pipelineOwner, timerObligations, operatorObservability)
 	if err != nil {
 		return nil, err
@@ -263,6 +293,9 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.runForkPostgresOwner = runForkOwner
+	if err := runForkOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	if err := agentOwner.BindLifecycleDiagnostics(eventOwner, runForkOwner); err != nil {
 		return nil, err
 	}
@@ -277,6 +310,9 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.startupPostgresOwner = startupOwner
+	if err := startupOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	ingressOwner, err := storeingress.NewPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -353,11 +389,17 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.operatorChannelSQLiteOwner = operatorChannels
+	if err := operatorChannels.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	channelOnboarding, err := storechannelonboarding.NewSQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
 	store.channelOnboardingSQLiteOwner = channelOnboarding
+	if err := channelOnboarding.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	sourceArtifacts, err := storesourceartifact.NewSQLite(backend, store.requireCurrentSchema, store.now)
 	if err != nil {
 		return nil, err
@@ -388,6 +430,9 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.activitySQLiteOwner = activityJournal
+	if err := activityJournal.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	activityResult, err := storeactivityresult.NewSQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -408,6 +453,9 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.mailboxSQLiteOwner = mailbox
+	if err := mailbox.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	budgetSpend, err := storebudgetspend.NewSQLite(backend)
 	if err != nil {
 		return nil, err
@@ -446,6 +494,9 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.effectSQLiteOwner = effectOwner
+	if err := effectOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	deliveryOwner, err := storedelivery.NewDeliverySQLiteOwner(deadLetterOwner, runLifecycle, candidates, agentOwner, store.now)
 	if err != nil {
 		return nil, err
@@ -468,11 +519,17 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err != nil {
 		return nil, err
 	}
+	if err := pipelineOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	startupOwner, err := storestartupownership.NewSQLiteWithBackendIdentity(backend, schema.Path(), backendIdentity, store.requireCurrentSchema, schema.CatalogEmpty, agentOwner, pipelineOwner)
 	if err != nil {
 		return nil, err
 	}
 	store.startupSQLiteOwner = startupOwner
+	if err := startupOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	if err := pipelineOwner.BindGenericScheduleTxOwner(genericSchedules); err != nil {
 		return nil, err
 	}
@@ -497,8 +554,17 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.eventSQLiteOwner = eventOwner
+	if err := eventOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	store.decisionSQLiteOwner = decisionOwner
+	if err := decisionOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	store.runLifecycleSQLiteOwner = runLifecycle
+	if err := runLifecycle.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	operatorRun, err := storeoperatorsurface.NewRunSQLite(backend, store.requireCurrentSchema, store.now, pipelineOwner, timerObligations, operatorObservability)
 	if err != nil {
 		return nil, err
@@ -524,6 +590,9 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.runForkSQLiteOwner = runForkOwner
+	if err := runForkOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
+		return nil, err
+	}
 	if err := agentOwner.BindLifecycleDiagnostics(eventOwner, runForkOwner); err != nil {
 		return nil, err
 	}

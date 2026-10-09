@@ -3,6 +3,7 @@ package runlifecycle
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -74,6 +75,7 @@ func (s *RunLifecycleSQLiteOwner) runControlTransition(ctx context.Context, req 
 	if req.ControlledBy = strings.TrimSpace(req.ControlledBy); req.ControlledBy == "" {
 		req.ControlledBy = "api.v1"
 	}
+	var changes ChannelCardChanges
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite run control transition", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimeruncontrol.State, error) {
 		var state runtimeruncontrol.State
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -95,7 +97,7 @@ func (s *RunLifecycleSQLiteOwner) runControlTransition(ctx context.Context, req 
 				if err := rejectSQLiteStandingRunStopTx(txctx, tx, runID); err != nil {
 					return runtimeruncontrol.StopFailure("standing_admission", err)
 				}
-				state, err = s.stopRunControlTx(txctx, tx, attempt, state, req)
+				state, err = s.stopRunControlTx(txctx, tx, attempt, state, req, &changes)
 			default:
 				err = fmt.Errorf("unsupported run control action %q", action)
 			}
@@ -125,10 +127,11 @@ func (s *RunLifecycleSQLiteOwner) runControlTransition(ctx context.Context, req 
 	})
 	state, committed := result.Value()
 	outcome := runtimeruncontrol.StoreTransition{State: state, Acknowledged: committed}
+	mutationErr := errors.Join(result.Err(), s.publishChannelChanges(committed, changes))
 	if action == "stop" {
-		return outcome, classifyStopTransactionOutcome(result.Phase(), committed, result.Err())
+		return outcome, classifyStopTransactionOutcome(result.Phase(), committed, mutationErr)
 	}
-	return outcome, result.Err()
+	return outcome, mutationErr
 }
 
 func loadSQLiteRunControlState(ctx context.Context, tx *sql.Tx, runID string) (runtimeruncontrol.State, error) {
@@ -222,7 +225,7 @@ func (s *RunLifecycleSQLiteOwner) continueRunControlTx(ctx context.Context, tx *
 	return state, nil
 }
 
-func (s *RunLifecycleSQLiteOwner) stopRunControlTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *RunLifecycleSQLiteOwner) stopRunControlTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest, changes *ChannelCardChanges) (runtimeruncontrol.State, error) {
 	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
 	if err != nil {
 		return runtimeruncontrol.State{}, runtimeruncontrol.StopFailure("validate_run", err)
@@ -234,7 +237,7 @@ func (s *RunLifecycleSQLiteOwner) stopRunControlTx(ctx context.Context, tx *sql.
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	if _, _, err := s.markRunTerminalTx(ctx, tx, attempt, runtimerunlifecycle.TerminalRequest{RunID: state.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: req.Now.UTC()}); err != nil {
+	if _, _, err := s.markRunTerminalTx(ctx, tx, attempt, runtimerunlifecycle.TerminalRequest{RunID: state.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: req.Now.UTC()}, changes); err != nil {
 		return runtimeruncontrol.State{}, runtimeruncontrol.StopFailure("terminal_state", err)
 	}
 	if _, err := tx.ExecContext(ctx, `

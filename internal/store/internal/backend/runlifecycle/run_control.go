@@ -3,6 +3,7 @@ package runlifecycle
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -85,6 +86,7 @@ func (s *RunLifecyclePostgresOwner) runControlTransition(ctx context.Context, re
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimeruncontrol.StoreTransition{}, err
 	}
+	var changes ChannelCardChanges
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimeruncontrol.State, error) {
 		var state runtimeruncontrol.State
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -102,7 +104,7 @@ func (s *RunLifecyclePostgresOwner) runControlTransition(ctx context.Context, re
 				if err := rejectPostgresStandingRunStopTx(txctx, tx, runID); err != nil {
 					return runtimeruncontrol.StopFailure("standing_admission", err)
 				}
-				state, err = s.stopRunControlTx(txctx, tx, attempt, state, req)
+				state, err = s.stopRunControlTx(txctx, tx, attempt, state, req, &changes)
 			case "pause":
 				state, err = s.pauseRunControlTx(txctx, tx, attempt, state, req)
 			case "continue":
@@ -136,10 +138,11 @@ func (s *RunLifecyclePostgresOwner) runControlTransition(ctx context.Context, re
 	})
 	state, committed := result.Value()
 	outcome := runtimeruncontrol.StoreTransition{State: state, Acknowledged: committed}
+	mutationErr := errors.Join(result.Err(), s.publishChannelChanges(committed, changes))
 	if action == "stop" {
-		return outcome, classifyStopTransactionOutcome(result.Phase(), committed, result.Err())
+		return outcome, classifyStopTransactionOutcome(result.Phase(), committed, mutationErr)
 	}
-	return outcome, result.Err()
+	return outcome, mutationErr
 }
 
 func lockRunControlState(ctx context.Context, tx *sql.Tx, runID string) (runtimeruncontrol.State, error) {
@@ -271,7 +274,7 @@ func requireGenericContinueAuthority(ctx context.Context, tx *sql.Tx, postgres b
 	}
 }
 
-func (s *RunLifecyclePostgresOwner) stopRunControlTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *RunLifecyclePostgresOwner) stopRunControlTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest, changes *ChannelCardChanges) (runtimeruncontrol.State, error) {
 	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
 	if err != nil {
 		return runtimeruncontrol.State{}, runtimeruncontrol.StopFailure("validate_run", err)
@@ -283,7 +286,7 @@ func (s *RunLifecyclePostgresOwner) stopRunControlTx(ctx context.Context, tx *sq
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+	if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx, attempt: attempt, channelCardChanges: changes}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
 		RunID: state.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: req.Now.UTC(),
 	}); err != nil {
 		return runtimeruncontrol.State{}, runtimeruncontrol.StopFailure("terminal_state", err)

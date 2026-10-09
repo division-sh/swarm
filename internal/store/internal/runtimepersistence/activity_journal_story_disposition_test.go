@@ -82,9 +82,9 @@ func TestActivityJournalTerminalTimestampAfterAdmissionBothStores(t *testing.T) 
 					go func() {
 						defer close(joined)
 						if status == "uncertain" {
-							receipt, completeErr = activityjournal.MarkUncertain(ctx, tx, dialect, active, spy, candidate)
+							receipt, _, completeErr = activityjournal.MarkUncertain(ctx, tx, dialect, active, spy, candidate)
 						} else {
-							receipt, completeErr = activityjournal.Complete(ctx, tx, dialect, active, spy, candidate)
+							receipt, _, completeErr = activityjournal.Complete(ctx, tx, dialect, active, spy, candidate)
 						}
 					}()
 					defer func() { cancel(); unblock(); <-joined }()
@@ -484,10 +484,10 @@ func activityStoryKernel(t *testing.T, fixture authorActivityReceiptFixture, pos
 	case "claim":
 		return activityjournal.Claim(ctx, tx, dialect, active, spy, record)
 	case "complete":
-		out, err := activityjournal.Complete(ctx, tx, dialect, active, spy, record)
+		out, _, err := activityjournal.Complete(ctx, tx, dialect, active, spy, record)
 		return out, false, err
 	case "uncertain":
-		out, err := activityjournal.MarkUncertain(ctx, tx, dialect, active, spy, record)
+		out, _, err := activityjournal.MarkUncertain(ctx, tx, dialect, active, spy, record)
 		return out, false, err
 	default:
 		panic("unknown activity test operation")

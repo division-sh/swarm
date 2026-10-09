@@ -10,6 +10,7 @@ import (
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -63,6 +64,7 @@ type canceledTurnPublicationOwner interface {
 }
 
 type EffectPostgresOwner struct {
+	channelChanges *render.ReconcileSignal
 	backend        *postgresbackend.Backend
 	requireCurrent func() error
 	lifecycle      mutationprotocol.CandidateWriter
@@ -74,6 +76,7 @@ type EffectPostgresOwner struct {
 }
 
 type EffectSQLiteOwner struct {
+	channelChanges *render.ReconcileSignal
 	backend        *sqlitebackend.Backend
 	requireCurrent func() error
 	lifecycle      mutationprotocol.CandidateWriter
@@ -98,6 +101,36 @@ func (s *EffectSQLiteOwner) BindCanceledTurnPublication(owner canceledTurnPublic
 	}
 	s.publications = owner
 	return nil
+}
+
+func (s *EffectPostgresOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return errors.New("postgres effect channel reconciliation requires one composition binding")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *EffectSQLiteOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {
+	if s == nil || signal == nil || s.channelChanges != nil {
+		return errors.New("sqlite effect channel reconciliation requires one composition binding")
+	}
+	s.channelChanges = signal
+	return nil
+}
+
+func (s *EffectPostgresOwner) publishChannelChanges(acknowledged, changed bool) error {
+	if s == nil {
+		return nil
+	}
+	return s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary)
+}
+
+func (s *EffectSQLiteOwner) publishChannelChanges(acknowledged, changed bool) error {
+	if s == nil {
+		return nil
+	}
+	return s.channelChanges.PublishAcknowledged(acknowledged && changed, render.ReconcileOrdinary)
 }
 
 func (s *EffectPostgresOwner) BindProviderDrainDirectives(owner providerDrainDirectiveOwner) error {

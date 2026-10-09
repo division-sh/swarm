@@ -38,6 +38,7 @@ type processLifecycleSupervisor struct {
 	resetRequests               []serveRuntimeBundleContextRequest
 	resetBuildExecution         func(serveRuntimeBundleContext) (map[string]apiv1.MethodHandler, error)
 	resetRefresh                func(context.Context) error
+	resetChannelPublication     func() error
 	resetGeneration             uint64
 	resetOperationID            string
 	resetConverged              bool
