@@ -13,13 +13,13 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	nativeinput "github.com/division-sh/swarm/internal/sessionprovider/input"
 )
 
 type AdmissionKind string
@@ -111,7 +111,7 @@ type AdmittedRequest struct {
 	rawOwner                *RawAdmissionPolicy
 	manifestAdmission       *manifestAdmission
 	rawAdmission            *rawRequestAdmission
-	sessionInput            *channelonboarding.SessionInputAdmission
+	sessionInput            *nativeinput.Admission
 }
 
 func (a AdmittedRequest) SemanticContentDigest() string { return a.semanticContentDigest }
@@ -596,7 +596,7 @@ func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error)
 
 // AdmitSessionInput consumes an owner-issued native input, not caller payload,
 // a session descriptor, or a connected flag. HTTP authentication stays separate.
-func (p InboundAdmissionPlan) AdmitSessionInput(ctx context.Context, input channelonboarding.SessionInputAdmission) (AdmittedRequest, error) {
+func (p InboundAdmissionPlan) AdmitSessionInput(ctx context.Context, input nativeinput.Admission) (AdmittedRequest, error) {
 	if !p.Valid() || p.Transport() != packs.ChannelTransportSession || p.manifest == nil {
 		return AdmittedRequest{}, unauthorized("compiled session admission plan is required")
 	}
