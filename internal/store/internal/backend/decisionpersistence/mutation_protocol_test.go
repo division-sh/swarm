@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
