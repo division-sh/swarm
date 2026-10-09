@@ -11289,6 +11289,8 @@ tool_model:
         it also retains the first capture's receipt time rather than today's transport clock. Onboarding captures
         explicitly carry no service/run/binding generation or activation revision; executable business captures
         instead require their exact admitted service/run/binding generation and positive activation revision.
+        A confirmed operator identity may already supply an exact positive identity-binding revision during onboarding;
+        that revision is not a service/run publication generation or permission to execute business work.
         The two scopes are a closed product, not an absent-business-field inference or a bootstrap execution grant.
         different payload or scope evidence conflicts rather than overwriting history. Account, conversation,
         provider event and message/edit/revoke kind are distinct identity dimensions. Captured work survives ordinary

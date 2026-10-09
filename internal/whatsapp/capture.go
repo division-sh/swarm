@@ -49,7 +49,7 @@ func (s captureScope) validate() error {
 	}
 	switch s.Kind {
 	case channelonboarding.SessionInputOnboarding:
-		if s.PublicationBinding != (runtimeinbound.BindingGeneration{}) || s.BindingRevision != 0 || s.ActivationRevision != 0 {
+		if s.PublicationBinding != (runtimeinbound.BindingGeneration{}) || s.ActivationRevision != 0 {
 			return fmt.Errorf("WhatsApp onboarding capture cannot carry business publication authority")
 		}
 	case channelonboarding.SessionInputBusiness:
