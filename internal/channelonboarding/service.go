@@ -1522,7 +1522,7 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 	if !boundCredentialRestart && op.Verb == VerbReconnect {
 		binding, proofCurrent, bindingErr := s.identities.CurrentBindingReadiness(ctx, op.Interface)
 		if bindingErr == nil {
-			proofPostureCurrent := binding.ProviderAuthority == providerAuthority &&
+			proofPostureCurrent := binding.ProviderAuthority.SameProvenance(providerAuthority) &&
 				((op.SaveProof && strings.TrimSpace(binding.ProofID) != "" && proofCurrent) ||
 					(!op.SaveProof && strings.TrimSpace(binding.ProofID) == ""))
 			if proofPostureCurrent {

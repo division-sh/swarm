@@ -33,6 +33,18 @@ func main() { _ = input.SealOwnedCapture }
 import "github.com/division-sh/swarm/internal/sessionprovider/input"
 func main() { _ = input.Admission{value: nil} }
 `, "unexported field value"},
+		{"account_internal_constructor", `package main
+import "github.com/division-sh/swarm/internal/sessionprovider/internal/authorityfact"
+func main() { _ = authorityfact.SealOwnedAccount }
+`, "use of internal package"},
+		{"account_facade_constructor", `package main
+import "github.com/division-sh/swarm/internal/sessionprovider/authority"
+func main() { _ = authority.SealOwnedAccount }
+`, "undefined: authority.SealOwnedAccount"},
+		{"claim_facade_fields", `package main
+import "github.com/division-sh/swarm/internal/sessionprovider/authority"
+func main() { _ = authority.Claim{value: nil} }
+`, "unexported field value"},
 	} {
 		t.Run(probe.name, func(t *testing.T) {
 			directory, err := os.MkdirTemp(filepath.Dir(here), ".native-issuance-probe-")

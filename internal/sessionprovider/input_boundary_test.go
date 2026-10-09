@@ -25,15 +25,18 @@ func nativeInputIssuerViolations(path string, source []byte) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if name != "github.com/division-sh/swarm/internal/sessionprovider/internal/inputfact" {
+		if name != "github.com/division-sh/swarm/internal/sessionprovider/internal/inputfact" && name != "github.com/division-sh/swarm/internal/sessionprovider/internal/authorityfact" {
 			continue
 		}
 		alias := "inputfact"
+		if strings.HasSuffix(name, "/authorityfact") {
+			alias = "authorityfact"
+		}
 		if imported.Name != nil {
 			alias = imported.Name.Name
 		}
 		aliases[alias] = true
-		if path != "input_issuer.go" && path != "input/admission.go" {
+		if path != "input_issuer.go" && path != "input/admission.go" && path != "authority_issuer_unix.go" && path != "claim_issuer.go" && path != "authority/admission.go" {
 			violations = append(violations, "foreign input issuer import: "+path)
 		}
 	}
@@ -43,14 +46,15 @@ func nativeInputIssuerViolations(path string, source []byte) ([]string, error) {
 			return true
 		}
 		root, ok := selector.X.(*ast.Ident)
-		if ok && aliases[root.Name] && selector.Sel.Name != "Admission" && path != "input_issuer.go" {
+		facade := path == "input/admission.go" || path == "authority/admission.go"
+		if ok && aliases[root.Name] && facade && selector.Sel.Name != "Admission" && selector.Sel.Name != "Account" && selector.Sel.Name != "Claim" {
 			violations = append(violations, "read-only facade exposes native construction: "+path)
 		}
 		return true
 	})
 	for _, declaration := range file.Decls {
 		function, ok := declaration.(*ast.FuncDecl)
-		if ok && function.Name.IsExported() && function.Type.Results != nil && path == "input_issuer.go" {
+		if ok && function.Recv == nil && function.Name.IsExported() && function.Type.Results != nil && (path == "input_issuer.go" || path == "authority_issuer_unix.go" || path == "claim_issuer.go") {
 			violations = append(violations, "exported native issuer: "+function.Name.Name)
 		}
 	}
@@ -100,7 +104,11 @@ var New = inputfact.SealOwnedCapture
 `,
 		`package input
 import "github.com/division-sh/swarm/internal/sessionprovider/internal/inputfact"
-type Raw = inputfact.Capture
+	type Raw = inputfact.Capture
+`,
+		`package input
+import "github.com/division-sh/swarm/internal/sessionprovider/internal/authorityfact"
+var New = authorityfact.SealOwnedAccount
 `,
 	} {
 		violations, err := nativeInputIssuerViolations("input/admission.go", []byte(source))

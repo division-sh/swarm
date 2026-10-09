@@ -18,3 +18,32 @@ provider-private-state file and reason.
 
 No raw authority disposition or scanner policy was added or widened. Only
 these exact reviewed findings are classified before registry regeneration.
+
+## Native Claim And Recovery Checkpoint
+
+The four new selected-store effective methods are `typed-public-facade`:
+`SettleSessionChannelClaim` accepts only an opaque native-issued claim, and
+`LoadOperatorChannelClaimReceipt` returns detached immutable receipt data.
+Neither accepts SQL, a transaction callback, a caller text grant or a table
+selector. Both stores delegate to their existing operator-channel backend owner.
+
+The eighteen new/changed backend findings remain `private-backend`. The extra
+claim receipt argument records original authorization. `session_claim.go`
+performs the existing claim settlement in the selected owned transaction,
+checking native lifetime and the exact original parent revision, and reads
+receipt identity/authorization/fingerprint through the backend's existing
+query and timestamp codecs. Begin and confirmation invoke the same private
+parent-revision fence. The SQL-bearing helper parameter never escapes the
+backend; no root-store currentness reader is called under its transaction.
+The extracted claim parent preflight retains the same checks and lock order;
+its private transaction parameter and call replace the larger inline body.
+
+The six `claim_recovery.go` findings are `private-domain-adapter`, like the
+existing private capture/publication retirement owner. Its transaction reads
+validated pending rows and deletes only the matched connection's local spool
+row after exact selected-store receipt/fingerprint reconciliation. It has no
+selected runtime SQL or new execution authority. Missing/conflicting history
+retains the capture; actual native retirement/reopen proofs cover the path.
+
+These are exact additions to the existing owner inventory, not a wildcard
+package allowance, new disposition, scanner-policy change or fixture waiver.

@@ -45,9 +45,14 @@ func (l encryptedCaptureLog) Sub(string) waLog.Logger { return l }
 // Only the account and transport peer are synthetic; decryption is not mocked.
 func encryptedMessageFixture(t *testing.T, receiver *store.Device, from types.JID, message *waE2E.Message) waBinary.Node {
 	t.Helper()
-	ctx := context.Background()
 	_, senderContainer := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "sender.db"))
 	sender := newSDKDeviceFixture(t, senderContainer)
+	return encryptedMessageFromFixture(t, receiver, sender, from, message)
+}
+
+func encryptedMessageFromFixture(t *testing.T, receiver, sender *store.Device, from types.JID, message *waE2E.Message) waBinary.Node {
+	t.Helper()
+	ctx := context.Background()
 	keys, err := receiver.PreKeys.GetOrGenPreKeys(ctx, 1)
 	if err != nil || len(keys) != 1 {
 		t.Fatalf("recipient prekey: %v", err)

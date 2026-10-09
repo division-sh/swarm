@@ -346,6 +346,18 @@ func sessionInputManifestFixture(t *testing.T) providertriggers.Manifest {
 	t.Helper()
 	body := string(incomingNormalizationFixture(t).SourceBytes())
 	body = strings.Replace(body, "secret: {required: true}\nsignature: {type: token_equality, header: X-Fixture-Signature}\n", "transport: session\nack: {mode: durable_before_dispatch}\n", 1)
+	body = strings.ReplaceAll(body, "      provider_timestamp_ms:\n", `      entry_invocation:
+        from: entry_invocation
+        optional: true
+        schema:
+          type: object
+          additionalProperties: false
+          required: [reference]
+          properties:
+            reference: {type: string, minLength: 1, maxLength: 32}
+            address: {type: string, minLength: 5, maxLength: 32}
+      provider_timestamp_ms:
+`)
 	manifest, err := providertriggers.ParseManifest([]byte(body))
 	if err != nil {
 		t.Fatal(err)

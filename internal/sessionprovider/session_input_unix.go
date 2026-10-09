@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/google/uuid"
 )
@@ -29,6 +30,9 @@ type nativeSessionInput struct {
 	Context            context.Context
 	Release            func()
 	SourceContext      captureSource
+	OriginalCapture    capturedEvent
+	OwnedSource        correlation.SourceArtifactFact
+	NativeCurrent      func() bool
 }
 
 func (input nativeSessionInput) matchesOriginalOperation(op channelonboarding.Operation, coordinate channelonboarding.ChannelRuntimeContextCoordinate) bool {
@@ -90,6 +94,7 @@ func (r *sessionInputReader) readOwnedInput(ctx context.Context, reference Sessi
 		return result, errSessionAccount
 	}
 	account := device.ID.ToNonAD().String()
+	ownedSource, _ := correlation.SourceArtifactFactFromContext(occurrence.ctx)
 	events, err := r.spool.pending(workContext)
 	if err != nil {
 		return result, err
@@ -103,11 +108,17 @@ func (r *sessionInputReader) readOwnedInput(ctx context.Context, reference Sessi
 			return result, errCaptureScopeChanged
 		}
 		retained = true
+		nativeCurrent := func() bool {
+			return r.state.ownsConnectedOccurrence(workContext, occurrence)
+		}
 		return nativeSessionInput{Scope: event.Scope.Kind, Account: event.Scope.Session, OperationID: event.Scope.OnboardingOperation,
 			OperationRevision: event.Scope.OperationRevision, ActivationRevision: event.Scope.ActivationRevision, TargetSelector: event.Scope.TargetSelector,
 			PrincipalID: event.Scope.PrincipalID, Source: event.Scope.Source, BindingRevision: event.Scope.BindingRevision,
 			PublicationBinding: event.Scope.PublicationBinding,
 			SourceContext:      event.Source,
+			OriginalCapture:    event,
+			OwnedSource:        ownedSource,
+			NativeCurrent:      nativeCurrent,
 			Body:               event.Body, ReceivedAt: event.ReceivedAt, Context: workContext, Release: release}, nil
 	}
 	return result, fmt.Errorf("WhatsApp authenticated input requires its verified retained capture")

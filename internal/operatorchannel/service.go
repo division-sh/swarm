@@ -107,14 +107,16 @@ func (s *Service) Bootstrap(ctx context.Context, now time.Time) (Principal, []Bi
 		if !ok {
 			continue
 		}
-		current, err := proof.ProviderAuthority.Current(ctx, s.credentials)
+		admitted, current, err := proof.ProviderAuthority.AdmitExecution(ctx, s.credentials)
 		if err != nil {
 			return Principal{}, nil, fmt.Errorf("observe provider credential for retained proof: %w", err)
 		}
 		if !current {
 			continue
 		}
+		proof.ProviderAuthority = admitted
 		binding, err := s.store.BindOperatorChannelFromProof(ctx, BootBindRequest{PrincipalID: principal.ID, Interface: identity, Proof: proof, RequestedAt: now})
+		admitted.CloseExecution()
 		if err != nil {
 			if errors.Is(err, ErrConflict) {
 				continue
@@ -163,7 +165,7 @@ func (s *Service) ResolveInterface(selector string) (InterfaceIdentity, error) {
 }
 
 func (s *Service) Begin(ctx context.Context, selector string, kind OperationKind, expectedRevision int64, requestKey, requestHash, onboardingOperationID string, authority ProviderAuthority, saveProof bool, now time.Time) (Operation, error) {
-	if err := authority.RequireExecutable(); err != nil {
+	if err := authority.Validate(); err != nil {
 		return Operation{}, err
 	}
 	principal, err := s.Principal()
@@ -178,7 +180,8 @@ func (s *Service) Begin(ctx context.Context, selector string, kind OperationKind
 	} else if found {
 		return replayed, nil
 	}
-	current, err := authority.Current(ctx, s.credentials)
+	admitted, current, err := authority.AdmitExecution(ctx, s.credentials)
+	defer admitted.CloseExecution()
 	if err != nil {
 		gateErr := fmt.Errorf("observe provider credential before identity ceremony mutation: %w", err)
 		return s.beginReplayAfterCurrentnessGate(ctx, replayRequest, gateErr)
@@ -187,6 +190,7 @@ func (s *Service) Begin(ctx context.Context, selector string, kind OperationKind
 		gateErr := fmt.Errorf("%w: provider credential must be current before identity ceremony mutation", ErrCredentialStale)
 		return s.beginReplayAfterCurrentnessGate(ctx, replayRequest, gateErr)
 	}
+	authority = admitted
 	identity, err := s.ResolveInterface(selector)
 	if err != nil {
 		return Operation{}, err
@@ -238,8 +242,11 @@ func (s *Service) Confirm(ctx context.Context, operationID string, expectedRevis
 		return Operation{}, Binding{}, err
 	}
 	providerCredentialCurrent := false
+	var admitted ProviderAuthority
 	if approve && !operation.State.Terminal() {
-		current, err := operation.ProviderAuthority.Current(ctx, s.credentials)
+		var current bool
+		admitted, current, err = operation.ProviderAuthority.AdmitExecution(ctx, s.credentials)
+		defer admitted.CloseExecution()
 		if err != nil {
 			return operation, Binding{}, fmt.Errorf("observe provider credential before identity confirmation: %w", err)
 		}
@@ -249,6 +256,7 @@ func (s *Service) Confirm(ctx context.Context, operationID string, expectedRevis
 		OperationID: strings.TrimSpace(operationID), PrincipalID: principal.ID,
 		ExpectedRevision: expectedRevision, Approve: approve,
 		ProviderAuthorityCurrent: providerCredentialCurrent, ConfirmedAt: now,
+		ProviderAuthorityAdmission: admitted,
 	})
 	if err != nil {
 		if operation.Kind == OperationReconnect && errors.Is(err, ErrConflict) && strings.Contains(err.Error(), "reconnect claimant differs") {
@@ -398,7 +406,7 @@ func validatedResponsibilityProof(responsibility ProofResponsibility) (VerifiedP
 		binding.PrincipalID != operation.PrincipalID || binding.Interface.Normalized() != operation.Interface.Normalized() ||
 		binding.ExternalAccountRef != operation.ExternalAccountRef || binding.ConversationRef != operation.ConversationRef ||
 		binding.ConversationScope != operation.ConversationScope || binding.AccountPresentation != operation.AccountPresentation ||
-		binding.ProviderAuthority != operation.ProviderAuthority ||
+		!binding.ProviderAuthority.SameProvenance(operation.ProviderAuthority) ||
 		binding.Revision != operation.BindingRevision || binding.OperationID != operation.OperationID ||
 		binding.ProofID != operation.ProofID || binding.ProofRevision != operation.ProofRevision ||
 		!binding.UpdatedAt.Equal(operation.CompletedAt) {
@@ -432,7 +440,7 @@ func immutableProofFactsMatch(existing, responsibility VerifiedProof) bool {
 		existing.Challenge == responsibility.Challenge &&
 		existing.OriginalOperationID == responsibility.OriginalOperationID &&
 		existing.MintingStoreID == responsibility.MintingStoreID &&
-		existing.ProviderAuthority == responsibility.ProviderAuthority &&
+		existing.ProviderAuthority.SameProvenance(responsibility.ProviderAuthority) &&
 		existing.VerifiedAt.Equal(responsibility.VerifiedAt) &&
 		existing.OperatorConfirmed == responsibility.OperatorConfirmed &&
 		equalConsentScopes(existing.ConsentScopes, responsibility.ConsentScopes)
@@ -656,7 +664,7 @@ func (s *Service) CurrentBindingReadiness(ctx context.Context, identity Interfac
 		return Binding{}, false, err
 	}
 	current := found && proof.Status == ProofActive && proof.ProofID == binding.ProofID && proof.Revision == binding.ProofRevision &&
-		proof.Interface.Normalized() == binding.Interface.Normalized() && proof.ProviderAuthority == binding.ProviderAuthority
+		proof.Interface.Normalized() == binding.Interface.Normalized() && proof.ProviderAuthority.SameProvenance(binding.ProviderAuthority)
 	return binding, current, nil
 }
 
@@ -720,7 +728,7 @@ func (s *Service) Readback(ctx context.Context) ([]Readback, error) {
 			continue
 		}
 		if binding.ProofID != "" {
-			if !proofFound || proof.Status != ProofActive || proof.ProofID != binding.ProofID || proof.Revision != binding.ProofRevision || proof.ProviderAuthority != binding.ProviderAuthority {
+			if !proofFound || proof.Status != ProofActive || proof.ProofID != binding.ProofID || proof.Revision != binding.ProofRevision || !proof.ProviderAuthority.SameProvenance(binding.ProviderAuthority) {
 				read.Status, read.Reason, read.ProofStatus = BindingRevoked, "machine-local verified account proof is missing, revoked, or superseded", ProofRevoked
 				out = append(out, read)
 				continue
