@@ -10,6 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -28,6 +30,8 @@ type timerTransitionContentionOwner struct {
 	commitContext              func(context.Context) context.Context
 	interruptedActivationReads int
 	activationReadErr          error
+	holdActivationRead         bool
+	holdTargetRead             bool
 }
 
 type timerTransitionOutcomeCapture struct {
@@ -38,6 +42,7 @@ type timerTransitionOutcomeCapture struct {
 	beforeIntercept func(context.Context) context.Context
 	entryErr        error
 	interceptErr    error
+	exitErr         error
 }
 
 func (c *timerTransitionOutcomeCapture) Intercept(ctx context.Context, event events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
@@ -47,16 +52,35 @@ func (c *timerTransitionOutcomeCapture) Intercept(ctx context.Context, event eve
 	c.entryErr = ctx.Err()
 	pass, emitted, outcome, err := c.coordinator.Intercept(ctx, event)
 	c.outcome, c.eventID, c.event, c.interceptErr = outcome, event.ID(), event, err
+	c.exitErr = ctx.Err()
 	return pass, emitted, outcome, err
 }
 
 func (o *timerTransitionContentionOwner) LoadWorkflowTimerActivation(ctx context.Context, activationID string) (runtimepipeline.WorkflowTimerActivation, bool, error) {
+	if o.holdActivationRead {
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+			return runtimepipeline.WorkflowTimerActivation{}, false, errors.New("held timer authorization read did not cancel")
+		}
+	}
 	activation, found, err := o.WorkflowPersistenceOwner.LoadWorkflowTimerActivation(ctx, activationID)
 	if ctx.Err() != nil {
 		o.interruptedActivationReads++
 		o.activationReadErr = err
 	}
 	return activation, found, err
+}
+
+func (o *timerTransitionContentionOwner) LoadWorkflowTargetPersistence(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entity runtimeidentity.EntityID) (runtimepipeline.WorkflowTargetPersistenceRecord, error) {
+	if o.holdTargetRead {
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+			return runtimepipeline.WorkflowTargetPersistenceRecord{}, errors.New("held timer target read did not cancel")
+		}
+	}
+	return o.WorkflowPersistenceOwner.LoadWorkflowTargetPersistence(ctx, identity, entity)
 }
 
 func (o *timerTransitionContentionOwner) CommitWorkflowEngineMutation(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
@@ -86,6 +110,10 @@ func TestWorkflowTimerPublishedOccurrenceSurvivesTransitionContentionOnBothStore
 
 func TestIssue2564M09TimerPublishedOccurrenceCanceledTransitionReplayBothStores(t *testing.T) {
 	verifyWorkflowTimerPublishedOccurrenceRecovery(t, []string{"canceled_step", "deadline_step", "canceled_dispatch", "deadline_dispatch"})
+}
+
+func TestWorkflowTimerDispatchDeadlineCutClassificationOnBothStores(t *testing.T) {
+	verifyWorkflowTimerPublishedOccurrenceRecovery(t, []string{"deadline_dispatch_before_mutation", "deadline_dispatch_before_authorization"})
 }
 
 func TestIssue2564M09TimerDispatchEntryCancellationLeavesBusObligationReplayableBothStores(t *testing.T) {
@@ -188,6 +216,8 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 				}
 				fireCtx := ctx
 				var interrupted error
+				deadlineDispatch := scenario == "deadline_dispatch" || scenario == "deadline_dispatch_before_mutation" || scenario == "deadline_dispatch_before_authorization"
+				deadlineBeforeMutation := false
 				entryCut := scenario == "canceled_entry" || scenario == "deadline_entry" || scenario == "deadline_entry_live_outer"
 				switch scenario {
 				case "deadline_entry_live_outer":
@@ -252,11 +282,21 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 						}
 						return ctx
 					}
-				case "deadline_dispatch":
+				case "deadline_dispatch", "deadline_dispatch_before_mutation", "deadline_dispatch_before_authorization":
 					interrupted = context.DeadlineExceeded
 					var cancel context.CancelFunc
 					fireCtx, cancel = context.WithTimeout(ctx, time.Second)
 					defer cancel()
+					owner.holdTargetRead = scenario == "deadline_dispatch_before_mutation"
+					if scenario == "deadline_dispatch_before_authorization" {
+						capture.beforeIntercept = func(dispatchCtx context.Context) context.Context {
+							owner.holdActivationRead = true
+							return dispatchCtx
+						}
+					}
+					defer func() {
+						owner.holdActivationRead, owner.holdTargetRead = false, false
+					}()
 					owner.commitContext = func(ctx context.Context) context.Context {
 						<-fireCtx.Done()
 						cancel()
@@ -280,18 +320,48 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 						t.Fatalf("dispatch entry deadline did not expire: %v", fireCtx.Err())
 					}
 				}
-				if scenario == "deadline_dispatch" {
+				if deadlineDispatch {
 					if !errors.Is(fireCtx.Err(), context.DeadlineExceeded) {
 						t.Fatalf("dispatch deadline did not expire at the transition cut: %v", fireCtx.Err())
 					}
-					// The bus's work lifetime converts an expired parent to cancellation.
-					if errors.Is(owner.lastErr, context.Canceled) {
-						interrupted = context.Canceled
+					if owner.calls == 0 {
+						// Expiration may precede mutation, but zero calls alone is
+						// not evidence of either authorization or interruption.
+						if !runtimefailures.IsContextInterruption(capture.exitErr) {
+							t.Fatalf("deadline cut lost receiver interruption: entry=%v exit=%v", capture.entryErr, capture.exitErr)
+						}
+						interrupted = capture.exitErr
+						_, authorizedRetry := capture.outcome.RetryRelease()
+						if authorizedRetry {
+							if capture.entryErr != nil || capture.interceptErr != nil {
+								t.Fatalf("pre-mutation retry lacked live authorized dispatch: entry=%v error=%v", capture.entryErr, capture.interceptErr)
+							}
+							deadlineBeforeMutation = true
+						} else {
+							// As in the entry-cut proof, an unfinished authorization
+							// belongs to the bus, never a timer retry authority.
+							if !runtimefailures.IsContextInterruption(capture.interceptErr) || !runtimefailures.IsContextInterruption(err) ||
+								!errors.Is(capture.interceptErr, interrupted) || !errors.Is(err, interrupted) {
+								t.Fatalf("pre-authorization deadline lost its exact cause: intercept=%v fire=%v receiver=%v", capture.interceptErr, err, interrupted)
+							}
+							entryCut = true
+						}
+					} else {
+						if owner.calls != 1 || capture.entryErr != nil || !runtimefailures.IsContextInterruption(owner.lastErr) {
+							t.Fatalf("deadline mutation cut was not exact: calls=%d entry=%v mutation=%v", owner.calls, capture.entryErr, owner.lastErr)
+						}
+						interrupted = owner.lastErr
 					}
 				}
-				if outcome != runtimepipeline.WorkflowTimerFireCommitted || (owner.reject && (err != nil || !runtimefailures.IsStateContention(owner.lastErr))) || (owner.cleanupErr != nil && !errors.Is(err, owner.cleanupErr)) || (!entryCut && interrupted != nil && (!errors.Is(owner.lastErr, interrupted) || (err != nil && !errors.Is(err, interrupted) && !errors.Is(err, fireCtx.Err())))) {
-					t.Fatalf("publication outcome=%s error=%v mutation_error=%v acknowledged=%d intercept_outcome=%+v",
-						outcome, err, owner.lastErr, owner.acknowledged, capture.outcome)
+				if scenario == "deadline_dispatch_before_mutation" && (!deadlineBeforeMutation || owner.calls != 0) {
+					t.Fatalf("held target read did not prove the authorized pre-mutation cut: calls=%d entry_cut=%t", owner.calls, entryCut)
+				}
+				if scenario == "deadline_dispatch_before_authorization" && (!entryCut || capture.entryErr != nil || owner.calls != 0 || owner.interruptedActivationReads != 1 || !errors.Is(owner.activationReadErr, interrupted)) {
+					t.Fatalf("held activation read did not prove live entry followed by authorization refusal: calls=%d entry=%v reads=%d read_error=%v", owner.calls, capture.entryErr, owner.interruptedActivationReads, owner.activationReadErr)
+				}
+				if outcome != runtimepipeline.WorkflowTimerFireCommitted || (owner.reject && (err != nil || !runtimefailures.IsStateContention(owner.lastErr))) || (owner.cleanupErr != nil && !errors.Is(err, owner.cleanupErr)) || (!entryCut && interrupted != nil && ((!deadlineBeforeMutation && !errors.Is(owner.lastErr, interrupted)) || (err != nil && !errors.Is(err, interrupted) && !errors.Is(err, fireCtx.Err())))) {
+					t.Fatalf("publication outcome=%s error=%v mutation_calls=%d mutation_error=%v acknowledged=%d entry=%v exit=%v intercept_outcome=%+v",
+						outcome, err, owner.calls, owner.lastErr, owner.acknowledged, capture.entryErr, capture.exitErr, capture.outcome)
 				}
 				eventID := workflowTimerPersistedEventID(t, selected, runID)
 				if capture.eventID != eventID {
@@ -318,7 +388,11 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 						if ok || capture.outcome.Committed || !capture.outcome.ContinueDispatch() {
 							t.Fatalf("unauthorized occurrence acquired timer retry/commit authority: %+v", capture.outcome)
 						}
-						// The bus owner, not timer authorization, preserves the obligation.
+					} else if !ok || capture.outcome.Committed || retry.Failure() == nil || retry.Failure().Detail.Code != code {
+						t.Fatalf("unacknowledged transition lost typed retry: %+v", capture.outcome)
+					}
+					if entryCut || deadlineBeforeMutation {
+						// Prove exact bus-owned work independently of a retry label.
 						obligations := selected.events.PipelineObligations()
 						work, err := obligations.ClaimEvent(ctx, eventID, runtimepipelineobligation.PurposeRecovery)
 						if err != nil {
@@ -330,8 +404,6 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 						if err := obligations.Release(ctx, work.Claim); err != nil {
 							t.Fatalf("release exact replay proof claim: %v", err)
 						}
-					} else if !ok || capture.outcome.Committed || retry.Failure() == nil || retry.Failure().Detail.Code != code {
-						t.Fatalf("unacknowledged transition lost typed retry: %+v", capture.outcome)
 					}
 					if interrupted != nil && !entryCut {
 						class := runtimefailures.ClassDependencyUnavailable
@@ -351,6 +423,7 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 					}
 					owner.reject = false
 					owner.commitContext = nil
+					owner.holdActivationRead, owner.holdTargetRead = false, false
 					capture.beforeIntercept = nil
 					if scenario == "restart_retry" {
 						if err := pc.StopWorkflowTimerLifecycle(ctx); err != nil {
