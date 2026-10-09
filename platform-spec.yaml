@@ -11235,6 +11235,18 @@ tool_model:
         state before Swarm's incoming capture; pre-capture redelivery and decryption-failure acknowledgments are not
         claimed durably recoverable. This limitation never grants a successful Swarm capture acknowledgment. The
         bounded incoming-only capture owner must prove its separate commit, publication and acknowledgment boundaries.
+      session_provider_state_lifetime: >
+        The concrete WhatsApp state owner opens the SDK database only while its stable connection directory is
+        exclusively possessed, after the caller reserves onboarding or retained enabled responsibility. Provider
+        keys and schema remain SDK-owned, not Swarm credentials or copied application data. Database and existing
+        journal files require private, single-link, no-follow file admission before SDK access. An admitted retained
+        account requires its existing database and exactly one matching SDK account; missing, multiple, malformed
+        or mismatched accounts refuse without deletion, replacement pairing or first-account selection. Bootstrap
+        may create unpaired private state but grants no account admission, operator identity or executable readiness.
+        One client occurrence owns the state at a time. Its complete callback, work and SDK-store join precedes a
+        successor occurrence or database close. Failed join or close retains possession and responsibility, while
+        ordinary retirement preserves every pairing file. Private descriptors close before possession is released.
+        This lifetime component alone does not install public session execution or qualify provider interoperability.
       session_pairing_qr: >
         The concrete WhatsApp pairing owner consumes the public QR and ADV-rotation events through the same guarded
         occurrence callback as incoming capture; the SDK GetQRChannel convenience helper is not a supported Swarm
@@ -11270,7 +11282,7 @@ tool_model:
         bound to the existing admitted activity/effect owners and their uncertainty policy.
       session_incoming_capture: >
         WhatsApp incoming capture commits exact payload bytes together with the original session admission,
-        connection occurrence, original admitted ingress entity, source identity, onboarding responsibility, principal and binding revision before
+        connection occurrence, exact original admitted service/run/binding generation, source identity, onboarding responsibility, principal and binding revision before
         reporting its local successful-capture status. A repeated provider event may retain its original occurrence;
         different payload or scope evidence conflicts rather than overwriting history. Account, conversation,
         provider event and message/edit/revoke kind are distinct identity dimensions. Captured work survives ordinary
@@ -11294,6 +11306,8 @@ tool_model:
         SDK device-address normalization never aliases phone and LID identities or imports display-name authority.
         Stable publication provider-event identity contains the exact connection, account, conversation, SDK delivery
         ID and message/edit/revoke kind already owned by capture; the existing publication owner derives UUIDs.
+        The original binding generation is frozen through the canonical inbound receipt identity owner before capture,
+        independently of concrete receiver construction and the later provider delivery identity.
         A mapped payload or fixture scope is not authenticated session admission, normalized-output authorization,
         human identity, or publication success. Accepted trigger normalization and original-authority admission remain
         separate mandatory consumers, and session execution remains unavailable until complete qualification.

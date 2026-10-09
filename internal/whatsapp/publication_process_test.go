@@ -29,11 +29,11 @@ func historicalPublicationBoundary() {
 	}
 }
 
-func (r historicalPublicationBarrierReader) LoadInboundPublicationByIdentity(ctx context.Context, provider, entity, event string) (runtimeinbound.Record, bool, error) {
+func (r historicalPublicationBarrierReader) LoadInboundPublicationByIdentity(ctx context.Context, identity runtimeinbound.Identity) (runtimeinbound.Record, bool, error) {
 	if r.phase == "before_read" {
 		historicalPublicationBoundary()
 	}
-	record, found, err := r.publicationReader.LoadInboundPublicationByIdentity(ctx, provider, entity, event)
+	record, found, err := r.publicationReader.LoadInboundPublicationByIdentity(ctx, identity)
 	if err == nil && found && r.phase == "after_verified_read" {
 		historicalPublicationBoundary()
 	}
@@ -162,7 +162,7 @@ func TestWhatsAppHistoricalPublicationProcessDeathBothStores(t *testing.T) {
 							t.Fatalf("restart did not verify and complete original history: %t %v", settled, err)
 						}
 					}
-					record, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, "whatsapp", event.Scope.EntityID, command.Request.ProviderEventID)
+					record, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, command.Request.Identity())
 					if err != nil || !found || record.OutputCount != 2 {
 						t.Fatal("historical interruption altered selected-store publication", err)
 					}

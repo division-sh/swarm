@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/google/uuid"
 )
 
@@ -27,7 +28,7 @@ var errCaptureScopeChanged = errors.New("WhatsApp capture belongs to a different
 // reconstruct a binding from today's source/principal during recovery.
 type captureScope struct {
 	Session             operatorchannel.SessionAccountAdmission
-	EntityID            string
+	PublicationBinding  runtimeinbound.BindingGeneration
 	Source              channelonboarding.ChannelDurableContextIdentity
 	OnboardingOperation string
 	PrincipalID         string
@@ -41,7 +42,10 @@ func (s captureScope) validate() error {
 	if err := s.Source.Validate(); err != nil {
 		return err
 	}
-	if s.Session.Provider != "whatsapp" || uuid.Validate(s.EntityID) != nil || uuid.Validate(s.OnboardingOperation) != nil ||
+	if err := s.PublicationBinding.Validate(); err != nil {
+		return err
+	}
+	if s.Session.Provider != "whatsapp" || uuid.Validate(s.OnboardingOperation) != nil ||
 		uuid.Validate(s.PrincipalID) != nil || s.BindingRevision < 0 {
 		return fmt.Errorf("WhatsApp capture requires its exact existing onboarding/principal/source scope")
 	}

@@ -19,6 +19,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/google/uuid"
 )
@@ -31,7 +33,8 @@ func captureFixture(t *testing.T) capturedEvent {
 	}
 	return capturedEvent{
 		Scope: captureScope{
-			EntityID: uuid.NewString(),
+			PublicationBinding: runtimeinbound.BindingGeneration{ServiceID: runtimeflowidentity.StandingServiceID("."),
+				RunID: uuid.NewString(), Generation: 1},
 			Session: operatorchannel.SessionAccountAdmission{
 				Provider: "whatsapp", ConnectionID: uuid.NewString(), AccountRef: "synthetic_account",
 				AdmissionID: uuid.NewString(), Revision: 1,

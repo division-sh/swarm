@@ -46,6 +46,7 @@ type sessionPublicationStore interface {
 	runtimeinbound.Runner
 	runtimepipeline.StandingServicePersistence
 	runtimebus.EventStore
+	runtimepipeline.FlowConstructionPublicationReader
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
@@ -157,7 +158,8 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 		WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(), DeliveryAuthority: authority,
 		PipelineObligations: f.selected.PipelineObligations(), PayloadAdmitter: payload, ProviderOutputVerifier: f.catalog,
 		Durable: runtimebus.DurableDependencies{ReplyContext: f.selected, RunLifecycle: f.selected, DeliveryLifecycle: f.selected,
-			FlowRoutes: f.selected, FlowRouteRecords: f.selected, FlowRouteSets: f.selected, FlowRouteTopology: f.selected,
+			ConstructionPublications: f.selected,
+			FlowRoutes:               f.selected, FlowRouteRecords: f.selected, FlowRouteSets: f.selected, FlowRouteTopology: f.selected,
 			FlowRouteRollback: f.selected, ActiveAgents: f.selected, ActiveFlows: f.selected, TargetOwners: f.selected,
 			PreparedEvents: f.selected, TargetFailureRecorder: f.selected, RunOrigins: f.selected, StandingRestarts: f.selected},
 	})
@@ -167,9 +169,9 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 	if err := f.bus.SetDeliveryContinuationOwner(bustest.NewDeliveryContinuationOwner(false)); err != nil {
 		t.Fatal(err)
 	}
-	flow := "whatsapp-session-proof/" + uuid.NewString()
+	flow := "."
 	f.candidate = runtimepipeline.StandingServiceCandidate{BindingEnabled: true, FlowPath: flow,
-		ServiceID: runtimeflowidentity.StandingServiceID(flow), InstanceID: uuid.NewString(), EntityID: uuid.NewString(), Source: source}
+		ServiceID: runtimeflowidentity.StandingServiceID(flow), Source: source}
 	f.standing, err = f.selected.ReconcileStandingService(f.ctx, f.candidate)
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +190,8 @@ func (f *sessionPublicationFixture) capture(t *testing.T) capturedEvent {
 func (f *sessionPublicationFixture) captureVariant(t *testing.T, kind string, group, reply bool) capturedEvent {
 	t.Helper()
 	scope := captureFixture(t).Scope
-	scope.EntityID = f.candidate.EntityID
+	scope.PublicationBinding = runtimeinbound.BindingGeneration{ServiceID: f.standing.ServiceID,
+		RunID: f.standing.RunID, Generation: f.standing.Generation}
 	scope.Source.BundleHash = f.candidate.Source.BundleHash()
 	message := incomingMessageFixture()
 	message.Info.ID = "DELIVERY_" + uuid.NewString()
@@ -336,7 +339,7 @@ func TestWhatsAppSessionPublicationVariantsBothStores(t *testing.T) {
 							if err := spool.retirePublished(f.ctx, event, f.selected); err != nil {
 								t.Fatal(err)
 							}
-							record, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, "whatsapp", event.Scope.EntityID, command.Request.ProviderEventID)
+							record, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, command.Request.Identity())
 							if err != nil || !found || len(record.Events) != 2 || string(record.Events[1].Event.Type()) != "inbound.whatsapp."+kind ||
 								!record.Events[1].Authorization.Valid() || !bytes.Equal(record.Events[0].Event.Payload(), event.Body) {
 								t.Fatalf("variant readback = %+v found=%t err=%v", record, found, err)
@@ -406,7 +409,7 @@ func TestWhatsAppSessionPublicationRollbackAndHistoricalResetBothStores(t *testi
 			if found, err := spool.reconcilePublished(f.ctx, event, f.selected); err != nil || found {
 				t.Fatal("rollback produced historical completion", err)
 			}
-			if record, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, "whatsapp", event.Scope.EntityID, command.Request.ProviderEventID); err != nil || found {
+			if record, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, command.Request.Identity()); err != nil || found {
 				t.Fatalf("rollback left publication: %+v found=%t err=%v", record, found, err)
 			}
 			rows, err := spool.readPendingRows(f.ctx, db)
@@ -447,7 +450,7 @@ type publicationReadFault struct {
 	err error
 }
 
-func (f publicationReadFault) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
+func (f publicationReadFault) LoadInboundPublicationByIdentity(context.Context, runtimeinbound.Identity) (runtimeinbound.Record, bool, error) {
 	return runtimeinbound.Record{}, false, f.err
 }
 
@@ -538,7 +541,7 @@ func TestWhatsAppHistoricalPublicationStableScopeRefusalsBothStores(t *testing.T
 					}
 				})
 			}
-			for _, cell := range []string{"connection", "account", "entity"} {
+			for _, cell := range []string{"connection", "account", "service", "run", "generation"} {
 				t.Run(cell+"_namespace", func(t *testing.T) {
 					changed := original
 					switch cell {
@@ -546,19 +549,23 @@ func TestWhatsAppHistoricalPublicationStableScopeRefusalsBothStores(t *testing.T
 						changed.Scope.Session.ConnectionID = uuid.NewString()
 					case "account":
 						changed.Scope.Session.AccountRef = "other"
-					case "entity":
-						changed.Scope.EntityID = uuid.NewString()
+					case "service":
+						changed.Scope.PublicationBinding.ServiceID = uuid.NewString()
+					case "run":
+						changed.Scope.PublicationBinding.RunID = uuid.NewString()
+					case "generation":
+						changed.Scope.PublicationBinding.Generation++
 					}
 					// The admitted connection owner checks its complete frozen scope;
 					// an altered namespace cannot become an original-scope retry.
 					if err := changed.requireOriginalScope(original.Scope); !errors.Is(err, errCaptureScopeChanged) {
 						t.Fatal("changed namespace passed original admission scope", err)
 					}
-					identity, err := changed.publicationProviderEventID()
+					identity, err := changed.publicationIdentity()
 					if err != nil {
 						t.Fatal(err)
 					}
-					if _, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, "whatsapp", changed.Scope.EntityID, identity); err != nil || found {
+					if _, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, identity); err != nil || found {
 						t.Fatal("another namespace resolved original publication", err)
 					}
 				})
@@ -599,7 +606,7 @@ func TestWhatsAppSessionPublicationOutputAuthorizationBeforeMutationBothStores(t
 					if _, err := f.bus.PrepareInboundDeliveryBatch(f.ctx, batch); err == nil {
 						t.Fatal("foreign normalized authority reached publication planning")
 					}
-					if _, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, "whatsapp", event.Scope.EntityID, command.Request.ProviderEventID); err != nil || found {
+					if _, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, command.Request.Identity()); err != nil || found {
 						t.Fatal("refused output authority created a publication", err)
 					}
 				})
@@ -611,8 +618,7 @@ func TestWhatsAppSessionPublicationOutputAuthorizationBeforeMutationBothStores(t
 func (f *sessionPublicationFixture) command(t *testing.T, event capturedEvent) runtimeinbound.CommitCommand {
 	t.Helper()
 	request := capturePublicationFixture(t, event)
-	request.StableServiceID, request.FlowPath, request.InstanceID = f.candidate.ServiceID, f.candidate.FlowPath, f.candidate.InstanceID
-	request.TargetFlowInstance, request.ResolvedRunID = f.candidate.FlowPath, f.standing.RunID
+	request.FlowPath = f.candidate.FlowPath
 	request.ExpectedGeneration, request.ExpectedPublicationSequence = f.standing.Generation, f.sequence
 	normalized, err := f.manifest.ProjectNormalizedPayload(event.Body)
 	if err != nil || len(normalized) != 1 {
@@ -628,6 +634,10 @@ func (f *sessionPublicationFixture) command(t *testing.T, event capturedEvent) r
 		t.Fatal(err)
 	}
 	batch := runtimebus.InboundDeliveryBatch{Provider: "whatsapp", AuthorSubjectType: "chat", AuthorSubjectID: event.Conversation}
+	routingSource, err := events.NewExternalIngressRoutingSource(request.FlowPath, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for ordinal, output := range []struct {
 		name          events.EventType
 		body          []byte
@@ -640,8 +650,8 @@ func (f *sessionPublicationFixture) command(t *testing.T, event capturedEvent) r
 			t.Fatal(err)
 		}
 		batch.Events = append(batch.Events, runtimebus.InboundDeliveryEvent{Kind: output.kind, Authorization: output.authorization,
-			Event: eventtest.ExistingRunRootIngress(id, output.name, "inbound-gateway", "", output.body, 0, request.ResolvedRunID,
-				events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: request.EntityID, FlowInstance: request.TargetFlowInstance}), request.OriginalReceivedAt)})
+			Event: eventtest.ExistingRunRootIngressWithRoutingSource(id, output.name, "inbound-gateway", "", output.body, 0, request.ResolvedRunID,
+				events.EventEnvelope{}, routingSource, request.OriginalReceivedAt)})
 	}
 	plan, err := f.bus.PrepareInboundDeliveryBatch(f.ctx, batch)
 	if err != nil {
@@ -670,7 +680,7 @@ func (f *sessionPublicationFixture) command(t *testing.T, event capturedEvent) r
 		t.Fatal(err)
 	}
 	command.Finalization.EvidenceEvent = eventtest.DiagnosticDirect(request.MarkerEventID, events.EventTypePlatformInboundRecord,
-		"runtime", "", payload, 0, request.ResolvedRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), request.OriginalReceivedAt)
+		"runtime", "", payload, 0, request.ResolvedRunID, "", events.EventEnvelope{}, request.OriginalReceivedAt)
 	if err := command.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -711,7 +721,7 @@ func TestWhatsAppSessionCaptureNormalizedPublicationBothStores(t *testing.T) {
 			if err != nil || !settled || f.plans != 1 {
 				t.Fatalf("historical reconciliation replanned or failed: %t plans=%d %v", settled, f.plans, err)
 			}
-			record, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, "whatsapp", event.Scope.EntityID, command.Request.ProviderEventID)
+			record, found, err := f.selected.LoadInboundPublicationByIdentity(f.ctx, command.Request.Identity())
 			if err != nil || !found || record.OutputCount != 2 || len(record.Events) != 2 || !bytes.Equal(record.Events[0].Event.Payload(), event.Body) {
 				t.Fatalf("verified historical event set changed: %+v %t %v", record, found, err)
 			}

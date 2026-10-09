@@ -48,14 +48,41 @@ type Identity struct {
 	ProviderEventID string `json:"provider_event_id"`
 }
 
-func (i Identity) Validate() error {
-	for field, value := range map[string]string{"service_id": i.ServiceID, "run_id": i.RunID} {
+// BindingGeneration is the admitted receipt namespace before a provider
+// delivery arrives. It carries no concrete receiver or delivery authority.
+type BindingGeneration struct {
+	ServiceID  string `json:"service_id"`
+	RunID      string `json:"run_id"`
+	Generation int64  `json:"generation"`
+}
+
+func (b BindingGeneration) Validate() error {
+	for field, value := range map[string]string{"service_id": b.ServiceID, "run_id": b.RunID} {
 		parsed, err := uuid.Parse(value)
 		if err != nil || parsed == uuid.Nil || parsed.String() != value {
 			return fmt.Errorf("inbound identity %s requires an exact UUID", field)
 		}
 	}
-	if i.Generation <= 0 || i.Provider == "" || i.Provider != strings.ToLower(strings.TrimSpace(i.Provider)) ||
+	if b.Generation <= 0 {
+		return fmt.Errorf("inbound identity requires its exact generation, provider and provider delivery")
+	}
+	return nil
+}
+
+func (i Identity) BindingGeneration() BindingGeneration {
+	return BindingGeneration{ServiceID: i.ServiceID, RunID: i.RunID, Generation: i.Generation}
+}
+
+func (b BindingGeneration) Identity(provider, providerEventID string) Identity {
+	return Identity{ServiceID: b.ServiceID, RunID: b.RunID, Generation: b.Generation,
+		Provider: provider, ProviderEventID: providerEventID}
+}
+
+func (i Identity) Validate() error {
+	if err := i.BindingGeneration().Validate(); err != nil {
+		return err
+	}
+	if i.Provider == "" || i.Provider != strings.ToLower(strings.TrimSpace(i.Provider)) ||
 		i.ProviderEventID == "" || i.ProviderEventID != strings.TrimSpace(i.ProviderEventID) {
 		return fmt.Errorf("inbound identity requires its exact generation, provider and provider delivery")
 	}

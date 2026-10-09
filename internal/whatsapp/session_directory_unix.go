@@ -167,8 +167,14 @@ func (d *sessionDirectory) release() error {
 	if d.released {
 		return nil
 	}
-	if err := errors.Join(d.lock.Close(), d.directory.Close(), d.base.Close()); err != nil {
-		return fmt.Errorf("release WhatsApp session possession: %w", err)
+	for _, file := range []**os.File{&d.directory, &d.base, &d.lock} {
+		if *file == nil {
+			continue
+		}
+		if err := (*file).Close(); err != nil {
+			return fmt.Errorf("release WhatsApp session possession: %w", err)
+		}
+		*file = nil
 	}
 	d.released = true
 	return nil
