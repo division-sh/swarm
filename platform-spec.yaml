@@ -18878,6 +18878,13 @@ platform_tables:
         failure. Inventory validates every requested coordinate before deduplicating storage
         identity. Observations defensively isolate all nested mutable data on admission and return;
         neither an observation nor successful read admission grants mutation or execution authority.
+        Ordinary select/create/select-or-create preparation consumes this admitted index through
+        R5.1. It retains an existing receiver's actual identity, refuses inactive occupancy, and
+        derives a new identity only after genuine absence. A later edge may select an exact pure
+        construction plan in the same operation without fabricating a native observation or
+        repeating construction. Native commit rechecks declaration/parent/key occupancy as well
+        as the proposed path inside the existing fenced mutation; stale absent selection cannot
+        construct a second receiver at another path. Explicit create remains a conflict, not reuse.
         Historical header projection carries these fixed-revision facts without manufacturing
         fresh construction receipts or readiness. Native missing companions remain corruption;
         admitted historical provenance is not inferred from their absence.
