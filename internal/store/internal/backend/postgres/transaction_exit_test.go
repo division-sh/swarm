@@ -25,6 +25,8 @@ type exitProbeConnector struct {
 	closed                           atomic.Int32
 	closedSignal                     chan struct{}
 	closeOnce                        sync.Once
+	closeEntered, closeRelease       chan struct{}
+	closeEnteredOnce                 sync.Once
 	commitFailure, rollbackFailure   error
 	beginFailure                     error
 	beforeCommit                     func()
@@ -72,6 +74,9 @@ func (c *exitProbeConn) BeginTx(ctx context.Context, opts driver.TxOptions) (dri
 	return &exitProbeTx{Tx: tx, probe: c.probe}, nil
 }
 func (c *exitProbeConn) Close() error {
+	if c.probe.closeEntered != nil {
+		c.probe.closeEnteredOnce.Do(func() { close(c.probe.closeEntered); <-c.probe.closeRelease })
+	}
 	err := c.Conn.Close()
 	c.probe.closed.Add(1)
 	c.probe.closeOnce.Do(func() { close(c.probe.closedSignal) })
