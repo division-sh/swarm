@@ -1086,6 +1086,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 	})
 	workOwner := testGatewayWorkOwner(t)
 	var manager *runtimemanager.AgentManager
+	workflowPersistence := runtimepipeline.NewWorkflowPersistence(pg)
 	sourceBus, err := bus.NewEventBusWithOptions(pg, bus.EventBusOptions{
 		ExecutionPosture:    executionposture.Live,
 		WorkOwner:           workOwner,
@@ -1093,10 +1094,11 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		ContractBundle:      loaded.Source,
 		SourceArtifactFact:  loaded.SourceArtifactFact,
 		Durable: bus.DurableDependencies{
+			Instances: workflowPersistence, ConstructionPublications: workflowPersistence,
 			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
 			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteTopology: pg,
 			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, PreparedEvents: pg,
-			TargetFailureRecorder: pg, RunOrigins: pg, StandingRestarts: pg, ConstructionPublications: pg,
+			TargetFailureRecorder: pg, RunOrigins: pg, StandingRestarts: pg,
 		},
 		InterceptorProvider: func() []bus.EventInterceptor {
 			return nil
@@ -1129,7 +1131,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		Module:                  workflowOwner,
 		ExecutionPosture:        executionposture.Live,
 		SourceArtifactFact:      loaded.SourceArtifactFact,
-		Persistence:             runtimepipeline.NewWorkflowPersistence(pg),
+		Persistence:             workflowPersistence,
 		RunLifecycle:            pg,
 		PipelineObligations:     pg.PipelineObligations(),
 		DeliveryStore:           pg,

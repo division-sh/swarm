@@ -79,22 +79,24 @@ func seedSelectedConstructedRootHistory(t *testing.T, ctx context.Context, db *s
 	if err != nil {
 		t.Fatal(err)
 	}
+	workflow := pipeline.NewWorkflowPersistence(selected)
 	sourceBus, err := bus.NewEventBusWithOptions(selected, bus.EventBusOptions{
 		ExecutionPosture: posture, WorkOwner: work, PipelineObligations: selected.PipelineObligations(),
 		ContractBundle: loaded.Source, SourceArtifactFact: loaded.SourceArtifactFact,
 		RuntimeInstanceID: runForkTestRuntimeInstanceID, DeliveryAuthority: authority, ReceiverExecution: eventreceiver.NormalExecution(),
 		Durable: bus.DurableDependencies{
+			Instances: workflow, ConstructionPublications: workflow,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteTopology: selected,
 			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
-			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected, ConstructionPublications: selected,
+			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	coordinator := pipeline.NewPipelineCoordinatorWithOptions(sourceBus, pipeline.PipelineCoordinatorOptions{
-		Module: selectedContractWorkflowModule{source: loaded.Source}, Persistence: pipeline.NewWorkflowPersistence(selected),
+		Module: selectedContractWorkflowModule{source: loaded.Source}, Persistence: workflow,
 		SourceArtifactFact: loaded.SourceArtifactFact, ExecutionPosture: posture, ReceiverExecution: eventreceiver.NormalExecution(),
 		RunLifecycle: selected, PipelineObligations: selected.PipelineObligations(), DeliveryStore: selected, DeadLetters: selected,
 		DecisionCards: selected, ProposedEffects: selected, HumanTasks: selected, DecisionCardDraftExpiry: selected, HumanTaskExpiry: selected,

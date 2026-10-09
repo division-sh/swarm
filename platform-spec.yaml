@@ -18873,6 +18873,10 @@ platform_tables:
         and process route registrations cannot substitute for admitted instance observations.
         Authored subscriptions and connections remain source-owned compiled definitions; the
         selected store exposes no authored routing-rule upsert or load API.
+        Native and selected-fork EventBus composition supplies the same explicit instance-index
+        and construction-publication readers. Selected-fork owner admission refuses either
+        missing reader before preparing an execution context; workflow presence cannot stand
+        in for those roles.
         Connect and pubsub recipient definitions are immutable source data, projected onto an admitted
         native instance or an operation-local R5.1 construction plan at selection time.
         Mutable recipient registration, process route membership and route-generation retries

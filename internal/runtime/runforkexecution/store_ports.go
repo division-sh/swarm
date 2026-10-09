@@ -135,6 +135,7 @@ func NewSelectedContractExecutionOwner(
 	}{
 		{"fork lifecycle", fork}, {"runtime execution lifecycle", runtimeExecution}, {"replay persistence", replay},
 		{"event store", events},
+		{"event instance index", busDurable.Instances}, {"event construction publications", busDurable.ConstructionPublications},
 		{"event run lifecycle", busDurable.RunLifecycle}, {"event delivery lifecycle", busDurable.DeliveryLifecycle},
 		{"event flow routes", busDurable.FlowRoutes}, {"event route records", busDurable.FlowRouteRecords},
 		{"event route topology", busDurable.FlowRouteTopology}, {"event active agents", busDurable.ActiveAgents},

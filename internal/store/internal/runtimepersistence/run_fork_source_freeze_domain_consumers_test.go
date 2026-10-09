@@ -83,6 +83,9 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			child.EntityID = entityID
 			created := fixture.forkedAt.Add(-time.Minute)
 			constructHistoricalSourceFixture(t, ctx, surface.(agentFixtureFlowStore), pipeline.FlowInstanceActivationRequest{
+				ContractBundle: source, Instance: parent, OccurredAt: created,
+			})
+			constructHistoricalSourceFixture(t, ctx, surface.(agentFixtureFlowStore), pipeline.FlowInstanceActivationRequest{
 				ContractBundle: source, Instance: child, OccurredAt: created,
 				ConstructorInput: "test.node_emitted.upserter", ResolvedKey: "domain",
 				TriggerEvent: eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted.upserter", "fixture", "", []byte(`{"account_id":"domain","instance_key":"domain"}`), 0, fixture.sourceRun, events.EventEnvelope{}, created),
