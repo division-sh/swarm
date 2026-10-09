@@ -23590,6 +23590,7 @@ test_specification:
         dependency and toolchain identity and canonical checksummed records. Candidate sources always scan fresh;
         malformed/unavailable/foreign analysis recomputes the original scan and never grants allowed debt.
         Protected master alone publishes archive-derived shared entries, including after verified proof replay; PR consumers restore exact keys read-only.
+        Test-only debt-cache environment is supplied only to its owning census command, never globally to ordinary proofs or product subprocesses.
         Active collector identity lives in an exact-baseline-bound sidecar; historical TSV bytes, rows and multiplicities are not rewritten by cache integration.
         The original logical proof batches share one hosted execution matrix so native fail-fast cancels ordinary and soak siblings alike;
         no unit/backend/selector membership changes follow from this scheduling boundary. Each soak retains its 1500-second command envelope,

@@ -50,6 +50,13 @@ func TestCITierCheckWaitsForSameRunSuccessfulSummary(t *testing.T) {
 
 func TestDebtAnalysisCIUsesExactReadOnlyRestoreAndProtectedProducer(t *testing.T) {
 	workflow := loadAdmissionWorkflow(t)
+	execution := findWorkflowStep(workflow.Jobs["proof-unit"].Steps, "Run exact planned proof unit")
+	if execution == nil {
+		t.Fatal("missing owned proof dispatcher")
+	}
+	if _, global := execution.Env["SWARM_DEBT_CACHE_DIR"]; global {
+		t.Fatal("test-only debt cache env must not reach ordinary or served proof children")
+	}
 	consumer := findWorkflowStep(workflow.Jobs["proof-unit"].Steps, "Restore exact trusted-base analysis read-only")
 	if consumer == nil || consumer.Uses != "actions/cache/restore@v4" || consumer.If != "matrix.unit == 'persistence-authority-debt-census'" || consumer.With["key"] != "${{ steps.debt-identity.outputs.key }}" || consumer.With["restore-keys"] != nil {
 		t.Fatal("base analysis consumer is not exact-key/read-only/isolated")
