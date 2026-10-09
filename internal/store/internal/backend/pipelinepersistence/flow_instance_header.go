@@ -128,11 +128,8 @@ func requireWorkflowHeaderProjection(ctx context.Context, tx *sql.Tx, postgres b
 	if expected.Transition.PreservesState() && (header.Revision != revision || header.CurrentState != expected.ExpectedState) {
 		return workflowEngineStateRevisionConflict(expected)
 	}
-	if lifecycle.WorkflowName != expected.WorkflowName || lifecycle.WorkflowVersion != expected.WorkflowVersion ||
-		lifecycle.ParentInstance != expected.ParentInstance || lifecycle.InstanceKey != expected.InstanceKey ||
-		lifecycle.Mode != expected.Mode || lifecycle.Status != expected.Status || lifecycle.StageDefined != expected.StageDefined ||
-		!lifecycle.TerminatedAt.Equal(expected.TerminatedAt) || !workflowCommitJSONEqual(lifecycle.Config, expected.Config) {
-		return fmt.Errorf("historical workflow header %s disagrees with fixed snapshot", expected.Identity.Route.InstancePath)
+	if err := requireHistoricalWorkflowDescriptor(lifecycle, expected); err != nil {
+		return err
 	}
 	if expected.EntityType != "" {
 		if !workflowCommitJSONEqual(target.State.Fields, expected.Fields) {
@@ -149,6 +146,16 @@ func requireWorkflowHeaderProjection(ctx context.Context, tx *sql.Tx, postgres b
 	}
 	if !workflowCommitJSONEqual(header.Gates, expected.Gates) || !workflowCommitJSONEqual(header.Bookkeeping, expected.Bookkeeping) || !workflowCommitJSONEqual(header.Accumulator, expected.Accumulator) {
 		return fmt.Errorf("historical workflow projection %s disagrees with fixed snapshot", expected.Identity.Route.InstancePath)
+	}
+	return nil
+}
+
+func requireHistoricalWorkflowDescriptor(lifecycle pipeline.WorkflowLifecycleCompanionPersistenceRecord, expected pipeline.WorkflowEngineStateRecord) error {
+	if lifecycle.WorkflowName != expected.WorkflowName || lifecycle.WorkflowVersion != expected.WorkflowVersion ||
+		lifecycle.ParentInstance != expected.ParentInstance || lifecycle.InstanceKey != expected.InstanceKey ||
+		lifecycle.Mode != expected.Mode || lifecycle.Status != expected.Status || lifecycle.StageDefined != expected.StageDefined ||
+		!lifecycle.TerminatedAt.Equal(expected.TerminatedAt) || !workflowCommitJSONEqual(lifecycle.Config, expected.Config) {
+		return fmt.Errorf("historical workflow header %s disagrees with fixed snapshot", expected.Identity.Route.InstancePath)
 	}
 	return nil
 }
