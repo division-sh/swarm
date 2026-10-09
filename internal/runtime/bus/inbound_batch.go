@@ -215,6 +215,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 	}
 	plan := InboundDeliveryPlan{events: append([]InboundDeliveryEvent(nil), validated.Events...)}
 	activationOwners := make(map[runtimeflowidentity.Route]int)
+	var runProposal pipeline.FlowInstanceRunProposal
 	release := func(cause error) (InboundDeliveryPlan, error) {
 		for _, prepared := range plan.prepared {
 			cause = errors.Join(cause, eb.AbandonPreparedPublish(context.WithoutCancel(ctx), prepared))
@@ -234,12 +235,32 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		if err != nil {
 			return release(err)
 		}
-		if err := eb.requireExistingRunActive(preparedCtx, admitted.Event()); err != nil {
-			return release(err)
+		if runProposal.Present() {
+			if err := runProposal.Validate(admitted.Event().RunID(), eb.sourceArtifactFact); err != nil {
+				return release(err)
+			}
+		} else {
+			missing, err := eb.requireExistingRunActive(preparedCtx, admitted)
+			if err != nil {
+				return release(err)
+			}
+			if missing {
+				runProposal, err = pipeline.NewFlowInstanceRunProposal(eb.sourceArtifactFact, admitted)
+				if err != nil {
+					return release(err)
+				}
+			}
+		}
+		preparedCtx = withConnectRoutePlanPreview(preparedCtx)
+		for _, command := range plan.commands {
+			preparedCtx, err = eb.deliveryPlanner.previewPreparedConstructions(preparedCtx, admitted.Event().RunID(), command.Activations)
+			if err != nil {
+				return release(err)
+			}
 		}
 		rawSettlement := eb.admitProviderRawSettlement(item.Kind, admitted.Event())
 		prepared, command, err := eb.prepareClosedPublication(preparedCtx, eventBusCommitPublishPlan{
-			bus: eb, event: admitted.Event(), admitted: admitted, providerRawSettlement: rawSettlement,
+			bus: eb, event: admitted.Event(), admitted: admitted, providerRawSettlement: rawSettlement, runProposal: runProposal,
 		})
 		if err != nil {
 			return release(err)

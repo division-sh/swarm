@@ -26,9 +26,10 @@ func connectPlanningPreview(ctx context.Context) bool {
 }
 
 type connectInstanceSelector struct {
-	source semanticview.Source
-	plan   pipeline.FlowInstanceActivationPlanner
-	index  pipeline.FlowInstanceIndexReader
+	source      semanticview.Source
+	plan        pipeline.FlowInstanceActivationPlanner
+	index       pipeline.FlowInstanceIndexReader
+	runProposal pipeline.FlowInstanceRunProposal
 }
 
 type connectInstanceSelection struct {
@@ -121,7 +122,7 @@ func (o connectInstanceSelector) Materialize(ctx context.Context, event events.E
 		prepared = preview.plans
 	}
 	selected, err := pipeline.PrepareFlowInstanceSelection(ctx, o.index, o.plan, pipeline.FlowInstanceSelectionRequest{
-		Lookup: lookup, Mode: selection.mode, MissingInstanceID: connectMissingInstanceID(plan, keys), Prepared: prepared,
+		Lookup: lookup, Mode: selection.mode, MissingInstanceID: connectMissingInstanceID(plan, keys), Prepared: prepared, RunProposal: o.runProposal,
 		Constructor: pipeline.FlowInstanceActivationRequest{ContractBundle: o.source, ConstructorInput: string(plan.ReceiverLocalEvent()), ResolvedKey: resolved,
 			PayloadProjection: projection, Bookkeeping: map[string]any{"last_source_event": event.ID()}, TriggerEvent: event},
 	})

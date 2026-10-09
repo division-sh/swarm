@@ -25,12 +25,18 @@ func (r connectRoutePlanResolver) addIndexedLookupPaths(ctx context.Context, run
 	if err != nil {
 		return err
 	}
-	instances, err := r.indexedInstances(ctx, scope)
-	if err != nil {
-		return err
-	}
-	for _, instance := range instances {
-		paths[instance.InstancePath] = struct{}{}
+	if r.lifecycle.runProposal.Present() {
+		if err := r.lifecycle.runProposal.Validate(runID, fact); err != nil {
+			return err
+		}
+	} else {
+		instances, err := r.indexedInstances(ctx, scope)
+		if err != nil {
+			return err
+		}
+		for _, instance := range instances {
+			paths[instance.InstancePath] = struct{}{}
+		}
 	}
 	proposals, err := r.prospectiveConnectInstances(ctx, runID, fact)
 	if err != nil {
@@ -131,7 +137,7 @@ func (r connectRoutePlanResolver) materializeKeylessConnect(ctx context.Context,
 	if err != nil {
 		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, err
 	}
-	selection, err := pipeline.PrepareFlowInstanceSelection(ctx, r.lifecycle.index, nil, pipeline.FlowInstanceSelectionRequest{Lookup: request, Mode: contracts.FlowInputResolutionModeSelect, Prepared: preparedConnectPlans(ctx)})
+	selection, err := pipeline.PrepareFlowInstanceSelection(ctx, r.lifecycle.index, nil, pipeline.FlowInstanceSelectionRequest{Lookup: request, Mode: contracts.FlowInputResolutionModeSelect, Prepared: preparedConnectPlans(ctx), RunProposal: r.lifecycle.runProposal})
 	if err != nil {
 		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, err
 	}

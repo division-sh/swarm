@@ -33,11 +33,15 @@ type FlowInstanceSelectionRequest struct {
 	MissingInstanceID string
 	Constructor       FlowInstanceActivationRequest
 	Prepared          []FlowInstanceActivationPlan
+	RunProposal       FlowInstanceRunProposal
 }
 
 // PrepareFlowInstanceSelection is the shared R5.1 select/create boundary.
 // A stored identity is never reconstructed from fields or a creation hash.
 func PrepareFlowInstanceSelection(ctx context.Context, reader FlowInstanceIndexReader, planner FlowInstanceActivationPlanner, request FlowInstanceSelectionRequest) (FlowInstanceSelection, error) {
+	if err := ctx.Err(); err != nil {
+		return FlowInstanceSelection{}, err
+	}
 	if reader == nil || !request.Lookup.Valid() || !request.Lookup.DeclaredSelection() {
 		return FlowInstanceSelection{}, fmt.Errorf("flow selection requires its admitted declared lookup and index owner")
 	}
@@ -50,6 +54,14 @@ func PrepareFlowInstanceSelection(ctx context.Context, reader FlowInstanceIndexR
 	if err != nil {
 		return FlowInstanceSelection{}, err
 	}
+	if request.RunProposal.Present() {
+		if err := request.RunProposal.Validate(request.Lookup.RunID(), request.Lookup.SourceFact()); err != nil {
+			return FlowInstanceSelection{}, err
+		}
+		if request.Lookup.ParentIdentity() != (flowidentity.Instance{}) && !parentPrepared {
+			return FlowInstanceSelection{}, fmt.Errorf("proposed run receiver requires its prepared construction parent")
+		}
+	}
 	if proposed != nil {
 		if request.Mode == contracts.FlowInputResolutionModeCreate {
 			owner, err := flowidentity.NewRunScopedFlowInstance(request.Lookup.RunID(), proposed.Identity.Route())
@@ -59,6 +71,12 @@ func PrepareFlowInstanceSelection(ctx context.Context, reader FlowInstanceIndexR
 			return FlowInstanceSelection{}, flowInstanceOccupiedConflict(owner)
 		}
 		return FlowInstanceSelection{Proposed: proposed}, nil
+	}
+	if request.RunProposal.Present() {
+		if request.Mode == contracts.FlowInputResolutionModeSelect {
+			return FlowInstanceSelection{}, &WorkflowInstanceLookupMiss{RequestedKey: request.Lookup.FlowID()}
+		}
+		return prepareMissingFlowInstance(ctx, planner, request)
 	}
 	observation, found, err := readFlowInstanceSelection(ctx, reader, request.Lookup, parentPrepared)
 	if err != nil {

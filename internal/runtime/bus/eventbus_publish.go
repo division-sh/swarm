@@ -456,6 +456,7 @@ type eventBusCommitPublishPlan struct {
 	dynamicFlowCreation   *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
 	outputConsumers       *runtimepinrouting.OutputConsumerResolver
 	stageFeedback         *runtimepipeline.WorkflowPublicationStageRequest
+	runProposal           runtimepipeline.FlowInstanceRunProposal
 }
 
 func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublishPlan) (PreparedPublish, bool, error) {
@@ -499,8 +500,15 @@ func (eb *EventBus) preparePublishCommand(ctx context.Context, plan eventBusComm
 	if err := eb.executionPosture.Admit(plan.event.ExecutionMode(), "event persistence and delivery"); err != nil {
 		return preparedCtx, PreparedPublish{}, PublicationCommand{}, err
 	}
-	if err := eb.requireExistingRunActive(preparedCtx, plan.event); err != nil {
+	missing, err := eb.requireExistingRunActive(preparedCtx, admitted)
+	if err != nil {
 		return preparedCtx, PreparedPublish{}, PublicationCommand{}, err
+	}
+	if missing {
+		plan.runProposal, err = runtimepipeline.NewFlowInstanceRunProposal(eb.sourceArtifactFact, admitted)
+		if err != nil {
+			return preparedCtx, PreparedPublish{}, PublicationCommand{}, err
+		}
 	}
 	prepared, command, err := eb.prepareClosedPublication(preparedCtx, plan)
 	if err == nil && plan.stageFeedback != nil {
@@ -526,34 +534,56 @@ func (eb *EventBus) applyCommittedPublication(ctx context.Context, prepared Prep
 	return consequences.prepared, true, err
 }
 
-func (eb *EventBus) requireExistingRunActive(ctx context.Context, event events.Event) error {
+func (eb *EventBus) requireExistingRunActive(ctx context.Context, admitted events.AdmittedEvent) (bool, error) {
+	event := admitted.Event()
 	if eb == nil || eb.store == nil {
-		return nil
+		return false, nil
 	}
 	runID := strings.TrimSpace(event.RunID())
 	if runID == "" {
-		return nil
+		return false, nil
 	}
 	if reader, ok := eb.store.(PreparedPublishEventReader); ok {
 		_, found, err := loadValidatedPreparedPublishEvent(ctx, reader, event.ID())
 		if err != nil {
-			return fmt.Errorf("load publication event before run preflight: %w", err)
+			return false, fmt.Errorf("load publication event before run preflight: %w", err)
 		}
 		if found {
-			return nil
+			return false, nil
 		}
 	}
 	owner, ok := eb.store.(interface {
 		RequirePublicationRunActive(context.Context, string) error
 	})
 	if !ok {
-		return nil
+		return false, nil
 	}
 	err := owner.RequirePublicationRunActive(ctx, runID)
-	if errors.Is(err, runtimerunlifecycle.ErrRunNotFound) {
-		return nil
+	if admitted.RunDisposition() == events.AdmittedRunCreateAuthorized && isolatedPublicationRunMissing(err, runID) {
+		return true, nil
 	}
-	return err
+	return false, err
+}
+
+func isolatedPublicationRunMissing(err error, runID string) bool {
+	for err != nil {
+		if missing, ok := err.(*runtimerunlifecycle.RunNotFoundError); ok {
+			return missing != nil && missing.RunID == runID
+		}
+		switch wrapped := err.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(children) != 1 {
+				return false
+			}
+			err = children[0]
+		case interface{ Unwrap() error }:
+			err = wrapped.Unwrap()
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func (eb *EventBus) finalizeCommittedFlowInstanceActivations(
@@ -753,6 +783,8 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.Event, publication eventBusCommitPublishPlan) (RoutePlan, error) {
 	planner := eb.deliveryPlanner
 	planner.recipientPolicy.prospective = publication.prospective
+	planner.recipientPolicy.runProposal = publication.runProposal
+	planner.connectPlanner.lifecycle.runProposal = publication.runProposal
 	planRoutes := func(context.Context, events.Event) (RoutePlan, error) {
 		return eb.planSubscribedRoutePlanWithPlanner(withClosedPublicationPlanning(ctx), evt, true, planner)
 	}

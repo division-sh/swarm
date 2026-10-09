@@ -275,7 +275,6 @@ func (s *managedNativeRecoveryDeliveryStore) ScanDeliveryContinuations(
 
 func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmission(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runtimeTestManagedLifecycleRunID)
 	module := managedNativeLifecycleModule(t, "recovered-native-agent")
 	managerStore := newManagedNativeLifecycleStore(t, managedNativeLifecycleAgent(t, module.SemanticSource()))
 	delivery := &managedNativeRecoveryDeliveryStore{}
@@ -287,6 +286,7 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 	)
 	deps.Config = cfg
 	deps.Options = managedNativeLifecycleOptions(t, "recovered-native-agent", probeRuntime, module)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), deps.Options.SourceArtifactFact.BundleHash()), runtimeTestManagedLifecycleRunID)
 	gatewayBinding, installGateway := startManagedNativeLifecycleGateway(t)
 	deps.Options.ToolGatewayBinding = gatewayBinding
 	rt, err := newScopedTestRuntime(t, ctx, deps)
@@ -353,7 +353,6 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 
 func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runtimeTestManagedLifecycleRunID)
 	predecessorStore := newManagedNativeLifecycleStore(t)
 	delivery := &managedNativeRecoveryDeliveryStore{}
 	predecessorDeps := managedNativeLifecycleDeps(
@@ -367,6 +366,12 @@ func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission
 		LLMRuntime:                       llm.NewNoopRuntime(llm.AnthropicAPIProviderContract()),
 		DisablePersistentStartupRecovery: true,
 	}
+	predecessorBundle, found := semanticview.Bundle(predecessorDeps.Options.WorkflowModule.SemanticSource())
+	if !found || predecessorBundle.SourceArtifact == nil {
+		t.Fatal("managed-native predecessor requires its actual source artifact")
+	}
+	predecessorDeps.Options.SourceArtifactFact = testSourceArtifactFact(t, predecessorBundle.SourceArtifact.BundleHash())
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), predecessorDeps.Options.SourceArtifactFact.BundleHash()), runtimeTestManagedLifecycleRunID)
 	predecessor, err := newScopedTestRuntime(t, ctx, predecessorDeps)
 	if err != nil {
 		t.Fatalf("NewRuntime(predecessor): %v", err)
@@ -390,9 +395,10 @@ func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission
 	)
 	candidateDeps.Config = managedNativeLifecycleConfig(true)
 	candidateDeps.Options = managedNativeLifecycleOptions(t, "replacement-native-agent", probeRuntime, module)
+	candidateCtx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), candidateDeps.Options.SourceArtifactFact.BundleHash()), runtimeTestManagedLifecycleRunID)
 	gatewayBinding, installGateway := startManagedNativeLifecycleGateway(t)
 	candidateDeps.Options.ToolGatewayBinding = gatewayBinding
-	candidate, err := newScopedTestRuntime(t, ctx, candidateDeps)
+	candidate, err := newScopedTestRuntime(t, candidateCtx, candidateDeps)
 	if err != nil {
 		t.Fatalf("NewRuntime(candidate): %v", err)
 	}
@@ -402,7 +408,7 @@ func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission
 		t.Fatalf("PrepareAuthorActivityCatalog(candidate): %v", err)
 	}
 	installGateway(candidate.ToolGateway.Handler())
-	if err := candidate.Start(ctx); err != nil {
+	if err := candidate.Start(candidateCtx); err != nil {
 		t.Fatalf("Start(candidate): %v", err)
 	}
 
@@ -443,10 +449,15 @@ func managedNativeLifecycleConfig(recovery bool) *config.Config {
 
 func managedNativeLifecycleOptions(t *testing.T, agentID string, modelRuntime llm.Runtime, module runtimepipeline.WorkflowModule) RuntimeOptions {
 	t.Helper()
+	bundle, found := semanticview.Bundle(module.SemanticSource())
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("managed-native lifecycle requires its actual source artifact")
+	}
 	return RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     modelRuntime,
+		SelfCheck:          false,
+		WorkflowModule:     module,
+		LLMRuntime:         modelRuntime,
+		SourceArtifactFact: testSourceArtifactFact(t, bundle.SourceArtifact.BundleHash()),
 		WorkspaceLifecycle: managedNativeLifecycleWorkspace{
 			claudeStartupWorkspaceStub: claudeStartupWorkspaceStub{
 				target: &workspace.Target{Container: "swarm-agent-" + agentID, Workdir: "/workspace"},

@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -419,6 +420,17 @@ func selectedRunTargetOwnerProjectionFromContext(ctx context.Context) (selectedR
 }
 
 func (p deliveryRecipientPolicy) loadSelectedRunTargetOwnerProjection(ctx context.Context) (selectedRunTargetOwnerProjection, error) {
+	if p.runProposal.Present() {
+		event, found := runtimecorrelation.InboundEventFromContext(ctx)
+		fact, present := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+		if !found || !present {
+			return selectedRunTargetOwnerProjection{}, fmt.Errorf("proposed target planning requires its admitted event and source")
+		}
+		if err := p.runProposal.Validate(event.RunID(), fact); err != nil {
+			return selectedRunTargetOwnerProjection{}, err
+		}
+		return selectedRunTargetOwnerProjection{prospective: p.prospective, context: ctx, source: p.semanticSource, required: p.requireTargetOwners, targetsAvailable: true}, nil
+	}
 	agents, agentsAvailable, err := p.loadActiveAgentDescriptors(ctx)
 	if err != nil {
 		return selectedRunTargetOwnerProjection{}, err
