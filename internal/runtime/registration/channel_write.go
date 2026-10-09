@@ -62,7 +62,7 @@ func FailChannelWrite(ctx context.Context, handle *runtimeeffects.Handle, toolID
 // CompleteChannelWrite persists observed provider evidence and the compiled
 // receipt through the same journal/selected-store settlement owner for HTTP/SDK.
 func CompleteChannelWrite(ctx context.Context, handle *runtimeeffects.Handle, toolID string, tool runtimecontracts.ToolSchemaEntry, output any,
-	observation map[string]any, raw []byte, launchErr, responseErr error, project func(any) (map[string]any, error),
+	observation map[string]any, raw []byte, launchErr, responseErr error,
 ) (DeliveryResult, error) {
 	source, err := channelWriteSource(handle)
 	if err != nil {
@@ -90,12 +90,13 @@ func CompleteChannelWrite(ctx context.Context, handle *runtimeeffects.Handle, to
 	}
 	settlement["response_fingerprint"] = runtimeeffects.Fingerprint(raw)
 	if source == "channel_delivery" {
-		if project == nil {
+		projection, compiled := tool.CompiledResultExecution()
+		if !compiled {
 			err = fmt.Errorf("channel delivery requires the compiled result projection")
 			return result, errors.Join(launchErr, observationErr, handle.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
 				"channel_delivery_projection_unconfirmed", source, "project_result", map[string]any{"tool": strings.TrimSpace(toolID)}, err))
 		}
-		output, err = project(output)
+		output, err = projection.Project(output)
 		if err != nil {
 			return result, errors.Join(launchErr, observationErr, handle.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
 				"channel_delivery_projection_unconfirmed", source, "project_result", map[string]any{"tool": strings.TrimSpace(toolID)}, err))

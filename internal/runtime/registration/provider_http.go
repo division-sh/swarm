@@ -165,21 +165,21 @@ func (e HTTPExecutor) applyWithReadback(ctx context.Context, toolID string, tool
 }
 
 func (e HTTPExecutor) DeliverChannelConfirmation(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string) (DeliveryResult, error) {
-	return e.deliverChannelWrite(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelConfirmation, "channel_confirmation", nil)
+	return e.deliverChannelWrite(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelConfirmation, "channel_confirmation")
 }
 
-func (e HTTPExecutor) DeliverChannelMessage(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string, project func(any) (map[string]any, error)) (DeliveryResult, error) {
-	if project == nil {
+func (e HTTPExecutor) DeliverChannelMessage(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string) (DeliveryResult, error) {
+	if _, compiled := tool.CompiledResultExecution(); !compiled {
 		return DeliveryResult{}, fmt.Errorf("channel delivery requires the compiled result projection")
 	}
-	return e.deliverChannelWrite(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelDelivery, "channel_delivery", project)
+	return e.deliverChannelWrite(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelDelivery, "channel_delivery")
 }
 
 func (e HTTPExecutor) AcknowledgeChannelAction(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string) (DeliveryResult, error) {
-	return e.deliverChannelWrite(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelActionAck, "channel_action_ack", nil)
+	return e.deliverChannelWrite(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelActionAck, "channel_action_ack")
 }
 
-func (e HTTPExecutor) deliverChannelWrite(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string, begin func(context.Context, []byte, map[string]string) (*runtimeeffects.Handle, error), source string, project func(any) (map[string]any, error)) (DeliveryResult, error) {
+func (e HTTPExecutor) deliverChannelWrite(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string, begin func(context.Context, []byte, map[string]string) (*runtimeeffects.Handle, error), source string) (DeliveryResult, error) {
 	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector || tool.Effect() != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		return DeliveryResult{}, fmt.Errorf("%s tool %q has an invalid contract", source, strings.TrimSpace(toolID))
 	}
@@ -208,7 +208,7 @@ func (e HTTPExecutor) deliverChannelWrite(ctx context.Context, toolID string, to
 		return FailChannelWrite(ctx, handle, toolID, launched, launchErr, err)
 	}
 	output, err := projectProviderResponse(toolID, tool, response, raw, secrets)
-	return CompleteChannelWrite(ctx, handle, toolID, tool, output, map[string]any{"status": response.StatusCode}, raw, launchErr, err, project)
+	return CompleteChannelWrite(ctx, handle, toolID, tool, output, map[string]any{"status": response.StatusCode}, raw, launchErr, err)
 }
 
 func (p *PendingApply) SettleReadback(ctx context.Context, exact bool, cause error) error {

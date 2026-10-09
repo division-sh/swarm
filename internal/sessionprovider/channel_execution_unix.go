@@ -26,15 +26,14 @@ type sessionChannelExecutor struct {
 }
 
 func (e sessionChannelExecutor) DeliverChannelConfirmation(ctx context.Context, operation string, input map[string]any, lineage map[string]string) (registration.DeliveryResult, error) {
-	return e.deliver(ctx, operation, input, lineage, runtimeeffects.AuthorityChannelConfirmation, nil)
+	return e.deliver(ctx, operation, input, lineage, runtimeeffects.AuthorityChannelConfirmation)
 }
 
 func (e sessionChannelExecutor) DeliverChannelMessage(ctx context.Context, operation string, input map[string]any, lineage map[string]string) (registration.DeliveryResult, error) {
-	return e.deliver(ctx, operation, input, lineage, runtimeeffects.AuthorityChannelDelivery,
-		func(result any) (map[string]any, error) { return e.plan.ProjectOperationOutput(operation, result) })
+	return e.deliver(ctx, operation, input, lineage, runtimeeffects.AuthorityChannelDelivery)
 }
 
-func (e sessionChannelExecutor) deliver(ctx context.Context, operation string, input map[string]any, lineage map[string]string, kind runtimeeffects.AuthorityKind, project func(any) (map[string]any, error)) (registration.DeliveryResult, error) {
+func (e sessionChannelExecutor) deliver(ctx context.Context, operation string, input map[string]any, lineage map[string]string, kind runtimeeffects.AuthorityKind) (registration.DeliveryResult, error) {
 	toolID, tool, err := e.plan.ConnectorOperation(operation)
 	if err != nil {
 		return registration.DeliveryResult{}, err
@@ -42,6 +41,11 @@ func (e sessionChannelExecutor) deliver(ctx context.Context, operation string, i
 	target, native := tool.InProcess()
 	if !native || target != runtimecontracts.ToolInProcessWhatsAppSendText || e.owner == nil {
 		return registration.DeliveryResult{}, fmt.Errorf("native channel write requires its owned WhatsApp send target")
+	}
+	if kind == runtimeeffects.AuthorityChannelDelivery {
+		if _, compiled := tool.CompiledResultExecution(); !compiled {
+			return registration.DeliveryResult{}, fmt.Errorf("native channel delivery requires the compiled result projection")
+		}
 	}
 	fingerprint, err := registration.ChannelWriteFingerprint(toolID, tool, input)
 	if err != nil {
@@ -99,7 +103,7 @@ func (e sessionChannelExecutor) deliver(ctx context.Context, operation string, i
 		err = fmt.Errorf("native send acknowledgment contradicts the launched message")
 	}
 	return registration.CompleteChannelWrite(ctx, handle, toolID, tool, output,
-		map[string]any{"provider": "whatsapp", "message_id": string(response.ID)}, raw, launchErr, err, project)
+		map[string]any{"provider": "whatsapp", "message_id": string(response.ID)}, raw, launchErr, err)
 }
 
 func (e sessionChannelExecutor) requireChannelDestination(ctx context.Context, selected runtimeeffects.Authority, destination string) error {
