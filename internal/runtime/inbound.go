@@ -251,6 +251,10 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		http.Error(w, fmt.Sprintf("ingress target %q provider %q has no compiled admission plan; request rejected before provider admission", target.Alias, provider), http.StatusServiceUnavailable)
 		return
 	}
+	if target.AdmissionPlan.Transport() != packs.ChannelTransportWebhook {
+		http.Error(w, "session ingress cannot accept webhook requests", http.StatusServiceUnavailable)
+		return
+	}
 	if g.admitCredentials == nil {
 		http.Error(w, "standing ingress credential admission unavailable", http.StatusServiceUnavailable)
 		return

@@ -46,6 +46,7 @@ const (
 
 const (
 	CapabilityReceiveHTTPSRoute    = "receive_https_route"
+	CapabilityReceiveSessionEvents = "receive_session_events"
 	CapabilityVerifySecret         = "verify_secret"
 	CapabilityEmitEvent            = "emit_event"
 	CapabilityPersistDedupeMarkers = "persist_dedupe_markers"
@@ -97,6 +98,7 @@ type TriggerEventFieldDescriptor struct {
 }
 
 type TriggerAdmission struct {
+	Transport             ChannelTransport     `json:"transport"`
 	BindingEnabled        *bool                `json:"binding_enabled,omitempty"`
 	BindingBlockReason    string               `json:"binding_block_reason,omitempty"`
 	RecoveryOperationID   string               `json:"recovery_operation_id,omitempty"`
@@ -191,7 +193,7 @@ func ProviderHumanCodeValues() map[userfacing.HumanCodeFamily][]string {
 			string(StatusReady), string(StatusNotReady), string(StatusAvailable),
 		},
 		userfacing.HumanCodeProviderCapability: {
-			CapabilityReceiveHTTPSRoute, CapabilityVerifySecret, CapabilityEmitEvent,
+			CapabilityReceiveHTTPSRoute, CapabilityReceiveSessionEvents, CapabilityVerifySecret, CapabilityEmitEvent,
 			CapabilityPersistDedupeMarkers, CapabilityCallProviderAction,
 			CapabilityLowerThroughActivity, CapabilityJournalAttempts,
 			CapabilitySatisfyPackInterface, CapabilityDeliverChannel,
@@ -533,6 +535,9 @@ func normalizeProviderTriggerSubject(subject *Subject) (SubjectStatus, error) {
 			return "", fmt.Errorf("effective provider trigger subject %q requires typed trigger_admission", subject.ID)
 		}
 		admission := subject.TriggerAdmission
+		if err := validateTriggerTransportSubject(*subject); err != nil {
+			return "", err
+		}
 		if admission.BindingBlockReason != "" {
 			if admission.BindingEnabled == nil || *admission.BindingEnabled {
 				return "", fmt.Errorf("effective provider trigger subject %q has a blocked enabled binding", subject.ID)
@@ -570,7 +575,7 @@ func normalizeProviderTriggerSubject(subject *Subject) (SubjectStatus, error) {
 		if admission.PolicySource != "verified_pack" && admission.PolicySource != "raw_declaration" {
 			return "", fmt.Errorf("effective provider trigger subject %q has invalid policy_source %q", subject.ID, admission.PolicySource)
 		}
-		allowedAuth := map[string]bool{"TOKEN_EQUALITY": true, "TOKEN": true, "HMAC_SHA256": true, "HMAC_SHA1": true, "UNAUTHENTICATED": true}
+		allowedAuth := map[string]bool{"TOKEN_EQUALITY": true, "TOKEN": true, "HMAC_SHA256": true, "HMAC_SHA1": true, "UNAUTHENTICATED": true, "SESSION_ACCOUNT": true}
 		if !allowedAuth[admission.RequestAuthentication] {
 			return "", fmt.Errorf("effective provider trigger subject %q has invalid request_authentication %q", subject.ID, admission.RequestAuthentication)
 		}
@@ -609,6 +614,12 @@ func normalizeProviderTriggerSubject(subject *Subject) (SubjectStatus, error) {
 		return StatusAvailable, nil
 	}
 	if subject.Applicability == "effective" {
+		if subject.TriggerAdmission.Transport == ChannelTransportSession {
+			if subject.TriggerAdmission.BindingEnabled != nil && *subject.TriggerAdmission.BindingEnabled {
+				return StatusReady, nil
+			}
+			return StatusNotReady, nil
+		}
 		unauthenticated := subject.TriggerAdmission.RequestAuthentication == "UNAUTHENTICATED"
 		if unauthenticated && len(subject.Requirements) != 0 {
 			return "", fmt.Errorf("effective unauthenticated provider trigger subject %q must not carry secret requirements", subject.ID)
@@ -641,6 +652,39 @@ func normalizeProviderTriggerSubject(subject *Subject) (SubjectStatus, error) {
 		return StatusNotReady, nil
 	}
 	return "", fmt.Errorf("provider trigger subject %q has invalid applicability %q", subject.ID, subject.Applicability)
+}
+
+func validateTriggerTransportSubject(subject Subject) error {
+	admission := subject.TriggerAdmission
+	if _, err := admission.Transport.ActivationPosture(); err != nil {
+		return fmt.Errorf("effective provider trigger subject %q: %w", subject.ID, err)
+	}
+	if admission.Transport == ChannelTransportWebhook {
+		if admission.RequestAuthentication == "SESSION_ACCOUNT" {
+			return fmt.Errorf("effective webhook provider trigger subject %q cannot claim session authentication", subject.ID)
+		}
+		return nil
+	}
+	if admission.RequestAuthentication != "SESSION_ACCOUNT" || admission.PolicySource != "verified_pack" ||
+		admission.SignedPayload != "" || admission.DigestEncoding != "" || len(subject.Requirements) != 0 {
+		return fmt.Errorf("effective session provider trigger subject %q requires verified account admission without HTTP or secret claims", subject.ID)
+	}
+	receivers := 0
+	for _, capability := range subject.Capabilities {
+		switch capability.Code {
+		case CapabilityReceiveHTTPSRoute, CapabilityVerifySecret:
+			return fmt.Errorf("effective session provider trigger subject %q cannot claim webhook capabilities", subject.ID)
+		case CapabilityReceiveSessionEvents:
+			if capability.Target != subject.Provider {
+				return fmt.Errorf("effective session provider trigger subject %q capability contradicts its provider", subject.ID)
+			}
+			receivers++
+		}
+	}
+	if receivers != 1 {
+		return fmt.Errorf("effective session provider trigger subject %q requires exactly one session receive capability", subject.ID)
+	}
+	return nil
 }
 
 func validateTriggerRequirement(subjectID string, requirement Requirement) error {
@@ -713,6 +757,7 @@ func RenderSubject(subject Subject, verbose bool) string {
 		}
 		parts = append(parts,
 			"alias="+admission.Alias,
+			"transport="+string(admission.Transport),
 			"policy_source="+admission.PolicySource,
 			"request_authentication="+admission.RequestAuthentication,
 			"event="+admission.Event,
@@ -788,7 +833,17 @@ func RenderEffectiveTriggerReadiness(subject Subject) string {
 	authentication := subject.TriggerAdmission.RequestAuthentication
 	parts = append(parts, authentication)
 	if subject.TriggerAdmission.BindingBlockReason == "recovery_required" {
-		parts = append(parts, "recovery required", "fix: "+subject.TriggerAdmission.RecoveryCommand+" with fresh credentials and complete the required ceremony")
+		ceremony := " with fresh credentials and complete the required ceremony"
+		if subject.TriggerAdmission.Transport == ChannelTransportSession {
+			ceremony = " and complete the required session admission and ceremony"
+		}
+		parts = append(parts, "recovery required", "fix: "+subject.TriggerAdmission.RecoveryCommand+ceremony)
+		return strings.Join(parts, " · ")
+	}
+	if subject.TriggerAdmission.Transport == ChannelTransportSession {
+		if subject.Status != StatusReady {
+			parts = append(parts, "session admission required")
+		}
 		return strings.Join(parts, " · ")
 	}
 	if authentication == "UNAUTHENTICATED" {

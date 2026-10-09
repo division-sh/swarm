@@ -2230,6 +2230,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 	}
 	trigger := packs.TriggerPackDescriptor{
 		Identity: packs.MustPackIdentity("provider.mock", "0.1.0", "sha256:"+strings.Repeat("b", 64), packs.TypeTrigger, packs.MustPackSource("test", "mock-trigger")), Provider: "mock",
+		Transport:  packs.ChannelTransportWebhook,
 		Generation: triggergeneration.FromCanonicalBytes([]byte("mock-trigger-generation")),
 		Events: map[string]packs.TriggerEvent{
 			"mock.action": {Name: "mock.action", Fields: triggerFields("token", "cursor", "principal", "room", "scope", "message_ref")},

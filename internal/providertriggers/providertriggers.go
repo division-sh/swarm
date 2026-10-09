@@ -149,8 +149,9 @@ func (s *CatalogSnapshot) PackDescriptors() []packs.TriggerPackDescriptor {
 			events[output.Event] = packs.TriggerEvent{Name: output.Event, Fields: fields}
 		}
 		out = append(out, packs.TriggerPackDescriptor{
-			Identity: entry.identity,
-			Provider: entry.manifest.Provider(), Generation: s.generation, Events: events,
+			Identity:  entry.identity,
+			Transport: entry.manifest.Transport(),
+			Provider:  entry.manifest.Provider(), Generation: s.generation, Events: events,
 		})
 	}
 	return out
@@ -336,12 +337,17 @@ func DerivedCapabilities(manifest Manifest) packs.Capabilities {
 	}
 	sort.Strings(eventNames)
 	verifySecret := ""
+	httpsRoute, sessionEvents := "/webhooks/{alias}/"+provider, ""
+	if manifest.Transport() == packs.ChannelTransportSession {
+		httpsRoute, sessionEvents = "", provider
+	}
 	if manifest.RequiresSecret() {
 		verifySecret = "webhook_signing." + provider
 	}
 	return packs.Capabilities{
 		Can: packs.CanCapabilities{
-			ReceiveHTTPSRoute:    "/webhooks/{alias}/" + provider,
+			ReceiveHTTPSRoute:    httpsRoute,
+			ReceiveSessionEvents: sessionEvents,
 			VerifySecret:         verifySecret,
 			EmitEvents:           eventNames,
 			PersistDedupeMarkers: true,
@@ -376,6 +382,9 @@ func (p LoadedPack) CapabilitySubject() (packs.Subject, error) {
 	}
 	if route := strings.TrimSpace(capabilities.Can.ReceiveHTTPSRoute); route != "" {
 		subject.Capabilities = append(subject.Capabilities, packs.Capability{Code: packs.CapabilityReceiveHTTPSRoute, Target: route})
+	}
+	if session := capabilities.Can.ReceiveSessionEvents; session != "" {
+		subject.Capabilities = append(subject.Capabilities, packs.Capability{Code: packs.CapabilityReceiveSessionEvents, Target: session})
 	}
 	if secret := strings.TrimSpace(capabilities.Can.VerifySecret); secret != "" {
 		subject.Capabilities = append(subject.Capabilities, packs.Capability{Code: packs.CapabilityVerifySecret, Target: secret})
@@ -554,6 +563,7 @@ func (req Request) withProvider(provider string) Request {
 
 type manifestDefinition struct {
 	Provider              string                    `yaml:"provider,omitempty"`
+	Transport             packs.ChannelTransport    `yaml:"transport,omitempty"`
 	PayloadObjectRequired bool                      `yaml:"payload_object_required,omitempty"`
 	PayloadObjectError    string                    `yaml:"payload_object_error,omitempty"`
 	PayloadSource         string                    `yaml:"payload_source,omitempty"`
@@ -667,6 +677,16 @@ func (m manifestDefinition) validate() error {
 	provider := NormalizeProviderName(m.Provider)
 	if provider == "" {
 		return fmt.Errorf("provider is required")
+	}
+	if m.Transport == packs.ChannelTransportSession {
+		for _, source := range []ValueSource{m.DeliveryID, m.EventType} {
+			if source.Header != "" || source.QueryParam != "" || source.FormParam != "" || !source.Required || source.sourceCount() != 1 {
+				return fmt.Errorf("%s session manifest requires exact payload delivery_id and event_type; HTTP sources are forbidden", provider)
+			}
+		}
+		if m.Ack.Mode != "durable_before_dispatch" {
+			return fmt.Errorf("%s session manifest requires ack.mode durable_before_dispatch", provider)
+		}
 	}
 	signatureType := strings.TrimSpace(m.Signature.Type)
 	if m.Secret.Required && signatureType == "" {

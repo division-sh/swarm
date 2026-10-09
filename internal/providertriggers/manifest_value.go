@@ -3,6 +3,7 @@ package providertriggers
 import (
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -32,6 +33,13 @@ func (m Manifest) Provider() string {
 		return ""
 	}
 	return m.value.definition.Provider
+}
+
+func (m Manifest) Transport() packs.ChannelTransport {
+	if m.value == nil {
+		return ""
+	}
+	return m.value.definition.Transport
 }
 
 func (m Manifest) RequiresSecret() bool {
@@ -97,6 +105,9 @@ func (m Manifest) ProjectNormalizedPayload(body []byte) ([]DeliveryEvent, error)
 func (m Manifest) admitRequest(req Request) (manifestAdmission, error) {
 	if err := m.Validate(); err != nil {
 		return manifestAdmission{}, err
+	}
+	if m.Transport() != packs.ChannelTransportWebhook {
+		return manifestAdmission{}, unauthorized("session trigger requires its retained account and activation authority, not a webhook request")
 	}
 	return m.value.definition.admitRequest(req)
 }

@@ -41,6 +41,7 @@ const (
 	RequestAuthenticationHMACSHA256    RequestAuthentication = "HMAC_SHA256"
 	RequestAuthenticationHMACSHA1      RequestAuthentication = "HMAC_SHA1"
 	RequestAuthenticationNone          RequestAuthentication = "UNAUTHENTICATED"
+	RequestAuthenticationSession       RequestAuthentication = "SESSION_ACCOUNT"
 )
 
 const UnsignedWebhookAcknowledgement = "unsigned_webhook"
@@ -84,6 +85,7 @@ type RawAdmissionPolicy struct {
 
 type InboundAdmissionPlan struct {
 	generation            triggergeneration.Generation
+	transport             packs.ChannelTransport
 	provider              string
 	policySource          PolicySource
 	requestAuthentication RequestAuthentication
@@ -208,10 +210,16 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 		return InboundAdmissionPlan{}, err
 	}
 	ack := strings.TrimSpace(declaration.Acknowledge)
-	if err := validateAcknowledgement(alias, provider, auth, ack, true); err != nil {
-		return InboundAdmissionPlan{}, err
+	if auth == RequestAuthenticationSession {
+		if signingSecret != "" || ack != "" {
+			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q session transport forbids signing_secret and webhook acknowledgement", alias, provider)
+		}
+	} else {
+		if err := validateAcknowledgement(alias, provider, auth, ack, true); err != nil {
+			return InboundAdmissionPlan{}, err
+		}
 	}
-	requiresSecret := auth != RequestAuthenticationNone
+	requiresSecret := auth != RequestAuthenticationNone && auth != RequestAuthenticationSession
 	if requiresSecret && signingSecret == "" {
 		return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q requires signing_secret for %s request authentication", alias, provider, auth)
 	}
@@ -222,6 +230,7 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 	identity := entry.identity
 	return InboundAdmissionPlan{
 		generation: s.Generation(), provider: provider, policySource: PolicySourceVerifiedPack,
+		transport:             manifest.Transport(),
 		requestAuthentication: auth, packIdentity: &identity, manifest: &manifest,
 		requiresSecret: requiresSecret, outputs: manifest.OutputManifest(),
 		acknowledgedUnsigned: ack == UnsignedWebhookAcknowledgement,
@@ -258,6 +267,7 @@ func (s *CatalogSnapshot) compileRawAdmission(alias, provider, signingSecret str
 	}
 	return InboundAdmissionPlan{
 		generation: generation, provider: provider, policySource: PolicySourceRawDeclaration,
+		transport:             packs.ChannelTransportWebhook,
 		requestAuthentication: auth, raw: &policy, requiresSecret: requiresSecret,
 		outputs: []OutputManifest{{Kind: OutputKindRaw, EventName: EventNameManifest{Literal: policy.Event}}}, acknowledgedUnsigned: ack == UnsignedWebhookAcknowledgement,
 	}, nil
@@ -274,6 +284,9 @@ func hasRawFields(declaration AdmissionDeclaration) bool {
 func manifestRequestAuthentication(manifest Manifest) (RequestAuthentication, error) {
 	if err := manifest.Validate(); err != nil {
 		return "", err
+	}
+	if manifest.Transport() == packs.ChannelTransportSession {
+		return RequestAuthenticationSession, nil
 	}
 	switch manifest.value.definition.Signature.Type {
 	case signatureTypeTokenEquality:
@@ -370,14 +383,17 @@ func compileRawPolicy(alias, provider string, declaration AdmissionDeclaration) 
 }
 
 func (p InboundAdmissionPlan) Valid() bool {
-	return p.provider != "" && p.generation.Valid() && (p.manifest != nil || p.raw != nil)
+	return p.provider != "" && p.generation.Valid() &&
+		(p.Transport() == packs.ChannelTransportWebhook || p.Transport() == packs.ChannelTransportSession) &&
+		(p.manifest != nil || p.raw != nil)
 }
 
 func (p InboundAdmissionPlan) Generation() triggergeneration.Generation {
 	return p.generation
 }
-func (p InboundAdmissionPlan) Provider() string           { return p.provider }
-func (p InboundAdmissionPlan) PolicySource() PolicySource { return p.policySource }
+func (p InboundAdmissionPlan) Transport() packs.ChannelTransport { return p.transport }
+func (p InboundAdmissionPlan) Provider() string                  { return p.provider }
+func (p InboundAdmissionPlan) PolicySource() PolicySource        { return p.policySource }
 func (p InboundAdmissionPlan) RequestAuthentication() RequestAuthentication {
 	return p.requestAuthentication
 }
@@ -453,6 +469,7 @@ func (p InboundAdmissionPlan) EffectiveCapabilitySubject(req EffectiveSubjectReq
 	provenance := "project"
 	admission := &packs.TriggerAdmission{
 		BundleHash: bundleHash, FlowPath: req.FlowPath, Alias: alias, CatalogGeneration: p.generation.Diagnostic(),
+		Transport:    p.transport,
 		PolicySource: string(p.policySource), RequestAuthentication: string(p.requestAuthentication), Event: eventName,
 	}
 	if p.manifest != nil {
@@ -460,7 +477,7 @@ func (p InboundAdmissionPlan) EffectiveCapabilitySubject(req EffectiveSubjectReq
 		provenance = p.packIdentity.Source().Provenance()
 		admission.SignedPayload = p.manifest.value.definition.Signature.SignedPayload
 		admission.DigestEncoding = p.manifest.value.definition.Signature.digestEncoding()
-		if p.manifest.value.definition.Signature.Type == signatureTypeTokenEquality || p.requestAuthentication == RequestAuthenticationNone {
+		if p.manifest.value.definition.Signature.Type == signatureTypeTokenEquality || p.requestAuthentication == RequestAuthenticationNone || p.Transport() == packs.ChannelTransportSession {
 			admission.DigestEncoding = ""
 		}
 		admission.Pack = &packs.TriggerPackIdentity{
@@ -471,13 +488,18 @@ func (p InboundAdmissionPlan) EffectiveCapabilitySubject(req EffectiveSubjectReq
 		admission.SignedPayload = "raw_body"
 		admission.DigestEncoding = p.raw.Authentication.Encoding
 	}
+	receive := packs.Capability{Code: packs.CapabilityReceiveHTTPSRoute, Target: "/webhooks/" + alias + "/" + p.provider}
+	if p.Transport() == packs.ChannelTransportSession {
+		receive = packs.Capability{Code: packs.CapabilityReceiveSessionEvents, Target: p.provider}
+		admission.BindingEnabled = new(bool)
+	}
 	subject := packs.Subject{
 		ID:   id,
 		Kind: packs.SubjectProviderTrigger, Provider: p.provider, Source: source,
 		Provenance: provenance, SourcePath: strings.TrimSpace(req.SourcePath), Applicability: "effective",
 		TriggerAdmission: admission,
 		Capabilities: []packs.Capability{
-			{Code: packs.CapabilityReceiveHTTPSRoute, Target: "/webhooks/" + alias + "/" + p.provider},
+			receive,
 			{Code: packs.CapabilityEmitEvent, Target: eventName},
 			{Code: packs.CapabilityPersistDedupeMarkers},
 		},
@@ -531,6 +553,9 @@ func (p InboundAdmissionPlan) Accept(req Request) (Delivery, error) {
 func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error) {
 	if !p.Valid() {
 		return AdmittedRequest{}, badRequest("compiled inbound admission plan is required")
+	}
+	if p.Transport() != packs.ChannelTransportWebhook {
+		return AdmittedRequest{}, unauthorized("session trigger requires its retained account and activation authority, not a webhook request")
 	}
 	provider := NormalizeProviderName(req.Provider)
 	if provider == "" {

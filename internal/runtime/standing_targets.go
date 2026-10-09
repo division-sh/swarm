@@ -257,7 +257,8 @@ func evaluateProviderTriggerCapabilitySubject(ctx context.Context, subject packs
 		return packs.Subject{}, fmt.Errorf("target credential evaluation requires one effective provider trigger subject")
 	}
 	base := normalized[0]
-	if base.TriggerAdmission.RequestAuthentication == string(providertriggers.RequestAuthenticationNone) {
+	if base.TriggerAdmission.Transport == packs.ChannelTransportSession ||
+		base.TriggerAdmission.RequestAuthentication == string(providertriggers.RequestAuthenticationNone) {
 		return base, nil
 	}
 	if len(subject.Requirements) != 1 || subject.Requirements[0].Satisfied != nil || strings.TrimSpace(subject.Requirements[0].Status) != "" || strings.TrimSpace(subject.Requirements[0].Remediation) != "" || strings.TrimSpace(subject.Requirements[0].Source) != "" {

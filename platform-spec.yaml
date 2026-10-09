@@ -10665,6 +10665,7 @@ tool_model:
         verified installed connector body. Envelope narrative is never a renderer source.
       known_capability_codes:
       - receive_https_route
+      - receive_session_events
       - verify_secret
       - emit_event
       - persist_dedupe_markers
@@ -12260,6 +12261,7 @@ tool_model:
         HMAC_SHA256: pack or raw HMAC-SHA256
         HMAC_SHA1: pack HMAC-SHA1
         UNAUTHENTICATED: pack with no signature or explicit raw none
+        SESSION_ACCOUNT: explicitly session-transport verified pack; retained provider session/account and onboarding/activation owners must establish authority before shared BODY admission
       catalog_snapshot: >
         Each successful configured pack load produces one immutable CatalogSnapshot. Its deterministic generation id is
         SHA-256 over sorted semantic tuples `(pack id, normalized provider, version, exact manifest_hash, provenance)`.
@@ -12267,11 +12269,22 @@ tool_model:
         manifests with `secret.required: false` are invalid at load, and every signed execution rejects an empty runtime key.
       plan: >
         Verification compiles every standing ingress binding into one immutable InboundAdmissionPlan containing the exact
-        catalog generation, normalized provider, policy_source (`verified_pack` or `raw_declaration`), exact
+        catalog generation, normalized provider, explicit transport (`webhook` or `session`), policy_source (`verified_pack` or `raw_declaration`), exact
         request_authentication, resolved pack id/version/manifest_hash/provenance when applicable, copied executable policy,
         secret requirement, typed raw-versus-normalized output manifest, event-name policy, and unsigned acknowledgement fact. Runtime targets and effective capability
         subjects carry this plan; a target without a valid plan is unavailable and the gateway fails before credential
         lookup, body interpretation, marker persistence, or publish.
+      session_transport: >
+        The verified trigger BODY selects session transport explicitly; provider names, absent signing secrets,
+        SDK pointers, connected booleans and structural session-account records do not select or authorize it.
+        Session pack admission forbids signing_secret and unsigned_webhook acknowledgement, and raw admission remains
+        webhook-only. Both compiled-plan and direct BODY HTTP entry points reject session transport before interpretation.
+        An admitted retained account and exact original onboarding/activation responsibility must authenticate session
+        input before it reaches the same post-authentication BODY, normalization and sealed publication admission owners.
+        Effective capability readback carries the explicit transport and SESSION_ACCOUNT authentication, claims
+        receive_session_events rather than receive_https_route, and has no dummy signing requirement. The base session
+        projection is NOT_READY until its existing lifecycle owner admits the exact binding; declaration alone grants
+        no execution. This does not install an arbitrary session provider or weaken webhook signature rules.
       bundle_generation: >
         Each loaded BundleContext owns the immutable trigger catalog, connector registry, channel plans, installed subjects,
         and effective subjects derived from that bundle's exact EffectivePackInventory. Boot compiles each context only from
@@ -12443,6 +12456,16 @@ tool_model:
       - arbitrary code/WASM before provider-trigger admission
     manifest_vocabulary:
       provider: normalized provider token matched from `/webhooks/{alias}/{provider}` after alias resolves exactly one loaded standing ingress target
+      transport: >
+        Omission selects webhook. Authored text may be exactly webhook or session; nulls, empty text, other kinds,
+        unknown values and whitespace variants fail at the exact source path. Session BODY forbids secret, signature,
+        challenge and payload_source on presence, including false or empty inactive blocks. Its required delivery_id
+        and event_type each use one exact JSON payload path or literal, never HTTP header/query/form input. Session
+        ack.mode must be durable_before_dispatch: provider capture must survive before acknowledgment, not replay an
+        uncertain send. Envelope capabilities derive the same exclusive transport: receive_https_route or
+        receive_session_events, never both; session envelopes forbid verify_secret even on inactive empty presence.
+        The accepted trigger descriptor retains that transport, and the channel compiler requires exact equality with
+        its declared transport; missing transport or a webhook/session mismatch cannot choose another implementation.
       payload_object_required: fail closed when the decoded request payload is not a JSON object
       payload_source: >
         Source for the provider payload embedded in the published normalized event. The default `payload` uses the decoded
@@ -25950,6 +25973,7 @@ cli_specification:
               machine_owner: internal/packs capability code constants populated from accepted provider bodies
               phrases:
                 receive_https_route: receive HTTPS route
+                receive_session_events: receive authenticated session events
                 verify_secret: verify named secret
                 emit_event: emit named event
                 persist_dedupe_markers: persist dedupe markers
