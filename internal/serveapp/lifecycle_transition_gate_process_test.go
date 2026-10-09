@@ -35,7 +35,7 @@ func TestServedCompiledGateOutcomeRestartOnBothStores(t *testing.T) {
 				t.Fatalf("gate commit barrier not reached\n%s", first.output.String())
 			}
 			requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "approved")
-			before := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
+			before := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 			if len(before) != 1 {
 				t.Fatalf("gate did not commit before crash: %#v", before)
 			}
@@ -64,8 +64,8 @@ func TestServedCompiledGateOutcomeRestartOnBothStores(t *testing.T) {
 			second, rt := start(false)
 			requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "done")
 			waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
-			after := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
-			if len(after) != 1 || !reflect.DeepEqual(readLifecycleTransitionAtCut(t, rt, seed.RunID, entityID, outcomeID), before[0]) || after[0].TriggerEventID != outcomeID || after[0].From != "approved" || after[0].To != "done" {
+			after := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
+			if len(after) != 1 || !reflect.DeepEqual(readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, outcomeID), before[0]) || after[0].TriggerEventID != outcomeID || after[0].From != "approved" || after[0].To != "done" {
 				t.Fatalf("restart changed gate cause or replayed route: before=%#v after=%#v", before, after)
 			}
 			var entity operatorread.OperatorEntityFull

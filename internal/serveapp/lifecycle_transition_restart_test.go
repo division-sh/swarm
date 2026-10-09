@@ -152,11 +152,11 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			if entity.Fields["result"] != "approved" {
 				t.Fatalf("ambient gate replaced frozen result: %#v", entity)
 			}
-			history := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
+			history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 			if len(history) != 1 || history[0].From != "approved" || history[0].To != "done" {
 				t.Fatalf("frozen transition history=%#v", history)
 			}
-			gateRecord := readLifecycleTransitionAtCut(t, rt, seed.RunID, entityID, history[0].TriggerEventID)
+			gateRecord := readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, history[0].TriggerEventID)
 			if gateRecord.From != "review" || gateRecord.To != "approved" || gateRecord.Evidence.FlowID() != "." {
 				t.Fatalf("frozen historical gate transition=%#v", gateRecord)
 			}
@@ -224,7 +224,7 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 				}
 				started := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.start", "restart-start", map[string]any{"seed": true}))
 				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
-				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), started.EventID, "waiting", "drafting")
+				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), started.EventID, "waiting", "drafting")
 				var capParams map[string]any
 				var capRevision string
 				for attempt := 1; attempt <= 2; attempt++ {
@@ -233,14 +233,14 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 					payload := map[string]any{"revision_id": loop.RevisionID}
 					admit := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", fmt.Sprintf("restart-admit-%d", attempt), payload))
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
-					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), admit.EventID, "drafting", "review")
+					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), admit.EventID, "drafting", "review")
 					capParams = params("loop.repeat", fmt.Sprintf("restart-repeat-%d", attempt), payload)
 					if attempt == 2 {
 						break
 					}
 					repeated := requireServedEventPublishRPCResult(t, rt.Endpoint, capParams)
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
-					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), repeated.EventID, "review", "drafting")
+					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), repeated.EventID, "review", "drafting")
 					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
 				}
 				armed.Store(true)
@@ -273,7 +273,7 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 				if entity.Fields["revision_id"] != capRevision {
 					t.Fatalf("consumer=%#v", entity)
 				}
-				history := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
+				history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 				if len(history) != 1 || history[0].TriggerEventID != cap.EventID || history[0].From != "review" || history[0].To != "escaped" {
 					t.Fatalf("restart history=%#v", history)
 				}

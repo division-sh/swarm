@@ -21,14 +21,14 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 			}
 			started := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.start", "start", map[string]any{"seed": true}))
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
-			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), started.EventID, "waiting", "drafting")
+			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), started.EventID, "waiting", "drafting")
 			first := readLifecycleLoop(t, rt, seed.RunID, entityID)
 			admit := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", "admit-1", map[string]any{"revision_id": first.RevisionID}))
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
-			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), admit.EventID, "drafting", "review")
+			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), admit.EventID, "drafting", "review")
 			repeated := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.repeat", "repeat-1", map[string]any{"revision_id": first.RevisionID}))
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
-			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), repeated.EventID, "review", "drafting")
+			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), repeated.EventID, "review", "drafting")
 			requireLifecycleFlowEntity(t, rt, seed.RunID, "ordinary/", "observed")
 			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
@@ -52,7 +52,7 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 			current := readLifecycleLoop(t, rt, seed.RunID, entityID)
 			admit = requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", "admit-2", map[string]any{"revision_id": current.RevisionID}))
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
-			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, seed.RunID, entityID), admit.EventID, "drafting", "review")
+			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), admit.EventID, "drafting", "review")
 			var replies [2]servedJSONRPCEnvelope
 			start := make(chan struct{})
 			var workers sync.WaitGroup
@@ -88,7 +88,7 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 			if closed.Status != loopruntime.StatusClosed || closed.Attempt != 2 || closed.RevisionID != current.RevisionID {
 				t.Fatalf("race loop=%#v", closed)
 			}
-			history := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
+			history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 			if len(history) != 1 || !accepted[history[0].TriggerEventID] {
 				t.Fatalf("race committed extra/missing cause=%#v", history)
 			}

@@ -145,7 +145,7 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 		}
 		requireStep := func(command string, published servedEventPublishRPCResult, from, to string) pipeline.WorkflowTransitionRecord {
 			t.Helper()
-			history := readLifecycleTransitionHistory(t, rt, runID, s.entity)
+			history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, s.entity)
 			if len(history) != 1 {
 				t.Fatalf("template step retained cumulative or missing evidence: %+v", history)
 			}
@@ -213,7 +213,7 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 		if entity.Fields["revision_id"] != s.revision {
 			t.Fatalf("%s nested gate consumed wrong revision: %#v", side, entity)
 		}
-		history := readLifecycleTransitionHistory(t, rt, runID, s.entity)
+		history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, s.entity)
 		if len(history) != 1 {
 			t.Fatalf("%s loop history=%#v", side, history)
 		}
@@ -258,7 +258,7 @@ func requireLifecycleTemplateVerdict(t *testing.T, rt servedControlProofRuntime,
 	if entity.Fields["result"] != s.side {
 		t.Fatalf("%s verdict reached wrong concrete consumer: %#v", s.side, entity)
 	}
-	history := readLifecycleTransitionHistory(t, rt, runID, s.gateEntity)
+	history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, s.gateEntity)
 	if len(history) != 1 {
 		t.Fatalf("%s gate history=%#v", s.side, history)
 	}

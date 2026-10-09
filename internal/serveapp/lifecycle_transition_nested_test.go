@@ -128,20 +128,20 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				}
 				started := publish("loop.start", "start", map[string]any{"seed": true})
 				requireLifecycleFlowEntity(t, rt, runID, prefix, "drafting")
-				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, runID, entityID), started.EventID, "waiting", "drafting")
+				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, entityID), started.EventID, "waiting", "drafting")
 				for attempt := 1; attempt <= 2; attempt++ {
 					loop := readLifecycleLoop(t, rt, runID, entityID)
 					payload := map[string]any{"revision_id": loop.RevisionID}
 					admit := publish("loop.admit", fmt.Sprintf("admit-%d", attempt), payload)
 					requireLifecycleFlowEntity(t, rt, runID, prefix, "review")
-					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, runID, entityID), admit.EventID, "drafting", "review")
+					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, entityID), admit.EventID, "drafting", "review")
 					repeated := publish("loop.repeat", fmt.Sprintf("repeat-%d", attempt), payload)
 					state := "drafting"
 					if attempt == 2 {
 						state = "escaped"
 					}
 					requireLifecycleFlowEntity(t, rt, runID, prefix, state)
-					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt, runID, entityID), repeated.EventID, "review", state)
+					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, entityID), repeated.EventID, "review", state)
 				}
 				closed := readLifecycleLoop(t, rt, runID, entityID)
 				gateEntity := requireLifecycleFlowEntity(t, rt, runID, prefix+"sink/", "review")
@@ -151,7 +151,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				if entity.Fields["revision_id"] != closed.RevisionID {
 					t.Fatalf("sibling gate consumed wrong revision: %#v loop=%#v", entity, closed)
 				}
-				history := readLifecycleTransitionHistory(t, rt, runID, entityID)
+				history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, entityID)
 				if len(history) != 1 {
 					t.Fatalf("nested loop history=%#v", history)
 				}
@@ -202,7 +202,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				if entity.Fields["result"] != side {
 					t.Fatalf("sibling verdict reached wrong third flow=%#v", entity)
 				}
-				history := readLifecycleTransitionHistory(t, rt, runID, gateEntities[index])
+				history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, gateEntities[index])
 				if len(history) != 1 {
 					t.Fatalf("nested gate history=%#v", history)
 				}
