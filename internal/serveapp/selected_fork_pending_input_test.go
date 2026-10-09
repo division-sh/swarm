@@ -247,9 +247,9 @@ func requirePendingInputPublicStates(t *testing.T, rt servedControlProofRuntime,
 		if entity.RunID != runID || !reflect.DeepEqual(entity, full.Entity) {
 			t.Fatal("public input result lost exact run/entity identity")
 		}
-		if entity.CurrentState == "done" {
+		if entity.CurrentState != nil && *entity.CurrentState == "done" {
 			done++
-		} else if entity.CurrentState != "ready" {
+		} else if entity.CurrentState == nil || *entity.CurrentState != "ready" {
 			t.Fatalf("unexpected public state: %+v", entity)
 		}
 	}

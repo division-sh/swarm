@@ -3,14 +3,22 @@ package runtimepersistence
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/entityquery"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -27,7 +35,7 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 				"schema.yaml":           "name: q10-readback\nstages:\n  unknown: {}\n  done:\n    final: true\n",
 				"entities.yaml":         "record:\n  marker: text?\n  current_state: text?\n",
 				"nostage/schema.yaml":   "name: nostage\n",
-				"nostage/entities.yaml": "record:\n  marker: text?\n",
+				"nostage/entities.yaml": "record:\n  marker: text?\n  current_state: text?\n  score: integer?\n",
 				"fieldless/schema.yaml": "name: fieldless\n",
 			}, nil)
 			runID, importID := uuid.NewString(), uuid.NewString()
@@ -44,7 +52,7 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			command := runtimebus.ScenarioSetupCommand{Setup: pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at, Entities: []pipeline.ScenarioSetupEntityRequest{
-				seed, {Alias: "import", EntityID: importID, FlowInstance: runID + "/import", EntityType: "record", Fields: map[string]any{"marker": "import"}},
+				seed, {Alias: "import", EntityID: importID, FlowInstance: "nostage/import", EntityType: "record", Fields: map[string]any{"marker": "import", "current_state": "business-import", "score": int64(12)}},
 			}}, Activations: []runtimebus.FlowInstanceActivationCommand{{Plan: plan}}}
 			for _, construction := range plan.ConstructionPlans() {
 				command.Activations[0].RouteTopology = append(command.Activations[0].RouteTopology, runtimebus.FlowInstanceRouteRecordSet{
@@ -109,6 +117,54 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 			if err != nil || len(groups.Counts) != 1 || groups.Counts["unknown"] != 1 || groups.AbsentCount != 2 {
 				t.Fatalf("absence/unknown counts drift: %+v %v", groups, err)
 			}
+			handler, err := apiv1.NewHandler(apiv1.Options{
+				PlatformSpecPath: contracts.DefaultPlatformSpecFile(repoRootForRuntimeWriterGuard(t)), AuthTokens: []string{"q10-read-token"},
+				Handlers: apiv1.OperatorEntityHandlers(apiv1.EntityHandlerOptions{Entities: f.store.(apiv1.EntityReadStore)}),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			readRPC := func(method string, params map[string]any) map[string]json.RawMessage {
+				t.Helper()
+				body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "q10-read", "method": method, "params": params})
+				if err != nil {
+					t.Fatal(err)
+				}
+				request := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(string(body))).WithContext(ctx)
+				request.Header.Set("Authorization", "Bearer q10-read-token")
+				recorder := httptest.NewRecorder()
+				handler.ServeHTTP(recorder, request)
+				var response struct {
+					Result map[string]json.RawMessage `json:"result"`
+					Error  json.RawMessage            `json:"error"`
+				}
+				if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				if recorder.Code != http.StatusOK || len(response.Error) != 0 || response.Result == nil {
+					t.Fatalf("public read %s: status=%d body=%s", method, recorder.Code, recorder.Body.String())
+				}
+				return response.Result
+			}
+			importWire := readRPC("entity.get", map[string]any{"run_id": runID, "entity_id": importID})
+			var summaryWire map[string]json.RawMessage
+			if err := json.Unmarshal(importWire["entity"], &summaryWire); err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []string{"stage_defined", "current_state", "revision", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at"} {
+				if string(summaryWire[key]) != "null" {
+					t.Fatalf("public imported %s must be an explicit null: %s", key, importWire["entity"])
+				}
+			}
+			for _, key := range []string{"bookkeeping", "gates", "accumulated", "loops"} {
+				if string(importWire[key]) != "null" {
+					t.Fatalf("public imported %s must be an explicit null: %s", key, importWire[key])
+				}
+			}
+			aggregateWire := readRPC("entity.aggregate", map[string]any{"run_id": runID, "group_by": "current_state"})
+			if string(aggregateWire["absent_count"]) != "2" || string(aggregateWire["counts"]) != `{"unknown":1}` {
+				t.Fatalf("public stage aggregate fabricated an absence bucket: %v", aggregateWire)
+			}
 			for cursor, seen := "", map[string]bool{}; ; {
 				page, err := operator.ListOperatorEntities(ctx, operatorread.OperatorEntityListOptions{RunID: runID, Limit: 1, Cursor: cursor})
 				if err != nil {
@@ -136,6 +192,38 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 				if target.EntityID == importID || (target.EntityID == runID && target.Stage != "unknown") {
 					t.Fatalf("budget uses data lifecycle: %+v", target)
 				}
+			}
+			contract, ok := entityruntime.ResolveForFlow(source, "nostage")
+			if !ok {
+				t.Fatal("missing admitted no-stage entity contract")
+			}
+			counter := f.store.(entityquery.Reader)
+			for _, tc := range []struct {
+				name      string
+				predicate entityquery.Predicate
+				want      int
+			}{
+				{"real stage does not select absent metadata", entityquery.Predicate{Field: "current_state", Op: "==", Value: "unknown"}, 0},
+				{"absent stage differs from real stage", entityquery.Predicate{Field: "workflow_state", Op: "!=", Value: "unknown"}, 2},
+				{"declared same-name field is not metadata", entityquery.Predicate{Field: "entity.current_state", Op: "==", Value: "business-import"}, 1},
+				{"numeric fields retain numeric comparison", entityquery.Predicate{Field: "score", Op: ">", Value: int64(2)}, 1},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					count, err := counter.CountWorkflowEntities(ctx, entityquery.Request{RunID: runID, Source: source, Contract: contract, Predicate: tc.predicate})
+					if err != nil || count != tc.want {
+						t.Fatalf("handler count = %d, want %d: %v", count, tc.want, err)
+					}
+				})
+			}
+			_, err = counter.CountWorkflowEntities(ctx, entityquery.Request{RunID: runID, Source: source, Contract: contract,
+				Predicate: entityquery.Predicate{Field: "current_state", Op: ">", Value: "unknown"}})
+			var nullComparison *entityquery.NullComparisonError
+			if !errors.As(err, &nullComparison) {
+				t.Fatalf("ordered absent stage must fail typed, not compare a sentinel: %v", err)
+			}
+			if _, err := counter.CountWorkflowEntities(ctx, entityquery.Request{RunID: runID, Source: source, Contract: contract,
+				Predicate: entityquery.Predicate{Field: "current_state", Op: "==", Value: nil}}); err == nil {
+				t.Fatal("handler query must retain its non-null RHS grammar")
 			}
 		})
 	}
