@@ -23635,6 +23635,19 @@ test_specification:
         expectations retain exact content and semantic IDs while deriving current bundle identity from independent
         fixture admission, never from runtime output. Corpus generation itself grants no execution or closure credit.
       timing_publication_and_cadence: >-
+        PR command-latency overruns become advisory only after complete successful plan-bound proof is admitted;
+        missing, failed, corrupt, duplicate or foreign evidence remains fatal. Schedule/manual/master timing stays enforced.
+        The independent test-time ratchet anchors the full hosted run 37706007387 attempt 1 and its exact execution source,
+        workflow head, plan digest, native build context, count and environment in an immutable approved inventory.
+        Project that full inventory through canonical core/lifecycle/full selectors for each affected tier, counting a
+        root and its direct children once and separately executed original soak backend cells separately.
+        Compare retained roots plus measured new cost; report removed/renamed roots separately without granting savings.
+        Unreviewed growth must satisfy both five percent of the pinned tier cost and 600 test-seconds, never a compounded
+        automatically refreshed merge-base anchor. A new top-level root above 30 seconds requires a Test-Time rationale
+        and an explicit independent reviewer or lead placement decision even below the aggregate limit.
+        A rationale alone grants no exception. A reviewed versioned anchor/policy adjustment must name the explicit
+        approval and exact source evidence; moving correctness coverage also requires the lead's coverage ruling.
+        Over-threshold host variance requires attribution/review rather than silent baseline widening or blind full reruns.
         Timing weights remain useful for partitioning, short-unit packing and ETA. Only exact successful full
         evidence and a model-only diff authorize the master-only publisher; both create/update PR bodies declare
         CI-Tier: core and Local-Tier: core, with ordinary native PR checks and no automatic duplicate dispatch.

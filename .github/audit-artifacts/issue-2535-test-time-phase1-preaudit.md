@@ -190,3 +190,38 @@ wrong workflow/ref/App, missing/failed proof, stale/future or API error refuses.
 Retain original PR proof until healthy bootstrap and blocking-marker activation.
 The lead will exercise positive/negative tier controls on PR-1's own hosted full
 run before activating enforcement; provide the final pushed head immediately.
+
+## Settled Ratchet And Exact Store Owners
+
+Reviewer-g 6075837853 settles the held ratchet and qualification parameters.
+The earlier 10% proposal and three-store-supplement wording are superseded.
+The initial immutable reference is successful hosted full run 37706007387,
+attempt 1, workflow head cbfb3e267dd48d3e880e2f96bc03e9c41633973b and actual
+execution source 5661cf9f42e443d04bfe774f8b4e87e95bea44d6. Complete original
+81-unit artifacts validate against digest
+e1d4f6cd8fadd4feab1f7aa975600fe6d07bc39fb3943928a407c62aaf6a95b2.
+The pinned inventory has 11,424 root/execution cells, 15,739.180 test-seconds;
+this is test work, not CI wall time or runner-minutes. Both independently run
+original soak cells remain distinct. Baselines project through exact canonical
+tier selectors. Parent/direct-child observations count once. Retained and new
+cost count; removed/renamed roots are named and neutral, never savings.
+
+Unreviewed growth is bounded by min(5% of the pinned tier, 600 test-seconds),
+and new roots above 30s require Test-Time rationale AND explicit independent
+reviewer/lead placement approval through a reviewed versioned policy adjustment.
+Text alone, a shared login, automatic publisher or each new base cannot advance
+the anchor. Missing roots, duplicate receipts, foreign source/run/attempt/build/
+count/venue/environment and anchor replacement refuse. Invalid proof remains
+fatal even under PR advisory command latency. No baseline cost increase or
+automatic root retiering is authorized.
+
+Exactly two required store owners already execute in local core:
+`store-admission-full` is the positive complement of the isolated census roots
+across internal/store and internal/testpostgres; it owns every new cache/sidecar
+control and G01. `persistence-authority-debt-census` selects
+`^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtRatchet)$`
+and requires the seven native-family children. Verify both plan/receipt IDs,
+selectors and required children in the single local core. `selected-store-fast`
+is optional, not a third cache supplement. Retain focused real cold/warm/corrupt/
+foreign/fresh-head/resurrection controls, but do not rerun either core owner
+redundantly. CI full / local core remains binding; no local full is required.

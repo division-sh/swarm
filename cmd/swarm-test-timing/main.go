@@ -19,56 +19,60 @@ import (
 )
 
 type config struct {
-	inputPath             string
-	markdownPath          string
-	packagesPath          string
-	changedPath           string
-	eventPath             string
-	currentPRPath         string
-	checkCITier           bool
-	proofPolicyPath       string
-	weightModelPath       string
-	planPath              string
-	matrixPath            string
-	evidencePath          string
-	evidenceRoot          string
-	jobsPath              string
-	workflowRunID         int64
-	workflowAttempt       int
-	workflowHeadSHA       string
-	budgetPath            string
-	resultJSONPath        string
-	event                 string
-	profile               string
-	headSHA               string
-	executionSHA          string
-	unitID                string
-	attempt               string
-	sourceRunID           string
-	topN                  int
-	exitCode              int
-	elapsedSeconds        float64
-	planCI                bool
-	recordEvidence        bool
-	evaluateBudget        bool
-	updateWeights         bool
-	observeCadence        bool
-	classificationPath    string
-	priorCorePlanPath     string
-	priorCoreEvidenceRoot string
-	priorCoreRunPath      string
-	priorCoreLandingSHA   string
-	validatePublish       bool
-	assertExecution       bool
-	warmProducts          bool
-	buildCache            string
-	verifyMerged          bool
-	repository            string
-	branchRef             string
+	testTimeReferencePath    string
+	captureTestTimeReference bool
+	inputPath                string
+	markdownPath             string
+	packagesPath             string
+	changedPath              string
+	eventPath                string
+	currentPRPath            string
+	checkCITier              bool
+	proofPolicyPath          string
+	weightModelPath          string
+	planPath                 string
+	matrixPath               string
+	evidencePath             string
+	evidenceRoot             string
+	jobsPath                 string
+	workflowRunID            int64
+	workflowAttempt          int
+	workflowHeadSHA          string
+	budgetPath               string
+	resultJSONPath           string
+	event                    string
+	profile                  string
+	headSHA                  string
+	executionSHA             string
+	unitID                   string
+	attempt                  string
+	sourceRunID              string
+	topN                     int
+	exitCode                 int
+	elapsedSeconds           float64
+	planCI                   bool
+	recordEvidence           bool
+	evaluateBudget           bool
+	updateWeights            bool
+	observeCadence           bool
+	classificationPath       string
+	priorCorePlanPath        string
+	priorCoreEvidenceRoot    string
+	priorCoreRunPath         string
+	priorCoreLandingSHA      string
+	validatePublish          bool
+	assertExecution          bool
+	warmProducts             bool
+	buildCache               string
+	verifyMerged             bool
+	repository               string
+	branchRef                string
 }
 
 func main() {
 	var cfg config
+	flag.StringVar(&cfg.testTimeReferencePath, "test-time-reference", ".github/test-time-reference.json", "pinned independently approved full timing inventory")
+	flag.BoolVar(&cfg.captureTestTimeReference, "capture-test-time-reference", false, "capture only the approved immutable hosted full reference")
 	flag.StringVar(&cfg.inputPath, "input", "-", "path to go test -json output, or - for stdin")
 	flag.StringVar(&cfg.markdownPath, "markdown", "-", "path to write Markdown output, or - for stdout")
 	flag.StringVar(&cfg.packagesPath, "packages", "", "newline-delimited discovered Go package inventory")
@@ -125,13 +129,33 @@ func main() {
 
 func run(cfg config) error {
 	modes := 0
-	for _, enabled := range []bool{cfg.verifyMerged, cfg.warmProducts, cfg.checkCITier, cfg.planCI, cfg.recordEvidence, cfg.evaluateBudget, cfg.updateWeights, cfg.observeCadence, cfg.validatePublish, cfg.assertExecution} {
+	for _, enabled := range []bool{cfg.captureTestTimeReference, cfg.verifyMerged, cfg.warmProducts, cfg.checkCITier, cfg.planCI, cfg.recordEvidence, cfg.evaluateBudget, cfg.updateWeights, cfg.observeCadence, cfg.validatePublish, cfg.assertExecution} {
 		if enabled {
 			modes++
 		}
 	}
 	if modes > 1 {
 		return fmt.Errorf("exactly one command mode may be selected")
+	}
+	if cfg.captureTestTimeReference {
+		plan, err := readPlan(cfg.planPath)
+		if err != nil {
+			return err
+		}
+		evidence, problems := readEvidenceTree(cfg.evidenceRoot)
+		if len(problems) != 0 {
+			return fmt.Errorf("reference evidence: %s", strings.Join(problems, "; "))
+		}
+		reference, err := testtiming.CaptureTestTimeReference(plan, evidence)
+		if err != nil {
+			return err
+		}
+		file, err := os.Create(cfg.testTimeReferencePath)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		return testtiming.WriteTestTimeReference(file, reference)
 	}
 	if cfg.verifyMerged {
 		return verifyMergedProof(cfg)
@@ -336,12 +360,34 @@ func evaluateBudget(cfg config) error {
 	}
 	evidence, problems := readEvidenceTree(cfg.evidenceRoot)
 	result := testtiming.EvaluateBudget(policy, testtiming.EvaluationOptions{
+		AdvisoryTiming:    cfg.event == "pull_request",
 		WorkflowRunID:     cfg.workflowRunID,
 		WorkflowAttempt:   cfg.workflowAttempt,
 		Plan:              plan,
 		HistoricalWeights: model.Packages,
 		LoadProblems:      problems,
 	}, evidence)
+	if cfg.testTimeReferencePath == "" {
+		return fmt.Errorf("test-time reference is required before advisory PR timing")
+	}
+	referenceFile, err := os.Open(cfg.testTimeReferencePath)
+	if err != nil {
+		return err
+	}
+	reference, err := testtiming.LoadTestTimeReference(referenceFile)
+	_ = referenceFile.Close()
+	if err != nil {
+		return err
+	}
+	proofPolicy, err := readProofPolicy(cfg.proofPolicyPath)
+	if err != nil {
+		return err
+	}
+	ratchet := testtiming.EvaluateTestTime(reference, proofPolicy, plan, cfg.workflowRunID, cfg.workflowAttempt, evidence)
+	result.TestTime = &ratchet
+	if ratchet.Status == testtiming.BudgetFail || ratchet.Status == testtiming.BudgetIncomplete {
+		result.Status = ratchet.Status
+	}
 	jobsFile, jobsErr := os.Open(cfg.jobsPath)
 	var jobs []testtiming.ActionJob
 	if jobsErr == nil {
