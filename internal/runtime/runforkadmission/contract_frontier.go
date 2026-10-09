@@ -427,22 +427,9 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selected
 				targets = append(targets, materialized.Target)
 			}
 		}
-		var definitions []runtimepinrouting.ConnectRecipientRegistration
-		if plan.ReceiverEndpoint().IsRoot() || !plan.RequiresRuntimeResolution() {
-			// Non-executing selected-contract projection describes static roles.
-			// It neither observes construction nor authorizes their execution.
-			definitions = routeTable.ConnectDeclarationDefinitions(plan.ReceiverEndpoint().Readback().FlowID)
-		} else {
-			for _, instance := range instances {
-				if instance.TemplateID != plan.ReceiverEndpoint().Readback().FlowID {
-					continue
-				}
-				bound, err := routeTable.ConnectReceiverDefinitions(runID, instance)
-				if err != nil {
-					return contractFrontierEvaluatedRoute{}, err
-				}
-				definitions = append(definitions, bound...)
-			}
+		definitions, err := selectedContractConnectDefinitions(routeTable, plan, runID, instances)
+		if err != nil {
+			return contractFrontierEvaluatedRoute{}, err
 		}
 		evaluation := graph.EvaluateMaterializedRecipients(plan, targets, definitions)
 		if _, err := evaluation.Ledger(); err != nil {
@@ -471,6 +458,27 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selected
 	out.nodeIDs = sortedSet(seenNodes)
 	out.recipients, err = forkrecipient.CanonicalSet(out.recipients)
 	return out, err
+}
+
+func selectedContractConnectDefinitions(table *runtimebus.RouteTable, plan runtimepinrouting.ConnectRoutePlan, runID string, instances []runtimeflowidentity.Instance) ([]runtimepinrouting.ConnectRecipientRegistration, error) {
+	flowID := plan.ReceiverEndpoint().Readback().FlowID
+	if plan.ReceiverEndpoint().IsRoot() || !plan.RequiresRuntimeResolution() {
+		// Non-executing selected-contract projection describes static roles.
+		// It neither observes construction nor authorizes their execution.
+		return table.ConnectDeclarationDefinitions(flowID), nil
+	}
+	var definitions []runtimepinrouting.ConnectRecipientRegistration
+	for _, instance := range instances {
+		if instance.TemplateID != flowID {
+			continue
+		}
+		bound, err := table.ConnectReceiverDefinitions(runID, instance)
+		if err != nil {
+			return nil, err
+		}
+		definitions = append(definitions, bound...)
+	}
+	return definitions, nil
 }
 
 func workflowNodeSubscribers(nodes []runtimepipeline.WorkflowNode, eventNames ...string) []string {
