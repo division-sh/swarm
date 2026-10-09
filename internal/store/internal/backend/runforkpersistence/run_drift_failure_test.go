@@ -49,10 +49,12 @@ func (runDriftFailureTx) Rollback() error { return nil }
 
 func (c runDriftFailureConn) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	matches := map[string]bool{
-		"snapshot":    strings.Contains(query, "WITH bounded AS"),
-		"physical":    strings.Contains(query, "CAST(mutation_id AS TEXT),CAST(entity_id AS TEXT)"),
-		"coordinates": strings.Contains(query, "CAST(f.run_id AS TEXT)"),
-		"state":       strings.Contains(query, "FROM entity_state"),
+		"snapshot":         strings.Contains(query, "WITH bounded AS"),
+		"physical":         strings.Contains(query, "CAST(mutation_id AS TEXT),CAST(entity_id AS TEXT)"),
+		"coordinates":      strings.Contains(query, "CAST(f.run_id AS TEXT)"),
+		"state":            strings.Contains(query, "FROM entity_state"),
+		"header_inventory": strings.Contains(query, "SELECT CAST(entity_id AS TEXT), instance_path FROM flow_instances"),
+		"header":           strings.Contains(query, "SELECT fi.entity_id"),
 	}[c.location]
 	if matches {
 		switch c.stage {
@@ -72,7 +74,9 @@ func (c runDriftFailureConn) QueryContext(_ context.Context, query string, args 
 			case "coordinates":
 				rows.values = []driver.Value{"foreign-run", "00000000-0000-0000-0000-000000000002", int64(1), true, int64(1)}
 			case "state":
-				rows.values = []driver.Value{"entity", "waiting", "[]", "{}", "{}", "{}"}
+				rows.values = []driver.Value{"00000000-0000-0000-0000-000000000003", "imported", "company", "waiting", "[]", "{}", "{}", "{}"}
+			case "header":
+				rows.values = []driver.Value{"00000000-0000-0000-0000-000000000003", "worker", nil, "worker", "", int64(1), "{}", "{}", "{}", nil, nil, nil, nil}
 			}
 			if c.stage == "admission_close" {
 				rows.closeErr = c.cause
@@ -85,6 +89,9 @@ func (c runDriftFailureConn) QueryContext(_ context.Context, query string, args 
 	}
 	if strings.Contains(query, "SELECT last_revision") {
 		return &runDriftFailureRows{values: []driver.Value{int64(1)}}, nil
+	}
+	if c.location == "header" && strings.Contains(query, "SELECT CAST(entity_id AS TEXT), instance_path FROM flow_instances") {
+		return &runDriftFailureRows{values: []driver.Value{"00000000-0000-0000-0000-000000000003", "worker"}}, nil
 	}
 	return &runDriftFailureRows{}, nil
 }
@@ -110,10 +117,16 @@ func (r *runDriftFailureRows) Next(dest []driver.Value) error {
 }
 
 func TestVerifyRunSnapshotFailuresRetainCause(t *testing.T) {
-	for _, location := range []string{"snapshot", "physical", "coordinates", "state"} {
+	for _, location := range []string{"snapshot", "physical", "coordinates", "state", "header_inventory", "header"} {
 		stages := []string{"query", "iteration", "close", "admission_close"}
+		if location == "header_inventory" {
+			stages = []string{"query", "iteration", "close"}
+		}
 		if location == "snapshot" {
 			stages = append(stages, "scan", "admission")
+		}
+		if location == "header" {
+			stages = append(stages, "admission")
 		}
 		for _, stage := range stages {
 			for _, cause := range []error{errors.New("driver transport failure"), context.DeadlineExceeded, context.Canceled} {
@@ -127,11 +140,11 @@ func TestVerifyRunSnapshotFailuresRetainCause(t *testing.T) {
 					const run = "00000000-0000-0000-0000-000000000001"
 					report, err := inspectRunDriftTest(t, db, run)
 					var history *mutationlog.HistoryError
-					if stage == "admission" || stage == "admission_close" {
+					if stage == "admission" || (stage == "admission_close" && location != "header") {
 						if !errors.As(err, &history) || history.RunID != run {
 							t.Fatalf("admission error lost coordinates: %+v %v", report, err)
 						}
-						if location != "state" && history.MutationID != "00000000-0000-0000-0000-000000000002" {
+						if location != "state" && location != "header" && history.MutationID != "00000000-0000-0000-0000-000000000002" {
 							t.Fatal("mutation coordinate lost")
 						}
 					} else if err == nil || errors.As(err, &history) {
