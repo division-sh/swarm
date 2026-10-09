@@ -364,11 +364,11 @@ func TestDeliveryTargetApplicationRejectsStateOnlyChildRelabeledAsParentOnBothSt
 			}
 
 			route := runtimeflowidentity.StoredRoute("review", runtimeflowidentity.LogicalInstanceID(instancePath), instancePath)
-			persisted, found, err := store.LoadEntityState(ctx, testRunScopedWorkflowInstanceForRun(testPipelineRunID, route.InstancePath), runtimeidentity.NormalizeEntityID(entityID))
+			persisted, err := store.targetReader.LoadWorkflowTargetPersistence(ctx, testRunScopedWorkflowInstanceForRun(testPipelineRunID, route.InstancePath), runtimeidentity.NormalizeEntityID(entityID))
 			var fields map[string]any
-			fieldsErr := json.Unmarshal(persisted.Fields, &fields)
-			if err != nil || !found || persisted.CurrentState != "active" || persisted.Revision != 1 || fieldsErr != nil || fields["marker"] != "unchanged" {
-				t.Fatalf("rejected child state changed: found=%t err=%v state=%#v", found, err, persisted)
+			fieldsErr := json.Unmarshal(persisted.State.Fields, &fields)
+			if err != nil || persisted.Presence != WorkflowTargetPersistenceStateOnly || fieldsErr != nil || fields["marker"] != "unchanged" {
+				t.Fatalf("rejected child state changed or gained lifecycle: err=%v state=%#v", err, persisted)
 			}
 		})
 	}

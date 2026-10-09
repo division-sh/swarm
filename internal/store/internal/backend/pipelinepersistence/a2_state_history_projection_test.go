@@ -17,7 +17,7 @@ func TestA2WorkflowHistoryProjectionPreservesRetainedNumbers(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := mutationlog.EntityStateProjection{
-		CurrentState: "collecting", Fields: retained, Bookkeeping: retained,
+		CurrentState: mutationlog.PresentLifecycleState("collecting"), Fields: retained, Bookkeeping: retained,
 		Gates: map[string]any{"ready": true}, Accumulator: retained,
 	}
 	after, err := workflowEngineStateProjection(pipeline.WorkflowEngineStateRecord{

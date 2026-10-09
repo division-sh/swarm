@@ -462,7 +462,7 @@ func trackedMutationStateMatchesEntityState(t *testing.T, db *sql.DB, entityID s
 	}
 
 	want := runtimemutationlog.EntityStateProjection{
-		CurrentState: strings.TrimSpace(currentState),
+		CurrentState: runtimemutationlog.PresentLifecycleState(currentState),
 		Fields:       decodeJSONMap(t, fieldsRaw),
 		Bookkeeping:  decodeJSONMap(t, bookRaw),
 		Gates:        decodeJSONMap(t, gatesRaw),
