@@ -275,6 +275,7 @@ var cliIdentifierInputRegistry = []cliIdentifierInputRegistration{
 	{Command: "swarm event replay", Selector: "flag:subscriber", Family: cliIdentifierFamilyAgent, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},
 
 	{Command: "swarm run status", Selector: "arg:run-id", Family: cliIdentifierFamilyRun, Mode: cliIdentifierModeFullOnly},
+	{Command: "swarm verify", Selector: "flag:run", Family: cliIdentifierFamilyRun, Mode: cliIdentifierModeFullOnly, ScopeRule: "exact run UUID in the selected read-only store; no API prefix resolver"},
 	{Command: "swarm run fan-out list", Selector: "arg:run-id", Family: cliIdentifierFamilyRun, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm run fan-out list", Selector: "flag:triggering-delivery-id", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "exact run-scoped triggering delivery UUID, not an event identifier"},
 	{Command: "swarm run fan-out list", Selector: "flag:flow-path", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "exact authored declaration flow path"},
