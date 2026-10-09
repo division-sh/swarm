@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -210,6 +211,23 @@ func (r Request) Identity() Identity {
 		Provider: r.Provider, ProviderEventID: r.ProviderEventID}
 }
 
+// CanonicalBytes is immutable request evidence, not a current execution fence.
+func (r Request) CanonicalBytes() ([]byte, error) {
+	r = r.Normalized()
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(r)
+	if err != nil {
+		return nil, err
+	}
+	value, err := canonicaljson.Decode(raw)
+	if err != nil {
+		return nil, err
+	}
+	return canonicaljson.Encode(value)
+}
+
 type EventFinalization struct {
 	Ordinal           int
 	Event             events.Event
@@ -236,6 +254,37 @@ type CommitCommand struct {
 	OperatorChannelAction *operatorchannel.InboundAction
 	OperatorChannelText   *operatorchannel.InboundText
 	PotentialBareText     *operatorchannel.InboundText
+}
+
+// PublicationSequence projects the sealed current native occurrence separately
+// from its retained original request. Webhook admission keeps its request fence.
+func (c CommitCommand) PublicationSequence() int64 {
+	if input, native := c.Admission.NativeInput(); native {
+		return input.PublicationSequence()
+	}
+	return c.Request.ExpectedPublicationSequence
+}
+
+func (c CommitCommand) validateNativeRequest() error {
+	input, native := c.Admission.NativeInput()
+	if !native {
+		return nil
+	}
+	if input.PublicationSequence() < 1 {
+		return fmt.Errorf("native publication requires its sealed occurrence")
+	}
+	if original := input.OriginalPublicationRequest(); len(original) > 0 {
+		actual, err := c.Request.CanonicalBytes()
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(original, actual) {
+			return ErrRequestIdentityConflict
+		}
+	} else if c.Request.ExpectedPublicationSequence != input.PublicationSequence() {
+		return fmt.Errorf("native publication changed its admitted occurrence")
+	}
+	return nil
 }
 
 // WithNativeLifetime preserves the mutation caller's context values while
@@ -271,6 +320,9 @@ func (c nativeCommitContext) Err() error {
 
 func (c CommitCommand) Validate() error {
 	if err := c.Request.Validate(); err != nil {
+		return err
+	}
+	if err := c.validateNativeRequest(); err != nil {
 		return err
 	}
 	request := c.Request.Normalized()

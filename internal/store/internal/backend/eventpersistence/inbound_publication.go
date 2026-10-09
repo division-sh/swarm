@@ -419,7 +419,7 @@ func admitPostgresInboundStandingTargetTx(ctx context.Context, s *EventPostgresO
 	if err != nil {
 		return fmt.Errorf("lock inbound standing service: %w", err)
 	}
-	if flowPath != request.FlowPath || runID != request.ResolvedRunID || generation != request.ExpectedGeneration || publicationSequence != request.ExpectedPublicationSequence {
+	if flowPath != request.FlowPath || runID != request.ResolvedRunID || generation != request.ExpectedGeneration || publicationSequence != command.PublicationSequence() {
 		return fmt.Errorf("stale or conflicting inbound standing target")
 	}
 	disposition, err := storestandingdisposition.ReadByRun(ctx, tx, true, request.ResolvedRunID)

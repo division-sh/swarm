@@ -341,7 +341,8 @@ func (f *activeInputFixture) activate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.selected.PublishStandingService(ctx, f.standing.ServiceID, f.standing.RunID, f.standing.Generation); err != nil {
+	f.standing.PublicationSequence, err = f.selected.PublishStandingService(ctx, f.standing.ServiceID, f.standing.RunID, f.standing.Generation)
+	if err != nil {
 		t.Fatal(err)
 	}
 	f.setScope(channelonboarding.SessionInputBusiness)
