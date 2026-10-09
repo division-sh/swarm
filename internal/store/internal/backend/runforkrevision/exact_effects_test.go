@@ -24,7 +24,7 @@ func TestExactRevisionReadBatchesPreserveSelection(t *testing.T) {
 	for _, ddl := range []string{
 		`CREATE TABLE run_fork_fact_revisions (run_id TEXT, family TEXT, fact_key TEXT, revision INTEGER, fact TEXT, present BOOLEAN)`,
 		`CREATE TABLE entity_state (run_id TEXT, entity_id TEXT, flow_instance TEXT, entity_type TEXT, slug TEXT, name TEXT, created_at TEXT)`,
-		`CREATE TABLE flow_instances (run_id TEXT, instance_path TEXT, entity_id TEXT, entity_type TEXT, slug TEXT, name TEXT, created_at TEXT, config TEXT, stage_defined BOOLEAN, flow_template TEXT, mode TEXT, status TEXT, current_state TEXT, entered_state_at TEXT, updated_at TEXT, terminated_at TEXT)`,
+		`CREATE TABLE flow_instances (run_id TEXT, instance_path TEXT, entity_id TEXT, entity_type TEXT, slug TEXT, name TEXT, created_at TEXT, config TEXT, stage_defined BOOLEAN, flow_template TEXT, mode TEXT, status TEXT, current_state TEXT, entered_state_at TEXT, updated_at TEXT, terminated_at TEXT, parent_instance TEXT, instance_key TEXT)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {
 			t.Fatal(err)
@@ -113,7 +113,7 @@ func TestExactEntityMetadataKeepsConstructionAndImportDistinct(t *testing.T) {
 	defer db.Close()
 	for _, ddl := range []string{
 		`CREATE TABLE entity_state (run_id TEXT, entity_id TEXT, flow_instance TEXT, entity_type TEXT, slug TEXT, name TEXT, created_at TEXT)`,
-		`CREATE TABLE flow_instances (run_id TEXT, instance_path TEXT, entity_id TEXT, entity_type TEXT, slug TEXT, name TEXT, created_at TEXT, config TEXT, stage_defined BOOLEAN, flow_template TEXT, mode TEXT, status TEXT, current_state TEXT, entered_state_at TEXT, updated_at TEXT, terminated_at TEXT)`,
+		`CREATE TABLE flow_instances (run_id TEXT, instance_path TEXT, entity_id TEXT, entity_type TEXT, slug TEXT, name TEXT, created_at TEXT, config TEXT, stage_defined BOOLEAN, flow_template TEXT, mode TEXT, status TEXT, current_state TEXT, entered_state_at TEXT, updated_at TEXT, terminated_at TEXT, parent_instance TEXT, instance_key TEXT)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {
 			t.Fatal(err)
@@ -128,7 +128,7 @@ func TestExactEntityMetadataKeepsConstructionAndImportDistinct(t *testing.T) {
 		{fieldlessID, "parent/inert", nil},
 		{fieldedID, "parent/keyed/one", "task"},
 	} {
-		if _, err := db.Exec(`INSERT INTO flow_instances VALUES ($1,$2,$3,$4,'header-slug','header-name','2026-09-19T00:00:00Z','{}',true,'parent','static','active','pending','2026-09-19T00:00:00Z','2026-09-19T00:00:00Z',NULL)`, runID, row.path, row.id, row.entityType); err != nil {
+		if _, err := db.Exec(`INSERT INTO flow_instances VALUES ($1,$2,$3,$4,'header-slug','header-name','2026-09-19T00:00:00Z','{}',true,'parent','static','active','pending','2026-09-19T00:00:00Z','2026-09-19T00:00:00Z',NULL,'parent',NULL)`, runID, row.path, row.id, row.entityType); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -168,6 +168,9 @@ func TestExactEntityMetadataKeepsConstructionAndImportDistinct(t *testing.T) {
 		}
 		if fact["construction_kind"] != "constructed" || fact["slug"] != "header-slug" || fact["name"] != "header-name" || fact["stage_defined"] != true || fact["flow_template"] != "parent" || fact["mode"] != "static" {
 			t.Fatalf("constructed metadata did not consume the header: %s", row.fact)
+		}
+		if fact["parent_instance"] != "parent" || fact["instance_key"] != nil {
+			t.Fatalf("constructed metadata lost immutable keyless address: %s", row.fact)
 		}
 		if fact["entity_id"] == fieldlessID && fact["entity_type"] != nil {
 			t.Fatalf("fieldless header acquired a field contract: %s", row.fact)

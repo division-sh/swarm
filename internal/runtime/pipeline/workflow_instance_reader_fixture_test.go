@@ -91,15 +91,16 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowTargetPersistence(ctx co
 		return WorkflowTargetPersistenceRecord{}, stateErr
 	}
 	var companion WorkflowLifecycleCompanionPersistenceRecord
+	var parentInstance, instanceKey sql.NullString
 	var workflowVersion sql.NullString
 	var headerType, headerSlug, headerName sql.NullString
 	var config, terminatedAt, createdAt, enteredAt, updatedAt, gates, bookkeeping, accumulator any
 	headerQuery := `SELECT instance_path, flow_template, json_extract(config, '$.workflow_version'), mode, status, config, terminated_at, created_at,
-		entity_id, entity_type, slug, name, current_state, revision, entered_state_at, updated_at, stage_defined, gates, bookkeeping, accumulator
+		entity_id, entity_type, slug, name, current_state, revision, entered_state_at, updated_at, stage_defined, gates, bookkeeping, accumulator, parent_instance, instance_key
 		FROM flow_instances WHERE run_id = ? AND instance_path = ?`
 	if r.dialect == workflowStoreDialectPostgres {
 		headerQuery = `SELECT instance_path, flow_template, config->>'workflow_version', mode, status, config, terminated_at, created_at,
-			entity_id::text, entity_type, slug, name, current_state, revision, entered_state_at, updated_at, stage_defined, gates, bookkeeping, accumulator
+			entity_id::text, entity_type, slug, name, current_state, revision, entered_state_at, updated_at, stage_defined, gates, bookkeeping, accumulator, parent_instance, instance_key
 			FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2`
 	}
 	err = tx.QueryRowContext(ctx, headerQuery, runID, route.InstancePath).Scan(
@@ -107,13 +108,14 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowTargetPersistence(ctx co
 		&companion.Status, &config, &terminatedAt, &createdAt,
 		&companion.State.EntityID, &headerType, &headerSlug, &headerName,
 		&companion.State.CurrentState, &companion.State.Revision, &enteredAt, &updatedAt, &companion.StageDefined,
-		&gates, &bookkeeping, &accumulator,
+		&gates, &bookkeeping, &accumulator, &parentInstance, &instanceKey,
 	)
 	companionExists := err == nil
 	if err != nil && err != sql.ErrNoRows {
 		return WorkflowTargetPersistenceRecord{}, err
 	}
 	if companionExists {
+		companion.ParentInstance, companion.InstanceKey = parentInstance.String, instanceKey.String
 		companion.Config = pipelineTestJSONBytes(config)
 		companion.State.FlowInstance = companion.FlowInstance
 		companion.State.EntityType, companion.State.Slug, companion.State.Name = headerType.String, headerSlug.String, headerName.String
