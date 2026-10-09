@@ -13,9 +13,10 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/staged"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -73,9 +74,9 @@ func TestIssue2589StagedEventFixturesMaintainPhysicalCountersBothStores(t *testi
 	eachExactFactStore(t, func(t *testing.T, s exactFactStore) {
 		f := newExactFactFixture(t, s)
 		ctx := testAuthorActivityContext()
-		dialect := authoractivityfixture.DialectSQLite
+		dialect := authoractivity.DialectSQLite
 		if s.postgres {
-			dialect = authoractivityfixture.DialectPostgres
+			dialect = authoractivity.DialectPostgres
 		}
 		recordFor := func(event events.Event) eventrecord.Record {
 			t.Helper()
@@ -104,7 +105,7 @@ func TestIssue2589StagedEventFixturesMaintainPhysicalCountersBothStores(t *testi
 		rollback := errors.New("roll back staged physical event and counter")
 		err := runSelectedFixtureMutation(ctx, s.selected, "staged rollback", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 			return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-				inserted, err := eventfixture.InsertUnrevisioned(txctx, tx, dialect, record)
+				inserted, err := staged.Insert(txctx, tx, dialect, record)
 				if err != nil || !inserted {
 					return fmt.Errorf("staged rollback insert=%v err=%v", inserted, err)
 				}
@@ -117,7 +118,7 @@ func TestIssue2589StagedEventFixturesMaintainPhysicalCountersBothStores(t *testi
 		readCount(0)
 		exactTransaction(t, s, func(txctx context.Context, tx *sql.Tx) {
 			for _, want := range []bool{true, false} {
-				inserted, err := eventfixture.InsertUnrevisioned(txctx, tx, dialect, record)
+				inserted, err := staged.Insert(txctx, tx, dialect, record)
 				if err != nil || inserted != want {
 					t.Fatalf("staged event insert=%v, want %v; err=%v", inserted, want, err)
 				}
@@ -126,11 +127,11 @@ func TestIssue2589StagedEventFixturesMaintainPhysicalCountersBothStores(t *testi
 		readCount(1)
 		conflict := recordFor(eventtest.ExistingRunRootIngress(f.eventID, "matrix.event", "staged", "", []byte(`{"value":2}`), 0, f.runID, events.EventEnvelope{Scope: events.EventScopeGlobal}, f.at))
 		exactTransaction(t, s, func(txctx context.Context, tx *sql.Tx) {
-			if inserted, err := eventfixture.InsertUnrevisioned(txctx, tx, dialect, conflict); err == nil || inserted {
+			if inserted, err := staged.Insert(txctx, tx, dialect, conflict); err == nil || inserted {
 				t.Fatalf("conflicting staged event admitted: inserted=%v err=%v", inserted, err)
 			}
 			runless := recordFor(eventtest.DiagnosticDirect(uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", []byte(`{"log_level":"warn","message":"counter control"}`), 0, "", "", events.EventEnvelope{}, f.at))
-			if inserted, err := eventfixture.InsertUnrevisioned(txctx, tx, dialect, runless); err != nil || !inserted {
+			if inserted, err := staged.Insert(txctx, tx, dialect, runless); err != nil || !inserted {
 				t.Fatalf("runless staged event insert=%v err=%v", inserted, err)
 			}
 		})

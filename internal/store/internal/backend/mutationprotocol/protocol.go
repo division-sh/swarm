@@ -306,13 +306,14 @@ func (a *Attempt) finalize(ctx context.Context, phase *Phase) error {
 		return errors.New("retained fork cleanup did not finalize activity before deletion")
 	}
 	if a.effects.HasDeclarations() {
+		a.effects.SetPendingEventCounts(a.pendingEventCounts())
 		*phase = RevisionFinalize
 		if a.dialect == privateactivity.DialectPostgres {
-			if _, err := privatefork.FinalizePostgres(ctx, a.tx, a.effects, a.pendingEventCounts()); err != nil {
+			if _, err := privatefork.FinalizePostgres(ctx, a.tx, a.effects); err != nil {
 				return err
 			}
 		} else {
-			if _, err := privatefork.FinalizeSQLite(ctx, a.tx, a.effects, a.pendingEventCounts()); err != nil {
+			if _, err := privatefork.FinalizeSQLite(ctx, a.tx, a.effects); err != nil {
 				return err
 			}
 		}

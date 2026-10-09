@@ -4110,7 +4110,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	if claimed.Snapshot.ActiveSessionID != "" {
 		t.Fatalf("in-progress source delivery active session = %q, want unbound #678 lineage case", claimed.Snapshot.ActiveSessionID)
 	}
-	storetest.InsertUnrevisionedChildEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkPointEventID, sourceRunID, sourceEventID,
+	storetest.InsertUnrevisionedChildEventRecord(t, ctx, pg, forkPointEventID, sourceRunID, sourceEventID,
 		"item.received", eventtest.Producer(events.EventProducerAgent, "validation-coordinator"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), forkAt)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)

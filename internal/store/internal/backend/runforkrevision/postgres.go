@@ -14,11 +14,11 @@ type postgresAdapter struct {
 	nativeTx *sql.Tx
 }
 
-func FinalizePostgres(ctx context.Context, tx *sql.Tx, effects *Effects, deltas []counterprojection.Delta) (map[string]Result, error) {
+func FinalizePostgres(ctx context.Context, tx *sql.Tx, effects *Effects) (map[string]Result, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("run fork revision finalization requires an existing PostgreSQL transaction")
 	}
-	return finalize(ctx, &postgresAdapter{tx: revisionQueryOwner(ctx, tx), nativeTx: tx}, effects, deltas)
+	return finalize(ctx, &postgresAdapter{tx: revisionQueryOwner(ctx, tx), nativeTx: tx}, effects)
 }
 
 func (a *postgresAdapter) applyEventCounts(ctx context.Context, deltas []counterprojection.Delta) error {

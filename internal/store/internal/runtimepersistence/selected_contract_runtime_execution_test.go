@@ -960,7 +960,7 @@ func TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres
 	if err != nil {
 		t.Fatalf("declare retained-discard history effects: %v", err)
 	}
-	seeded, err := runforkrevision.FinalizePostgres(ctx, seedTx, effects, nil)
+	seeded, err := runforkrevision.FinalizePostgres(ctx, seedTx, effects)
 	if err != nil {
 		_ = seedTx.Rollback()
 		t.Fatalf("finalize retained-discard history: %v", err)

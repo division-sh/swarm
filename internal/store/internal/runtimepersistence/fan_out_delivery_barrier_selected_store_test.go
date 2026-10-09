@@ -1113,9 +1113,9 @@ func captureFanOutBarrierForkRevision(t *testing.T, ctx context.Context, db *sql
 		t.Fatal(err)
 	}
 	if postgres {
-		_, err = runforkrevision.FinalizePostgres(ctx, tx, effects, nil)
+		_, err = runforkrevision.FinalizePostgres(ctx, tx, effects)
 	} else {
-		_, err = runforkrevision.FinalizeSQLite(ctx, tx, effects, nil)
+		_, err = runforkrevision.FinalizeSQLite(ctx, tx, effects)
 	}
 	if err != nil {
 		t.Fatalf("capture fan-out barrier fork revision: %v", err)

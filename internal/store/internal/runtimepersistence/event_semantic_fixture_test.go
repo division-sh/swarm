@@ -16,13 +16,13 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
+	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/staged"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -572,7 +572,7 @@ func insertPostgresCanonicalEventRecordFixtureTx(ctx context.Context, tx *sql.Tx
 	if err != nil {
 		return err
 	}
-	inserted, err := eventfixture.InsertUnrevisioned(ctx, tx, authoractivityfixture.DialectPostgres, record)
+	inserted, err := staged.Insert(ctx, tx, authoractivity.DialectPostgres, record)
 	if err != nil {
 		return err
 	}

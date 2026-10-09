@@ -58,6 +58,7 @@ func TestRevisionCountersFollowCanonicalLocksBeforeProjection(t *testing.T) {
 			// Opposite contributions retain their order, but cannot lock runs
 			// until the pre-existing canonical revision locks have been acquired.
 			deltas := []counterprojection.Delta{{RunID: second, Amount: 2}, {RunID: first, Amount: 1}}
+			effects.SetPendingEventCounts(deltas)
 			for _, delta := range deltas {
 				update := mock.ExpectExec(`UPDATE runs SET event_count = event_count \+`)
 				if postgres {
@@ -70,9 +71,9 @@ func TestRevisionCountersFollowCanonicalLocksBeforeProjection(t *testing.T) {
 			projectionErr := errors.New("projection after locked counter updates")
 			mock.ExpectQuery(`SELECT .*run_fork_fact_revisions`).WillReturnError(projectionErr)
 			if postgres {
-				_, err = FinalizePostgres(context.Background(), tx, effects, deltas)
+				_, err = FinalizePostgres(context.Background(), tx, effects)
 			} else {
-				_, err = FinalizeSQLite(context.Background(), tx, effects, deltas)
+				_, err = FinalizeSQLite(context.Background(), tx, effects)
 			}
 			if !errors.Is(err, projectionErr) {
 				t.Fatalf("finalization order: %v", err)
