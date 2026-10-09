@@ -1,6 +1,8 @@
 package channelonboarding
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -39,21 +41,89 @@ func TestChannelRuntimeContextCoordinateRequiresEveryExactGeneration(t *testing.
 }
 
 func TestChannelRuntimeCoordinatesFollowClosedPhaseProduct(t *testing.T) {
-	for _, phase := range append(ValidPhases(), Phase("unknown")) {
-		for _, executable := range []bool{false, true} {
-			name := string(phase) + "/declaration"
-			coordinate := testCoordinate()
-			if executable {
-				name = string(phase) + "/executable"
-			} else {
-				coordinate.TargetGeneration = 0
+	rows := []struct {
+		phase            Phase
+		webhook, session bool
+	}{
+		{PhasePreparing, false, false}, {PhaseCredentialsAdmitted, false, false},
+		{PhaseActivatingProvider, true, false}, {PhaseAwaitingExternalIdentity, true, false},
+		{PhaseAwaitingOperatorConfirmation, true, false}, {PhasePublishingActivation, true, true},
+		{PhasePublishingProcessActivation, true, true}, {PhasePromotingRegistration, true, true},
+		{PhaseRetiringPredecessor, true, true}, {PhaseDeliveringConfirmation, true, true},
+		{PhaseSucceeded, true, true}, {PhaseFailed, false, false}, {PhaseRetired, false, false},
+	}
+	if len(rows) != len(ValidPhases()) {
+		t.Fatal("phase product census is incomplete")
+	}
+	for _, row := range rows {
+		for _, posture := range []ActivationPosture{ActivationWebhookRegistration, ActivationSessionConnection, "unknown"} {
+			for _, executable := range []bool{false, true} {
+				t.Run(string(row.phase)+"/"+string(posture)+"/"+fmt.Sprint(executable), func(t *testing.T) {
+					coordinate := testCoordinate()
+					if !executable {
+						coordinate.TargetGeneration = 0
+					}
+					requires := row.webhook
+					if posture == ActivationSessionConnection {
+						requires = row.session
+					}
+					want := posture.Valid() && (executable || !requires)
+					if err := coordinate.ValidateForPhase(row.phase, posture); (err == nil) != want {
+						t.Fatalf("coordinate phase product = %v, want valid=%t", err, want)
+					}
+				})
 			}
-			t.Run(name, func(t *testing.T) {
-				wantValid := phase.Valid() && (executable || !phase.RequiresExecutableTarget())
-				if err := coordinate.ValidateForPhase(phase); (err == nil) != wantValid {
-					t.Fatalf("coordinate phase product = %v, want valid=%t", err, wantValid)
-				}
-			})
+		}
+	}
+	if err := testCoordinate().ValidateForPhase("unknown", ActivationSessionConnection); err == nil {
+		t.Fatal("unknown phase admitted")
+	}
+}
+
+func TestRetainedSessionAccountIsProvenanceNotExecutableAuthority(t *testing.T) {
+	account := operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: uuid.NewString(),
+		AccountRef: "paired-account", AdmissionID: uuid.NewString(), Revision: 1}
+	for _, row := range []struct {
+		phase           Phase
+		absent, present bool
+	}{
+		{PhasePreparing, true, false}, {PhaseCredentialsAdmitted, true, false}, {PhaseActivatingProvider, true, true},
+		{PhaseAwaitingExternalIdentity, false, true}, {PhaseAwaitingOperatorConfirmation, false, true},
+		{PhasePublishingActivation, false, true}, {PhasePublishingProcessActivation, false, true},
+		{PhasePromotingRegistration, false, true}, {PhaseRetiringPredecessor, false, true},
+		{PhaseDeliveringConfirmation, false, true}, {PhaseSucceeded, false, true}, {PhaseFailed, true, true}, {PhaseRetired, true, true},
+	} {
+		for _, present := range []bool{false, true} {
+			op := Operation{Posture: ActivationSessionConnection, Provider: "whatsapp", Phase: row.phase}
+			want := row.absent
+			if present {
+				op.SessionAccount, want = account, row.present
+			}
+			if err := op.ValidateSessionAccount(); (err == nil) != want {
+				t.Fatalf("phase %s present=%t: %v, want valid=%t", row.phase, present, err, want)
+			}
+		}
+	}
+	for _, mutate := range []func(*Operation){
+		func(o *Operation) { o.Posture = ActivationWebhookRegistration },
+		func(o *Operation) { o.SessionAccount.Provider = "other" },
+		func(o *Operation) { o.SessionAccount.Revision = 0 },
+		func(o *Operation) { o.SessionAccount.ConnectionID = "" },
+	} {
+		op := Operation{Posture: ActivationSessionConnection, Provider: "whatsapp", Phase: PhaseAwaitingExternalIdentity, SessionAccount: account}
+		mutate(&op)
+		if err := op.ValidateSessionAccount(); err == nil {
+			t.Fatal("contradictory retained account admitted")
+		}
+	}
+	authority := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: account}
+	if err := authority.RequireExecutable(); err == nil {
+		t.Fatal("retained DTO acquired executable authority")
+	}
+	for _, value := range []any{Operation{Coordinate: testCoordinate(), SessionAccount: account}, ConnectedChannelActivation{Coordinate: testCoordinate(), SessionAccount: account}} {
+		encoded, err := json.Marshal(value)
+		if err != nil || strings.Contains(string(encoded), account.AccountRef) {
+			t.Fatalf("private account leaked through public record: %s %v", encoded, err)
 		}
 	}
 }

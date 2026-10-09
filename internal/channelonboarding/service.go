@@ -822,7 +822,7 @@ func (s *Service) recoverTerminalCredentials(ctx context.Context, op Operation) 
 }
 
 func recoveryNeedsFreshTargetAdmission(op Operation, candidate Candidate) bool {
-	return candidate.Target.Generation == 0 && (op.Phase == PhasePreparing || op.Phase.RequiresExecutableTarget())
+	return candidate.Target.Generation == 0 && (op.Phase == PhasePreparing || op.Phase.RequiresExecutableTarget(op.Posture))
 }
 
 func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, providerCredential string) (Result, error) {
@@ -843,7 +843,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 		return Result{}, fmt.Errorf("%w: onboarding operation changed before execution", ErrRevisionConflict)
 	}
 	op = current
-	if !op.Coordinate.MatchesDeclaration(candidate.Coordinate) || op.Phase.RequiresExecutableTarget() && candidate.Validate() != nil {
+	if !op.Coordinate.MatchesDeclaration(candidate.Coordinate) || op.Phase.RequiresExecutableTarget(op.Posture) && candidate.Validate() != nil {
 		return Result{Operation: op, Candidate: &candidate}, fmt.Errorf("%w: onboarding operation is not fenced to the exact current runtime occurrence", ErrRevisionConflict)
 	}
 	for {
@@ -1823,7 +1823,7 @@ func (s *Service) bindCurrentCandidate(ctx context.Context, op Operation) (Opera
 	rebound := op
 	if !op.Coordinate.MatchesDeclaration(candidate.Coordinate) {
 		coordinate := candidate.Coordinate
-		if op.Phase.RequiresExecutableTarget() && coordinate.TargetGeneration == 0 {
+		if op.Phase.RequiresExecutableTarget(op.Posture) && coordinate.TargetGeneration == 0 {
 			// Retain the historical target coordinate for local reconciliation.
 			// Declaration discovery grants no replacement executable authority.
 			coordinate.TargetGeneration = op.Coordinate.TargetGeneration
