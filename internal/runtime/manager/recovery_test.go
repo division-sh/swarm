@@ -20,7 +20,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -32,12 +31,9 @@ import (
 )
 
 type recoveryTestBus struct {
-	storedRoutes            []runtimebus.FlowInstanceRouteRecord
 	selectedRouteRecoveries []SelectedContractRouteRecoveryRecord
-	routeListQueries        int
+	selectedRecoveryQueries int
 	pipelineSweeps          int
-	restored                []string
-	restoredRequests        []runtimebus.FlowInstanceRouteMaterializationRequest
 	deliveries              map[string][]string
 	runtimeLogs             []runtimepipeline.RuntimeLogEntry
 }
@@ -123,29 +119,9 @@ func (b *recoveryTestBus) CommitPublication(ctx context.Context, command runtime
 func (b *recoveryTestBus) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
 	return append([]string(nil), b.deliveries[eventID]...), nil
 }
-func (b *recoveryTestBus) UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error {
-	return nil
-}
-func (b *recoveryTestBus) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
-	return nil
-}
-func (b *recoveryTestBus) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	b.routeListQueries++
-	out := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(b.storedRoutes))
-	for _, route := range b.storedRoutes {
-		out = append(out, route.Identity)
-	}
-	return out, nil
-}
 func (b *recoveryTestBus) ListSelectedContractRouteRecoveryRecords(context.Context) ([]SelectedContractRouteRecoveryRecord, error) {
+	b.selectedRecoveryQueries++
 	return append([]SelectedContractRouteRecoveryRecord(nil), b.selectedRouteRecoveries...), nil
-}
-func (b *recoveryTestBus) PublishPersistedFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
-	req = req.Normalized()
-	identity := req.Identity
-	b.restored = append(b.restored, identity.Route.InstancePath)
-	b.restoredRequests = append(b.restoredRequests, req)
-	return nil
 }
 
 type recoveryTestStore struct {
@@ -343,8 +319,8 @@ func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(
 			if err == nil || !strings.Contains(err.Error(), "nearest common ancestor schema.yaml") {
 				t.Fatalf("Recover error = %v, want admission rejection", err)
 			}
-			if am.Count() != 0 || bus.routeListQueries != 0 || bus.pipelineSweeps != 0 {
-				t.Fatalf("recovery side effects: agents=%d route_queries=%d pipeline_sweeps=%d, want none", am.Count(), bus.routeListQueries, bus.pipelineSweeps)
+			if am.Count() != 0 || bus.selectedRecoveryQueries != 0 || bus.pipelineSweeps != 0 {
+				t.Fatalf("recovery side effects: agents=%d selected_recovery_queries=%d pipeline_sweeps=%d, want none", am.Count(), bus.selectedRecoveryQueries, bus.pipelineSweeps)
 			}
 		})
 	}
@@ -370,8 +346,8 @@ func TestMockOnlyPostureRejectsPersistedLiveAgentBeforeStartupReconstruction(t *
 	if err := am.hydratePersistedAgentExecutions(testAuthorActivityContext(context.Background())); err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 		t.Fatalf("HydrateForStartup error = %v, want live-agent rejection", err)
 	}
-	if factoryCalls != 0 || am.Count() != 0 || bus.routeListQueries != 0 || bus.pipelineSweeps != 0 {
-		t.Fatalf("startup mutations factory=%d agents=%d route_queries=%d sweeps=%d, want zero", factoryCalls, am.Count(), bus.routeListQueries, bus.pipelineSweeps)
+	if factoryCalls != 0 || am.Count() != 0 || bus.selectedRecoveryQueries != 0 || bus.pipelineSweeps != 0 {
+		t.Fatalf("startup mutations factory=%d agents=%d selected_recovery_queries=%d sweeps=%d, want zero", factoryCalls, am.Count(), bus.selectedRecoveryQueries, bus.pipelineSweeps)
 	}
 }
 
@@ -406,11 +382,7 @@ type startupReplayTestStore struct {
 }
 
 func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
-	bus := &recoveryTestBus{
-		storedRoutes: []runtimebus.FlowInstanceRouteRecord{{
-			Identity: runtimeflowidentity.RunScopedFlowInstance{RunID: managerIdentityTestRunID, Route: runtimeflowidentity.DeriveRoute("review", "inst-1")},
-		}},
-	}
+	bus := &recoveryTestBus{}
 	store := &recoveryTestStore{
 		agents: []PersistedAgent{{
 			Config: managerTestAgentConfig(models.AgentConfig{
@@ -449,8 +421,10 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 	if err := am.Recover(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	if len(bus.restored) != 0 || len(workflowInstances.routeLoads) != 0 {
-		t.Fatalf("generic no-readiness route was restored: routes=%#v loads=%#v", bus.restored, workflowInstances.routeLoads)
+	if len(am.dynamicFlowActiveAttempts) != 0 || len(workflowInstances.activationAttempts) != 0 ||
+		len(workflowInstances.armedEntries) != 0 || len(workflowInstances.creates) != 0 || len(workflowInstances.routeLoads) != 0 {
+		t.Fatalf("generic no-readiness header gained attachment authority: attempts=%d durable_attempts=%d timers=%v creates=%v loads=%v",
+			len(am.dynamicFlowActiveAttempts), len(workflowInstances.activationAttempts), workflowInstances.armedEntries, workflowInstances.creates, workflowInstances.routeLoads)
 	}
 }
 
@@ -487,6 +461,9 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 		t.Fatalf("Recover: %v", err)
 	}
 	snapshot := am.SelectedContractRouteRecoverySnapshot()
+	if bus.selectedRecoveryQueries != 1 {
+		t.Fatalf("fixed-contract recovery queries = %d, want one canonical observation", bus.selectedRecoveryQueries)
+	}
 	if len(snapshot) != 1 {
 		t.Fatalf("selected route recovery snapshot len = %d, want 1", len(snapshot))
 	}
@@ -543,8 +520,8 @@ func TestRecoverRestoresSelectedContractRouteRecoveriesFromForkLocalOwner(t *tes
 	if !reflect.DeepEqual(got.Record, bus.selectedRouteRecoveries[0]) {
 		t.Fatal("recovery changed the persisted record or its fingerprints/counts")
 	}
-	if len(bus.restored) != 0 {
-		t.Fatalf("current route restore was used for selected route recovery: %#v", bus.restored)
+	if len(am.dynamicFlowActiveAttempts) != 0 {
+		t.Fatalf("fixed-contract recovery gained current attachment authority: %d", len(am.dynamicFlowActiveAttempts))
 	}
 	am.workflowInstances = &flowActivationTestInstanceStore{}
 	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(testFlowBundle(t, "")))
