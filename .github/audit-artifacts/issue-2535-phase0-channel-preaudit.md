@@ -1212,3 +1212,67 @@ guards and a reviewer decision on corrected-head matrix/receipt carry still
 precede further server2 qualification; f431 core is NOT relabeled automatically.
 Exact-head hosted full, all12 supplements and final proof-audit addendum remain
 required. Parent2535/2250 and the distinct original2353 timeout remain open.
+
+## E2E-13 Explicit Locale Fixture Correction
+
+Reviewer-G's bounded ruling6091539770 approves a TEST-ONLY prerequisite
+correction, not a new post-commit producer. Hosted full38006790556 at b47
+FAILS TestChannelOnboardingE2E13CredentialWriteBeforeCheckpoint/explicit_postgres
+with registrations3/deliveries2 instead of3/3. The worker repeatedly scans at
+the unchanged ordinary1s cadence, but exact native admission refuses the
+unsent standing card because the recovered reconnect operation has no explicit
+client-language declaration. Both provider deliveries are confirmations.
+
+G's failure-only diagnostic at b47 reproduces that PostgreSQL failure in one
+of three full both-store repetitions (aggregate61.994s). Durable operation
+readback is succeeded, ClientLanguage empty, ClientLocaleRevision1; bounded
+provider-effect diagnostics show two `Swarm channel connected.` messages and
+no card. Other passing repetitions do not erase the counterexample: the
+predecessor's card can settle before reconnect, masking the missing successor
+prerequisite. This is neither a missing wake nor evidence to infer English.
+
+The governing channel.onboarding_retry.locale_requalification contract forbids
+an English default. Canonical onboarding owns the explicit declaration and
+its revision; native qualification consumes it, independently of worker
+scheduling. Add only `--client-language en` to the E2E-13 reconnect command.
+Keep the credential-write crash cut, restart/resume identity assertions,15s
+effect deadline, exact3/3 provider counts and exactly one standing card. Do
+not change production qualification, backstops or recovery. The reviewer
+independently proved this one-flag repair5/5 on the full both-store root.
+
+Sibling sweep: E2E-14 already declares en and explicitly fences the predecessor
+card before rebind. E2E-16 asserts two confirmations and no recovered standing
+card; E2E-17 destroys the pending reconnect before checkpoint/confirmation.
+Neither is credited as a positive successor native-card proof. The existing
+TestChannelNativeLocaleQualificationPublicJourney independently preserves the
+both-store missing-declaration refusal, explicit en/fr requalification, exact
+declaration revision and no reinstall across restart. Those controls remain
+unchanged; targeted repaired E2E-13 and native-locale controls precede renewed
+qualification. This correction qualifies Q01's fixture, not another P owner.
+
+Repair-tree controls on vemew/native PG16 PASS: complete E2E-13 both-store
+root `-race -count=5`,15 passing records/zero failures or skips,213.192s;
+unchanged complete native-locale root `-count=1`,33 passing records/zero
+failures or skips,155.872s. These pre-commit focused results are not a core,
+supplement-matrix or hosted-full receipt. A clean committed-head E2E-13 control
+and immutable log hashes will be recorded in the PR proof-audit addendum.
+
+## Independent Pressure Qualification Blocker
+
+Fresh b47 whole Local core on server2 FAILS20pass/1fail/1interrupted; the
+serveapp-channel command and all12 supplements never ran. The pressure root
+TestIssue2394PressureReservationStarvationPostgres captures sequence3 waiting
+32.056574588s behind later peers, exceeding its real30s claim before commit.
+The fixture schedules sequence1 starvation but lets all peers barge; only
+sequence1's stale rejection is allowed by the unchanged drain oracle. The
+production owner correctly refuses the expired claim. This matches a tracked
+peer-expiry shape under2353/2394, NOT proof that current PR contribution is
+excluded or permission to relax the oracle. The paired FIFO control passes.
+
+The full chronology,22 source-bound receipts and reviewer disposition request
+are retained in PR comment6091479149 and2353 comment6091479475. Both fixture
+blobs match integration base4d; shared publication code also changes, so causal
+attribution remains open. No core/full retry, pressure fixture edit, automatic
+receipt carry or class closure is authorized by the E2E-13 ruling. Server2
+was released after joined cleanup with no process and admission0active0waiting.
+CI full / Local core plus the12 named complete supplements remains the gate.
