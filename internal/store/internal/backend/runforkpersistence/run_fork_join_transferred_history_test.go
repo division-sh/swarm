@@ -158,4 +158,33 @@ func TestTransferredJoinInventoryBindsCompleteEvidence(t *testing.T) {
 	if _, err := runForkTimerRecordInventory(uuid.NewString(), nil, nil, source); err == nil {
 		t.Fatal("foreign transferred obligation admitted")
 	}
+	if err := requireRunForkTransferredJoinInventory(snapshot.RunID, []genericschedule.TransferredJoinOccurrence{source}, nil); err == nil {
+		t.Fatal("missing native transfer evidence discharged history")
+	}
+	if err := requireRunForkTransferredJoinInventory(snapshot.RunID, []genericschedule.TransferredJoinOccurrence{source}, []genericschedule.TransferredJoinOccurrence{source, source}); err == nil {
+		t.Fatal("extra native transfer evidence discharged history")
+	}
+	changed := source
+	changed.Publication.AuthorityStamp = "different-stamp"
+	if err := requireRunForkTransferredJoinInventory(snapshot.RunID, []genericschedule.TransferredJoinOccurrence{source}, []genericschedule.TransferredJoinOccurrence{changed}); err == nil {
+		t.Fatal("changed native transfer evidence discharged history")
+	}
+	plan := runfork.RunForkPlan{SourceRunID: snapshot.RunID, ForkPoint: inventory.Point, TransferredJoins: []genericschedule.TransferredJoinOccurrence{source}}.WithHistoricalEvents(snapshot.Revision, nil)
+	plan.ReplayResumeAdmission = runForkReplayResumeAdmission(runForkAdmissionEvidence{RelevantTimer: true, TimerHistory: inventory})
+	if materializable, err := runForkTimerHistoryMaterializable(plan); err != nil || materializable {
+		t.Fatalf("unpublished transfer discharged its capability blocker: allowed=%v err=%v", materializable, err)
+	}
+	fingerprint := func(plan runfork.RunForkPlan) string {
+		t.Helper()
+		value, err := runfork.SelectedPreparationPlanFingerprint(plan, runfork.RunForkContractFrontierAdmission{}, runfork.RunForkSelectedContractRecipientPlanning{}, "declaration")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	want := fingerprint(plan)
+	plan.TransferredJoins = []genericschedule.TransferredJoinOccurrence{changed}
+	if fingerprint(plan) == want {
+		t.Fatal("preparation omitted transferred lineage evidence")
+	}
 }
