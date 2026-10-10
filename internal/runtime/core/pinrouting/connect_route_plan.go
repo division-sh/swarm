@@ -1414,14 +1414,6 @@ type CompiledConnectGraph struct {
 	receiverPinCollisions []ConnectReceiverPinCollision
 }
 
-// RouteOwnerDependency is a compiled relationship between a producer scope
-// and a scope whose route records observe that producer. It carries no run
-// instance identity; that is selected from the current durable snapshot.
-type RouteOwnerDependency struct {
-	SourceFlowPath   string
-	ReceiverFlowPath string
-}
-
 // RouteDependencySelection separates the descriptors needed to derive a new
 // route from existing owners whose records may change because of that route.
 type RouteDependencySelection struct {
@@ -1430,9 +1422,8 @@ type RouteDependencySelection struct {
 }
 
 // SelectRouteDependencies is the compiled graph's owner of activation
-// dependency scope. RouteTable supplies already-admitted pub/sub observer
-// relationships; neither storage nor callers reinterpret their event names.
-func (g CompiledConnectGraph) SelectRouteDependencies(changedFlowPaths []string, observers []RouteOwnerDependency) RouteDependencySelection {
+// dependency scope. Only admitted connections establish these relationships.
+func (g CompiledConnectGraph) SelectRouteDependencies(changedFlowPaths []string) RouteDependencySelection {
 	changed := make(map[string]struct{}, len(changedFlowPaths))
 	for _, flowPath := range changedFlowPaths {
 		flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
@@ -1442,18 +1433,16 @@ func (g CompiledConnectGraph) SelectRouteDependencies(changedFlowPaths []string,
 	}
 	context := make(map[string]struct{})
 	affected := make(map[string]struct{})
-	dependencies := append([]RouteOwnerDependency(nil), observers...)
+	dependencies := make([]ConnectRoutePlan, 0, len(g.plans))
 	for _, plan := range g.plans {
 		if plan.source.IsRoot() || plan.receiver.IsRoot() {
 			continue
 		}
-		dependencies = append(dependencies, RouteOwnerDependency{
-			SourceFlowPath: plan.source.flowPath.value, ReceiverFlowPath: plan.receiver.flowPath.value,
-		})
+		dependencies = append(dependencies, plan)
 	}
 	for _, dependency := range dependencies {
-		source := strings.Trim(strings.TrimSpace(dependency.SourceFlowPath), "/")
-		receiver := strings.Trim(strings.TrimSpace(dependency.ReceiverFlowPath), "/")
+		source := dependency.source.flowPath.value
+		receiver := dependency.receiver.flowPath.value
 		if source == "" || receiver == "" {
 			continue
 		}
@@ -1468,8 +1457,8 @@ func (g CompiledConnectGraph) SelectRouteDependencies(changedFlowPaths []string,
 	// An affected owner is replaced with its complete derived route set. Load
 	// every producer it observes, not only the producer in this activation.
 	for _, dependency := range dependencies {
-		source := strings.Trim(strings.TrimSpace(dependency.SourceFlowPath), "/")
-		receiver := strings.Trim(strings.TrimSpace(dependency.ReceiverFlowPath), "/")
+		source := dependency.source.flowPath.value
+		receiver := dependency.receiver.flowPath.value
 		if source == "" || receiver == "" {
 			continue
 		}

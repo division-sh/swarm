@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type publicationRunPreflightTestStore struct {
@@ -68,6 +69,51 @@ func TestPublicationRunFixtureRequiresExactKnownRun(t *testing.T) {
 	cancel()
 	if err := owner.RequireActiveRun(ctx, busInternalTestRunID); !errors.Is(err, context.Canceled) {
 		t.Fatalf("fixture owner lost cancellation: %v", err)
+	}
+}
+
+func TestRunCreatingRecipientPreviewSharesProposalWithOrdinaryConsumers(t *testing.T) {
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"schema.yaml": "name: root\npins:\n  inputs: [task.requested]\n  outputs: [task.requested]\n",
+		"events.yaml": "task.requested:\n",
+		"nodes.yaml":  "worker:\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  event_handlers:\n    task.requested:\n      guard: {id: admitted, check: true}\n",
+	}))
+	missing := &runlifecycle.RunNotFoundError{RunID: busInternalTestRunID}
+	independent := errors.New("independent run observation failure")
+	for _, test := range []struct {
+		name     string
+		creating bool
+		fault    error
+	}{
+		{name: "new run", creating: true, fault: missing},
+		{name: "existing-run carrier", fault: missing},
+		{name: "joined independent failure", creating: true, fault: errors.Join(missing, independent)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			selected := newConnectRoutePlanStaticStore()
+			bus, err := newScopedTestEventBus(selected, EventBusOptions{
+				ContractBundle: source,
+				Durable: DurableDependencies{
+					RunLifecycle: &publicationRunPreflightTestStore{fault: test.fault},
+					Instances:    constructionIndexTestReader{err: errors.New("preview consulted uncommitted native instance evidence")},
+				},
+				TemplateInstancePlanner: newTestFlowInstanceActivationOwner(nil),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := bus.CheckPublishRecipientPlan(context.Background(), admitRunProposalEvent(t, test.creating).Event())
+			if test.name == "new run" {
+				if err != nil || len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target.Route().FlowInstance != busInternalTestRunID || !plan.DeliveryRoutes[0].ConnectClaim.Empty() {
+					t.Fatalf("ordinary root consumer lost its operation-private proposal: plan=%+v err=%v", plan, err)
+				}
+			} else if !errors.Is(err, test.fault) {
+				t.Fatalf("preview changed the original refusal: got=%v want=%v", err, test.fault)
+			}
+			if len(selected.events) != 0 || len(selected.routes) != 0 {
+				t.Fatal("recipient preview persisted construction or delivery")
+			}
+		})
 	}
 }
 

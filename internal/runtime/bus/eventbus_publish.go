@@ -788,6 +788,7 @@ func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.
 	planner.recipientPolicy.prospective = publication.prospective
 	planner.recipientPolicy.runProposal = publication.runProposal
 	planner.connectPlanner.lifecycle.runProposal = publication.runProposal
+	planner.routeResolver.resolveRoutedSubscribers = planner.connectPlanner.resolvePubsubSubscribers
 	planRoutes := func(context.Context, events.Event) (RoutePlan, error) {
 		return eb.planSubscribedRoutePlanWithPlanner(withClosedPublicationPlanning(ctx), evt, true, planner)
 	}
@@ -2693,7 +2694,15 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 			return result, nil
 		}
 	}
-	plan, err := eb.planSubscribedRoutePlan(withConnectPlanningPreview(ictx), evt, false)
+	proposal, err := eb.preparePublicationRunProposal(ictx, admitted, runtimepipeline.FlowInstanceRunProposal{})
+	if err != nil {
+		return PublishRecipientPlan{}, err
+	}
+	planner := eb.deliveryPlanner
+	planner.recipientPolicy.runProposal = proposal
+	planner.connectPlanner.lifecycle.runProposal = proposal
+	planner.routeResolver.resolveRoutedSubscribers = planner.connectPlanner.resolvePubsubSubscribers
+	plan, err := eb.planSubscribedRoutePlanWithPlanner(withConnectPlanningPreview(ictx), evt, false, planner)
 	if err != nil {
 		return PublishRecipientPlan{}, err
 	}

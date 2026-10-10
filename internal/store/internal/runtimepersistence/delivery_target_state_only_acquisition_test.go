@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -24,7 +25,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -255,17 +255,6 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						if err != nil {
 							t.Fatal(err)
 						}
-						if scope.template {
-							identity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.StoredRoute(scope.flow, "instance", instance))
-							if err != nil {
-								t.Fatal(err)
-							}
-							if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{
-								Identity: identity, Instance: constructed, ActivationVariables: map[string]string{"entity.instance_key": "instance"},
-							}); err != nil {
-								t.Fatal(err)
-							}
-						}
 						return bus
 					}
 					bus := newBus()
@@ -283,18 +272,27 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						if scope.flow == "." && tc.state == "" {
 							failure = "canonical activation planner"
 						}
-						if scope.flow == "." && tc.wrongOwner {
-							failure = "root construction identity contradicts"
+						assertFailure := func(err error, lateFieldRow bool) {
+							t.Helper()
+							if tc.wrongOwner || lateFieldRow {
+								var corrupt *runtimepipeline.FlowInstanceConstructionCorruption
+								if !errors.As(err, &corrupt) || corrupt.RunID != runID || corrupt.InstancePath != instance {
+									t.Fatalf("incomplete native owner must be exact corruption: %v", err)
+								}
+							} else if failure == "owner is missing" {
+								var missing *runtimepipeline.WorkflowInstanceLookupMiss
+								if !errors.As(err, &missing) || missing.RequestedKey != scope.flow {
+									t.Fatalf("absent native receiver must be an exact lookup miss: %v", err)
+								}
+							} else if err == nil || !strings.Contains(err.Error(), failure) {
+								t.Fatalf("Publish=%v, want %q", err, failure)
+							}
 						}
 						err := bus.Publish(ctx, evt)
-						if err == nil || !strings.Contains(err.Error(), failure) {
-							t.Fatalf("Publish=%v, want %q", err, failure)
-						}
+						assertFailure(err, false)
 						if tc.appearance {
 							seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, instance, "active", "different-business-key")
-							if err := bus.Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), failure) {
-								t.Fatalf("field-row appearance became construction authority: %v", err)
-							}
+							assertFailure(bus.Publish(ctx, evt), true)
 						}
 						assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
 						return

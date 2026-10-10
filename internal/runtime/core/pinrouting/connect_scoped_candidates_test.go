@@ -196,7 +196,7 @@ func TestCompiledGraphDependencySelectionFollowsNestedConnectChain(t *testing.T)
 		{changed: "unrelated"},
 	} {
 		t.Run(tc.changed, func(t *testing.T) {
-			selected := graph.SelectRouteDependencies([]string{tc.changed}, nil)
+			selected := graph.SelectRouteDependencies([]string{tc.changed})
 			if !slices.Equal(selected.ContextFlowPaths, tc.context) || !slices.Equal(selected.AffectedFlowPaths, tc.affected) {
 				t.Fatalf("selection = %#v, want context=%#v affected=%#v", selected, tc.context, tc.affected)
 			}
@@ -204,23 +204,32 @@ func TestCompiledGraphDependencySelectionFollowsNestedConnectChain(t *testing.T)
 	}
 }
 
-func TestCompiledGraphDependencySelectionLoadsCompleteAffectedObserverContext(t *testing.T) {
-	graph := CompiledConnectGraph{}
-	dependencies := []RouteOwnerDependency{
-		{SourceFlowPath: "producer", ReceiverFlowPath: "observer"},
-		{SourceFlowPath: "other", ReceiverFlowPath: "observer"},
-		{SourceFlowPath: "unrelated", ReceiverFlowPath: "elsewhere"},
+func TestCompiledGraphDependencySelectionLoadsCompleteConnectedContext(t *testing.T) {
+	source := testConnectRoutePlanSource([]connectRoutePlanFlow{
+		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "producer.done"}}},
+		{id: "other", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "other.done"}}},
+		{id: "observer", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "producer.done"}, {Event: "other.done"}}},
+		{id: "unrelated", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "unrelated.done"}}},
+		{id: "elsewhere", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "unrelated.done"}}},
+	}, []runtimecontracts.FlowConnect{
+		{Event: "producer.done", From: "producer", To: "observer"},
+		{Event: "other.done", From: "other", To: "observer"},
+		{Event: "unrelated.done", From: "unrelated", To: "elsewhere"},
+	})
+	graph := CompileConnectGraph(source)
+	if issues := graph.Issues(); len(issues) != 0 {
+		t.Fatalf("compiled graph issues = %#v", issues)
 	}
 	for _, changed := range []string{"producer", "other"} {
 		t.Run(changed, func(t *testing.T) {
-			selected := graph.SelectRouteDependencies([]string{changed}, dependencies)
+			selected := graph.SelectRouteDependencies([]string{changed})
 			if !slices.Equal(selected.AffectedFlowPaths, []string{"observer"}) ||
 				!slices.Equal(selected.ContextFlowPaths, []string{"observer", "other", "producer"}) {
 				t.Fatalf("selected %#v: complete observer context required without unrelated owners", selected)
 			}
 		})
 	}
-	selected := graph.SelectRouteDependencies([]string{"observer"}, dependencies)
+	selected := graph.SelectRouteDependencies([]string{"observer"})
 	if len(selected.AffectedFlowPaths) != 0 || !slices.Equal(selected.ContextFlowPaths, []string{"other", "producer"}) {
 		t.Fatalf("observer activation selected %#v", selected)
 	}

@@ -18338,7 +18338,9 @@ platform_tables:
         patterns are unsupported. Authored subscriptions consume their compiled admission and exact native receiver;
         cross-flow delivery consumes the explicit compiled connection and actual stored parent/key identity. A new source
         instance does not replace another producer family or establish a new subscription. Handler and concrete agent
-        roles remain distinct in operation-local recipient projection.'
+        roles remain distinct in operation-local recipient projection. Dependency selection accepts only compiled
+        admitted connections, not caller-supplied observer edges. Ordinary subscriptions and connections consume the
+        same operation-private construction proposal before a new run commits; no boot-time resolver may discard it.'
       description: 'Unified routing table for both contract-defined patterns and materialized instance routes. Replaces the
         need for a separate flow_instance_routes table. At boot: contract subscriptions inserted as pattern rows (is_wildcard
         may be true). On receiver creation: wildcard patterns expanded into concrete rows (is_materialized = true, materialized_from

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"strings"
 	"testing"
 	"time"
@@ -389,13 +388,11 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	receipts := conformanceConstructionReceipts{}
 	receipts.add(t, source, parent.RunID(), root, "")
 	receipts.add(t, source, parent.RunID(), portfolio, "")
-	accounts := map[string]runtimeflowidentity.Instance{}
 	for _, key := range []string{"acct-a", "acct-b"} {
 		instance, err := runtimeflowidentity.KeyedChild(source, root, "account", key)
 		if err != nil {
 			t.Fatal(err)
 		}
-		accounts[key] = instance
 		receipts.add(t, source, parent.RunID(), instance, key)
 	}
 	store := &fanOutPinRouteMemoryStore{
@@ -451,14 +448,15 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		return nil
 	}))
 	for _, instanceID := range []string{"acct-a", "acct-b"} {
-		if err := flowroutefixture.StageAndPublish(busCtx, eb, runtimebus.FlowInstanceRouteMaterializationRequest{
-			Identity: runtimeflowidentity.RunScopedFlowInstance{
-				RunID: parent.RunID(),
-				Route: runtimeflowidentity.StoredRoute("account", instanceID, "account/"+instanceID),
-			},
-			Instance: accounts[instanceID],
-		}); err != nil {
-			t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
+		lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, sourceFact, runtimeflowidentity.RunScopedFlowInstance{
+			RunID: parent.RunID(), Route: runtimeflowidentity.StoredRoute("account", instanceID, "account/"+instanceID),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		observed, found, err := receipts.LookupFlowInstance(busCtx, lookup)
+		if err != nil || !found || observed.Identity().InstancePath != "account/"+instanceID {
+			t.Fatalf("account fixture index: found=%t err=%v identity=%+v", found, err, observed.Identity())
 		}
 	}
 	agentDeliveries := make(map[string]<-chan *runtimebus.LocalDelivery, len(store.activeAgents))

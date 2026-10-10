@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"strings"
 	"testing"
 	"time"
@@ -57,10 +56,11 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
-			ctx := seedRuntimeTestRun(t, pg)
+			ctx := seedRuntimeTestRunForSource(t, pg, source)
 			var pc *runtimepipeline.PipelineCoordinator
 			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
-				ContractBundle: source,
+				SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
+				ContractBundle:     source,
 				InterceptorProvider: func() []runtimebus.EventInterceptor {
 					if pc == nil {
 						return nil
@@ -74,6 +74,7 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 			module := newRuntimeTestWorkflowModule(t, source)
 			resultHandlerStarted := make(chan string, 4)
 			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
+				SourceArtifactFact:  runtimeTestSourceArtifactFact(t, source),
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              module,
 				Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
@@ -92,14 +93,11 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 			})
 
 			instance := artifactActionResultWorkflowInstance()
+			instance.InstanceKey = "inst-1"
 			instance.WorkflowVersion = source.WorkflowVersion()
+			seedRuntimeTestKeylessSource(t, ctx, pg, pc, semanticview.RootExecutionFlowID(source))
 			constructed := seedRuntimeTestPreparedInstance(t, ctx, pg, pc, instance)
-			if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
-				RunID: templateInstanceDeliveryRunID,
-				Route: runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1"),
-			}, Instance: constructed.Plan.Identity}); err != nil {
-				t.Fatalf("AddFlowInstanceRoute: %v", err)
-			}
+			assertRuntimeTestConstructedInstance(t, ctx, pg, source, constructed.Plan.Identity)
 
 			requestPayload, err := json.Marshal(map[string]any{
 				"request_id": tc.requestID,
