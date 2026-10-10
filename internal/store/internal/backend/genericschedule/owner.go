@@ -858,7 +858,10 @@ routing_source, execution_mode, COALESCE(reply_context_id, ''), due_basis_kind, 
 COALESCE(due_basis_duration, ''), COALESCE(due_basis_cron, ''), COALESCE(task_id, ''),
 immutable_hash, created_at, initial_fire_at, fire_at, COALESCE(CAST(occurrence_event_id AS TEXT), ''),
 occurrence_admitted_at, status, COALESCE(cancel_cause, ''), cancelled_at, fired_at, accepted_at,
-failed_at, COALESCE(failure_code, ''), COALESCE(failure_message, ''), clock_suspension`
+failed_at, COALESCE(failure_code, ''), COALESCE(failure_message, ''), clock_suspension,
+COALESCE(CAST(source_timer_id AS TEXT), ''), COALESCE(CAST(forked_from_run_id AS TEXT), ''),
+COALESCE(forked_from_point_kind, ''), COALESCE(forked_from_point_revision, 0),
+COALESCE(CAST(forked_from_event_id AS TEXT), ''), source_armed_at, COALESCE(reconstruction_owner, '')`
 
 func activationSelectByID(d dialect) string {
 	if d == postgresDialect {
@@ -889,6 +892,8 @@ func scanActivationRow(row rowScanner, _ dialect) (runtimegenericschedule.Activa
 		payloadRaw, routingRaw, suspensionRaw                                         any
 		dueAbsoluteRaw, createdRaw, initialRaw, currentRaw, occurrenceAdmittedRaw     any
 		cancelCause, failureCode, failureMessage                                      string
+		origin                                                                        runtimegenericschedule.ForkJoinOrigin
+		sourceAdmissionRaw                                                            any
 		cancelledRaw, firedRaw, acceptedRaw, failedRaw                                any
 	)
 	err := row.Scan(
@@ -898,6 +903,8 @@ func scanActivationRow(row rowScanner, _ dialect) (runtimegenericschedule.Activa
 		&immutableHashDuplicate, &createdRaw, &initialRaw, &currentRaw, &occurrenceEventID,
 		&occurrenceAdmittedRaw, &status, &cancelCause, &cancelledRaw, &firedRaw, &acceptedRaw,
 		&failedRaw, &failureCode, &failureMessage, &suspensionRaw,
+		&origin.SourceActivationID, &origin.SourceRunID, &origin.PointKind, &origin.PointRevision,
+		&origin.PointEventID, &sourceAdmissionRaw, &origin.Owner,
 	)
 	if err != nil {
 		return runtimegenericschedule.Activation{}, err
@@ -969,6 +976,12 @@ func scanActivationRow(row rowScanner, _ dialect) (runtimegenericschedule.Activa
 		return malformed(err)
 	}
 	if activation.FailedAt, _, err = timeValue(failedRaw); err != nil {
+		return malformed(err)
+	}
+	if origin.SourceAdmittedAt, _, err = timeValue(sourceAdmissionRaw); err != nil {
+		return malformed(err)
+	}
+	if activation.ForkJoinOrigin, err = runtimegenericschedule.DecodeForkJoinOrigin(origin); err != nil {
 		return malformed(err)
 	}
 	activation = activation.Canonical()

@@ -147,5 +147,13 @@ func projectRunForkGenericActivation(timer runForkRevisionTimer) (genericschedul
 		FiredAt: value(timer.FiredAt), AcceptedAt: value(timer.AcceptedAt), FailedAt: value(timer.FailedAt),
 		Failure: genericschedule.Failure{Code: timer.FailureCode, Message: timer.FailureMessage},
 	}
+	activation.ForkJoinOrigin, err = genericschedule.DecodeForkJoinOrigin(genericschedule.ForkJoinOrigin{
+		SourceActivationID: timer.SourceTimerID, SourceRunID: timer.ForkedFromRunID,
+		PointKind: timer.ForkedFromPointKind, PointRevision: timer.ForkedFromPointRevision,
+		PointEventID: timer.ForkedFromEventID, SourceAdmittedAt: value(timer.SourceArmedAt), Owner: timer.ReconstructionOwner,
+	})
+	if err != nil {
+		return genericschedule.Activation{}, err
+	}
 	return activation, activation.Validate()
 }
