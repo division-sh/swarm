@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 )
 
 type SignalSender struct {
+	mu                      sync.Mutex
 	fixture                 *sessionstate.Fixture
 	device                  *store.Device
 	receiver, from, fromLID types.JID
@@ -63,6 +65,8 @@ func (s *SignalSender) Close() error { return s.fixture.Close() }
 
 func (s *SignalSender) EncryptText(t testing.TB, text, messageID string) waBinary.Node {
 	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	plain, err := proto.Marshal(&waE2E.Message{Conversation: proto.String(text)})
 	if err != nil {
 		t.Fatal(err)
@@ -81,11 +85,13 @@ func (s *SignalSender) EncryptText(t testing.TB, text, messageID string) waBinar
 		t.Fatal("sender produced an unsupported Signal ciphertext kind", encrypted.Type())
 	}
 	return waBinary.Node{Tag: "message", Attrs: waBinary.Attrs{
-		"from": s.from, "id": messageID, "t": time.Now().Unix(), "type": "text",
+		"from": s.from, "sender_lid": s.fromLID, "id": messageID, "t": time.Now().Unix(), "type": "text",
 	}, Content: []waBinary.Node{{Tag: "enc", Attrs: waBinary.Attrs{"type": kind, "v": "2"}, Content: encrypted.Serialize()}}}
 }
 
 func (s *SignalSender) DecryptOutbound(ctx context.Context, node *waBinary.Node) (*waE2E.Message, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if node == nil || node.Tag != "message" || node.Attrs["to"] != s.from.ToNonAD() && node.Attrs["to"] != s.fromLID.ToNonAD() {
 		return nil, fmt.Errorf("outbound message targets another conversation")
 	}
@@ -152,6 +158,8 @@ func (s *SignalSender) DecryptOutbound(ctx context.Context, node *waBinary.Node)
 }
 
 func (s *SignalSender) PublicPreKey(ctx context.Context, jid types.JID) (waBinary.Node, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if jid != s.from && jid != s.fromLID {
 		return waBinary.Node{}, fmt.Errorf("requested another sender's prekey")
 	}

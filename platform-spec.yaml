@@ -11265,7 +11265,12 @@ tool_model:
         standing service, executable target or enabled business binding. Parent retirement cancels and joins that
         connection. A failed drain or close keeps both possession and runtime work until explicit complete cleanup.
         Serve activation refresh first rereads each original retained onboarding responsibility. Failed or retired
-        parents consume that connection's complete cancellation-aware close, including partial construction;
+        parents consume that connection's complete cancellation-aware close, including partial construction.
+        Completed onboarding remains immutable successful history, not perpetual live connection ownership:
+        refresh consumes the existing exact selected binding/activation currentness owner for each completed
+        session and closes its original connection when that responsibility has been withdrawn. It never
+        terminalizes successful history to drive cleanup. Currentness observation errors or cancellation retain
+        the original cleanup responsibility and cannot authorize a replacement;
         observation or join failure preserves its cache entry and cleanup evidence and refuses publication.
         No refresh constructs a replacement, logs out, or deletes pairing. Current sibling responsibilities remain
         owned. Successful repeated cleanup joins the same original connection before activation reconciliation.

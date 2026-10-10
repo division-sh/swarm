@@ -303,7 +303,7 @@ func (p *serveNativeProtocolPeer) text(text, id string) {
 	}
 	select {
 	case receipt := <-p.receipts:
-		if receipt.Attrs["id"] != id {
+		if receipt.Attrs["id"] != id || receipt.Attrs["type"] == "retry" {
 			p.t.Fatal("SDK acknowledged a different durable input", receipt)
 		}
 	case <-time.After(5 * time.Second):

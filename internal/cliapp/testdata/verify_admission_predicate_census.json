@@ -3500,110 +3500,116 @@
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.AdmitSessionAccount",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "4cd35118196104b70ae65ce4081857232cbdc6252ca643a24496f38313b05b87"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.BootstrapSession",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "27fc7f471a738f5f3660b302ff2cf481484c63188985cc7f6b852b521d52b4c8"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ChannelExecution",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "f9d762b3c3a5299e1a9b99d1a63867e058c4ddcf6dc691d13647500a0cd9b759"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.CheckpointSessionPairing",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "689ee0b607eb4627429ebb842f2f853651fa0adf52c19b79a4414d7c57d86d3c"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.CurrentValueMatchesSeal",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "90baafa665e87ee063bac6db1547d5aa6cf2079b13d3c9cedac9392e349060ae"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ObserveSession",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "409de740d712f4bd35b73084ccdb1cefff2c1aa8b297ad3a68964694256b5510"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.QualifySessionPlan",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "9b06101dc5334ac1fd61389dd00fb7373c4c4d75ebda6899a793547824fd242b"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ReadSessionPairing",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "59665e46245a2efc604804648dd18b51bb7610e7aefe098046928a1aa75a0cbb"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ResumeSession",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "5574c4a2e6719a4866388b336cc5165fc58ecd3be5daf438901025b161caa9bf"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.RetireInactiveSessions",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
-    "body_sha256": "d9da76bf19b37f6668b58b910098c236807f464e6e1cd3cad505774f279edf14"
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
+    "body_sha256": "76fa9b97587eb79c52c8a459e083b3845908e30683ede02dde7b14c98cde7cc2"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.connection",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "1f9a7ae14a7deeb23792db0f1fd7ef29b97d3192008d07f6d2c420d6eb5e34a2"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.currentConnection",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "e8b4cda72ac559543c0e06c2ea0d5481a866b46d5cd1828d4dfcb28080837af0"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.openSessionAttempt",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "64dc62c945b4cc3ae048b8b067c7e27bae33e82e131a47a0025d14191b4b4ca2"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.validateResumeSession",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "3b0ceea6e37dcd3d6831d1f0ecf0f615b62cc5c07fc7951b1123eb448bb9be30"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.validateRetainedSessionOperation",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "f0d434f0bfe1638a0968db036e076a4937b852e93779a9f63a6e3cc9486fac74"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrapAttempt.current",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "ad4bf466f03e8784fddefad53b30f870ea8374a9f217dc5fc3d3e97bfbd5b89e"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::init",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "096dad8a6acfa957329319332b5b5e56392bdc332d84baf91d2122441a3b2568"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::newNativeServeSessionBootstrap",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
     "body_sha256": "ecbebc0210b1d43bbd41e0d6233b1dbeb6c6bd0658ff65d1906701ea40ba95b7"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::serveSessionRetirementRequired",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement",
+    "body_sha256": "cd477c14da6b258e9316e122769146e662b97c359cbb61c72a4dd29941323b2f"
   },
   {
     "owner": "internal/serveapp/channel_session_startup.go::newServeChannelProviderOwners",

@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -169,8 +170,16 @@ func TestRunServeWhatsAppSignedPairingBothStores(t *testing.T) {
 				}
 			})
 			peer.text("/inbox", "SERVED_INBOX")
+			observation := render.IntentObservationQuery{Kind: render.IntentText, Provider: "whatsapp",
+				MessageReference: "SERVED_INBOX", ConversationReference: from.String(), InterfaceKey: result.Operation.Interface.Key()}
+			waitTextReplyIntent(t, reader, observation, "entry")
+			requireNativeIntentObservationScope(t, reader, observation)
 			requireServedNativeInboxReply(t, endpoint, peer, reader)
-			pairingPath := filepath.Join(opts.SwarmDir, result.Operation.SessionConnectionID, "session.json")
+			pairingFiles, err := filepath.Glob(filepath.Join(opts.SwarmDir, "*", "session.json"))
+			if err != nil || len(pairingFiles) != 1 {
+				t.Fatal("single actual pairing owner has no exact retained header", pairingFiles, err)
+			}
+			pairingPath := pairingFiles[0]
 			pairingHeader, err := os.ReadFile(pairingPath)
 			if err != nil {
 				t.Fatal(err)
@@ -188,8 +197,9 @@ func TestRunServeWhatsAppSignedPairingBothStores(t *testing.T) {
 			}
 			result = channelonboarding.Result{}
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
-			if result.Operation.Phase != channelonboarding.PhaseRetired || result.Readiness != nil && result.Readiness.Ready || result.Pairing != nil {
-				t.Fatal("public native unbind remained ready or disclosed new pairing material", result)
+			if result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Operation.ConfirmationOperationID != completed.ConfirmationOperationID ||
+				result.Readiness == nil || result.Readiness.Ready || result.Pairing != nil {
+				t.Fatal("public native unbind lost historical success or retained execution/pairing disclosure", result)
 			}
 			connected := requireServedNativeDisconnect(t, peer)
 			if code := process.stop(); code != 0 {
@@ -200,8 +210,9 @@ func TestRunServeWhatsAppSignedPairingBothStores(t *testing.T) {
 			endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 			result = channelonboarding.Result{}
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
-			if result.Operation.Phase != channelonboarding.PhaseRetired || result.Readiness != nil && result.Readiness.Ready {
-				t.Fatal("ordinary restart adopted the unbound native responsibility", result)
+			if result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Operation.ConfirmationOperationID != completed.ConfirmationOperationID ||
+				result.Readiness == nil || result.Readiness.Ready {
+				t.Fatal("ordinary restart lost history or adopted the unbound native responsibility", result)
 			}
 			peer.mu.Lock()
 			unchanged := peer.connections == connected
@@ -216,13 +227,14 @@ func TestRunServeWhatsAppSignedPairingBothStores(t *testing.T) {
 			if err != nil || !bytes.Equal(pairingHeader, after) {
 				t.Fatal("unbind/restart deleted or rewrote retained v1 pairing identity", err)
 			}
-			fixture, providerState, err := sessionstate.OpenSDKFixture(context.Background(), filepath.Join(opts.SwarmDir, completed.SessionConnectionID, "provider.db"))
+			fixture, providerState, err := sessionstate.OpenSDKFixture(context.Background(), filepath.Join(filepath.Dir(pairingPath), "provider.db"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			device, err := providerState.CurrentDevice(context.Background(), completed.SessionAccount.AccountRef)
+			accountRef := peer.account.ToNonAD().String()
+			device, err := providerState.CurrentDevice(context.Background(), accountRef)
 			closeErr := fixture.Close()
-			if err != nil || closeErr != nil || device == nil || device.ID == nil || device.ID.ToNonAD().String() != completed.SessionAccount.AccountRef {
+			if err != nil || closeErr != nil || device == nil || device.ID == nil || device.ID.ToNonAD().String() != accountRef {
 				t.Fatal("public unbind deleted or adopted the SDK-owned paired account", err, closeErr)
 			}
 			select {
@@ -231,6 +243,33 @@ func TestRunServeWhatsAppSignedPairingBothStores(t *testing.T) {
 			default:
 			}
 		})
+	}
+}
+
+func requireNativeIntentObservationScope(t *testing.T, reader storetest.ChannelObservation, exact render.IntentObservationQuery) {
+	t.Helper()
+	for name, mutate := range map[string]func(*render.IntentObservationQuery){
+		"provider":     func(q *render.IntentObservationQuery) { q.Provider = "telegram" },
+		"message":      func(q *render.IntentObservationQuery) { q.MessageReference = "FOREIGN_MESSAGE" },
+		"conversation": func(q *render.IntentObservationQuery) { q.ConversationReference = "foreign@s.whatsapp.net" },
+		"interface":    func(q *render.IntentObservationQuery) { q.InterfaceKey = "foreign" },
+	} {
+		changed := exact
+		mutate(&changed)
+		if _, found, err := reader.ObserveChannelIntent(context.Background(), changed); err != nil || found {
+			t.Fatal("read-only native intent lookup crossed its exact scope", name, found, err)
+		}
+	}
+	for name, mutate := range map[string]func(*render.IntentObservationQuery){
+		"dual selector":        func(q *render.IntentObservationQuery) { q.ProviderEventID = "invented-publication-identity" },
+		"missing conversation": func(q *render.IntentObservationQuery) { q.ConversationReference = "" },
+		"wrong kind":           func(q *render.IntentObservationQuery) { q.Kind = render.IntentAction },
+	} {
+		changed := exact
+		mutate(&changed)
+		if _, found, err := reader.ObserveChannelIntent(context.Background(), changed); err == nil || found {
+			t.Fatal("read-only native intent lookup accepted an ambiguous selector", name, found, err)
+		}
 	}
 }
 
@@ -253,15 +292,25 @@ func requireServedNativeDisconnect(t *testing.T, peer *serveNativeProtocolPeer) 
 func requireServedNativeInboxReply(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, reader storetest.ChannelObservation) {
 	t.Helper()
 	var sent servedNativeMessage
-	select {
-	case sent = <-peer.sent:
-	case <-time.After(5 * time.Second):
-		t.Fatal("served encrypted Inbox request did not produce a decrypted reply")
+	var cards []servedNativeMessage
+	deadline := time.After(5 * time.Second)
+waiting:
+	for {
+		select {
+		case sent = <-peer.sent:
+			if strings.HasPrefix(sent.Body.GetConversation(), "Inbox\n") {
+				break waiting
+			}
+			cards = append(cards, sent)
+		case <-deadline:
+			t.Fatal("served encrypted Inbox request did not produce a decrypted reply", cards)
+		}
 	}
 	var page struct {
 		Items []struct {
 			Kind string `json:"kind"`
 			Card struct {
+				ID    string `json:"card_id"`
 				Title string `json:"title"`
 			} `json:"decision_card"`
 			Notice struct {
@@ -289,9 +338,23 @@ func requireServedNativeInboxReply(t *testing.T, endpoint string, peer *serveNat
 			lines = append(lines, "- "+label)
 		}
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	for _, card := range cards {
+		matched := false
+		for _, item := range page.Items {
+			if item.Kind == "decision_card" && strings.HasPrefix(card.Body.GetConversation(), item.Card.Title+"\n") &&
+				strings.Contains(card.Body.GetConversation(), "\nReference: "+item.Card.ID) {
+				matched = true
+			}
+		}
+		if !matched {
+			t.Fatal("served peer emitted output outside the public pending cards/Inbox", card.Body.GetConversation())
+		}
+	}
+	settlementDeadline := time.Now().Add(5 * time.Second)
+	var last []render.Candidate
+	for time.Now().Before(settlementDeadline) {
 		plans, err := reader.ListCurrentChannelDeliveryPlans(context.Background(), "", 200)
+		last = plans
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -314,5 +377,5 @@ func requireServedNativeInboxReply(t *testing.T, endpoint string, peer *serveNat
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("decrypted native Inbox had no exact settled delivery receipt", sent.ID)
+	t.Fatal("decrypted native Inbox had no exact settled delivery receipt", sent.ID, sent.Body.GetConversation(), last)
 }
