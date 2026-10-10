@@ -19,7 +19,7 @@ func TestNamesOnlyPrivateInputDoesNotInventExternalProducer(t *testing.T) {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	for _, eventType := range []string{"opco.product_initialization_requested", "operating/opco.product_initialization_requested"} {
-		for _, subscriber := range routes.ResolveForRun(busInternalTestRunID, eventType) {
+		for _, subscriber := range routes.PubsubDeclarationDefinitionsFixture(t, "operating", eventType) {
 			if subscriber.RouteSourceCode() != "subscription" {
 				t.Fatalf("unconnected input invented route authority: %#v", subscriber)
 			}

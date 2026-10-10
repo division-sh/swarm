@@ -222,7 +222,7 @@ rows:
       remain invalid authority.
 
   - id: wildcard_static_service_route_production
-    concept: Wildcard route-table matching remains typed subscription discovery, but cannot create static cross-flow workflow-node ownership without an exact import-boundary or compiled-connect authority.
+    concept: Compiled wildcard bindings consume exact indexed receiver identity and cannot create cross-flow workflow-node ownership without compiled-connect authority.
     classification: already_covered_by_existing_proof
     tier: required_pr_smoke
     proof_dimensions: [route_plan_model, persistence_authority, negative_authority, required_pr_smoke]
@@ -239,20 +239,19 @@ rows:
       - {kind: spec_ref, path: platform-spec.yaml, ref: workflow_node_route_authority}
       - {kind: spec_ref, path: platform-spec.yaml, ref: route_plan_authority}
       - {kind: artifact, path: internal/runtime/bus/delivery_planner.go}
-      - {kind: artifact, path: internal/runtime/bus/routing_derivation_internal_test.go}
+      - {kind: artifact, path: internal/runtime/bus/indexed_pubsub_receivers_test.go}
       - {kind: artifact, path: internal/runtime/bus/eventbus_target_routes_test.go}
     proof_refs:
       - {kind: issue, issue: 1299}
-      - {kind: go_test, name: TestRouteTableResolve_WildcardSubscriberMatchesActiveConcreteChildEventWithoutMaterializedKey}
+      - {kind: go_test, name: TestIndexedPubsubWildcardTracksAdmittedInventory}
       - {kind: go_test, name: TestDeliveryPlanner_NoTargetWildcardCrossFlowRoutedNodeFailsClosed}
-      - {kind: go_test, name: TestEventBusPublish_MixedExactAndWildcardCrossFlowRoutesFailBeforePersistence}
+      - {kind: go_test, name: TestEventBusPublish_UncompiledCrossFlowDeclarationsCannotCreateRecipients}
     notes: >
-      RouteTable may discover that component-scaffold/*/opco.repo_scaffold_requested
-      matches component-scaffold/<id>/opco.repo_scaffold_requested, but that match
-      is not receiver target-owner evidence. RoutePlan fails before persistence
-      unless an exact import-boundary or compiled-connect authority owns the
-      cross-flow delivery; live carriers, receipts, replay markers, and readback
-      cannot repair it.
+      Exact and slash-free wildcard definitions bind only to admitted receiver
+      observations. A declaration alone or a process cache is not native
+      existence. Removing one indexed receiver cannot retain it or remove its
+      sibling. Cross-flow delivery requires the compiled connection; live
+      carriers, receipts, replay markers and readback cannot repair it.
 
   - id: runtime_callback_flow_instance_localization
     concept: Runtime callback producers publish canonical concrete names; routing consumes that name unchanged and persists typed workflow-node delivery authority before internal carrier dispatch.

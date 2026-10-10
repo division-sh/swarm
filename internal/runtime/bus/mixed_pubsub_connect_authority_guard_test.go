@@ -14,7 +14,6 @@ import (
 func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
 	for owner, retired := range map[reflect.Type][]string{
 		reflect.TypeOf(RouteTable{}):           {"templateObservers"},
-		reflect.TypeOf(routePattern{}):         {"SourceInstancePath"},
 		reflect.TypeOf(routeResolvedPattern{}): {"SourceTemplatePath", "SourceLocalEvent"},
 	} {
 		for _, name := range retired {

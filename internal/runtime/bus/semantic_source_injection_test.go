@@ -40,7 +40,7 @@ func TestNewEventBusWithOptions_DoesNotUseAmbientWorkflowSemanticSource(t *testi
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if got := eb.RouteTable().ResolveForRun(eventBusTestRunID, "scoring/score.dimension_complete"); len(got) != 0 {
-		t.Fatalf("Resolve(scoring/score.dimension_complete) = %#v, want no ambient-derived routes", got)
+	if got, err := eb.RouteTable().PubsubDeclarationDefinitions("scoring", []string{"scoring/score.dimension_complete"}); err == nil || len(got) != 0 {
+		t.Fatalf("ambient scoring declaration admitted: definitions=%#v err=%v", got, err)
 	}
 }

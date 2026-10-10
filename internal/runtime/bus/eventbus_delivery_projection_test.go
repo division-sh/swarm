@@ -283,23 +283,12 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	}.Normalized()
 	targetNode := testFlowNode(t, "worker", "target-node")
 	targetHandler := runtimepipeline.MustDeliveryTargetHandler(targetNode)
-	routeTable := newRouteTable(nil)
-	routeTable.eventPath[eventType] = struct{}{}
-	routeTable.routes[routeResolutionKey{eventType: eventType}] = []Subscriber{{
-		Recipient:      events.MustNodeDeliveryRecipient(targetNode),
-		Path:           "worker/inst-1",
-		LocalizedEvent: "work.started",
-		handlerNode:    targetNode,
-		targetHandler:  targetHandler,
-		routeSource:    subscriberRouteSourceSubscription,
-	}}
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(target)
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: semanticview.Wrap(materializedTargetBundleWithHandler(
 			t, "worker", "target-node", "work.started", existingOwnerHandlerFixture(),
 		)),
-		RouteTable: routeTable,
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 			return []DeliveryRouteBlueprint{{
 				Recipient: events.MustNodeDeliveryRecipient(targetNode),

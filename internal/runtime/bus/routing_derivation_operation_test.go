@@ -202,15 +202,12 @@ func TestPreparedConstructionBindsCompiledPubsubWithoutRouteMembership(t *testin
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := oracle.AddConstructedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
-			t.Fatal(err)
-		}
 		key := constructed.InstancePath + "/item.finished"
 		got, err := live.PubsubReceiverDefinitions(busInternalTestRunID, constructed, []string{key})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := oracle.ResolveForRun(busInternalTestRunID, key); len(got) != 1 || !reflect.DeepEqual(got, want) {
+		if want := oracle.PubsubReceiverDefinitionsFixture(t, busInternalTestRunID, constructed, key); len(got) != 1 || !reflect.DeepEqual(got, want) {
 			t.Fatalf("pure binding %s differs from independent derivation: got=%#v want=%#v", id, got, want)
 		}
 	}

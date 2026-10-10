@@ -59,6 +59,74 @@ func TestIndexedPubsubUsesNativeExistenceAndStoredIdentity(t *testing.T) {
 	}
 }
 
+func TestIndexedPubsubWildcardTracksAdmittedInventory(t *testing.T) {
+	for _, mode := range []string{"root", "static", "template"} {
+		t.Run(mode, func(t *testing.T) {
+			source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyPublicationDirectTextSite(t, mode))
+			table, err := DeriveRouteTable(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			flowID, ids := "source", []string{""}
+			if mode == "root" {
+				flowID = "."
+			} else if mode == "template" {
+				ids = []string{"one", "two"}
+			}
+			ctx := constructionIndexContext(t, source)
+			reader := &constructionIndexTestReader{}
+			resolver := newConnectRoutePlanResolver(source, table, nil, reader, nil)
+			var publications []events.Event
+			for _, id := range ids {
+				instance := ConstructedFlowInstanceIdentityFixture(source, flowID, id, busInternalTestRunID)
+				routingSource := eventtest.ConcreteTemplateRoutingSource(flowID, instance.InstancePath, instance.EntityID)
+				if mode == "static" {
+					routingSource = eventtest.StaticFlowRoutingSource(flowID, instance.InstancePath, instance.EntityID)
+				}
+				event := eventtest.ExistingRunRootIngressWithRoutingSource(eventtest.UUID("indexed-wildcard-"+mode+id), "result.direct", "", "", nil, 0, busInternalTestRunID, events.EventEnvelope{}, routingSource, time.Now().UTC())
+				publications = append(publications, event)
+				keys := pubsubEventKeys(event, ordinaryPublicationSource{})
+				if got, err := resolver.resolvePubsubSubscribers(ctx, event, keys, ordinaryPublicationSource{}); err != nil || len(got) != 0 {
+					t.Fatalf("compiled declaration invented absent receiver: got=%+v err=%v", got, err)
+				}
+				reader.observations = append(reader.observations, constructionIndexObservation(t, source, busInternalTestRunID, instance, id))
+			}
+			for repeat := 0; repeat < 3; repeat++ {
+				for _, event := range publications {
+					got, err := resolver.resolvePubsubSubscribers(ctx, event, pubsubEventKeys(event, ordinaryPublicationSource{}), ordinaryPublicationSource{})
+					if err != nil || len(got) != 2 {
+						t.Fatalf("indexed exact/wildcard cardinality: got=%+v err=%v", got, err)
+					}
+					wildcards := 0
+					for i, subscriber := range got {
+						if subscriber.Path != event.RoutingSource().Route().FlowInstance || subscriber.LocalizedEvent != "result.direct" {
+							t.Fatalf("indexed binding borrowed another coordinate: %+v", subscriber)
+						}
+						if subscriber.Recipient.LocalID() == "wildcard" {
+							wildcards++
+							got[i].Path, got[i].LocalizedEvent = "foreign", "poisoned"
+						}
+					}
+					if wildcards != 1 {
+						t.Fatalf("wildcard cardinality=%d", wildcards)
+					}
+				}
+			}
+			reader.observations = reader.observations[1:]
+			for i, event := range publications {
+				got, err := resolver.resolvePubsubSubscribers(ctx, event, pubsubEventKeys(event, ordinaryPublicationSource{}), ordinaryPublicationSource{})
+				want := 2
+				if i == 0 {
+					want = 0
+				}
+				if err != nil || len(got) != want {
+					t.Fatalf("exact inventory removal changed sibling or retained receiver: got=%+v want=%d err=%v", got, want, err)
+				}
+			}
+		})
+	}
+}
+
 func TestIndexedPubsubRejectsForeignDuplicateAndIndependentFailures(t *testing.T) {
 	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting))
 	table, err := DeriveRouteTable(source)

@@ -1608,7 +1608,7 @@ func TestRouteTableCompiledConnectRootInputExcludesFlattenedChildObserver(t *tes
 		t.Fatalf("connect recipients = %#v, want only exact root parent-listener", recipients)
 	}
 
-	local := routeTable.ResolveForRun(busInternalTestRunID, "worker/work.completed")
+	local := routeTable.PubsubDeclarationDefinitionsFixture(t, "worker", "worker/work.completed")
 	if len(local) != 1 || local[0].Recipient.LocalID() != "worker-output-observer" || local[0].handlerNode.FlowPath() != "worker" {
 		t.Fatalf("same-flow recipients = %#v, want only exact child observer", local)
 	}
