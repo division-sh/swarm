@@ -158,18 +158,23 @@ func TestOpenRPCEntityFullAccumulatedSchemaMatchesRuntimeOwner(t *testing.T) {
 
 	result := map[string]any{
 		"entity": map[string]any{
-			"entity_id":     "entity-1",
-			"run_id":        "run-1",
-			"flow_instance": "review/primary",
-			"entity_type":   "mvp_spec",
-			"current_state": "collecting",
-			"revision":      float64(2),
-			"created_at":    "2026-05-20T01:00:00Z",
-			"updated_at":    "2026-05-20T01:05:00Z",
+			"entity_id":            "entity-1",
+			"run_id":               "run-1",
+			"flow_instance":        "review/primary",
+			"entity_type":          "mvp_spec",
+			"stage_defined":        true,
+			"current_state":        "collecting",
+			"revision":             float64(2),
+			"entered_state_at":     "2026-05-20T01:05:00Z",
+			"lifecycle_created_at": "2026-05-20T01:00:00Z",
+			"lifecycle_updated_at": "2026-05-20T01:05:00Z",
+			"created_at":           "2026-05-20T01:00:00Z",
+			"updated_at":           "2026-05-20T01:05:00Z",
 		},
 		"fields":      map[string]any{"priority": "high", "activation": "manual"},
 		"bookkeeping": map[string]any{"activation": "standing"},
 		"gates":       map[string]any{"approved": true},
+		"loops":       []any{},
 		"accumulated": map[string]any{
 			"score":       float64(3),
 			"accumulator": map[string]any{"count": float64(2)},
@@ -177,6 +182,88 @@ func TestOpenRPCEntityFullAccumulatedSchemaMatchesRuntimeOwner(t *testing.T) {
 		},
 	}
 	validator.validateMethodResult(t, "entity.get", result)
+}
+
+func TestOpenRPCQ10LifecyclePresence(t *testing.T) {
+	openRPC, _ := loadComplianceOpenRPC(t, complianceOpenRPCPath(repoRoot(t)))
+	validator := newOpenRPCResultSchemaValidator(t, openRPC)
+	validator.preflightMethodResultSchemas(t, []string{"entity.get", "entity.list", "entity.aggregate"})
+	for _, kind := range []string{"data_only", "constructed_no_stage", "constructed_unknown_stage"} {
+		t.Run(kind, func(t *testing.T) {
+			summary := map[string]any{
+				"entity_id": "entity-1", "run_id": "run-1", "flow_instance": "work", "entity_type": "task",
+				"created_at": "2026-10-10T01:00:00Z", "updated_at": "2026-10-10T01:00:00Z",
+				"stage_defined": nil, "current_state": nil, "revision": nil,
+				"entered_state_at": nil, "lifecycle_created_at": nil, "lifecycle_updated_at": nil,
+			}
+			result := map[string]any{
+				"entity": summary, "fields": map[string]any{"current_state": "authored", "revision": float64(0)},
+				"bookkeeping": nil, "gates": nil, "accumulated": nil, "loops": nil,
+			}
+			if kind != "data_only" {
+				summary["stage_defined"], summary["revision"] = false, float64(1)
+				summary["lifecycle_created_at"], summary["lifecycle_updated_at"] = "2026-10-10T01:00:00Z", "2026-10-10T01:00:00Z"
+				result["bookkeeping"], result["gates"], result["accumulated"], result["loops"] = map[string]any{}, map[string]any{}, map[string]any{}, []any{}
+			}
+			if kind == "constructed_unknown_stage" {
+				summary["stage_defined"], summary["current_state"], summary["entered_state_at"] = true, "unknown", "2026-10-10T01:00:00Z"
+			}
+			validator.validateMethodResult(t, "entity.get", result)
+			validator.validateMethodResult(t, "entity.list", map[string]any{"entities": []any{summary}})
+			for _, key := range []string{"stage_defined", "current_state", "revision", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at"} {
+				t.Run("missing_"+key, func(t *testing.T) {
+					original := summary[key]
+					delete(summary, key)
+					err := validator.validateValue("$.entity.get.result", validator.methods["entity.get"].Result.Schema, result)
+					summary[key] = original
+					if err == nil || !strings.Contains(err.Error(), key) {
+						t.Fatalf("missing lifecycle property %s: %v", key, err)
+					}
+				})
+			}
+			for key, value := range map[string]any{"stage_defined": float64(0), "current_state": false, "revision": float64(0), "entered_state_at": "not-a-clock", "lifecycle_created_at": "", "lifecycle_updated_at": false} {
+				t.Run("invalid_"+key, func(t *testing.T) {
+					original := summary[key]
+					summary[key] = value
+					err := validator.validateValue("$.entity.get.result", validator.methods["entity.get"].Result.Schema, result)
+					summary[key] = original
+					if err == nil || !strings.Contains(err.Error(), key) {
+						t.Fatalf("invalid lifecycle property %s: %v", key, err)
+					}
+				})
+			}
+			for _, key := range []string{"bookkeeping", "gates", "accumulated", "loops"} {
+				t.Run("missing_"+key, func(t *testing.T) {
+					original := result[key]
+					delete(result, key)
+					err := validator.validateValue("$.entity.get.result", validator.methods["entity.get"].Result.Schema, result)
+					result[key] = original
+					if err == nil || !strings.Contains(err.Error(), key) {
+						t.Fatalf("missing full lifecycle property %s: %v", key, err)
+					}
+				})
+			}
+			for key, value := range map[string]any{"bookkeeping": []any{}, "gates": map[string]any{"approved": "yes"}, "accumulated": []any{}, "loops": map[string]any{}} {
+				t.Run("invalid_"+key, func(t *testing.T) {
+					original := result[key]
+					result[key] = value
+					err := validator.validateValue("$.entity.get.result", validator.methods["entity.get"].Result.Schema, result)
+					result[key] = original
+					if err == nil || !strings.Contains(err.Error(), key) {
+						t.Fatalf("invalid full lifecycle property %s: %v", key, err)
+					}
+				})
+			}
+		})
+	}
+	for _, count := range []int{0, 2} {
+		validator.validateMethodResult(t, "entity.aggregate", map[string]any{"counts": map[string]any{"unknown": float64(1)}, "absent_count": float64(count)})
+	}
+	for _, result := range []map[string]any{{"counts": map[string]any{}}, {"counts": map[string]any{}, "absent_count": float64(-1)}} {
+		if err := validator.validateValue("$.entity.aggregate.result", validator.methods["entity.aggregate"].Result.Schema, result); err == nil || !strings.Contains(err.Error(), "absent_count") {
+			t.Fatalf("invalid absent group count: %v", err)
+		}
+	}
 }
 
 func TestOpenRPCSubscriptionNotificationSchemas(t *testing.T) {

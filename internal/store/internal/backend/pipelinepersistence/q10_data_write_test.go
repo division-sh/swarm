@@ -16,7 +16,7 @@ import (
 // receipts. Unexpected data UPDATEs fail the original sqlmock expectation.
 func TestQ10RequiredCompanionOnUnchangedData(t *testing.T) {
 	for _, postgres := range []bool{false, true} {
-		for _, caseName := range []string{"unchanged", "missing", "foreign_type", "duplicate", "bad_fields", "changed", "integer_to_double", "absent_to_null"} {
+		for _, caseName := range []string{"unchanged", "missing", "foreign_type", "foreign_identity", "foreign_path", "duplicate", "bad_fields", "zero_creation_clock", "zero_update_clock", "reversed_data_clocks", "changed", "integer_to_double", "absent_to_null"} {
 			t.Run(q10Dialect(postgres)+"/"+caseName, func(t *testing.T) {
 				db, mock, err := sqlmock.New()
 				if err != nil {
@@ -48,6 +48,10 @@ func TestQ10RequiredCompanionOnUnchangedData(t *testing.T) {
 					fieldID, fieldPath, fieldTypeValue, fieldsValue = nil, nil, nil, nil
 				case "foreign_type":
 					fieldTypeValue = "other"
+				case "foreign_identity":
+					fieldID = "3c333333-3333-4333-8333-333333333333"
+				case "foreign_path":
+					fieldPath = "other/path"
 				case "bad_fields":
 					fieldsValue = `null`
 				case "changed":
@@ -64,12 +68,24 @@ func TestQ10RequiredCompanionOnUnchangedData(t *testing.T) {
 				}
 				mock.ExpectQuery(`(?s)^SELECT fi.entity_id, fi.instance_path`).WithArgs(run, entity, "work").WillReturnRows(rows)
 				valid := caseName == "unchanged" || caseName == "changed" || caseName == "integer_to_double" || caseName == "absent_to_null"
+				badClock := caseName == "zero_creation_clock" || caseName == "zero_update_clock" || caseName == "reversed_data_clocks"
 				// Bad JSON is diagnosed after the exact PostgreSQL field lock.
-				if postgres && (valid || caseName == "bad_fields") {
+				if postgres && (valid || badClock || caseName == "bad_fields") {
 					mock.ExpectQuery(`(?s)^SELECT entity_id FROM entity_state .* FOR UPDATE$`).WithArgs(run, entity, "work", "task").WillReturnRows(sqlmock.NewRows([]string{"entity_id"}).AddRow(entity))
 				}
+				if valid || badClock {
+					createdAt, updatedAt := at.Format(time.RFC3339Nano), at.Format(time.RFC3339Nano)
+					switch caseName {
+					case "zero_creation_clock":
+						createdAt = time.Time{}.Format(time.RFC3339Nano)
+					case "zero_update_clock":
+						updatedAt = time.Time{}.Format(time.RFC3339Nano)
+					case "reversed_data_clocks":
+						updatedAt = at.Add(-time.Second).Format(time.RFC3339Nano)
+					}
+					mock.ExpectQuery(`(?s)^SELECT COALESCE\(slug,''\), COALESCE\(name,''\), created_at, updated_at`).WithArgs(run, entity, "work", "task").WillReturnRows(sqlmock.NewRows([]string{"slug", "name", "created_at", "updated_at"}).AddRow("", "", createdAt, updatedAt))
+				}
 				if valid {
-					mock.ExpectQuery(`(?s)^SELECT COALESCE\(slug,''\), COALESCE\(name,''\), created_at, updated_at`).WithArgs(run, entity, "work", "task").WillReturnRows(sqlmock.NewRows([]string{"slug", "name", "created_at", "updated_at"}).AddRow("", "", at, at))
 					if caseName != "unchanged" {
 						mock.ExpectExec(`(?s)^UPDATE entity_state SET slug = .* fields = .* updated_at = .*WHERE`).WithArgs("", "", string(record.Fields), record.UpdatedAt, run, entity, "work", "task").WillReturnResult(sqlmock.NewResult(0, 1))
 					}
