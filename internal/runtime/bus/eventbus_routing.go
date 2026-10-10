@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
@@ -366,36 +365,6 @@ func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[agentidenti
 		}
 	}
 	return set, true, nil
-}
-
-func (eb *EventBus) PinRoutingDescriptors(ctx context.Context) ([]runtimepinrouting.Descriptor, error) {
-	descriptors, _, err := eb.activeTargetDescriptors(ctx)
-	if err != nil {
-		return nil, err
-	}
-	agents, _, err := eb.activeAgentDescriptors(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ordered := newOrderedActiveTargetDescriptors(descriptors)
-	for _, descriptor := range activeTargetDescriptorsFromAgents(agents) {
-		ordered.add(descriptor)
-	}
-	out := make([]runtimepinrouting.Descriptor, 0, len(ordered.descriptors))
-	for _, descriptor := range ordered.descriptors {
-		descriptor = descriptor.Normalized()
-		if descriptor.FlowInstance == "" && descriptor.EntityID == "" {
-			continue
-		}
-		out = append(out, runtimepinrouting.Descriptor{
-			FlowID:        descriptor.FlowID,
-			ID:            descriptor.ID,
-			EntityID:      descriptor.EntityID,
-			FlowInstance:  descriptor.FlowInstance,
-			AddressFields: normalizeDescriptorAddressFields(descriptor.AddressFields),
-		})
-	}
-	return out, nil
 }
 
 type selectedTargetOwnerLookupScopeKey struct{}

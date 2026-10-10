@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"reflect"
 	"strings"
@@ -93,6 +94,78 @@ func TestA9MissingCreationPlannerCannotBorrowReceiptAuthority(t *testing.T) {
 	materialized, decision, handled, err := owner.Materialize(withConnectRoutePlanPreview(constructionIndexContext(t, source)), event, plan, map[string]string{"payload.account_id": "acct-1"})
 	if err == nil || !handled || !materialized.Failure.Empty() || decision.Activation != nil || decision.identity != (flowidentity.Instance{}) {
 		t.Fatalf("receipt authority authorized new construction: %+v %+v handled=%t err=%v", materialized, decision, handled, err)
+	}
+}
+
+func TestParentLocalConstructionSelectionUsesRecordedAncestry(t *testing.T) {
+	for _, authoredPin := range []bool{false, true} {
+		t.Run(fmt.Sprintf("authored_input_%t", authoredPin), func(t *testing.T) {
+			parentFlow := connectRoutePlanTestFlow{
+				id: "parent", mode: contracts.FlowModeStatic,
+				nodes: map[string]contracts.SystemNodeContract{
+					"collector": {EventHandlers: map[string]contracts.SystemNodeEventHandler{"work.done": existingOwnerHandlerFixture()}},
+				},
+			}
+			if authoredPin {
+				parentFlow.inputs = []contracts.FlowInputEventPin{{Event: "work.done"}}
+			}
+			source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
+				parentFlow,
+				{id: "parent/child", mode: contracts.FlowModeStatic, outputs: []contracts.FlowOutputEventPin{{Event: "work.done"}}},
+			}, []contracts.FlowConnect{{Event: "work.done", From: "parent/child", To: "parent"}}))
+			graph := pinrouting.CompileConnectGraph(source)
+			if issues := graph.Issues(); len(issues) != 0 || len(graph.Plans()) != 1 {
+				t.Fatalf("parent-local graph plans=%+v issues=%+v", graph.Plans(), issues)
+			}
+			root := ConstructedFlowInstanceIdentityFixture(source, ".", "", busInternalTestRunID)
+			parent := ConstructedFlowInstanceIdentityFixture(source, "parent", "", busInternalTestRunID)
+			child := ConstructedFlowInstanceIdentityFixture(source, "parent/child", "", busInternalTestRunID)
+			observations := []pipeline.FlowInstanceObservation{
+				constructionIndexObservation(t, source, busInternalTestRunID, root, ""),
+				constructionIndexObservation(t, source, busInternalTestRunID, parent, ""),
+				constructionIndexObservation(t, source, busInternalTestRunID, child, ""),
+			}
+			independent := errors.New("parent index unavailable")
+			joined := errors.Join(context.Canceled, independent)
+			for _, test := range []struct {
+				name   string
+				index  constructionIndexTestReader
+				runID  string
+				entity string
+				want   error
+				valid  bool
+			}{
+				{name: "exact recorded parent", index: constructionIndexTestReader{observations: observations}, valid: true},
+				{name: "missing structural parent", index: constructionIndexTestReader{observations: observations[1:]}},
+				{name: "missing lexical owner", index: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{observations[0], observations[2]}}},
+				{name: "foreign run", index: constructionIndexTestReader{observations: observations}, runID: eventtest.UUID("foreign-local-run")},
+				{name: "foreign source entity", index: constructionIndexTestReader{observations: observations}, entity: eventtest.UUID("foreign-local-entity")},
+				{name: "independent failure", index: constructionIndexTestReader{err: independent}, want: independent},
+				{name: "cancellation", index: constructionIndexTestReader{err: context.Canceled}, want: context.Canceled},
+				{name: "joined cancellation and independent failure", index: constructionIndexTestReader{err: joined}, want: joined},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					runID, entity := busInternalTestRunID, child.EntityID
+					if test.runID != "" {
+						runID = test.runID
+					}
+					if test.entity != "" {
+						entity = test.entity
+					}
+					sender := eventtest.StaticFlowRoutingSource(child.TemplateID, child.InstancePath, entity)
+					event := eventtest.ExistingRunRootIngressWithRoutingSource(eventtest.UUID("parent-local-event"), "parent/child/work.done", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, sender, time.Now().UTC())
+					owner := connectInstanceSelector{source: source, index: test.index}
+					actual, err := owner.constructionParent(constructionIndexContext(t, source), event, graph.Plans()[0])
+					if test.valid {
+						if err != nil || actual != root {
+							t.Fatalf("parent-local structural parent=%+v err=%v, want %+v", actual, err, root)
+						}
+					} else if err == nil || actual != (flowidentity.Instance{}) || test.want != nil && !errors.Is(err, test.want) {
+						t.Fatalf("parent-local refusal lost exact index authority: parent=%+v err=%v", actual, err)
+					}
+				})
+			}
+		})
 	}
 }
 

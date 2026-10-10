@@ -428,8 +428,10 @@ func TestMixedPubsubConnectCompositionMatchedConnectPreservesLocal(t *testing.T)
 	}
 	store := newTargetRouteMemoryStore()
 	producerOwner := testSelectedRunTargetOwner("producer-owner", "producer", "producer-owner")
+	producerOwner.EntityID = runtimeflowidentity.EntityID("producer")
 	consumerOwner := connectRoutePlanStaticOwner()
 	store.setTargetOwners(producerOwner, consumerOwner)
+	installMixedStaticConstructionFixture(t, store, source, []ActiveTargetDescriptor{producerOwner, consumerOwner})
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}, RouteTable: routeTable})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -500,8 +502,10 @@ func TestMixedPubsubConnectCompositionTypedSourceOutranksConnectedEnvelopeTarget
 	source := mixedPubsubConnectStaticSource(t)
 	store := newTargetRouteMemoryStore()
 	producerOwner := testSelectedRunTargetOwner("producer-owner", "producer", "producer-owner")
+	producerOwner.EntityID = runtimeflowidentity.EntityID("producer")
 	consumerOwner := connectRoutePlanStaticOwner()
 	store.setTargetOwners(producerOwner, consumerOwner)
+	installMixedStaticConstructionFixture(t, store, source, []ActiveTargetDescriptor{producerOwner, consumerOwner})
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -552,7 +556,9 @@ func TestMixedPubsubConnectCompositionNoConnectMatchPreservesLocal(t *testing.T)
 	source := mixedPubsubConnectNoMatchSource(t)
 	store := newTargetRouteMemoryStore()
 	producerOwner := testSelectedRunTargetOwner("producer-owner", "producer", "producer-owner")
+	producerOwner.EntityID = runtimeflowidentity.EntityID("producer")
 	store.setTargetOwners(producerOwner)
+	installMixedStaticConstructionFixture(t, store, source, []ActiveTargetDescriptor{producerOwner})
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -580,7 +586,9 @@ func TestMixedPubsubConnectCompositionConnectFailureIsAtomic(t *testing.T) {
 	source := mixedPubsubConnectFailureSource(t)
 	store := newTargetRouteMemoryStore()
 	producerOwner := testSelectedRunTargetOwner("producer-owner", "producer", "producer-owner")
+	producerOwner.EntityID = runtimeflowidentity.EntityID("producer")
 	store.setTargetOwners(producerOwner)
+	installMixedStaticConstructionFixture(t, store, source, []ActiveTargetDescriptor{producerOwner})
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1404,6 +1412,7 @@ func TestEventBusPublish_RootConnectToNestedStaticPersistsExactReceiverOwner(t *
 	rootTarget := events.RouteIdentity{
 		FlowID: ".", FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("root-source-entity"),
 	}.Normalized()
+	eb.durable.RunLifecycle = &publicationRunPreflightTestStore{runID: rootTarget.FlowInstance}
 	installConnectionSourceConstructionForRun(t, eb, source, ".", rootTarget.FlowInstance)
 	store.installIndexObservation(constructionIndexObservation(t, source, rootTarget.FlowInstance,
 		StoredFlowInstanceIdentityFixture(source, "consumer", "", rootTarget.FlowInstance, childEntity), ""))
@@ -1467,6 +1476,7 @@ func TestEventBusPublish_RootConnectParentContextCannotSupplyMissingReceiver(t *
 	currentTarget := events.RouteIdentity{
 		FlowID: ".", FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("unrelated-current-owner"),
 	}.Normalized()
+	eb.durable.RunLifecycle = &publicationRunPreflightTestStore{runID: currentTarget.FlowInstance}
 	installConnectionSourceConstructionForRun(t, eb, source, ".", currentTarget.FlowInstance)
 	ctx := runtimedelivery.WithRoute(context.Background(), events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "root-dispatcher")),
@@ -1501,6 +1511,7 @@ func TestEventBusPublish_RootConnectToSingletonUsesReceiverOwnedMaterializingTar
 	rootTarget := events.RouteIdentity{
 		FlowID: ".", FlowInstance: uuid.NewString(), EntityID: eventtest.UUID("root-source-entity"),
 	}.Normalized()
+	eb.durable.RunLifecycle = &publicationRunPreflightTestStore{runID: rootTarget.FlowInstance}
 	installConnectionSourceConstructionForRun(t, eb, source, ".", rootTarget.FlowInstance)
 	store.installIndexObservation(constructionIndexObservation(t, source, rootTarget.FlowInstance,
 		StoredFlowInstanceIdentityFixture(source, "consumer", "", rootTarget.FlowInstance, runtimeflowidentity.EntityID("consumer")), ""))
@@ -1742,23 +1753,24 @@ func TestEventBusPublish_SingletonConnectToRootUsesExactSelectedRootOwner(t *tes
 func TestEventBusPublish_SingletonConnectToRootRejectsMissingOrAmbiguousSelectedOwnerBeforeMutation(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
-		owners    func(string) []ActiveTargetDescriptor
-		wantError string
+		duplicate bool
 	}{
-		{name: "missing", owners: func(string) []ActiveTargetDescriptor { return nil }, wantError: "target owner is missing"},
-		{name: "ambiguous", owners: func(runID string) []ActiveTargetDescriptor {
-			return []ActiveTargetDescriptor{
-				{ID: "root-owner-a", FlowInstance: runID, EntityID: eventtest.UUID("root-owner-a")},
-				{ID: "root-owner-b", FlowInstance: runID, EntityID: eventtest.UUID("root-owner-b")},
-			}
-		}, wantError: "target owner is ambiguous"},
+		{name: "missing"},
+		{name: "ambiguous", duplicate: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := connectRoutePlanSingletonProducerRootReceiverSource(t)
 			store := newTargetRouteMemoryStore()
 			runID := uuid.NewString()
-			store.setTargetOwners(tc.owners(runID)...)
-			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}}})
+			scout := constructionIndexObservation(t, source, runID, ConstructedFlowInstanceIdentityFixture(source, "scout", "", runID), "")
+			index := constructionIndexTestReader{observations: []runtimepipeline.FlowInstanceObservation{scout}}
+			if tc.duplicate {
+				root := constructionIndexObservation(t, source, runID, ConstructedFlowInstanceIdentityFixture(source, ".", "", runID), "")
+				index.observations = append(index.observations, root, root)
+			}
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{
+				RunLifecycle: &publicationRunPreflightTestStore{runID: runID}, Instances: index,
+			}})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -1775,11 +1787,13 @@ func TestEventBusPublish_SingletonConnectToRootRejectsMissingOrAmbiguousSelected
 				routingSource, time.Now().UTC(),
 			)
 			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
-			if _, err := eb.CheckPublishRecipientPlan(ctx, evt); err == nil || !strings.Contains(err.Error(), tc.wantError) {
-				t.Fatalf("CheckPublishRecipientPlan error = %v, want %q", err, tc.wantError)
+			_, err = eb.CheckPublishRecipientPlan(ctx, evt)
+			if tc.duplicate && (err == nil || !strings.Contains(err.Error(), "receiver inventory repeats a native coordinate")) || !tc.duplicate && !isolatedInstanceLookupMiss(err) {
+				t.Fatalf("CheckPublishRecipientPlan error = %v, want exact native-root refusal", err)
 			}
-			if err := eb.Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), tc.wantError) {
-				t.Fatalf("Publish error = %v, want %q", err, tc.wantError)
+			err = eb.Publish(ctx, evt)
+			if tc.duplicate && (err == nil || !strings.Contains(err.Error(), "receiver inventory repeats a native coordinate")) || !tc.duplicate && !isolatedInstanceLookupMiss(err) {
+				t.Fatalf("Publish error = %v, want exact native-root refusal", err)
 			}
 			if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 || len(store.flowRoutes) != 0 || len(store.claims) != 0 || len(store.scans) != 0 || len(store.active) != 0 {
 				t.Fatalf("rejected publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v claims=%#v scans=%#v active=%#v",
@@ -4385,6 +4399,7 @@ func TestMixedPubsubConnectCompositionMatchedZeroConnectRecipientsPreservesLocal
 		events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: connectRoutePlanStaticOwner().EntityID},
 		events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")},
 	)
+	installMixedStaticConstructionFixture(t, store, source, mixedStaticOwners(t, source, "producer", "consumer"))
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
