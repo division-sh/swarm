@@ -149,7 +149,7 @@ func openForkJoinNativeFixture(t *testing.T, dialect string) *forkJoinNativeFixt
 		if err := schema.BootstrapSchema(t.Context(), bootstrap); err != nil {
 			t.Fatal(err)
 		}
-		f.generic, err = storegenericschedule.NewPostgres(f.postgres, schema.RequireCurrent)
+		f.generic, err = storegenericschedule.NewPostgres(f.postgres, schema.RequireCurrent, &storerunlifecycle.RunLifecyclePostgresOwner{})
 		f.pipeline = &pipelinepersistence.PipelinePostgresOwner{RunLifecyclePostgresOwner: &storerunlifecycle.RunLifecyclePostgresOwner{}}
 	} else {
 		dbPath := filepath.Join(t.TempDir(), "fork-join.db")
@@ -175,7 +175,7 @@ func openForkJoinNativeFixture(t *testing.T, dialect string) *forkJoinNativeFixt
 		if err := schema.BootstrapSchema(t.Context(), bootstrap); err != nil {
 			t.Fatal(err)
 		}
-		f.generic, err = storegenericschedule.NewSQLite(f.sqlite, schema.RequireCurrent)
+		f.generic, err = storegenericschedule.NewSQLite(f.sqlite, schema.RequireCurrent, &storerunlifecycle.RunLifecycleSQLiteOwner{})
 		f.pipeline = &pipelinepersistence.PipelineSQLiteOwner{RunLifecycleSQLiteOwner: &storerunlifecycle.RunLifecycleSQLiteOwner{}}
 	}
 	if err != nil {
