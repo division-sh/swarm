@@ -77,7 +77,7 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				}
 				predecessorCredentialCount = channelOnboardingCredentialCount(t, harness.credentialPath)
 				barrier.Arm()
-				command = startChannelOnboardingCLICommand(t, harness.opts.ConfigPath, harness.endpoint, []string{"channel", "reconnect", "telegram", "--yes", "--credential-stdin"}, "crash-boundary-replacement-token\n")
+				command = startChannelOnboardingCLICommand(t, harness.opts.ConfigPath, harness.endpoint, []string{"channel", "reconnect", "telegram", "--yes", "--client-language", "en", "--credential-stdin"}, "crash-boundary-replacement-token\n")
 			} else if boundary == channelonboarding.TestAfterActivationCommitBeforePublication {
 				predecessor = runChannelOnboardingCLIJourney(t, harness.opts.ConfigPath, harness.endpoint, harness.provider, "connect", "crash-boundary-token", 7214, "private", 0)
 				if predecessor.Activation == nil || predecessor.Readiness == nil || !predecessor.Readiness.Ready {
