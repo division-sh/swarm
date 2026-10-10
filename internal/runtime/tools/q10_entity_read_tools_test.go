@@ -7,6 +7,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestQ10AgentReadbackAndQueryOwnershipBothStores(t *testing.T) {
@@ -17,9 +18,9 @@ func TestQ10AgentReadbackAndQueryOwnershipBothStores(t *testing.T) {
 			bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", "", "accounts:\n  status: text\n  score: numeric\n")
 			var selected runtimetools.EntityPersistence
 			if backend == "sqlite" {
-				selected = newSQLiteRuntimeToolStoreForTest(t)
+				selected = storetest.StartSQLiteRuntimeStore(t)
 			} else {
-				selected = newPostgresHumanTaskToolStoreForTest(t)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			}
 			ctx := runtimetools.WithActor(seedEntityToolSourceRun(t, selected, bundle), actor)
 			executor := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{

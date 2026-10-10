@@ -1270,7 +1270,9 @@ func TestEntityTools_ImportedFixtureLogsInitialMutationRows(t *testing.T) {
 }
 
 func TestEntityTools_GetEntityReturnsStoredCurrentState(t *testing.T) {
-	ctx, exec, db := newEntityToolTestHarness(t)
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "tester", Type: "internal", Role: "operator", Tools: []string{"get_entity"}}
+	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "review", "accounts", "", "accounts:\n  status: text\n  score: numeric\n  active: boolean\n", "marginal_review")
+	ctx, exec := newEntityToolTestExecutorWithBundle(t, actor, bundle)
 	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -1279,14 +1281,6 @@ func TestEntityTools_GetEntityReturnsStoredCurrentState(t *testing.T) {
 			"active": true,
 		},
 	})
-	if _, err := db.ExecContext(ctx, `
-		UPDATE flow_instances
-		SET current_state = 'marginal_review'
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, entityToolTestRunID, entityID); err != nil {
-		t.Fatalf("seed current_state: %v", err)
-	}
-
 	out, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
 	if err != nil {
 		t.Fatalf("get_entity: %v", err)
@@ -1586,8 +1580,10 @@ func captureEntityToolRunForkRevision(t *testing.T, db *sql.DB, runID string) {
 }
 
 func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
-	ctx, exec, db := newEntityToolTestHarness(t)
-	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "tester", Type: "internal", Role: "operator", Tools: []string{"search_entities", "query_entities"}}
+	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "review", "accounts", "", "accounts:\n  status: text\n  score: numeric\n  active: boolean\n", "marginal_review")
+	ctx, exec := newEntityToolTestExecutorWithBundle(t, actor, bundle)
+	seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"status": "open",
@@ -1595,14 +1591,6 @@ func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
 			"active": true,
 		},
 	})
-	if _, err := db.ExecContext(ctx, `
-		UPDATE flow_instances
-		SET current_state = 'marginal_review'
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, entityToolTestRunID, entityID); err != nil {
-		t.Fatalf("seed current_state: %v", err)
-	}
-
 	searchOut, err := exec.Execute(ctx, "search_entities", map[string]any{
 		"current_state": "marginal_review",
 		"limit":         10,
