@@ -460,7 +460,6 @@ func eventBusSourceOperationLedger() map[string]string {
 		"FenceAgentRoute":                            operationMutation,
 		"FinalizeSelectedReceiverAdmission":          operationRetained,
 		"HasFlowInstanceRoute":                       operationPureRead,
-		"ListFlowInstanceRoutes":                     operationPureRead,
 		"LookupAPIEventPublication":                  operationPureRead,
 		"LogRuntime":                                 operationMutation,
 		// This projects an exact already-admitted durable transition, including retained
