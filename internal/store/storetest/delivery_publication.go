@@ -61,7 +61,6 @@ func CommitNativeDeliveryPublication(t *testing.T, ctx context.Context, selected
 	}
 	if root != nil {
 		command.Activations = []pipeline.FlowInstanceActivationPlan{root.Plan}
-		command.RouteTopology = root.RouteTopology
 	}
 	committed, err := selected.CommitPublication(ctx, command)
 	if err != nil || !committed.Acknowledged {

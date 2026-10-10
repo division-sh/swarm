@@ -100,7 +100,7 @@ func newTimerCauseReplayNativeFixture(t *testing.T, backend string, bundle *cont
 	}
 	pc := newTimerReplayCoordinator(t, bus, selected, pipeline.PipelineCoordinatorOptions{
 		Module: proposedEffectProofModule{source: source, nodes: nodes}, TimerScheduler: scheduler, WorkOwner: pipelineExternalTestWorkOwner(t),
-	}, authorActivityTestSourceArtifactFact)
+	}, fact)
 	bus.SetInterceptors(pc)
 	t.Cleanup(func() {
 		join, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
