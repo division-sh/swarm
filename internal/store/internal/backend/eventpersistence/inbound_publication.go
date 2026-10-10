@@ -128,7 +128,7 @@ func commitInboundPublicationSQL(
 	children := make([]runtimeinbound.EventRecord, len(command.Finalization.Events))
 	for index, publication := range command.Publications {
 		var err error
-		committed[index], err = commitValidatedPublicationTx(ctx, attempt, eventStore, publication, true)
+		committed[index], err = commitValidatedPublicationTx(ctx, attempt, eventStore, publication)
 		if err != nil {
 			return runtimeinbound.CommitResult{}, fmt.Errorf("commit inbound publication event %d: %w", index, err)
 		}

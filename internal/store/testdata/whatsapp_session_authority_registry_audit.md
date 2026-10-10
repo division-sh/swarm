@@ -79,3 +79,43 @@ standing-target preflight. Four changed call fingerprints retain
 those preflights, and the two standing calls now transfer the complete typed
 command instead of only its request. Regeneration removes the obsolete four
 fingerprints. The same transaction, checks and lock order are preserved.
+
+## Rebased Native Activity And Session Preparation Inventory
+
+Regeneration after the master rebase exposed 34 unclassified fingerprints in
+17 declarations. They include previously omitted preparation/standing/activity
+sites, not just fingerprints changed by the rebase. Each exact finding is now
+assigned to an existing owner; no collector, policy or debt allowance changed.
+
+Nine findings are `typed-process-local`: `requireNativePublicationAdmission`,
+`nativeChannelActivityLaunch`, `withNativeChannelActivityLaunch`,
+`ConsumeNativeChannelActivity`, `prepareSessionActivityIntents`, and the two
+coordinator declarations. The callbacks carry currentness/cleanup or select the
+original typed execution owner. The private context key carries a single-use
+launch tied to the newly started attempt, source, activation, tool and input.
+Neither exposes SQL or a caller-constructible grant. The session activity
+projection and native activity handoff tests exercise rejection and release.
+
+Eight findings in `sessionStandingBindingCurrent` and
+`sessionStandingActivationCurrent` are `private-backend`. They consume the
+existing selected transaction, principal/binding locks and exact onboarding
+and activation records. Confirmed responsibility retains standing service
+identity while disconnected; it does not grant execution. The standing
+responsibility tests cover missing, foreign, retired and canceled evidence.
+The two facade methods are `typed-public-facade`: typed operation in, boolean
+currentness out, with no transaction/callback/raw store authority.
+
+Ten prekey fixture findings are `private-backend`: `SDKPreKeyInventory`,
+`SetSDKPreKeyInsertFailure` and `SetSDKPreKeyCommitFailure`. These named private
+fixture operations observe one account or install the exact bounded batch and
+COMMIT failures; they do not expose generic SQL to callers. Four findings in
+`sdkTransaction` and `DoDecryptionTxn` are also `private-backend`. The private
+context scope serializes the original account's SDK transaction across loaded
+handles and rejects foreign/expired nesting. Prekey preparation tests prove
+inventory identity, batch and COMMIT rollback, cancellation, lock order, close
+and process-death durability.
+
+The changed `ObserveIntent` QueryContext fingerprint remains `private-backend`:
+the existing read-only intent observation owner consumes typed query filters.
+Served native Inbox, authored reply and process-death tests use this owner;
+no selected-store handle or SQL is returned to the test caller.

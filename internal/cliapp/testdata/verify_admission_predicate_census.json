@@ -1058,25 +1058,31 @@
   {
     "owner": "internal/runtime/channel_activation_admission.go::*Runtime.bindChannelSessionAdmission",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21",
     "body_sha256": "5ca46f5a4fbbf32fc7606ef8a4ddf6f88be2d9adc74d0d99e3e420181b1b106e"
+  },
+  {
+    "owner": "internal/runtime/channel_activation_admission.go::*Runtime.nativeChannelExecution",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21",
+    "body_sha256": "ca874f301c966841ad5fab3e18bd086eb23f447813d57bb0fd68a252d718512c"
   },
   {
     "owner": "internal/runtime/channel_activation_admission.go::*Runtime.validateChannelActivationPublication",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21",
     "body_sha256": "c5763ef499e9da3967be66b097e8fb1112eb71bd5de8df3722afe84b9bc28227"
   },
   {
     "owner": "internal/runtime/channel_activation_admission.go::*Runtime.validateLearnedChannelPublication",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21",
     "body_sha256": "5a37d5674c4ca610ab010ddc90cdc7acd50e73826f3f355e8731cf292a46033c"
   },
   {
     "owner": "internal/runtime/channel_activation_admission.go::*Runtime.validateNativeChannelPublication",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21",
     "body_sha256": "0c940826e2af59b198d6a6d298d42e9644d184a66bfe0cadebd033f08c032354"
   },
   {
@@ -2457,7 +2463,7 @@
     "owner": "internal/runtime/runtime.go::newRuntime",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "b52742ec816459cdc93bfbb8a1042d96ae6d9e42ca2a34bf30cf80b6c8c8cbd9"
+    "body_sha256": "1f24fc604a92d40d18e4cb38dca608b500e7d68c3c1a89025ad8f5f256efa7d4"
   },
   {
     "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
@@ -3738,6 +3744,12 @@
     "body_sha256": "b2be89cfa49464c8bb866786c857e2103fd70558cecbe5780dfb379733dc1b72"
   },
   {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.completeSessionAttempt",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "e549a0ce9b478db2fddce141170901e8b24cf4fee58863952a7d14f955b6f522"
+  },
+  {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.connection",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
@@ -3759,7 +3771,7 @@
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.openSessionAttempt",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
-    "body_sha256": "64dc62c945b4cc3ae048b8b067c7e27bae33e82e131a47a0025d14191b4b4ca2"
+    "body_sha256": "8cb44dfcf7c7004b3af7fdf4dc56c6291de14efeb31c723b8167ecf27ffca0fc"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.validateResumeSession",
