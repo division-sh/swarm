@@ -245,6 +245,11 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 		}
 	}
 	if cut != "stopped" {
+		readyWait := 5 * time.Second
+		if disposition == "automatic_retry" {
+			// Unlike synchronous Ensure, this proof includes the default 5s retry tick.
+			readyWait = 15 * time.Second
+		}
 		select {
 		case attempt := <-workflow.ready:
 			wantOrdinal := uint64(2)
@@ -254,7 +259,7 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 			if attempt.Ordinal() != wantOrdinal || workflow.enabled.Load() {
 				t.Fatalf("wrong ready attempt or unreached cut: %+v enabled=%t", attempt, workflow.enabled.Load())
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(readyWait):
 			t.Fatal("accepted timer work did not reach ready")
 		}
 		wantAcquired := int32(4)
