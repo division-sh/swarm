@@ -222,6 +222,7 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool, rese
 				if code := process.stop(); code != 0 {
 					t.Fatal("authored activity RunServe did not join before restart", code, process.outputString())
 				}
+				enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
 				process = startServeRuntimeTestProcess(t, opts)
 				process.waitForReadyLine()
 				endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
