@@ -11254,6 +11254,8 @@ tool_model:
         connection. A failed drain or close keeps both possession and runtime work until explicit complete cleanup.
         Concurrent close callers wait through cancellation-aware serialization; expiration returns the caller's
         cancellation without releasing or canceling another cleanup owner's retained work or possession.
+        Explicit Close requests retirement independently of the caller's join deadline; the existing counted
+        retirement owner completes SDK/state joining even when the initial bootstrap caller stops waiting.
         Caller cancellation fences a pending SDK dial or handshake and returns from the individual wait without
         permitting reconnect. The concrete attempt retains its transient runtime work through complete SDK and
         occurrence joining, even if an internal SDK handshake wait outlives that caller. Quiescence, possession
@@ -11279,7 +11281,11 @@ tool_model:
         cleanup before relinquishing responsibility. Only the private connection owner may checkpoint the exact
         persisted SDK account while its original reserved occurrence is authenticated. It freezes account provenance
         and advances to awaiting_external_identity under the selected operation revision, without claiming a human
-        binding or executable target. Repetition retains the original account admission; supplied QR observations
+        binding or executable target. A successful selected commit updates the original verified account projection
+        even if request cancellation then prevents returning success. Fresh supported retry consumes that exact
+        committed admission on its genuine current occurrence; pre-commit cancellation grants none. Neither retry
+        nor restart remints account/connection identity or treats a retained DTO as executable authority.
+        Repetition retains the original account admission; supplied QR observations
         cannot create it. The existing identity ceremony consumes this session provenance through genuine native
         admission rather than fabricating a provider credential.
         Optional runtime incoming installation validates the compiled session trigger, live source-owned EventBus,
