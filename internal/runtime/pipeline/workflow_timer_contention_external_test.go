@@ -264,15 +264,16 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 				earlyPublisherJoined := false
 				entryCut := scenario == "canceled_entry" || scenario == "deadline_entry" || scenario == "deadline_entry_live_outer"
 				switch scenario {
-				case "receiver_deadline_held_activation", "receiver_deadline_held_target":
+				case "receiver_cancellation_cause_held_activation", "receiver_cancellation_cause_held_target", "receiver_cancellation_cause_held_activation_delayed_entry", "receiver_cancellation_cause_held_target_delayed_entry":
 					var cancel context.CancelFunc
-					fireCtx, cancel = context.WithTimeout(ctx, time.Second)
+					fireCtx, cancel = context.WithCancel(ctx)
 					defer cancel()
 					read := "activation"
-					if scenario == "receiver_deadline_held_target" {
+					if scenario == "receiver_cancellation_cause_held_target" || scenario == "receiver_cancellation_cause_held_target_delayed_entry" {
 						read = "target"
 					}
 					receiverProbe = &timerReceiverReadCut{publisher: fireCtx, read: read, owner: owner, test: t}
+					receiverProbe.delayEntry = scenario == "receiver_cancellation_cause_held_activation_delayed_entry" || scenario == "receiver_cancellation_cause_held_target_delayed_entry"
 					owner.heldReadEntered = receiverProbe.enterRead
 					owner.readReturned = receiverProbe.returnRead
 					capture.beforeIntercept = receiverProbe.beginReceiver
@@ -407,7 +408,7 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 				}
 				if receiverProbe != nil {
 					receiverProbe.validate(capture, publisherReturnErr)
-					interrupted = context.DeadlineExceeded
+					interrupted = context.Canceled
 					entryCut = receiverProbe.read == "activation"
 					deadlineBeforeMutation = receiverProbe.read == "target"
 				}
