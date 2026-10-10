@@ -865,7 +865,7 @@ func projectRunForkHistoricalHeader(sourceRunID, forkRunID, entityID, path, targ
 	if identity.EntityID != entityID || identity.InstancePath != path {
 		return runtimepipeline.WorkflowEngineStateRecord{}, fmt.Errorf("historical header contradicts projected construction identity")
 	}
-	config, err := recorded.Project(identity.Route(), identity.ParentRoute)
+	config, err := recorded.Project(identity.Route(), identity.ParentRoute, recorded.WorkflowVersion())
 	if err != nil {
 		return runtimepipeline.WorkflowEngineStateRecord{}, err
 	}

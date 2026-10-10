@@ -43,8 +43,9 @@ import (
 
 func armedArrivalFixture(t *testing.T) string {
 	t.Helper()
-	root := canonicalrouting.CopyExactJoinEventBusProof(t, "")
-	path := filepath.Join(root, "entities.yaml")
+	flowID := os.Getenv(publishedJoinFlowEnv)
+	root := canonicalrouting.CopyExactJoinEventBusProof(t, flowID)
+	path := filepath.Join(root, flowID, "entities.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -73,13 +74,16 @@ func seedArmedArrivalSource(t *testing.T, ctx context.Context, selected any, own
 	})
 	marker := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "item.completed", "source-runtime", "",
 		[]byte(`{"member_id":"cut","result":{"value":"cut"}}`), 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), at.Add(time.Second), executionmode.Mock)
-	admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, ".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	marker, err = events.ApplyPayloadAdmission(marker, admission)
-	if err != nil {
-		t.Fatal(err)
+	flowID := os.Getenv(publishedJoinFlowEnv)
+	if flowID != "orders" {
+		admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, ".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		marker, err = events.ApplyPayloadAdmission(marker, admission)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	work, found := worklifetime.OccurrenceFromContext(ctx)
 	if !found {
@@ -110,27 +114,49 @@ func seedArmedArrivalSource(t *testing.T, ctx context.Context, selected any, own
 		t.Fatal("armed arrival source lifecycle planner was not admitted")
 	}
 	identity := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), runID, runID, runID, "")
-	command := selectedExecutionSourceFlowCommand(t, ctx, loaded, marker, identity)
-	instance, lifecycle, err := coordinator.PrepareInitialEntryLifecycle(ctx,
-		flowidentity.RunScopedFlowInstance{RunID: runID, Route: identity.Route()}, command.Plan.Instance, marker.CreatedAt())
-	if err != nil {
-		t.Fatal(err)
+	workflow := flowidentity.RunScopedFlowInstance{RunID: runID, Route: identity.Route()}
+	if flowID == "orders" {
+		marker = seedPublishedOrdersJoinConstruction(t, ctx, selected, loaded, coordinator, identity, marker, marker.CreatedAt())
+		active, err := selected.(interface {
+			ListActiveGenericScheduleActivationsForRun(context.Context, string) ([]genericschedule.Activation, error)
+		}).ListActiveGenericScheduleActivationsForRun(ctx, runID)
+		if err != nil || len(active) != 1 {
+			t.Fatalf("constructed orders arrival requires its sole native deadline: %+v err=%v", active, err)
+		}
+		object, ok := active[0].Command.Payload.Interface().(map[string]any)
+		if !ok {
+			t.Fatal("constructed orders deadline lacks its typed join handle")
+		}
+		handle, ref, valid := timeridentity.ParseJoinHandle(object)
+		entry := ref.StageEntry()
+		if !valid || handle.Kind() != timeridentity.TimerHandleJoinTimeout || ref.FlowPath() != "orders" ||
+			entry.RunID != runID || entry.EntityID != active[0].Command.EntityID || entry.EntityID == runID ||
+			entry.InstancePath != active[0].Command.FlowInstance || !strings.HasPrefix(entry.InstancePath, "orders/") {
+			t.Fatalf("constructed orders deadline lost its exact child ownership: %+v", ref)
+		}
+		workflow.Route = flowidentity.StoredRoute(entry.FlowScope, entry.InstanceID, entry.InstancePath)
+	} else {
+		command := selectedExecutionSourceFlowCommand(t, ctx, loaded, marker, identity)
+		instance, lifecycle, err := coordinator.PrepareInitialEntryLifecycle(ctx, workflow, command.Plan.Instance, marker.CreatedAt())
+		if err != nil {
+			t.Fatal(err)
+		}
+		command, err = flowactivationfixture.Command(ctx, instance, lifecycle, marker.CreatedAt())
+		if err != nil {
+			t.Fatal(err)
+		}
+		committed, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
+		if err != nil || !committed.Acknowledged || !committed.Created {
+			t.Fatalf("canonical armed arrival construction: %+v err=%v", committed, err)
+		}
+		if err := committed.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		if committed.Plan.Identity != identity || committed.Plan.Readiness.Identity != identity {
+			t.Fatalf("armed arrival construction lost its complete root/readiness: %+v", committed.Plan)
+		}
 	}
-	command, err = flowactivationfixture.Command(ctx, instance, lifecycle, marker.CreatedAt())
-	if err != nil {
-		t.Fatal(err)
-	}
-	committed, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
-	if err != nil || !committed.Acknowledged || !committed.Created {
-		t.Fatalf("canonical armed arrival construction: %+v err=%v", committed, err)
-	}
-	if err := committed.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if committed.Plan.Identity != identity || committed.Plan.Readiness.Identity != identity {
-		t.Fatalf("armed arrival construction lost its complete root/readiness: %+v", committed.Plan)
-	}
-	header, found, err := owner.ports.workflow.LoadWorkflowInstance(ctx, flowidentity.RunScopedFlowInstance{RunID: runID, Route: identity.Route()})
+	header, found, err := owner.ports.workflow.LoadWorkflowInstance(ctx, workflow)
 	if err != nil || !found || header.CurrentState != "awaiting" {
 		t.Fatalf("constructed armed arrival source: %+v found=%v err=%v", header, found, err)
 	}
@@ -175,6 +201,20 @@ func seedArmedArrivalSource(t *testing.T, ctx context.Context, selected any, own
 	}
 	if err := genericschedule.ValidateWorkflowJoinScheduleRelation(join, source); err != nil {
 		t.Fatal(err)
+	}
+	if flowID == "orders" {
+		// Construction committed its scoped creating input. The fixed cut is a
+		// distinct admitted event; source immutability includes both history rows.
+		marker = eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), marker.Type(), "source-runtime", "",
+			marker.Payload(), 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), marker.CreatedAt().Add(time.Second), executionmode.Mock)
+		admission, err := rootruntime.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, marker, "orders")
+		if err != nil {
+			t.Fatal(err)
+		}
+		marker, err = events.ApplyPayloadAdmission(marker, admission)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, marker, nil, pipelineobligation.ScopeSubscribed)
 	storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)

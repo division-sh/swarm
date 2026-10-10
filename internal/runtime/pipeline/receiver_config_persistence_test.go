@@ -97,7 +97,7 @@ func TestHistoricalWorkflowConfigProjectsOnlyOwnership(t *testing.T) {
 	}
 	target := flowidentity.RouteForInstancePath("parent/two/review")
 	projectedParent := flowidentity.ParentRoute{FlowID: parent.FlowID, FlowInstance: "parent/two", EntityID: uuid.NewString()}
-	projected, err := recorded.Project(target, projectedParent)
+	projected, err := recorded.Project(target, projectedParent, recorded.WorkflowVersion())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,15 +109,32 @@ func TestHistoricalWorkflowConfigProjectsOnlyOwnership(t *testing.T) {
 		t.Fatalf("historical projection changed non-ownership controls: controls=%+v err=%v", control, err)
 	}
 	for _, invalid := range []flowidentity.ParentRoute{{}, {FlowID: "different", FlowInstance: "parent/two", EntityID: projectedParent.EntityID}, {FlowID: parent.FlowID, FlowInstance: "parent/two"}} {
-		if _, err := recorded.Project(target, invalid); err == nil {
+		if _, err := recorded.Project(target, invalid, recorded.WorkflowVersion()); err == nil {
 			t.Fatalf("accepted incomplete/changed parent %+v", invalid)
 		}
 	}
 	if _, err := DecodeWorkflowInstanceRecordedHeader(flowidentity.RouteForInstancePath(source.StorageRef), []byte(strings.Replace(string(raw), `"workflow_version":"source-version"`, `"workflow_version":1`, 1))); err == nil {
 		t.Fatal("accepted malformed recorded workflow version")
 	}
-	again, err := recorded.Project(target, projectedParent)
+	again, err := recorded.Project(target, projectedParent, recorded.WorkflowVersion())
 	if err != nil || string(again) != string(projected) {
 		t.Fatalf("projection mutated recorded controls: %s %v", again, err)
+	}
+	selected, err := recorded.Project(target, projectedParent, "selected-version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectedControl, err := decodeWorkflowInstanceHeaderPayload(selected, workflowInstancePersistedControl{})
+	if err != nil || selectedControl.WorkflowVersion != "selected-version" ||
+		selectedControl.InstanceKind != source.InstanceKind || selectedControl.TemplateVersion != source.TemplateVersion || selectedControl.Status != source.Status {
+		t.Fatalf("selected version replaced unrelated recorded controls: %+v err=%v", selectedControl, err)
+	}
+	for _, invalid := range []string{"", " padded-version "} {
+		if _, err := recorded.Project(target, projectedParent, invalid); err == nil {
+			t.Fatalf("accepted an inexact workflow version %q", invalid)
+		}
+	}
+	if recorded.WorkflowVersion() != source.WorkflowVersion {
+		t.Fatal("selected projection changed source version")
 	}
 }
