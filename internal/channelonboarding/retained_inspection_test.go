@@ -88,7 +88,7 @@ func TestRetainedChannelInspectionPreservesExactOwnershipAndRequiredReads(t *tes
 }
 
 func TestPendingChannelTeardownInspectionSharesRecoveryKindAdmission(t *testing.T) {
-	for _, kind := range []TeardownKind{TeardownUnbind, TeardownProofRevoke, TeardownInterfaceRetirement, TeardownContextRetirement, "unknown"} {
+	for _, kind := range []TeardownKind{TeardownUnbind, TeardownProofRevoke, TeardownInterfaceRetirement, TeardownContextRetirement, TeardownLogout, "unknown"} {
 		t.Run(string(kind), func(t *testing.T) {
 			reader := &retainedInspectionReader{teardowns: []TeardownOperation{
 				{TeardownID: "finished", Phase: TeardownSucceeded, Kind: kind},

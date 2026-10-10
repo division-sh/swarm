@@ -72,9 +72,66 @@ func newChannelCommand(opts rootCommandOptions) *cobra.Command {
 		newChannelListCommand(opts),
 		newChannelStatusCommand(opts),
 		newChannelUnbindCommand(opts),
+		newChannelLogoutCommand(opts),
 		newChannelProofRevokeCommand(opts),
 	)
 	return cmd
+}
+
+func newChannelLogoutCommand(opts rootCommandOptions) *cobra.Command {
+	commandOpts := opts
+	var output cliOutputOptions
+	var idempotencyKey string
+	cmd := &cobra.Command{
+		Use:   "logout <operation-id>",
+		Short: "Unlink one exact paired connection and delete its local pairing state.",
+		Args:  argcount.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runChannelLogout(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], idempotencyKey, commandOpts, output)
+		},
+	}
+	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
+	bindCLIAPIConnectionFlagsWithClass(cmd, &commandOpts, cliAPICommandClassControl, "swarm channel logout")
+	bindCLIOutputFlags(cmd, &output)
+	return cmd
+}
+
+func runChannelLogout(ctx context.Context, out, errOut io.Writer, operationID, idempotencyKey string, opts rootCommandOptions, output cliOutputOptions) error {
+	client, err := newCLIAPIClient(opts)
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	var retained channelOnboardingResult
+	if err := client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": operationID}, &retained); err != nil {
+		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	if retained.Operation.OperationID != operationID || retained.Operation.Revision < 1 {
+		return returnCLIValidationError(errOut, errors.New("channel readback does not identify the requested operation"))
+	}
+	revision := retained.Operation.Revision
+	if retained.Logout != nil {
+		if retained.Logout.OperationID != operationID || retained.Logout.ExpectedRevision < 1 {
+			return returnCLIValidationError(errOut, errors.New("channel logout readback contradicts the requested operation"))
+		}
+		revision = retained.Logout.ExpectedRevision
+	}
+	params := map[string]any{"operation_id": operationID, "expected_revision": revision}
+	if strings.TrimSpace(idempotencyKey) != "" {
+		params["idempotency_key"] = strings.TrimSpace(idempotencyKey)
+	}
+	var result channelonboarding.SessionLogoutReadback
+	if err := client.call(ctx, "channel.logout", params, &result); err != nil {
+		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	if err := result.Validate(); err != nil || result.OperationID != operationID || result.ExpectedRevision != revision {
+		return returnCLIValidationError(errOut, errors.New("channel logout response contradicts the requested responsibility"))
+	}
+	human := func(w io.Writer) {
+		fmt.Fprintf(w, "Logout %s: %s (revision %d).\n", result.Teardown.TeardownID, result.Teardown.Phase, result.Teardown.Revision)
+	}
+	quiet := func() ([]string, error) { return []string{result.Teardown.TeardownID}, nil }
+	return renderCLIOutput(out, errOut, output, result, human, quiet)
 }
 
 func newChannelLifecycleCommand(opts rootCommandOptions, verb string) *cobra.Command {
