@@ -127,3 +127,62 @@ func TestServedRunDebugStorageRefusesUnavailableSnapshotsBothStores(t *testing.T
 		})
 	}
 }
+
+// These are native read products, not served-startup or directory eligibility
+// receipts. Header and authored-data membership must remain independent.
+func TestQ10ServedDiagnosticsPreserveMembershipAndAbsentLifecycleBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			run, sibling := uuid.NewString(), uuid.NewString()
+			const (
+				fielded   = "96000000-0000-4000-8000-000000000001"
+				imported  = "96000000-0000-4000-8000-000000000002"
+				fieldless = "96000000-0000-4000-8000-000000000003"
+				noStage   = "96000000-0000-4000-8000-000000000004"
+			)
+			seedEntityToolStorageWitness(t, fixture, run, fielded, true, true)
+			seedEntityToolStorageWitness(t, fixture, run, imported, false, true)
+			seedEntityToolStorageWitness(t, fixture, run, fieldless, true, false)
+			seedEntityToolStorageWitness(t, fixture, run, noStage, true, true)
+			seedEntityToolStorageWitness(t, fixture, sibling, imported, true, true)
+			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+				_, err := tx.ExecContext(ctx, `UPDATE flow_instances SET stage_defined=FALSE, current_state='pending' WHERE run_id=$1 AND entity_id=$2`, run, noStage)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restore()
+			data := readServedRunDebugSection(ctx, fixture.store, backend.name, "entity_state", run)
+			want := fmt.Sprintf("entity_state: [%s storage-witness/%s queued]; [%s storage-witness/%s <nil>]; [%s storage-witness/%s <nil>]", fielded, fielded, imported, imported, noStage, noStage)
+			if data != want || strings.Contains(data, fieldless) {
+				t.Fatalf("data membership, exact run or lifecycle absence changed: got=%q want=%q", data, want)
+			}
+			headers := readServedRunDebugSection(ctx, fixture.store, backend.name, "flow_instances", run)
+			if !strings.Contains(headers, fieldless) || !strings.Contains(headers, noStage) || strings.Contains(headers, imported) {
+				t.Fatalf("header census was filtered through data membership: %q", headers)
+			}
+			if counts := probe.Snapshot(); counts.Total.ReadCommits != 2 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
+				t.Fatalf("diagnostics escaped original read owner: %+v", counts)
+			}
+			cancelled, cancel := context.WithCancel(ctx)
+			cancel()
+			if got := readServedRunDebugSection(cancelled, fixture.store, backend.name, "entity_state", run); !strings.Contains(got, context.Canceled.Error()) || strings.Contains(got, fielded) {
+				t.Fatalf("cancelled data diagnostic returned evidence: %q", got)
+			}
+			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+				_, err := tx.ExecContext(ctx, `UPDATE flow_instances SET entity_type='foreign' WHERE run_id=$1 AND entity_id=$2`, run, fielded)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if got := readServedRunDebugSection(ctx, fixture.store, backend.name, "entity_state", run); got == want || strings.Contains(got, "queued]") || strings.Contains(got, "<nil>]") {
+				t.Fatalf("malformed pair returned partial/clean diagnostic evidence: %q", got)
+			}
+		})
+	}
+}
