@@ -26,7 +26,7 @@ import (
 
 func TestEmbeddedInventoryLoadsFirstPartyProvidersFromVerifiedPlatformPacks(t *testing.T) {
 	registry := testPlatformRegistry(t)
-	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"} {
+	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform", "whatsapp"} {
 		entry, _ := registry.EntryByProvider(provider)
 		if entry.Source != "embedded:provider."+provider || entry.Identity.Provenance != packs.ProvenancePlatform || entry.SourcePath != "provider-triggers/"+provider {
 			t.Fatalf("%s embedded source = %#v", provider, entry)
@@ -36,8 +36,8 @@ func TestEmbeddedInventoryLoadsFirstPartyProvidersFromVerifiedPlatformPacks(t *t
 
 func TestPlatformPackInventoryIsCompleteFilesystemOnlyAndFreshlyStamped(t *testing.T) {
 	dirs := testPlatformPackDirs(t)
-	if len(dirs) != 8 {
-		t.Fatalf("platform pack directories = %d, want 8: %v", len(dirs), dirs)
+	if len(dirs) != 9 {
+		t.Fatalf("platform pack directories = %d, want 9: %v", len(dirs), dirs)
 	}
 	providers := make([]string, 0, len(dirs))
 	for _, dir := range dirs {
@@ -64,27 +64,42 @@ func TestPlatformPackInventoryIsCompleteFilesystemOnlyAndFreshlyStamped(t *testi
 		if err != nil {
 			t.Fatalf("capability subject %s: %v", dir, err)
 		}
-		wantCapabilityCount := 3 + len(DerivedCapabilities(pack.Manifest).Can.EmitEvents)
+		wantCapabilityCount := 2 + len(DerivedCapabilities(pack.Manifest).Can.EmitEvents)
+		if pack.Manifest.RequiresSecret() {
+			wantCapabilityCount++
+		}
 		if subject.Kind != packs.SubjectProviderTrigger || subject.Status != packs.StatusAvailable || subject.Provider != pack.Manifest.Provider() || len(subject.Capabilities) != wantCapabilityCount || len(subject.Guarantees) != 3 {
 			t.Fatalf("capability subject %s = %#v", dir, subject)
 		}
-		wantRoute := "/webhooks/{alias}/" + pack.Manifest.Provider()
-		var gotRoute string
+		wantReceive := packs.Capability{Code: packs.CapabilityReceiveHTTPSRoute, Target: "/webhooks/{alias}/" + pack.Manifest.Provider()}
+		if pack.Manifest.Transport() == packs.ChannelTransportSession {
+			wantReceive = packs.Capability{Code: packs.CapabilityReceiveSessionEvents, Target: pack.Manifest.Provider()}
+		}
+		var gotReceive packs.Capability
 		for _, capability := range subject.Capabilities {
-			if capability.Code == packs.CapabilityReceiveHTTPSRoute {
-				gotRoute = capability.Target
+			if capability.Code == packs.CapabilityReceiveHTTPSRoute || capability.Code == packs.CapabilityReceiveSessionEvents {
+				if gotReceive.Code != "" {
+					t.Fatal("trigger advertised more than one transport")
+				}
+				gotReceive = capability
 			}
 		}
-		if gotRoute != wantRoute {
-			t.Fatalf("capability subject %s receive route = %q, want %q", dir, gotRoute, wantRoute)
+		if gotReceive != wantReceive {
+			t.Fatalf("capability subject %s receive = %#v, want %#v", dir, gotReceive, wantReceive)
 		}
-		if len(subject.Requirements) != 1 || subject.Requirements[0].Scope != packs.RequirementScopeTarget || subject.Requirements[0].Satisfied != nil || subject.Requirements[0].Status != "" {
-			t.Fatalf("capability subject %s requirements = %#v, want target-scoped unevaluated", dir, subject.Requirements)
+		wantRequires := DerivedRequires(pack.Manifest).Secrets
+		if len(subject.Requirements) != len(wantRequires) {
+			t.Fatalf("trigger requirements disagree with admitted transport: %s", dir)
+		}
+		for _, requirement := range subject.Requirements {
+			if requirement.Scope != packs.RequirementScopeTarget || requirement.Satisfied != nil || requirement.Status != "" {
+				t.Fatalf("capability subject %s requirements = %#v, want target-scoped unevaluated", dir, subject.Requirements)
+			}
 		}
 		providers = append(providers, pack.Manifest.Provider())
 	}
 	sort.Strings(providers)
-	want := []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"}
+	want := []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform", "whatsapp"}
 	if strings.Join(providers, ",") != strings.Join(want, ",") {
 		t.Fatalf("filesystem providers = %v, want %v", providers, want)
 	}
@@ -102,7 +117,7 @@ func TestConfiguredPlatformPackInventoryHasNoHardCodedCompletenessAuthority(t *t
 	if err != nil {
 		t.Fatalf("load explicit embedded inventory: %v", err)
 	}
-	if registry == nil || len(loaded) != 8 {
+	if registry == nil || len(loaded) != 9 {
 		t.Fatalf("embedded platform inventory result = registry:%v loaded:%d", registry != nil, len(loaded))
 	}
 	body, err := os.ReadFile("providertriggers.go")

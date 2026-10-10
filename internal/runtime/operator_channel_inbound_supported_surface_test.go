@@ -309,8 +309,8 @@ func compileEmbeddedTelegramOperatorChannelPlan(t *testing.T) packs.Satisfaction
 		t.Fatal(err)
 	}
 	plans, err := packs.CompileChannelInventory(registry, packfixture.ChannelPacks(t), packfixture.TriggerCatalog(t).PackDescriptors(), packfixture.ConnectorRegistry(t).PackDescriptors())
-	if err != nil || len(plans) != 1 {
-		t.Fatalf("compile embedded channel inventory = %#v, %v", plans, err)
+	if err != nil {
+		t.Fatal("compile embedded channel inventory", err)
 	}
-	return plans[0]
+	return packfixture.ChannelPlanByID(t, plans, "provider.telegram.hitl_channel")
 }

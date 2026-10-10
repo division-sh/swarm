@@ -827,20 +827,21 @@ func configuredTelegramChannelBindingWithTextLimit(t *testing.T, serverURL strin
 		connectors[descriptorIndex].Tools["telegram.send_interactive"] = tool
 	}
 	plans, err := packs.CompileChannelInventory(registry, channels, triggers.PackDescriptors(), connectors)
-	if err != nil || len(plans) != 1 {
-		t.Fatalf("CompileChannelInventory = %#v, %v", plans, err)
+	if err != nil {
+		t.Fatal("CompileChannelInventory", err)
 	}
+	plan := packfixture.ChannelPlanByID(t, plans, "provider.telegram.hitl_channel")
 	triggerEntry, _ := inventory.Lookup("provider.telegram")
 	connectorEntry, _ := inventory.Lookup("provider.telegram.connector")
 	channelEntry, _ := inventory.Lookup("provider.telegram.hitl_channel")
 	if telegramConnectorIdentity.ID() != connectorEntry.ID() || telegramConnectorIdentity.ManifestHash() != connectorEntry.ManifestHash() || telegramConnectorIdentity.Source().Provenance() != packartifact.ProvenanceProject {
 		t.Fatalf("connector descriptor identity = %#v, want project entry %#v", telegramConnectorIdentity, connectorEntry)
 	}
-	channelIdentity := plans[0].ChannelIdentity()
+	channelIdentity := plan.ChannelIdentity()
 	if channelIdentity.ID() != channelEntry.ID() || channelIdentity.ManifestHash() != channelEntry.ManifestHash() || channelIdentity.Source().Provenance() != packartifact.ProvenanceProject {
 		t.Fatalf("channel plan identity = %#v, want project entry %#v", channelIdentity, channelEntry)
 	}
-	structuralSubject, err := plans[0].CapabilitySubject()
+	structuralSubject, err := plan.CapabilitySubject()
 	if err != nil {
 		t.Fatalf("channel plan capability subject: %v", err)
 	}
@@ -850,7 +851,7 @@ func configuredTelegramChannelBindingWithTextLimit(t *testing.T, serverURL strin
 		structuralSubject.Evidence[0].Fields["connector_hash"] != connectorEntry.ManifestHash() {
 		t.Fatalf("channel capability subject = %#v", structuralSubject)
 	}
-	binding, err := packs.NewOutboundBindingPlanWithCredentials("ops", plans[0], "42", nil,
+	binding, err := packs.NewOutboundBindingPlanWithCredentials("ops", plan, "42", nil,
 		map[string]string{"telegram_bot_token": "telegram_bot_token"})
 	if err != nil {
 		t.Fatalf("NewOutboundBindingPlan: %v", err)
