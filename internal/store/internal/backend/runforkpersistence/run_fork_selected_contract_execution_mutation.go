@@ -1135,7 +1135,7 @@ func (s *RunForkSQLiteOwner) requireRunForkSelectedContractExecutionSettlementTx
 
 func (s *RunForkPostgresOwner) ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string, source semanticview.Source) error {
 	allowedEvents := uniqueNonEmptyStrings(allowedSourceEventIDs)
-	timerEvents, err := selectedContractWorkflowTimerLineage(ctx, tx, forkRunID, true, s.PipelinePostgresOwner.ReadWorkflowTimerActivationTx)
+	timerEvents, err := selectedContractTimerLineage(ctx, tx, forkRunID, true, s.PipelinePostgresOwner.ReadWorkflowTimerActivationTx)
 	if err != nil {
 		return err
 	}

@@ -285,6 +285,7 @@ func TestSelectedActivationSettlementEmptyInputRequiresNoInventedFeed(t *testing
 				WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 			mock.ExpectQuery(`SELECT event_id, task_id FROM events`).WithArgs(child).
 				WillReturnRows(sqlmock.NewRows([]string{"event", "task"}))
+			expectEmptyGenericOccurrenceCensus(mock, child)
 			mock.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM fan_out_intents`).WithArgs(child).
 				WillReturnRows(sqlmock.NewRows([]string{"present"}).AddRow(false))
 			for _, table := range []string{"event_deliveries", "events", "agent_sessions", "agent_conversation_audits", "agent_turns"} {
@@ -464,6 +465,7 @@ func TestSelectedActivationSettlementPreservesDrainAndLineageBothDialects(t *tes
 				} else {
 					mock.ExpectQuery(`SELECT event_id, task_id FROM events`).WithArgs(child).
 						WillReturnRows(sqlmock.NewRows([]string{"event", "task"}))
+					expectEmptyGenericOccurrenceCensus(mock, child)
 					if postgres {
 						mock.ExpectQuery(`FROM unnest`).WillReturnRows(sqlmock.NewRows([]string{"missing"}).AddRow(1))
 					} else {
