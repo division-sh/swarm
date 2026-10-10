@@ -22254,7 +22254,8 @@
               "suspended",
               "orphaned",
               "dormant",
-              "recovery_required"
+              "recovery_required",
+              "session_required"
             ],
             "type": "string"
           },

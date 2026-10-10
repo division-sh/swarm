@@ -1797,7 +1797,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return 1
 		}
 	}
-	if !publicIngressEnabled && len(standing) > 0 {
+	if !publicIngressEnabled && requiresPublicIngressPresentation(standing) {
 		presenter.recordPublicIngressDisabledHint()
 	}
 	standing = publicIngressPresentation(standing, ready.Snapshot(time.Now().UTC()))
@@ -2416,7 +2416,7 @@ func reportServeStandingReadiness(ctx context.Context, owner standingServiceStat
 			if out != nil {
 				fmt.Fprintf(out, "standing service %s suspended by=%s at=%s reason=%s resume=`swarm standing resume %s`\n", status.ServiceID, status.OverrideActor, status.OverrideAt.Format(time.RFC3339), status.OverrideReason, status.ServiceID)
 			}
-		case runtimerunlifecycle.StandingRestartCredentialDormant, runtimerunlifecycle.StandingRestartRecoveryRequired:
+		case runtimerunlifecycle.StandingRestartCredentialDormant, runtimerunlifecycle.StandingRestartSessionDormant, runtimerunlifecycle.StandingRestartRecoveryRequired:
 			if out != nil {
 				fmt.Fprintf(out, "standing service %s %s declaration_present=true binding_enabled=false run=%s generation=%d override=%s remediation=%s\n", status.ServiceID, status.RestartDisposition.Kind, status.RunID, status.Generation, status.RestartDisposition.OperatorOverride, status.RestartDisposition.RunControlGuidance())
 			}

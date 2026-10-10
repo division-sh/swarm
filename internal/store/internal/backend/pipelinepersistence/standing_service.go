@@ -849,11 +849,11 @@ func (s *standingServiceAdapter) reconcileStandingServiceTx(ctx context.Context,
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
-	if !candidate.BindingEnabled && (disposition.Kind == runtimerunlifecycle.StandingRestartActiveIntrinsic || disposition.Kind == runtimerunlifecycle.StandingRestartSuspended || disposition.Kind == runtimerunlifecycle.StandingRestartCredentialDormant || disposition.Kind == runtimerunlifecycle.StandingRestartRecoveryRequired || disposition.Kind == runtimerunlifecycle.StandingRestartOrphaned) {
+	if !candidate.BindingEnabled && (disposition.Kind == runtimerunlifecycle.StandingRestartActiveIntrinsic || disposition.Kind == runtimerunlifecycle.StandingRestartSuspended || disposition.Kind == runtimerunlifecycle.StandingRestartCredentialDormant || disposition.Kind == runtimerunlifecycle.StandingRestartSessionDormant || disposition.Kind == runtimerunlifecycle.StandingRestartRecoveryRequired || disposition.Kind == runtimerunlifecycle.StandingRestartOrphaned) {
 		return s.disableStandingServiceTx(ctx, tx, current, candidate)
 	}
 	switch disposition.Kind {
-	case runtimerunlifecycle.StandingRestartActiveIntrinsic, runtimerunlifecycle.StandingRestartSuspended, runtimerunlifecycle.StandingRestartCredentialDormant, runtimerunlifecycle.StandingRestartRecoveryRequired, runtimerunlifecycle.StandingRestartOrphaned:
+	case runtimerunlifecycle.StandingRestartActiveIntrinsic, runtimerunlifecycle.StandingRestartSuspended, runtimerunlifecycle.StandingRestartCredentialDormant, runtimerunlifecycle.StandingRestartSessionDormant, runtimerunlifecycle.StandingRestartRecoveryRequired, runtimerunlifecycle.StandingRestartOrphaned:
 		return s.resumeStandingServiceTx(ctx, tx, current, candidate)
 	case runtimerunlifecycle.StandingRestartTerminalOrphaned:
 		return s.reconcileResetRequiredStandingServiceTx(ctx, tx, current, candidate, disposition)

@@ -542,8 +542,11 @@ func normalizeProviderTriggerSubject(subject *Subject) (SubjectStatus, error) {
 			if admission.BindingEnabled == nil || *admission.BindingEnabled {
 				return "", fmt.Errorf("effective provider trigger subject %q has a blocked enabled binding", subject.ID)
 			}
-			if admission.BindingBlockReason != "credentials_absent" && admission.BindingBlockReason != "recovery_required" {
+			if admission.BindingBlockReason != "credentials_absent" && admission.BindingBlockReason != "recovery_required" && admission.BindingBlockReason != "session_admission_required" {
 				return "", fmt.Errorf("effective provider trigger subject %q has invalid binding_block_reason %q", subject.ID, admission.BindingBlockReason)
+			}
+			if admission.BindingBlockReason == "session_admission_required" && admission.Transport != ChannelTransportSession {
+				return "", fmt.Errorf("effective provider trigger subject %q uses session admission on a non-session transport", subject.ID)
 			}
 		}
 		if (admission.BindingBlockReason == "recovery_required") != (admission.RecoveryOperationID != "") {
