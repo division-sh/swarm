@@ -213,9 +213,8 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 			RunLifecycle:             durable,
 			DeliveryLifecycle:        durable,
 
-			ActiveAgents:          durable,
-			ActiveFlows:           durable,
-			TargetOwners:          durable,
+			ActiveAgents: durable,
+
 			PreparedEvents:        durable,
 			TargetFailureRecorder: durable,
 			RunOrigins:            durable,

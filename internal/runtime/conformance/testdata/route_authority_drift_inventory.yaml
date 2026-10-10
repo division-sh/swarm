@@ -888,6 +888,7 @@ seam_families:
       - internal/runtime/bus/durable_dependencies_test.go
       - internal/runtime/bus/eventbus_publish_test.go
       - internal/runtime/bus/eventbus_routing.go
+      - internal/runtime/bus/indexed_connect_receivers_test.go
       - internal/runtime/bus/target_owner_projection.go
       - internal/runtime/bus/target_owner_projection_test.go
       - internal/runtime/bus/scalar_template_instance_store_parity_test.go

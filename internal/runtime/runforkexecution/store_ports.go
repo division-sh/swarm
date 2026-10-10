@@ -138,7 +138,6 @@ func NewSelectedContractExecutionOwner(
 		{"event instance index", busDurable.Instances}, {"event construction publications", busDurable.ConstructionPublications},
 		{"event run lifecycle", busDurable.RunLifecycle}, {"event delivery lifecycle", busDurable.DeliveryLifecycle},
 		{"event active agents", busDurable.ActiveAgents},
-		{"event active flows", busDurable.ActiveFlows}, {"event target owners", busDurable.TargetOwners},
 		{"event emit feedback", busDurable.EmitFeedback},
 		{"prepared event settlements", busDurable.PreparedEvents}, {"event target failure recorder", busDurable.TargetFailureRecorder},
 		{"event run origins", busDurable.RunOrigins}, {"event standing restarts", busDurable.StandingRestarts},

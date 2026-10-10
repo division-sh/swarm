@@ -8,7 +8,6 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
@@ -123,14 +122,5 @@ func newInboundTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = runtimeTestOccurrence(t, opts.SourceArtifactFact.BundleHash())
 	}
-	var owners inboundFixtureOwners
-	for _, target := range targets {
-		instance, err := flowidentity.StandingForGeneration(opts.ContractBundle, target.FlowPath, target.RunID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		owners = append(owners, inboundFixtureOwner{RunID: target.RunID, FlowInstance: instance.InstancePath, EntityID: instance.EntityID})
-	}
-	opts.Durable.TargetOwners = owners
 	return newRuntimeTestEventBusWithOptions(t, store, opts)
 }

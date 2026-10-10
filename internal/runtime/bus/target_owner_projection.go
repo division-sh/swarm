@@ -545,7 +545,7 @@ func (p selectedRunTargetOwnerProjection) targetOwnerCandidates() []runtimepipel
 		}
 		out = append(out, runtimepipeline.DeliveryTargetOwnerCandidate{
 			Route: events.RouteIdentity{
-				FlowID:       runtimeflowidentity.SemanticScopeFromFlowInstanceRef(descriptor.FlowInstance),
+				FlowID:       descriptor.FlowID,
 				FlowInstance: descriptor.FlowInstance,
 				EntityID:     descriptor.EntityID,
 			},

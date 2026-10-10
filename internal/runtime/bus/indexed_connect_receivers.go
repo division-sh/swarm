@@ -118,42 +118,34 @@ func (r connectRoutePlanResolver) indexedReceiverWorkflowInstance(ctx context.Co
 	return instance, err == nil, err
 }
 
-func (r connectRoutePlanResolver) addIndexedLookupPaths(ctx context.Context, runID string, flows map[string]struct{}, paths map[string]struct{}) error {
+func (r connectRoutePlanResolver) lookupTargetScope(ctx context.Context, runID string, flows map[string]struct{}, owners []flowidentity.RunScopedFlowInstance) (selectedTargetOwnerLookupScope, error) {
 	fact, present := correlation.SourceArtifactFactFromContext(ctx)
 	if !present || r.lifecycle.index == nil {
-		return fmt.Errorf("connect lookup scope requires its admitted source and index owner")
+		return selectedTargetOwnerLookupScope{}, fmt.Errorf("connect lookup scope requires its admitted source and index owner")
 	}
 	flowIDs := make([]string, 0, len(flows))
 	for flowID := range flows {
 		flowIDs = append(flowIDs, flowID)
 	}
-	scope, err := pipeline.NewFlowInstanceLookupScope(r.source, fact, runID, flowIDs, nil)
+	scope, err := pipeline.NewFlowInstanceLookupScope(r.source, fact, runID, flowIDs, owners)
 	if err != nil {
-		return err
+		return selectedTargetOwnerLookupScope{}, err
 	}
+	var observations []pipeline.FlowInstanceObservation
 	if r.lifecycle.runProposal.Present() {
 		if err := r.lifecycle.runProposal.Validate(runID, fact); err != nil {
-			return err
+			return selectedTargetOwnerLookupScope{}, err
 		}
 	} else {
-		instances, err := r.indexedInstances(ctx, scope)
+		observations, err = r.indexedObservations(ctx, scope)
 		if err != nil {
-			return err
-		}
-		for _, instance := range instances {
-			paths[instance.InstancePath] = struct{}{}
+			return selectedTargetOwnerLookupScope{}, err
 		}
 	}
-	proposals, err := r.prospectiveConnectInstances(ctx, runID, fact)
-	if err != nil {
-		return err
+	if _, err := r.prospectiveConnectInstances(ctx, runID, fact); err != nil {
+		return selectedTargetOwnerLookupScope{}, err
 	}
-	for _, instance := range proposals {
-		if _, included := flows[instance.TemplateID]; included {
-			paths[instance.InstancePath] = struct{}{}
-		}
-	}
-	return nil
+	return selectedTargetOwnerLookupScope{lookup: scope, observations: observations}, nil
 }
 
 func preparedConnectPlans(ctx context.Context) []pipeline.FlowInstanceActivationPlan {

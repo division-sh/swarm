@@ -429,9 +429,9 @@ func externalRuntimeTestDurableDependencies(durable externalRuntimeTestDurableEv
 		ConstructionPublications: durable,
 		EmitFeedback:             durable,
 		ReplyContext:             durable, RunLifecycle: durable,
-		DeliveryLifecycle: durable,
-		ActiveAgents:      durable,
-		ActiveFlows:       durable, TargetOwners: durable, PreparedEvents: durable,
+		DeliveryLifecycle:     durable,
+		ActiveAgents:          durable,
+		PreparedEvents:        durable,
 		TargetFailureRecorder: durable, RunOrigins: durable, StandingRestarts: durable,
 	}
 }

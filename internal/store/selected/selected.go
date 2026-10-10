@@ -343,7 +343,7 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 				ScenarioSetup:            selected,
 				ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
-				ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
+				ActiveAgents:          selected,
 				PreparedEvents:        selected,
 				TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 			},
@@ -400,7 +400,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 				ScenarioSetup:            selected,
 				ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
-				ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
+				ActiveAgents:          selected,
 				PreparedEvents:        selected,
 				TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 			},
@@ -464,7 +464,7 @@ func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipelin
 		ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
 		ActiveAgents: selected,
-		ActiveFlows:  selected, TargetOwners: selected,
+
 		PreparedEvents: selected, TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 	}
 	execution, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
@@ -486,7 +486,7 @@ func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipe
 		ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
 		ActiveAgents: selected,
-		ActiveFlows:  selected, TargetOwners: selected,
+
 		PreparedEvents: selected, TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 	}
 	execution, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(

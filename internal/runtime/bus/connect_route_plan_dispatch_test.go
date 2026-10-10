@@ -1182,7 +1182,7 @@ func TestEventBusPublish_ConnectRoutePlanRejectsConflictingAdmittedTargetBeforeP
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	installConnectionSourceConstruction(t, eb, source, "producer")
+	sourceOwner := installConnectionSourceConstructionForRun(t, eb, source, "producer", busInternalTestRunID)
 	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID,
 		StoredFlowInstanceIdentityFixture(source, "consumer", "", busInternalTestRunID, connectRoutePlanStaticOwner().EntityID), ""))
 	eventID := uuid.NewString()
@@ -1196,9 +1196,9 @@ func TestEventBusPublish_ConnectRoutePlanRejectsConflictingAdmittedTargetBeforeP
 		"",
 		"",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{
-			FlowID:       "unrelated",
-			FlowInstance: "unrelated/one",
-			EntityID:     eventtest.UUID("unrelated-one"),
+			FlowID:       sourceOwner.TemplateID,
+			FlowInstance: sourceOwner.InstancePath,
+			EntityID:     sourceOwner.EntityID,
 		}),
 		time.Now().UTC(),
 	)
@@ -1804,27 +1804,24 @@ func TestEventBusPublish_SingletonConnectToRootRejectsMissingOrAmbiguousSelected
 }
 
 func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEvent(t *testing.T) {
-	source := connectRoutePlanRootProducerStaticSource(t)
+	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyRootOutputConnectWithChildPublisher(t))
 	store := newTargetRouteMemoryStore()
-	store.setTargetOwners(
-		testSelectedRunTargetOwner("consumer-a-owner", "consumer-a", "consumer-a-owner"),
-		testSelectedRunTargetOwner("consumer-b-owner", "consumer-b", "consumer-b-owner"),
-	)
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	child := installConnectionSourceConstructionForRun(t, eb, source, "child", busInternalTestRunID)
 	eventID := uuid.NewString()
-	evt := connectRoutePlanConcreteProducerEvent(
+	evt := connectRoutePlanStaticProducerEvent(
 		eventID,
-		events.EventType("child/inst-9/root.ready"),
+		events.EventType("child/root.ready"),
 		"",
 		"",
 		json.RawMessage(`{"entity_id":"entity-1"}`),
 		0,
 		"",
 		"",
-		events.EnvelopeForFlowInstance(events.EventEnvelope{}, "child/inst-9"),
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: child.TemplateID, FlowInstance: child.InstancePath, EntityID: child.EntityID}),
 		time.Now().UTC(),
 	)
 
@@ -2591,9 +2588,6 @@ func TestCompiledConnectEvaluationDoesNotRequireLegacyFlowDescriptors(t *testing
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	// Target-policy field projections are a separate optional role, not
-	// construction or connect-recipient evidence.
-	eb.durable.ActiveFlows = nil
 	installConnectionSourceConstruction(t, eb, source, "producer")
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-stale"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -4665,6 +4659,13 @@ func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventN
 }
 
 func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *testing.T) {
+	paths := func(scope selectedTargetOwnerLookupScope) []string {
+		var paths []string
+		for _, observed := range scope.observations {
+			paths = append(paths, observed.Identity().InstancePath)
+		}
+		return paths
+	}
 	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting))
 	table, err := DeriveRouteTable(source)
 	if err != nil {
@@ -4685,16 +4686,16 @@ func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *
 	)
 	ctx := constructionIndexContext(t, source)
 	scope, ok, err := resolver.selectedTargetScope(ctx, evt)
-	if err != nil || !ok || len(scope.instancePaths) != 0 || scope.sourceEntityID != "" {
+	if err != nil || !ok || len(scope.observations) != 0 {
 		t.Fatalf("declaration without construction widened its lookup: ok=%t scope=%#v", ok, scope)
 	}
 	scope, ok, err = resolver.selectedTargetScope(ctx, evt)
-	if err != nil || !ok || len(scope.instancePaths) != 0 {
+	if err != nil || !ok || len(scope.observations) != 0 {
 		t.Fatalf("repeated declaration binding invented a receiver: ok=%t scope=%#v", ok, scope)
 	}
 	previewContext := withConnectRoutePlanPreview(ctx)
 	scope, ok, err = resolver.selectedTargetScope(previewContext, evt)
-	if err != nil || !ok || len(scope.instancePaths) != 0 {
+	if err != nil || !ok || len(scope.observations) != 0 {
 		t.Fatalf("process preview substituted for native receiver evidence: scope=%#v err=%v", scope, err)
 	}
 	for _, test := range []struct{ runID, id, key string }{{evt.RunID(), "one", "42"}, {evt.RunID(), "two", "43"}, {uuid.NewString(), "foreign", "44"}} {
@@ -4702,7 +4703,7 @@ func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *
 		index.observations = append(index.observations, constructionIndexObservation(t, source, test.runID, instance, test.key))
 	}
 	scope, ok, err = resolver.selectedTargetScope(previewContext, evt)
-	if err != nil || !ok || scope.sourceEntityID != "" || !slices.Equal(scope.instancePaths, []string{"account/one", "account/two"}) {
+	if err != nil || !ok || !slices.Equal(paths(scope), []string{"account/one", "account/two"}) {
 		t.Fatalf("declaration candidate scope mixed concrete sender or foreign run: ok=%t scope=%#v", ok, scope)
 	}
 	index.err = errors.New("independent native lookup failure")
@@ -4722,13 +4723,13 @@ func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *
 	)
 	keylessContext := constructionIndexContext(t, keylessSource)
 	scope, ok, err = keylessResolver.selectedTargetScope(keylessContext, keylessEvent)
-	if err != nil || !ok || len(scope.instancePaths) != 0 {
+	if err != nil || !ok || len(scope.observations) != 0 {
 		t.Fatalf("keyless declaration fabricated stored existence: scope=%#v err=%v", scope, err)
 	}
 	instance := ConstructedFlowInstanceIdentityFixture(keylessSource, "beta", "", keylessEvent.RunID())
 	keylessIndex.observations = []runtimepipeline.FlowInstanceObservation{constructionIndexObservation(t, keylessSource, keylessEvent.RunID(), instance, "")}
 	scope, ok, err = keylessResolver.selectedTargetScope(keylessContext, keylessEvent)
-	if err != nil || !ok || scope.sourceEntityID != "" || !slices.Equal(scope.instancePaths, []string{"beta"}) {
+	if err != nil || !ok || !slices.Equal(paths(scope), []string{"beta"}) {
 		t.Fatalf("native keyless receiver lost its exact path: scope=%#v err=%v", scope, err)
 	}
 }
