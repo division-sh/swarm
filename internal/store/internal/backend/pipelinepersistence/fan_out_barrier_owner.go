@@ -222,6 +222,8 @@ func foldFanOutIntentTerminalDispositions(
 						fold.Summary.Succeeded++
 					case fanoutobligation.InheritedDeadLettered:
 						fold.Summary.DeadLettered++
+					case fanoutobligation.InheritedCanceled:
+						fold.Summary.Canceled++
 					case fanoutobligation.InheritedNoRoute:
 						fold.Summary.NoRoute++
 					default:
@@ -244,25 +246,15 @@ func foldFanOutIntentTerminalDispositions(
 				case settlement.NoDelivery() && len(deliveries) == 0:
 					fold.Summary.NoRoute++
 				case settlement.Delivered() && len(deliveries) > 0:
-					allTerminal := true
-					deadLettered := false
-					canceled := false
-					for _, delivery := range deliveries {
-						if !delivery.Terminal() {
-							allTerminal = false
-						}
-						if delivery.Status == runtimedelivery.StatusDeadLetter {
-							deadLettered = true
-						}
-						if delivery.Status == runtimedelivery.StatusCanceled {
-							canceled = true
-						}
+					disposition, terminal, err := fanoutbarrier.RecipientDisposition(deliveries)
+					if err != nil {
+						return fanoutbarrier.Fold{}, fmt.Errorf("fan-out ordinal %d recipient disposition: %w", ordinal, err)
 					}
-					if !allTerminal {
+					if !terminal {
 						fold.PendingCommitted++
-					} else if deadLettered {
+					} else if disposition == fanoutobligation.InheritedDeadLettered {
 						fold.Summary.DeadLettered++
-					} else if canceled {
+					} else if disposition == fanoutobligation.InheritedCanceled {
 						fold.Summary.Canceled++
 					} else {
 						fold.Summary.Succeeded++

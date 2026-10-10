@@ -598,11 +598,12 @@ type InheritedTerminalDisposition string
 const (
 	InheritedSucceeded    InheritedTerminalDisposition = "succeeded"
 	InheritedDeadLettered InheritedTerminalDisposition = "dead_lettered"
+	InheritedCanceled     InheritedTerminalDisposition = "canceled"
 	InheritedNoRoute      InheritedTerminalDisposition = "no_route"
 )
 
 func (d InheritedTerminalDisposition) Valid() bool {
-	return d == InheritedSucceeded || d == InheritedDeadLettered || d == InheritedNoRoute
+	return d == InheritedSucceeded || d == InheritedDeadLettered || d == InheritedCanceled || d == InheritedNoRoute
 }
 
 func (o Outcome) Validate() error {
