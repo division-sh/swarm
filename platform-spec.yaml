@@ -11296,6 +11296,15 @@ tool_model:
         grants no new work. Destructive device deletion additionally requires explicit current logout and cannot use
         an inherited transaction to bypass retirement. Ordinary disconnect, provider-side unlink, pairing failure,
         reset and source retirement do not authorize automatic local session deletion.
+      session_explicit_logout_drain: >
+        An explicit logout reserves the original SDK occurrence against new sends before draining its already
+        admitted work. This process-local reservation does not authorize destruction: the authenticated destructive
+        responsibility and existing selected effect journal must still admit and record the exact logout. Draining
+        retains the original socket and private-store possession needed for the unlink IQ and SDK-owned deletion;
+        ordinary disconnect or global SDK-store retirement must not precede that effect. The occurrence sends at
+        most one unlink. Cancellation or retirement while waiting for the drain grants no send, local deletion or
+        adoption of the reservation by another caller. In-flight admitted work is joined rather than silently canceled
+        to make logout possible. Unbind, reset, proof revoke, source retirement and ordinary stop retain pairing.
       session_private_directory_component: >
         On supported Linux and Darwin hosts, the concrete connection directory is keyed by the retained connection
         UUID under an existing private runtime-state base, never source hash, run or process occurrence. Directory,
