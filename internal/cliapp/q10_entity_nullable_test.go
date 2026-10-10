@@ -58,16 +58,97 @@ func TestQ10EntityNullableDTOAndCLIDiagnostics(t *testing.T) {
 				}
 				data[key] = value
 			}
+			for _, key := range []string{"fields", "bookkeeping", "gates", "accumulated", "loops"} {
+				value := full[key]
+				delete(full, key)
+				if _, err := decode(full); err == nil {
+					t.Fatalf("missing full property %s admitted", key)
+				}
+				full[key] = value
+			}
+			for _, clock := range []string{"created_at", "updated_at"} {
+				value := data[clock]
+				data[clock] = "not-a-time"
+				if _, err := decode(full); err == nil {
+					t.Fatalf("malformed data clock %s admitted", clock)
+				}
+				data[clock] = value
+			}
+			data["updated_at"] = "2026-10-08T01:00:00Z"
+			if _, err := decode(full); err == nil {
+				t.Fatal("data update before data creation admitted")
+			}
+			data["updated_at"] = base["updated_at"]
 			if kind == "import" {
-				data["current_state"] = "unknown"
-				if _, err := decode(full); err == nil {
-					t.Fatal("import invented lifecycle")
+				for key, value := range map[string]any{
+					"stage_defined": false, "current_state": "unknown", "revision": 1,
+					"entered_state_at": base["created_at"], "lifecycle_created_at": base["created_at"], "lifecycle_updated_at": base["updated_at"],
+				} {
+					data[key] = value
+					if _, err := decode(full); err == nil {
+						t.Fatalf("import invented lifecycle property %s", key)
+					}
+					data[key] = nil
 				}
-				data["current_state"] = nil
-				full["gates"] = map[string]bool{}
-				if _, err := decode(full); err == nil {
-					t.Fatal("import invented gates")
+				for key, value := range map[string]any{
+					"gates": map[string]bool{}, "bookkeeping": map[string]any{}, "accumulated": map[string]any{}, "loops": []any{},
+				} {
+					full[key] = value
+					if _, err := decode(full); err == nil {
+						t.Fatalf("import invented lifecycle property %s", key)
+					}
+					full[key] = nil
 				}
+			} else {
+				for _, key := range []string{"revision", "lifecycle_created_at", "lifecycle_updated_at"} {
+					value := data[key]
+					data[key] = nil
+					if _, err := decode(full); err == nil {
+						t.Fatalf("constructed null %s admitted", key)
+					}
+					data[key] = value
+				}
+				for _, revision := range []any{0, -1, 1.5} {
+					data["revision"] = revision
+					if _, err := decode(full); err == nil {
+						t.Fatalf("invalid constructed revision %v admitted", revision)
+					}
+				}
+				data["revision"] = 3
+				for _, key := range []string{"bookkeeping", "gates", "accumulated", "loops"} {
+					value := full[key]
+					full[key] = nil
+					if _, err := decode(full); err == nil {
+						t.Fatalf("constructed null %s admitted", key)
+					}
+					full[key] = value
+				}
+				data["lifecycle_updated_at"] = "2026-10-08T01:00:00Z"
+				if _, err := decode(full); err == nil {
+					t.Fatal("lifecycle update before lifecycle creation admitted")
+				}
+				data["lifecycle_updated_at"] = base["updated_at"]
+				if kind == "no_stage" {
+					for key, value := range map[string]any{"current_state": "unknown", "entered_state_at": base["created_at"]} {
+						data[key] = value
+						if _, err := decode(full); err == nil {
+							t.Fatalf("no-stage lifecycle acquired %s", key)
+						}
+						data[key] = nil
+					}
+				} else {
+					for _, key := range []string{"current_state", "entered_state_at"} {
+						value := data[key]
+						data[key] = nil
+						if _, err := decode(full); err == nil {
+							t.Fatalf("named stage missing %s admitted", key)
+						}
+						data[key] = value
+					}
+				}
+			}
+			if _, err := decode(full); err != nil {
+				t.Fatalf("negative matrix damaged the valid %s control: %v", kind, err)
 			}
 		})
 	}
