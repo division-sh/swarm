@@ -574,9 +574,6 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 	if err != nil {
 		return selectedTargetOwnerLookupScope{}, false, err
 	}
-	if len(flows) == 0 && len(coordinates) == 0 {
-		return selectedTargetOwnerLookupScope{}, false, nil
-	}
 	scope, err := r.lookupTargetScope(ctx, evt.RunID(), flows, coordinates)
 	return scope, err == nil, err
 }

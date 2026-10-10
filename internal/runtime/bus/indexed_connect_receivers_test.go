@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -66,6 +67,76 @@ func TestTargetOwnerProjectionConsumesOnlyScopedIndexObservations(t *testing.T) 
 	}
 	if _, _, err := bus.activeTargetDescriptors(withSelectedTargetOwnerLookupScope(correlation.WithInboundEvent(context.Background(), event), scope)); err == nil {
 		t.Fatal("target lookup accepted missing admitted source")
+	}
+}
+
+func TestControlPublicationKeepsEmptyCompiledTargetScope(t *testing.T) {
+	source := connectRoutePlanRootProducerSingletonSource(t)
+	event := eventtest.RuntimeControl(eventtest.UUID("empty-scope-control"), "mailbox.card_deferred", "", "", []byte(`{}`), 0,
+		busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	ctx := correlation.WithInboundEvent(constructionIndexContext(t, source), event)
+	reader := &unscopedConnectIndexTestReader{}
+	resolver := newConnectRoutePlanResolver(source, nil, nil, reader, nil)
+	bus := &EventBus{semanticSource: source, durable: DurableDependencies{Instances: reader}}
+	scope, bounded, err := resolver.selectedTargetScope(ctx, event)
+	if err != nil || !bounded || !scope.lookup.Valid() || len(scope.lookup.FlowIDs()) != 0 || len(scope.lookup.Coordinates()) != 0 {
+		t.Fatalf("control publication lost its empty compiled scope: %+v bounded=%t err=%v", scope, bounded, err)
+	}
+	if len(reader.requested) != 1 || reader.requested[0].RunID() != event.RunID() || !reader.requested[0].SourceFact().Matches(scope.lookup.SourceFact()) {
+		t.Fatalf("control lookup lost exact source/run admission: %+v", reader.requested)
+	}
+	owners, available, err := bus.activeTargetDescriptors(withSelectedTargetOwnerLookupScope(ctx, scope))
+	if err != nil || !available || len(owners) != 0 {
+		t.Fatalf("empty scope must be known absence, not unbounded target discovery: %+v available=%t err=%v", owners, available, err)
+	}
+	identity := ConstructedFlowInstanceIdentityFixture(source, "consumer", "", event.RunID())
+	reader.observations = []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, event.RunID(), identity, "")}
+	if _, _, err := resolver.selectedTargetScope(ctx, event); err == nil {
+		t.Fatal("empty control scope accepted an unrelated receiver")
+	}
+	reader.observations = nil
+	for _, failure := range []error{context.Canceled, errors.New("empty scope index failure"), errors.Join(context.Canceled, errors.New("independent empty scope failure"))} {
+		reader.err = failure
+		if _, _, err := resolver.selectedTargetScope(ctx, event); !errors.Is(err, failure) {
+			t.Fatalf("empty scope suppressed index error: got=%v want=%v", err, failure)
+		}
+	}
+	reader.err = nil
+	if _, _, err := resolver.selectedTargetScope(context.Background(), event); err == nil {
+		t.Fatal("empty scope accepted missing source admission")
+	}
+}
+
+func TestDirectPlanningPropagatesScopedIndexFailures(t *testing.T) {
+	source := connectRoutePlanRootProducerSingletonSource(t)
+	event := eventtest.RuntimeControl(eventtest.UUID("direct-empty-scope-control"), "mailbox.card_deferred", "", "", []byte(`{}`), 0,
+		busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	ctx := constructionIndexContext(t, source)
+	reader := &unscopedConnectIndexTestReader{}
+	bus := &EventBus{semanticSource: source, durable: DurableDependencies{Instances: reader}}
+	planner := deliveryPlanner{
+		connectPlanner: newConnectRoutePlanResolver(source, nil, nil, reader, nil),
+		recipientPolicy: deliveryRecipientPolicy{
+			semanticSource: source,
+			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+				return nil, false, nil
+			},
+			loadActiveTargetDescriptors: bus.activeTargetDescriptors,
+		},
+	}
+	for _, failure := range []error{context.Canceled, errors.New("direct index failure"), errors.Join(context.Canceled, errors.New("independent direct index failure"))} {
+		reader.err = failure
+		if _, err := planner.PlanDirect(ctx, event, []string{"requester"}); !errors.Is(err, failure) {
+			t.Fatalf("direct planning bypassed scoped index admission: got=%v want=%v", err, failure)
+		}
+	}
+	if len(reader.requested) != 3 {
+		t.Fatalf("direct planning did not query its scoped owner: %+v", reader.requested)
+	}
+	for _, request := range reader.requested {
+		if request.RunID() != event.RunID() || !request.Valid() || len(request.FlowIDs()) != 0 || len(request.Coordinates()) != 0 {
+			t.Fatalf("direct control admission broadened its empty scope: %+v", request)
+		}
 	}
 }
 
