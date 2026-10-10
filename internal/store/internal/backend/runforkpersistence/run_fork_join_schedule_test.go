@@ -130,6 +130,90 @@ func TestSelectedPreparationFingerprintBindsArrivalSchedules(t *testing.T) {
 	}
 }
 
+func TestFixedRevisionSchedulesKeepScopedKeys(t *testing.T) {
+	for _, withJoin := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unrelated_only", true: "alongside_join"}[withJoin], func(t *testing.T) {
+			snapshot, entities, join := arrivalJoinScheduleProjectionFixture(t, true, false)
+			command, err := genericschedule.WorkflowJoinAdmission(join, executionmode.Live)
+			if err != nil {
+				t.Fatal(err)
+			}
+			command.ScheduleKey, command.TaskID = "poll", ""
+			command.EventType = "poll.tick"
+			command.Payload, err = canonicaljson.FromGo(map[string]any{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := arrivalJoinRevisionTimer(t, command, join.ArmedAt)
+			command.OwnerID = "another-owner"
+			second := arrivalJoinRevisionTimer(t, command, join.ArmedAt)
+			if first.ScheduleScope == second.ScheduleScope {
+				t.Fatal("fixture does not separate owners")
+			}
+			for _, row := range []runForkRevisionTimer{first, second} {
+				if _, err := projectRunForkGenericActivation(row); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want := len(snapshot.Timers)
+			if !withJoin {
+				entities, snapshot.Timers, want = nil, nil, 0
+			}
+			snapshot.Timers = append(snapshot.Timers, first, second)
+			got, err := loadRunForkArrivalJoinSchedules(snapshot, entities)
+			if err != nil || len(got) != want {
+				t.Fatalf("scoped schedules: got=%v want=%d err=%v", got, want, err)
+			}
+			snapshot.Timers = append(snapshot.Timers, first)
+			if _, err := loadRunForkArrivalJoinSchedules(snapshot, entities); err == nil {
+				t.Fatal("same-scope duplicate schedule admitted")
+			}
+		})
+	}
+}
+
+func TestFixedRevisionImmediateEmptyJoinHasNoOriginalTimeout(t *testing.T) {
+	for _, withDeadline := range []bool{false, true} {
+		t.Run(map[bool]string{false: "without_deadline", true: "with_deadline"}[withDeadline], func(t *testing.T) {
+			snapshot, entities, retained := arrivalJoinScheduleProjectionFixture(t, true, false)
+			due := time.Time{}
+			if withDeadline {
+				due = retained.DeadlineAt
+			}
+			join, err := joinruntime.NewActivation(retained.JoinRef(), nil, nil, retained.ArmedAt, due)
+			if err != nil {
+				t.Fatal(err)
+			}
+			join.Close(joinruntime.CloseReasonComplete, true, false)
+			handle, err := timeridentity.JoinCompleteHandle(join.JoinRef())
+			if err != nil {
+				t.Fatal(err)
+			}
+			join, err = join.WithTimerHandle(handle, join.ArmedAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			command, err := genericschedule.WorkflowJoinAdmission(join, executionmode.Live)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot.Timers = []runForkRevisionTimer{arrivalJoinRevisionTimer(t, command, join.ArmedAt)}
+			buckets := map[string]map[string]any{}
+			if err := joinruntime.Store(buckets, join); err != nil {
+				t.Fatal(err)
+			}
+			entities[0].Accumulator = map[string]any{}
+			for key, value := range buckets {
+				entities[0].Accumulator[key] = value
+			}
+			got, err := loadRunForkArrivalJoinSchedules(snapshot, entities)
+			if err != nil || len(got) != 1 {
+				t.Fatalf("immediate empty join: schedules=%v err=%v", got, err)
+			}
+		})
+	}
+}
+
 func arrivalJoinScheduleProjectionFixture(t *testing.T, root, completion bool) (*runForkRevisionSnapshot, []runfork.RunForkEntityState, joinruntime.Activation) {
 	t.Helper()
 	plan, _, reply := runForkReplyPlanFixture(t, replycontext.StateOpen, root, false)

@@ -314,6 +314,14 @@ func (a Activation) HasMember(member string) bool {
 }
 
 func (a Activation) Completed() int { return len(a.Outputs) }
+
+// ImmediateEmptyCompletion has no original timeout: the lifecycle writer closes
+// an empty arm and creates only its completion schedule in the same mutation.
+func (a Activation) ImmediateEmptyCompletion() bool {
+	return a.Expected() == 0 && a.Status == StatusClosed && a.CloseReason == CloseReasonComplete &&
+		a.TimerHandle().Kind() == timeridentity.TimerHandleJoinComplete && a.FireAt.Equal(a.ArmedAt)
+}
+
 func (a Activation) Expected() int {
 	if a.MemberCount != nil {
 		return *a.MemberCount

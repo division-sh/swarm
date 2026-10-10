@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -44,39 +45,37 @@ func loadRunForkArrivalJoinSchedules(snapshot *runForkRevisionSnapshot, entities
 	return schedules, nil
 }
 
-func indexRunForkJoinSchedules(snapshot *runForkRevisionSnapshot) (map[string]runForkRevisionTimer, error) {
-	timers := make(map[string]runForkRevisionTimer)
+type runForkJoinScheduleKey struct {
+	scope, schedule string
+}
+
+func indexRunForkJoinSchedules(snapshot *runForkRevisionSnapshot) (map[runForkJoinScheduleKey]runForkRevisionTimer, error) {
+	timers := make(map[runForkJoinScheduleKey]runForkRevisionTimer)
 	for _, timer := range snapshot.Timers {
 		if timer.RunID != snapshot.RunID {
 			continue
 		}
-		if _, duplicate := timers[timer.ScheduleKey]; duplicate && timer.ScheduleKey != "" {
-			return nil, fmt.Errorf("fixed-revision join schedule repeats key %s", timer.ScheduleKey)
+		key := runForkJoinScheduleKey{timer.ScheduleScope, timer.ScheduleKey}
+		if _, duplicate := timers[key]; duplicate && timer.ScheduleKey != "" {
+			return nil, fmt.Errorf("fixed-revision join schedule repeats scoped key %s", timer.ScheduleKey)
 		}
 		if timer.ScheduleKey != "" {
-			timers[timer.ScheduleKey] = timer
+			timers[key] = timer
 		}
 	}
 	return timers, nil
 }
 
-func loadRunForkArrivalArmSchedules(join joinruntime.Activation, timers map[string]runForkRevisionTimer, owned map[string]struct{}) ([]genericschedule.Activation, error) {
-	if join.FireAt.IsZero() {
-		return nil, nil
-	}
-	keys := []string{join.TimerTaskID()}
-	if join.TimerHandle().Kind() == timeridentity.TimerHandleJoinComplete && !join.DeadlineAt.IsZero() {
-		handle, err := timeridentity.JoinTimeoutHandle(join.JoinRef())
-		if err != nil {
-			return nil, err
-		}
-		keys = append(keys, handle.TaskID())
+func loadRunForkArrivalArmSchedules(join joinruntime.Activation, timers map[runForkJoinScheduleKey]runForkRevisionTimer, owned map[string]struct{}) ([]genericschedule.Activation, error) {
+	keys, err := runForkArrivalArmScheduleKeys(join)
+	if err != nil {
+		return nil, err
 	}
 	var schedules []genericschedule.Activation
 	for _, key := range keys {
 		timer, found := timers[key]
 		if !found {
-			return nil, fmt.Errorf("fixed-revision arrival arm lacks schedule %s", key)
+			return nil, fmt.Errorf("fixed-revision arrival arm lacks schedule %s", key.schedule)
 		}
 		if _, duplicate := owned[timer.TimerID]; duplicate {
 			return nil, fmt.Errorf("fixed-revision schedule %s has multiple arrival owners", timer.TimerID)
@@ -92,6 +91,29 @@ func loadRunForkArrivalArmSchedules(join joinruntime.Activation, timers map[stri
 		schedules = append(schedules, activation)
 	}
 	return schedules, nil
+}
+
+func runForkArrivalArmScheduleKeys(join joinruntime.Activation) ([]runForkJoinScheduleKey, error) {
+	if join.FireAt.IsZero() {
+		return nil, nil
+	}
+	command, err := genericschedule.WorkflowJoinAdmission(join, executionmode.Live)
+	if err != nil {
+		return nil, err
+	}
+	scope, err := command.ScopeKey()
+	if err != nil {
+		return nil, err
+	}
+	keys := []runForkJoinScheduleKey{{scope, join.TimerTaskID()}}
+	if join.TimerHandle().Kind() == timeridentity.TimerHandleJoinComplete && !join.DeadlineAt.IsZero() && !join.ImmediateEmptyCompletion() {
+		handle, err := timeridentity.JoinTimeoutHandle(join.JoinRef())
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, runForkJoinScheduleKey{scope, handle.TaskID()})
+	}
+	return keys, nil
 }
 
 func requireRunForkJoinSourceOwner(runID string, entity runfork.RunForkEntityState, join joinruntime.Activation) error {
