@@ -2,13 +2,16 @@ package runtimepersistence
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestFlowConstructorImmutableReplayConflictBothStores(t *testing.T) {
@@ -150,6 +153,34 @@ func TestFlowConstructorReplayAndRefusalBothStores(t *testing.T) {
 					}
 				}
 				before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
+				switch variant {
+				case "progress", "missing_header", "missing_fields", "missing_receipt", "missing_readiness":
+					fact, present := correlation.SourceArtifactFactFromContext(f.ctx)
+					if !present {
+						t.Fatal("index replay proof requires its admitted source")
+					}
+					source := semanticview.Wrap(f.bundle)
+					request, err := pipeline.NewExactFlowInstanceLookup(source, fact, record.Identity)
+					if err != nil {
+						t.Fatal(err)
+					}
+					index := f.store.(pipeline.FlowInstanceIndexReader)
+					observed, found, err := index.LookupFlowInstance(f.ctx, request)
+					if variant == "progress" {
+						stored, projectionErr := observed.WorkflowInstance()
+						if err != nil || !found || projectionErr != nil || stored.CurrentState != "done" || stored.Revision != 2 || stored.Fields["handled"] != true || !stored.Gates["approved"] {
+							t.Fatalf("native index lost legitimate progress: %+v found=%t err=%v projection=%v", stored, found, err, projectionErr)
+						}
+					} else {
+						var corruption *pipeline.FlowInstanceConstructionCorruption
+						if !errors.As(err, &corruption) || found || observed.Valid() {
+							t.Fatalf("incomplete native evidence became absence or selection: %+v found=%t err=%v", observed, found, err)
+						}
+					}
+					if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
+						t.Fatal("native index repaired or mutated constructor evidence")
+					}
+				}
 				replayed, err := committer.CommitFlowInstanceActivation(f.ctx, plan)
 				if variant == "progress" {
 					if err != nil || !replayed.Acknowledged || replayed.Created || !reflect.DeepEqual(replayed.Lifecycle, pipeline.CommittedWorkflowLifecycleMutation{}) {
@@ -170,7 +201,13 @@ func TestFlowConstructorReplayAndRefusalBothStores(t *testing.T) {
 				if err == nil || replayed.Acknowledged || replayed.Created {
 					t.Fatalf("corrupt construction acquired replay authority: %+v %v", replayed, err)
 				}
-				if variant == "missing_fields" || variant == "missing_receipt" {
+				if variant == "missing_fields" {
+					var corruption *pipeline.FlowInstanceConstructionCorruption
+					if !errors.As(err, &corruption) {
+						t.Fatalf("missing declared field row lost its construction-corruption disposition: %v", err)
+					}
+				}
+				if variant == "missing_receipt" {
 					failure, typed := failures.As(err)
 					if !typed || failure.Failure.Class != failures.ClassConflictingDuplicate {
 						t.Fatalf("incomplete replay lost its conflicting-duplicate disposition: %v", err)
