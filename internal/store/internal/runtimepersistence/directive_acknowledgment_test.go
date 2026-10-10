@@ -53,8 +53,6 @@ var errInjectedDirectivePersistence = errors.New("injected directive persistence
 
 type directiveIntegrationStore interface {
 	storeTestDurableEventBusStore
-	runtimebus.ScopedActiveFlowInstanceDescriptorLister
-	runtimebus.KeyedActiveFlowInstanceDescriptorLister
 	runtimeagentcontrol.DirectiveOperationStore
 	runtimemanager.ManagerPersistence
 	agentfixture.Store
