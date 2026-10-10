@@ -72,9 +72,17 @@ func (s *SignalSender) EncryptText(t testing.TB, text, messageID string) waBinar
 	if err != nil {
 		t.Fatal(err)
 	}
+	kind := "msg"
+	switch encrypted.Type() {
+	case protocol.WHISPER_TYPE:
+	case protocol.PREKEY_TYPE:
+		kind = "pkmsg"
+	default:
+		t.Fatal("sender produced an unsupported Signal ciphertext kind", encrypted.Type())
+	}
 	return waBinary.Node{Tag: "message", Attrs: waBinary.Attrs{
 		"from": s.from, "id": messageID, "t": time.Now().Unix(), "type": "text",
-	}, Content: []waBinary.Node{{Tag: "enc", Attrs: waBinary.Attrs{"type": "pkmsg", "v": "2"}, Content: encrypted.Serialize()}}}
+	}, Content: []waBinary.Node{{Tag: "enc", Attrs: waBinary.Attrs{"type": kind, "v": "2"}, Content: encrypted.Serialize()}}}
 }
 
 func (s *SignalSender) DecryptOutbound(ctx context.Context, node *waBinary.Node) (*waE2E.Message, error) {
