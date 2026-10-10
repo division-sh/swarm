@@ -19,6 +19,9 @@ func (r IntentRequest) ValidateSourceProjection() error {
 	if source.ElementRef != r.PlanRef.ElementRef || strings.TrimSpace(source.BundleHash) == "" || strings.TrimSpace(source.SemanticDigest) == "" {
 		return fmt.Errorf("fan-out source witness requires its exact original plan reference")
 	}
+	if source.BundleHash == r.PlanRef.BundleHash && source != r.PlanRef {
+		return fmt.Errorf("fan-out source and execution references contradict the same artifact")
+	}
 	if err := semantics.Validate(source); err != nil {
 		return fmt.Errorf("fan-out admitted source evidence: %w", err)
 	}
