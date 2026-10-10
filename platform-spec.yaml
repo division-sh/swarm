@@ -18330,6 +18330,10 @@ platform_tables:
         Constructed existence, immutable parent/key selection and terminal occupancy are observed through the native
         FlowInstanceIndexReader, never through persisted route membership. Fixed-revision observations consume admitted
         historical construction evidence; missing native receipt or readiness evidence is corruption, not an absent route.'
+      reply_origin_availability: 'Reply recipient binding consumes the admitted native origin header or the exact
+        operation-private constructor proposal, not process route membership. A terminated or final-state origin remains
+        occupied but has no fresh reply carrier; classify the existing stale-arrival outcome without claiming its reply
+        context. Independent lookup, source, identity and corruption failures remain errors, never stale-arrival evidence.'
       description: 'Unified routing table for both contract-defined patterns and materialized instance routes. Replaces the
         need for a separate flow_instance_routes table. At boot: contract subscriptions inserted as pattern rows (is_wildcard
         may be true). On receiver creation: wildcard patterns expanded into concrete rows (is_materialized = true, materialized_from

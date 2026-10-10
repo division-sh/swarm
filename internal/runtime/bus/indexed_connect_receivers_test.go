@@ -9,6 +9,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -16,6 +19,47 @@ import (
 type unscopedConnectIndexTestReader struct {
 	constructionIndexTestReader
 	requested []pipeline.FlowInstanceLookupScope
+}
+
+func TestReplyOriginLookupPreservesPreparedConstructionAndIndependentFailures(t *testing.T) {
+	source := connectRoutePlanCarriedKeyResolutionSource(t, contracts.FlowInputResolutionModeSelect)
+	ctx := constructionIndexContext(t, source)
+	fact, _ := correlation.SourceArtifactFactFromContext(ctx)
+	event := admitRunProposalEvent(t, true).Event()
+	root := ConstructedFlowInstanceIdentityFixture(source, ".", "", event.RunID())
+	child, err := flowidentity.KeylessChild(source, root, "producer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner := newTestFlowInstanceActivationOwner(nil)
+	var plans []pipeline.FlowInstanceActivationPlan
+	for _, instance := range []flowidentity.Instance{root, child} {
+		plan, err := planner.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
+			ContractBundle: source, Instance: instance, TriggerEvent: event, OccurredAt: event.CreatedAt(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		plans = append(plans, plan)
+	}
+	request, err := pipeline.NewExactFlowInstanceLookup(source, fact, flowidentity.RunScopedFlowInstance{RunID: event.RunID(), Route: child.Route()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeFailure := errors.New("independent reply-origin read failure")
+	resolver := connectRoutePlanResolver{source: source, lifecycle: connectInstanceSelector{index: constructionIndexTestReader{err: storeFailure}}}
+	previewCtx := withConnectRoutePlanPreview(ctx)
+	previewCtx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes).plans = plans
+	instance, found, err := resolver.replyOriginWorkflowInstance(previewCtx, request)
+	if err != nil || !found || instance.StorageRef != child.InstancePath || instance.EntityID != plans[1].Instance.EntityID {
+		t.Fatalf("prepared reply origin became native absence/read authority: %+v found=%t err=%v", instance, found, err)
+	}
+	for _, failure := range []error{context.Canceled, storeFailure, errors.Join(context.Canceled, storeFailure)} {
+		resolver.lifecycle.index = constructionIndexTestReader{err: failure}
+		if _, found, err := resolver.replyOriginWorkflowInstance(ctx, request); found || !errors.Is(err, failure) {
+			t.Fatalf("reply read failure became a stale origin: found=%t err=%v want=%v", found, err, failure)
+		}
+	}
 }
 
 func (r *unscopedConnectIndexTestReader) ListFlowInstances(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error) {
