@@ -101,7 +101,7 @@ func matchSessionActivityConnector(activation CompiledActivation, toolID, toolHa
 	var selected CompiledSessionActivityTarget
 	found := false
 	for _, name := range activation.Plan.OperationNames() {
-		id, connector, err := activation.Plan.ConnectorOperation(name)
+		id, connector, err := activation.Plan.ConnectorDeclaration(name)
 		if err != nil {
 			return selected, false, err
 		}

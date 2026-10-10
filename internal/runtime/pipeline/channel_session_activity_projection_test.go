@@ -40,11 +40,11 @@ func nativeActivityDeclarationFixture(t *testing.T, toolID string, tool contract
 
 func TestSessionActivityLaunchUsesAuthoredCustomerNotMailboxDestination(t *testing.T) {
 	activation, tool, intent, _, _ := nativeActivityHandoffFixture(t)
-	toolID, _, err := activation.Plan.ConnectorOperation("deliver")
+	toolID, declaration, err := activation.Plan.ConnectorDeclaration("deliver")
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, site := nativeActivityDeclarationFixture(t, toolID, tool)
+	source, site := nativeActivityDeclarationFixture(t, toolID, declaration)
 	publication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{activation})
 	if err != nil {
 		t.Fatal(err)
@@ -119,12 +119,12 @@ type sessionActivityProjectionSource struct {
 func (s sessionActivityProjectionSource) WorkflowVersion() string { return "fixture-version" }
 
 func TestSessionActivityPreparationFreezesAndRefusesReplacement(t *testing.T) {
-	activation, tool, intent, _, _ := nativeActivityHandoffFixture(t)
-	toolID, _, err := activation.Plan.ConnectorOperation("deliver")
+	activation, _, intent, _, _ := nativeActivityHandoffFixture(t)
+	toolID, declaration, err := activation.Plan.ConnectorDeclaration("deliver")
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, site := nativeActivityDeclarationFixture(t, toolID, tool)
+	base, site := nativeActivityDeclarationFixture(t, toolID, declaration)
 	schema, _ := base.FlowSchemaByID(".")
 	source := sessionActivityProjectionSource{Source: base, schema: schema}
 	publication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{activation})
@@ -192,12 +192,12 @@ func (s sessionActivityProjectionSource) FlowSchemaByID(flowID string) (contract
 }
 
 func TestSessionActivityProjectionRejectsMissingAndAmbiguousDeclarations(t *testing.T) {
-	activation, tool, _, _, _ := nativeActivityHandoffFixture(t)
-	toolID, _, err := activation.Plan.ConnectorOperation("deliver")
+	activation, _, _, _, _ := nativeActivityHandoffFixture(t)
+	toolID, declaration, err := activation.Plan.ConnectorDeclaration("deliver")
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, site := nativeActivityDeclarationFixture(t, toolID, tool)
+	base, site := nativeActivityDeclarationFixture(t, toolID, declaration)
 	publication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{activation})
 	if err != nil {
 		t.Fatal(err)
@@ -238,12 +238,12 @@ func TestSessionActivityProjectionRejectsMissingAndAmbiguousDeclarations(t *test
 }
 
 func TestSessionActivityProjectionKeepsSameProviderSiblingsDistinct(t *testing.T) {
-	activation, tool, _, _, _ := nativeActivityHandoffFixture(t)
-	toolID, _, err := activation.Plan.ConnectorOperation("deliver")
+	activation, _, _, _, _ := nativeActivityHandoffFixture(t)
+	toolID, declaration, err := activation.Plan.ConnectorDeclaration("deliver")
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, site := nativeActivityDeclarationFixture(t, toolID, tool)
+	source, site := nativeActivityDeclarationFixture(t, toolID, declaration)
 	sibling := activation
 	sibling.OnboardingOperationID = uuid.NewString()
 	sibling.SessionAccount.ConnectionID = uuid.NewString()
@@ -283,12 +283,12 @@ func TestSessionActivityProjectionKeepsSameProviderSiblingsDistinct(t *testing.T
 }
 
 func TestSessionActivityProjectionJoinsExactDeclarationAndIngress(t *testing.T) {
-	activation, tool, _, _, _ := nativeActivityHandoffFixture(t)
-	toolID, _, err := activation.Plan.ConnectorOperation("deliver")
+	activation, _, _, _, _ := nativeActivityHandoffFixture(t)
+	toolID, declaration, err := activation.Plan.ConnectorDeclaration("deliver")
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, site := nativeActivityDeclarationFixture(t, toolID, tool)
+	source, site := nativeActivityDeclarationFixture(t, toolID, declaration)
 	publication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{activation})
 	if err != nil {
 		t.Fatal(err)
@@ -326,5 +326,37 @@ func TestSessionActivityProjectionJoinsExactDeclarationAndIngress(t *testing.T) 
 	}
 	if _, err := channelonboarding.CompileSessionActivityTarget(source, activation.Coordinate.BundleHash, site, empty); err == nil {
 		t.Fatal("missing activation selected an ambient session")
+	}
+}
+
+func TestSessionActivityProjectionKeepsDeclarationAndChannelResultMappingDistinct(t *testing.T) {
+	activation, compiled, _, _, _ := nativeActivityHandoffFixture(t)
+	id, declaration, err := activation.Plan.ConnectorDeclaration("deliver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, mapped := declaration.CompiledResultExecution(); mapped {
+		t.Fatal("connector declaration acquired channel result semantics")
+	}
+	if _, mapped := compiled.CompiledResultExecution(); !mapped {
+		t.Fatal("compiled channel operation lost its result mapping")
+	}
+	publication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{activation})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, site := nativeActivityDeclarationFixture(t, id, declaration)
+	if _, err := channelonboarding.CompileSessionActivityTarget(source, activation.Coordinate.BundleHash, site, publication); err != nil {
+		t.Fatal("exact imported connector was rejected after legitimate channel compilation", err)
+	}
+	alteredOutput, err := declaration.WithSchemas(declaration.InputSchema(), contracts.MustToolInputSchema(contracts.ToolSchemaObject))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, altered := range []contracts.ToolSchemaEntry{compiled, alteredOutput} {
+		source, site := nativeActivityDeclarationFixture(t, id, altered)
+		if _, err := channelonboarding.CompileSessionActivityTarget(source, activation.Coordinate.BundleHash, site, publication); err == nil {
+			t.Fatal("altered connector declaration acquired the original session")
+		}
 	}
 }

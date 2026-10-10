@@ -11546,7 +11546,7 @@ tool_model:
         activation, principal binding and SDK account/connection occurrence. Persisted or reconstructed public
         fields cannot issue or recover this handoff. The original held activation is checked again before the
         sole SDK send, which uses the exact journal request identity. A verified provider response consumes the
-        compiled result projection before settling that same journal. A send error or malformed acknowledgment
+        channel result projection for runtime channel operations before settling that same journal. A send error or malformed acknowledgment
         remains uncertain; replay and restart use the recorded attempt without another SDK call. An absent or
         foreign runtime installation fails closed, with no HTTP, credential, builtin or MCP fallback.
         Authored session-write activities retain their authored tool and exact node/handler/activity identity.
@@ -11554,6 +11554,10 @@ tool_model:
         exactly one enabled original activation; the immutable request and any proposed-effect continuation carry
         its private activity target and exact plan/publication generations. Launch recompares those frozen facts
         against the held original owner, never rebinding to a same-provider sibling or replacement connection.
+        The pack compiler retains the exact admitted connector declaration separately from its derived channel
+        result mapping. The scoped declaration must match that original contract in full; ignoring selected
+        fields or comparing it to the derived channel mapping cannot establish identity. Authored activities
+        return the connector's schema-validated result, not an operator-delivery receipt projection.
         The destination is the immutable authored activity input under its declared schema and flow authority,
         not the operator mailbox destination. Runtime channel operations retain their separately compiled binding
         destination checks. Neither declaration nor stored selection materializes native launch permission.
