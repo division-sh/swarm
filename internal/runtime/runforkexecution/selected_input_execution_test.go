@@ -147,8 +147,28 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 					t.Fatalf("did not reach evidence consumer: %v", err)
 				}
 				if fault == "control" {
-					if err != nil || len(result.ForkEvents) == 0 {
+					if err != nil || !result.Activation.Activated || result.ExecutedEventCount != 0 {
 						t.Fatalf("input control: %+v %v", result, err)
+					}
+					wait, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+					defer cancel()
+					child := result.Materialization.ForkRunID
+					for {
+						count, readErr := storetest.ReadLifecycleEventCardinality(wait, selected, child, "item.received")
+						if readErr != nil {
+							t.Fatal(readErr)
+						}
+						if count == 1 {
+							break
+						}
+						if count > 1 {
+							t.Fatal("selected input duplicated its publication")
+						}
+						select {
+						case <-wait.Done():
+							t.Fatal("selected input never durably published after activation")
+						case <-time.After(10 * time.Millisecond):
+						}
 					}
 				} else {
 					if err == nil {
