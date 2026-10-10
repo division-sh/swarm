@@ -11247,6 +11247,15 @@ tool_model:
         One client occurrence owns the state at a time. Its complete callback, work and SDK-store join precedes a
         successor occurrence or database close. Failed join or close retains possession and responsibility, while
         ordinary retirement preserves every pairing file. Private descriptors close before possession is released.
+        Runtime installation first validates the original selected operation, compiled plan, exact source artifact
+        and owning runtime occurrence before opening retained paired state. One non-transient process-control
+        work lease owns the SDK, callbacks, database and possession through complete retirement; it creates no
+        standing service, executable target or enabled business binding. Parent retirement cancels and joins that
+        connection. A failed drain or close keeps both possession and runtime work until explicit complete cleanup.
+        Each account admission additionally retains transient runtime work through its existing single release;
+        runtime fencing refuses new admissions and quiescence cannot finish while such admission remains held.
+        Health readback supplies a held account admission and exact connected occurrence observation, never a
+        cached READY flag. The existing readiness join still owns activation, source, principal and receipt checks.
         This lifetime component alone does not install public session execution or qualify provider interoperability.
       session_pairing_qr: >
         The concrete WhatsApp pairing owner consumes the public QR and ADV-rotation events through the same guarded
