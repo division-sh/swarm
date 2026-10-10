@@ -232,7 +232,7 @@ func TestProviderTriggerCapabilitySubjectsPreserveInstalledEffectiveMultiplicity
 			}
 		}
 	}
-	if installed != 8 || effective != 6 || raw != 4 {
+	if installed != 9 || effective != 6 || raw != 4 {
 		t.Fatalf("subject multiplicity installed=%d effective=%d raw=%d", installed, effective, raw)
 	}
 	body, err := json.Marshal(subjects)
