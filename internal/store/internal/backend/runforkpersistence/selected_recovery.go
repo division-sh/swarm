@@ -352,13 +352,8 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 	}
 	result = plan.SelectedForkRecoveryResult
 	result.CanceledTurns = canceled
-	if (result.Disposition == runfork.SelectedForkRecoveryResume || result.Disposition == runfork.SelectedForkRecoveryActivate) && state != "closed" {
-		res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions
-			SET state='closed',fence_generation=fence_generation+1,lease_expires_at=NULL,terminal_at=$2,updated_at=$2
-			WHERE execution_id=$1 AND state=$3 AND failure IS NULL`, result.ExecutionID, req.Effects.Now(), state)
-		if err := requireExactlyOneMutation(res, err, "fence selected recovery predecessor"); err != nil {
-			return result, err
-		}
+	if err := retireSelectedRecoveryPredecessorTx(ctx, tx, result, state, req.Effects.Now()); err != nil {
+		return result, err
 	}
 	if result.Disposition != runfork.SelectedForkRecoveryFailed {
 		if pending {
@@ -412,6 +407,27 @@ func recoverFailedSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selected
 		return result, err
 	}
 	return result, nil
+}
+
+func retireSelectedRecoveryPredecessorTx(ctx context.Context, tx *sql.Tx, result runfork.SelectedForkRecoveryResult, state string, now time.Time) error {
+	next := ""
+	switch result.Disposition {
+	case runfork.SelectedForkRecoveryResume, runfork.SelectedForkRecoveryActivate:
+		if state != "closed" {
+			next = "closed"
+		}
+	case runfork.SelectedForkRecoveryControlOnly:
+		if state == "prepared" || state == "running" {
+			next = "quiesced"
+		}
+	}
+	if next == "" {
+		return nil
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions
+		SET state=$4,fence_generation=fence_generation+1,lease_expires_at=NULL,terminal_at=$2,updated_at=$2
+		WHERE execution_id=$1 AND state=$3 AND failure IS NULL`, result.ExecutionID, now, state, next)
+	return requireExactlyOneMutation(res, err, "fence selected recovery predecessor")
 }
 
 func settledSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, record selectedRecoveryRecord, sqlite, lock bool) (runfork.SelectedForkRecoveryResult, bool, error) {
@@ -470,6 +486,9 @@ func planSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecyc
 func planInterruptedSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, record selectedRecoveryRecord) (selectedRecoveryRecord, error) {
 	result := record
 	state, failure := record.state, record.failure
+	if snapshot.State == runlifecycle.StatePaused && record.Operation == nil && failure == nil && (state == "prepared" || state == "running") {
+		return planPausedUnkeyedSelectedRecoveryTx(ctx, tx, record)
+	}
 	if state == "failed" && failure == nil {
 		return result, fmt.Errorf("failed selected execution lacks failure evidence")
 	}
@@ -500,6 +519,20 @@ func planInterruptedSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot
 		return result, fmt.Errorf("selected recovery state is invalid: %s", state)
 	}
 	return failedSelectedRecovery(record)
+}
+
+func planPausedUnkeyedSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, record selectedRecoveryRecord) (selectedRecoveryRecord, error) {
+	// An attached container is not proof that activation released work. No
+	// permanent request means recovery may preserve control, never mint replay.
+	settled, err := selectedForkRecoveryEffectsSettledTx(ctx, tx, record.RunID)
+	if err != nil {
+		return record, err
+	}
+	if !settled {
+		return failedSelectedRecovery(record)
+	}
+	record.Disposition = runfork.SelectedForkRecoveryControlOnly
+	return record, nil
 }
 
 func failedSelectedRecovery(record selectedRecoveryRecord) (selectedRecoveryRecord, error) {
