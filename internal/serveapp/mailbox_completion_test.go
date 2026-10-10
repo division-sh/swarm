@@ -190,6 +190,8 @@ func gateCompletionAssertResponse(t *testing.T, result gateCompletionHTTPResult,
 
 func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
 	t.Helper()
+	var deliveryReader servedRunDeliveryReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	opts := &cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
@@ -220,7 +222,7 @@ func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOpt
 	return opts, func() (*serveRuntimeTestProcess, servedControlProofRuntime) {
 		p := startServeRuntimeTestProcess(t, *opts)
 		p.waitForReadyLine()
-		return p, servedControlProofRuntime{Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, p.outputString()) + "/v1/rpc", DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root), Postgres: selectedPG, SQLite: selectedSQLite}
+		return p, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, p.outputString()) + "/v1/rpc", DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root), Postgres: selectedPG, SQLite: selectedSQLite}
 	}
 }
 
@@ -232,7 +234,7 @@ func TestServedMailboxCompletionInsertRollbackAndRestartBothStores(t *testing.T)
 			first, rt := start()
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "completion-seed"})
 			entityID := requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, "", "review")
-			waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			var cardID, hash string
 			if err := rt.DB.QueryRow(`SELECT card_id, card_content_hash FROM decision_cards WHERE run_id=$1 AND status='pending'`, seed.RunID).Scan(&cardID, &hash); err != nil {
 				t.Fatal(err)
@@ -261,7 +263,7 @@ func TestServedMailboxCompletionInsertRollbackAndRestartBothStores(t *testing.T)
 				t.Fatalf("first execution after removing completion fault: %#v", firstSuccess)
 			}
 			requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "done")
-			waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			committed := gateCompletionRead(t, rt, "first_success_after_restart", seed.RunID, cardID, domain)
 			gateCompletionAssertResponse(t, firstSuccess, committed, false)
 			replay := gateCompletionHTTP(context.Background(), rt.Endpoint, params)

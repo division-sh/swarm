@@ -92,7 +92,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	assertNoForkArtifacts(t, h.db, materialized.ForkRunID)
 	assertRunCountsUnchanged(t, sourceBefore, selectedContractSourceRunCounts(t, h.db, sourceRunID), "source run after cleanup probe")
 	assertSourceRowsFrozen(t, sourceRowsBefore, selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID), "source rows after cleanup probe")
-	assertSourceRunLifecycle(t, h.db, sourceRunID, "paused", false)
+	assertSourceRunLifecycle(t, h.pg, sourceRunID, "paused", false)
 
 	cfg := testRuntimeConfig()
 	cfg.LLM.Backend = "anthropic"
@@ -157,12 +157,12 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 		!containsTier12String(result.Activation.BranchDivergence.SourceAdvancedFacts, "source_events_advanced_after_fork_point") {
 		t.Fatalf("selected-contract source-advanced branch activation = %#v", result.Activation)
 	}
-	assertSourceRunLifecycle(t, h.db, sourceRunID, "paused", false)
+	assertSourceRunLifecycle(t, h.pg, sourceRunID, "paused", false)
 	negativeFixtureRoot := catalogRuntimeFixture(t, "catalog.runtime.selected_contract_fork", "test-non-agent-replay-fail-closed").Root
 	assertUnsupportedHistoricalReplayFailsClosed(t, negativeFixtureRoot)
 }
 
-func selectedContractExecutionOwnerForCatalogTest(t testing.TB, db *sql.DB, selected *store.PostgresStore, forkOverride ...runtimerunforkexecution.SelectedContractForkLifecycle) runtimerunforkexecution.SelectedContractExecutionOwner {
+func selectedContractExecutionOwnerForCatalogTest(t testing.TB, selected *store.PostgresStore, forkOverride ...runtimerunforkexecution.SelectedContractForkLifecycle) runtimerunforkexecution.SelectedContractExecutionOwner {
 	t.Helper()
 	var fork runtimerunforkexecution.SelectedContractForkLifecycle = selected
 	if len(forkOverride) > 0 {
@@ -202,7 +202,7 @@ func selectedContractExecutionOwnerForCatalogHarness(t testing.TB, h *runtimeHar
 		return h.selectedOwners[0]
 	}
 	if h.pg != nil {
-		owner := selectedContractExecutionOwnerForCatalogTest(t, h.db, h.pg, forkOverride...)
+		owner := selectedContractExecutionOwnerForCatalogTest(t, h.pg, forkOverride...)
 		bindCatalogSelectedOwner(t, h, owner)
 		h.selectedOwners = append(h.selectedOwners, owner)
 		return owner
@@ -603,17 +603,16 @@ func assertSourceRowsFrozen(t testing.TB, before, after map[string]string, label
 	t.Fatalf("%s changed source row content:\nbefore=%#v\nafter=%#v", label, before, after)
 }
 
-func assertSourceRunLifecycle(t testing.TB, db *sql.DB, runID, wantStatus string, wantEnded bool) {
+func assertSourceRunLifecycle(t testing.TB, selected runtimebus.RunLifecycleReadPersistence, runID, wantStatus string, wantEnded bool) {
 	t.Helper()
-	var status string
-	var ended bool
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-		SELECT status, ended_at IS NOT NULL
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, runID).Scan(&status, &ended); err != nil {
+	snapshot, err := selected.LoadRunLifecycleSnapshot(testAuthorActivityContext(context.Background()), runID)
+	if err != nil {
 		t.Fatalf("load source run lifecycle: %v", err)
 	}
+	if snapshot.RunID != runID {
+		t.Fatalf("source run lifecycle borrowed identity: got %q want %q", snapshot.RunID, runID)
+	}
+	status, ended := snapshot.Status, snapshot.EndedAt != nil
 	if strings.TrimSpace(status) != wantStatus || ended != wantEnded {
 		t.Fatalf("source run lifecycle = status:%q ended:%v, want status:%q ended:%v", status, ended, wantStatus, wantEnded)
 	}

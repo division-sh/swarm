@@ -16,6 +16,27 @@ func ReadFiniteRunStartStorageCounts(ctx context.Context, selected any) (FiniteR
 	return private.ReadFiniteRunStartStorageCountsForTest(ctx, selected)
 }
 
+type LatestPipelineReceiptStorage = private.LatestPipelineReceiptStorage
+type EventPipelineReceiptObservationRow = private.EventPipelineReceiptObservationRow
+
+type SourceFanOutIntentDiagnosticRow = private.SourceFanOutIntentDiagnosticRow
+
+func CountClosedSourceFanOutIssuance(ctx context.Context, selected any, runID, eventID string, cardinality int) (int, error) {
+	return private.CountClosedSourceFanOutIssuanceForTest(ctx, selected, runID, eventID, cardinality)
+}
+
+func ReadSourceFanOutIntentDiagnosticRows(ctx context.Context, selected any, runID, eventID string) ([]SourceFanOutIntentDiagnosticRow, error) {
+	return private.ReadSourceFanOutIntentDiagnosticRowsForTest(ctx, selected, runID, eventID)
+}
+
+func ReadEarliestEventPipelineReceiptRows(ctx context.Context, selected any) ([]EventPipelineReceiptObservationRow, error) {
+	return private.ReadEarliestEventPipelineReceiptRowsForTest(ctx, selected)
+}
+
+func ReadLatestPlatformPipelineReceiptStorage(ctx context.Context, selected any, eventID string) (LatestPipelineReceiptStorage, error) {
+	return private.ReadLatestPlatformPipelineReceiptStorageForTest(ctx, selected, eventID)
+}
+
 func ReadPinnedAuthoredMutationStorage(ctx context.Context, selected any, source fanoutobligation.SourceRef) (json.RawMessage, error) {
 	return private.ReadPinnedAuthoredMutationStorageForTest(ctx, selected, source)
 }

@@ -3,27 +3,32 @@ package pipeline
 import (
 	"testing"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestIssue2564EvaluatedSnapshotMustFenceCommitBothStores(t *testing.T) {
+func VerifyIssue2564EvaluatedSnapshotMustFenceCommitBothStoresForTest(t *testing.T, open func(*testing.T, string, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			source := testRootEntityContractSource("root", "test_entity")
-			bundle, _ := semanticview.Bundle(source)
-			bundle.RootEntities["test_entity"].Fields["count"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
-			bundle.RootEntities["test_entity"].Fields["marker"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
-			pc := &PipelineCoordinator{workflowStore: store, module: &pipelineFixtureWorkflowModule{source: source}}
+			source := loadWorkflowTempSource(t, map[string]string{
+				"schema.yaml":   "name: stale-evaluated-snapshot\nstages:\n  pending: {}\n",
+				"entities.yaml": "test_entity:\n  count: integer\n  marker: integer\n",
+			})
+			fixture := open(t, tc.name, source)
+			pc := fixture.NewCoordinator(PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: source}})
+			store := pc.workflowStore
+			ctx := correlation.WithRunID(fixture.Context, testPipelineRunID)
+			if err := fixture.RequireRun(ctx, testPipelineRunID); err != nil {
+				t.Fatal(err)
+			}
 			repo := pipelineEngineStateRepo{coordinator: pc}
 			entityID := runtimeRunID(ctx)
-			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, EntityID: entityID,
-				WorkflowName: ".", WorkflowVersion: "1.0.0", CurrentState: "pending",
+				WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "pending",
 				Fields: map[string]any{"count": 0, "marker": 0}, EntityType: "test_entity",
 			})); err != nil {
 				t.Fatal(err)

@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"sync"
 	"testing"
 	"time"
 
@@ -12,32 +11,24 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t *testing.T) {
+func VerifyNativeNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":   "name: first-event-transition\nstages:\n  waiting: {}\n  done: {final: true}\n",
 		"entities.yaml": "first_event_entity: {}\n",
 		"events.yaml":   "request.accepted:\n",
 		"nodes.yaml":    "acceptor:\n  execution_type: system_node\n  subscribes_to: [request.accepted]\n  event_handlers:\n    request.accepted:\n      advances_to: done\n",
 	})
-	module := &previewWorkflowModule{bundle: bundle}
 
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
+			fixture, pc, ctx := nativePilotPipelineForTest(t, tc.name, bundle, open)
+			store := pc.workflowStore
 			runID := correlation.RunIDFromContext(ctx)
-			pc := &PipelineCoordinator{
-				bus:            &recordingPipelineBus{},
-				workflowStore:  store,
-				expressionEval: newWorkflowExpressionEvaluator(),
-				entityLocks:    map[string]*sync.Mutex{},
-				module:         module,
-			}
-			configureWorkflowLifecycleForTest(t, pc)
 
 			entityID := runID
 			eventID := uuid.NewString()
 			occurredAt := time.Now().UTC()
-			evt := eventtest.RunCreatingRootIngress(
+			evt := eventtest.ExistingRunRootIngress(
 				eventID,
 				events.EventType("request.accepted"),
 				"",
@@ -45,15 +36,14 @@ func TestNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStores(
 				[]byte(`{}`),
 				0,
 				runID,
-				"",
-				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+				events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}),
 				occurredAt,
 			)
 			node := pipelineSourceNode(t, pc.SemanticSource(), ".", "acceptor")
-			ctx, state := prepareConstructorUnitDelivery(t, pc, ctx, ".", "acceptor", evt)
-			outcome, err := pc.executeNodeContractHandler(ctx, node, runtimecontracts.SystemNodeEventHandler{
+			ctx, state := prepareNativeConstructorHandlerDeliveryForTest(t, fixture, pc, ctx, ".", "acceptor", evt)
+			outcome, err := executeNativeClaimedPipelineHandlerForTest(t, pc, ctx, node, runtimecontracts.SystemNodeEventHandler{
 				AdvancesTo: "done",
-			}, workflowTriggerContext{Event: evt, State: state, HandlerEventKey: "request.accepted"}, false)
+			}, workflowTriggerContext{Event: evt, State: state, HandlerEventKey: "request.accepted"})
 			if err != nil {
 				t.Fatalf("execute first event transition: %v", err)
 			}

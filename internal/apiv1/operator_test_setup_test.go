@@ -47,7 +47,7 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 		t.Fatalf("setup entity result = %#v", entityResult)
 	}
 	assertTestSetupPersistence(t, db, bundleHash, runID, entityID, "waiting", "seeded", true)
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
+	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
 
@@ -56,7 +56,7 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 		t.Fatalf("test.setup_entities replay error = %#v", replay.Error)
 	}
 	assertTestSetupPersistence(t, db, bundleHash, runID, entityID, "waiting", "seeded", true)
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
+	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows after replay = %d, want 1", count)
 	}
 
@@ -77,7 +77,7 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 		t.Fatalf("test.setup_entities replay after idempotency expiry error = %#v", expiredReplay.Error)
 	}
 	assertTestSetupPersistence(t, db, bundleHash, runID, entityID, "waiting", "seeded", true)
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
+	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows after expired replay = %d, want 1", count)
 	}
 }
@@ -212,7 +212,7 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 			if details["field"] != tc.wantField {
 				t.Fatalf("test.setup_entities invalid field = %#v, want %s; details=%#v", details["field"], tc.wantField, details)
 			}
-			if count := countAPIIdempotencyRows(t, db); count != 0 {
+			if count := countAPIIdempotencyRows(t, pg); count != 0 {
 				t.Fatalf("api_idempotency rows after invalid setup = %d, want 0", count)
 			}
 			if count := countTestSetupEntityRows(t, db); count != 0 {

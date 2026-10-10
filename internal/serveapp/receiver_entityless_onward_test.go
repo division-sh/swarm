@@ -25,7 +25,7 @@ func TestReceiverCompositionEntitylessOnwardBothStores(t *testing.T) {
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "onward-request"}
 				}
 				started := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 				rows, err := rt.DB.Query(`SELECT CAST(delivery_target_route AS TEXT),status FROM event_deliveries WHERE run_id=$1`, started.RunID)
 				if err != nil {
 					t.Fatal(err)

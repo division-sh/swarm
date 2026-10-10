@@ -42,11 +42,14 @@ func openTimerReplayNativeStore(t *testing.T, backend string) (timerReplaySelect
 	}
 }
 
-func newTimerReplayCoordinator(t *testing.T, bus *runtimebus.EventBus, selected timerReplaySelectedStore, options pipeline.PipelineCoordinatorOptions) *pipeline.PipelineCoordinator {
+func newTimerReplayCoordinator(t *testing.T, bus *runtimebus.EventBus, selected timerReplaySelectedStore, options pipeline.PipelineCoordinatorOptions, fact correlation.SourceArtifactFact) *pipeline.PipelineCoordinator {
 	t.Helper()
+	if err := fact.Validate(); err != nil {
+		t.Fatal(err)
+	}
 	options.ExecutionPosture = executionposture.Live
 	options.ReceiverExecution = eventreceiver.NormalExecution()
-	options.SourceArtifactFact = authorActivityTestSourceArtifactFact
+	options.SourceArtifactFact = fact
 	options.Persistence = pipeline.NewWorkflowPersistence(selected)
 	options.DeliveryStore = selected
 	options.DeadLetters = selected
@@ -88,7 +91,7 @@ func newTimerCauseReplayNativeFixture(t *testing.T, backend string, bundle *cont
 	}
 	pc := newTimerReplayCoordinator(t, bus, selected, pipeline.PipelineCoordinatorOptions{
 		Module: proposedEffectProofModule{source: source, nodes: nodes}, TimerScheduler: scheduler, WorkOwner: pipelineExternalTestWorkOwner(t),
-	})
+	}, authorActivityTestSourceArtifactFact)
 	bus.SetInterceptors(pc)
 	t.Cleanup(func() {
 		join, cancel := context.WithTimeout(context.Background(), 5*time.Second)

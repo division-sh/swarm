@@ -24,7 +24,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -33,21 +32,6 @@ type exactWorkflowJoinSource struct {
 	plans             []runtimecontracts.WorkflowJoinPlan
 	nodeFlowID        string
 	overrideNodeOwner bool
-}
-
-type exactWorkflowJoinHarness struct {
-	t         *testing.T
-	store     *workflowInstanceStore
-	ctx       context.Context
-	bundle    *runtimecontracts.WorkflowContractBundle
-	source    exactWorkflowJoinSource
-	schedules *recordingGenericScheduleWakeupOwner
-	bus       *recordingPipelineBus
-	pc        *PipelineCoordinator
-	flowID    string
-	path      string
-	route     runtimeflowidentity.Route
-	entityID  string
 }
 
 func (s exactWorkflowJoinSource) WorkflowJoins() []runtimecontracts.WorkflowJoinPlan {
@@ -61,133 +45,11 @@ func (s exactWorkflowJoinSource) ExecutableNodeSource(node runtimeidentity.Execu
 	return s.Source.ExecutableNodeSource(node)
 }
 
-func newExactWorkflowJoinHarness(
-	t *testing.T,
-	storeCase workflowJoinStoreCase,
-	flowID string,
-	initialState string,
-	members []any,
-) *exactWorkflowJoinHarness {
-	t.Helper()
-	store, ctx := storeCase.open(t)
-	bundle := workflowJoinLifecycleBundle(t)
-	plan := exactCompiledJoinPlanForTest(bundle, flowID)
-	source := exactWorkflowJoinSource{
-		Source: workflowJoinLifecycleRootAndFlowSource(bundle), plans: []runtimecontracts.WorkflowJoinPlan{plan},
-		nodeFlowID: flowID, overrideNodeOwner: true,
-	}
-	harness := &exactWorkflowJoinHarness{
-		t: t, store: store, ctx: ctx, bundle: bundle, source: source,
-		schedules: &recordingGenericScheduleWakeupOwner{}, bus: &recordingPipelineBus{}, flowID: flowID,
-	}
-	harness.path = runtimecorrelation.RunIDFromContext(ctx)
-	workflowName := "."
-	if flowID != "" {
-		harness.path = flowID + "/" + uuid.NewString()
-		workflowName = flowID
-	}
-	harness.route = testRunScopedWorkflowInstanceFromContext(ctx, harness.path).Route
-	harness.entityID = FlowInstanceEntityID(harness.path)
-	harness.pc = harness.newCoordinator()
-	if err := store.upsert(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
-		InstanceID: uuid.NewString(), StorageRef: harness.path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
-		EntityID: harness.entityID, CurrentState: initialState, EnteredStageAt: time.Now().UTC(),
-		Fields:       map[string]any{"expected": append([]any{}, members...)},
-		StateBuckets: map[string]any{"entity_projection": map[string]any{"expected": append([]any{}, members...)}},
-		EntityType:   "test_entity",
-	})); err != nil {
-		t.Fatal(err)
-	}
-	return harness
-}
-
-func (h *exactWorkflowJoinHarness) newCoordinator() *PipelineCoordinator {
-	h.t.Helper()
-	return newWorkflowJoinPipelineCoordinator(h.t, h.bus, h.store.testDB(), PipelineCoordinatorOptions{
-		Module: &pipelineFixtureWorkflowModule{source: h.source}, Persistence: workflowPersistenceForTest(h.store), GenericSchedules: h.schedules,
-	})
-}
-
-func (h *exactWorkflowJoinHarness) restart() {
-	h.t.Helper()
-	h.pc = h.newCoordinator()
-}
-
 func exactJoinRoutingSource(flowID, path, entityID string) events.RoutingSource {
 	if flowID == "" {
 		return eventtest.RootRoutingSource(path)
 	}
 	return eventtest.ConcreteTemplateRoutingSource(flowID, path, entityID)
-}
-
-func (h *exactWorkflowJoinHarness) envelope() events.EventEnvelope {
-	h.t.Helper()
-	if h.flowID == "" {
-		return events.EnvelopeForEntityID(events.EventEnvelope{}, h.entityID)
-	}
-	return workflowJoinTestEnvelope(h.path, h.entityID)
-}
-
-func (h *exactWorkflowJoinHarness) armInitial() runtimegenericschedule.Activation {
-	h.t.Helper()
-	if err := applyTestInitialEntryEffect(h.ctx, h.pc, h.route, h.entityID); err != nil {
-		h.t.Fatalf("arm exact join: %v", err)
-	}
-	upserts, _ := committedWorkflowSchedulesForTest(h.t, h.store)
-	if len(upserts) != 1 {
-		entry, found, err := runtimeworkflowlifecycle.LoadStageEntry(h.instance().Bookkeeping)
-		h.t.Fatalf("armed schedules=%d root=%q run=%q path=%q plan=%q entry=%#v found=%v err=%v", len(upserts), semanticview.RootExecutionFlowID(h.source), runtimecorrelation.RunIDFromContext(h.ctx), h.path, h.source.plans[0].Node.FlowPath(), entry, found, err)
-	}
-	_, ref, ok := timeridentity.ParseJoinHandle(parsePayloadMap(genericSchedulePayloadForTest(h.t, upserts[0])))
-	if !ok || ref.FlowPath() != pipelineDeclarationFlowPath(h.flowID) || upserts[0].Command.RoutingSource.Route().FlowID != h.flowID {
-		h.t.Fatalf("armed declaration = ref:%#v schedule:%#v ok=%v", ref, upserts[0], ok)
-	}
-	return upserts[0]
-}
-
-func (h *exactWorkflowJoinHarness) transition(nextState, eventType string) {
-	h.t.Helper()
-	transitionCtx := testPersistedWorkflowStateTransitionContext(h.t, h.store, h.ctx, h.route, h.entityID, eventType)
-	if err := persistAdmittedJoinTransitionForTest(h.t, h.pc, transitionCtx, h.route, h.entityID, nextState, eventType); err != nil {
-		h.t.Fatalf("transition workflow to %s: %v", nextState, err)
-	}
-}
-
-func (h *exactWorkflowJoinHarness) instance() WorkflowInstance {
-	h.t.Helper()
-	instance, found, err := h.store.Load(h.ctx, testRunScopedWorkflowRoute(h.ctx, h.route))
-	if err != nil || !found {
-		h.t.Fatalf("load workflow instance: found=%v err=%v", found, err)
-	}
-	return instance
-}
-
-func (h *exactWorkflowJoinHarness) activation() joinruntime.Activation {
-	h.t.Helper()
-	instance := h.instance()
-	carrier, err := workflowInstanceStateCarrier(instance)
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	activation, found, err := joinruntime.Load(carrier.StateBuckets, pipelineNode(h.t, h.flowID, "join-node"), workflowJoinActivationKey(h.t, carrier.StateBuckets, pipelineNode(h.t, h.flowID, "join-node")))
-	if err != nil || !found {
-		h.t.Fatalf("load join activation: found=%v err=%v", found, err)
-	}
-	return activation
-}
-
-func (h *exactWorkflowJoinHarness) scheduleEvent(schedule runtimegenericschedule.Activation, eventID string) events.Event {
-	h.t.Helper()
-	return workflowJoinScheduleEventForTest(
-		h.t, eventID, schedule, runtimecorrelation.RunIDFromContext(h.ctx), h.envelope(), time.Now().UTC(),
-	)
-}
-
-func (h *exactWorkflowJoinHarness) fire(event events.Event) (contractHandlerExecutionResult, error) {
-	h.t.Helper()
-	return executeResolvedJoinForTest(h.t, h.pc, h.ctx, event, workflowTriggerContext{
-		Event: event, State: mustCurrentWorkflowState(h.t, h.pc, h.ctx, h.route, h.entityID),
-	})
 }
 
 func exactJoinSemanticStateEqual(left, right WorkflowInstance) bool {
@@ -229,7 +91,7 @@ func workflowJoinLifecycleRootAndFlowSource(bundle *runtimecontracts.WorkflowCon
 	return semanticview.Wrap(bundle)
 }
 
-func seedExactJoinScope(t *testing.T, store *workflowInstanceStore, ctx context.Context, source semanticview.Source, declarationFlowID, path string) exactJoinScope {
+func seedExactJoinScope(t *testing.T, fixture *PipelineDeliveryNativeFixtureForTest, ctx context.Context, source semanticview.Source, declarationFlowID, path string) exactJoinScope {
 	t.Helper()
 	executionFlowID := declarationFlowID
 	if executionFlowID == "" {
@@ -237,10 +99,10 @@ func seedExactJoinScope(t *testing.T, store *workflowInstanceStore, ctx context.
 	}
 	route := testRunScopedWorkflowInstanceFromContext(ctx, path).Route
 	entityID := FlowInstanceEntityID(path)
-	if err := store.upsert(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
-		InstanceID: route.InstanceID, StorageRef: path, WorkflowName: executionFlowID, WorkflowVersion: "1.0.0",
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
+		InstanceID: route.InstanceID, StorageRef: path, WorkflowName: executionFlowID, WorkflowVersion: source.WorkflowVersion(),
 		EntityID: entityID, CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(),
-		Fields:     map[string]any{"expected": []any{"a", "b"}},
+		Fields:     map[string]any{"expected": []any{"a", "b"}, "instance_key": strings.TrimPrefix(path, declarationFlowID+"/")},
 		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatal(err)
@@ -268,44 +130,22 @@ func exactJoinActivationForScope(t *testing.T, pc *PipelineCoordinator, store *w
 	return activations[0]
 }
 
-func deliverExactJoinMember(t *testing.T, pc *PipelineCoordinator, store *workflowInstanceStore, ctx context.Context, source semanticview.Source, scope exactJoinScope, member string) error {
+func deliverExactJoinMember(t *testing.T, fixture *PipelineDeliveryNativeFixtureForTest, mutations *nativePipelineLifecycleMutationObservationForTest, pc *PipelineCoordinator, ctx context.Context, source semanticview.Source, scope exactJoinScope, member string) error {
 	t.Helper()
-	envelope := events.EnvelopeForEntityID(events.EventEnvelope{}, scope.entityID)
-	if scope.declarationFlowID != "" {
-		envelope = handlerTestWorkflowEnvelope(scope.declarationFlowID, scope.path, scope.entityID)
-	}
-	event := eventtest.RunCreatingRootIngressWithRoutingSource(
-		uuid.NewString(), events.EventType("item.completed"), "operator", "",
-		mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": member}}), 0,
-		runtimecorrelation.RunIDFromContext(ctx), "", envelope, exactJoinRoutingSource(scope.declarationFlowID, scope.path, scope.entityID), time.Now().UTC(),
-	)
-	persistExactJoinEvent(t, store, ctx, event)
-	target := events.RouteIdentity{FlowID: scope.executionFlowID, FlowInstance: scope.path, EntityID: scope.entityID}
+	event := nativeWorkflowJoinEventForTest(ctx, scope.declarationFlowID, scope.path, scope.entityID, "item.completed", mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": member}}), time.Now().UTC())
 	joinNode := pipelineNode(t, scope.declarationFlowID, "join-node")
-	deliveryCtx, err := persistWorkflowJoinPublicationForTest(t, pc, ctx, event, events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient(joinNode),
-		Target:    events.MustExistingEntityTarget(target),
-	}, true)
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(joinNode), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: scope.executionFlowID, FlowInstance: scope.path, EntityID: scope.entityID})}
+	deliveryCtx, err := nativeWorkflowJoinPublicationContextForTest(t, fixture, pc, ctx, event, route, true)
 	if err != nil {
 		return err
 	}
 	handler := source.ExecutableNodeEventHandlers(joinNode)["item.completed"]
-	_, err = executeClaimedWorkflowJoinForTest(t, pc, deliveryCtx, joinNode, handler, workflowTriggerContext{
-		Event: event, State: mustCurrentWorkflowState(t, pc, ctx, scope.route, scope.entityID), HandlerEventKey: "item.completed",
-	})
-	if err == nil {
-		_, err = drivePublishedJoinCompletionForTest(t, pc, deliveryCtx, joinNode, handler, contractHandlerExecutionResult{})
+	result, err := executeNativeClaimedPipelineHandlerForTest(t, pc, deliveryCtx, joinNode, handler, workflowTriggerContext{Event: event, State: mustCurrentWorkflowState(t, pc, ctx, scope.route, scope.entityID), HandlerEventKey: "item.completed"})
+	if err != nil {
+		return err
 	}
+	_, err = driveNativePublishedJoinCompletionForTest(t, fixture, mutations, pc, deliveryCtx, joinNode, handler, result)
 	return err
-}
-
-func persistExactJoinEvent(t testing.TB, store *workflowInstanceStore, ctx context.Context, event events.Event) {
-	t.Helper()
-	dialect := authoractivityfixture.DialectPostgres
-	if store.isSQLite() {
-		dialect = authoractivityfixture.DialectSQLite
-	}
-	seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, event)
 }
 
 func TestJoinScheduleFactsAreDerivedOnlyFromTypedDeclarationHandle(t *testing.T) {
@@ -498,7 +338,7 @@ func TestWorkflowJoinDeclarationRefUsesExactExecutionScope(t *testing.T) {
 	}
 }
 
-func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStores(t *testing.T) {
+func VerifyNativeRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		for _, scope := range []struct {
 			name   string
@@ -508,41 +348,11 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 			{name: "flow", flowID: "orders"},
 		} {
 			t.Run(storeCase.name+"/"+scope.name, func(t *testing.T) {
-				store, ctx := storeCase.open(t)
-				bundle := workflowJoinLifecycleBundle(t)
-				plan := exactCompiledJoinPlanForTest(bundle, scope.flowID)
-				source := exactWorkflowJoinSource{
-					Source: workflowJoinLifecycleRootAndFlowSource(bundle), plans: []runtimecontracts.WorkflowJoinPlan{plan},
-					nodeFlowID: scope.flowID, overrideNodeOwner: true,
-				}
-				schedules := &recordingGenericScheduleWakeupOwner{}
-				newCoordinator := func() *PipelineCoordinator {
-					return newWorkflowJoinPipelineCoordinator(t, &recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-						Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), GenericSchedules: schedules,
-					})
-				}
-				pc := newCoordinator()
-				path := runtimecorrelation.RunIDFromContext(ctx)
-				workflowName := "."
-				if scope.flowID != "" {
-					path = scope.flowID + "/" + uuid.NewString()
-					workflowName = scope.flowID
-				}
-				route := testRunScopedWorkflowInstanceFromContext(ctx, path).Route
-				entityID := FlowInstanceEntityID(path)
-				if err := store.upsert(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
-					InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
-					EntityID: entityID, CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(),
-					Fields:     map[string]any{"expected": []any{"a", "b"}},
-					EntityType: "test_entity",
-				})); err != nil {
-					t.Fatal(err)
-				}
-				transitionCtx := testPersistedWorkflowStateTransitionContext(t, store, ctx, route, entityID, "dispatch.completed")
-				if err := persistAdmittedJoinTransitionForTest(t, pc, transitionCtx, route, entityID, "awaiting", "dispatch.completed"); err != nil {
-					t.Fatalf("arm exact %s join: %v", scope.name, err)
-				}
-				upserts, _ := committedWorkflowSchedulesForTest(t, store)
+				h := newNativeExactWorkflowJoinHarness(t, storeCase.name, scope.flowID, "dispatching", []any{"a", "b"}, workflowJoinLifecycleBundleStartingAt(t, "dispatching"), open)
+				h.transition("awaiting", "dispatch.completed")
+				store, ctx, pc, source := h.store, h.ctx, h.pc, h.source
+				path, route, entityID := h.path, h.route, h.entityID
+				upserts, _ := h.mutations.schedules()
 				if len(upserts) != 1 {
 					t.Fatalf("armed schedules = %#v", upserts)
 				}
@@ -566,18 +376,15 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 
 				handler := source.ExecutableNodeEventHandlers(joinNode)["item.completed"]
 				deliver := func(coordinator *PipelineCoordinator, id, member string) error {
-					envelope := events.EnvelopeForEntityID(events.EventEnvelope{}, entityID)
-					if scope.flowID != "" {
-						envelope = workflowJoinTestEnvelope(path, entityID)
-					}
-					event := eventtest.RunCreatingRootIngressWithRoutingSource(eventtest.UUID(id), events.EventType("item.completed"), "", "", mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": member}}), 0, runtimecorrelation.RunIDFromContext(ctx), "", envelope, exactJoinRoutingSource(scope.flowID, path, entityID), time.Now().UTC())
-					_, err := executePublishedWorkflowJoinForTest(t, coordinator, ctx, joinNode, handler, workflowTriggerContext{Event: event, State: mustCurrentWorkflowState(t, coordinator, ctx, route, entityID), HandlerEventKey: "item.completed"})
+					event := nativeWorkflowJoinEventForTest(ctx, scope.flowID, path, entityID, "item.completed", mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": member}}), time.Now().UTC())
+					_, err := executeNativePublishedWorkflowJoinForTest(t, h.fixture, h.mutations, coordinator, ctx, joinNode, handler, workflowTriggerContext{Event: event, State: mustCurrentWorkflowState(t, coordinator, ctx, route, entityID), HandlerEventKey: "item.completed"})
 					return err
 				}
 				if err := deliver(pc, "member-a", "a"); err != nil {
 					t.Fatal(err)
 				}
-				pc = newCoordinator()
+				h.restart()
+				store, ctx, pc = h.store, h.ctx, h.pc
 				if err := deliver(pc, "member-b", "b"); err != nil {
 					t.Fatal(err)
 				}
@@ -593,7 +400,7 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 				if err != nil || !found || activation.Status != joinruntime.StatusClosed || activation.FlowPath() != pipelineDeclarationFlowPath(scope.flowID) || activation.Completed() != 2 || !activation.TimerCancelled {
 					t.Fatalf("closed activation = found:%v activation:%#v err:%v", found, activation, err)
 				}
-				_, cancellations := committedWorkflowSchedulesForTest(t, store)
+				_, cancellations := h.mutations.schedules()
 				assertJoinCompletionCancellationsForTest(t, cancellations, armedRef)
 				if err := deliver(pc, "member-b-duplicate", "b"); err == nil {
 					t.Fatal("stale duplicate mutated a closed join")
@@ -603,14 +410,13 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 	}
 }
 
-func TestSiblingFlowJoinDeclarationsStayIndependentAcrossRestartOnBothStores(t *testing.T) {
+func VerifyNativeSiblingFlowJoinDeclarationsStayIndependentAcrossRestartOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		for _, order := range []struct {
 			name    string
 			reverse bool
 		}{{name: "a_then_b"}, {name: "b_then_a", reverse: true}} {
 			t.Run(storeCase.name+"/"+order.name, func(t *testing.T) {
-				store, ctx := storeCase.open(t)
 				files := workflowJoinLifecycleFixtureFiles(false, "")
 				for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
 					for _, flowID := range []string{"a", "b"} {
@@ -630,34 +436,39 @@ func TestSiblingFlowJoinDeclarationsStayIndependentAcrossRestartOnBothStores(t *
 				}
 				source := exactWorkflowJoinSource{Source: semanticview.Wrap(bundle), plans: plans}
 				schedules := &recordingGenericScheduleWakeupOwner{}
-				newCoordinator := func() *PipelineCoordinator {
-					return newWorkflowJoinPipelineCoordinator(t, &recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-						Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), GenericSchedules: schedules,
-					})
+				fixture := open(t, storeCase.name, source)
+				ctx := runtimecorrelation.WithRunID(fixture.Context, uuid.NewString())
+				if err := fixture.RequireRun(ctx, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
+					t.Fatal(err)
 				}
-				pc := newCoordinator()
-				firstScope := seedExactJoinScope(t, store, ctx, source, "a", "a/"+uuid.NewString())
-				secondScope := seedExactJoinScope(t, store, ctx, source, "b", "b/"+uuid.NewString())
+				mutations := &nativePipelineLifecycleMutationObservationForTest{}
+				pc := nativeWorkflowJoinSourceCoordinatorForTest(t, fixture, source, schedules, mutations)
+				store := pc.workflowStore
+				firstScope := seedExactJoinScope(t, fixture, ctx, source, "a", "a/"+uuid.NewString())
+				secondScope := seedExactJoinScope(t, fixture, ctx, source, "b", "b/"+uuid.NewString())
 				for _, scope := range []exactJoinScope{firstScope, secondScope} {
 					if err := applyTestInitialEntryEffect(ctx, pc, scope.route, scope.entityID); err != nil {
 						t.Fatalf("arm sibling flow join %s: %v", scope.declarationFlowID, err)
 					}
 				}
-				upserts, _ := committedWorkflowSchedulesForTest(t, store)
+				upserts, _ := mutations.schedules()
 				if len(upserts) != 2 || upserts[0].Command.TaskID == upserts[1].Command.TaskID {
 					t.Fatalf("sibling flow join schedules = %#v, want two exact declarations", upserts)
 				}
 				if firstActivation, secondActivation := exactJoinActivationForScope(t, pc, store, ctx, firstScope), exactJoinActivationForScope(t, pc, store, ctx, secondScope); firstActivation.Completed() != 0 || secondActivation.Completed() != 0 {
 					t.Fatalf("armed sibling flow activations = first:%#v second:%#v", firstActivation, secondActivation)
 				}
-				if err := deliverExactJoinMember(t, pc, store, ctx, source, firstScope, "a"); err != nil {
+				if err := deliverExactJoinMember(t, fixture, mutations, pc, ctx, source, firstScope, "a"); err != nil {
 					t.Fatal(err)
 				}
 				if firstActivation, secondActivation := exactJoinActivationForScope(t, pc, store, ctx, firstScope), exactJoinActivationForScope(t, pc, store, ctx, secondScope); firstActivation.Completed() != 1 || secondActivation.Completed() != 0 {
 					t.Fatalf("first sibling flow arrival crossed declarations: first:%#v second:%#v", firstActivation, secondActivation)
 				}
-				pc = newCoordinator()
-				if err := deliverExactJoinMember(t, pc, store, ctx, source, secondScope, "a"); err != nil {
+				fixture = fixture.ReopenExecution()
+				ctx = runtimecorrelation.WithRunID(fixture.Context, runtimecorrelation.RunIDFromContext(ctx))
+				pc = nativeWorkflowJoinSourceCoordinatorForTest(t, fixture, source, schedules, mutations)
+				store = pc.workflowStore
+				if err := deliverExactJoinMember(t, fixture, mutations, pc, ctx, source, secondScope, "a"); err != nil {
 					t.Fatal(err)
 				}
 				if firstActivation, secondActivation := exactJoinActivationForScope(t, pc, store, ctx, firstScope), exactJoinActivationForScope(t, pc, store, ctx, secondScope); firstActivation.Completed() != 1 || secondActivation.Completed() != 1 {
@@ -668,7 +479,7 @@ func TestSiblingFlowJoinDeclarationsStayIndependentAcrossRestartOnBothStores(t *
 	}
 }
 
-func TestRootAndFlowWorkflowJoinStageExitCancelsExactScheduleOnBothStores(t *testing.T) {
+func VerifyNativeRootAndFlowWorkflowJoinStageExitCancelsExactScheduleOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		for _, flowID := range []string{"", "orders"} {
 			name := "root"
@@ -676,7 +487,7 @@ func TestRootAndFlowWorkflowJoinStageExitCancelsExactScheduleOnBothStores(t *tes
 				name = "flow"
 			}
 			t.Run(storeCase.name+"/"+name, func(t *testing.T) {
-				h := newExactWorkflowJoinHarness(t, storeCase, flowID, "awaiting", []any{"a", "b"})
+				h := newNativeExactWorkflowJoinHarness(t, storeCase.name, flowID, "awaiting", []any{"a", "b"}, nil, open)
 				schedule := h.armInitial()
 				h.transition("dispatching", "manual.abort")
 				activation := h.activation()
@@ -684,7 +495,7 @@ func TestRootAndFlowWorkflowJoinStageExitCancelsExactScheduleOnBothStores(t *tes
 					!activation.TimerCancelled || activation.FlowPath() != pipelineDeclarationFlowPath(flowID) {
 					t.Fatalf("stage-exit activation = %#v", activation)
 				}
-				_, cancellations := committedWorkflowSchedulesForTest(t, h.store)
+				_, cancellations := h.mutations.schedules()
 				if len(cancellations) != 1 || cancellations[0].Command.ScheduleKey != schedule.Command.ScheduleKey {
 					t.Fatalf("stage-exit cancellations = %#v, want %q", cancellations, schedule.Command.ScheduleKey)
 				}
@@ -699,7 +510,7 @@ func TestRootAndFlowWorkflowJoinStageExitCancelsExactScheduleOnBothStores(t *tes
 				if !exactJoinSemanticStateEqual(beforeLate, afterLate) {
 					t.Fatalf("late cancelled occurrence mutated workflow\nbefore=%#v\nafter=%#v", beforeLate, afterLate)
 				}
-				_, afterCancellations := committedWorkflowSchedulesForTest(t, h.store)
+				_, afterCancellations := h.mutations.schedules()
 				if len(afterCancellations) != 1 {
 					t.Fatalf("late occurrence emitted extra cancellations: %#v", afterCancellations)
 				}
@@ -708,7 +519,7 @@ func TestRootAndFlowWorkflowJoinStageExitCancelsExactScheduleOnBothStores(t *tes
 	}
 }
 
-func TestRootAndFlowWorkflowJoinImmediateCompletionFiresExactHandleAfterRestartOnBothStores(t *testing.T) {
+func VerifyNativeRootAndFlowWorkflowJoinImmediateCompletionFiresExactHandleAfterRestartOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		for _, flowID := range []string{"", "orders"} {
 			name := "root"
@@ -716,7 +527,7 @@ func TestRootAndFlowWorkflowJoinImmediateCompletionFiresExactHandleAfterRestartO
 				name = "flow"
 			}
 			t.Run(storeCase.name+"/"+name, func(t *testing.T) {
-				h := newExactWorkflowJoinHarness(t, storeCase, flowID, "awaiting", nil)
+				h := newNativeExactWorkflowJoinHarness(t, storeCase.name, flowID, "awaiting", nil, nil, open)
 				schedule := h.armInitial()
 				if schedule.Command.EventType != joinCompleteEvent {
 					t.Fatalf("immediate schedule = %#v", schedule)
@@ -748,7 +559,7 @@ func TestRootAndFlowWorkflowJoinImmediateCompletionFiresExactHandleAfterRestartO
 				if afterDuplicate.CurrentState != "ready" {
 					t.Fatalf("immediate completion state = %q", afterDuplicate.CurrentState)
 				}
-				_, cancellations := committedWorkflowSchedulesForTest(t, h.store)
+				_, cancellations := h.mutations.schedules()
 				if len(cancellations) != 1 || cancellations[0].Command.ScheduleKey != schedule.Command.ScheduleKey {
 					t.Fatalf("immediate completion cancellations = %#v", cancellations)
 				}
@@ -757,7 +568,7 @@ func TestRootAndFlowWorkflowJoinImmediateCompletionFiresExactHandleAfterRestartO
 	}
 }
 
-func TestRootAndFlowWorkflowJoinTimeoutFiresExactHandleAfterRestartOnBothStores(t *testing.T) {
+func VerifyNativeRootAndFlowWorkflowJoinTimeoutFiresExactHandleAfterRestartOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		for _, flowID := range []string{"", "orders"} {
 			name := "root"
@@ -765,7 +576,7 @@ func TestRootAndFlowWorkflowJoinTimeoutFiresExactHandleAfterRestartOnBothStores(
 				name = "flow"
 			}
 			t.Run(storeCase.name+"/"+name, func(t *testing.T) {
-				h := newExactWorkflowJoinHarness(t, storeCase, flowID, "awaiting", []any{"a", "b"})
+				h := newNativeExactWorkflowJoinHarness(t, storeCase.name, flowID, "awaiting", []any{"a", "b"}, nil, open)
 				schedule := h.armInitial()
 				if schedule.Command.EventType != joinTimeoutEvent {
 					t.Fatalf("timeout schedule = %#v", schedule)
@@ -792,7 +603,7 @@ func TestRootAndFlowWorkflowJoinTimeoutFiresExactHandleAfterRestartOnBothStores(
 				if afterDuplicate.CurrentState != "attention" {
 					t.Fatalf("timeout state = %q", afterDuplicate.CurrentState)
 				}
-				_, cancellations := committedWorkflowSchedulesForTest(t, h.store)
+				_, cancellations := h.mutations.schedules()
 				if len(cancellations) != 1 || cancellations[0].Command.ScheduleKey != schedule.Command.ScheduleKey {
 					t.Fatalf("timeout cancellations = %#v", cancellations)
 				}
@@ -801,37 +612,19 @@ func TestRootAndFlowWorkflowJoinTimeoutFiresExactHandleAfterRestartOnBothStores(
 	}
 }
 
-func TestRootAndFlowWorkflowJoinLoopSupersessionCancelsExactGenerationOnBothStores(t *testing.T) {
-	runRootAndFlowWorkflowJoinLoopSupersession(t, nil)
+func VerifyNativeRootAndFlowWorkflowJoinLoopSupersessionCancelsExactGenerationOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	runRootAndFlowWorkflowJoinLoopSupersession(t, open, nil)
 }
 
 // This uses real arm, repeat, cancellation and persistence owners before
 // folding their mutation records, rather than constructing retained join JSON.
-func TestWorkflowJoinRetainedGenerationMutationRoundTripBothStores(t *testing.T) {
-	runRootAndFlowWorkflowJoinLoopSupersession(t, func(t *testing.T, h *exactWorkflowJoinHarness) {
-		rows, err := h.store.testDB().QueryContext(h.ctx, `SELECT path,new_value FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND domain='accumulator' ORDER BY created_at,mutation_id`, runtimecorrelation.RunIDFromContext(h.ctx), h.entityID)
+func VerifyNativeWorkflowJoinRetainedGenerationMutationRoundTripBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	runRootAndFlowWorkflowJoinLoopSupersession(t, open, func(t *testing.T, h *nativeExactWorkflowJoinHarness) {
+		records, err := h.fixture.AccumulatorHistory(h.ctx, runtimecorrelation.RunIDFromContext(h.ctx), h.entityID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer rows.Close()
-		var records []mutationlog.ProjectionMutation
-		for rows.Next() {
-			var path string
-			var raw []byte
-			if err := rows.Scan(&path, &raw); err != nil {
-				t.Fatal(err)
-			}
-			var value any
-			if len(raw) != 0 {
-				if err := json.Unmarshal(raw, &value); err != nil {
-					t.Fatal(err)
-				}
-			}
-			records = append(records, mutationlog.ProjectionMutation{Domain: mutationlog.DomainAccumulator, Path: path, NewValue: value})
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
-		}
+
 		if len(records) == 0 {
 			t.Fatal("ordinary join lifecycle wrote no accumulator history")
 		}
@@ -864,7 +657,7 @@ func TestWorkflowJoinRetainedGenerationMutationRoundTripBothStores(t *testing.T)
 	})
 }
 
-func runRootAndFlowWorkflowJoinLoopSupersession(t *testing.T, verify func(*testing.T, *exactWorkflowJoinHarness)) {
+func runRootAndFlowWorkflowJoinLoopSupersession(t *testing.T, open pipelineDeliveryNativeOpenerForTest, verify func(*testing.T, *nativeExactWorkflowJoinHarness)) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		for _, flowID := range []string{"", "orders"} {
 			name := "root"
@@ -872,33 +665,13 @@ func runRootAndFlowWorkflowJoinLoopSupersession(t *testing.T, verify func(*testi
 				name = "flow"
 			}
 			t.Run(storeCase.name+"/"+name, func(t *testing.T) {
-				h := newExactWorkflowJoinHarness(t, storeCase, flowID, "awaiting", []any{"a", "b"})
-				h.bundle = workflowJoinLifecycleBundleWithOptions(t, false, "repeat")
+				bundle := workflowJoinLifecycleBundleWithOptions(t, false, "repeat")
+				h := newNativeExactWorkflowJoinHarness(t, storeCase.name, flowID, "dispatching", []any{"a", "b"}, bundle, open)
 				declarationFlowID := pipelineDeclarationFlowPath(flowID)
-				h.source.Source = workflowJoinLifecycleRootAndFlowSource(h.bundle)
-				h.pc = h.newCoordinator()
-				createdAt := time.Now().UTC()
-				loop, err := loopruntime.New(
-					runtimecorrelation.RunIDFromContext(h.ctx), h.entityID, declarationFlowID, "revision", "revision_id",
-					uuid.NewString(), "awaiting", 3, createdAt,
-				)
-				if err != nil {
-					t.Fatal(err)
-				}
-				instance := h.instance()
-				carrier, err := workflowInstanceStateCarrier(instance)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := loopruntime.Store(carrier.StateBuckets, loop); err != nil {
-					t.Fatal(err)
-				}
-				instance.StateBuckets = carrier.PersistedStateBuckets()
-				if err := h.store.upsert(h.ctx, instance); err != nil {
-					t.Fatal(err)
-				}
+				loop := h.startLoop()
+				createdAt := loop.StartedAt
 
-				schedule := h.armInitial()
+				schedule := h.armedSchedule()
 				_, firstRef, ok := timeridentity.ParseJoinHandle(parsePayloadMap(genericSchedulePayloadForTest(t, schedule)))
 				if !ok || !firstRef.Generation().Equal(loop.Generation()) || firstRef.FlowPath() != pipelineDeclarationFlowPath(flowID) {
 					t.Fatalf("first generation handle = %#v ok=%v, loop=%#v", firstRef, ok, loop.Generation())
@@ -908,13 +681,12 @@ func runRootAndFlowWorkflowJoinLoopSupersession(t *testing.T, verify func(*testi
 					if handler.Join == nil || handler.Loop == nil {
 						t.Fatal("retained-member fixture requires the admitted join and loop handler")
 					}
-					arrival := eventtest.RunCreatingRootIngressWithRoutingSource(
+					arrival := eventtest.ExistingRunRootIngressWithRoutingSource(
 						uuid.NewString(), events.EventType("item.completed"), "operator", "",
 						mustJSON(map[string]any{"member_id": "a", "result": map[string]any{"value": "retained"}, "revision_id": loop.RevisionID}), 0,
-						runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), exactJoinRoutingSource(h.flowID, h.path, h.entityID), time.Now().UTC(),
+						runtimecorrelation.RunIDFromContext(h.ctx), h.envelope(), exactJoinRoutingSource(h.flowID, h.path, h.entityID), time.Now().UTC(),
 					)
-					persistExactJoinEvent(t, h.store, h.ctx, arrival)
-					if _, err := executePublishedWorkflowJoinForTest(t, h.pc, h.ctx, pipelineNode(t, h.flowID, "join-node"), handler, workflowTriggerContext{
+					if _, err := executeNativePublishedWorkflowJoinForTest(t, h.fixture, h.mutations, h.pc, h.ctx, pipelineNode(t, h.flowID, "join-node"), handler, workflowTriggerContext{
 						Event: arrival, State: mustCurrentWorkflowState(t, h.pc, h.ctx, h.route, h.entityID), HandlerEventKey: "item.completed",
 					}); err != nil {
 						t.Fatalf("record retained member before repeat: %v", err)
@@ -924,23 +696,22 @@ func runRootAndFlowWorkflowJoinLoopSupersession(t *testing.T, verify func(*testi
 				eventID := uuid.NewString()
 				payload := mustJSON(map[string]any{"revision_id": loop.Generation().RevisionID})
 				eventAt := createdAt.Add(time.Minute)
-				event := eventtest.RunCreatingRootIngressWithRoutingSource(
+				event := eventtest.ExistingRunRootIngressWithRoutingSource(
 					eventID, events.EventType("loop.repeat"), "operator", "", payload, 0,
-					runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), exactJoinRoutingSource(h.flowID, h.path, h.entityID), eventAt,
+					runtimecorrelation.RunIDFromContext(h.ctx), h.envelope(), exactJoinRoutingSource(h.flowID, h.path, h.entityID), eventAt,
 				)
-				persistExactJoinEvent(t, h.store, h.ctx, event)
 				repeat := runtimecontracts.SystemNodeEventHandler{
 					Loop: &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "awaiting"}, AdvancesTo: "awaiting",
 				}
-				result, err := executePublishedWorkflowJoinForTest(t, h.pc, h.ctx, pipelineNode(t, flowID, "observer"), repeat, workflowTriggerContext{
+				result, err := executeNativePublishedWorkflowJoinForTest(t, h.fixture, h.mutations, h.pc, h.ctx, pipelineNode(t, flowID, "observer"), repeat, workflowTriggerContext{
 					Event: event, State: mustCurrentWorkflowState(t, h.pc, h.ctx, h.route, h.entityID),
 				})
 				if err != nil || !result.Handled {
 					t.Fatalf("repeat loop = handled:%v err:%v", result.Handled, err)
 				}
 
-				instance = h.instance()
-				carrier, err = workflowInstanceStateCarrier(instance)
+				instance := h.instance()
+				carrier, err := workflowInstanceStateCarrier(instance)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -957,7 +728,7 @@ func runRootAndFlowWorkflowJoinLoopSupersession(t *testing.T, verify func(*testi
 					!firstActivation.JoinRef().Equal(firstRef) {
 					t.Fatalf("superseded join = found:%v activation:%#v err:%v", found, firstActivation, err)
 				}
-				_, cancellations := committedWorkflowSchedulesForTest(t, h.store)
+				_, cancellations := h.mutations.schedules()
 				if len(cancellations) != 1 || cancellations[0].Command.ScheduleKey != schedule.Command.ScheduleKey {
 					t.Fatalf("superseded cancellations = %#v, want %q", cancellations, schedule.Command.ScheduleKey)
 				}
@@ -981,29 +752,30 @@ func runRootAndFlowWorkflowJoinLoopSupersession(t *testing.T, verify func(*testi
 	}
 }
 
-func TestNestedFanOutDiamondJoinsRetainIndependentDeclarationHandles(t *testing.T) {
+func VerifyNativeNestedFanOutDiamondJoinsRetainIndependentDeclarationHandlesForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		t.Run(storeCase.name, func(t *testing.T) {
-			store, ctx := storeCase.open(t)
 			bundle := workflowJoinLifecycleBundle(t)
 			source := exactRootAndFlowJoinSource(bundle)
 			schedules := &recordingGenericScheduleWakeupOwner{}
-			newCoordinator := func() *PipelineCoordinator {
-				return newWorkflowJoinPipelineCoordinator(t, &recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-					Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), GenericSchedules: schedules,
-				})
+			fixture := open(t, storeCase.name, source)
+			ctx := runtimecorrelation.WithRunID(fixture.Context, uuid.NewString())
+			if err := fixture.RequireRun(ctx, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
+				t.Fatal(err)
 			}
-			pc := newCoordinator()
+			mutations := &nativePipelineLifecycleMutationObservationForTest{}
+			pc := nativeWorkflowJoinSourceCoordinatorForTest(t, fixture, source, schedules, mutations)
+			store := pc.workflowStore
 			runID := runtimecorrelation.RunIDFromContext(ctx)
-			root := seedExactJoinScope(t, store, ctx, source, "", runID)
-			left := seedExactJoinScope(t, store, ctx, source, "orders", "orders/"+uuid.NewString())
-			right := seedExactJoinScope(t, store, ctx, source, "orders", "orders/"+uuid.NewString())
+			root := seedExactJoinScope(t, fixture, ctx, source, "", runID)
+			left := seedExactJoinScope(t, fixture, ctx, source, "orders", "orders/"+uuid.NewString())
+			right := seedExactJoinScope(t, fixture, ctx, source, "orders", "orders/"+uuid.NewString())
 			for _, scope := range []exactJoinScope{root, left, right} {
 				if err := applyTestInitialEntryEffect(ctx, pc, scope.route, scope.entityID); err != nil {
 					t.Fatalf("arm %s diamond join: %v", scope.path, err)
 				}
 			}
-			upserts, _ := committedWorkflowSchedulesForTest(t, store)
+			upserts, _ := mutations.schedules()
 			if len(upserts) != 3 {
 				t.Fatalf("diamond schedules = %#v", upserts)
 			}
@@ -1013,10 +785,13 @@ func TestNestedFanOutDiamondJoinsRetainIndependentDeclarationHandles(t *testing.
 				t.Fatalf("concrete child schedules lost declaration/owner distinction: left=%#v right=%#v", upserts[1].Command, upserts[2].Command)
 			}
 
-			pc = newCoordinator()
+			fixture = fixture.ReopenExecution()
+			ctx = runtimecorrelation.WithRunID(fixture.Context, runtimecorrelation.RunIDFromContext(ctx))
+			pc = nativeWorkflowJoinSourceCoordinatorForTest(t, fixture, source, schedules, mutations)
+			store = pc.workflowStore
 			for _, child := range []exactJoinScope{left, right} {
 				for _, member := range []string{"a", "b"} {
-					if err := deliverExactJoinMember(t, pc, store, ctx, source, child, member); err != nil {
+					if err := deliverExactJoinMember(t, fixture, mutations, pc, ctx, source, child, member); err != nil {
 						t.Fatalf("complete child %s member %s: %v", child.path, member, err)
 					}
 				}
@@ -1029,7 +804,7 @@ func TestNestedFanOutDiamondJoinsRetainIndependentDeclarationHandles(t *testing.
 				t.Fatalf("child completion mutated root activation: %#v", rootActivation)
 			}
 			for _, member := range []string{"a", "b"} {
-				if err := deliverExactJoinMember(t, pc, store, ctx, source, root, member); err != nil {
+				if err := deliverExactJoinMember(t, fixture, mutations, pc, ctx, source, root, member); err != nil {
 					t.Fatalf("complete root diamond member %s: %v", member, err)
 				}
 			}
@@ -1044,7 +819,7 @@ func TestNestedFanOutDiamondJoinsRetainIndependentDeclarationHandles(t *testing.
 			}
 			hostile := root
 			hostile.executionFlowID = "returns"
-			if err := deliverExactJoinMember(t, pc, store, ctx, source, hostile, "a"); err == nil {
+			if err := deliverExactJoinMember(t, fixture, mutations, pc, ctx, source, hostile, "a"); err == nil {
 				t.Fatal("unrelated same-leaf flow scope selected the root declaration")
 			}
 			for index, scope := range []exactJoinScope{root, left, right} {
@@ -1053,7 +828,7 @@ func TestNestedFanOutDiamondJoinsRetainIndependentDeclarationHandles(t *testing.
 					t.Fatalf("hostile same-leaf event mutated %s", scope.path)
 				}
 			}
-			_, cancellations := committedWorkflowSchedulesForTest(t, store)
+			_, cancellations := mutations.schedules()
 			if len(cancellations) != 6 {
 				t.Fatalf("diamond cancellations=%d, want both exact obligations for all three owners", len(cancellations))
 			}
@@ -1070,44 +845,23 @@ func TestNestedFanOutDiamondJoinsRetainIndependentDeclarationHandles(t *testing.
 	}
 }
 
-func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
+func VerifyNativeReentrantJoinCompletionDoesNotCancelNextGenerationForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		t.Run(storeCase.name, func(t *testing.T) {
-			h := newExactWorkflowJoinHarness(t, storeCase, "orders", "awaiting", []any{"a", "b"})
-			h.bundle = workflowJoinLifecycleBundleWithOptions(t, false, "reentrant")
-			h.source.Source = workflowJoinLifecycleRootAndFlowSource(h.bundle)
-			h.pc = h.newCoordinator()
-			createdAt := time.Now().UTC()
-			loop, err := loopruntime.New(
-				runtimecorrelation.RunIDFromContext(h.ctx), h.entityID, "orders", "revision", "revision_id",
-				uuid.NewString(), "awaiting", 3, createdAt,
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
-			instance := h.instance()
-			carrier, err := workflowInstanceStateCarrier(instance)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := loopruntime.Store(carrier.StateBuckets, loop); err != nil {
-				t.Fatal(err)
-			}
-			instance.StateBuckets = carrier.PersistedStateBuckets()
-			if err := h.store.upsert(h.ctx, instance); err != nil {
-				t.Fatal(err)
-			}
+			bundle := nativeWorkflowJoinLoopBundleForTest(t, "reentrant")
+			h := newNativeExactWorkflowJoinHarness(t, storeCase.name, "orders", "dispatching", []any{"a", "b"}, bundle, open)
+			loop := h.startLoop()
+			createdAt := loop.StartedAt
 
-			firstSchedule := h.armInitial()
+			firstSchedule := h.armedSchedule()
 			handler := h.source.ExecutableNodeEventHandlers(mustPipelineNode(h.flowID, "join-node"))["item.completed"]
 			for _, member := range []string{"a", "b"} {
-				event := eventtest.RunCreatingRootIngressWithRoutingSource(
+				event := eventtest.ExistingRunRootIngressWithRoutingSource(
 					uuid.NewString(), events.EventType("item.completed"), "operator", "",
 					mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": member}, "revision_id": loop.Generation().RevisionID}), 0,
-					runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), exactJoinRoutingSource(h.flowID, h.path, h.entityID), time.Now().UTC(),
+					runtimecorrelation.RunIDFromContext(h.ctx), h.envelope(), exactJoinRoutingSource(h.flowID, h.path, h.entityID), time.Now().UTC(),
 				)
-				persistExactJoinEvent(t, h.store, h.ctx, event)
-				if _, err := executePublishedWorkflowJoinForTest(t, h.pc, h.ctx, pipelineNode(t, h.flowID, "join-node"), handler, workflowTriggerContext{
+				if _, err := executeNativePublishedWorkflowJoinForTest(t, h.fixture, h.mutations, h.pc, h.ctx, pipelineNode(t, h.flowID, "join-node"), handler, workflowTriggerContext{
 					Event: event, State: mustCurrentWorkflowState(t, h.pc, h.ctx, h.route, h.entityID), HandlerEventKey: "item.completed",
 				}); err != nil {
 					t.Fatalf("complete first generation member %s: %v", member, err)
@@ -1120,23 +874,22 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 			repeatEventID := uuid.NewString()
 			repeatPayload := mustJSON(map[string]any{"revision_id": loop.Generation().RevisionID})
 			repeatAt := createdAt.Add(time.Minute)
-			repeatEvent := eventtest.RunCreatingRootIngressWithRoutingSource(
+			repeatEvent := eventtest.ExistingRunRootIngressWithRoutingSource(
 				repeatEventID, events.EventType("loop.repeat"), "operator", "", repeatPayload, 0,
-				runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), exactJoinRoutingSource(h.flowID, h.path, h.entityID), repeatAt,
+				runtimecorrelation.RunIDFromContext(h.ctx), h.envelope(), exactJoinRoutingSource(h.flowID, h.path, h.entityID), repeatAt,
 			)
-			persistExactJoinEvent(t, h.store, h.ctx, repeatEvent)
 			repeat := runtimecontracts.SystemNodeEventHandler{
 				Loop: &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "ready"}, AdvancesTo: "awaiting",
 			}
-			result, err := executePublishedWorkflowJoinForTest(t, h.pc, h.ctx, pipelineNode(t, h.flowID, "observer"), repeat, workflowTriggerContext{
+			result, err := executeNativePublishedWorkflowJoinForTest(t, h.fixture, h.mutations, h.pc, h.ctx, pipelineNode(t, h.flowID, "observer"), repeat, workflowTriggerContext{
 				Event: repeatEvent, State: mustCurrentWorkflowState(t, h.pc, h.ctx, h.route, h.entityID),
 			})
 			if err != nil || !result.Handled {
 				t.Fatalf("re-enter next generation = handled:%v err:%v", result.Handled, err)
 			}
 
-			instance = h.instance()
-			carrier, err = workflowInstanceStateCarrier(instance)
+			instance := h.instance()
+			carrier, err := workflowInstanceStateCarrier(instance)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1172,7 +925,8 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 			if !exactJoinSemanticStateEqual(beforeStale, afterStale) {
 				t.Fatal("stale first-generation occurrence mutated the live next generation")
 			}
-			h.transition("dispatching", "manual.abort")
+			abort := nativeWorkflowJoinEventForTest(h.ctx, "orders", h.path, h.entityID, "manual.abort", mustJSON(map[string]any{"revision_id": nextLoop.RevisionID}), time.Now().UTC())
+			dispatchNativeWorkflowJoinEventForTest(t, h.fixture, h.pc, h.ctx, abort, "dispatcher")
 			instance = h.instance()
 			carrier, err = workflowInstanceStateCarrier(instance)
 			if err != nil {
@@ -1186,7 +940,7 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 	}
 }
 
-func TestConcurrentRootAndFlowSameLeafJoinsRemainDistinctAcrossRestart(t *testing.T) {
+func VerifyNativeConcurrentRootAndFlowSameLeafJoinsRemainDistinctAcrossRestartForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		for _, fireRoot := range []bool{false, true} {
 			name := "fire-flow-cancel-root"
@@ -1194,25 +948,26 @@ func TestConcurrentRootAndFlowSameLeafJoinsRemainDistinctAcrossRestart(t *testin
 				name = "fire-root-cancel-flow"
 			}
 			t.Run(storeCase.name+"/"+name, func(t *testing.T) {
-				store, ctx := storeCase.open(t)
 				bundle := workflowJoinLifecycleBundle(t)
 				source := exactRootAndFlowJoinSource(bundle)
 				schedules := &recordingGenericScheduleWakeupOwner{}
-				newCoordinator := func() *PipelineCoordinator {
-					return newWorkflowJoinPipelineCoordinator(t, &recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-						Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), GenericSchedules: schedules,
-					})
+				fixture := open(t, storeCase.name, source)
+				ctx := runtimecorrelation.WithRunID(fixture.Context, uuid.NewString())
+				if err := fixture.RequireRun(ctx, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
+					t.Fatal(err)
 				}
-				pc := newCoordinator()
+				mutations := &nativePipelineLifecycleMutationObservationForTest{}
+				pc := nativeWorkflowJoinSourceCoordinatorForTest(t, fixture, source, schedules, mutations)
+				store := pc.workflowStore
 				runID := runtimecorrelation.RunIDFromContext(ctx)
-				root := seedExactJoinScope(t, store, ctx, source, "", runID)
-				flow := seedExactJoinScope(t, store, ctx, source, "orders", "orders/"+uuid.NewString())
+				root := seedExactJoinScope(t, fixture, ctx, source, "", runID)
+				flow := seedExactJoinScope(t, fixture, ctx, source, "orders", "orders/"+uuid.NewString())
 				for _, scope := range []exactJoinScope{root, flow} {
 					if err := applyTestInitialEntryEffect(ctx, pc, scope.route, scope.entityID); err != nil {
 						t.Fatalf("arm %s: %v", scope.path, err)
 					}
 				}
-				upserts, _ := committedWorkflowSchedulesForTest(t, store)
+				upserts, _ := mutations.schedules()
 				if len(upserts) != 2 {
 					t.Fatalf("same-leaf schedules = %#v", upserts)
 				}
@@ -1227,29 +982,26 @@ func TestConcurrentRootAndFlowSameLeafJoinsRemainDistinctAcrossRestart(t *testin
 					t.Fatalf("same-leaf handles = root:%#v/%v flow:%#v/%v", rootRef, rootOK, flowRef, flowOK)
 				}
 
-				pc = newCoordinator()
+				fixture = fixture.ReopenExecution()
+				ctx = runtimecorrelation.WithRunID(fixture.Context, runtimecorrelation.RunIDFromContext(ctx))
+				pc = nativeWorkflowJoinSourceCoordinatorForTest(t, fixture, source, schedules, mutations)
+				store = pc.workflowStore
 				firedScope, cancelledScope := flow, root
 				firedSchedule := flowSchedule
 				if fireRoot {
 					firedScope, cancelledScope = root, flow
 					firedSchedule = rootSchedule
 				}
-				fireEnvelope := events.EnvelopeForEntityID(events.EventEnvelope{}, firedScope.entityID)
-				if firedScope.declarationFlowID != "" {
-					fireEnvelope = workflowJoinTestEnvelope(firedScope.path, firedScope.entityID)
-				}
+				fireEnvelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: firedScope.executionFlowID, FlowInstance: firedScope.path, EntityID: firedScope.entityID})
 				fireEvent := workflowJoinScheduleEventForTest(t, uuid.NewString(), firedSchedule, runID, fireEnvelope, time.Now().UTC())
-				persistExactJoinEvent(t, store, ctx, fireEvent)
-				result, err := executeResolvedJoinForTest(t, pc, ctx, fireEvent, workflowTriggerContext{
+				result, err := executeNativeResolvedJoinForTest(t, fixture, pc, ctx, fireEvent, workflowTriggerContext{
 					Event: fireEvent, State: mustCurrentWorkflowState(t, pc, ctx, firedScope.route, firedScope.entityID),
 				})
 				if err != nil || !result.Handled {
 					t.Fatalf("fire exact same-leaf join = handled:%v err:%v", result.Handled, err)
 				}
-				transitionCtx := testPersistedWorkflowStateTransitionContext(t, store, ctx, cancelledScope.route, cancelledScope.entityID, "manual.abort")
-				if err := persistAdmittedJoinTransitionForTest(t, pc, transitionCtx, cancelledScope.route, cancelledScope.entityID, "dispatching", "manual.abort"); err != nil {
-					t.Fatalf("cancel other same-leaf join: %v", err)
-				}
+				abort := nativeWorkflowJoinEventForTest(ctx, cancelledScope.declarationFlowID, cancelledScope.path, cancelledScope.entityID, "manual.abort", []byte("{}"), time.Now().UTC())
+				dispatchNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, abort, "dispatcher")
 				fired := exactJoinActivationForScope(t, pc, store, ctx, firedScope)
 				cancelled := exactJoinActivationForScope(t, pc, store, ctx, cancelledScope)
 				if fired.CloseReason != joinruntime.CloseReasonDeadline || fired.FlowPath() != pipelineDeclarationFlowPath(firedScope.declarationFlowID) || !fired.OutcomeFired {

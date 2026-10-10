@@ -322,7 +322,7 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 				}
 				if deadlineDispatch {
 					if !errors.Is(fireCtx.Err(), context.DeadlineExceeded) {
-						t.Fatalf("dispatch deadline did not expire at the transition cut: %v", fireCtx.Err())
+						t.Fatalf("dispatch deadline did not expire at the transition cut: outer=%v dispatch=%v intercept=%v entry=%v exit=%v mutation_calls=%d", fireCtx.Err(), err, capture.interceptErr, capture.entryErr, capture.exitErr, owner.calls)
 					}
 					if owner.calls == 0 {
 						// Expiration may precede mutation, but zero calls alone is
@@ -376,7 +376,7 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 					if err != nil || !found || before.CurrentState != "waiting" || len(before.TransitionHistory) != 0 || owner.acknowledged != 0 {
 						t.Fatalf("rejected transition leaked: %+v found=%t error=%v", before, found, err)
 					}
-					if got := gateRecoveryPipelineReceiptCount(t, selected, eventID); got != 0 {
+					if got := gateRecoveryPipelineReceiptCount(t, selected.events, eventID); got != 0 {
 						t.Fatalf("rejected transition has %d terminal receipts", got)
 					}
 					retry, ok := capture.outcome.RetryRelease()
@@ -454,7 +454,7 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 					t.Fatalf("settled occurrence replayed: %+v error=%v", result, err)
 				}
 				persisted, found, err := activations.LoadWorkflowTimerActivation(ctx, fired.Ref.ActivationID)
-				if err != nil || !found || !reflect.DeepEqual(persisted, fired) || workflowTimerEventCount(t, selected, runID, runtimecontracts.WorkflowStageTimerInternalEvent) != 1 || gateRecoveryPipelineReceiptCount(t, selected, eventID) != 1 {
+				if err != nil || !found || !reflect.DeepEqual(persisted, fired) || workflowTimerEventCount(t, selected, runID, runtimecontracts.WorkflowStageTimerInternalEvent) != 1 || gateRecoveryPipelineReceiptCount(t, selected.events, eventID) != 1 {
 					t.Fatalf("recovery changed exact occurrence/history: before=%+v after=%+v error=%v", fired, persisted, err)
 				}
 			})

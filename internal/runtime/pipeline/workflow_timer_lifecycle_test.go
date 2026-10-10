@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -24,570 +24,478 @@ func (s *recordingGenericScheduleWakeupOwner) ReconcileWakeupWithRecovery(_ cont
 	return false, nil
 }
 
-func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
-	const entityID = testPipelineRunID
-	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-absolute-path")
-	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
-	if err != nil {
-		t.Fatalf("load bundle: %v", err)
-	}
-	module, err := newPipelineFixtureWorkflowModule(bundle)
-	if err != nil {
-		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
-	}
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+func VerifyNativeExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandlerForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+			fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-absolute-path")
+			platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+			if err != nil {
+				t.Fatalf("load bundle: %v", err)
+			}
+			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+			entityID := runID
+			if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID:      runID,
+				StorageRef:      runID,
+				EntityID:        entityID,
+				WorkflowName:    ".",
+				WorkflowVersion: bundle.WorkflowVersion(),
+				CurrentState:    "waiting",
+				Fields:          map[string]any{},
+				EntityType:      "test_entity",
+			})); err != nil {
+				t.Fatalf("seed workflow instance: %v", err)
+			}
 
-	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
-		Module: module,
-	})
-	if pc == nil {
-		t.Fatal("expected coordinator")
-	}
-	ctx := testPipelineCoordinatorRunContext(t, pc)
-	runID := runtimecorrelation.RunIDFromContext(ctx)
-	if err := pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      runID,
-		StorageRef:      runID,
-		EntityID:        entityID,
-		WorkflowName:    bundle.WorkflowName(),
-		WorkflowVersion: bundle.WorkflowVersion(),
-		CurrentState:    "waiting",
-		Fields:          map[string]any{},
-		EntityType:      "test_entity",
-	})); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
+			envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), runID)
+			envelope = events.EnvelopeForSourceRoute(envelope, events.RouteIdentity{
+				FlowID: "child", FlowInstance: "child", EntityID: entityID,
+			})
+			envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{
+				FlowID: ".", FlowInstance: runID, EntityID: entityID,
+			})
+			evt := eventtest.ExistingRunRootIngressWithRoutingSource(
+				uuid.NewString(),
+				events.EventType("child/task.done"),
+				"cataloge2e",
+				"",
+				[]byte(`{"entity_id":"`+entityID+`"}`),
+				0,
+				runID,
+				envelope,
+				eventtest.StaticFlowRoutingSource("child", "child", entityID),
+				time.Now().UTC(),
+			)
 
-	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), runID)
-	envelope = events.EnvelopeForSourceRoute(envelope, events.RouteIdentity{
-		FlowID: "child", FlowInstance: "child", EntityID: entityID,
-	})
-	envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{
-		FlowID: bundle.WorkflowName(), FlowInstance: runID, EntityID: entityID,
-	})
-	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
-		uuid.NewString(),
-		events.EventType("child/task.done"),
-		"cataloge2e",
-		"",
-		[]byte(`{"entity_id":"`+entityID+`"}`),
-		0,
-		testPipelineRunID,
-		"",
-		envelope,
-		eventtest.StaticFlowRoutingSource("child", "child", entityID),
-		time.Now().UTC(),
-	)
+			route := workflowNodeStampedConnectRouteForHandlerEvent(t, pc.SemanticSource(), "task.done", "listener")
+			route.Target = events.MustExistingEntityTarget(evt.TargetRoute())
+			if err := fixture.PublishNode(ctx, evt, route); err != nil {
+				t.Fatal(err)
+			}
+			deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, route)
 
-	configurePipelineTestDeliveryOwner(t, pc)
-	route := workflowNodeStampedConnectRouteForHandlerEvent(t, pc.SemanticSource(), "task.done", "listener")
-	route.Target = events.MustExistingEntityTarget(evt.TargetRoute())
-	route = seedPipelineNodeDeliveryRouteAuthority(t, db, evt, route)
-	deliveryCtx := withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route)
+			if handled := pc.executeNodeHandlerPlan(deliveryCtx, pipelineNode(t, "", "dispatcher"), evt); handled {
+				t.Fatal("dispatcher should not handle child/task.done")
+			}
+			instance, ok, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
+			if err != nil {
+				t.Fatalf("load workflow instance after wrong node execution: %v", err)
+			}
+			if !ok {
+				t.Fatal("workflow instance missing after wrong node execution")
+			}
+			if got := instance.CurrentState; got != "waiting" {
+				t.Fatalf("state after wrong node execution = %q, want waiting", got)
+			}
 
-	if handled := pc.executeNodeHandlerPlan(deliveryCtx, pipelineNode(t, "", "dispatcher"), evt); handled {
-		t.Fatal("dispatcher should not handle child/task.done")
-	}
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(runID))
-	if err != nil {
-		t.Fatalf("load workflow instance after wrong node execution: %v", err)
-	}
-	if !ok {
-		t.Fatal("workflow instance missing after wrong node execution")
-	}
-	if got := instance.CurrentState; got != "waiting" {
-		t.Fatalf("state after wrong node execution = %q, want waiting", got)
-	}
-
-	if handled, err := pc.executeNodeHandlerPlanResult(deliveryCtx, pipelineNode(t, "", "listener"), evt); err != nil || !handled {
-		t.Fatalf("listener should handle child/task.done: handled=%v err=%v", handled, err)
-	}
-	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(runID))
-	if err != nil {
-		t.Fatalf("load workflow instance after listener execution: %v", err)
-	}
-	if !ok {
-		t.Fatal("workflow instance missing after listener execution")
-	}
-	if got := instance.CurrentState; got != "done" {
-		t.Fatalf("state after listener execution = %q, want done", got)
+			if handled, err := pc.executeNodeHandlerPlanResult(deliveryCtx, pipelineNode(t, "", "listener"), evt); err != nil || !handled {
+				t.Fatalf("listener should handle child/task.done: handled=%v err=%v", handled, err)
+			}
+			instance, ok, err = pc.workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
+			if err != nil {
+				t.Fatalf("load workflow instance after listener execution: %v", err)
+			}
+			if !ok {
+				t.Fatal("workflow instance missing after listener execution")
+			}
+			if got := instance.CurrentState; got != "done" {
+				t.Fatalf("state after listener execution = %q, want done", got)
+			}
+		})
 	}
 }
+func VerifyNativeExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitionsForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+			fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-pin-wiring")
+			platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+			if err != nil {
+				t.Fatalf("load bundle: %v", err)
+			}
+			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+			bus := observeNativePipelineDeliveryBusForTest(t, pc)
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+			entityID := runID
+			if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID:      runID,
+				StorageRef:      runID,
+				EntityID:        entityID,
+				WorkflowName:    ".",
+				WorkflowVersion: bundle.WorkflowVersion(),
+				CurrentState:    "ready",
+				Fields:          map[string]any{},
+				EntityType:      "test_entity",
+			})); err != nil {
+				t.Fatalf("seed workflow instance: %v", err)
+			}
 
-func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *testing.T) {
-	const entityID = testPipelineRunID
-	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-pin-wiring")
-	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
-	if err != nil {
-		t.Fatalf("load bundle: %v", err)
-	}
-	module, err := newPipelineFixtureWorkflowModule(bundle)
-	if err != nil {
-		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
-	}
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+			childEntityID := FlowInstanceEntityID("child")
+			constructNativePipelineScenarioForTest(t, fixture, pc, ctx, "child")
+			triggerEnvelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, childEntityID), "child")
+			triggerEnvelope = events.EnvelopeForTargetRoute(triggerEnvelope, events.RouteIdentity{
+				FlowID: "child", FlowInstance: "child", EntityID: childEntityID,
+			})
+			trigger := eventtest.ExistingRunRootIngress(
+				uuid.NewString(),
+				events.EventType("child/work.requested"),
+				"cataloge2e",
+				"",
+				[]byte(`{"entity_id":"`+entityID+`"}`),
+				0,
+				runID,
+				triggerEnvelope,
+				time.Now().UTC(),
+			)
 
-	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
-		Module: module,
-	})
-	if pc == nil {
-		t.Fatal("expected coordinator")
-	}
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      testPipelineRunID,
-		StorageRef:      testPipelineRunID,
-		EntityID:        entityID,
-		WorkflowName:    bundle.WorkflowName(),
-		WorkflowVersion: bundle.WorkflowVersion(),
-		CurrentState:    "ready",
-		Fields:          map[string]any{},
-		EntityType:      "test_entity",
-	})); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
+			childWorker := pipelineSourceNode(t, pc.SemanticSource(), "child", "child-worker")
+			triggerRoute := events.DeliveryRoute{
+				Recipient: events.MustNodeDeliveryRecipient(childWorker),
+				Target: events.MustExistingEntityTarget(events.RouteIdentity{
+					FlowID: "child", FlowInstance: "child", EntityID: childEntityID,
+				}),
+			}
+			if err := fixture.PublishNode(ctx, trigger, triggerRoute); err != nil {
+				t.Fatal(err)
+			}
 
-	childEntityID := FlowInstanceEntityID("child")
-	seedConstructorUnitInstance(t, pc, testPipelineCoordinatorRunContext(t, pc), "child")
-	triggerEnvelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, childEntityID), "child")
-	triggerEnvelope = events.EnvelopeForTargetRoute(triggerEnvelope, events.RouteIdentity{
-		FlowID: "child", FlowInstance: "child", EntityID: childEntityID,
-	})
-	trigger := eventtest.RunCreatingRootIngress(
-		uuid.NewString(),
-		events.EventType("work.requested"),
-		"cataloge2e",
-		"",
-		[]byte(`{"entity_id":"`+entityID+`"}`),
-		0,
-		testPipelineRunID,
-		"",
-		triggerEnvelope,
-		time.Now().UTC(),
-	)
+			gate := &nativePipelineDeliveryDispatchGateForTest{Bus: pc.bus, EngineMutationPublicationPlanner: bus, entered: make(chan struct{}), release: make(chan struct{}), flowScope: "child"}
+			pc.bus = gate
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(gate.release) }) }
+			done := make(chan struct{})
+			var childHandled bool
+			var childErr error
+			go func() {
+				defer close(done)
+				childHandled, childErr = pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(ctx, triggerRoute), childWorker, trigger)
+			}()
+			t.Cleanup(func() {
+				release()
+				join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				select {
+				case <-done:
+				case <-join.Done():
+					t.Error("native child execution did not join after releasing its dispatch gate")
+				}
+			})
+			cut, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			select {
+			case <-gate.entered:
+			case <-done:
+				t.Fatalf("child stopped before its native dispatch cut: %t/%v", childHandled, childErr)
+			case <-cut.Done():
+				t.Fatal("native child never reached its post-commit dispatch cut")
+			}
+			instance, ok, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
+			if err != nil {
+				t.Fatalf("load workflow instance after child-worker execution: %v", err)
+			}
+			if !ok {
+				t.Fatal("workflow instance missing after child-worker execution")
+			}
+			if got := instance.CurrentState; got != "ready" {
+				t.Fatalf("root state after child-worker execution = %q, want ready", got)
+			}
 
-	configurePipelineTestDeliveryOwner(t, pc)
-	childWorker := pipelineSourceNode(t, pc.SemanticSource(), "child", "child-worker")
-	triggerRoute := seedPipelineNodeDeliveryRouteAuthority(t, db, trigger, events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient(childWorker),
-		Target: events.MustExistingEntityTarget(events.RouteIdentity{
-			FlowID: "child", FlowInstance: "child", EntityID: childEntityID,
-		}),
-	})
+			parentListener := pipelineNode(t, "", "parent-listener")
+			handler, ok := pc.SemanticSource().ExecutableNodeEventHandler(parentListener, "work.completed")
+			if !ok {
+				t.Fatal("parent-listener handler missing for root-local work.completed")
+			}
+			if !handler.Emit.Empty() || !handler.OnSuccess.Empty() {
+				t.Fatalf("parent-listener carries retired dead output: emit=%#v on_success=%#v", handler.Emit, handler.OnSuccess)
+			}
 
-	if handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), triggerRoute), childWorker, trigger); err != nil || !handled {
-		t.Fatalf("child-worker should handle work.requested through the input-pin alias: handled=%v err=%v", handled, err)
-	}
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(testPipelineRunID))
-	if err != nil {
-		t.Fatalf("load workflow instance after child-worker execution: %v", err)
-	}
-	if !ok {
-		t.Fatal("workflow instance missing after child-worker execution")
-	}
-	if got := instance.CurrentState; got != "ready" {
-		t.Fatalf("root state after child-worker execution = %q, want ready", got)
-	}
-
-	listenerCtx := withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), "child")
-	completionEnvelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "child")
-	completionEnvelope = events.EnvelopeForSourceRoute(completionEnvelope, events.RouteIdentity{
-		FlowID: "child", FlowInstance: "child", EntityID: entityID,
-	})
-	completionEnvelope = events.EnvelopeForTargetRoute(completionEnvelope, events.RouteIdentity{
-		FlowID: bundle.WorkflowName(), FlowInstance: testPipelineRunID, EntityID: entityID,
-	})
-	completion := eventtest.RunCreatingRootIngressWithRoutingSource(
-		uuid.NewString(),
-		events.EventType("work.completed"),
-		"cataloge2e",
-		"",
-		[]byte(`{"entity_id":"`+entityID+`"}`),
-		0,
-		testPipelineRunID,
-		"",
-		completionEnvelope,
-		eventtest.StaticFlowRoutingSource("child", "child", entityID),
-		time.Now().UTC(),
-	)
-
-	completionRoute := seedPipelineNodeDeliveryAuthority(t, db, completion, pipelineNode(t, "", "parent-listener"))
-	parentListener := pipelineNode(t, "", "parent-listener")
-	handler, ok := pc.SemanticSource().ExecutableNodeEventHandler(parentListener, "work.completed")
-	if !ok {
-		t.Fatal("parent-listener handler missing for root-local work.completed")
-	}
-	if !handler.Emit.Empty() || !handler.OnSuccess.Empty() {
-		t.Fatalf("parent-listener carries retired dead output: emit=%#v on_success=%#v", handler.Emit, handler.OnSuccess)
-	}
-
-	if handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(listenerCtx, completionRoute), parentListener, completion); err != nil || !handled {
-		t.Fatalf("parent-listener should clear inherited child flow scope and handle root-local work.completed: handled=%t err=%v", handled, err)
-	}
-	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(testPipelineRunID))
-	if err != nil {
-		t.Fatalf("load workflow instance after parent-listener execution: %v", err)
-	}
-	if !ok {
-		t.Fatal("workflow instance missing after parent-listener execution")
-	}
-	if got := instance.CurrentState; got != "done" {
-		t.Fatalf("root state after parent-listener execution = %q, want done", got)
+			release()
+			select {
+			case <-done:
+			case <-cut.Done():
+				t.Fatal("native child/parent dispatch did not join")
+			}
+			if !childHandled || childErr != nil {
+				t.Fatalf("child-worker native execution: %t/%v", childHandled, childErr)
+			}
+			if bus.publishedCount() != 1 {
+				t.Fatalf("child completion publications=%d, want one", bus.publishedCount())
+			}
+			completion := bus.persistedPublishedEvent(t, fixture, ctx, 0)
+			parent, err := fixture.NodeDeliverySnapshot(ctx, runID, completion.ID(), parentListener.Key())
+			if err != nil {
+				t.Fatalf("exact native parent delivery event=%s type=%s: %v", completion.ID(), completion.Type(), err)
+			}
+			if target := parent.Route.Target.Route(); target.FlowInstance != runID || target.EntityID != entityID {
+				t.Fatalf("native parent delivery targeted another instance: %+v", target)
+			}
+			if _, err := fixture.Store.ProveHandoff(ctx, completion.ID(), parent.Route); err != nil {
+				t.Fatalf("child completion lost its exact original parent handoff: %v", err)
+			}
+			instance, ok, err = pc.workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
+			if err != nil {
+				t.Fatalf("load workflow instance after parent-listener execution: %v", err)
+			}
+			if !ok {
+				t.Fatal("workflow instance missing after parent-listener execution")
+			}
+			if got := instance.CurrentState; got != "done" {
+				t.Fatalf("root state after parent-listener execution = %q, want done", got)
+			}
+		})
 	}
 }
+func VerifyNativePipelineIntercept_HandlesChildFlowOutputForRootListenerForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+			fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-pin-wiring")
+			platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+			if err != nil {
+				t.Fatalf("load bundle: %v", err)
+			}
+			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+			entityID := runID
+			if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID:      runID,
+				StorageRef:      runID,
+				EntityID:        entityID,
+				WorkflowName:    ".",
+				WorkflowVersion: bundle.WorkflowVersion(),
+				CurrentState:    "ready",
+				Fields:          map[string]any{},
+				EntityType:      "test_entity",
+			})); err != nil {
+				t.Fatalf("seed workflow instance: %v", err)
+			}
 
-func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
-	const entityID = "11111111-1111-1111-1111-111111111111"
-	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-pin-wiring")
-	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
-	if err != nil {
-		t.Fatalf("load bundle: %v", err)
-	}
-	module, err := newPipelineFixtureWorkflowModule(bundle)
-	if err != nil {
-		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
-	}
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+			completion := eventtest.ExistingRunRootIngress(
+				uuid.NewString(),
+				events.EventType("child/work.completed"),
+				"cataloge2e",
+				"",
+				[]byte(`{"entity_id":"`+entityID+`"}`),
+				0,
+				runID,
+				events.EnvelopeForTargetRoute(
+					events.EventEnvelope{},
+					events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID},
+				),
+				time.Now().UTC(),
+			)
 
-	bus := &recordingPipelineBus{}
-	pc := newPostgresPipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		Module: module,
-	})
-	if pc == nil {
-		t.Fatal("expected coordinator")
-	}
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      testPipelineRunID,
-		StorageRef:      testPipelineRunID,
-		WorkflowName:    bundle.WorkflowName(),
-		WorkflowVersion: bundle.WorkflowVersion(),
-		CurrentState:    "ready",
-		Fields:          map[string]any{},
-		EntityType:      "test_entity",
-	})); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
-
-	completion := eventtest.RunCreatingRootIngress(
-		uuid.NewString(),
-		events.EventType("work.completed"),
-		"cataloge2e",
-		"",
-		[]byte(`{"entity_id":"`+entityID+`"}`),
-		0,
-		testPipelineRunID,
-		"",
-		events.EnvelopeForTargetRoute(
-			events.EventEnvelope{},
-			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: testPipelineRunID, EntityID: entityID},
-		),
-		time.Now().UTC(),
-	)
-
-	configurePipelineTestDeliveryOwner(t, pc)
-	route := seedPipelineNodeDeliveryAuthority(t, db, completion, pipelineNode(t, "", "parent-listener"))
-	passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), completion)
-	if err != nil {
-		t.Fatalf("Intercept: %v", err)
-	}
-	if passThrough {
-		t.Fatal("expected the exact parent-listener delivery to be consumed without event-wide passthrough")
-	}
-	if len(emitted) != 0 {
-		t.Fatalf("emitted = %#v, want no retired dead output", emitted)
+			route := workflowNodeStampedConnectRouteForHandlerEvent(t, pc.SemanticSource(), "work.completed", "parent-listener")
+			route.Target = events.MustExistingEntityTarget(completion.TargetRoute())
+			if err := fixture.PublishNode(ctx, completion, route); err != nil {
+				t.Fatal(err)
+			}
+			passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(ctx, route), completion)
+			if err != nil {
+				t.Fatalf("Intercept: %v", err)
+			}
+			if passThrough {
+				t.Fatal("expected the exact parent-listener delivery to be consumed without event-wide passthrough")
+			}
+			if len(emitted) != 0 {
+				t.Fatalf("emitted = %#v, want no retired dead output", emitted)
+			}
+		})
 	}
 }
+func VerifyNativePipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChildContinuationForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+			fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
+			platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+			if err != nil {
+				t.Fatalf("load bundle: %v", err)
+			}
+			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+			root := constructNativePipelineScenarioForTest(t, fixture, pc, ctx, ".")
+			childInstance := constructNativePipelineScenarioForTest(t, fixture, pc, ctx, "child")
+			rootEntityID := root.EntityID
+			grandchild := constructedScenarioInstanceForTest(t, pc.SemanticSource(), ctx, "child/grandchild")
+			grandchild.CurrentState = "finished"
+			if err := fixture.Construct(ctx, grandchild); err != nil {
+				t.Fatal(err)
+			}
+			grandchildEntityID := grandchild.EntityID
+			completion := eventtest.ExistingRunRootIngress(
+				uuid.NewString(),
+				events.EventType("child/grandchild/micro.done"),
+				"cataloge2e",
+				"",
+				[]byte(`{"entity_id":"`+grandchildEntityID+`"}`),
+				0,
+				runID,
+				events.EnvelopeForTargetRoute(
+					events.EnvelopeForEntityID(events.EventEnvelope{}, grandchildEntityID),
+					events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: rootEntityID},
+				),
+				time.Now().UTC(),
+			)
 
-func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChildContinuation(t *testing.T) {
-	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
-	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
-	if err != nil {
-		t.Fatalf("load bundle: %v", err)
-	}
-	module, err := newPipelineFixtureWorkflowModule(bundle)
-	if err != nil {
-		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
-	}
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(pipelineNode(t, ".", "root-collector")), Target: events.MustExistingEntityTarget(completion.TargetRoute())}
+			if err := fixture.PublishNode(ctx, completion, route); err != nil {
+				t.Fatal(err)
+			}
+			passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(ctx, route), completion)
+			if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
+				t.Fatalf("Intercept error = %v, want stamped connect claim", err)
+			}
+			if passThrough || len(emitted) != 0 {
+				t.Fatalf("failed delivery result = passThrough:%v emitted:%#v, want no output", passThrough, emitted)
+			}
 
-	bus := &recordingPipelineBus{}
-	pc := newPostgresPipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		Module: module,
-	})
-	if pc == nil {
-		t.Fatal("expected coordinator")
-	}
-	const rootEntityID = "11111111-1111-1111-1111-111111111111"
-	childEntityID := FlowInstanceEntityID("child/inst-1")
-	grandchildEntityID := FlowInstanceEntityID("child/grandchild/inst-1")
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      rootEntityID,
-		StorageRef:      bundle.WorkflowName(),
-		WorkflowName:    bundle.WorkflowName(),
-		WorkflowVersion: bundle.WorkflowVersion(),
-		CurrentState:    "idle",
-		Fields:          map[string]any{},
-		EntityType:      "test_entity",
-	})); err != nil {
-		t.Fatalf("seed root instance: %v", err)
-	}
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      childEntityID,
-		StorageRef:      "child/inst-1",
-		WorkflowName:    "child",
-		WorkflowVersion: bundle.WorkflowVersion(),
-		CurrentState:    "waiting",
-		Fields: map[string]any{
-			"entity_id":        childEntityID,
-			"flow_path":        "child/inst-1",
-			"parent_entity_id": rootEntityID,
-		},
-		EntityType: "test_entity",
-	})); err != nil {
-		t.Fatalf("seed child instance: %v", err)
-	}
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      grandchildEntityID,
-		StorageRef:      "child/grandchild/inst-1",
-		WorkflowName:    "grandchild",
-		WorkflowVersion: bundle.WorkflowVersion(),
-		CurrentState:    "finished",
-		Fields: map[string]any{
-			"entity_id":        grandchildEntityID,
-			"flow_path":        "child/grandchild/inst-1",
-			"parent_entity_id": childEntityID,
-		},
-		EntityType: "test_entity",
-	})); err != nil {
-		t.Fatalf("seed grandchild instance: %v", err)
-	}
-
-	completion := eventtest.RunCreatingRootIngress(
-		uuid.NewString(),
-		events.EventType("child/grandchild/micro.done"),
-		"cataloge2e",
-		"",
-		[]byte(`{"entity_id":"`+grandchildEntityID+`"}`),
-		0,
-		testPipelineRunID,
-		"",
-		events.EnvelopeForTargetRoute(
-			events.EnvelopeForEntityID(events.EventEnvelope{}, grandchildEntityID),
-			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: testPipelineRunID, EntityID: rootEntityID},
-		),
-		time.Now().UTC(),
-	)
-
-	configurePipelineTestDeliveryOwner(t, pc)
-	route := seedPipelineNodeDeliveryAuthority(t, db, completion, pipelineNode(t, "", "root-collector"))
-	passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), completion)
-	if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
-		t.Fatalf("Intercept error = %v, want stamped connect claim", err)
-	}
-	if passThrough || len(emitted) != 0 {
-		t.Fatalf("failed delivery result = passThrough:%v emitted:%#v, want no output", passThrough, emitted)
-	}
-
-	child, found, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance("child/inst-1"))
-	if err != nil {
-		t.Fatalf("load child instance: %v", err)
-	}
-	if !found {
-		t.Fatal("expected child instance")
-	}
-	if got := strings.TrimSpace(child.CurrentState); got != "waiting" {
-		t.Fatalf("child current_state = %q, want waiting", got)
+			child, found, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, childInstance.StorageRef))
+			if err != nil {
+				t.Fatalf("load child instance: %v", err)
+			}
+			if !found {
+				t.Fatal("expected child instance")
+			}
+			if got := strings.TrimSpace(child.CurrentState); got != "waiting" {
+				t.Fatalf("child current_state = %q, want waiting", got)
+			}
+		})
 	}
 }
+func VerifyNativePipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRootResultForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+			fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
+			platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+			if err != nil {
+				t.Fatalf("load bundle: %v", err)
+			}
+			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+			root := constructNativePipelineScenarioForTest(t, fixture, pc, ctx, ".")
+			childInstance := constructNativePipelineScenarioForTest(t, fixture, pc, ctx, "child")
+			rootEntityID, childRowID := root.EntityID, childInstance.EntityID
+			if consume, handled, err := pc.workflowNodeInterceptPolicy(ctx, "child/grandchild/micro.done", eventtest.ExistingRunRootIngress(
+				"",
+				events.EventType("child/grandchild/micro.done"),
+				"",
+				"",
+				nil,
+				0,
+				runID,
+				events.EnvelopeForTargetRoute(
+					events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
+					events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: rootEntityID},
+				),
+				time.Time{},
+			)); err != nil || handled || consume {
+				t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, err = %v, want no unstamped match", handled, consume, err)
+			}
 
-func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRootResult(t *testing.T) {
-	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
-	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
-	if err != nil {
-		t.Fatalf("load bundle: %v", err)
-	}
-	module, err := newPipelineFixtureWorkflowModule(bundle)
-	if err != nil {
-		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
-	}
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+			completion := eventtest.ExistingRunRootIngress(
+				uuid.NewString(),
+				events.EventType("child/grandchild/micro.done"),
+				"cataloge2e",
+				"",
+				[]byte(`{"entity_id":"`+childRowID+`"}`),
+				0,
+				runID,
+				events.EnvelopeForTargetRoute(
+					events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
+					events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: rootEntityID},
+				),
+				time.Now().UTC(),
+			)
 
-	bus := &recordingPipelineBus{}
-	pc := newPostgresPipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		Module: module,
-	})
-	if pc == nil {
-		t.Fatal("expected coordinator")
-	}
-	const (
-		rootEntityID  = "11111111-1111-1111-1111-111111111111"
-		childFlowPath = "child/9c38251c-4fba-4a18-9afc-774ede7cc866"
-	)
-	childRowID := FlowInstanceEntityID(childFlowPath)
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      rootEntityID,
-		WorkflowName:    bundle.WorkflowName(),
-		WorkflowVersion: bundle.WorkflowVersion(),
-		CurrentState:    "idle",
-		EntityType:      "test_entity",
-	})); err != nil {
-		t.Fatalf("seed root instance: %v", err)
-	}
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      childRowID,
-		StorageRef:      childFlowPath,
-		WorkflowName:    "child",
-		WorkflowVersion: bundle.WorkflowVersion(),
-		CurrentState:    "waiting",
-		Fields: map[string]any{
-			"entity_id":        childRowID,
-			"flow_path":        childFlowPath,
-			"parent_entity_id": rootEntityID,
-		},
-		EntityType: "test_entity",
-	})); err != nil {
-		t.Fatalf("seed child instance: %v", err)
-	}
-	if consume, handled, err := pc.workflowNodeInterceptPolicy(testAuthorActivityContext(t, context.Background()), "child/grandchild/micro.done", eventtest.RunCreatingRootIngress(
-		"",
-		events.EventType("child/grandchild/micro.done"),
-		"",
-		"",
-		nil,
-		0,
-		testPipelineRunID,
-		"",
-		events.EnvelopeForTargetRoute(
-			events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
-			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: testPipelineRunID, EntityID: rootEntityID},
-		),
-		time.Time{},
-	)); err != nil || handled || consume {
-		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, err = %v, want no unstamped match", handled, consume, err)
-	}
-
-	completion := eventtest.RunCreatingRootIngress(
-		uuid.NewString(),
-		events.EventType("child/grandchild/micro.done"),
-		"cataloge2e",
-		"",
-		[]byte(`{"entity_id":"`+childRowID+`"}`),
-		0,
-		testPipelineRunID,
-		"",
-		events.EnvelopeForTargetRoute(
-			events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
-			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: testPipelineRunID, EntityID: rootEntityID},
-		),
-		time.Now().UTC(),
-	)
-
-	configurePipelineTestDeliveryOwner(t, pc)
-	route := seedPipelineNodeDeliveryAuthority(t, db, completion, pipelineNode(t, "", "root-collector"))
-	passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), completion)
-	if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
-		t.Fatalf("Intercept error = %v, want stamped connect claim", err)
-	}
-	if passThrough || len(emitted) != 0 {
-		t.Fatalf("failed delivery result = passThrough:%v emitted:%#v, want no output", passThrough, emitted)
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(pipelineNode(t, ".", "root-collector")), Target: events.MustExistingEntityTarget(completion.TargetRoute())}
+			if err := fixture.PublishNode(ctx, completion, route); err != nil {
+				t.Fatal(err)
+			}
+			passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(ctx, route), completion)
+			if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
+				t.Fatalf("Intercept error = %v, want stamped connect claim", err)
+			}
+			if passThrough || len(emitted) != 0 {
+				t.Fatalf("failed delivery result = passThrough:%v emitted:%#v, want no output", passThrough, emitted)
+			}
+		})
 	}
 }
+func VerifyNativePipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDoesNotAuthorizeRootResultForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+			fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
+			platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+			if err != nil {
+				t.Fatalf("load bundle: %v", err)
+			}
+			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+			root := constructNativePipelineScenarioForTest(t, fixture, pc, ctx, ".")
+			child := constructNativePipelineScenarioForTest(t, fixture, pc, ctx, "child")
+			rootEntityID, childRowID := root.EntityID, child.EntityID
+			completion := eventtest.ExistingRunRootIngress(
+				uuid.NewString(),
+				events.EventType("child/grandchild/micro.done"),
+				"cataloge2e",
+				"",
+				[]byte(`{"entity_id":"`+childRowID+`"}`),
+				0,
+				runID,
+				events.EnvelopeForTargetRoute(
+					events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
+					events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: rootEntityID},
+				),
+				time.Now().UTC(),
+			)
 
-func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDoesNotAuthorizeRootResult(t *testing.T) {
-	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
-	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
-	if err != nil {
-		t.Fatalf("load bundle: %v", err)
-	}
-	module, err := newPipelineFixtureWorkflowModule(bundle)
-	if err != nil {
-		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
-	}
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(pipelineNode(t, ".", "root-collector")), Target: events.MustExistingEntityTarget(completion.TargetRoute())}
+			if err := fixture.PublishNode(ctx, completion, route); err != nil {
+				t.Fatal(err)
+			}
+			// Ambient private SQL/context protocols are unsupported. Hold the real
+			// selected coordinator instead; no transaction or admission fact escapes.
+			closeCut, err := fixture.HoldUnstampedAdmissionTransaction(ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := closeCut(); err != nil {
+					t.Error(err)
+				}
+			})
+			before := fixture.Transactions()
+			if before.Active != 1 {
+				t.Fatalf("original selected transaction cut inactive: %+v", before)
+			}
+			passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(ctx, route), completion)
+			if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
+				t.Fatalf("Intercept error = %v, want stamped connect claim", err)
+			}
+			if passThrough || len(emitted) != 0 {
+				t.Fatalf("failed delivery result = passThrough:%v emitted:%#v, want no output", passThrough, emitted)
+			}
+			if during := fixture.Transactions(); during.Active != 1 || during.Claims != before.Claims {
+				t.Fatalf("unstamped route borrowed the live transaction or acquired a claim: before=%+v during=%+v", before, during)
+			}
+			if err := closeCut(); err != nil {
+				t.Fatal(err)
+			}
+			if after := fixture.Transactions(); after.Active != 0 || after.Claims != before.Claims {
+				t.Fatalf("native transaction cut did not join cleanly: %+v", after)
+			}
 
-	bus := &recordingPipelineBus{}
-	pc := newPostgresPipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		Module: module,
-	})
-	if pc == nil {
-		t.Fatal("expected coordinator")
-	}
-	const (
-		rootEntityID  = "11111111-1111-1111-1111-111111111111"
-		childFlowPath = "child/9c38251c-4fba-4a18-9afc-774ede7cc866"
-	)
-	childRowID := FlowInstanceEntityID(childFlowPath)
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      rootEntityID,
-		WorkflowName:    bundle.WorkflowName(),
-		WorkflowVersion: bundle.WorkflowVersion(),
-		CurrentState:    "idle",
-		EntityType:      "test_entity",
-	})); err != nil {
-		t.Fatalf("seed root instance: %v", err)
-	}
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      childRowID,
-		StorageRef:      childFlowPath,
-		WorkflowName:    "child",
-		WorkflowVersion: bundle.WorkflowVersion(),
-		CurrentState:    "waiting",
-		Fields: map[string]any{
-			"entity_id":        childRowID,
-			"flow_path":        childFlowPath,
-			"parent_entity_id": rootEntityID,
-		},
-		EntityType: "test_entity",
-	})); err != nil {
-		t.Fatalf("seed child instance: %v", err)
-	}
-	ctx := testPipelineCoordinatorRunContext(t, pc)
-
-	completion := eventtest.RunCreatingRootIngress(
-		uuid.NewString(),
-		events.EventType("child/grandchild/micro.done"),
-		"cataloge2e",
-		"",
-		[]byte(`{"entity_id":"`+childRowID+`"}`),
-		0,
-		testPipelineRunID,
-		"",
-		events.EnvelopeForTargetRoute(
-			events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
-			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: testPipelineRunID, EntityID: rootEntityID},
-		),
-		time.Now().UTC(),
-	)
-
-	configurePipelineTestDeliveryOwner(t, pc)
-	route := seedPipelineNodeDeliveryAuthority(t, db, completion, pipelineNode(t, "", "root-collector"))
-	if err := pc.workflowStore.testRuntimeMutation().RunRuntimeMutationContext(ctx, func(ctx context.Context) error {
-		passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(ctx, route), completion)
-		if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
-			t.Fatalf("Intercept error = %v, want stamped connect claim", err)
-		}
-		if passThrough || len(emitted) != 0 {
-			t.Fatalf("failed delivery result = passThrough:%v emitted:%#v, want no output", passThrough, emitted)
-		}
-		return nil
-	}); err != nil {
-		t.Fatalf("owned nested completion transaction: %v", err)
+		})
 	}
 }

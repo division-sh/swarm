@@ -72,7 +72,7 @@ func TestR2NamedRecordEmitSurvivesServedRestartBothStores(t *testing.T) {
 				}
 			}
 			checkReport(published.RunID)
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, published.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, published.RunID)
 			rt = restart()
 			checkReport(published.RunID)
 			var completedEventID string
@@ -88,7 +88,7 @@ func TestR2NamedRecordEmitSurvivesServedRestartBothStores(t *testing.T) {
 				t.Fatalf("invalid typed-record fork: %+v", fork)
 			}
 			checkReport(fork.ForkRunID)
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 			rt = restart()
 			checkReport(fork.ForkRunID)
 		})

@@ -124,7 +124,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 			t.Run(string(backend)+"/"+tc.name, func(t *testing.T) {
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverAcquisitionWithoutFinishedEmission(t, tc.policy))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "acquisition-seed"})
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 				seedRows := readForkReceiverRows(t, rt, seed.RunID)
 				wantSeedRows := map[string]forkReceiverRow{
@@ -139,7 +139,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				if started.RunID != seed.RunID {
 					t.Fatal("source request escaped seeded run")
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 				var frontier string
 				if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
@@ -167,7 +167,7 @@ func TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionB
 				if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
 					t.Fatalf("supplemental acquisition fork identity: %+v", fork)
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 				childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, frontier)
 				childRoute := requireSupplementalForkAcquisitionSettlement(t, rt, fork.ForkRunID, childEvent, tc.policy)
 				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent) != sourceEvidence {

@@ -839,30 +839,28 @@ func startNodeDeliveryContinuation(
 func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSelectedStore(t *testing.T) {
 	for _, backend := range []struct {
 		name  string
-		setup func(*testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore)
+		setup func(*testing.T) (context.Context, nodeDeliveryRecoveryStore)
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected := storetest.AdmitPostgresRuntimeStore(t, db)
+			setup: func(t *testing.T) (context.Context, nodeDeliveryRecoveryStore) {
+				selected := storetest.StartPostgresRuntimeStore(t)
 				ctx := seedRuntimeTestRun(t, selected)
-				return ctx, db, selected
+				return ctx, selected
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
+			setup: func(t *testing.T) (context.Context, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
-				return ctx, storetest.Database(selected), selected
+				return ctx, selected
 			},
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			ctx, db, selected := backend.setup(t)
+			ctx, selected := backend.setup(t)
 			bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyArtifactActionResultDelivery(t, "template", false))
 			source := semanticview.Wrap(bundle)
 			var pc *runtimepipeline.PipelineCoordinator
@@ -884,7 +882,7 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 			}
 			deliveryOwner := &renewalTrackingDeliveryStore{Store: selected}
 			workOwner := runtimeTestEventBusWorkOwner(t, bus)
-			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, selected, runtimepipeline.PipelineCoordinatorOptions{
+			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           workOwner,
 				Module:              newRuntimeTestWorkflowModule(t, source),
 				Persistence:         workflowPersistence,
@@ -976,7 +974,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 			}
 			workOwner := runtimeTestEventBusWorkOwner(t, bus)
-			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, selected, runtimepipeline.PipelineCoordinatorOptions{
+			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           workOwner,
 				Module:              newRuntimeTestWorkflowModule(t, source),
 				Persistence:         workflowPersistence,
@@ -1119,7 +1117,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			handlerStarted := make(chan struct{}, 4)
 			deliveryOwner := &renewalTrackingDeliveryStore{Store: selected}
 			workOwner := runtimeTestEventBusWorkOwner(t, bus)
-			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, selected, runtimepipeline.PipelineCoordinatorOptions{
+			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           workOwner,
 				Module:              newRuntimeTestWorkflowModule(t, source),
 				Persistence:         workflowPersistence,

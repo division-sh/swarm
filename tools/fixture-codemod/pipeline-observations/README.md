@@ -1,4 +1,4 @@
-# Batch 2 Pipeline And Connector Observations
+# Finite Pipeline And Connector Fixture Migrations
 
 This finite codemod ships with its reviewed caller output. Run from the repository
 root:
@@ -8,7 +8,9 @@ go run ./tools/fixture-codemod/pipeline-observations
 go run ./tools/fixture-codemod/pipeline-observations -write
 ```
 
-The 28 recipes cover exactly 11 owned files. Each identifies an enclosing function
+The original 28 recipes cover exactly 11 owned files. Later native setup and
+projection cohorts append their own finite snapshots and independent workload
+controls in the same committed recipe inventory. Each identifies an enclosing function
 and its complete before/after syntax, not a SQL-text pattern or arbitrary query
 translation. Source positions and inert comments do not change the match. Changed
 bindings, effectful work, missing/ambiguous functions and malformed source refuse

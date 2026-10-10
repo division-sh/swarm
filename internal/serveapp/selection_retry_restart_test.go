@@ -57,7 +57,7 @@ func TestServedSelectionRetryAndRestartBothStores(t *testing.T) {
 				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
 				rt, _, restart := newRetainedMailboxCompletionRuntime(t, backend, canonicalrouting.CopySelectionRetry(t))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "seed", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "selection-seed"})
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				enabled.Store(faulted)
 				params := map[string]any{"event_name": "select", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{}, "idempotency_key": "selection-request"}
 				accepted := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
@@ -90,7 +90,7 @@ func TestServedSelectionRetryAndRestartBothStores(t *testing.T) {
 					}
 					assertServedSelectionTrace(t, rt, accepted.EventID, seed.RunID, false)
 				} else {
-					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					assertServedSelectionTrace(t, rt, accepted.EventID, seed.RunID, true)
 				}
 				// Clear only the injected dependency fault while constructing the next
@@ -98,7 +98,7 @@ func TestServedSelectionRetryAndRestartBothStores(t *testing.T) {
 				// persisted obligation and normal startup recovery remain untouched.
 				resumeOnConstruction.Store(true)
 				rt, _ = restart()
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				assertServedSelectionTrace(t, rt, accepted.EventID, seed.RunID, true)
 				if faulted {
 					var claim int64
@@ -111,7 +111,7 @@ func TestServedSelectionRetryAndRestartBothStores(t *testing.T) {
 				if duplicate.EventID != accepted.EventID || duplicate.RunID != seed.RunID {
 					t.Fatal("duplicate changed the admitted event/run")
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				var after operatorread.OperatorEventFull
 				requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": accepted.EventID}, &after)
 				immutable.Deliveries, after.Deliveries = nil, nil

@@ -28,6 +28,28 @@ var (
 	sqliteDeliveryAdapter   = mustDeliveryAdapter(DialectSQLite)
 )
 
+func SetPreparedTargetConflictTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, originalIdentity, subscriberID, corruptIdentity, corruptTarget string) (int64, error) {
+	if tx == nil {
+		return 0, fmt.Errorf("prepared target conflict requires its selected write transaction")
+	}
+	query := `UPDATE event_deliveries SET subscriber_id=?, route_identity=?, delivery_target_route=? WHERE event_id=? AND route_identity=?`
+	if postgres {
+		query = `UPDATE event_deliveries SET subscriber_id=$1, route_identity=$2, delivery_target_route=$3::jsonb WHERE event_id=$4::uuid AND route_identity=$5`
+	}
+	result, err := tx.ExecContext(ctx, query, subscriberID, corruptIdentity, corruptTarget, eventID, originalIdentity)
+	if err != nil {
+		return 0, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if changed != 1 {
+		return 0, fmt.Errorf("prepared target conflict requires its exact existing delivery: rows=%d", changed)
+	}
+	return changed, nil
+}
+
 func mustDeliveryAdapter(dialect Dialect) *Adapter {
 	adapter, err := NewAdapter(dialect)
 	if err != nil {
@@ -117,6 +139,10 @@ func (s *DeliverySQLiteOwner) InspectDeliveryRecovery(
 }
 
 func (s *DeliveryPostgresOwner) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
+	return s.claimDeliveryWithLease(ctx, authority, event, route, runtimedelivery.DefaultLeaseTTL)
+}
+
+func (s *DeliveryPostgresOwner) claimDeliveryWithLease(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute, lease time.Duration) (runtimedelivery.ClaimResult, error) {
 	if route.Normalized().Recipient.Empty() {
 		return runtimedelivery.ClaimResult{}, fmt.Errorf("delivery recipient is required")
 	}
@@ -139,7 +165,7 @@ func (s *DeliveryPostgresOwner) ClaimDelivery(ctx context.Context, authority run
 					return err
 				}
 			}
-			claimed, err = s.receiverAdapter.ClaimExactResultWithRenewal(txctx, attempt, authority, event, route, runtimedelivery.DefaultLeaseTTL)
+			claimed, err = s.receiverAdapter.ClaimExactResultWithRenewal(txctx, attempt, authority, event, route, lease)
 			return err
 		})
 		return claimed, err
@@ -151,6 +177,10 @@ func (s *DeliveryPostgresOwner) ClaimDelivery(ctx context.Context, authority run
 }
 
 func (s *DeliverySQLiteOwner) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
+	return s.claimDeliveryWithLease(ctx, authority, event, route, runtimedelivery.DefaultLeaseTTL)
+}
+
+func (s *DeliverySQLiteOwner) claimDeliveryWithLease(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute, lease time.Duration) (runtimedelivery.ClaimResult, error) {
 	if route.Normalized().Recipient.Empty() {
 		return runtimedelivery.ClaimResult{}, fmt.Errorf("delivery recipient is required")
 	}
@@ -173,7 +203,7 @@ func (s *DeliverySQLiteOwner) ClaimDelivery(ctx context.Context, authority runti
 					return err
 				}
 			}
-			claimed, err = s.receiverAdapter.ClaimExactResultWithRenewal(txctx, attempt, authority, event, route, runtimedelivery.DefaultLeaseTTL)
+			claimed, err = s.receiverAdapter.ClaimExactResultWithRenewal(txctx, attempt, authority, event, route, lease)
 			return err
 		})
 		return claimed, err
@@ -415,22 +445,30 @@ func (s *DeliverySQLiteOwner) ObserveDeliveryContinuations(ctx context.Context, 
 }
 
 func (s *DeliveryPostgresOwner) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
+	return s.renewDeliveryWithLease(ctx, claim, runtimedelivery.DefaultLeaseTTL)
+}
+
+func (s *DeliveryPostgresOwner) renewDeliveryWithLease(ctx context.Context, claim runtimedelivery.Claim, lease time.Duration) (runtimedelivery.ClaimCommit, error) {
 	return postgresDeliveryMutation(s, ctx, nil, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) (runtimedelivery.Snapshot, error) {
 		transactiontest.Mark(txctx, transactiontest.DeliveryRenew)
 		if err := runstate.RequirePostgresActiveTx(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
-		return s.renewClaimTx(txctx, attempt, claim, runtimedelivery.DefaultLeaseTTL)
+		return s.renewClaimTx(txctx, attempt, claim, lease)
 	})
 }
 
 func (s *DeliverySQLiteOwner) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
+	return s.renewDeliveryWithLease(ctx, claim, runtimedelivery.DefaultLeaseTTL)
+}
+
+func (s *DeliverySQLiteOwner) renewDeliveryWithLease(ctx context.Context, claim runtimedelivery.Claim, lease time.Duration) (runtimedelivery.ClaimCommit, error) {
 	return sqliteDeliveryMutation(s, ctx, nil, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) (runtimedelivery.Snapshot, error) {
 		transactiontest.Mark(txctx, transactiontest.DeliveryRenew)
 		if err := runstate.RequireSQLiteActiveTx(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
-		return s.renewClaimTx(txctx, attempt, claim, runtimedelivery.DefaultLeaseTTL)
+		return s.renewClaimTx(txctx, attempt, claim, lease)
 	})
 }
 

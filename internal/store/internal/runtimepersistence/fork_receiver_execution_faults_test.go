@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -318,34 +319,91 @@ type forkReceiverFaultEdit struct {
 	columns           []string
 }
 
+type forkReceiverFaultCell struct {
+	Column, Type string
+	Value        json.RawMessage
+}
+
+func decodeForkReceiverFaultRow(raw string, columns []string) ([]forkReceiverFaultCell, error) {
+	var cells []forkReceiverFaultCell
+	if err := json.Unmarshal([]byte(raw), &cells); err != nil {
+		return nil, err
+	}
+	if len(cells) != len(columns) {
+		return nil, errors.New("physical fault row column cardinality changed")
+	}
+	for i, cell := range cells {
+		if cell.Column != columns[i] || cell.Type == "" || len(cell.Value) == 0 {
+			return nil, errors.New("physical fault row lost column/type/value identity")
+		}
+	}
+	return cells, nil
+}
+
+func forkReceiverFaultKeyMatches(cell forkReceiverFaultCell, value string) (bool, error) {
+	var stored *string
+	if err := json.Unmarshal(cell.Value, &stored); err != nil {
+		return false, err
+	}
+	if stored == nil {
+		return false, errors.New("physical fault key cannot be null")
+	}
+	switch cell.Type {
+	case "string":
+		return *stored == value, nil
+	case "[]uint8":
+		decoded, err := base64.StdEncoding.DecodeString(*stored)
+		if err != nil {
+			return false, err
+		}
+		return string(decoded) == value, nil
+	default:
+		return false, errors.New("physical fault key has an unsupported driver type")
+	}
+}
+
 // Whole-store equality permits only the named cells on one exact physical row.
 func assertForkReceiverFaultOnlyColumns(t *testing.T, before, after map[string]SelectedForkStorageTableSnapshot, edits []forkReceiverFaultEdit) {
 	t.Helper()
 	for _, edit := range edits {
 		old, new := before[edit.table], after[edit.table]
+		if !reflect.DeepEqual(old.Columns, new.Columns) {
+			t.Fatalf("fault changed physical column inventory %s", edit.table)
+		}
 		changed := 0
 		for i, raw := range old.Rows {
-			var values []any
-			if err := json.Unmarshal([]byte(raw), &values); err != nil {
+			values, err := decodeForkReceiverFaultRow(raw, old.Columns)
+			if err != nil {
 				t.Fatal(err)
 			}
 			key := sortColumnIndex(t, old.Columns, edit.key)
-			if values[key] != edit.value {
+			selected, err := forkReceiverFaultKeyMatches(values[key], edit.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !selected {
 				continue
 			}
 			changed++
 			matches := 0
 			for _, newRaw := range new.Rows {
-				var newValues []any
-				if err := json.Unmarshal([]byte(newRaw), &newValues); err != nil {
+				newValues, err := decodeForkReceiverFaultRow(newRaw, new.Columns)
+				if err != nil {
 					t.Fatal(err)
 				}
-				if newValues[key] != edit.value {
+				selected, err := forkReceiverFaultKeyMatches(newValues[key], edit.value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !selected {
 					continue
 				}
 				matches++
 				for _, column := range edit.columns {
 					index := sortColumnIndex(t, old.Columns, column)
+					if values[index].Column != newValues[index].Column || values[index].Type != newValues[index].Type {
+						t.Fatalf("fault changed physical column/type identity %s.%s", edit.table, column)
+					}
 					if reflect.DeepEqual(values[index], newValues[index]) {
 						t.Fatalf("fault did not change required cell %s.%s", edit.table, column)
 					}

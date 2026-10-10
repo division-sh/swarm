@@ -315,7 +315,7 @@ func newA2CanonicalAccumulatorProof(t *testing.T, selected gateRecoveryStoreCase
 	}
 	source := semanticview.Wrap(bundle)
 	runID := uuid.NewString()
-	insertGateRecoveryRun(t, selected, runID)
+	insertGateRecoveryRun(t, selected.events, runID)
 	ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 	proof := &a2AccumulatorPersistenceProof{selected: selected, ctx: ctx, runID: runID, module: proposedEffectProofModule{
 		source: source, nodes: []pipeline.WorkflowNode{

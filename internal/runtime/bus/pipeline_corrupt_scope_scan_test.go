@@ -156,30 +156,16 @@ func settledPipelineReceiptCount(t *testing.T, fixture completeEventDispatchFixt
 
 func deleteCommittedReplayScope(t testing.TB, fixture completeEventDispatchFixture, eventID string) {
 	t.Helper()
-	query := `DELETE FROM committed_replay_scopes WHERE event_id = ?`
-	if fixture.dialect == "postgres" {
-		query = `DELETE FROM committed_replay_scopes WHERE event_id = $1::uuid`
-	}
-	if _, err := fixture.db.ExecContext(fixture.ctx, query, eventID); err != nil {
+	if err := storetest.DeleteCommittedReplayScope(fixture.ctx, fixture.store, eventID); err != nil {
 		t.Fatalf("delete committed replay scope: %v", err)
 	}
 }
 
 func pipelineReceiptOutcome(t testing.TB, fixture completeEventDispatchFixture, eventID string) (string, string) {
 	t.Helper()
-	query := `
-		SELECT outcome, COALESCE(reason_code, '')
-		FROM event_receipts
-		WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
-	if fixture.dialect == "postgres" {
-		query = `
-			SELECT outcome, COALESCE(reason_code, '')
-			FROM event_receipts
-			WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
-	}
-	var outcome, reason string
-	if err := fixture.db.QueryRowContext(context.Background(), query, eventID).Scan(&outcome, &reason); err != nil {
+	out, err := storetest.ReadExactPipelineReceiptOutcomeReason(context.Background(), fixture.store, eventID)
+	if err != nil {
 		t.Fatalf("load pipeline receipt: %v", err)
 	}
-	return outcome, reason
+	return out.Outcome, out.Reason
 }

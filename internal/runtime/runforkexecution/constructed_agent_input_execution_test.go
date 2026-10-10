@@ -32,7 +32,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -92,13 +91,8 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 	runID, eventID := uuid.NewString(), uuid.NewString()
 	at := time.Unix(1700002200, 0).UTC()
 	bundle, _ := semanticview.Bundle(loaded.Source)
-	fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID,
-		Source: loaded.SourceArtifactFact, Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)}
-	if backend == "sqlite" {
-		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
-	} else {
-		runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
-	}
+	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
+		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
 	payload := []byte(`{}`)
 	anchorType := events.EventType("task.assigned")
 	if nested {

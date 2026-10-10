@@ -185,7 +185,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				selected := storeCase.open(t)
 				runtimeLogger := &exactJoinRuntimeLogger{}
 				runID := uuid.NewString()
-				insertGateRecoveryRun(t, selected, runID)
+				insertGateRecoveryRun(t, selected.events, runID)
 				ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				source := exactExternalWorkflowJoinSource(t, flowID)
 				joinNode := externalPipelineSourceNode(t, source, flowID, "join-node")
@@ -425,7 +425,7 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 						t.Fatalf("selected store %T lacks generic schedule or event readback ownership", selected.events)
 					}
 					runID := uuid.NewString()
-					insertGateRecoveryRun(t, selected, runID)
+					insertGateRecoveryRun(t, selected.events, runID)
 					ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 					source := exactExternalWorkflowJoinSourceWithTimeout(t, flowID, outcome.timeout)
 					joinNode := externalPipelineSourceNode(t, source, flowID, "join-node")

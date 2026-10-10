@@ -29,7 +29,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -82,8 +81,7 @@ func proveRuntimeConstructedActorCensusBothStores(t *testing.T, journey string) 
 				if backend == "sqlite" {
 					selected = storetest.StartSQLiteRuntimeStore(t)
 				} else {
-					_, db, _ := testutil.StartPostgres(t)
-					selected = storetest.AdmitPostgresRuntimeStore(t, db)
+					selected = storetest.StartPostgresRuntimeStore(t)
 				}
 				runID := uuid.NewString()
 				ctx := startupRecoverySourceContext(fact, runID)

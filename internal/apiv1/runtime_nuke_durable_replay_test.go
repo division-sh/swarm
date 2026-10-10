@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -56,7 +55,7 @@ func TestRuntimeNukeDurableReplaySurvivesAPICompletionLossAndExpiration(t *testi
 		t.Fatalf("domain completion was lost: %s", admitted.Phase)
 	}
 	laterRun := uuid.NewString()
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{RunID: laterRun, Origin: runlifecyclefixture.ScenarioSetupOrigin()})
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: laterRun, Origin: storetest.ScenarioSetupOrigin()})
 	first, err := executeRuntimeNuke(ctx, req, opts, now.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)

@@ -790,10 +790,10 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps, d
 func completeRuntimeRecoveryTestDeps(t testing.TB, deps RuntimeDeps) RuntimeDeps {
 	t.Helper()
 	if !deps.WorkflowPersistence.Configured() {
-		deps.WorkflowPersistence = startupRecoveryWorkflowPersistence(nil, deps.TimerObligationReader)
+		deps.WorkflowPersistence = startupRecoveryWorkflowPersistence(deps.TimerObligationReader)
 	}
 	if deps.DeliveryStore == nil {
-		deps.DeliveryStore = newRuntimeShutdownDeliveryStore(t)
+		deps.DeliveryStore = &managedNativeRecoveryDeliveryStore{}
 	}
 	if deps.EventStore == nil {
 		deps.EventStore = startupRecoveryMinimalEventStore{}

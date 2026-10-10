@@ -450,7 +450,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		"event_name": seedName, "bundle_hash": rt.BundleHash,
 		"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-seed",
 	})
-	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 	waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 	seedRows := readForkReceiverRows(t, rt, seed.RunID)
 	seedCompanions := map[string]map[string][]string{}
@@ -463,7 +463,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	request := map[string]any{"event_name": requestName, "run_id": seed.RunID, "source_event_id": seed.EventID,
 		"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-request"}
 	started := requireServedEventPublishRPCResult(t, rt.Endpoint, request)
-	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 	waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 	if started.RunID != seed.RunID {
 		t.Fatal("second source ingress escaped the seeded run")
@@ -479,7 +479,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		if second.EventID == started.EventID || second.RunID != seed.RunID {
 			t.Fatal("distinct source occurrence collapsed")
 		}
-		waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 		waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 		if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2 AND event_id<>$3`, seed.RunID, prefix+"producer/work.ready", frontier).Scan(&frontier); err != nil {
 			t.Fatal(err)
@@ -582,11 +582,11 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	if option.nested {
 		siblingSeed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": seedName, "bundle_hash": rt.BundleHash,
 			"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-seed"})
-		waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, siblingSeed.RunID)
+		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, siblingSeed.RunID)
 		waitForkReceiverSourceCompletion(t, rt, siblingSeed.RunID)
 		requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": requestName, "run_id": siblingSeed.RunID, "source_event_id": siblingSeed.EventID,
 			"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-request"})
-		waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, siblingSeed.RunID)
+		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, siblingSeed.RunID)
 		waitForkReceiverSourceCompletion(t, rt, siblingSeed.RunID)
 		if siblingSeed.RunID == seed.RunID {
 			t.Fatal("independent sibling run collapsed")
@@ -672,7 +672,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
 		t.Fatalf("fork identity: %+v", fork)
 	}
-	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 	childRows := readForkReceiverRows(t, rt, fork.ForkRunID)
 	childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, frontier)
 	// This persisted child event has passed backend source-event loading and
@@ -747,7 +747,7 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "validation.triggered", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"candidate": "fork-capability"}, "idempotency_key": "capability-source"})
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 			var frontier, entityID, instancePath string
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/validation.requested'`, seed.RunID).Scan(&frontier); err != nil {
@@ -863,7 +863,7 @@ func TestServedForkSourceCompletionWithoutForkBothStores(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"work_id": "no-fork-completion"}, "idempotency_key": "no-fork-seed"})
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			early := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 			settled := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
@@ -933,7 +933,7 @@ func TestServedForkSourceCompletionWithoutForkBothStores(t *testing.T) {
 			}
 			sort.Strings(changed)
 			t.Logf("NO FORK INVOKED: delivery-only quiescence -> pipeline completion changed=%v receipts=%d->%d", changed, len(early["event_receipts"]), len(settled["event_receipts"]))
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			if after := readServedForkRecipientSourceDomain(t, rt, seed.RunID); !reflect.DeepEqual(settled, after) {
 				t.Fatal("source continued changing after exact pipeline handoff/receipt boundary")
 			}
@@ -1051,7 +1051,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 			t.Run(fmt.Sprintf("%s/entityless_producer=%t", backend, entityless), func(t *testing.T) {
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, entityless))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "business-seed"})
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 				seedRows := readForkReceiverRows(t, rt, seed.RunID)
 				if got := seedRows["consumer"]; got.Type != "receipt" || got.State != "active" || got.Fields["marker"] != "consumer-owned" || got.Fields["processed_token"] != "seeded" {
@@ -1061,7 +1061,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				if started.RunID != seed.RunID {
 					t.Fatal("source request escaped seeded run")
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 				var frontier string
 				if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
@@ -1097,7 +1097,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				if fork.SourceRunID != seed.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
 					t.Fatalf("business fork identity: %+v", fork)
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 				childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, frontier)
 				childRoute := requireForkReceiverBusinessMutation(t, rt, fork.ForkRunID, childEvent, consumer.ID)
 				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent) != sourceEvidence {

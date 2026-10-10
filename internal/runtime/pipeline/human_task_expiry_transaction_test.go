@@ -24,9 +24,6 @@ func (e *transactionProbeHumanTaskExpiry) ListDueHumanTaskExpiryEvents(context.C
 }
 
 func (e *transactionProbeHumanTaskExpiry) CommitHumanTaskExpirations(ctx context.Context, command HumanTaskExpiryCommand) (CommittedHumanTaskExpiry, error) {
-	if _, ok := PipelineSQLTxFromContext(ctx); ok {
-		return CommittedHumanTaskExpiry{}, errors.New("runtime received selected-store transaction authority")
-	}
 	if err := command.Validate(); err != nil {
 		return CommittedHumanTaskExpiry{}, err
 	}
@@ -48,10 +45,8 @@ func (e *transactionProbeHumanTaskExpiry) CommitHumanTaskExpirations(ctx context
 	return CommittedHumanTaskExpiry{Acknowledged: true, Publications: committed}, e.commitErr
 }
 
-func TestHumanTaskExpiryUsesClosedSelectedStoreCommitEvidence(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	runner := &recordingRuntimeMutationRunner{db: db}
-	workflowStore := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+func VerifyHumanTaskExpiryUsesClosedSelectedStoreCommitEvidenceForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+	fixture := open(t)
 	runID := uuid.NewString()
 	expiry := &transactionProbeHumanTaskExpiry{
 		acknowledged: true,
@@ -61,7 +56,7 @@ func TestHumanTaskExpiryUsesClosedSelectedStoreCommitEvidence(t *testing.T) {
 		),
 	}
 	bus := &recordingPipelineBus{publishErr: errors.New("injected event persistence failure")}
-	coordinator := &PipelineCoordinator{bus: bus, workflowStore: workflowStore}
+	coordinator := &PipelineCoordinator{bus: bus, workflowStore: fixture.Persistence.store}
 
 	if err := coordinator.expireHumanTaskCards(context.Background(), expiry, time.Now().UTC(), 10); err == nil {
 		t.Fatal("expiry succeeded when publication planning failed")

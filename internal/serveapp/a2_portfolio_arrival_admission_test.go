@@ -27,7 +27,7 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 			if !setup.NewRunCreated || setup.RunID == "" || setup.EventID == "" {
 				t.Fatalf("public setup did not create a run: %+v", setup)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, setup.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, setup.RunID)
 			parent := requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "portfolio", "portfolio_id", "portfolio-one")
 			period := requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "portfolio/period", "period_id", "period-one")
 			requireA2PortfolioSetupRoutes(t, rt, setup, parent, period, "materializing_entity")
@@ -51,7 +51,7 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 				if trigger.NewRunCreated || trigger.RunID != setup.RunID || trigger.EventID == "" {
 					t.Fatalf("independent public arrival changed its run: %+v", trigger)
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, setup.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, setup.RunID)
 				wirePayload := map[string]any{"portfolio_id": "portfolio-one", "period_id": "period-one", "operating_id": member, "revenue": float64(revenue)}
 				requested, worker := requireA2PortfolioOperatingCreation(t, rt, trigger, wirePayload, "operating_instance_id")
 				if workers[worker.Entity.EntityID] {
@@ -155,7 +155,7 @@ func TestA2PortfolioPublicIndependentArrivalAdmissionBothStores(t *testing.T) {
 				arrival operatorread.OperatorEventFull
 			}{{conflictParams, conflictTrigger, conflict}, {unexpectedParams, unexpectedTrigger, unexpected}} {
 				replay := requireServedEventPublishRPCResult(t, rt.Endpoint, refused.params)
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, setup.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, setup.RunID)
 				if replay.EventID != refused.trigger.EventID || replay.RunID != setup.RunID ||
 					!reflect.DeepEqual(refused.arrival, a2ReadJoinPublicEvent(t, rt, refused.arrival.EventID)) ||
 					!reflect.DeepEqual(beforeRequests, requireA2PortfolioEvents(t, rt, setup.RunID, "ingress/operating.report.requested")) ||

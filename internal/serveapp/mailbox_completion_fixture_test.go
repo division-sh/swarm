@@ -47,6 +47,8 @@ func newRetainedMailboxCompletionRuntime(t *testing.T, backend servedparity.Back
 
 func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedparity.Backend, root, configSuffix string, tokens ...string) (servedControlProofRuntime, cursorMailboxStore, func() (servedControlProofRuntime, cursorMailboxStore)) {
 	t.Helper()
+	var deliveryReader servedRunDeliveryReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 	if len(tokens) == 0 {
 		tokens = []string{apiv1.DefaultLoopbackAPIToken}
 	}
@@ -109,7 +111,7 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 		process.waitForReadyLine()
 		runtime := servedTestProcessRuntime(t, process)
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-		rt := servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: name, Runtime: runtime, Postgres: pg, SQLite: sq, BundleHash: runtime.Options.SourceArtifactFact.BundleHash()}
+		rt := servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: name, Runtime: runtime, Postgres: pg, SQLite: sq, BundleHash: runtime.Options.SourceArtifactFact.BundleHash()}
 		var owner cursorMailboxStore = sq
 		if pg != nil {
 			owner = pg
@@ -124,7 +126,7 @@ func mailboxCompletionFixtureInRuntime(t *testing.T, rt servedControlProofRuntim
 	t.Helper()
 	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "matrix-seed-" + uuid.NewString()})
 	requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
-	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 	var id string
 	if err := rt.DB.QueryRow(`SELECT card_id FROM decision_cards WHERE run_id=$1 AND status='pending'`, seed.RunID).Scan(&id); err != nil {
 		t.Fatal(err)
@@ -156,7 +158,7 @@ func mailboxCompletionAnchorCard(t *testing.T, f cursorMailboxFixture, kind deci
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		waitServedRunDeliveryQuiescence(t, f.rt.DB, f.rt.Backend, f.base.RunID)
+		waitServedRunDeliveryQuiescence(t, f.rt.ReadRunDeliveries, f.base.RunID)
 		card, err := f.store.GetDecisionCard(f.ctx, id)
 		if err != nil {
 			t.Fatal(err)
@@ -167,7 +169,7 @@ func mailboxCompletionAnchorCard(t *testing.T, f cursorMailboxFixture, kind deci
 		t.Fatalf("unknown anchor %s", kind)
 	}
 	requireServedEventPublishRPCResult(t, f.rt.Endpoint, map[string]any{"event_name": "observer.requested", "run_id": f.base.RunID, "source_event_id": f.eventID, "payload": map[string]any{"seed": true}, "idempotency_key": "observer-seed-" + f.base.RunID})
-	waitServedRunDeliveryQuiescence(t, f.rt.DB, f.rt.Backend, f.base.RunID)
+	waitServedRunDeliveryQuiescence(t, f.rt.ReadRunDeliveries, f.base.RunID)
 	var id string
 	if err := f.rt.DB.QueryRow(`SELECT card_id FROM decision_cards WHERE run_id=$1 AND anchor_kind='human_task'`, f.base.RunID).Scan(&id); err != nil {
 		t.Fatalf("ask_human did not create a card: %v\n%s", err, servedEventPublishDebugSummary(t, f.rt.DB, f.rt.Backend, f.base.RunID))
@@ -182,7 +184,7 @@ func mailboxCompletionAnchorCard(t *testing.T, f cursorMailboxFixture, kind deci
 func mailboxCompletionNotice(t *testing.T, f cursorMailboxFixture) string {
 	t.Helper()
 	seed := requireServedEventPublishRPCResult(t, f.rt.Endpoint, map[string]any{"event_name": "notice.requested", "run_id": f.base.RunID, "source_event_id": f.eventID, "payload": map[string]any{"seed": true}, "idempotency_key": "notice-seed-" + uuid.NewString()})
-	waitServedRunDeliveryQuiescence(t, f.rt.DB, f.rt.Backend, f.base.RunID)
+	waitServedRunDeliveryQuiescence(t, f.rt.ReadRunDeliveries, f.base.RunID)
 	waitPublicationSiteCompletion(t, f.rt, f.base.RunID)
 	var id, summary, from string
 	if err := f.rt.DB.QueryRow(`SELECT item_id,summary,from_agent FROM mailbox WHERE source_event_id=$1 AND item_type=$2`, seed.EventID, runtimetools.NotifyHumanMailboxItemType).Scan(&id, &summary, &from); err != nil {

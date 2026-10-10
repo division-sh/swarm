@@ -33,7 +33,7 @@ func consumeForkFanOutBarrierCompletion(t *testing.T, fixture authorActivityRece
 	selected := fixture.store.(storeTestDurableEventBusStore)
 	store := fixture.store.(genericschedule.Store)
 	loopBefore := readForkBarrierLoop(t, ctx, fixture.db, runID)
-	advanceFanOutBarriersForTest(t, ctx, selected, fixture.db, runID, time.Now().UTC())
+	advanceFanOutBarriersForTest(t, ctx, selected, runID, time.Now().UTC())
 	var activationID string
 	var raw []byte
 	if err := fixture.db.QueryRowContext(ctx, `SELECT schedule_activation_id,timer_handle FROM fan_out_obligation_barriers WHERE run_id=$1`, runID).Scan(&activationID, &raw); err != nil {

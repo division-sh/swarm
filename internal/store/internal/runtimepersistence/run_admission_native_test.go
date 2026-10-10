@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	sourceartifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -108,11 +110,13 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 								}
 								return nil
 							}
-							var inactive *runtimerunlifecycle.RunNotActiveError
-							if !errors.As(err, &inactive) {
-								return errors.Join(errors.New("terminal run borrowed active admission"), err)
+							state := runtimerunlifecycle.StateCancelled
+							if change == "complete" {
+								state = runtimerunlifecycle.StateCompleted
+							} else if change == "fork-source" {
+								state = runtimerunlifecycle.StateForked
 							}
-							return nil
+							return validateInactiveAdmissionRefusal(fact, err, runID, state)
 						}); err != nil {
 							return err
 						}
@@ -130,6 +134,122 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 						t.Fatalf("rollback leaked source: %+v, %v", fact, err)
 					}
 				})
+			}
+		})
+	}
+}
+
+func validateInactiveAdmissionRefusal(fact runtimecorrelation.SourceArtifactFact, err error, runID string, state runtimerunlifecycle.State) error {
+	var inactive *runtimerunlifecycle.RunNotActiveError
+	if !errors.As(err, &inactive) || inactive == nil || inactive.RunID != runID || inactive.State != state || fact.Validate() == nil {
+		return fmt.Errorf("inactive admission refusal: fact=%q error=%v; want run=%q state=%q and invalid fact", fact.BundleHash(), err, runID, state)
+	}
+	return nil
+}
+
+func TestRunAdmissionMissingRunRefusesBeforeMutationBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := openRunLifecycleCandidateParityFixture(t, backend)
+			writer := selectedAdmissionLifecycleWriter(fixture.store)
+			ctx := testAuthorActivitySourceArtifactContext()
+			runID := uuid.NewString()
+			rollback := errors.New("rollback after missing-run admission")
+			err := runSelectedFixtureMutation(ctx, fixture.store, "missing-run admission", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+				return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+					fact, err := writer.RequireActiveSourceTx(txctx, tx, runID)
+					var missing *runtimerunlifecycle.RunNotFoundError
+					if !errors.As(err, &missing) || missing == nil || missing.RunID != runID || fact.Validate() == nil {
+						return fmt.Errorf("missing active run: fact=%q error=%v; want missing %q and invalid fact", fact.BundleHash(), err, runID)
+					}
+					if _, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID); err != nil || cached {
+						return errors.Join(errors.New("missing run minted active admission"), err)
+					}
+					var runs, mutations int
+					if err := tx.QueryRowContext(txctx, `SELECT COUNT(*) FROM runs WHERE run_id=$1`, runID).Scan(&runs); err != nil {
+						return err
+					}
+					if err := tx.QueryRowContext(txctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1`, runID).Scan(&mutations); err != nil {
+						return err
+					}
+					if runs != 0 || mutations != 0 {
+						return fmt.Errorf("missing-run refusal wrote runs=%d mutations=%d before rollback", runs, mutations)
+					}
+					return rollback
+				})
+			})
+			if !errors.Is(err, rollback) {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestRunAdmissionWarmArtifactLossRefusesBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := openRunLifecycleCandidateParityFixture(t, backend)
+			writer := selectedAdmissionLifecycleWriter(fixture.store)
+			ctx := testAuthorActivitySourceArtifactContext()
+			runID := uuid.NewString()
+			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Now().UTC())
+			rollback := errors.New("rollback after warmed-artifact refusal")
+			err := runSelectedFixtureMutation(ctx, fixture.store, "warmed-artifact refusal", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+				return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+					original, err := writer.RequireActiveSourceTx(txctx, tx, runID)
+					if err != nil || original.BundleHash() != runLifecycleCandidateParityBundleHash {
+						return errors.Join(errors.New("failed initial native source admission"), err)
+					}
+					if err := attempt.RequireActiveRunSourceAdmission(txctx, runID, original); err != nil {
+						return err
+					}
+					if err := sourceartifactstore.DeleteSourceArtifactForFixtureRefusalTx(txctx, tx, backend, original); err != nil {
+						return err
+					}
+					cachedFact, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID)
+					if err != nil || !cached || !cachedFact.Matches(original) {
+						return errors.Join(errors.New("artifact fault erased warmed run admission"), err)
+					}
+					for range 2 {
+						fact, err := writer.RequireActiveSourceTx(txctx, tx, runID)
+						var unavailable *runtimerunlifecycle.SourceArtifactUnavailableError
+						if !errors.As(err, &unavailable) || unavailable == nil || unavailable.BundleHash != original.BundleHash() || unavailable.Cause != "missing_source_artifact" || fact.Validate() == nil {
+							return fmt.Errorf("warm admission reused absent artifact: fact=%q error=%v; want unavailable %q and invalid fact", fact.BundleHash(), err, original.BundleHash())
+						}
+					}
+					return rollback
+				})
+			})
+			if !errors.Is(err, rollback) {
+				t.Fatal(err)
+			}
+			fact, err := fixture.store.RequireActiveRunSource(ctx, runID)
+			if err != nil || fact.BundleHash() != runLifecycleCandidateParityBundleHash {
+				t.Fatalf("rollback did not restore source availability: %q, %v", fact.BundleHash(), err)
+			}
+		})
+	}
+}
+
+func TestInactiveAdmissionRefusalRejectsWrongStateIdentityAndLiveFact(t *testing.T) {
+	runID := uuid.NewString()
+	valid := mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash)
+	for _, probe := range []struct {
+		name     string
+		fact     runtimecorrelation.SourceArtifactFact
+		err      error
+		wantPass bool
+	}{
+		{name: "exact", err: &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: runtimerunlifecycle.StateForked}, wantPass: true},
+		{name: "wrong-run", err: &runtimerunlifecycle.RunNotActiveError{RunID: uuid.NewString(), State: runtimerunlifecycle.StateForked}},
+		{name: "wrong-state", err: &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: runtimerunlifecycle.StateCancelled}},
+		{name: "live-fact", fact: valid, err: &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: runtimerunlifecycle.StateForked}},
+		{name: "untyped", err: errors.New("inactive")},
+		{name: "success", fact: valid},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			if err := validateInactiveAdmissionRefusal(probe.fact, probe.err, runID, runtimerunlifecycle.StateForked); (err == nil) != probe.wantPass {
+				t.Fatalf("refusal oracle: %v", err)
 			}
 		})
 	}

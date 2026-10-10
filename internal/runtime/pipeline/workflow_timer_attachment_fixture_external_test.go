@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
@@ -14,6 +15,11 @@ import (
 // Timer component proofs own native attachment admission, not executable
 // topology. Their caller joins timer/publication work before retiring this owner.
 func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected any) (func(pipeline.DynamicFlowRuntimeReadinessPlan) pipeline.DynamicFlowRuntimeActivationAttempt, func()) {
+	t.Helper()
+	return newTimerReplayAttachmentOwnerForSource(t, ctx, selected, authorActivityTestSourceArtifactFact)
+}
+
+func newTimerReplayAttachmentOwnerForSource(t *testing.T, ctx context.Context, selected any, fact correlation.SourceArtifactFact) (func(pipeline.DynamicFlowRuntimeReadinessPlan) pipeline.DynamicFlowRuntimeActivationAttempt, func()) {
 	t.Helper()
 	workflows := selected.(pipeline.DynamicFlowRuntimeReadinessPersistence)
 	process, err := selected.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
@@ -48,7 +54,7 @@ func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected a
 		})
 	}
 	t.Cleanup(closeOwner)
-	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}}, nil)
+	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fact.BundleHash()}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +70,7 @@ func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected a
 		t.Fatal(err)
 	}
 	grant, err := process.IssueGenerationGrant(ctx, startupownership.GrantRequest{
-		BundleHash: authorActivityTestSourceArtifactFact.BundleHash(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+		BundleHash: fact.BundleHash(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		RuntimeGeneration: 1, SourceSetRevision: set.Revision,
 	})
 	if err != nil {

@@ -29,6 +29,56 @@ import (
 
 type Dialect string
 
+func MakeManagerRetryEligibleTx(ctx context.Context, tx *sql.Tx, event events.Event, route events.DeliveryRoute) error {
+	if tx == nil {
+		return fmt.Errorf("manager retry cut requires the original selected transaction")
+	}
+	id, err := DeliveryID(event.ID(), route)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET next_eligible_at=$1 WHERE delivery_id=$2 AND event_id=$3 AND run_id=$4 AND status='failed'`, time.Now().UTC().Add(-time.Minute), id, event.ID(), event.RunID())
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil || count != 1 {
+		return fmt.Errorf("manager retry cut requires one exact failed delivery: count=%d,error=%v", count, err)
+	}
+	return nil
+}
+
+// This cut changes age, not lease authority or expiry. Settlement still has to
+// renew the exact original token before recording its outcome.
+func AgeManagerClaimStartedAtTx(ctx context.Context, tx *sql.Tx, claim Claim, startedAt time.Time) error {
+	if tx == nil {
+		return fmt.Errorf("manager age cut requires the original selected transaction")
+	}
+	if err := claim.Validate(); err != nil {
+		return err
+	}
+	if startedAt.IsZero() || !startedAt.Before(time.Now()) {
+		return fmt.Errorf("manager age cut requires a past nonzero timestamp")
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET created_at=$1,started_at=$1,updated_at=$1 WHERE delivery_id=$2 AND run_id=$3 AND claim_version=$4 AND status='in_progress'`, startedAt.UTC(), claim.DeliveryID(), claim.RunID(), claim.Version())
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil || count != 1 {
+		return fmt.Errorf("manager age cut requires one exact in-progress delivery: count=%d,error=%v", count, err)
+	}
+	result, err = tx.ExecContext(ctx, `UPDATE event_delivery_attempts SET started_at=$1 WHERE delivery_id=$2 AND claim_version=$3 AND claim_token=$4 AND open_marker=TRUE`, startedAt.UTC(), claim.DeliveryID(), claim.Version(), claim.PersistenceToken())
+	if err != nil {
+		return err
+	}
+	count, err = result.RowsAffected()
+	if err != nil || count != 1 {
+		return fmt.Errorf("manager age cut requires one matching open attempt: count=%d,error=%v", count, err)
+	}
+	return nil
+}
+
 const (
 	DialectPostgres Dialect = "postgres"
 	DialectSQLite   Dialect = "sqlite"

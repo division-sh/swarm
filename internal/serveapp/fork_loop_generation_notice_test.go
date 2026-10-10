@@ -41,7 +41,7 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 				"event_name": "work.requested", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "loop-notice-proof"}, "idempotency_key": "loop-notice-start",
 			})
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			waitForkReceiverSourceCompletion(t, rt, started.RunID)
 			var frontier string
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='review/review.requested'`, started.RunID).Scan(&frontier); err != nil {
@@ -60,7 +60,7 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 			if fork.SourceRunID != started.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == started.RunID || fork.ExecutedEventCount != 1 {
 				t.Fatalf("fork: %+v", fork)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 			child := readForkLoopActivation(t, rt, fork.ForkRunID)
 			expected, err := loopruntime.Fork(source, fork.ForkRunID, flowidentity.EntityID("review"))
 			if err != nil {

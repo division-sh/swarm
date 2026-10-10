@@ -82,7 +82,7 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			runID := uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
+			insertGateRecoveryRun(t, selected.events, runID)
 			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			repo := canonicalrouting.RepoRoot(t)
 			bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopySelectionRetry(t), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})

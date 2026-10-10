@@ -23,8 +23,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -85,6 +85,12 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 				if foreign.sourceTransition && index == 1 {
 					planSource = facts[0]
 				}
+				setup := runtimecorrelation.WithSourceArtifactFact(context.Background(), fact)
+				setup = runtimecorrelation.WithRunID(setup, runIDs[index])
+				setup = runtimeauthoractivity.WithScope(setup, runtimeauthoractivity.BundleScope("11111111-1111-1111-1111-111111111111", fact.BundleHash()))
+				storetest.RequireRun(t, setup, selected.RuntimeDeps().EventBusDurable.RunLifecycle.(storetest.RunFixtureStore), storetest.RunFixture{
+					Origin: storetest.ScenarioSetupOrigin(), RunID: runIDs[index], Artifact: artifacts[index],
+				})
 				seedServeDynamicTopologyReadiness(t, db, backend, fact, planSource, artifacts[index], runIDs[index], paths[index])
 			}
 			if foreign.malformed {
@@ -236,16 +242,6 @@ func seedServeDynamicTopologyReadiness(
 	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), source)
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, source.BundleHash()))
-	fixture := runlifecyclefixture.Fixture{
-		Origin:   runlifecyclefixture.ScenarioSetupOrigin(),
-		RunID:    runID,
-		Artifact: artifact,
-	}
-	if backend == "sqlite" {
-		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
-	} else {
-		runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
-	}
 	parts := strings.SplitN(instancePath, "/", 2)
 	if len(parts) != 2 {
 		t.Fatalf("invalid readiness instance path %q", instancePath)

@@ -3,13 +3,10 @@ package pipeline
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"reflect"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -186,46 +183,43 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
 
 type compiledAdapterFixture struct {
 	t                    *testing.T
-	db                   *sql.DB
+	native               *PipelineDeliveryNativeFixtureForTest
 	store                *workflowInstanceStore
 	pc                   *PipelineCoordinator
 	bundle               *contracts.WorkflowContractBundle
 	ctx                  context.Context
 	flow, path, entityID string
 	node                 identity.ExecutableNode
-	bus                  *recordingPipelineBus
+	bus                  *nativePipelineDeliveryBusObservationForTest
 }
 
-func newCompiledAdapterFixture(t *testing.T, backend string, bundle *contracts.WorkflowContractBundle, flow, stage string, seed bool) *compiledAdapterFixture {
+func newNativeCompiledAdapterFixture(t *testing.T, backend string, bundle *contracts.WorkflowContractBundle, flow, stage string, seed bool, open pipelineDeliveryNativeOpenerForTest) *compiledAdapterFixture {
 	t.Helper()
-	db, store := openHandlerEntityRequirementStore(t, backend)
-	bus := &recordingPipelineBus{}
-	pc := &PipelineCoordinator{
-		bus: bus, workflowStore: store, expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks: map[string]*sync.Mutex{}, module: &previewWorkflowModule{bundle: bundle},
+	native := open(t, backend, semanticview.Wrap(bundle))
+	module := &previewWorkflowModule{bundle: bundle}
+	nodes, err := LoadWorkflowNodes(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatal(err)
 	}
-	configureWorkflowLifecycleForTest(t, pc)
-	configurePipelineTestDeliveryOwner(t, pc)
-	var ctx context.Context
-	if backend == "sqlite" {
-		ctx = sqliteExactOnceRunContext(t, db)
-	} else {
-		ctx = testPipelineRunContext(t, db)
-	}
+	module.workflowNodes = nodes
+	pc, ctx := nativePipelineDeliveryCoordinatorForTest(t, native, module)
 	ctx = withLiveWorkflowInitialEntry(ctx)
-	runID := correlation.RunIDFromContext(ctx)
+	runID := uuid.NewString()
+	ctx = correlation.WithRunID(ctx, runID)
+	if err := native.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
 	path := runID
 	if flow != "." {
 		path = flow + "/" + uuid.NewString()
 	}
-	f := &compiledAdapterFixture{t: t, db: db, store: store, pc: pc, bundle: bundle, ctx: ctx, flow: flow, path: path, entityID: FlowInstanceEntityID(path), bus: bus}
+	f := &compiledAdapterFixture{t: t, native: native, store: pc.workflowStore, pc: pc, bundle: bundle, ctx: ctx, flow: flow, path: path, entityID: FlowInstanceEntityID(path), bus: observeNativePipelineDeliveryBusForTest(t, pc)}
 	f.node = pipelineSourceNode(t, pc.SemanticSource(), flow, "router")
 	if seed {
 		instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 			InstanceID: testWorkflowInstanceRoute(path).InstanceID, StorageRef: path, EntityID: f.entityID,
 			WorkflowName: flow, WorkflowVersion: pc.SemanticSource().WorkflowVersion(), EntityType: "test_entity",
-			CurrentState: stage, Fields: map[string]any{"marker": "unchanged"},
-			EnteredStageAt: time.Now().UTC().Add(-time.Minute),
+			CurrentState: stage, Fields: map[string]any{"marker": "unchanged"}, EnteredStageAt: time.Now().UTC().Add(-time.Minute),
 		})
 		if schema, found := pc.SemanticSource().FlowSchemaByID(flow); found && !schema.Instance.Empty() {
 			instance.Fields[schema.Instance.Path()] = instance.InstanceID
@@ -233,7 +227,7 @@ func newCompiledAdapterFixture(t *testing.T, backend string, bundle *contracts.W
 		if flow != "." {
 			instance.ParentFlowID, instance.ParentFlowInstance, instance.ParentEntityID = ".", runID, FlowInstanceEntityID(runID)
 		}
-		if err := store.upsert(ctx, instance); err != nil {
+		if err := native.Construct(ctx, instance); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -249,6 +243,15 @@ func (f *compiledAdapterFixture) load() (WorkflowInstance, bool) {
 	return instance, found
 }
 
+func (f *compiledAdapterFixture) persistedTimers(active bool) []WorkflowTimerActivation {
+	f.t.Helper()
+	rows, err := f.store.listPersistedWorkflowTimerActivations(f.ctx, correlation.RunIDFromContext(f.ctx), f.entityID, active)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return rows
+}
+
 func (f *compiledAdapterFixture) event(event string) events.Event {
 	return f.eventPayload(event, []byte("{}"))
 }
@@ -258,9 +261,8 @@ func (f *compiledAdapterFixture) eventPayload(event string, payload []byte) even
 	envelope := events.EnvelopeForTargetRoute(testWorkflowSourceEnvelope(f.flow, f.path, f.entityID), events.RouteIdentity{
 		FlowID: f.flow, FlowInstance: f.path, EntityID: f.entityID,
 	})
-	evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), events.EventType(event), "", "", payload, 0,
-		correlation.RunIDFromContext(f.ctx), "", envelope, testWorkflowRoutingSource(f.flow, f.path, f.entityID), time.Now().UTC())
-	seedExactOnceEvent(f.t, f.store, f.ctx, evt)
+	evt := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(event), "", "", payload, 0,
+		correlation.RunIDFromContext(f.ctx), envelope, testWorkflowRoutingSource(f.flow, f.path, f.entityID), time.Now().UTC())
 	return evt
 }
 
@@ -321,20 +323,13 @@ func (f *compiledAdapterFixture) executeAdmittedRecipient(event string, evt even
 		f.t.Fatalf("missing authored handler %s", event)
 	}
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(f.node), Target: target}
-	ctx, err := persistWorkflowJoinPublicationForTest(f.t, f.pc, f.ctx, evt, route, true)
-	if err != nil {
+	if err := f.native.PublishNode(f.ctx, evt, route); err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
-	result, err := executeClaimedWorkflowJoinForTest(f.t, f.pc, ctx, f.node, handler, workflowTriggerContext{
-		Event: evt, HandlerEventKey: event, State: f.state(),
-	})
-	if result.Committed {
-		err = errors.Join(err, f.pc.transferCommittedHandlerFollowUp(ctx, result.FollowUp, nil))
-	}
-	return result, err
+	return executeNativeClaimedPipelineHandlerForTest(f.t, f.pc, withWorkflowNodeDeliveryRoute(f.ctx, route), f.node, handler, workflowTriggerContext{Event: evt, HandlerEventKey: event, State: f.state()})
 }
 
-func TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores(t *testing.T) {
+func VerifyNativePipelineCompiledOrdinaryCarrierExecutionOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := compiledAdapterSource(t)
 	source := semanticview.Wrap(bundle)
 	graph, _ := semanticview.WorkflowStageTopology(source, ".")
@@ -342,7 +337,7 @@ func TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores(t *testing.T) {
 		for _, from := range []string{"ready", "working", "shared"} {
 			for _, event := range []string{"direct", "inherited", "rule", "complete"} {
 				t.Run(backend+"/"+from+"/"+event, func(t *testing.T) {
-					f := newCompiledAdapterFixture(t, backend, bundle, ".", from, true)
+					f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", from, true, open)
 					evt := f.event(event)
 					result, err := f.executeExistingRecipient(event, evt)
 					if err != nil {
@@ -397,27 +392,20 @@ func TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores(t *testing.T) {
 	}
 }
 
-func TestPipelineCompiledTransitionNoOpOnBothStores(t *testing.T) {
+func VerifyNativePipelineCompiledTransitionNoOpOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := compiledAdapterSource(t, true)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, event := range []string{"self", "write_only", "fallback", "emit_only"} {
 			t.Run(backend+"/"+event, func(t *testing.T) {
-				f := newCompiledAdapterFixture(t, backend, bundle, ".", "", false)
+				f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "", false, open)
 				{
-					// Seed only the unit fixture; selected-store constructor proof lives in runtimepersistence.
+					// Commit initial state and its lifecycle through the original owner.
 					preparedInstance, preparedLifecycle, err := f.pc.PrepareInitialEntryLifecycle(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, f.path), f.initialInstance("ready"), time.Now().UTC())
 					if err != nil {
 						t.Fatalf("prepare fixture lifecycle: %v", err)
 					}
-					if err := f.store.upsert(f.ctx, preparedInstance); err != nil {
-						t.Fatalf("seed fixture state: %v", err)
-					}
-					var committedLifecycle CommittedWorkflowLifecycleMutation
-					if err := f.store.runPipelineMutation(f.ctx, func(txctx context.Context) error {
-						var commitErr error
-						committedLifecycle, commitErr = commitPipelineTestWorkflowLifecycle(txctx, f.store, preparedLifecycle)
-						return commitErr
-					}); err != nil {
+					committedLifecycle, err := f.native.ConstructInitial(f.ctx, preparedInstance, preparedLifecycle)
+					if err != nil {
 						t.Fatalf("seed fixture lifecycle: %v", err)
 					}
 					if err := f.pc.FinalizeInitialEntryLifecycle(f.ctx, committedLifecycle); err != nil {
@@ -456,12 +444,12 @@ func TestPipelineCompiledTransitionNoOpOnBothStores(t *testing.T) {
 	}
 }
 
-func TestPipelineCompiledTransitionGuardDispositionOnBothStores(t *testing.T) {
+func VerifyNativePipelineCompiledTransitionGuardDispositionOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := compiledAdapterSource(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, event := range []string{"kill", "reject", "discard"} {
 			t.Run(backend+"/"+event, func(t *testing.T) {
-				f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
+				f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "ready", true, open)
 				before, _ := f.load()
 				evt := f.event(event)
 				result, err := f.executeExistingRecipient(event, evt)
@@ -493,7 +481,7 @@ func TestPipelineCompiledTransitionGuardDispositionOnBothStores(t *testing.T) {
 			})
 		}
 		t.Run(backend+"/child_kill", func(t *testing.T) {
-			f := newCompiledAdapterFixture(t, backend, bundle, "child", "ready", true)
+			f := newNativeCompiledAdapterFixture(t, backend, bundle, "child", "ready", true, open)
 			evt := f.event("kill")
 			result, err := f.executeExistingRecipient("kill", evt)
 			if err != nil {
@@ -514,7 +502,7 @@ func TestPipelineCompiledTransitionGuardDispositionOnBothStores(t *testing.T) {
 	}
 }
 
-func TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores(t *testing.T) {
+func VerifyNativeGuardKillUsesExactStageInEitherDeclarationOrderBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, tc := range []struct {
 			name, stages, wantStage string
@@ -525,7 +513,7 @@ func TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores(t *testing.T)
 		} {
 			t.Run(backend+"/"+tc.name, func(t *testing.T) {
 				bundle := compiledAdapterSourceWithKillStages(t, tc.stages)
-				f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
+				f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "ready", true, open)
 				evt := f.event("kill")
 				result, err := f.executeExistingRecipient("kill", evt)
 				if err != nil || result.Outcome == nil || result.Outcome.Status != HandlerOutcomeKilled {
@@ -546,7 +534,7 @@ func TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores(t *testing.T)
 	}
 }
 
-func TestPipelineCompiledTransitionStageGuardsOnBothStores(t *testing.T) {
+func VerifyNativePipelineCompiledTransitionStageGuardsOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := compiledAdapterSource(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, tc := range []struct {
@@ -557,7 +545,7 @@ func TestPipelineCompiledTransitionStageGuardsOnBothStores(t *testing.T) {
 			{"unknown", false, true}, {"foreign_only", false, true},
 		} {
 			t.Run(backend+"/"+tc.stage, func(t *testing.T) {
-				f := newCompiledAdapterFixture(t, backend, bundle, ".", tc.stage, true)
+				f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", tc.stage, true, open)
 				before, _ := f.load()
 				evt := f.event("direct")
 				var result contractHandlerExecutionResult
@@ -595,7 +583,7 @@ func TestPipelineCompiledTransitionStageGuardsOnBothStores(t *testing.T) {
 		}
 		for _, target := range []string{"unknown", "foreign_only", "Done"} {
 			t.Run(backend+"/target/"+target, func(t *testing.T) {
-				f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
+				f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "ready", true, open)
 				before, _ := f.load()
 				handler := f.pc.SemanticSource().ExecutableNodeEventHandlers(f.node)["direct"]
 				handler.AdvancesTo = target
@@ -613,7 +601,7 @@ func TestPipelineCompiledTransitionStageGuardsOnBothStores(t *testing.T) {
 		}
 		for _, stage := range []string{"unknown", "foreign_only"} {
 			t.Run(backend+"/no_advance/"+stage, func(t *testing.T) {
-				f := newCompiledAdapterFixture(t, backend, bundle, ".", stage, true)
+				f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", stage, true, open)
 				before, _ := f.load()
 				if _, err := f.execute("write_only", f.event("write_only")); err == nil {
 					t.Fatal("no-advance bypassed exact source-stage membership")
@@ -631,7 +619,7 @@ func TestPipelineCompiledTransitionStageGuardsOnBothStores(t *testing.T) {
 			{".", "ready", false}, {".", "Ready", true}, {".", "shared", false}, {"child", "shared", true},
 		} {
 			t.Run(backend+"/terminal_guard/"+tc.flow+"/"+tc.stage, func(t *testing.T) {
-				f := newCompiledAdapterFixture(t, backend, bundle, tc.flow, tc.stage, true)
+				f := newNativeCompiledAdapterFixture(t, backend, bundle, tc.flow, tc.stage, true, open)
 				state, err := handlerExecutionStateSnapshot(contracts.SystemNodeEventHandler{}, f.entityID, f.state(), tc.flow, f.pc.SemanticSource().WorkflowVersion())
 				if err != nil {
 					t.Fatal(err)
@@ -647,7 +635,7 @@ func TestPipelineCompiledTransitionStageGuardsOnBothStores(t *testing.T) {
 			})
 		}
 		t.Run(backend+"/phase_policy", func(t *testing.T) {
-			f := newCompiledAdapterFixture(t, backend, bundle, "child", "ready", true)
+			f := newNativeCompiledAdapterFixture(t, backend, bundle, "child", "ready", true, open)
 			state, err := handlerExecutionStateSnapshot(contracts.SystemNodeEventHandler{}, f.entityID, f.state(), "child", f.pc.SemanticSource().WorkflowVersion())
 			if err != nil {
 				t.Fatal(err)
@@ -665,19 +653,19 @@ func TestPipelineCompiledTransitionStageGuardsOnBothStores(t *testing.T) {
 	}
 }
 
-func TestTerminalReceiverClaimFailsClosedWithoutEngineMutationBothStores(t *testing.T) {
+func VerifyNativeTerminalReceiverClaimFailsClosedWithoutEngineMutationBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := compiledAdapterSource(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			f := newCompiledAdapterFixture(t, backend, bundle, ".", "Ready", true)
+			f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "Ready", true, open)
 			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"direct"}}}
 			evt := f.event("direct")
 			route := events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(f.node),
 				Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: f.path, EntityID: f.entityID}),
 			}
-			owner := f.pc.deliveryStore.(*pipelineTestDeliveryOwner)
-			if err := owner.commitInitial(f.ctx, evt, route); err != nil {
+			owner := f.native.Store
+			if err := f.native.PublishNode(f.ctx, evt, route); err != nil {
 				t.Fatal(err)
 			}
 			id, err := runtimedelivery.DeliveryID(evt.ID(), route)
@@ -714,19 +702,19 @@ func TestTerminalReceiverClaimFailsClosedWithoutEngineMutationBothStores(t *test
 	}
 }
 
-func TestCaseDistinctReadyReceiverClaimExecutesAndSettlesBothStores(t *testing.T) {
+func VerifyNativeCaseDistinctReadyReceiverClaimExecutesAndSettlesBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := compiledAdapterSource(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
+			f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "ready", true, open)
 			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"write_only"}}}
 			evt := f.event("write_only")
 			route := events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(f.node),
 				Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: f.path, EntityID: f.entityID}),
 			}
-			owner := f.pc.deliveryStore.(*pipelineTestDeliveryOwner)
-			if err := owner.commitInitial(f.ctx, evt, route); err != nil {
+			owner := f.native.Store
+			if err := f.native.PublishNode(f.ctx, evt, route); err != nil {
 				t.Fatal(err)
 			}
 			id, err := runtimedelivery.DeliveryID(evt.ID(), route)
@@ -756,20 +744,27 @@ func TestCaseDistinctReadyReceiverClaimExecutesAndSettlesBothStores(t *testing.T
 	}
 }
 
-func TestInactiveCompanionRefusesNonterminalClaimBothStores(t *testing.T) {
+func VerifyNativeInactiveCompanionRefusesNonterminalClaimBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := compiledAdapterSource(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, status := range []string{"draining", "terminated"} {
 			t.Run(backend+"/"+status, func(t *testing.T) {
-				f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
+				f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "ready", true, open)
 				f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"write_only"}}}
 				inactive, _ := f.load()
 				inactive.Status = status
 				if status == "terminated" {
 					inactive.TerminatedAt = time.Now().UTC()
 				}
-				if err := f.store.upsert(f.ctx, inactive); err != nil {
-					t.Fatalf("persist inactive companion: %v", err)
+				var changed int64
+				var err error
+				if status == "terminated" {
+					changed, err = f.native.Terminated(f.ctx, correlation.RunIDFromContext(f.ctx), f.path, inactive.TerminatedAt)
+				} else {
+					changed, err = f.native.Draining(f.ctx, correlation.RunIDFromContext(f.ctx), f.path)
+				}
+				if err != nil || changed != 1 {
+					t.Fatalf("persist exact inactive companion: %d/%v", changed, err)
 				}
 				before, _ := f.load()
 				evt := f.event("write_only")
@@ -777,8 +772,8 @@ func TestInactiveCompanionRefusesNonterminalClaimBothStores(t *testing.T) {
 					Recipient: events.MustNodeDeliveryRecipient(f.node),
 					Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: f.path, EntityID: f.entityID}),
 				}
-				owner := f.pc.deliveryStore.(*pipelineTestDeliveryOwner)
-				if err := owner.commitInitial(f.ctx, evt, route); err != nil {
+				owner := f.native.Store
+				if err := f.native.PublishNode(f.ctx, evt, route); err != nil {
 					t.Fatal(err)
 				}
 				id, err := runtimedelivery.DeliveryID(evt.ID(), route)
@@ -802,19 +797,19 @@ func TestInactiveCompanionRefusesNonterminalClaimBothStores(t *testing.T) {
 	}
 }
 
-func TestFallbackClaimSettlesWithoutBusinessTransitionBothStores(t *testing.T) {
+func VerifyNativeFallbackClaimSettlesWithoutBusinessTransitionBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := compiledAdapterSource(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			f := newCompiledAdapterFixture(t, backend, bundle, ".", "working", true)
+			f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "working", true, open)
 			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"fallback"}}}
 			evt := f.event("fallback")
 			route := events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(f.node),
 				Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: f.path, EntityID: f.entityID}),
 			}
-			owner := f.pc.deliveryStore.(*pipelineTestDeliveryOwner)
-			if err := owner.commitInitial(f.ctx, evt, route); err != nil {
+			owner := f.native.Store
+			if err := f.native.PublishNode(f.ctx, evt, route); err != nil {
 				t.Fatal(err)
 			}
 			id, err := runtimedelivery.DeliveryID(evt.ID(), route)
@@ -855,20 +850,20 @@ func TestFallbackClaimSettlesWithoutBusinessTransitionBothStores(t *testing.T) {
 	}
 }
 
-func TestGuardRefusalClaimSettlesWithoutBusinessTransitionBothStores(t *testing.T) {
+func VerifyNativeGuardRefusalClaimSettlesWithoutBusinessTransitionBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := compiledAdapterSource(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, event := range []string{"reject", "discard"} {
 			t.Run(backend+"/"+event, func(t *testing.T) {
-				f := newCompiledAdapterFixture(t, backend, bundle, ".", "working", true)
+				f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "working", true, open)
 				f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{events.EventType(event)}}}
 				evt := f.event(event)
 				route := events.DeliveryRoute{
 					Recipient: events.MustNodeDeliveryRecipient(f.node),
 					Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: f.path, EntityID: f.entityID}),
 				}
-				owner := f.pc.deliveryStore.(*pipelineTestDeliveryOwner)
-				if err := owner.commitInitial(f.ctx, evt, route); err != nil {
+				owner := f.native.Store
+				if err := f.native.PublishNode(f.ctx, evt, route); err != nil {
 					t.Fatal(err)
 				}
 				id, err := runtimedelivery.DeliveryID(evt.ID(), route)
@@ -906,11 +901,11 @@ func TestGuardRefusalClaimSettlesWithoutBusinessTransitionBothStores(t *testing.
 	}
 }
 
-func TestPipelineCompiledTransitionInitialAdmissionOnBothStores(t *testing.T) {
+func VerifyNativePipelineCompiledTransitionInitialAdmissionOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := compiledAdapterSource(t, true)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend+"/requires_constructed_header", func(t *testing.T) {
-			f := newCompiledAdapterFixture(t, backend, bundle, ".", "", false)
+			f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "", false, open)
 			evt := f.event("direct")
 			_, err := f.execute("direct", evt)
 			if err == nil {
@@ -923,14 +918,7 @@ func TestPipelineCompiledTransitionInitialAdmissionOnBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// Unit-fixture setup, not proof of the selected-store constructor.
-			if err := f.store.upsert(f.ctx, instance); err != nil {
-				t.Fatal(err)
-			}
-			if err := f.store.runPipelineMutation(f.ctx, func(txctx context.Context) error {
-				_, err := commitPipelineTestWorkflowLifecycle(txctx, f.store, lifecycle)
-				return err
-			}); err != nil {
+			if _, err := f.native.ConstructInitial(f.ctx, instance, lifecycle); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := f.execute("direct", evt); err != nil {
@@ -943,7 +931,7 @@ func TestPipelineCompiledTransitionInitialAdmissionOnBothStores(t *testing.T) {
 		})
 		for _, stage := range []string{"working", "foreign_only", "Ready", "pending", ""} {
 			t.Run(backend+"/invalid_initial/"+stage, func(t *testing.T) {
-				f := newCompiledAdapterFixture(t, backend, bundle, ".", "", false)
+				f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "", false, open)
 				at := time.Now().UTC()
 				instance := f.initialInstance(stage)
 				if _, _, err := f.pc.PrepareInitialEntryLifecycle(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, f.path), instance, at); err == nil {
@@ -955,7 +943,7 @@ func TestPipelineCompiledTransitionInitialAdmissionOnBothStores(t *testing.T) {
 			})
 		}
 		t.Run(backend+"/effect_disagrees_with_prepared_state", func(t *testing.T) {
-			f := newCompiledAdapterFixture(t, backend, bundle, ".", "", false)
+			f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "", false, open)
 			instance := f.initialInstance("ready")
 			effect, err := workflowlifecycle.NewInitialEntry(testWorkflowInstanceRoute(f.path), identity.NormalizeEntityID(f.entityID), "working", executionmode.Live, time.Now().UTC())
 			if err != nil {
@@ -975,7 +963,7 @@ func TestPipelineCompiledTransitionInitialAdmissionOnBothStores(t *testing.T) {
 				name, source, stage = "stateless", statelessCompiledAdapterSource(t), "pending"
 			}
 			t.Run(backend+"/deterministic_initial_preparation/"+name, func(t *testing.T) {
-				f := newCompiledAdapterFixture(t, backend, source, ".", "", false)
+				f := newNativeCompiledAdapterFixture(t, backend, source, ".", "", false, open)
 				at := time.Now().UTC()
 				instance := f.initialInstance(stage)
 				prepared, lifecycle, err := f.pc.PrepareInitialEntryLifecycle(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, f.path), instance, at)
@@ -985,13 +973,7 @@ func TestPipelineCompiledTransitionInitialAdmissionOnBothStores(t *testing.T) {
 				if _, found := f.load(); found {
 					t.Fatal("preparation persisted executable state")
 				}
-				if err := f.store.upsert(f.ctx, prepared); err != nil {
-					t.Fatal(err)
-				}
-				if err := f.store.runPipelineMutation(f.ctx, func(txctx context.Context) error {
-					_, err := commitPipelineTestWorkflowLifecycle(txctx, f.store, lifecycle)
-					return err
-				}); err != nil {
+				if _, err := f.native.ConstructInitial(f.ctx, prepared, lifecycle); err != nil {
 					t.Fatal(err)
 				}
 				before, found := f.load()
@@ -1143,12 +1125,12 @@ func requireGuardedPreviewEvidence(t *testing.T, f *compiledAdapterFixture, prev
 	}
 }
 
-func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
+func VerifyNativeCompiledTransitionPreviewExecutionAgreementOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := compiledAdapterSource(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, event := range []string{"direct", "inherited", "rule", "complete", "self", "fallback", "write_only", "emit_only", "guarded", "kill", "reject", "discard"} {
 			t.Run(backend+"/"+event, func(t *testing.T) {
-				f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
+				f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "ready", true, open)
 				evt := f.event(event)
 				before, _ := f.load()
 				preview, previewErr := PreviewContractHandlerExecution(f.ctx, bundle, f.node, evt, f.previewState(), nil)
@@ -1191,7 +1173,7 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 			})
 		}
 		t.Run(backend+"/template_qualified_selection", func(t *testing.T) {
-			f := newCompiledAdapterFixture(t, backend, bundle, "child", "ready", true)
+			f := newNativeCompiledAdapterFixture(t, backend, bundle, "child", "ready", true, open)
 			evt := f.event("guarded")
 			before, _ := f.load()
 			preview, err := PreviewContractHandlerExecution(f.ctx, bundle, f.node, evt, f.previewState(), nil)
@@ -1217,8 +1199,10 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 			}
 		})
 		t.Run(backend+"/initial", func(t *testing.T) {
-			f := newCompiledAdapterFixture(t, backend, bundle, ".", "", false)
-			seedConstructorUnitInstance(t, f.pc, f.ctx, ".")
+			f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "", false, open)
+			if err := f.native.Construct(f.ctx, constructedScenarioInstanceForTest(t, f.pc.SemanticSource(), f.ctx, ".")); err != nil {
+				t.Fatal(err)
+			}
 			evt := f.event("direct")
 			before, found := f.load()
 			if !found || before.CurrentState != "ready" || len(before.TransitionHistory) != 0 {
@@ -1242,7 +1226,7 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 			requireCompiledPreviewAgreement(t, f, evt, before, after, preview, result)
 		})
 		t.Run(backend+"/foreign_source", func(t *testing.T) {
-			f := newCompiledAdapterFixture(t, backend, bundle, ".", "foreign_only", true)
+			f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "foreign_only", true, open)
 			evt := f.event("direct")
 			before, _ := f.load()
 			if _, err := PreviewContractHandlerExecution(f.ctx, bundle, f.node, evt, f.previewState(), nil); err == nil {
@@ -1258,7 +1242,7 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 		})
 		for _, field := range []string{"flow", "entity", "route"} {
 			t.Run(backend+"/foreign_snapshot/"+field, func(t *testing.T) {
-				f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
+				f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "ready", true, open)
 				evt := f.event("direct")
 				before, _ := f.load()
 				snapshot := f.previewState()
@@ -1286,7 +1270,7 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 				"events.yaml":   "start:\nadmit:\n  revision_id: text\nrepeat:\n  revision_id: text\n",
 				"nodes.yaml":    "router:\n  execution_type: system_node\n  event_handlers:\n    start:\n      loop: {start: revision, from: ready}\n      advances_to: drafting\n    admit:\n      loop: {admit: revision, from: drafting}\n      advances_to: review\n    repeat:\n      loop: {repeat: revision, from: review}\n      advances_to: drafting\n",
 			})
-			f := newCompiledAdapterFixture(t, backend, loopBundle, ".", "ready", true)
+			f := newNativeCompiledAdapterFixture(t, backend, loopBundle, ".", "ready", true, open)
 			if _, err := f.executeExistingRecipient("start", f.event("start")); err != nil {
 				t.Fatal(err)
 			}

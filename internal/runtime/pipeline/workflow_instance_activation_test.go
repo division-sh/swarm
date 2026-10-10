@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -13,11 +12,10 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -30,11 +28,11 @@ func (o *workflowInitialMaterializationTestOwner) PrepareWorkflowLifecycleMutati
 	return PreparedWorkflowLifecycleMutation{Emissions: make([]runtimeengine.EmitIntent, o.emissions)}, nil
 }
 
-func TestWorkflowInitialLifecyclePreparationRejectsUnownedEmissions(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
+func VerifyWorkflowInitialLifecyclePreparationRejectsUnownedEmissionsForTest(t *testing.T, open func(*testing.T, string) WorkflowProjectionNativeFixtureForTest) {
+	fixture := open(t, testPipelineRunID)
+	store := fixture.Persistence.store
 	store.lifecycleOwner = &workflowInitialMaterializationTestOwner{emissions: 1}
-	ctx := withLiveWorkflowInitialEntry(sqliteExactOnceRunContext(t, db))
+	ctx := withLiveWorkflowInitialEntry(fixture.Context)
 	instance := WorkflowInstance{
 		InstanceID: "inst-1", StorageRef: "review/inst-1", WorkflowName: "review",
 		WorkflowVersion: "1.0.0", CurrentState: "pending",
@@ -46,7 +44,7 @@ func TestWorkflowInitialLifecyclePreparationRejectsUnownedEmissions(t *testing.T
 	} else if !strings.Contains(err.Error(), "lifecycle emissions outside its atomic commit") {
 		t.Fatalf("initial materialization error = %v", err)
 	}
-	if _, found, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef)); err != nil || found {
+	if _, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef)); err != nil || found {
 		t.Fatalf("rejected initial materialization persisted state: found=%v err=%v", found, err)
 	}
 }
@@ -66,33 +64,6 @@ func (*workflowInitialMaterializationTestOwner) ReconcileInitialEntryTimers(cont
 
 func (*workflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return nil
-}
-
-func transitionWorkflowActivationRunForTest(
-	t *testing.T,
-	store *workflowInstanceStore,
-	ctx context.Context,
-	runID string,
-	state runtimerunlifecycle.State,
-) {
-	t.Helper()
-	if store == nil || store.testRuntimeMutation() == nil {
-		t.Fatal("workflow activation run transition requires runtime mutation owner")
-	}
-	if err := store.testRuntimeMutation().RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		if state == runtimerunlifecycle.StateCancelled {
-			_, _, err := store.runLifecycle.MarkTerminalRun(txctx, runtimerunlifecycle.TerminalRequest{
-				RunID: runID, State: state, EndedAt: time.Now().UTC(),
-			})
-			return err
-		}
-		_, err := store.runLifecycle.TransitionActiveRun(txctx, runtimerunlifecycle.ActiveTransitionRequest{
-			RunID: runID, State: state,
-		})
-		return err
-	}); err != nil {
-		t.Fatalf("transition workflow activation run %s to %s: %v", runID, state, err)
-	}
 }
 
 func TestHandlerEmitEnvelope_KeepsLocalEntityAcrossOutputBoundaries(t *testing.T) {
@@ -189,11 +160,13 @@ pins:
 	}
 }
 
-func TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey(t *testing.T) {
-	source := loadWorkflowTempSource(t, map[string]string{
+func VerifyNativeTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKeyForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			source := loadWorkflowTempSource(t, map[string]string{
 
-		"operating/entities.yaml": "test_entity:\n  instance_key: text\n",
-		"operating/schema.yaml": `name: operating
+				"operating/entities.yaml": "test_entity:\n  instance_key: text\n",
+				"operating/schema.yaml": `name: operating
 instance: instance_key
 stages:
   initializing: {}
@@ -201,13 +174,13 @@ stages:
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"operating/events.yaml": `opco.product_initialization_requested:
+				"operating/events.yaml": `opco.product_initialization_requested:
   entity_id: string
   instance_key: text
 opco.ceo_ready:
   entity_id: string?
 `,
-		"operating/nodes.yaml": `lifecycle-orchestrator:
+				"operating/nodes.yaml": `lifecycle-orchestrator:
   execution_type: system_node
   subscribes_to: [opco.product_initialization_requested]
   produces: [opco.ceo_ready]
@@ -215,67 +188,63 @@ opco.ceo_ready:
     opco.product_initialization_requested:
       emit: opco.ceo_ready
 `,
-	})
-	entityID := FlowInstanceEntityID("operating/inst-1")
-	evt := handlerTestRootIngress(
-		uuid.NewString(),
-		events.EventType("opco.product_initialization_requested"),
-		"",
-		"",
-		mustJSON(map[string]any{"entity_id": entityID, "instance_key": "inst-1"}),
-		0,
-		testPipelineRunID,
-		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "operating/inst-1"),
-		time.Time{},
-	)
-	evt = eventtest.TargetRouted(evt, events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: "11111111-1111-1111-1111-111111111111"})
+			})
+			bundle, found := semanticview.Bundle(source)
+			if !found {
+				t.Fatal("template delivery requires its exact admitted source")
+			}
+			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+			bus := observeNativePipelineDeliveryBusForTest(t, pc)
+			entityID := "11111111-1111-1111-1111-111111111111"
+			target := events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: entityID}
+			evt := eventtest.ExistingRunRootIngress(uuid.NewString(), "opco.product_initialization_requested", "", "", mustJSON(map[string]any{"entity_id": entityID, "instance_key": "inst-1"}), 0,
+				runtimecorrelation.RunIDFromContext(ctx), events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
+			node := pipelineNode(t, "operating", "lifecycle-orchestrator")
+			resolved := workflowNodeEventHandlerResolutionForDelivery(source, node, evt)
+			if !resolved.Matched {
+				t.Fatal("expected exact local event to resolve to lifecycle-orchestrator handler")
+			}
+			if got := resolved.HandlerEventKey; got != "opco.product_initialization_requested" {
+				t.Fatalf("handler event key = %q, want opco.product_initialization_requested", got)
+			}
+			// The local-key resolver control is separate from durable publication,
+			// which must use the artifact's canonical declaration event name.
+			evt = eventtest.ExistingRunRootIngress(evt.ID(), "operating/opco.product_initialization_requested", "", "", evt.Payload(), 0,
+				evt.RunID(), evt.Envelope(), evt.CreatedAt())
+			if canonical := workflowNodeEventHandlerResolutionForDelivery(source, node, evt); !canonical.Matched || canonical.HandlerEventKey != resolved.HandlerEventKey {
+				t.Fatalf("canonical delivery lost its exact local handler key: %+v", canonical)
+			}
 
-	node := pipelineNode(t, "operating", "lifecycle-orchestrator")
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, node, evt)
-	if !resolved.Matched {
-		t.Fatal("expected exact local event to resolve to lifecycle-orchestrator handler")
-	}
-	if got := resolved.HandlerEventKey; got != "opco.product_initialization_requested" {
-		t.Fatalf("handler event key = %q, want opco.product_initialization_requested", got)
-	}
-
-	_, db, _ := testutil.StartPostgres(t)
-	bus := &recordingPipelineBus{}
-	pc := &PipelineCoordinator{
-		bus:            bus,
-		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
-		module:         staticSemanticWorkflowModule{source: source},
-	}
-	configurePipelineTestDeliveryOwner(t, pc)
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForSource(t, source, testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
-		InstanceID: "inst-1", StorageRef: "operating/inst-1", EntityID: "11111111-1111-1111-1111-111111111111",
-		WorkflowName: "operating", WorkflowVersion: "1.0.0", CurrentState: "initializing", Fields: map[string]any{"instance_key": "inst-1"},
-		EntityType: "test_entity",
-	})); err != nil {
-		t.Fatalf("seed exact selected template owner: %v", err)
-	}
-	route := seedPipelineNodeDeliveryAuthority(t, db, evt, pipelineNode(t, "operating", "lifecycle-orchestrator"))
-	handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), node, evt)
-	if err != nil {
-		t.Fatalf("executeNodeHandlerPlanResult: %v", err)
-	}
-	if !handled {
-		t.Fatal("executeNodeHandlerPlanResult handled = false, want true")
-	}
-	if got := bus.publishedCount(); got != 1 {
-		t.Fatalf("published count = %d, want 1", got)
-	}
-	if got := string(bus.publishedEvent(0).Type()); got != "operating/inst-1/opco.ceo_ready" {
-		t.Fatalf("published event type = %q, want operating/inst-1/opco.ceo_ready", got)
-	}
-	if got := bus.publishedEvent(0).RoutingSource().Route(); got != (events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: "11111111-1111-1111-1111-111111111111"}) {
-		t.Fatalf("keyed publication lost its exact constructed producer: %+v", got)
+			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
+				InstanceID: "inst-1", StorageRef: "operating/inst-1", EntityID: "11111111-1111-1111-1111-111111111111",
+				WorkflowName: "operating", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "initializing", Fields: map[string]any{"instance_key": "inst-1"},
+				EntityType: "test_entity",
+			})); err != nil {
+				t.Fatalf("seed exact selected template owner: %v", err)
+			}
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(target)}
+			if err := fixture.PublishNode(ctx, evt, route); err != nil {
+				t.Fatal(err)
+			}
+			handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(ctx, route), node, evt)
+			if err != nil {
+				t.Fatalf("executeNodeHandlerPlanResult: %v", err)
+			}
+			if !handled {
+				t.Fatal("executeNodeHandlerPlanResult handled = false, want true")
+			}
+			if got := bus.publishedCount(); got != 1 {
+				t.Fatalf("published count = %d, want 1", got)
+			}
+			if got := string(bus.publishedEvent(0).Type()); got != "operating/inst-1/opco.ceo_ready" {
+				t.Fatalf("published event type = %q, want operating/inst-1/opco.ceo_ready", got)
+			}
+			if got := bus.publishedEvent(0).RoutingSource().Route(); got != (events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: "11111111-1111-1111-1111-111111111111"}) {
+				t.Fatalf("keyed publication lost its exact constructed producer: %+v", got)
+			}
+		})
 	}
 }
-
 func loadWorkflowFixtureSource(t *testing.T, fixture string) semanticview.Source {
 	t.Helper()
 	return semanticview.Wrap(loadWorkflowFixtureBundle(t, fixture))

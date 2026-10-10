@@ -39,7 +39,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 )
 
 func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer(t *testing.T) {
@@ -331,14 +330,9 @@ func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContr
 	ctx := runtimecorrelation.WithSourceArtifactFact(runForkTestContext(t), loaded.SourceArtifactFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 	artifact := selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash())
-	fixture := runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute), Source: loaded.SourceArtifactFact, Artifact: artifact,
-	}
-	if f.sqlite == nil {
-		runlifecyclefixture.RequirePostgres(t, ctx, f.db.DB, fixture)
-	} else {
-		runlifecyclefixture.RequireSQLite(t, ctx, f.db.DB, fixture)
-	}
+	storetest.RequireRun(t, ctx, f.owner.ports.fork.(storetest.RunFixtureStore), storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: artifact,
+	})
 	payload, err := json.Marshal(map[string]any{"entity_id": entityID})
 	if err != nil {
 		t.Fatal(err)

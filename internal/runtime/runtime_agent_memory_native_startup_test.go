@@ -21,7 +21,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -50,9 +49,7 @@ func assertNativeRuntimeStartCarriesMemoryIdentity(t *testing.T, variant canonic
 		t.Run(backend, func(t *testing.T) {
 			var selected startupRecoveryOrderStore
 			if backend == "postgres" {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			} else {
 				selected = storetest.StartSQLiteRuntimeStore(t)
 			}

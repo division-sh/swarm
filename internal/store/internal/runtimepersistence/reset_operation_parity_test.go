@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -120,12 +119,7 @@ func TestResetQuiescenceReceiptCommitsWithRunCancellationBothStores(t *testing.T
 				}
 			})
 			runID := uuid.NewString()
-			fixture := runlifecyclefixture.Fixture{RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin()}
-			if backend == "sqlite" {
-				runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
-			} else {
-				runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
-			}
+			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{RunID: runID, Origin: semanticScenarioSetupRunOriginForTest()})
 			op, err := cap.AdmitResetOperation(ctx, destructivereset.Request{OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "quiescence", IncludeSourceArtifactsSet: true, RequestedAt: time.Now().UTC()})
 			if err != nil {
 				t.Fatal(err)
@@ -162,7 +156,7 @@ func TestResetQuiescenceReceiptCommitsWithRunCancellationBothStores(t *testing.T
 			if len(result.Runs) != 1 || result.Runs[0].PreviousStatus != "running" || result.Runs[0].Status != "cancelled" {
 				t.Fatalf("exact cancellation = %+v", result)
 			}
-			proveResetCleanupCommitAndReplay(t, ctx, cap, db, backend, committed)
+			proveResetCleanupCommitAndReplay(t, ctx, selected, cap, db, backend, committed)
 		})
 	}
 }
@@ -187,7 +181,7 @@ func installResetReceiptFault(t *testing.T, db *sql.DB, backend, phase string) f
 	}
 }
 
-func proveResetCleanupCommitAndReplay(t *testing.T, ctx context.Context, cap startupownership.ProcessCapability, db *sql.DB, backend string, op destructivereset.Operation) {
+func proveResetCleanupCommitAndReplay(t *testing.T, ctx context.Context, selected any, cap startupownership.ProcessCapability, db *sql.DB, backend string, op destructivereset.Operation) {
 	t.Helper()
 	req := destructivereset.CleanupRequest{OperationID: op.Request.OperationID, ActorTokenID: op.Request.ActorTokenID, RequestedAt: op.Request.RequestedAt, Result: *op.Plan, Quiescence: *op.Quiescence}
 	drop := installResetReceiptFault(t, db, backend, "cleanup_committed")
@@ -208,12 +202,7 @@ func proveResetCleanupCommitAndReplay(t *testing.T, ctx context.Context, cap sta
 		t.Fatalf("cleanup receipt = %+v, %v", committed, err)
 	}
 	laterRun := uuid.NewString()
-	fixture := runlifecyclefixture.Fixture{RunID: laterRun, Origin: runlifecyclefixture.ScenarioSetupOrigin()}
-	if backend == "sqlite" {
-		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
-	} else {
-		runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
-	}
+	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{RunID: laterRun, Origin: semanticScenarioSetupRunOriginForTest()})
 	replay, err := cap.ApplyDestructiveResetCleanup(ctx, req, nil)
 	if err != nil || !reflect.DeepEqual(replay, result) {
 		t.Fatalf("cleanup replay = %+v, %v", replay, err)

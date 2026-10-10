@@ -10,7 +10,6 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -28,10 +27,7 @@ func TestSourceRevisionFixtureUsesExactSelectedOwner(t *testing.T) {
 		open func(*testing.T) sourceRevisionProofStore
 	}{
 		{"sqlite", func(t *testing.T) sourceRevisionProofStore { return StartSQLiteRuntimeStore(t) }},
-		{"postgres", func(t *testing.T) sourceRevisionProofStore {
-			_, db, _ := testutil.StartPostgres(t)
-			return AdmitPostgresRuntimeStore(t, db)
-		}},
+		{"postgres", func(t *testing.T) sourceRevisionProofStore { return StartPostgresRuntimeStore(t) }},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)

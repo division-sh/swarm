@@ -9,13 +9,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	bus, err := newScopedAPITestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -50,7 +47,7 @@ func TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency(t *testing.
 	} else if state.Status != runtimeingress.StatusPaused {
 		t.Fatalf("runtime ingress status = %q, want paused", state.Status)
 	}
-	if count := countEventsByName(t, db, "platform.paused"); count != 1 {
+	if count := countEventsByName(t, pg, "platform.paused"); count != 1 {
 		t.Fatalf("platform.paused events = %d, want 1", count)
 	}
 
@@ -58,7 +55,7 @@ func TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency(t *testing.
 	if replay.Error != nil {
 		t.Fatalf("runtime.pause replay error = %#v", replay.Error)
 	}
-	if count := countEventsByName(t, db, "platform.paused"); count != 1 {
+	if count := countEventsByName(t, pg, "platform.paused"); count != 1 {
 		t.Fatalf("platform.paused events after replay = %d, want 1", count)
 	}
 
@@ -83,7 +80,7 @@ func TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency(t *testing.
 	} else if state.Status != runtimeingress.StatusRunning {
 		t.Fatalf("runtime ingress status = %q, want running", state.Status)
 	}
-	if count := countEventsByName(t, db, "platform.resumed"); count != 1 {
+	if count := countEventsByName(t, pg, "platform.resumed"); count != 1 {
 		t.Fatalf("platform.resumed events = %d, want 1", count)
 	}
 
@@ -91,7 +88,7 @@ func TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency(t *testing.
 	if resumeReplay.Error != nil {
 		t.Fatalf("runtime.resume replay error = %#v", resumeReplay.Error)
 	}
-	if count := countEventsByName(t, db, "platform.resumed"); count != 1 {
+	if count := countEventsByName(t, pg, "platform.resumed"); count != 1 {
 		t.Fatalf("platform.resumed events after replay = %d, want 1", count)
 	}
 

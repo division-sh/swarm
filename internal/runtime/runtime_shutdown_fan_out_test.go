@@ -20,8 +20,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
 type shutdownFanOutSession struct{ *runtimeTestRetainedSession }
@@ -101,13 +99,14 @@ func assertShutdownFanOutPending(t *testing.T, shutdown <-chan error) {
 	}
 }
 
-func TestRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLive(t *testing.T) {
+func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	ctx := testAuthorActivityContext(context.Background())
-	store := newRuntimeShutdownDeliveryStore(t)
+	store, fixture := newRuntimeShutdownDeliveryStore(t, open)
 	bus, err := newRuntimeTestEventBus(t, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	activateRuntimeShutdownDelivery(t, store, bus, fixture.Context)
 	rt := &Runtime{Bus: bus, workOccurrence: runtimeTestEventBusRuntimeOccurrence(t, bus)}
 	registration := newShutdownFanOutRegistration(t, rt)
 	grant := rt.startupGrant
@@ -142,8 +141,12 @@ func TestRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = rt.Manager.Shutdown() })
-	if err := bus.Publish(ctx, eventtest.ExistingRunRootIngress(eventtest.UUID("fan-out-shutdown-manager"),
-		"test.in", "tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())); err != nil {
+	managerEvent := eventtest.ExistingRunRootIngress(eventtest.UUID("fan-out-shutdown-manager"),
+		"test.in", "tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())
+	managerEvent = fixture.PublishDelivery(fixture.Context, managerEvent, []events.DeliveryRoute{{
+		Recipient: events.MustAgentDeliveryRecipient(agent.id), AgentIdentity: agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission"),
+	}}, store.authority)
+	if err := bus.Publish(ctx, managerEvent); err != nil {
 		t.Fatal(err)
 	}
 	awaitShutdownFanOut(t, started, "manager handler")
@@ -201,17 +204,12 @@ func TestRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLive(t *testing.T) {
 		"test.in", "tester", "", nil, 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agent.id),
 		AgentIdentity: agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission")}
-	var proofs []deliverylifecycle.DurableHandoffProof
-	if err := store.mutate(permit.Context(), func(ctx context.Context, attempt *eventfixture.Attempt) error {
-		if err := eventfixture.Insert(ctx, attempt, authoractivityfixture.DialectSQLite, event); err != nil {
-			return err
-		}
-		var err error
-		proofs, err = store.adapter.CommitInitial(ctx, attempt, event.ID(), event.RunID(), []events.DeliveryRoute{route}, store.authority)
-		return err
-	}); err != nil {
+	event = fixture.PublishDelivery(permit.Context(), event, []events.DeliveryRoute{route}, store.authority)
+	proof, err := store.ProveHandoff(permit.Context(), event.ID(), route)
+	if err != nil {
 		t.Fatal(err)
 	}
+	proofs := []deliverylifecycle.DurableHandoffProof{proof}
 	if len(proofs) != 1 || proofs[0].EventID() != event.ID() {
 		t.Fatalf("missing exact native-commit handoff proof: %+v", proofs)
 	}

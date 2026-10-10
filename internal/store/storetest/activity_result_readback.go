@@ -10,6 +10,12 @@ import (
 
 type ActivityResultPublicationStorage = private.ActivityResultPublicationStorage
 
+type ProposedEffectRunExecutionStorage = private.ProposedEffectRunExecutionStorage
+
+func ReadProposedEffectRunExecutionStorage(ctx context.Context, selected any, runID string) (ProposedEffectRunExecutionStorage, error) {
+	return private.ReadProposedEffectRunExecutionStorageForTest(ctx, selected, runID)
+}
+
 type ActivityAttemptStorageEvidence = private.ActivityAttemptStorageEvidence
 
 func ReadActivityAttemptStorage(ctx context.Context, selected any, run string) ([]ActivityAttemptStorageEvidence, error) {

@@ -13,7 +13,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -36,10 +35,7 @@ func TestScopedFlowDescriptorAndTargetReadsBothStores(t *testing.T) {
 				db, _ = postgresRouteStatementFixture(t, 0, false)
 				runID = postgresStatementRunID
 			} else {
-				db, _ = sqliteRouteStatementFixture(t, 0)
-				runlifecyclefixture.RequireSQLite(t, context.Background(), db, runlifecyclefixture.Fixture{
-					RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-				})
+				db, _ = sqliteRouteStatementFixture(t, 0, runID)
 			}
 			ctx := context.Background()
 			createScopedReadFixture(t, db, postgres, runID)
@@ -155,10 +151,7 @@ func TestKeyedFlowDescriptorCandidatesBothStores(t *testing.T) {
 				db, _ = postgresRouteStatementFixture(t, 0, false)
 				runID = postgresStatementRunID
 			} else {
-				db, _ = sqliteRouteStatementFixture(t, 0)
-				runlifecyclefixture.RequireSQLite(t, context.Background(), db, runlifecyclefixture.Fixture{
-					RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-				})
+				db, _ = sqliteRouteStatementFixture(t, 0, runID)
 			}
 			ctx := context.Background()
 			createScopedReadFixture(t, db, postgres, runID)

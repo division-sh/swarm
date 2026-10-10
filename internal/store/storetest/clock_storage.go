@@ -2,11 +2,16 @@ package storetest
 
 import (
 	"context"
+	"time"
 
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
 
 type ClockStorageObservation = private.ClockStorageObservation
+
+func ReadPostgresObservationTime(ctx context.Context, selected any) (time.Time, error) {
+	return private.ReadPostgresObservationTimeForTest(ctx, selected)
+}
 
 func CountInstanceClockActivations(ctx context.Context, selected any) (int, error) {
 	return private.CountInstanceClockActivationsForTest(ctx, selected)

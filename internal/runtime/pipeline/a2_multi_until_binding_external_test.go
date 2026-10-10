@@ -37,7 +37,7 @@ func TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores(t *testin
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			runID, key := uuid.NewString(), uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
+			insertGateRecoveryRun(t, selected.events, runID)
 			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, canonicalrouting.ArrivalJoinRoutingFiles(t, canonicalrouting.ArrivalJoinMultiUntil)))
 			worker := externalPipelineSourceNode(t, source, ".", "worker")

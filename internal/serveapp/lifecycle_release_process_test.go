@@ -47,7 +47,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					var decision map[string]any
 					requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decision)
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
-					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 					if len(history) != 1 || history[0].From != "approved" || history[0].To != "done" {
 						t.Fatalf("nested gate history: %+v", history)
@@ -107,7 +107,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 				if receiver == entityID {
 					t.Fatal("connected receiver borrowed the producer entity")
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 				if len(history) != 1 {
 					t.Fatalf("loop transition history: %+v", history)
@@ -162,7 +162,7 @@ func startLifecycleReleaseProcess(t *testing.T, binary string, backend servedpar
 			t.Errorf("close release inspection: %v", err)
 		}
 	})
-	return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: backendName, BundleHash: servedEventPublishFixtureBundleHash(t, root), ReceiverStateReader: requireReceiverProofStateReader(t, observer)}
+	return servedControlProofRuntime{ReadRunDeliveries: servedInspectionDeliveryReader(t, observer), Endpoint: endpoint, DB: db, Backend: backendName, BundleHash: servedEventPublishFixtureBundleHash(t, root), ReceiverStateReader: requireReceiverProofStateReader(t, observer)}
 }
 
 // Public-boundary proofs receive no authority to inspect the server's store.

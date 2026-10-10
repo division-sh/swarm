@@ -65,7 +65,7 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			runID, key := uuid.NewString(), uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
+			insertGateRecoveryRun(t, selected.events, runID)
 			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			variant := canonicalrouting.ArrivalJoinBoundReply
 			if siblingFlow == "observer" {

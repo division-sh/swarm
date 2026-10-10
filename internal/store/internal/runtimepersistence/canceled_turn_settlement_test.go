@@ -128,7 +128,7 @@ func proveCanceledDeliveryFanOutFold(t *testing.T, ctx context.Context, selected
 	fixture := seedFanOutOwnerChildFixture(t, ctx, selected.db, completion.store, selected.postgres, parent, 1, at)
 	handle := seedFanOutDeliveryBarrier(t, ctx, selected.db, fixture, at)
 	seedFanOutBarrierOutcomes(t, ctx, selected.db, fixture, []string{snapshot.EventID}, false, at)
-	advanceFanOutBarriersForTest(t, ctx, completion.store.(storeTestDurableEventBusStore), selected.db, fixture.runID, at.Add(time.Second))
+	advanceFanOutBarriersForTest(t, ctx, completion.store.(storeTestDurableEventBusStore), fixture.runID, at.Add(time.Second))
 	want := fanoutbarrier.Summary{Total: 1, Canceled: 1}
 	assertFanOutBarrierState(t, ctx, selected.db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusClosedPending, &want, handle.TaskID())
 }

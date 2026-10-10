@@ -52,7 +52,7 @@ func TestA2UntilAndFinalArrivalHaveOneDurableCloseWinnerOnBothStores(t *testing.
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			runID := uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
+			insertGateRecoveryRun(t, selected.events, runID)
 			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, a2CountJoinFiles(2)))
 			node := externalPipelineSourceNode(t, source, ".", "collector")

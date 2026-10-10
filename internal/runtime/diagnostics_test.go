@@ -2,117 +2,73 @@ package runtime
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/testutil"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
-type runtimeLogPersistenceStub struct {
-	db      *sql.DB
-	capture *runtimeLogPersistenceCapture
-}
-
 type runtimeLogPersistenceCapture struct {
-	records []RuntimeLogPersistenceRecord
-	err     error
+	records         []RuntimeLogPersistenceRecord
+	err             error
+	lineageErr      error
+	lineageRequests [][3]string
 }
 
-func (s runtimeLogPersistenceStub) RuntimeLogLineageParentEventID(ctx context.Context, runID, explicitParentEventID, subjectEventID string) (string, error) {
-	explicitParentEventID = strings.TrimSpace(explicitParentEventID)
-	if explicitParentEventID != "" {
-		return explicitParentEventID, nil
-	}
-	runID = strings.TrimSpace(runID)
-	subjectEventID = strings.TrimSpace(subjectEventID)
-	if s.db == nil || runID == "" || subjectEventID == "" {
-		return "", nil
-	}
-	if _, err := uuid.Parse(runID); err != nil {
-		return "", err
-	}
-	if _, err := uuid.Parse(subjectEventID); err != nil {
-		return "", nil
-	}
-	var exists bool
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM events
-			WHERE run_id = $1::uuid
-			  AND event_id = $2::uuid
-		)
-	`, runID, subjectEventID).Scan(&exists); err != nil {
-		return "", err
-	}
-	if !exists {
-		return "", nil
-	}
-	return subjectEventID, nil
+func (c *runtimeLogPersistenceCapture) PersistRuntimeLog(_ context.Context, record RuntimeLogPersistenceRecord) error {
+	c.records = append(c.records, record)
+	return c.err
 }
 
-func (s runtimeLogPersistenceStub) PersistLifecycleDiagnostic(context.Context, diaglog.LifecycleDiagnostic, RuntimeLogPersistenceRecord) (bool, error) {
+func (c *runtimeLogPersistenceCapture) RuntimeLogLineageParentEventID(_ context.Context, runID, explicitParentEventID, subjectEventID string) (string, error) {
+	c.lineageRequests = append(c.lineageRequests, [3]string{runID, explicitParentEventID, subjectEventID})
+	if c.lineageErr != nil {
+		return "", c.lineageErr
+	}
+	return strings.TrimSpace(explicitParentEventID), nil
+}
+
+func (*runtimeLogPersistenceCapture) PersistLifecycleDiagnostic(context.Context, diaglog.LifecycleDiagnostic, RuntimeLogPersistenceRecord) (bool, error) {
 	return false, fmt.Errorf("lifecycle diagnostic persistence is not configured")
 }
 
-func (s runtimeLogPersistenceStub) PersistRuntimeLog(ctx context.Context, record RuntimeLogPersistenceRecord) error {
-	if s.capture != nil {
-		s.capture.records = append(s.capture.records, record)
-		return s.capture.err
+func TestRuntimeLogCaptureRetainsExactFactsWithoutInventingDurability(t *testing.T) {
+	capture := &runtimeLogPersistenceCapture{}
+	record := RuntimeLogPersistenceRecord{
+		EventID: uuid.NewString(), CreatedAt: time.Unix(123, 456).UTC(), RunID: uuid.NewString(),
+		ParentEventID: uuid.NewString(), Payload: []byte(`{"message":"exact unit record"}`), ExecutionMode: executionmode.Live,
 	}
-	if s.db == nil {
-		return nil
+	if err := capture.PersistRuntimeLog(context.Background(), record); err != nil || len(capture.records) != 1 || !reflect.DeepEqual(capture.records[0], record) {
+		t.Fatalf("capture replaced typed record facts: records=%+v err=%v", capture.records, err)
 	}
-	constructed := eventtest.InExecutionMode(eventtest.DiagnosticDirect(
-		"", events.EventTypePlatformRuntimeLog, "runtime", "", record.Payload, 0,
-		strings.TrimSpace(record.RunID), strings.TrimSpace(record.ParentEventID),
-		events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Time{},
-	), record.ExecutionMode)
-	runID := strings.TrimSpace(record.RunID)
-	if runID == "" {
-		return eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectPostgres, func(ctx context.Context, attempt *eventfixture.Attempt) error {
-			return eventfixture.Insert(ctx, attempt, authoractivityfixture.DialectPostgres, constructed)
-		}).Err()
+	subject := uuid.NewString()
+	if parent, err := capture.RuntimeLogLineageParentEventID(context.Background(), record.RunID, "", subject); err != nil || parent != "" {
+		t.Fatalf("capture invented persisted subject lineage: %q/%v", parent, err)
 	}
-	return runRuntimeLogStoryForTest(ctx, s.db, func(storyctx context.Context, attempt *eventfixture.Attempt) error {
-		if err := attempt.WithSQL(storyctx, func(ctx context.Context, tx *sql.Tx) error {
-			return ensureRuntimeLogRunRowInStoryForTest(ctx, tx, runID)
-		}); err != nil {
-			return err
-		}
-		if err := eventfixture.Insert(storyctx, attempt, authoractivityfixture.DialectPostgres, constructed); err != nil {
-			return err
-		}
-		return attempt.WithSQL(storyctx, func(ctx context.Context, tx *sql.Tx) error {
-			return nil
-		})
-	})
+	if parent, err := capture.RuntimeLogLineageParentEventID(context.Background(), record.RunID, record.ParentEventID, subject); err != nil || parent != record.ParentEventID {
+		t.Fatalf("capture lost supplied explicit lineage fact: %q/%v", parent, err)
+	}
 }
 
-func newTestRuntimeLogger(db *sql.DB, stub runtimeLogPersistenceStub) *RuntimeLogger {
-	stub.db = db
-	return NewRuntimeLogger(stub, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+func newTestRuntimeLogger(persistence RuntimeLogPersistence) *RuntimeLogger {
+	return NewRuntimeLogger(persistence, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
 		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 	})
 }
@@ -133,7 +89,7 @@ func assertCapturedRuntimeLog(t testing.TB, capture *runtimeLogPersistenceCaptur
 
 func TestRuntimeLoggerPersistsNormalizedAdmissionBytes(t *testing.T) {
 	capture := &runtimeLogPersistenceCapture{}
-	logger := NewRuntimeLogger(runtimeLogPersistenceStub{capture: capture}, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	logger := NewRuntimeLogger(capture, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
 		var payload map[string]any
 		if err := json.Unmarshal(event.Payload(), &payload); err != nil {
 			return events.PayloadAdmission{}, err
@@ -174,7 +130,7 @@ func TestRuntimeLoggerPersistsNormalizedAdmissionBytes(t *testing.T) {
 
 func TestRuntimeLoggerOmitsAbsentNestedDetailFieldsBeforeAdmission(t *testing.T) {
 	capture := &runtimeLogPersistenceCapture{}
-	logger := NewRuntimeLogger(runtimeLogPersistenceStub{capture: capture}, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	logger := NewRuntimeLogger(capture, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
 		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 	})
 	if err := logger.Log(context.Background(), RuntimeLogEntry{
@@ -205,7 +161,7 @@ func TestRuntimeLoggerOmitsAbsentNestedDetailFieldsBeforeAdmission(t *testing.T)
 
 func TestRuntimeLoggerRejectsNullDetailListElements(t *testing.T) {
 	capture := &runtimeLogPersistenceCapture{}
-	logger := NewRuntimeLogger(runtimeLogPersistenceStub{capture: capture}, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	logger := NewRuntimeLogger(capture, executionposture.Live, func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
 		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 	})
 	err := logger.Log(context.Background(), RuntimeLogEntry{
@@ -228,12 +184,6 @@ func TestCanonicalRuntimeLogDecoderRejectsNestedNullDetailListElements(t *testin
 }
 
 func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
 	capture := &runtimeLogPersistenceCapture{}
 	wantPersisted := runtimeLogPayloadArg{
 		level:        "warn",
@@ -255,7 +205,7 @@ func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
 		},
 	}
 
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
+	logger := newTestRuntimeLogger(capture)
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(testAuthorActivityContext(context.Background()), recorder)
 	failure := runtimefailures.Normalize(runtimefailures.New(
@@ -329,18 +279,9 @@ func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
 	if !ok || detail["code"] != "cross_flow_write_forbidden" {
 		t.Fatalf("details.failure.detail = %#v", failureMap["detail"])
 	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("ExpectationsWereMet() error = %v", err)
-	}
 }
 
 func TestRuntimeLogger_Log_AppendsCanonicalFlightRecorderDefaults(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
 	capture := &runtimeLogPersistenceCapture{}
 	wantPersisted := runtimeLogPayloadArg{
 		level:     "warn",
@@ -350,7 +291,7 @@ func TestRuntimeLogger_Log_AppendsCanonicalFlightRecorderDefaults(t *testing.T) 
 		eventType: "diagnostic/actual",
 	}
 
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
+	logger := newTestRuntimeLogger(capture)
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(testAuthorActivityContext(context.Background()), recorder)
 
@@ -398,18 +339,9 @@ func TestRuntimeLogger_Log_AppendsCanonicalFlightRecorderDefaults(t *testing.T) 
 	if details["event_type"] != "diagnostic/actual" {
 		t.Fatalf("details.event_type = %#v, want diagnostic/actual", details["event_type"])
 	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("ExpectationsWereMet() error = %v", err)
-	}
 }
 
 func TestRuntimeLogger_Log_PersistsRuntimeLogPayloadViaCapabilityOwner(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
 	capture := &runtimeLogPersistenceCapture{}
 	wantPersisted := runtimeLogPayloadArg{
 		level:        "warn",
@@ -431,7 +363,7 @@ func TestRuntimeLogger_Log_PersistsRuntimeLogPayloadViaCapabilityOwner(t *testin
 		},
 	}
 
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
+	logger := newTestRuntimeLogger(capture)
 	failure := runtimefailures.Normalize(runtimefailures.New(
 		runtimefailures.ClassAuthorizationDenied,
 		"cross_flow_write_forbidden",
@@ -460,25 +392,16 @@ func TestRuntimeLogger_Log_PersistsRuntimeLogPayloadViaCapabilityOwner(t *testin
 		t.Fatalf("logger.Log() error = %v", err)
 	}
 	assertCapturedRuntimeLog(t, capture, wantPersisted, "", "")
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("ExpectationsWereMet() error = %v", err)
-	}
 }
 
 func TestRuntimeLogger_Log_PassesRunScopeToPersistenceOwner(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
 	const runID = "8d4891f8-0f8e-4c85-b34b-9e0e7f4327dd"
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(testAuthorActivityContext(context.Background()), recorder)
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 
 	capture := &runtimeLogPersistenceCapture{}
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
+	logger := newTestRuntimeLogger(capture)
 	if err := logger.Log(ctx, RuntimeLogEntry{
 		Level:     "error",
 		Message:   "runtime log",
@@ -491,9 +414,6 @@ func TestRuntimeLogger_Log_PassesRunScopeToPersistenceOwner(t *testing.T) {
 		level: "error", message: "runtime log", component: "workflow-runtime", action: "handler_error",
 		detail: map[string]any{"run_id": runID},
 	}, runID, "")
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("ExpectationsWereMet() error = %v", err)
-	}
 	entries := recorder.SnapshotFlightRecorder()
 	if len(entries) != 1 {
 		t.Fatalf("flight recorder count = %d, want 1", len(entries))
@@ -507,14 +427,15 @@ func TestRuntimeLogger_Log_PassesRunScopeToPersistenceOwner(t *testing.T) {
 	}
 }
 
-func TestRuntimeLogger_Log_StampsSourceArtifactFactOnRunRow(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
+func VerifyRuntimeLogger_Log_StampsSourceArtifactFactOnRunRowForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
+	artifact := admittedRuntimeLogSourceArtifactForTest(t)
+	fixture := open(t, artifact)
+	logger := newTestRuntimeLogger(fixture.Persistence)
 	runID := uuid.NewString()
-	sourceFact := testPersistedSourceArtifactFact(t, seedRuntimeLogSourceArtifact(t, db))
+	sourceFact := testPersistedSourceArtifactFact(t, artifact.BundleHash())
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(testAuthorActivityContext(context.Background()), sourceFact.BundleHash()), runID)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
+	before := requireNativeRuntimeLogRunForTest(t, fixture, ctx, runID)
 
 	if err := logger.Log(ctx, RuntimeLogEntry{
 		Level:     "info",
@@ -524,60 +445,47 @@ func TestRuntimeLogger_Log_StampsSourceArtifactFactOnRunRow(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("logger.Log: %v", err)
 	}
-	var gotHash string
-	if err := db.QueryRow(`
-		SELECT bundle_hash
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, runID).Scan(&gotHash); err != nil {
+	stored, err := fixture.RunSnapshot(ctx, runID)
+	if err != nil {
 		t.Fatalf("load run source artifact: %v", err)
 	}
+	gotHash := stored.BundleHash
 	if gotHash != sourceFact.BundleHash() {
 		t.Fatalf("run source artifact hash = %q, want %q", gotHash, sourceFact.BundleHash())
 	}
+	requireNativeRuntimeLogRunPreservedForTest(t, fixture, ctx, before)
 }
 
-func TestRuntimeLogger_LogRejectsDeletedPersistedSourceArtifactFact(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
+func VerifyRuntimeLogSetupRejectsDeletedPersistedSourceArtifactFactForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
+	artifact := admittedRuntimeLogSourceArtifactForTest(t)
+	fixture := open(t, artifact)
 	runID := uuid.NewString()
-	sourceFact := testPersistedSourceArtifactFact(t, seedRuntimeLogSourceArtifact(t, db))
-	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `DELETE FROM source_artifacts WHERE bundle_hash = $1`, sourceFact.BundleHash()); err != nil {
+	sourceFact := testPersistedSourceArtifactFact(t, artifact.BundleHash())
+	if removed, err := fixture.RemoveArtifact(fixture.Context, sourceFact.BundleHash()); err != nil || removed != 1 {
 		t.Fatalf("delete source artifact row: %v", err)
 	}
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(testAuthorActivityContext(context.Background()), sourceFact.BundleHash()), runID)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 
-	err := logger.Log(ctx, RuntimeLogEntry{
-		Level:     "info",
-		Message:   "runtime log",
-		Component: "workflow-runtime",
-		Action:    "source_artifact_missing",
-	})
+	before := fixture.Physical(ctx)
+	_, err := fixture.Runs.CreateRun(ctx, storerunlifecycle.CreateRequest{RunID: runID, Source: sourceFact, Origin: storerunlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC()})
 	if !errors.Is(err, storerunlifecycle.ErrSourceArtifactUnavailable) {
-		t.Fatalf("logger.Log error = %v, want ErrSourceArtifactUnavailable", err)
+		t.Fatalf("run setup error = %v, want ErrSourceArtifactUnavailable", err)
 	}
-	assertRunRowExists(t, db, runID, false)
-	if count := countRuntimeLogRowsForRun(t, db, runID); count != 0 {
-		t.Fatalf("runtime log rows for %s = %d, want 0", runID, count)
+	assertRunRowExists(t, fixture, ctx, runID, false)
+	if counts := fixture.Physical(ctx); counts != before || counts.Events != 0 {
+		t.Fatalf("source-refused setup changed physical storage: before=%+v after=%+v", before, counts)
 	}
 }
 
 func TestRuntimeLogger_Log_ReturnsPersistenceFailure(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
 	writeErr := errors.New("insert failed")
 	capture := &runtimeLogPersistenceCapture{err: writeErr}
 
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(testAuthorActivityContext(context.Background()), recorder)
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
-	err = logger.Log(ctx, RuntimeLogEntry{
+	logger := newTestRuntimeLogger(capture)
+	err := logger.Log(ctx, RuntimeLogEntry{
 		Level:     "error",
 		Message:   "Persisting the pipeline receipt failed",
 		Component: "eventbus",
@@ -586,21 +494,12 @@ func TestRuntimeLogger_Log_ReturnsPersistenceFailure(t *testing.T) {
 	if !errors.Is(err, writeErr) {
 		t.Fatalf("logger.Log() error = %v, want %v", err, writeErr)
 	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("ExpectationsWereMet() error = %v", err)
-	}
 	if entries := recorder.SnapshotFlightRecorder(); len(entries) != 0 {
 		t.Fatalf("flight recorder count = %d, want 0", len(entries))
 	}
 }
 
 func TestRuntimeLogger_Log_AllowsEmptyCanonicalMessageWhenDetailsExist(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
 	capture := &runtimeLogPersistenceCapture{}
 	wantPersisted := runtimeLogPayloadArg{
 		level:     "info",
@@ -619,7 +518,7 @@ func TestRuntimeLogger_Log_AllowsEmptyCanonicalMessageWhenDetailsExist(t *testin
 		},
 	}
 
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
+	logger := newTestRuntimeLogger(capture)
 	if err := logger.Log(testAuthorActivityContext(context.Background()), RuntimeLogEntry{
 		Level:     "debug",
 		Message:   "",
@@ -639,9 +538,6 @@ func TestRuntimeLogger_Log_AllowsEmptyCanonicalMessageWhenDetailsExist(t *testin
 		t.Fatalf("logger.Log() error = %v, want nil", err)
 	}
 	assertCapturedRuntimeLog(t, capture, wantPersisted, "", "")
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("ExpectationsWereMet() error = %v", err)
-	}
 }
 
 func TestDecodeCanonicalRuntimeLogPayload_FailsClosedOnMissingMessageField(t *testing.T) {
@@ -666,16 +562,11 @@ func TestDecodeCanonicalRuntimeLogPayloadRejectsRetiredErrorCarrier(t *testing.T
 }
 
 func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnPayloadValidationFailure(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(testAuthorActivityContext(context.Background()), recorder)
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
-	err = logger.Log(ctx, RuntimeLogEntry{
+	capture := &runtimeLogPersistenceCapture{}
+	logger := newTestRuntimeLogger(capture)
+	err := logger.Log(ctx, RuntimeLogEntry{
 		Level:     "warn",
 		Message:   "runtime log",
 		Component: "diagnostics",
@@ -687,33 +578,25 @@ func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnPayloadValidationFailure
 	if err == nil || !strings.Contains(err.Error(), "details.correlation") {
 		t.Fatalf("logger.Log() error = %v, want correlation validation failure", err)
 	}
+	if len(capture.records) != 0 {
+		t.Fatal("payload refusal reached persistence")
+	}
 	if entries := recorder.SnapshotFlightRecorder(); len(entries) != 0 {
 		t.Fatalf("flight recorder count = %d, want 0", len(entries))
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("expectations: %v", err)
 	}
 }
 
 func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnLineageLookupFailure(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
 	lineageErr := errors.New("lineage lookup failed")
-	mock.ExpectQuery(`SELECT EXISTS`).
-		WithArgs(runID, subjectEventID).
-		WillReturnError(lineageErr)
+	capture := &runtimeLogPersistenceCapture{lineageErr: lineageErr}
 
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(testAuthorActivityContext(context.Background()), recorder)
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
-	err = logger.Log(ctx, RuntimeLogEntry{
+	logger := newTestRuntimeLogger(capture)
+	err := logger.Log(ctx, RuntimeLogEntry{
 		Level:     "warn",
 		Message:   "runtime log",
 		Component: "eventbus",
@@ -723,21 +606,15 @@ func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnLineageLookupFailure(t *
 	if !errors.Is(err, lineageErr) {
 		t.Fatalf("logger.Log() error = %v, want %v", err, lineageErr)
 	}
+	if len(capture.lineageRequests) != 1 || capture.lineageRequests[0] != ([3]string{runID, "", subjectEventID}) || len(capture.records) != 0 {
+		t.Fatalf("lineage refusal lost exact arguments or reached persistence: %+v", capture)
+	}
 	if entries := recorder.SnapshotFlightRecorder(); len(entries) != 0 {
 		t.Fatalf("flight recorder count = %d, want 0", len(entries))
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("expectations: %v", err)
 	}
 }
 
 func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnRunOwnerFailure(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
 	runID := uuid.NewString()
 	runRowErr := errors.New("run row failed")
 	capture := &runtimeLogPersistenceCapture{err: runRowErr}
@@ -745,8 +622,8 @@ func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnRunOwnerFailure(t *testi
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(testAuthorActivityContext(context.Background()), recorder)
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
-	err = logger.Log(ctx, RuntimeLogEntry{
+	logger := newTestRuntimeLogger(capture)
+	err := logger.Log(ctx, RuntimeLogEntry{
 		Level:     "error",
 		Message:   "runtime log",
 		Component: "workflow-runtime",
@@ -758,18 +635,9 @@ func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnRunOwnerFailure(t *testi
 	if entries := recorder.SnapshotFlightRecorder(); len(entries) != 0 {
 		t.Fatalf("flight recorder count = %d, want 0", len(entries))
 	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("expectations: %v", err)
-	}
 }
 
 func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnPostAppendOwnerFailure(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
 	runID := uuid.NewString()
 	syncErr := errors.New("sync failed")
 	capture := &runtimeLogPersistenceCapture{err: syncErr}
@@ -777,8 +645,8 @@ func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnPostAppendOwnerFailure(t
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(testAuthorActivityContext(context.Background()), recorder)
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{capture: capture})
-	err = logger.Log(ctx, RuntimeLogEntry{
+	logger := newTestRuntimeLogger(capture)
+	err := logger.Log(ctx, RuntimeLogEntry{
 		Level:     "error",
 		Message:   "runtime log",
 		Component: "workflow-runtime",
@@ -790,19 +658,17 @@ func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnPostAppendOwnerFailure(t
 	if entries := recorder.SnapshotFlightRecorder(); len(entries) != 0 {
 		t.Fatalf("flight recorder count = %d, want 0", len(entries))
 	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("expectations: %v", err)
-	}
 }
 
-func TestRuntimeLogger_Log_PersistsCanonicalRunOwnershipFromContext(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	ctx := testAuthorActivityContextForBundle(context.Background(), seedRuntimeLogSourceArtifact(t, db))
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
+func VerifyRuntimeLogger_Log_PersistsCanonicalRunOwnershipFromContextForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
+	artifact := admittedRuntimeLogSourceArtifactForTest(t)
+	fixture := open(t, artifact)
+	ctx := testAuthorActivityContextForBundle(context.Background(), artifact.BundleHash())
+	logger := newTestRuntimeLogger(fixture.Persistence)
 	runID := uuid.NewString()
 	spoofedRunID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	before := requireNativeRuntimeLogRunForTest(t, fixture, ctx, runID)
 
 	if err := logger.Log(ctx, RuntimeLogEntry{
 		Level:     "warn",
@@ -817,7 +683,7 @@ func TestRuntimeLogger_Log_PersistsCanonicalRunOwnershipFromContext(t *testing.T
 		t.Fatalf("logger.Log() error = %v", err)
 	}
 
-	row := loadLatestRuntimeLogRow(t, db)
+	row := loadLatestRuntimeLogRow(t, fixture, ctx)
 	if row.RunID != runID {
 		t.Fatalf("persisted run_id = %q, want %q", row.RunID, runID)
 	}
@@ -827,15 +693,16 @@ func TestRuntimeLogger_Log_PersistsCanonicalRunOwnershipFromContext(t *testing.T
 	if got := strings.TrimSpace(asString(row.Detail["note"])); got != "context must win" {
 		t.Fatalf("payload details.note = %q, want context must win", got)
 	}
-	assertRunRowExists(t, db, runID, true)
-	assertRunRowExists(t, db, spoofedRunID, false)
+	assertRunRowExists(t, fixture, ctx, runID, true)
+	assertRunRowExists(t, fixture, ctx, spoofedRunID, false)
+	requireNativeRuntimeLogRunPreservedForTest(t, fixture, ctx, before)
 }
 
-func TestRuntimeLogger_Log_DoesNotInferRunOwnershipFromDetailPayload(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
+func VerifyRuntimeLogger_Log_DoesNotInferRunOwnershipFromDetailPayloadForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
+	artifact := admittedRuntimeLogSourceArtifactForTest(t)
+	fixture := open(t, artifact)
+	ctx := fixture.Context
+	logger := newTestRuntimeLogger(fixture.Persistence)
 	payloadRunID := uuid.NewString()
 
 	if err := logger.Log(ctx, RuntimeLogEntry{
@@ -851,7 +718,7 @@ func TestRuntimeLogger_Log_DoesNotInferRunOwnershipFromDetailPayload(t *testing.
 		t.Fatalf("logger.Log() error = %v", err)
 	}
 
-	row := loadLatestRuntimeLogRow(t, db)
+	row := loadLatestRuntimeLogRow(t, fixture, ctx)
 	if row.RunID != "" {
 		t.Fatalf("persisted run_id = %q, want empty", row.RunID)
 	}
@@ -861,29 +728,23 @@ func TestRuntimeLogger_Log_DoesNotInferRunOwnershipFromDetailPayload(t *testing.
 	if got := strings.TrimSpace(asString(row.Detail["note"])); got != "must remain unscoped" {
 		t.Fatalf("payload details.note = %q, want must remain unscoped", got)
 	}
-	assertRunRowExists(t, db, payloadRunID, false)
+	assertRunRowExists(t, fixture, ctx, payloadRunID, false)
 }
 
-func TestRuntimeLogger_Log_DerivesLineageFromPersistedSubjectEvent(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	ctx := testAuthorActivityContextForBundle(context.Background(), seedRuntimeLogSourceArtifact(t, db))
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
+func VerifyRuntimeLogger_Log_DerivesLineageFromPersistedSubjectEventForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
+	artifact := admittedRuntimeLogSourceArtifactForTest(t)
+	fixture := open(t, artifact)
+	ctx := testAuthorActivityContextForBundle(context.Background(), artifact.BundleHash())
+	logger := newTestRuntimeLogger(fixture.Persistence)
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	if err := ensureRuntimeLogRunRowForTest(ctx, db, runID); err != nil {
-		t.Fatalf("ensure run row: %v", err)
-	}
-	if err := eventfixture.RunMutation(ctx, db, authoractivityfixture.DialectPostgres, func(ctx context.Context, attempt *eventfixture.Attempt) error {
-		return eventfixture.Insert(ctx, attempt, authoractivityfixture.DialectPostgres, eventtest.PersistedChildForProducer(
-			subjectEventID, events.EventType("validation/validation.package_ready"),
-			eventtest.Producer(events.EventProducerAgent, "runtime.run_fork.selected_contract_execution"),
-			"", []byte(`{}`), 0, runID, eventtest.UUID("diagnostic-subject-parent:"+subjectEventID), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
-		))
-	}).Err(); err != nil {
-		t.Fatalf("seed subject event: %v", err)
-	}
+	before := requireNativeRuntimeLogRunForTest(t, fixture, ctx, runID)
+	fixture.PublishSubject(ctx, eventtest.PersistedChildForProducer(
+		subjectEventID, events.EventType("validation/validation.package_ready"),
+		eventtest.Producer(events.EventProducerAgent, "runtime.run_fork.selected_contract_execution"),
+		"", []byte(`{}`), 0, runID, eventtest.UUID("diagnostic-subject-parent:"+subjectEventID), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
+	))
 
 	if err := logger.Log(ctx, RuntimeLogEntry{
 		Level:     "warn",
@@ -899,7 +760,7 @@ func TestRuntimeLogger_Log_DerivesLineageFromPersistedSubjectEvent(t *testing.T)
 		t.Fatalf("logger.Log() error = %v", err)
 	}
 
-	row := loadLatestRuntimeLogRow(t, db)
+	row := loadLatestRuntimeLogRow(t, fixture, ctx)
 	if row.RunID != runID {
 		t.Fatalf("persisted run_id = %q, want %q", row.RunID, runID)
 	}
@@ -909,15 +770,17 @@ func TestRuntimeLogger_Log_DerivesLineageFromPersistedSubjectEvent(t *testing.T)
 	if got := strings.TrimSpace(asString(row.Detail["parent_event_id"])); got != subjectEventID {
 		t.Fatalf("payload details.parent_event_id = %q, want subject event %q", got, subjectEventID)
 	}
+	requireNativeRuntimeLogRunPreservedForTest(t, fixture, ctx, before)
 }
 
-func TestRuntimeLogger_Log_DoesNotDeriveLineageFromUnpersistedSubjectEvent(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	ctx := testAuthorActivityContextForBundle(context.Background(), seedRuntimeLogSourceArtifact(t, db))
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
+func VerifyRuntimeLogger_Log_DoesNotDeriveLineageFromUnpersistedSubjectEventForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
+	artifact := admittedRuntimeLogSourceArtifactForTest(t)
+	fixture := open(t, artifact)
+	ctx := testAuthorActivityContextForBundle(context.Background(), artifact.BundleHash())
+	logger := newTestRuntimeLogger(fixture.Persistence)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	before := requireNativeRuntimeLogRunForTest(t, fixture, ctx, runID)
 
 	missingSubjectEventID := uuid.NewString()
 	if err := logger.Log(ctx, RuntimeLogEntry{
@@ -931,7 +794,7 @@ func TestRuntimeLogger_Log_DoesNotDeriveLineageFromUnpersistedSubjectEvent(t *te
 		t.Fatalf("logger.Log() error = %v", err)
 	}
 
-	row := loadLatestRuntimeLogRow(t, db)
+	row := loadLatestRuntimeLogRow(t, fixture, ctx)
 	if row.RunID != runID {
 		t.Fatalf("persisted run_id = %q, want %q", row.RunID, runID)
 	}
@@ -941,16 +804,18 @@ func TestRuntimeLogger_Log_DoesNotDeriveLineageFromUnpersistedSubjectEvent(t *te
 	if got := strings.TrimSpace(asString(row.Detail["parent_event_id"])); got != "" {
 		t.Fatalf("payload details.parent_event_id = %q, want empty", got)
 	}
+	requireNativeRuntimeLogRunPreservedForTest(t, fixture, ctx, before)
 }
 
-func TestRuntimeLogger_Log_PersistsTypedRuntimeLineage(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	ctx := testAuthorActivityContextForBundle(context.Background(), seedRuntimeLogSourceArtifact(t, db))
-	logger := newTestRuntimeLogger(db, runtimeLogPersistenceStub{})
+func VerifyRuntimeLogger_Log_PersistsTypedRuntimeLineageForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
+	artifact := admittedRuntimeLogSourceArtifactForTest(t)
+	fixture := open(t, artifact)
+	ctx := testAuthorActivityContextForBundle(context.Background(), artifact.BundleHash())
+	logger := newTestRuntimeLogger(fixture.Persistence)
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	before := requireNativeRuntimeLogRunForTest(t, fixture, ctx, runID)
 	ctx = runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
 		Owner:               "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage",
 		RunID:               runID,
@@ -962,18 +827,11 @@ func TestRuntimeLogger_Log_PersistsTypedRuntimeLineage(t *testing.T) {
 		Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
 		SelectedForkContext: true,
 	})
-	if err := ensureRuntimeLogRunRowForTest(ctx, db, runID); err != nil {
-		t.Fatalf("ensure run row: %v", err)
-	}
-	if err := eventfixture.RunMutation(ctx, db, authoractivityfixture.DialectPostgres, func(ctx context.Context, attempt *eventfixture.Attempt) error {
-		return eventfixture.Insert(ctx, attempt, authoractivityfixture.DialectPostgres, eventtest.PersistedChildForProducer(
-			subjectEventID, events.EventType("validation/validation.package_ready"),
-			eventtest.Producer(events.EventProducerAgent, "runtime.run_fork.selected_contract_execution"),
-			"", []byte(`{}`), 0, runID, eventtest.UUID("diagnostic-subject-parent:"+subjectEventID), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
-		))
-	}).Err(); err != nil {
-		t.Fatalf("seed subject event: %v", err)
-	}
+	fixture.PublishSubject(ctx, eventtest.PersistedChildForProducer(
+		subjectEventID, events.EventType("validation/validation.package_ready"),
+		eventtest.Producer(events.EventProducerAgent, "runtime.run_fork.selected_contract_execution"),
+		"", []byte(`{}`), 0, runID, eventtest.UUID("diagnostic-subject-parent:"+subjectEventID), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
+	))
 
 	if err := logger.Log(ctx, RuntimeLogEntry{
 		Level:     "warn",
@@ -984,7 +842,7 @@ func TestRuntimeLogger_Log_PersistsTypedRuntimeLineage(t *testing.T) {
 		t.Fatalf("logger.Log() error = %v", err)
 	}
 
-	row := loadLatestRuntimeLogRow(t, db)
+	row := loadLatestRuntimeLogRow(t, fixture, ctx)
 	if row.RunID != runID {
 		t.Fatalf("persisted run_id = %q, want %q", row.RunID, runID)
 	}
@@ -1003,6 +861,7 @@ func TestRuntimeLogger_Log_PersistsTypedRuntimeLineage(t *testing.T) {
 	if got := strings.TrimSpace(asString(row.Detail["runtime_lineage_classification"])); got != "fork_local" {
 		t.Fatalf("runtime_lineage_classification = %q, want fork_local", got)
 	}
+	requireNativeRuntimeLogRunPreservedForTest(t, fixture, ctx, before)
 }
 
 type persistedRuntimeLogRow struct {
@@ -1011,24 +870,14 @@ type persistedRuntimeLogRow struct {
 	Detail        map[string]any
 }
 
-func loadLatestRuntimeLogRow(t *testing.T, db *sql.DB) persistedRuntimeLogRow {
+func loadLatestRuntimeLogRow(t *testing.T, fixture RuntimeLogNativeFixtureForTest, ctx context.Context) persistedRuntimeLogRow {
 	t.Helper()
-	var (
-		runID         string
-		sourceEventID string
-		payloadRaw    []byte
-	)
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-		SELECT COALESCE(run_id::text, ''), COALESCE(source_event_id::text, ''), payload
-		FROM events
-		WHERE event_name = 'platform.runtime_log'
-		ORDER BY created_at DESC
-		LIMIT 1
-	`).Scan(&runID, &sourceEventID, &payloadRaw); err != nil {
+	event, err := fixture.LatestLog(ctx)
+	if err != nil {
 		t.Fatalf("load runtime log row: %v", err)
 	}
 	payload := map[string]any{}
-	if err := json.Unmarshal(payloadRaw, &payload); err != nil {
+	if err := json.Unmarshal(event.Payload(), &payload); err != nil {
 		t.Fatalf("decode runtime log payload: %v", err)
 	}
 	detail, _ := payload["details"].(map[string]any)
@@ -1036,16 +885,16 @@ func loadLatestRuntimeLogRow(t *testing.T, db *sql.DB) persistedRuntimeLogRow {
 		detail = map[string]any{}
 	}
 	return persistedRuntimeLogRow{
-		RunID:         strings.TrimSpace(runID),
-		SourceEventID: strings.TrimSpace(sourceEventID),
+		RunID:         event.RunID(),
+		SourceEventID: event.ParentEventID(),
 		Detail:        detail,
 	}
 }
 
-func assertRunRowExists(t *testing.T, db *sql.DB, runID string, want bool) {
+func assertRunRowExists(t *testing.T, fixture RuntimeLogNativeFixtureForTest, ctx context.Context, runID string, want bool) {
 	t.Helper()
-	var exists bool
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid)`, runID).Scan(&exists); err != nil {
+	exists, err := fixture.RunPresence(ctx, runID)
+	if err != nil {
 		t.Fatalf("check run row %s: %v", runID, err)
 	}
 	if exists != want {
@@ -1053,7 +902,7 @@ func assertRunRowExists(t *testing.T, db *sql.DB, runID string, want bool) {
 	}
 }
 
-func seedRuntimeLogSourceArtifact(t *testing.T, db *sql.DB) string {
+func admittedRuntimeLogSourceArtifactForTest(t *testing.T) *sourceartifact.AdmittedSourceArtifact {
 	t.Helper()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: runtime-log-test\n"), 0o644); err != nil {
@@ -1063,73 +912,7 @@ func seedRuntimeLogSourceArtifact(t *testing.T, db *sql.DB) string {
 	if err != nil {
 		t.Fatalf("admit runtime log source artifact: %v", err)
 	}
-	persisted, err := sourceartifact.PersistedFromArtifact(artifact, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("construct persisted runtime log source artifact: %v", err)
-	}
-	if _, err := db.ExecContext(testAuthorActivityContext(context.Background()), `
-		INSERT INTO source_artifacts (bundle_hash, source_blob, member_count, total_bytes, created_at)
-		VALUES ($1, $2, $3, $4, $5)
-	`, persisted.BundleHash, persisted.SourceBlob, persisted.MemberCount, persisted.TotalBytes, persisted.CreatedAt); err != nil {
-		t.Fatalf("persist runtime log source artifact: %v", err)
-	}
-	return artifact.BundleHash()
-}
-
-func countRuntimeLogRowsForRun(t *testing.T, db *sql.DB, runID string) int {
-	t.Helper()
-	var count int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-		SELECT COUNT(*)
-		FROM events
-		WHERE run_id = $1::uuid
-		  AND event_name = 'platform.runtime_log'
-	`, runID).Scan(&count); err != nil {
-		t.Fatalf("count runtime log rows for %s: %v", runID, err)
-	}
-	return count
-}
-
-func ensureRuntimeLogRunRowForTest(ctx context.Context, db *sql.DB, runID string) error {
-	return runRuntimeLogStoryForTest(ctx, db, func(storyctx context.Context, attempt *eventfixture.Attempt) error {
-		return attempt.WithSQL(storyctx, func(ctx context.Context, tx *sql.Tx) error {
-			return ensureRuntimeLogRunRowInStoryForTest(ctx, tx, runID)
-		})
-	})
-}
-
-func runRuntimeLogStoryForTest(ctx context.Context, db *sql.DB, fn func(context.Context, *eventfixture.Attempt) error) error {
-	if db == nil {
-		return nil
-	}
-	return eventfixture.RunMutation(ctx, db, authoractivityfixture.DialectPostgres, fn).Err()
-}
-
-func ensureRuntimeLogRunRowInStoryForTest(ctx context.Context, tx *sql.Tx, runID string) error {
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return nil
-	}
-	if _, err := uuid.Parse(runID); err != nil {
-		return err
-	}
-	source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
-	if !ok {
-		return errors.New("runtime log run fixture requires bundle source fact")
-	}
-	if err := source.Validate(); err != nil {
-		return err
-	}
-	if tx == nil {
-		return errors.New("runtime log run fixture requires transaction")
-	}
-	_, err := runlifecyclefixture.PostgresCreateRunInMutation(ctx, tx, storerunlifecycle.CreateRequest{
-		RunID:     runID,
-		Source:    source,
-		Origin:    runlifecyclefixture.ScenarioSetupOrigin(),
-		StartedAt: time.Now().UTC(),
-	})
-	return err
+	return artifact
 }
 
 type runtimeLogPayloadArg struct {

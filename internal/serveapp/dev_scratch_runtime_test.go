@@ -62,6 +62,8 @@ func TestRunServeRuntimeDevScratchPersistsExactBundleAndRunSource(t *testing.T) 
 }
 
 func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
+	var deliveryReader servedRunDeliveryReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 	repo := canonicalrouting.CopyRootIngressServedFollowUp(t)
 	opts := devScratchRuntimeOptions(t, repo)
 	process := startServeRuntimeTestProcessAtRepo(t, repo, opts)
@@ -86,7 +88,7 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 	}
 	db := openDevScratchReadback(t, repo)
 	defer db.Close()
-	waitServedRunDeliveryQuiescence(t, db, "sqlite", started.RunID)
+	waitServedRunDeliveryQuiescence(t, deliveryReader, started.RunID)
 	var published struct {
 		EventID string `json:"event_id"`
 		RunID   string `json:"run_id"`
@@ -101,7 +103,7 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 	if published.RunID != started.RunID || strings.TrimSpace(published.EventID) == "" {
 		t.Fatalf("event.publish result = %#v", published)
 	}
-	waitServedRunDeliveryQuiescence(t, db, "sqlite", started.RunID)
+	waitServedRunDeliveryQuiescence(t, deliveryReader, started.RunID)
 	requireServedRunStatus(t, endpoint, started.RunID, "completed")
 
 	var fork apiv1.RunForkExecutionResult
@@ -128,7 +130,7 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "completed" || fork.ExecutedEventCount != 1 {
 		t.Fatalf("run.fork result = %#v", fork)
 	}
-	waitServedRunDeliveryQuiescence(t, db, "sqlite", fork.ForkRunID)
+	waitServedRunDeliveryQuiescence(t, deliveryReader, fork.ForkRunID)
 	requireServedRunStatus(t, endpoint, fork.ForkRunID, "completed")
 
 	var runReadback map[string]any

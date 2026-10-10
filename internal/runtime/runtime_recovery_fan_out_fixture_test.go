@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 
@@ -19,12 +18,8 @@ type startupRecoveryFanOutSession struct {
 	capacity startupownership.FanOutCapacity
 }
 
-func startupRecoveryFanOutSessionForTest(t testing.TB, db *sql.DB) func(*runtimeTestRetainedSession) startupownership.RetainedSession {
+func startupRecoveryFanOutSessionForTest(t testing.TB, capacity startupownership.FanOutCapacity) func(*runtimeTestRetainedSession) startupownership.RetainedSession {
 	t.Helper()
-	capacity, err := startupownership.PostgreSQLFanOutCapacity(db.Stats().MaxOpenConnections, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
 	return func(session *runtimeTestRetainedSession) startupownership.RetainedSession {
 		return &startupRecoveryFanOutSession{runtimeTestRetainedSession: session, capacity: capacity}
 	}

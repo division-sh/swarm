@@ -7,18 +7,18 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
-func TestPipelineInterceptionRetainsCommittedStageBothStores(t *testing.T) {
+func VerifyNativePipelineInterceptionRetainsCommittedStageForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := compiledAdapterSource(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
+			f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "ready", true, open)
 			event := f.event("direct")
 			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(f.node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: f.flow, FlowInstance: f.path, EntityID: f.entityID})}
-			ctx, err := persistWorkflowJoinPublicationForTest(t, f.pc, f.ctx, event, route, true)
+			ctx, err := nativeWorkflowJoinPublicationContextForTest(t, f.native, f.pc, f.ctx, event, route, true)
 			if err != nil {
 				t.Fatal(err)
 			}
-			owner := installedWorkflowJoinDeliveryOwnerForTest(t, f.pc)
+			owner := f.native.Store
 			id, err := runtimedelivery.DeliveryID(event.ID(), route)
 			if err != nil {
 				t.Fatal(err)

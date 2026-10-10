@@ -2,7 +2,6 @@ package bus_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -24,8 +23,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -118,6 +115,7 @@ func scalarTemplateKeyedDescriptors(descriptors []runtimebus.ActiveFlowInstanceD
 
 type scalarTemplateInstanceParityStore interface {
 	componentFlowConstructionStore
+	storetest.RunFixtureStore
 	runtimebus.FlowInstanceRoutePersistence
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.PreparedPublishEventReader
@@ -174,13 +172,8 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			sourceBundleHash := sourceFact.BundleHash()
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
-			selected, db := newScalarTemplateInstanceParityStore(t, backend, ctx)
-			run := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: sourceFact, Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC().Add(-time.Minute)}
-			if backend == "postgres" {
-				runlifecyclefixture.RequirePostgres(t, ctx, db, run)
-			} else {
-				runlifecyclefixture.RequireSQLite(t, ctx, db, run)
-			}
+			selected := newScalarTemplateInstanceParityStore(t, backend, ctx)
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: sourceFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC().Add(-time.Minute)})
 			entityID := runtimeflowidentity.EntityID("account/one")
 			constructor, err := runtimepipeline.CompileFlowConstructor(source, "account", "account.ready")
 			if err != nil {
@@ -332,18 +325,16 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 	}
 }
 
-func newScalarTemplateInstanceParityStore(t *testing.T, backend string, ctx context.Context) (scalarTemplateInstanceParityStore, *sql.DB) {
+func newScalarTemplateInstanceParityStore(t *testing.T, backend string, ctx context.Context) scalarTemplateInstanceParityStore {
 	t.Helper()
 	switch backend {
 	case "sqlite":
 		selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		return &sqliteScalarTemplateInstanceStore{SQLiteRuntimeStore: selected}, storetest.DatabaseForTest(selected)
+		return &sqliteScalarTemplateInstanceStore{SQLiteRuntimeStore: selected}
 	case "postgres":
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		return &postgresScalarTemplateInstanceStore{PostgresStore: storetest.AdmitPostgresRuntimeStore(t, db)}, db
+		return &postgresScalarTemplateInstanceStore{PostgresStore: storetest.StartPostgresRuntimeStore(t)}
 	default:
 		t.Fatalf("unsupported backend %q", backend)
-		return nil, nil
+		return nil
 	}
 }

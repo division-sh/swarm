@@ -91,11 +91,11 @@ func TestMailboxMutationCompletionRollbackBothStores(t *testing.T) {
 						remove()
 						original := mailboxCompletionLoseHTTPResponse(t, f.rt.Endpoint, method, params)
 						var replay map[string]any
-						waitServedRunDeliveryQuiescence(t, f.rt.DB, f.rt.Backend, card.RunID)
+						waitServedRunDeliveryQuiescence(t, f.rt.ReadRunDeliveries, card.RunID)
 						domain := read()
 						effects := mailboxCompletionRunEffects(t, f.rt, card.RunID)
 						requireServedJSONRPCResult(t, f.rt.Endpoint, method, params, &replay)
-						waitServedRunDeliveryQuiescence(t, f.rt.DB, f.rt.Backend, card.RunID)
+						waitServedRunDeliveryQuiescence(t, f.rt.ReadRunDeliveries, card.RunID)
 						if original["idempotency_replayed"] != false || replay["idempotency_replayed"] != true {
 							t.Fatalf("replay markers: %v %v", original, replay)
 						}

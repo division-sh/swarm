@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 )
@@ -14,6 +15,37 @@ import (
 type SelectedForkStorageTableSnapshot struct {
 	Columns []string
 	Rows    []string
+}
+
+// Recovery refusal compares all physical columns in these four exact-run
+// families. The table inventory is private and fixed, never caller-selected.
+func ReadSelectedForkRecoveredStorageSnapshotForTest(ctx context.Context, selected any, runID string) (map[string]SelectedForkStorageTableSnapshot, error) {
+	if err := validateSelectedForkStorageIdentity(runID); err != nil {
+		return nil, err
+	}
+	if !selectedForkSnapshotObserverInitialized(selected) {
+		return nil, fmt.Errorf("recovered storage snapshot requires an initialized native observer, got %T", selected)
+	}
+	var snapshot map[string]SelectedForkStorageTableSnapshot
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		snapshot = make(map[string]SelectedForkStorageTableSnapshot, 4)
+		for _, table := range []string{"entity_state", "flow_instances", "flow_instance_runtime_readiness", "events"} {
+			rows, err := tx.QueryContext(ctx, "SELECT * FROM "+table+" WHERE run_id = $1", runID)
+			if err != nil {
+				return err
+			}
+			evidence, err := readSelectedForkSnapshotRows(rows)
+			if err != nil {
+				return err
+			}
+			snapshot[table] = evidence
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return snapshot, nil
 }
 
 // This is one closed whole-store immutability witness. Callers cannot select
@@ -94,7 +126,7 @@ func readSelectedForkSnapshotRows(rows *sql.Rows) (SelectedForkStorageTableSnaps
 	}
 	evidence := SelectedForkStorageTableSnapshot{Columns: append([]string(nil), columns...), Rows: []string{}}
 	for rows.Next() {
-		encoded, err := encodeSelectedForkSnapshotRow(rows, len(columns))
+		encoded, err := encodeSelectedForkSnapshotRow(rows, columns)
 		if err != nil {
 			return SelectedForkStorageTableSnapshot{}, err
 		}
@@ -110,23 +142,37 @@ func readSelectedForkSnapshotRows(rows *sql.Rows) (SelectedForkStorageTableSnaps
 	return evidence, nil
 }
 
-func encodeSelectedForkSnapshotRow(rows *sql.Rows, columns int) (string, error) {
-	values, pointers := make([]any, columns), make([]any, columns)
+func encodeSelectedForkSnapshotRow(rows *sql.Rows, columns []string) (string, error) {
+	values, pointers := make([]any, len(columns)), make([]any, len(columns))
 	for i := range values {
 		pointers[i] = &values[i]
 	}
 	if err := rows.Scan(pointers...); err != nil {
 		return "", err
 	}
-	return encodeSelectedForkSnapshotValues(values)
+	return encodeSelectedForkSnapshotValues(columns, values)
 }
 
-func encodeSelectedForkSnapshotValues(values []any) (string, error) {
-	for i, value := range values {
-		if raw, ok := value.([]byte); ok {
-			values[i] = string(raw)
-		}
+func encodeSelectedForkSnapshotValues(columns []string, values []any) (string, error) {
+	if len(columns) == 0 || len(columns) != len(values) {
+		return "", fmt.Errorf("physical snapshot column/value cardinality mismatch")
 	}
-	encoded, err := json.Marshal(values)
-	return string(encoded), err
+	encodedValues := make([]struct {
+		Column string
+		Type   string
+		Value  any
+	}, len(values))
+	for i, value := range values {
+		if stamp, ok := value.(time.Time); ok {
+			value = stamp.UTC()
+		}
+		encodedValues[i].Column = columns[i]
+		encodedValues[i].Type = fmt.Sprintf("%T", value)
+		encodedValues[i].Value = value
+	}
+	encoded, err := json.Marshal(encodedValues)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }

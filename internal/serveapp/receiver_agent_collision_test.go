@@ -116,7 +116,7 @@ func requireServedReceiverAgentCollision(t *testing.T, rt servedControlProofRunt
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, runID)
+	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 	record, receiver := requireSingleReceiverTargetState(t, rt.ReceiverStateReader, runID, "account")
 	path, entityID, flowRaw := receiver.StorageRef, receiver.EntityID, record.Lifecycle.Config
 	var agentID, raw, descriptor, tools, permissions, model string

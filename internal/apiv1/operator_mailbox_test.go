@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -232,37 +231,37 @@ func TestMailboxListOptionsAcceptsSupersededDecisionCardStatus(t *testing.T) {
 	}
 }
 
-func countEventsByName(t *testing.T, db *sql.DB, eventName string) int {
+func countEventsByName(t *testing.T, selected any, eventName string) int {
 	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = $1`, eventName).Scan(&count); err != nil {
+	count, err := storetest.CountEventNameStorage(context.Background(), selected, eventName)
+	if err != nil {
 		t.Fatalf("count events %s: %v", eventName, err)
 	}
 	return count
 }
 
-func countEventDeliveriesForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string) int {
+func countEventDeliveriesForEvent(t *testing.T, ctx context.Context, selected any, eventID string) int {
 	t.Helper()
-	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'agent'`, eventID).Scan(&count); err != nil {
+	count, err := storetest.CountAgentEventDeliveryStorage(ctx, selected, eventID)
+	if err != nil {
 		t.Fatalf("count event deliveries for %s: %v", eventID, err)
 	}
 	return count
 }
 
-func countPipelineReceiptsForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string) int {
+func countPipelineReceiptsForEvent(t *testing.T, ctx context.Context, selected any, eventID string) int {
 	t.Helper()
-	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).Scan(&count); err != nil {
+	count, err := storetest.CountPipelineEventReceiptStorage(ctx, selected, eventID)
+	if err != nil {
 		t.Fatalf("count pipeline receipts for %s: %v", eventID, err)
 	}
 	return count
 }
 
-func countAPIIdempotencyRows(t *testing.T, db *sql.DB) int {
+func countAPIIdempotencyRows(t *testing.T, selected any) int {
 	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM api_idempotency`).Scan(&count); err != nil {
+	count, err := storetest.CountAPICommandReceipts(context.Background(), selected)
+	if err != nil {
 		t.Fatalf("count api_idempotency rows: %v", err)
 	}
 	return count

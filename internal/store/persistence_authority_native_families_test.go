@@ -17,6 +17,15 @@ func TestNativeFixtureFamiliesDoNotReceiveRawAuthority(t *testing.T) {
 		{"TestNativeLoopClaimFixturesDoNotReceiveRawAuthority", verifyNativeLoopClaimFixturesDoNotReceiveRawAuthority},
 		{"TestNativeMockFixturesDoNotReceiveRawAuthority", verifyNativeMockFixturesDoNotReceiveRawAuthority},
 		{"TestNativeAPIReadSetupDoesNotReceiveRawAuthority", verifyNativeAPIReadSetupDoesNotReceiveRawAuthority},
+		{"TestNativeProjectionRoundTripFixturesDoNotReceiveRawAuthority", verifyNativeProjectionRoundTripFixturesDoNotReceiveRawAuthority},
+		{"TestNativeStorageIdentityFixturesDoNotReceiveRawAuthority", verifyNativeStorageIdentityFixturesDoNotReceiveRawAuthority},
+		{"TestNativeProjectionStorageFixturesDoNotReceiveRawAuthority", verifyNativeProjectionStorageFixturesDoNotReceiveRawAuthority},
+		{"TestNativeProjectionShapeFixturesDoNotReceiveRawAuthority", verifyNativeProjectionShapeFixturesDoNotReceiveRawAuthority},
+		{"TestNativeProjectionHeaderFixturesDoNotReceiveRawAuthority", verifyNativeProjectionHeaderFixturesDoNotReceiveRawAuthority},
+		{"TestNativeMutationSeedFixturesDoNotReceiveRawAuthority", verifyNativeMutationSeedFixturesDoNotReceiveRawAuthority},
+		{"TestNativeLookupMissFixturesDoNotReceiveRawAuthority", verifyNativeLookupMissFixturesDoNotReceiveRawAuthority},
+		{"TestNativeBookkeepingFixturesDoNotReceiveRawAuthority", verifyNativeBookkeepingFixturesDoNotReceiveRawAuthority},
+		{"TestNativeHandlerFixturesDoNotReceiveRawAuthority", verifyNativeHandlerFixturesDoNotReceiveRawAuthority},
 	} {
 		t.Run(family.name, func(t *testing.T) {
 			family.verify(t, findings)

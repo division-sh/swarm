@@ -71,7 +71,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			if !reflect.DeepEqual(gotStages, wantStages) {
 				t.Fatalf("one constructor did not create the complete initial tree: got=%v want=%v", gotStages, wantStages)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, runID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			captured := make(chan map[string][][]string, 1)
 			go func() {
 				waitServedPublicationSettlement(t, probe, seed)
@@ -213,7 +213,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				requireLifecycleEventCount(t, rt, runID, prefix+"loop.escaped", 1)
 				requireLifecycleEventCount(t, rt, runID, prefix+"sink/work.completed", 1)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, runID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			var entities int
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, runID).Scan(&entities); err != nil {
 				t.Fatal(err)

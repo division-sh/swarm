@@ -34,7 +34,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -179,12 +178,7 @@ func newA2MapFanOutExecutionFromFiles(t *testing.T, selected gateRecoveryStoreCa
 		}
 	})
 	ctx = withLiveGateExecution(worklifetime.WithOccurrence(ctx, work))
-	fixture := runlifecyclefixture.Fixture{RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact}
-	if selected.postgres {
-		runlifecyclefixture.RequirePostgres(t, ctx, selected.db, fixture)
-	} else {
-		runlifecyclefixture.RequireSQLite(t, ctx, selected.db, fixture)
-	}
+	storetest.RequireRun(t, ctx, selected.events, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact})
 	descriptors, err := swarmruntime.AuthorActivityEventDescriptors(source)
 	if err != nil {
 		t.Fatal(err)

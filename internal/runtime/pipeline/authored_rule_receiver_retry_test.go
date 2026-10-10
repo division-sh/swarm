@@ -10,10 +10,11 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -29,11 +30,10 @@ func (s *authoredRuleRetryDiagnosticStore) SettleFailure(ctx context.Context, cl
 
 // Exercise the original source-loaded receiver failure through real claim,
 // retry and engine settlement owners; only the persistence read is faulted.
-func TestAuthoredRuleReceiverPreparationRetryBothStores(t *testing.T) {
-	for _, backend := range workflowJoinStoreCases() {
+func VerifyNativeAuthoredRuleReceiverPreparationRetryBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, variant := range []string{"no_fault_control", "fresh_retry", "recovered_retry"} {
-			t.Run(backend.name+"/"+variant, func(t *testing.T) {
-				store, ctx := backend.open(t)
+			t.Run(backend+"/"+variant, func(t *testing.T) {
 				bundle := loadWorkflowTempBundle(t, map[string]string{
 					"schema.yaml":   "name: delivery-authority\nstages:\n  queued: {}\n  done: {final: true}\n",
 					"entities.yaml": "test_entity: {}\n",
@@ -43,12 +43,14 @@ func TestAuthoredRuleReceiverPreparationRetryBothStores(t *testing.T) {
 				module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 				node := pipelineNode(t, ".", "node-a")
 				module.workflowNodes = []WorkflowNode{{Node: node, Subscriptions: []events.EventType{"source.evt"}}}
-				owner := newPipelineTestDeliveryOwnerForDB(t, store.testDB())
+				fixture := open(t, backend, semanticview.Wrap(bundle))
+				pc, ctx := nativePipelineDeliveryCoordinatorForTest(t, fixture, module)
+				store := fixture.Persistence.store
+				owner := fixture.Store
 				observed := &authoredRuleRetryDiagnosticStore{Store: owner}
-				bus := &recordingPipelineBus{}
-				pc := newPostgresPipelineCoordinatorForTest(bus, store.testDB(), PipelineCoordinatorOptions{Module: module, DeliveryStore: owner})
-				pc.workflowStore = store
-				configurePipelineTestDeliveryOwner(t, pc)
+				bus := observeNativePipelineDeliveryBusForTest(t, pc)
+				retention := &review2460NativeRetentionObserver{WorkflowDeliveryRuntime: pc.deliveryRuntime}
+				pc.deliveryRuntime = retention
 				pc.deliveryStore = observed
 				handler, found := pc.SemanticSource().ExecutableNodeEventHandler(node, "source.evt")
 				if !found || len(handler.Rules) != 2 || !handler.Rules[0].Authored() || !handler.Rules[1].Authored() || handler.Rules[1].Condition != "else" {
@@ -63,51 +65,59 @@ func TestAuthoredRuleReceiverPreparationRetryBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Logf("source: authored=%v rule=%s condition=%s target=%s ref=%s/%s/%s", handler.Rules[0].Authored(), handler.Rules[0].ID, handler.Rules[0].Condition, handler.Rules[0].AdvancesTo, ref.Flow(), ref.Family(), ref.SemanticPath())
-				runID := runtimecorrelation.RunIDFromContext(ctx)
-				entityID := runID
-				evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), eventtest.StaticFlowRoutingSource(".", runID, entityID), time.Now().UTC())
-				dialect := authoractivityfixture.DialectPostgres
-				if store.isSQLite() {
-					dialect = authoractivityfixture.DialectSQLite
+				runID := uuid.NewString()
+				ctx = runtimecorrelation.WithRunID(ctx, runID)
+				if err := fixture.RequireRun(ctx, runID); err != nil {
+					t.Fatal(err)
 				}
-				seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
-				if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				entityID := runID
+				evt := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, events.EnvelopeForTargetRoute(handlerTestWorkflowEnvelope(".", runID, entityID), events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), eventtest.StaticFlowRoutingSource(".", runID, entityID), time.Now().UTC())
+				if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
 					CurrentState: "queued", EntityType: "test_entity", Fields: map[string]any{},
 				})); err != nil {
 					t.Fatal(err)
 				}
 				route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID})}
-				if err := owner.commitInitial(ctx, evt, route); err != nil {
+				if err := fixture.PublishNode(ctx, evt, route); err != nil {
 					t.Fatal(err)
 				}
 				id, err := runtimedelivery.DeliveryID(evt.ID(), route)
 				if err != nil {
 					t.Fatal(err)
 				}
-				var initialFacts int
-				if err := store.testDB().QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, id).Scan(&initialFacts); err != nil || initialFacts != 0 {
+				_, initialFacts, err := fixture.SelectionFact(ctx, evt.ID(), id)
+				if err != nil || initialFacts != 0 {
 					t.Fatalf("unexecuted delivery already has rule evidence: count=%d err=%v", initialFacts, err)
 				}
 				readFact := func() handlerselection.HandlerRuleSelectionFact {
-					var selectionContext, disposition, flow, family, path, label string
-					err := store.testDB().QueryRowContext(ctx, `SELECT selection_context, disposition, COALESCE(flow_path, ''), COALESCE(declaration_family, ''), COALESCE(semantic_path, ''), display_label FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, id).Scan(&selectionContext, &disposition, &flow, &family, &path, &label)
-					if err != nil {
-						t.Fatal(err)
+					fact, count, err := fixture.SelectionFact(ctx, evt.ID(), id)
+					if err != nil || count != 1 {
+						t.Fatalf("exact stored selection count=%d error=%v", count, err)
 					}
-					fact, err := handlerselection.Hydrate(selectionContext, disposition, flow, family, path, label)
-					if err != nil {
-						t.Fatal(err)
-					}
-					t.Logf("persisted per-delivery fact: context=%s disposition=%s ref=%s/%s/%s label=%s", selectionContext, disposition, flow, family, path, label)
 					return fact
 				}
 				attemptCtx := withWorkflowNodeDeliveryRoute(ctx, route)
 				if variant != "no_fault_control" {
-					reader := &failingReceiverPersistenceReader{WorkflowTargetPersistenceReader: store.targetReader,
+					reader := &failingReceiverPersistenceReader{WorkflowTargetPersistenceReader: pc.workflowStore.targetReader,
 						failure: runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "receiver_read_unavailable", "receiver-diagnostic", "load_target", nil, errors.New("injected pre-handler receiver read failure"))}
-					store.targetReader = reader
+					pc.workflowStore.targetReader = reader
 					if variant == "recovered_retry" {
+						acquisition, err := fixture.Continuations.Acquire(id)
+						if err != nil || acquisition.Validate(id) != nil {
+							t.Fatalf("recover exact native carrier: %v", err)
+						}
+						continuation, carrierAcquired := acquisition.Acquired()
+						if !carrierAcquired {
+							t.Fatal("native recovery carrier was not acquired")
+						}
+						guard, err := worklifetime.NewDeliveryContinuationGuard(ctx, continuation)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if resolution, err := guard.Consume(nil); err != nil || resolution != worklifetime.DeliveryContinuationConsumed {
+							t.Fatalf("recover native attempt ownership: %v/%v", resolution, err)
+						}
 						snapshot, err := owner.Snapshot(ctx, id)
 						if err != nil {
 							t.Fatal(err)
@@ -136,14 +146,13 @@ func TestAuthoredRuleReceiverPreparationRetryBothStores(t *testing.T) {
 					if reader.calls == 0 || snapshot.Status != runtimedelivery.StatusFailed || snapshot.RetryCount != 1 || snapshot.NextEligibleAt.IsZero() || len(outcomes) != 1 || outcomes[0].Outcome != "retry_scheduled" {
 						t.Fatalf("retry not explicitly scheduled: reader_calls=%d snapshot=%#v outcomes=%#v", reader.calls, snapshot, outcomes)
 					}
-					bus.deliveryContinuations.mu.Lock()
-					held := bus.deliveryContinuations.held[id]
-					bus.deliveryContinuations.mu.Unlock()
-					if !held || bus.publishedCount() != 0 {
-						t.Fatal("pre-handler failure lost continuation or emitted business work")
+					acquisition, acquisitionErr := fixture.Continuations.Acquire(id)
+					held := acquisitionErr == nil && acquisition.Validate(id) == nil && acquisition.Disposition() == worklifetime.DeliveryAlreadyOwned
+					if !held || retention.calls.Load() != 1 || bus.publishedCount() != 0 {
+						t.Fatal("pre-handler failure lost native retention or emitted business work")
 					}
-					var finalCount int
-					if err := store.testDB().QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, id).Scan(&finalCount); err != nil {
+					_, finalCount, err := fixture.SelectionFact(ctx, evt.ID(), id)
+					if err != nil {
 						t.Fatal(err)
 					}
 					if finalCount != 0 || snapshot.FinalSelection.Present() || len(observed.failures) != 1 || !observed.failures[0].Equal(handlerselection.NotReached()) {
@@ -155,9 +164,10 @@ func TestAuthoredRuleReceiverPreparationRetryBothStores(t *testing.T) {
 					}
 					t.Logf("retry accepted: status=%s retries=%d claim_version=%d next_eligible=%s retained=%v outcome=%s", snapshot.Status, snapshot.RetryCount, snapshot.ClaimVersion, snapshot.NextEligibleAt, held, outcomes[0].Outcome)
 					reader.failure = nil
-					if err := owner.makeRetryEligible(ctx, id); err != nil {
+					if err := fixture.RetryEligible(ctx, evt, route); err != nil {
 						t.Fatal(err)
 					}
+					recoverNativePipelineRetryForTest(t, fixture, ctx)
 				}
 				handled, dispatchErr := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
 				after, err := owner.Snapshot(ctx, id)

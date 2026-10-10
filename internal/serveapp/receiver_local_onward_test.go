@@ -16,7 +16,7 @@ func TestReceiverCompositionEntitylessLocalOnwardBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyReceiverEntitylessLocal(t))
 			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "local-onward"})
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, published.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, published.RunID)
 			for _, node := range []string{"collector", "local"} {
 				var raw, status string
 				if err := rt.DB.QueryRow(`SELECT CAST(delivery_target_route AS TEXT),status FROM event_deliveries WHERE run_id=$1 AND subscriber_id=$2`, published.RunID, identitytest.FlowNode(t, "sink", node).Key()).Scan(&raw, &status); err != nil {

@@ -47,7 +47,11 @@ func TestSelectedForkPreparationSnapshotRetainsWholePhysicalInventoryBothStores(
 			}
 			want := SelectedForkStorageTableSnapshot{
 				Columns: []string{"id", "payload", "amount", "optional"},
-				Rows:    []string{`["a","[]",1,""]`, `["a","[]",1,""]`, `["b","{ \"lex\": 1.00 }",2,null]`},
+				Rows: []string{
+					`[{"Column":"id","Type":"string","Value":"a"},{"Column":"payload","Type":"string","Value":"[]"},{"Column":"amount","Type":"int64","Value":1},{"Column":"optional","Type":"string","Value":""}]`,
+					`[{"Column":"id","Type":"string","Value":"a"},{"Column":"payload","Type":"string","Value":"[]"},{"Column":"amount","Type":"int64","Value":1},{"Column":"optional","Type":"string","Value":""}]`,
+					`[{"Column":"id","Type":"string","Value":"b"},{"Column":"payload","Type":"string","Value":"{ \"lex\": 1.00 }"},{"Column":"amount","Type":"int64","Value":2},{"Column":"optional","Type":"\u003cnil\u003e","Value":null}]`,
+				},
 			}
 			if !reflect.DeepEqual(before[`snapshot"rows`], want) {
 				t.Fatalf("physical columns, duplicates, lexical JSON or sorting changed: %q want=%q", before[`snapshot"rows`], want)

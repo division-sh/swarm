@@ -510,6 +510,15 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		"TestNativeLoopClaimFixturesDoNotReceiveRawAuthority",
 		"TestNativeMockFixturesDoNotReceiveRawAuthority",
 		"TestNativeAPIReadSetupDoesNotReceiveRawAuthority",
+		"TestNativeProjectionRoundTripFixturesDoNotReceiveRawAuthority",
+		"TestNativeStorageIdentityFixturesDoNotReceiveRawAuthority",
+		"TestNativeProjectionStorageFixturesDoNotReceiveRawAuthority",
+		"TestNativeProjectionShapeFixturesDoNotReceiveRawAuthority",
+		"TestNativeProjectionHeaderFixturesDoNotReceiveRawAuthority",
+		"TestNativeMutationSeedFixturesDoNotReceiveRawAuthority",
+		"TestNativeLookupMissFixturesDoNotReceiveRawAuthority",
+		"TestNativeBookkeepingFixturesDoNotReceiveRawAuthority",
+		"TestNativeHandlerFixturesDoNotReceiveRawAuthority",
 	}
 	if len(censusUnit.RequiredChildren) != 1 || !slices.Equal(censusUnit.RequiredChildren["TestNativeFixtureFamiliesDoNotReceiveRawAuthority"], nativeChildren) {
 		t.Fatal("census unit dropped a completed-family assertion")

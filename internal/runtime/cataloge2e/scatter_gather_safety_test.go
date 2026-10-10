@@ -433,22 +433,6 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 
 // A committed fan-out intent can outlive PublishAndWait's process-local tree.
 // Observe exact durable descendants, not elapsed time or a stable count of loops.
-const scatterGatherFrontierQuery = `WITH RECURSIVE run_events AS MATERIALIZED (
-	SELECT event_id,source_event_id FROM events WHERE run_id=$1 AND event_name<>'platform.runtime_log'
-), descendants(event_id) AS (
-	SELECT event_id FROM run_events WHERE event_id=$2
-	UNION
-	SELECT e.event_id FROM run_events e JOIN descendants p ON e.source_event_id=p.event_id
-), delivery_counts AS (
-	SELECT p.event_id, COUNT(d.delivery_id) AS total,
-		COALESCE(SUM(CASE WHEN d.status<>'delivered' THEN 1 ELSE 0 END),0) AS unsettled
-	FROM descendants p LEFT JOIN event_deliveries d ON d.event_id=p.event_id
-	GROUP BY p.event_id
-)
-SELECT (SELECT COUNT(*) FROM descendants),
-	(SELECT COUNT(*) FROM delivery_counts WHERE total<>1 OR unsettled<>0),
-	(SELECT COUNT(*) FROM dead_letters d JOIN descendants p ON d.original_event_id=p.event_id)`
-
 func scatterGatherWait(t testing.TB, h *runtimeHarness, step catalogTriggerStep, phaseStart, phaseDeadline time.Time) {
 	t.Helper()
 	started := time.Now()
@@ -458,6 +442,10 @@ func scatterGatherWait(t testing.TB, h *runtimeHarness, step catalogTriggerStep,
 	}
 	ctx, cancel := context.WithDeadline(h.ctx, deadline)
 	defer cancel()
+	reader, err := h.catalogOperatorEventLister()
+	if err != nil {
+		t.Fatal(err)
+	}
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
 	want := 0
@@ -472,8 +460,8 @@ func scatterGatherWait(t testing.TB, h *runtimeHarness, step catalogTriggerStep,
 	issued := step.Event != "batch.submitted" && step.Event != "batch.finished"
 	for {
 		if !issued {
-			var count int
-			if err := h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND source_event_id=$2 AND status='closed' AND cardinality=$3 AND cursor=$3 AND claim_owner IS NULL`, catalogRuntimeRunID, step.eventID, cardinality).Scan(&count); err != nil {
+			count, err := storetest.CountClosedSourceFanOutIssuance(ctx, reader, catalogRuntimeRunID, step.eventID, cardinality)
+			if err != nil {
 				logScatterGatherProgress(t, h, step.eventID)
 				t.Fatal(err)
 			}
@@ -491,8 +479,8 @@ func scatterGatherWait(t testing.TB, h *runtimeHarness, step catalogTriggerStep,
 		// Poll only durable identities/status. Full public hydration below remains
 		// mandatory, but must not compete with issuance for every growing prefix.
 		// Match the public helper's explicit ExcludeRuntimeLogs filter.
-		var observed, unsettled, deadLetters int
-		err := h.db.QueryRowContext(ctx, scatterGatherFrontierQuery, catalogRuntimeRunID, step.eventID).Scan(&observed, &unsettled, &deadLetters)
+		frontier, err := storetest.ReadCausalDeliveryFrontier(ctx, reader, catalogRuntimeRunID, step.eventID)
+		observed, unsettled, deadLetters := frontier.Observed, frontier.Unsettled, frontier.DeadLetters
 		if err != nil {
 			logScatterGatherProgress(t, h, step.eventID)
 			t.Fatal(err)
@@ -554,8 +542,8 @@ func scatterGatherWait(t testing.TB, h *runtimeHarness, step catalogTriggerStep,
 		}
 		if ready {
 			if step.Event == "batch.submitted" || step.Event == "batch.finished" {
-				var count int
-				if err := h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND source_event_id=$2 AND status='closed' AND cardinality=$3 AND cursor=$3 AND claim_owner IS NULL`, catalogRuntimeRunID, step.eventID, cardinality).Scan(&count); err != nil {
+				count, err := storetest.CountClosedSourceFanOutIssuance(ctx, reader, catalogRuntimeRunID, step.eventID, cardinality)
+				if err != nil {
 					t.Fatal(err)
 				}
 				if count != 1 {
@@ -663,23 +651,18 @@ func logScatterGatherAttempts(t testing.TB, h *runtimeHarness, deliveryID string
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(h.ctx), time.Second)
 	defer cancel()
-	rows, err := h.db.QueryContext(ctx, `SELECT claim_version,closure_kind,COALESCE(outcome,''),COALESCE(reason_code,''),COALESCE(CAST(failure AS TEXT),'') FROM event_delivery_attempts WHERE delivery_id=$1 ORDER BY claim_version`, deliveryID)
+	reader, err := h.catalogOperatorEventLister()
 	if err != nil {
 		t.Logf("failed attempt readback for %s: %v", deliveryID, err)
 		return
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var version int
-		var closure, outcome, reason, failure string
-		if err := rows.Scan(&version, &closure, &outcome, &reason, &failure); err != nil {
-			t.Logf("failed attempt scan for %s: %v", deliveryID, err)
-			return
-		}
-		t.Logf("delivery %s attempt %d: closure=%s outcome=%s reason=%s failure=%s", deliveryID, version, closure, outcome, reason, failure)
+	rows, err := storetest.ReadDeliveryAttemptDiagnosticRows(ctx, reader, deliveryID)
+	if err != nil {
+		t.Logf("failed attempt readback for %s: %v", deliveryID, err)
+		return
 	}
-	if err := rows.Err(); err != nil {
-		t.Logf("failed attempt rows for %s: %v", deliveryID, err)
+	for _, row := range rows {
+		t.Logf("delivery %s attempt %d: closure=%s outcome=%s reason=%s failure=%s", deliveryID, row.Version, row.Closure, row.Outcome, row.Reason, row.Failure)
 	}
 }
 
@@ -687,33 +670,24 @@ func logScatterGatherProgress(t testing.TB, h *runtimeHarness, eventID string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(h.ctx), time.Second)
 	defer cancel()
-	rows, err := h.db.QueryContext(ctx, `SELECT status,cardinality,cursor,COALESCE(claim_owner,''),claim_generation,CAST(lease_expires_at AS TEXT) FROM fan_out_intents WHERE run_id=$1 AND source_event_id=$2`, catalogRuntimeRunID, eventID)
+	reader, err := h.catalogOperatorEventLister()
 	if err != nil {
 		t.Logf("failed fan-out observation: %v", err)
 		return
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var status, owner string
-		var cardinality, cursor, generation int
-		var expiry any
-		if err := rows.Scan(&status, &cardinality, &cursor, &owner, &generation, &expiry); err != nil {
-			t.Logf("failed fan-out scan: %v", err)
-			return
-		}
-		t.Logf("fan-out at failed deadline: status=%s cursor=%d/%d owner=%q generation=%d lease=%v", status, cursor, cardinality, owner, generation, expiry)
+	rows, err := storetest.ReadSourceFanOutIntentDiagnosticRows(ctx, reader, catalogRuntimeRunID, eventID)
+	if err != nil {
+		t.Logf("failed fan-out observation: %v", err)
+		return
 	}
-	if err := rows.Err(); err != nil {
-		t.Logf("failed fan-out rows: %v", err)
+	for _, row := range rows {
+		t.Logf("fan-out at failed deadline: status=%s cursor=%d/%d owner=%q generation=%d lease=%v", row.Status, row.Cursor, row.Cardinality, row.Owner, row.Generation, row.LeaseExpiry)
 	}
-	if err := rows.Close(); err != nil {
-		t.Logf("failed fan-out row close: %v", err)
-	}
-	var events, ledgers, bytes int
-	if err := h.db.QueryRowContext(ctx, `SELECT COUNT(*),COUNT(DISTINCT CAST(route_settlement AS TEXT)),COALESCE(SUM(LENGTH(CAST(route_settlement AS TEXT))),0) FROM events WHERE run_id=$1 AND source_event_id=$2`, catalogRuntimeRunID, eventID).Scan(&events, &ledgers, &bytes); err != nil {
+	facts, err := storetest.ReadSourceRouteSettlementStorage(ctx, reader, catalogRuntimeRunID, eventID)
+	if err != nil {
 		t.Logf("failed fan-out event size read: %v", err)
 	} else {
-		t.Logf("fan-out persisted settlement inputs: events=%d distinct=%d bytes=%d", events, ledgers, bytes)
+		t.Logf("fan-out persisted settlement inputs: events=%d distinct=%d bytes=%d", facts.Events, facts.DistinctLedgers, facts.Bytes)
 	}
 	logScatterGatherDeliveryProgress(t, ctx, h, eventID)
 }
@@ -738,36 +712,19 @@ type scatterGatherDeliveryCount struct {
 func scatterGatherDeliveryProgress(ctx context.Context, h *runtimeHarness, eventID string) ([]scatterGatherDeliveryCount, error) {
 	// Inspect the failed publication's entire causal tree, not only its issued
 	// ordinals. A closed cursor does not imply that downstream receivers settled.
-	rows, err := h.db.QueryContext(ctx, `
-		WITH RECURSIVE descendants(event_id) AS (
-			SELECT event_id FROM events WHERE run_id=$1 AND event_id=$2
-			UNION
-			SELECT child.event_id FROM events child
-			JOIN descendants parent ON child.source_event_id=parent.event_id
-			WHERE child.run_id=$1
-		)
-		SELECT d.subscriber_type,d.subscriber_id,d.status,COALESCE(d.reason_code,''),COUNT(*)
-		FROM event_deliveries d JOIN descendants event ON event.event_id=d.event_id
-		WHERE d.run_id=$1
-		GROUP BY d.subscriber_type,d.subscriber_id,d.status,COALESCE(d.reason_code,'')
-		ORDER BY d.subscriber_type,d.subscriber_id,d.status,COALESCE(d.reason_code,'')
-	`, catalogRuntimeRunID, eventID)
+	reader, err := h.catalogOperatorEventLister()
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var result []scatterGatherDeliveryCount
-	for rows.Next() {
-		var entry scatterGatherDeliveryCount
-		if err := rows.Scan(&entry.class, &entry.subscriber, &entry.status, &entry.reason, &entry.count); err != nil {
-			return nil, err
-		}
-		result = append(result, entry)
-	}
-	if err := rows.Err(); err != nil {
+	rows, err := storetest.ReadCausalDeliveryStatusCounts(ctx, reader, catalogRuntimeRunID, eventID)
+	if err != nil {
 		return nil, err
 	}
-	return result, rows.Close()
+	var result []scatterGatherDeliveryCount
+	for _, row := range rows {
+		result = append(result, scatterGatherDeliveryCount{class: row.Class, subscriber: row.Subscriber, status: row.Status, reason: row.Reason, count: row.Count})
+	}
+	return result, nil
 }
 
 func scatterGatherPublicEvents(h *runtimeHarness, ctx context.Context) (map[string]operatorread.OperatorEventFull, error) {
@@ -888,20 +845,15 @@ func scatterGatherLoad(t testing.TB, h *runtimeHarness, path string, ctx context
 
 func scatterGatherCounts(t testing.TB, h *runtimeHarness, ctx context.Context) map[string]int {
 	t.Helper()
-	counts := map[string]int{}
-	for _, table := range []string{"entity_state", "timers", "fan_out_intents"} {
-		var count int
-		if err := h.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE run_id=$1", table), catalogRuntimeRunID).Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		counts[table] = count
-	}
-	var domainEvents int
-	if err := h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND (event_name IN ('batch.submitted','batch.finished','item.registered','item.finished','batch.opened') OR event_name LIKE 'workers/%/item.reported')`, catalogRuntimeRunID).Scan(&domainEvents); err != nil {
+	reader, err := h.catalogOperatorEventLister()
+	if err != nil {
 		t.Fatal(err)
 	}
-	counts["domain_events"] = domainEvents
-	return counts
+	counts, err := storetest.ReadScatterGatherPhysicalCounts(ctx, reader, catalogRuntimeRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]int{"entity_state": counts.Entities, "timers": counts.Timers, "fan_out_intents": counts.FanOutIntents, "domain_events": counts.DomainEvents}
 }
 
 func scatterGatherStates(t testing.TB, h *runtimeHarness, paths map[string]string, collectorRef string) map[string]pipeline.WorkflowInstance {

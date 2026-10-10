@@ -83,8 +83,8 @@ func TestReceiverMaterializationDuplicateNamesAcrossSiblingAndNestedScopesBothSt
 					t.Fatal(err)
 				}
 				ctx := catalogRunContext(h, catalogRuntimeRunID)
-				var eventID string
-				if err := h.db.QueryRowContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2`, catalogRuntimeRunID, geometry.event).Scan(&eventID); err != nil {
+				eventID, err := h.readRunNamedEventIdentity(ctx, catalogRuntimeRunID, geometry.event)
+				if err != nil {
 					t.Fatal(err)
 				}
 				var store interface {
@@ -174,8 +174,8 @@ func TestReceiverMaterializationSourceLocalTargetlessAgentControlBothStores(t *t
 				t.Fatal(err)
 			}
 			ctx := catalogRunContext(h, catalogRuntimeRunID)
-			var id string
-			if err := h.db.QueryRowContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name='start.seeded'`, catalogRuntimeRunID).Scan(&id); err != nil {
+			id, err := h.readRunNamedEventIdentity(ctx, catalogRuntimeRunID, "start.seeded")
+			if err != nil {
 				t.Fatal(err)
 			}
 			var store interface {
@@ -235,7 +235,8 @@ func TestReceiverMaterializationChildToRootBothStores(t *testing.T) {
 			var eventID string
 			deadline := time.Now().Add(10 * time.Second)
 			for {
-				err := h.db.QueryRowContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name='child/child.ready'`, catalogRuntimeRunID).Scan(&eventID)
+				var err error
+				eventID, err = h.readRunNamedEventIdentity(ctx, catalogRuntimeRunID, "child/child.ready")
 				if err == nil {
 					break
 				}

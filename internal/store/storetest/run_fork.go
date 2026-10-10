@@ -27,6 +27,10 @@ func ReadSelectedForkApplicationStorageSnapshot(ctx context.Context, selected an
 	return private.ReadSelectedForkApplicationStorageSnapshotForTest(ctx, selected)
 }
 
+func ReadSelectedForkRecoveredStorageSnapshot(ctx context.Context, selected any, runID string) (map[string]SelectedForkStorageTableSnapshot, error) {
+	return private.ReadSelectedForkRecoveredStorageSnapshotForTest(ctx, selected, runID)
+}
+
 func ReadSelectedForkRunBundleHash(ctx context.Context, selected any, runID string) (string, error) {
 	return private.ReadSelectedForkRunBundleHashForTest(ctx, selected, runID)
 }

@@ -19,7 +19,7 @@ func TestReceiverCompositionIndependentPoliciesBothStores(t *testing.T) {
 				root := canonicalrouting.CopyReceiverMixedPolicies(t, optionalFirst)
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 				published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "mixed-policies"})
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, published.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, published.RunID)
 				optionalScope := "z-observer"
 				if optionalFirst {
 					optionalScope = "a-observer"

@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -55,12 +54,7 @@ func TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				runID := uuid.NewString()
-				fixture := runlifecyclefixture.Fixture{RunID: runID, BundleHash: artifact.BundleHash(), Origin: runlifecyclefixture.ScenarioSetupOrigin()}
-				if backend == "sqlite" {
-					runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
-				} else {
-					runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
-				}
+				requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{RunID: runID, BundleHash: artifact.BundleHash(), Origin: semanticScenarioSetupRunOriginForTest()})
 				op, err := cap.AdmitResetOperation(ctx, destructivereset.Request{
 					OperationID: uuid.NewString(), ActorTokenID: "operator", RequestHash: "source-atomicity",
 					IncludeSourceArtifacts: include, IncludeSourceArtifactsSet: true, RequestedAt: time.Now().UTC(),
