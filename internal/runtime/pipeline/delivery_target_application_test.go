@@ -30,6 +30,9 @@ func VerifyDeliveryTargetApplicationPreservesCompositionTargetOnSQLiteAndPostgre
 	if err := fixture.RequireRun(ctx, testPipelineRunID); err != nil {
 		t.Fatal(err)
 	}
+	if err := fixture.Construct(ctx, constructedScenarioInstanceForTest(t, source, ctx, semanticview.RootExecutionFlowID(source))); err != nil {
+		t.Fatalf("construct composition target structural root: %v", err)
+	}
 	pc := fixture.NewCoordinator(PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
@@ -50,6 +53,7 @@ func VerifyDeliveryTargetApplicationPreservesCompositionTargetOnSQLiteAndPostgre
 	)
 	expected := map[string]any{"account_id": "account-1"}
 	instanceID := "composition-selected"
+	expected["instance_key"] = instanceID
 	identity := deriveFlowInstanceIdentity(source, "review", instanceID)
 	target := events.RouteIdentity{FlowID: "review", FlowInstance: identity.InstancePath, EntityID: identity.EntityID}
 	owner := events.MustExistingEntityTarget(target)
@@ -78,9 +82,11 @@ func VerifyDeliveryTargetApplicationPreservesCompositionTargetOnSQLiteAndPostgre
 	siblingID := "later-matching-sibling"
 	siblingPath := "review/" + siblingID
 	siblingEntityID := eventtest.UUID("later-matching-sibling")
+	siblingFields := cloneStringAnyMap(expected)
+	siblingFields["instance_key"] = siblingID
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
 		InstanceID: siblingID, StorageRef: siblingPath, EntityID: siblingEntityID,
-		WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), CurrentState: "active", Fields: expected,
+		WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), CurrentState: "active", Fields: siblingFields,
 		EntityType: "review_entity",
 	})); err != nil {
 		t.Fatalf("seed later matching sibling: %v", err)
