@@ -103,7 +103,6 @@ type storeTestDurableEventBusStore interface {
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
-	runtimebus.FlowInstanceRouteRecordReader
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimepipeline.WorkflowInstancePersistenceReader

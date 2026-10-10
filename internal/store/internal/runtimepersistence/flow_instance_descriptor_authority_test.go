@@ -30,7 +30,6 @@ import (
 
 type flowInstanceDescriptorAuthorityStore interface {
 	externalStoreTestDurableEventBusStore
-	runtimebus.FlowInstanceRouteRecordReader
 	runtimebus.ActiveFlowInstanceDescriptorLister
 }
 

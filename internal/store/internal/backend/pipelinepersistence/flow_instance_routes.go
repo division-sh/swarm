@@ -8,86 +8,10 @@ import (
 	"strings"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
-
-type flowInstanceDescriptorQueryer interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
-func (s *PipelinePostgresOwner) ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error) {
-	if s == nil || s.backend == nil {
-		return nil, fmt.Errorf("postgres store is required for flow instance routes")
-	}
-	identity = identity.Normalize()
-	if err := identity.Validate(); err != nil {
-		return nil, fmt.Errorf("flow instance route identity is required")
-	}
-	q := flowInstanceDescriptorQueryer(s.backend)
-	return listFlowInstanceRouteRecords(ctx, q, identity, `
-		SELECT event_pattern, subscriber_type, subscriber_id, COALESCE(source_flow, '')
-		FROM routing_rules
-		JOIN flow_instances fi ON fi.run_id = routing_rules.run_id AND fi.instance_path = routing_rules.flow_instance
-		WHERE routing_rules.run_id = $1::uuid AND routing_rules.flow_instance = $2
-		  AND routing_rules.is_materialized = true
-		  AND routing_rules.status = 'active'
-		  AND fi.status = 'active'
-		ORDER BY event_pattern, subscriber_type, subscriber_id, source_flow
-	`)
-}
-
-func (s *PipelineSQLiteOwner) ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error) {
-	if s == nil || s.backend == nil {
-		return nil, fmt.Errorf("sqlite runtime store is required for flow instance routes")
-	}
-	identity = identity.Normalize()
-	if err := identity.Validate(); err != nil {
-		return nil, fmt.Errorf("flow instance route identity is required")
-	}
-	q := flowInstanceDescriptorQueryer(s.backend)
-	return listFlowInstanceRouteRecords(ctx, q, identity, `
-		SELECT event_pattern, subscriber_type, subscriber_id, COALESCE(source_flow, '')
-		FROM routing_rules
-		JOIN flow_instances fi ON fi.run_id = routing_rules.run_id AND fi.instance_path = routing_rules.flow_instance
-		WHERE routing_rules.run_id = ? AND routing_rules.flow_instance = ?
-		  AND routing_rules.is_materialized = TRUE
-		  AND routing_rules.status = 'active'
-		  AND fi.status = 'active'
-		ORDER BY event_pattern, subscriber_type, subscriber_id, source_flow
-	`)
-}
-
-func listFlowInstanceRouteRecords(
-	ctx context.Context,
-	q flowInstanceDescriptorQueryer,
-	identity runtimeflowidentity.RunScopedFlowInstance,
-	query string,
-) ([]runtimebus.FlowInstanceRouteRecord, error) {
-	rows, err := q.QueryContext(ctx, query, identity.RunID, identity.Route.InstancePath)
-	if err != nil {
-		return nil, fmt.Errorf("list exact flow instance route records %s: %w", identity.Key(), err)
-	}
-	defer rows.Close()
-	var out []runtimebus.FlowInstanceRouteRecord
-	for rows.Next() {
-		var record runtimebus.FlowInstanceRouteRecord
-		record.Identity = identity
-		if err := rows.Scan(&record.EventPattern, &record.SubscriberType, &record.SubscriberID, &record.SourceFlow); err != nil {
-			return nil, fmt.Errorf("scan exact flow instance route record %s: %w", identity.Key(), err)
-		}
-		if strings.TrimSpace(record.SourceFlow) == "" {
-			record.SourceFlow = identity.Route.ScopeKey
-		}
-		out = append(out, record)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate exact flow instance route records %s: %w", identity.Key(), err)
-	}
-	return out, nil
-}
 
 const postgresActiveFlowInstanceDescriptorsSQL = `
 		SELECT fi.run_id::text, fi.instance_path, fi.flow_template, readiness.plan, readiness.plan_hash, readiness.activation_attempt_id, readiness.phase, readiness.activation_attempt_state,

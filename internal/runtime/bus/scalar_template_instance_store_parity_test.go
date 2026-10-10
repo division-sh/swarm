@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +15,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -72,31 +70,6 @@ func (s *sqliteScalarTemplateInstanceStore) ListFlowInstances(ctx context.Contex
 		return nil, s.indexErr
 	}
 	return s.SQLiteRuntimeStore.ListFlowInstances(ctx, scope)
-}
-
-func scalarTemplateScopedDescriptors(descriptors []runtimebus.ActiveFlowInstanceDescriptor, templateIDs, instancePaths []string) []runtimebus.ActiveFlowInstanceDescriptor {
-	var selected []runtimebus.ActiveFlowInstanceDescriptor
-	for _, descriptor := range descriptors {
-		if slices.Contains(templateIDs, descriptor.FlowTemplate) || slices.Contains(instancePaths, descriptor.FlowInstance) {
-			selected = append(selected, descriptor)
-		}
-	}
-	return selected
-}
-
-func scalarTemplateKeyedDescriptors(descriptors []runtimebus.ActiveFlowInstanceDescriptor, templateID, keyField, keyValue string) []runtimebus.ActiveFlowInstanceDescriptor {
-	field, err := runtimecontracts.ParseTemplateInstanceField(strings.TrimPrefix(keyField, "entity."))
-	if err != nil || keyField != "entity."+field.Path() {
-		return nil
-	}
-	key := []runtimecontracts.TemplateInstanceKeyValue{{Field: field, Value: keyValue}}
-	var selected []runtimebus.ActiveFlowInstanceDescriptor
-	for _, descriptor := range descriptors {
-		if descriptor.FlowTemplate == templateID && runtimepinrouting.ConnectInstanceKeyDescriptorMatches(key, runtimepinrouting.Descriptor{AddressFields: descriptor.AddressFields}) {
-			selected = append(selected, descriptor)
-		}
-	}
-	return selected
 }
 
 type scalarTemplateInstanceParityStore interface {

@@ -555,10 +555,6 @@ func (s *PostgresStore) ListEventDeliveryRoutes(ctx context.Context, eventID str
 	return s.eventPostgresOwner.ListEventDeliveryRoutes(ctx, eventID)
 }
 
-func (s *PostgresStore) ListFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.RunScopedFlowInstance) ([]bus.FlowInstanceRouteRecord, error) {
-	return s.pipelinePostgresOwner.ListFlowInstanceRouteRecords(ctx, identity)
-}
-
 func (s *PostgresStore) ListFlowInstances(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error) {
 	return s.pipelinePostgresOwner.ListFlowInstances(ctx, scope)
 }
@@ -1785,10 +1781,6 @@ func (s *SQLiteRuntimeStore) ListDueHumanTaskExpiryEvents(ctx context.Context, n
 
 func (s *SQLiteRuntimeStore) ListDurableAgentLifecycleStates(ctx context.Context) ([]manager.AgentLifecycleState, error) {
 	return s.agentSQLiteOwner.ListDurableAgentLifecycleStates(ctx)
-}
-
-func (s *SQLiteRuntimeStore) ListFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.RunScopedFlowInstance) ([]bus.FlowInstanceRouteRecord, error) {
-	return s.pipelineSQLiteOwner.ListFlowInstanceRouteRecords(ctx, identity)
 }
 
 func (s *SQLiteRuntimeStore) ListFlowInstances(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error) {

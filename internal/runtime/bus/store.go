@@ -519,10 +519,6 @@ type FlowInstanceRouteTopologyResult struct {
 	Acknowledged bool
 }
 
-type FlowInstanceRouteRecordReader interface {
-	ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]FlowInstanceRouteRecord, error)
-}
-
 type ActiveAgentDescriptor struct {
 	Identity agentidentity.Identity
 	EntityID string

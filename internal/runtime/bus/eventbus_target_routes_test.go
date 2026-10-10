@@ -211,19 +211,6 @@ func (s *targetRouteMemoryStore) ListFlowInstanceRoutes(context.Context) ([]runt
 	return routes, nil
 }
 
-func (s *targetRouteMemoryStore) ListFlowInstanceRouteRecords(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]FlowInstanceRouteRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	identity = targetRouteIdentity(identity)
-	var routes []FlowInstanceRouteRecord
-	for _, route := range s.flowRoutes {
-		if sameTargetRoute(route.Identity, identity) {
-			routes = append(routes, route)
-		}
-	}
-	return routes, nil
-}
-
 func newTargetRouteMemoryStore() *targetRouteMemoryStore {
 	return &targetRouteMemoryStore{
 		events:      map[string]events.Event{},
