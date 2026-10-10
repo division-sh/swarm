@@ -15,7 +15,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -27,9 +26,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"github.com/google/uuid"
 )
 
@@ -65,14 +64,13 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			runID, key := uuid.NewString(), uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			variant := canonicalrouting.ArrivalJoinBoundReply
 			if siblingFlow == "observer" {
 				variant = canonicalrouting.ArrivalJoinBoundReplyObserver
 			}
 			files := canonicalrouting.ArrivalJoinRoutingFiles(t, variant)
 			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))
+			ctx, fact := nativeConstructionContextFixture(t, selected.events.(storetest.RunFixtureStore), source, runID)
 			if siblingFlow == "observer" {
 				if issues := pinrouting.CompileConnectGraph(source).Issues(); len(issues) != 0 {
 					t.Fatalf("ordinary observer fixture is not a compiler-admitted Connect surface: %#v", issues)
@@ -105,13 +103,13 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 				module.nodes = append(module.nodes, runtimepipeline.WorkflowNode{Node: siblingNode,
 					Subscriptions: []events.EventType{"observer/provider.replied", "observer/provider.notified"}, ExecutionType: runtimecontracts.SystemNodeExecutionType})
 			}
-			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, TestLifecycleProbe: probe, Logger: logger},
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), TestLifecycleProbe: probe, Logger: logger},
 				"platform.join_complete", "platform.join_timeout")
 			if err != nil {
 				t.Fatal(err)
 			}
 			schedules, _ := newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
-			options := runtimepipeline.PipelineCoordinatorOptions{Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe}
+			options := runtimepipeline.PipelineCoordinatorOptions{Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe}
 			pc := newGateRecoveryCoordinator(bus, selected, options)
 			bus.SetInterceptors(pc)
 			commitKeylessConstructorComponent(t, ctx, selected, pc, source)
@@ -123,7 +121,7 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 			owner := testRunScopedWorkflowInstanceForRun(runID, path)
 			readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 				Identity: flowidentity.Instance{TemplateID: "requester", ScopeKey: "requester", InstanceID: key, InstancePath: path, EntityID: flowidentity.EntityID(path), HasStoredPath: true},
-				RunID:    runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
+				RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 			}
 			readiness.Identity.ParentRoute = flowidentity.ParentRoute{FlowID: parent.WorkflowName, FlowInstance: parent.StorageRef, EntityID: parent.EntityID}
 			readiness.Identity.ParentEntityID = parent.EntityID
@@ -135,9 +133,7 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 				Fields: map[string]any{"order_id": key, "expected": []any{"a", "b"}},
 			}, now)
 			markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)
-			if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: constructed.Identity}); err != nil {
-				t.Fatal(err)
-			}
+			requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, constructed.Identity)
 			load := func() runtimepipeline.WorkflowInstance {
 				t.Helper()
 				instance, found, err := pc.Load(ctx, owner)
@@ -168,7 +164,7 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 			}
 			cancel()
 			if err != nil {
-				t.Fatalf("provider did not receive real request: %v logs=%s", err, logger.String())
+				t.Fatalf("provider did not receive real request: %v logs=%s handler_failures=%+v", err, logger.String(), logger.failuresFor("handler_error", trigger.ID()))
 			}
 			request, found, err := selected.events.LoadPreparedPublishEvent(ctx, requestID)
 			if err != nil || !found || len(request.DeliveryRoutes) != 1 || request.Event.Event().ParentEventID() != trigger.ID() {
@@ -201,9 +197,7 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 					Fields: map[string]any{"order_id": siblingKey, "expected": []any{"a", "b"}},
 				}, now)
 				markGateRecoveryTopologyReadyFixture(t, selected, siblingReadiness, now)
-				if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: siblingOwner, Instance: siblingConstruction.Identity}); err != nil {
-					t.Fatal(err)
-				}
+				requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, siblingConstruction.Identity)
 				loadSibling = func() runtimepipeline.WorkflowInstance {
 					t.Helper()
 					instance, found, err := pc.Load(ctx, siblingOwner)

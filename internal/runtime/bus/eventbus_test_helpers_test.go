@@ -110,6 +110,7 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 		}
 	}
 	originReader := opts.Durable.RunOrigins
+	instanceReader := opts.Durable.Instances
 	if opts.PipelineObligations == nil {
 		opts.Durable = runtimebus.DurableTestDependencyProjection(store)
 	} else {
@@ -117,6 +118,9 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 	}
 	if originReader != nil {
 		opts.Durable.RunOrigins = originReader
+	}
+	if instanceReader != nil {
+		opts.Durable.Instances = instanceReader
 	}
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID

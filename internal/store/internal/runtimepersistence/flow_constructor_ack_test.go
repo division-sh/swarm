@@ -78,6 +78,7 @@ func TestFlowConstructorAcknowledgedFailureRetainsExactIdentityBothStores(t *tes
 					lifecycle.PipelineCoordinator = options.WorkflowInstances.(*pipeline.PipelineCoordinator)
 					options.WorkflowInstances = lifecycle
 				})
+				f.constructKeylessRoot(t)
 				req := f.request("receipt", "receipt", "unchanged")
 				if err := f.manager.ActivateFlowInstance(f.ctx, req); !errors.Is(err, fault) {
 					t.Fatalf("constructor lost commit failure: %v", err)

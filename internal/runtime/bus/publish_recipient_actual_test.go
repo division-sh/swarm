@@ -118,7 +118,7 @@ func TestPublishRecipientActualRejectsCompetingProducerBeforeDedup(t *testing.T)
 		t.Fatal(err)
 	}
 	var routes []runtimepinrouting.ConnectDeliveryRoute
-	for _, subscriber := range table.Resolve("sink/work.completed") {
+	for _, subscriber := range table.PubsubDeclarationDefinitionsFixture(t, "sink", "sink/work.completed") {
 		if !subscriber.Recipient.IsNode() {
 			continue
 		}

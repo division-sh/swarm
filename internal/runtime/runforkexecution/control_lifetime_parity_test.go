@@ -22,6 +22,31 @@ import (
 	"github.com/google/uuid"
 )
 
+func requireSelectedControlInstanceReaders(t *testing.T, owner SelectedContractExecutionOwner) {
+	t.Helper()
+	p := owner.ports
+	for _, role := range []string{"instance index", "construction publications"} {
+		t.Run(role, func(t *testing.T) {
+			durable := p.busDurable
+			if role == "instance index" {
+				durable.Instances = nil
+			} else {
+				durable.ConstructionPublications = nil
+			}
+			_, err := NewSelectedContractExecutionOwner(
+				p.workflow, p.fork, p.runtimeExecution, p.replay, p.events, durable,
+				p.pipelineObligations, p.manager, p.managerRoles, p.effects, p.completion,
+				p.completionHeartbeat, p.liveSessions, p.managedCapabilities, p.budget, p.logs,
+				p.decisionCards, p.proposedEffects, p.humanTasks, p.decisionCardDraftExpiry, p.humanTaskExpiry,
+			)
+			want := "selected-contract execution requires event " + role
+			if err == nil || err.Error() != want {
+				t.Fatalf("missing %s: error=%v, want %q", role, err, want)
+			}
+		})
+	}
+}
+
 func TestSelectedForkControlLifetimeBothStores(t *testing.T) {
 	testSelectedForkControlLifetime(t, "")
 }
@@ -99,6 +124,9 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 					selected, authorityStore = s, s
 					owner = selectedContractExecutionOwnerForTest(t, s)
 					newOwner = func() SelectedContractExecutionOwner { return newSelectedContractExecutionOwnerForTest(t, s) }
+				}
+				if phase == "executing" {
+					requireSelectedControlInstanceReaders(t, owner)
 				}
 				ctx := runForkTestContext(t)
 				process, _ := worklifetime.ProcessFromContext(ctx)

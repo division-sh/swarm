@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -29,13 +28,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storetest "github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testsql"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 const templateInstanceDeliveryRunID = "99999999-9999-4999-8999-999999999901"
@@ -56,10 +55,11 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := seedRuntimeTestRun(t, pg)
+	ctx := seedRuntimeTestRunForSource(t, pg, source)
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
-		ContractBundle: source,
+		ContractBundle:     source,
+		SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
 				return nil
@@ -73,6 +73,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
+		SourceArtifactFact:  runtimeTestSourceArtifactFact(t, source),
 		Module:              module,
 		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:        pg,
@@ -81,12 +82,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	})
 	constructed := seedTemplateInstanceDeliveryRouteOwner(t, ctx, pg, pc, source)
 
-	if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
-		RunID: templateInstanceDeliveryRunID,
-		Route: runtimeflowidentity.DeriveRoute("operating", "inst-1"),
-	}, Instance: constructed.Plan.Identity}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
-	}
+	assertRuntimeTestConstructedInstance(t, ctx, pg, source, constructed.Plan.Identity)
 	eventID := "99999999-9999-4999-8999-999999999902"
 	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 		eventID,
@@ -132,23 +128,19 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := seedRuntimeTestRun(t, pg)
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
+	ctx := seedRuntimeTestRunForSource(t, pg, source)
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source)})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
-		WorkOwner: runtimeTestEventBusWorkOwner(t, bus), Module: newRuntimeTestWorkflowModule(t, source),
+		SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
+		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus), Module: newRuntimeTestWorkflowModule(t, source),
 		Persistence: runtimepipeline.NewWorkflowPersistence(pg), RunLifecycle: pg,
 		PipelineObligations: pg.PipelineObligations(), DeliveryStore: pg,
 	})
 	constructed := seedTemplateInstanceDeliveryRouteOwner(t, ctx, pg, pc, source)
-	if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
-		RunID: templateInstanceDeliveryRunID,
-		Route: runtimeflowidentity.DeriveRoute("operating", "inst-1"),
-	}, Instance: constructed.Plan.Identity}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
-	}
+	assertRuntimeTestConstructedInstance(t, ctx, pg, source, constructed.Plan.Identity)
 	ch := runtimeInternalDeliveriesForTest(t, bus, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
 	eventID := "99999999-9999-4999-8999-999999999903"
 	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
@@ -195,9 +187,10 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 
 func seedTemplateInstanceDeliveryRouteOwner(t testing.TB, ctx context.Context, selected runtimebus.FlowInstanceActivationCommitOwner, pc *runtimepipeline.PipelineCoordinator, source semanticview.Source) runtimepipeline.CommittedFlowInstanceActivation {
 	t.Helper()
+	seedRuntimeTestKeylessSource(t, ctx, selected, pc, semanticview.RootExecutionFlowID(source))
 	return seedRuntimeTestPreparedInstance(t, ctx, selected, pc, runtimepipeline.WorkflowInstance{
 		InstanceID: "inst-1", StorageRef: "operating/inst-1", EntityID: runtimeflowidentity.EntityID("operating/inst-1"),
-		WorkflowName: "operating", WorkflowVersion: source.WorkflowVersion(), Mode: "template",
+		WorkflowName: "operating", WorkflowVersion: source.WorkflowVersion(), Mode: "template", InstanceKey: "inst-1",
 		CurrentState: "initializing", StageDefined: true, EntityType: "operating_state", Fields: map[string]any{"instance_id": "inst-1"},
 	})
 }
@@ -331,10 +324,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := seedRuntimeTestRun(t, pg)
-	proofStore := routeMaterializationDBProofStore{pg: pg}
 	durable := externalRuntimeTestDurableDependencies(pg)
-	durable.FlowRoutes = proofStore
-	durable.FlowRouteSets = proofStore
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
@@ -873,59 +863,30 @@ opco.ceo_ready:
 	}
 }
 
-type routeMaterializationDBProofStore struct {
-	pg *store.PostgresStore
-}
-
-func (s routeMaterializationDBProofStore) PipelineObligations() runtimepipelineobligation.Store {
-	return s.pg.PipelineObligations()
-}
-
-func (s routeMaterializationDBProofStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
-	return s.pg.RegisterAuthorActivityEventCatalog(scope, descriptors)
-}
-
-func (s routeMaterializationDBProofStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
-	return s.pg.CommitPublication(ctx, command)
-}
-
-func (s routeMaterializationDBProofStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
-	return s.pg.ListEventDeliveryRecipients(ctx, eventID)
-}
-
-func (s routeMaterializationDBProofStore) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
-	return s.pg.UpsertFlowInstanceRoute(ctx, route)
-}
-
-func (s routeMaterializationDBProofStore) ReplaceFlowInstanceRouteRecords(
-	ctx context.Context,
-	identity runtimeflowidentity.RunScopedFlowInstance,
-	routes []runtimebus.FlowInstanceRouteRecord,
-) error {
-	return s.pg.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
-}
-
-func (s routeMaterializationDBProofStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	return s.pg.DeleteFlowInstanceRoute(ctx, identity)
-}
-
-func (s routeMaterializationDBProofStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	return s.pg.ListFlowInstanceRoutes(ctx)
-}
-
-func (s routeMaterializationDBProofStore) ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error) {
-	return s.pg.ListFlowInstanceRouteRecords(ctx, identity)
-}
-
-func (s routeMaterializationDBProofStore) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	return s.pg.ListActiveFlowInstanceDescriptors(ctx, runID)
-}
-
 func seedRuntimeTestRun(t *testing.T, selected *store.PostgresStore) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRuntimeInstanceID(testAuthorActivityContext(context.Background()), authorActivityTestRuntimeInstanceID)
 	ctx = runtimecorrelation.WithRunID(ctx, templateInstanceDeliveryRunID)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
+	return ctx
+}
+
+func runtimeTestSourceArtifactFact(t testing.TB, source semanticview.Source) runtimecorrelation.SourceArtifactFact {
+	t.Helper()
+	bundle, found := semanticview.Bundle(source)
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("native component fixture requires its admitted source artifact")
+	}
+	return sourceartifactfixture.FactFor(bundle.SourceArtifact)
+}
+
+func seedRuntimeTestRunForSource(t *testing.T, selected *store.PostgresStore, source semanticview.Source) context.Context {
+	t.Helper()
+	fact := runtimeTestSourceArtifactFact(t, source)
+	ctx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), templateInstanceDeliveryRunID)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+	bundle, _ := semanticview.Bundle(source)
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	return ctx
 }
 

@@ -11,19 +11,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
@@ -214,102 +209,6 @@ func (o *sourceMutationProbeOwner) sourceFact(action string) runtimecorrelation.
 	}
 }
 
-type sourceBoundaryProbeStore struct {
-	InMemoryEventStore
-	runtimedelivery.Store
-
-	upsertCalls int
-	deleteCalls int
-	bindCalls   int
-	routes      map[string]FlowInstanceRouteRecord
-	upsertFact  runtimecorrelation.SourceArtifactFact
-	deleteFact  runtimecorrelation.SourceArtifactFact
-	bindFact    runtimecorrelation.SourceArtifactFact
-}
-
-func (s *sourceBoundaryProbeStore) UpsertFlowInstanceRoute(ctx context.Context, route FlowInstanceRouteRecord) error {
-	s.upsertCalls++
-	s.upsertFact, _ = runtimecorrelation.SourceArtifactFactFromContext(ctx)
-	if s.routes == nil {
-		s.routes = map[string]FlowInstanceRouteRecord{}
-	}
-	s.routes[route.Identity.Key()+"\x00"+route.EventPattern] = route
-	return nil
-}
-
-func (s *sourceBoundaryProbeStore) DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	s.deleteCalls++
-	s.deleteFact, _ = runtimecorrelation.SourceArtifactFactFromContext(ctx)
-	for key, route := range s.routes {
-		if route.Identity == identity {
-			delete(s.routes, key)
-		}
-	}
-	return nil
-}
-
-func (s *sourceBoundaryProbeStore) ReplaceFlowInstanceRouteRecords(
-	ctx context.Context,
-	identity runtimeflowidentity.RunScopedFlowInstance,
-	routes []FlowInstanceRouteRecord,
-) error {
-	if len(routes) == 0 {
-		return s.DeleteFlowInstanceRoute(ctx, identity)
-	}
-	for _, route := range routes {
-		if err := s.UpsertFlowInstanceRoute(ctx, route); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *sourceBoundaryProbeStore) ReplaceFlowInstanceRouteTopology(
-	ctx context.Context,
-	sets []FlowInstanceRouteRecordSet,
-) (FlowInstanceRouteTopologyResult, error) {
-	for _, set := range sets {
-		if err := s.ReplaceFlowInstanceRouteRecords(ctx, set.Identity, set.Routes); err != nil {
-			return FlowInstanceRouteTopologyResult{}, err
-		}
-	}
-	return FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
-}
-
-func (*sourceBoundaryProbeStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-
-func (*sourceBoundaryProbeStore) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
-	return fn(ctx)
-}
-
-func (s *sourceBoundaryProbeStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	seen := map[runtimeflowidentity.RunScopedFlowInstance]struct{}{}
-	for _, route := range s.routes {
-		seen[route.Identity] = struct{}{}
-	}
-	out := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(seen))
-	for route := range seen {
-		out = append(out, route)
-	}
-	return out, nil
-}
-
-func (s *sourceBoundaryProbeStore) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.ClaimCommit, error) {
-	s.bindCalls++
-	s.bindFact, _ = runtimecorrelation.SourceArtifactFactFromContext(ctx)
-	routeIdentity, err := events.ParseDeliveryRouteIdentity(claim.RouteIdentity())
-	if err != nil {
-		return runtimedelivery.ClaimCommit{}, err
-	}
-	return runtimedelivery.ClaimCommit{Acknowledged: true, Snapshot: runtimedelivery.Snapshot{
-		DeliveryID: claim.DeliveryID(), RunID: claim.RunID(), RouteIdentity: routeIdentity,
-		ClaimVersion: claim.Version(), SubscriberClass: claim.SubscriberClass(), SubscriberID: claim.SubscriberID(),
-		Status: runtimedelivery.StatusInProgress, ActiveSessionID: sessionID,
-	}}, nil
-}
-
 func sourceMutationFact(t testing.TB, marker string) runtimecorrelation.SourceArtifactFact {
 	t.Helper()
 	fact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat(marker, 64))
@@ -317,41 +216,6 @@ func sourceMutationFact(t testing.TB, marker string) runtimecorrelation.SourceAr
 		t.Fatalf("construct source fact: %v", err)
 	}
 	return fact
-}
-
-func sourceMutationRouteSource(t testing.TB) semanticview.Source {
-	flow := runtimecontracts.FlowContractView{
-		Path:  "work",
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "work"},
-		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
-			InstanceField("instance_key"),
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"task.completed": {},
-			"task.requested": {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"worker": {
-				Produces:     []string{"task.completed"},
-				SubscribesTo: []string{"task.requested"},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{flow}}
-	root.Children[0].Parent = &root
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &root.Schema,
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "work": &root.Children[0]},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"work": flow.Schema},
-	}
-	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "work"))
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(err)
-	}
-	return semanticview.Wrap(bundle)
 }
 
 func newSourceMutationProbeBus(
@@ -515,64 +379,6 @@ func TestPublishRootsRejectForeignSourceBeforeWorkOccurrenceAdmission(t *testing
 			}
 		})
 	}
-}
-
-func TestAdjacentDurableMutationRootsRejectForeignSourceBeforeMutation(t *testing.T) {
-	owned := sourceMutationFact(t, "c")
-	foreign := sourceMutationFact(t, "d")
-	owner := newSourceMutationProbeOwner()
-	store := &sourceBoundaryProbeStore{}
-	bus := newSourceMutationProbeBusWithStore(t, store, owned, owner, sourceMutationRouteSource(t))
-	foreignCtx := runtimecorrelation.WithSourceArtifactFact(context.Background(), foreign)
-	req := FlowInstanceRouteMaterializationRequest{
-		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("work", "instance-a")),
-	}
-
-	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
-	rollback := make([]runtimepipelinefixture.OwnerAction, 0, 1)
-	routeCtx := runtimepipelinefixture.WithSQLTx(foreignCtx, &sql.Tx{})
-	routeCtx = runtimepipelinefixture.WithPostCommitActions(routeCtx, &postCommit)
-	routeCtx = runtimepipelinefixture.WithRollbackActions(routeCtx, &rollback)
-	if err := bus.AddFlowInstanceRouteContextFixture(routeCtx, req); err == nil ||
-		!strings.Contains(err.Error(), "bundle source fact conflicts") {
-		t.Fatalf("foreign route add error = %v, want source conflict", err)
-	}
-	if store.upsertCalls != 0 || len(postCommit) != 0 || len(rollback) != 0 || bus.HasFlowInstanceRoute(req.Identity) {
-		t.Fatalf(
-			"route add mutations = upsert:%d post_commit:%d rollback:%d local:%v, want zero",
-			store.upsertCalls, len(postCommit), len(rollback), bus.HasFlowInstanceRoute(req.Identity),
-		)
-	}
-
-	if err := bus.AddFlowInstanceRouteContextFixture(context.Background(), req); err != nil {
-		t.Fatalf("owner-bound route add: %v", err)
-	}
-	if store.upsertCalls == 0 || !owned.Matches(store.upsertFact) || !bus.HasFlowInstanceRoute(req.Identity) {
-		t.Fatal("owner-bound route add did not persist and publish with the immutable source")
-	}
-	beforeDeletes := store.deleteCalls
-	if err := bus.RemoveFlowInstanceRouteContextFixture(foreignCtx, req.Identity); err == nil ||
-		!strings.Contains(err.Error(), "bundle source fact conflicts") {
-		t.Fatalf("foreign route remove error = %v, want source conflict", err)
-	}
-	if store.deleteCalls != beforeDeletes || !bus.HasFlowInstanceRoute(req.Identity) {
-		t.Fatal("foreign route removal mutated persistence or the local route table")
-	}
-	if err := bus.RemoveFlowInstanceRouteFixture(req.Identity); err != nil {
-		t.Fatalf("owner-bound no-context route removal: %v", err)
-	}
-	if store.deleteCalls != beforeDeletes+1 || !owned.Matches(store.deleteFact) || bus.HasFlowInstanceRoute(req.Identity) {
-		t.Fatal("owner-bound route removal did not use the immutable bus source")
-	}
-
-	if _, err := bus.MarkDeliveryInProgress(foreignCtx, "agent-a", "session-a"); err == nil ||
-		!strings.Contains(err.Error(), "bundle source fact conflicts") {
-		t.Fatalf("foreign delivery-session error = %v, want source conflict", err)
-	}
-	if store.bindCalls != 0 {
-		t.Fatalf("delivery-session store mutations = %d, want zero", store.bindCalls)
-	}
-
 }
 
 func TestDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMutation(t *testing.T) {

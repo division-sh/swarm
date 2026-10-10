@@ -61,17 +61,6 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) runfork.Run
 		})
 		hasHistoricalReplayRequirement = true
 	}
-	if strings.TrimSpace(evidence.RouteHistory.State) == runfork.RunForkRouteHistoryUnknownUnversioned {
-		blocker := runForkReplayResumeBlocker(runfork.RunForkBlockerFlowRouteHistoryUnproven)
-		blockers = appendRunForkBlocker(blockers, blocker)
-		dispositions = append(dispositions, runfork.RunForkReplayResumeDisposition{
-			Fact:        runfork.RunForkReplayResumeFactRouteHistory,
-			Disposition: runfork.RunForkReplayResumeDispositionFailClosedBlocker,
-			BlockerCode: blocker.Code,
-			Message:     blocker.Message,
-		})
-		hasHistoricalReplayRequirement = true
-	}
 	if evidence.ActiveSession {
 		blocker := runForkReplayResumeBlocker(runfork.RunForkBlockerSessionHistoryUnproven)
 		blockers = appendRunForkBlocker(blockers, blocker)
@@ -129,10 +118,6 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) runfork.Run
 		UnsupportedBlockers:      blockers,
 	}
 }
-
-// runfork.RunForkReplayResumeAdmissionWithSelectedRouteResolution discharges only the
-// unversioned route-history blocker after the selected route topology and its
-// persisted fork-local recovery have been validated by the caller.
 
 func runForkReplayResumeDispositionForPendingWork(item runfork.RunForkPendingWork) runfork.RunForkReplayResumeDisposition {
 	disposition := runfork.RunForkReplayResumeDisposition{
@@ -326,11 +311,6 @@ func runForkReplayResumeBlocker(code string) runfork.RunForkUnsupportedBlocker {
 		return runfork.RunForkUnsupportedBlocker{
 			Code:    runfork.RunForkBlockerTimerHistoryUnproven,
 			Message: "timers are current-state rows and timer creation/cancellation is not represented in the mutation log",
-		}
-	case runfork.RunForkBlockerFlowRouteHistoryUnproven:
-		return runfork.RunForkUnsupportedBlocker{
-			Code:    runfork.RunForkBlockerFlowRouteHistoryUnproven,
-			Message: "routing_rules are current-state rows and cannot prove historical flow-route membership at the fork point",
 		}
 	case runfork.RunForkBlockerSessionHistoryUnproven:
 		return runfork.RunForkUnsupportedBlocker{

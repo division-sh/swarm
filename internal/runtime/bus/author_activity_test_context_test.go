@@ -215,13 +215,17 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 			opts.PipelineObligations = provider.PipelineObligations()
 		}
 	}
+	runOwner := opts.Durable.RunLifecycle
 	if opts.PipelineObligations != nil {
 		opts.Durable = ExactDurableTestDependencies(store)
+	}
+	if runOwner != nil {
+		opts.Durable.RunLifecycle = runOwner
 	}
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}
-	if bundle, ok := semanticview.Bundle(opts.ContractBundle); ok && bundle != nil && bundle.SourceArtifact != nil {
+	if bundle, ok := semanticview.Bundle(opts.ContractBundle); opts.SourceArtifactFact.BundleHash() == "" && ok && bundle != nil && bundle.SourceArtifact != nil {
 		fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 		if err != nil {
 			return nil, err

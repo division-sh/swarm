@@ -236,7 +236,6 @@ type PersistenceRoles struct {
 	EventExistence       EventExistenceReader
 	DirectiveOperations  runtimeagentcontrol.DirectiveOperationStore
 	DirectiveTargets     AgentDirectiveRunTargetResolver
-	FlowRoutes           runtimebus.FlowInstanceRoutePersistence
 }
 
 type StrategicContext = json.RawMessage

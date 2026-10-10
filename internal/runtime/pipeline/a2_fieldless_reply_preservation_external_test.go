@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -35,9 +34,8 @@ func TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores(t *test
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			runID, token := uuid.NewString(), uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, canonicalrouting.ArrivalJoinRoutingFiles(t, canonicalrouting.ArrivalJoinFieldlessReply)))
+			ctx, fact := nativeConstructionContextFixture(t, selected.events.(storetest.RunFixtureStore), source, runID)
 			if issues := pinrouting.CompileConnectGraph(source).Issues(); len(issues) != 0 || len(source.WorkflowJoins()) != 0 {
 				t.Fatalf("fieldless reply requires admitted paired Connect and no joins: issues=%#v joins=%#v", issues, source.WorkflowJoins())
 			}
@@ -68,14 +66,14 @@ func TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores(t *test
 			}}
 			newBus := func() *runtimebus.EventBus {
 				t.Helper()
-				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, TestLifecycleProbe: probe, Logger: logger})
+				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), TestLifecycleProbe: probe, Logger: logger})
 				if err != nil {
 					t.Fatal(err)
 				}
 				return bus
 			}
 			bus := newBus()
-			options := pipeline.PipelineCoordinatorOptions{Module: module, TestLifecycleProbe: probe}
+			options := pipeline.PipelineCoordinatorOptions{Module: module, SourceArtifactFact: fact, TestLifecycleProbe: probe}
 			pc := newGateRecoveryCoordinator(bus, selected, options)
 			bus.SetInterceptors(pc)
 			at := time.Now().UTC()
@@ -87,15 +85,14 @@ func TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			// Initialize the explicit root parent as component input, without
-			// persisting a third header in this two-child persistence proof.
-			parent, _, err := pc.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), pipeline.WorkflowInstance{
+			commitA2FixtureConstruction(t, pc, selected.events, ctx, testRunScopedWorkflowInstanceForRun(runID, runID), pipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: runID,
 				WorkflowName: semanticview.RootExecutionFlowID(source), WorkflowVersion: source.WorkflowVersion(),
 				CurrentState: parentStage.ID(),
 			}, at)
-			if err != nil {
-				t.Fatalf("initialize explicit fieldless parent: %v", err)
+			parent, found, err := pc.Load(ctx, testRunScopedWorkflowInstanceForRun(runID, runID))
+			if err != nil || !found {
+				t.Fatalf("load constructed fieldless parent: found=%v err=%v", found, err)
 			}
 			for _, flow := range []string{"requester", "provider"} {
 				graph, found := semanticview.WorkflowStageTopology(source, flow)
@@ -128,7 +125,7 @@ func TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores(t *test
 						t.Fatalf("payload-only reply invented %s rows: %d", table, n)
 					}
 				}
-				if count("SELECT COUNT(*) FROM flow_instances WHERE run_id=$1") != 2 || count("SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id=$1") != 2 || count("SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1") != constructionHistory {
+				if count("SELECT COUNT(*) FROM flow_instances WHERE run_id=$1") != 3 || count("SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id=$1") != 3 || count("SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1") != constructionHistory {
 					t.Fatal("fieldless execution changed immutable construction evidence")
 				}
 			}

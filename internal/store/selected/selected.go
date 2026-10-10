@@ -342,8 +342,7 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 				EmitFeedback:             selected,
 				ScenarioSetup:            selected,
 				ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-				FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
-				FlowRouteTopology: selected, FlowRouteRollback: selected,
+
 				ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
 				PreparedEvents:        selected,
 				TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
@@ -400,8 +399,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 				EmitFeedback:             selected,
 				ScenarioSetup:            selected,
 				ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-				FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
-				FlowRouteTopology: selected, FlowRouteRollback: selected,
+
 				ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
 				PreparedEvents:        selected,
 				TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
@@ -446,7 +444,7 @@ func managerRoles(selected *private.PostgresStore) runtimemanager.PersistenceRol
 	return runtimemanager.PersistenceRoles{
 		LifecycleCensus: selected, LifecycleState: selected, LifecycleEffects: selected,
 		LifecycleDiagnostics: selected, EffectsRecovery: selected, StandingRestarts: selected, DeliveryQuiescence: selected,
-		EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected, FlowRoutes: selected,
+		EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
 	}
 }
 
@@ -454,7 +452,7 @@ func sqliteManagerRoles(selected *private.SQLiteRuntimeStore) runtimemanager.Per
 	return runtimemanager.PersistenceRoles{
 		LifecycleCensus: selected, LifecycleState: selected, LifecycleEffects: selected,
 		LifecycleDiagnostics: selected, EffectsRecovery: selected, StandingRestarts: selected, DeliveryQuiescence: selected,
-		EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected, FlowRoutes: selected,
+		EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
 	}
 }
 
@@ -464,9 +462,9 @@ func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipelin
 		ConstructionPublications: workflow,
 		EmitFeedback:             selected,
 		ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
-		FlowRouteTopology: selected, FlowRouteRollback: selected, ActiveAgents: selected,
-		ActiveFlows: selected, TargetOwners: selected,
+
+		ActiveAgents: selected,
+		ActiveFlows:  selected, TargetOwners: selected,
 		PreparedEvents: selected, TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 	}
 	execution, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
@@ -486,9 +484,9 @@ func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipe
 		ConstructionPublications: workflow,
 		EmitFeedback:             selected,
 		ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
-		FlowRouteTopology: selected, FlowRouteRollback: selected, ActiveAgents: selected,
-		ActiveFlows: selected, TargetOwners: selected,
+
+		ActiveAgents: selected,
+		ActiveFlows:  selected, TargetOwners: selected,
 		PreparedEvents: selected, TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 	}
 	execution, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(

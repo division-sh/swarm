@@ -1665,11 +1665,20 @@ func TestSelectedContractExecutionMaterializationRejectsUnversionedRouteProofRem
 	selectedEventID := seedSelectedContractLaterEventPreRevision(t, db, sourceRunID, entityID, at.Add(time.Second), "flow-a/1")
 	captureRunForkTestRevision(t, db, sourceRunID)
 	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: selectedEventID})
-	if err != nil || plan.RouteHistory.State != runfork.RunForkRouteHistoryUnknownUnversioned {
-		t.Fatalf("route fixture must require selected resolution: state=%q err=%v", plan.RouteHistory.State, err)
+	if err != nil || plan.ForkPoint.EventID != selectedEventID || len(plan.Entities) != 5 || plan.ReconstructedEntityCount != len(plan.Entities) {
+		t.Fatalf("fixed selected fixture: plan=%+v err=%v", plan, err)
+	}
+	found := false
+	for _, entity := range plan.Entities {
+		if entity.EntityID == entityID && entity.MaterializationMetadata != nil && entity.MaterializationMetadata.FlowInstance == "flow-a/1" && entity.MaterializationMetadata.Owner == runfork.RunForkMaterializedEntitySnapshotMetadataOwner {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("fixed selected fixture lost its exact constructed subject")
 	}
 	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, selectedEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
-	// Even with valid preparation, unversioned routes require their own proof.
+	// Valid fixed construction does not replace the selected frontier proof.
 	request.FrontierAdmission = runfork.RunForkContractFrontierAdmission{}
 	before := snapshotForkHistoricalExecutionTables(t, db, true)
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
@@ -1677,7 +1686,7 @@ func TestSelectedContractExecutionMaterializationRejectsUnversionedRouteProofRem
 		t.Fatalf("materialization error = %v, want exact prepared route proof refusal", err)
 	}
 	if materialized.ForkRunID != "" {
-		t.Fatalf("materialized fork despite route blocker: %#v", materialized)
+		t.Fatalf("materialized fork despite missing frontier proof: %#v", materialized)
 	}
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
 	if after := snapshotForkHistoricalExecutionTables(t, db, true); !reflect.DeepEqual(before, after) {

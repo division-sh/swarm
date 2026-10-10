@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -404,10 +405,18 @@ func selectedExecutionSourceFlowCommand(t *testing.T, ctx context.Context, loade
 		t.Fatal(err)
 	}
 	var resolvedKey any
+	var payload map[string]any
 	if constructorInput != "" {
-		resolvedKey = identity.InstanceID
+		if err := canonicaljson.DecodePreservingNumberLexemes(event.Payload(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		resolvedKey = payload[constructor.KeyField()]
 	}
-	fields, err := constructor.InitialFields(nil, resolvedKey)
+	fields, err := constructor.InitialFields(payload, resolvedKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instanceKey, err := pipeline.AdmitFlowInstanceKey(loaded.Source, identity.TemplateID, resolvedKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,6 +439,7 @@ func selectedExecutionSourceFlowCommand(t *testing.T, ctx context.Context, loade
 	}
 	instance := pipeline.WorkflowInstance{
 		InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
+		InstanceKey:  instanceKey,
 		ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
 		EntityType: contract.EntityType, WorkflowName: identity.TemplateID, WorkflowVersion: loaded.Source.WorkflowVersion(),
 		Mode: schema.EffectiveMode(), CurrentState: stage.ID(), StageDefined: graph.StageCount() != 0,

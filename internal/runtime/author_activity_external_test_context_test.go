@@ -411,11 +411,8 @@ type externalRuntimeTestDurableEventStore interface {
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
-	runtimebus.FlowInstanceRoutePersistence
 	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteSetPersistence
 	runtimebus.FlowInstanceRouteTopologyPersistence
-	runtimebus.FlowInstanceRouteRollbackPersistence
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.SelectedRunTargetOwnerLister
@@ -432,9 +429,9 @@ func externalRuntimeTestDurableDependencies(durable externalRuntimeTestDurableEv
 		ConstructionPublications: durable,
 		EmitFeedback:             durable,
 		ReplyContext:             durable, RunLifecycle: durable,
-		DeliveryLifecycle: durable, FlowRoutes: durable, FlowRouteRecords: durable,
-		FlowRouteSets: durable, FlowRouteTopology: durable, FlowRouteRollback: durable, ActiveAgents: durable,
-		ActiveFlows: durable, TargetOwners: durable, PreparedEvents: durable,
+		DeliveryLifecycle: durable,
+		ActiveAgents:      durable,
+		ActiveFlows:       durable, TargetOwners: durable, PreparedEvents: durable,
 		TargetFailureRecorder: durable, RunOrigins: durable, StandingRestarts: durable,
 	}
 }
@@ -457,7 +454,6 @@ func externalRuntimeTestSelectedManagerRoles(selected any) runtimemanager.Persis
 	roles.EventExistence, _ = selected.(runtimemanager.EventExistenceReader)
 	roles.DirectiveOperations, _ = selected.(runtimeagentcontrol.DirectiveOperationStore)
 	roles.DirectiveTargets, _ = selected.(runtimemanager.AgentDirectiveRunTargetResolver)
-	roles.FlowRoutes, _ = selected.(runtimebus.FlowInstanceRoutePersistence)
 	roles.StandingRestarts, _ = selected.(runtimerunlifecycle.StandingRestartDispositionReader)
 	return roles
 }
@@ -576,7 +572,7 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 		}
 	}
 	if opts.PipelineObligations != nil {
-		if opts.Durable.FlowRouteTopology == nil {
+		if opts.Durable.Instances == nil {
 			durable, ok := store.(externalRuntimeTestDurableEventStore)
 			if !ok {
 				return nil, fmt.Errorf("external runtime durable event-store fixture %T lacks exact durable roles", store)

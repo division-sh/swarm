@@ -121,9 +121,6 @@ func projectManagerTestPersistenceRoles(roles *PersistenceRoles, candidate any) 
 	if roles.DirectiveTargets == nil {
 		roles.DirectiveTargets, _ = candidate.(AgentDirectiveRunTargetResolver)
 	}
-	if roles.FlowRoutes == nil {
-		roles.FlowRoutes, _ = candidate.(runtimebus.FlowInstanceRoutePersistence)
-	}
 }
 
 func admitManagerTestBusContext(ctx context.Context) (context.Context, error) {

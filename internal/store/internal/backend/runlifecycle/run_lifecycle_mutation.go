@@ -251,22 +251,6 @@ func (s *RunLifecycleSQLiteOwner) RequireActiveRun(ctx context.Context, runID st
 	return err
 }
 
-// RequirePublicationRunActive performs the closed preflight used before route
-// planning. The event commit repeats this check in its own transaction; this
-// operation only guarantees that terminal-run refusal cannot be shadowed by a
-// later route-planning error.
-func (s *RunLifecyclePostgresOwner) RequirePublicationRunActive(ctx context.Context, runID string) error {
-	return s.runRead(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return (postgresRunLifecycleMutation{store: s, tx: tx, readOnly: true}).RequireActive(txctx, runID)
-	})
-}
-
-func (s *RunLifecycleSQLiteOwner) RequirePublicationRunActive(ctx context.Context, runID string) error {
-	return s.runRead(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return (sqliteRunLifecycleMutation{store: s, tx: tx, readOnly: true}).RequireActive(txctx, runID)
-	})
-}
-
 func (s *RunLifecyclePostgresOwner) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return runPostgresLifecycleRead(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimecorrelation.SourceArtifactFact, error) {
 		return mutation.RequirePresentSource(ctx, runID)

@@ -48,6 +48,9 @@ func newSnapshotOwnershipFixture(t *testing.T, backend eventRecordContractBacken
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	req := sqliteFlowActivationRequest(construction.bundle, "owner", "one", "", "owner/one")
 	parent := flowidentity.Stored(req.ContractBundle, semanticview.RootExecutionFlowID(req.ContractBundle), f.runID, f.runID, f.runID, "")
+	rootRequest := sqliteFlowActivationRequest(construction.bundle, ".", f.runID, "", f.runID)
+	rootRequest.Instance, rootRequest.OccurredAt = parent, at
+	constructHistoricalSourceFixture(t, f.ctx, construction.store, rootRequest)
 	child, err := flowidentity.KeyedChild(req.ContractBundle, parent, "owner", "one")
 	if err != nil {
 		t.Fatal(err)
@@ -133,13 +136,19 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 				t.Run(order, func(t *testing.T) {
 					f := newSnapshotOwnershipFixture(t, backend, order != "ordinary_materialization", order == "reverse")
 					plan := f.plan(t)
-					if len(plan.Entities) != 1 {
+					if len(plan.Entities) != 2 {
 						t.Fatalf("plan = %#v", plan)
 					}
-					entity := plan.Entities[0]
+					var entity runfork.RunForkEntityState
+					for _, candidate := range plan.Entities {
+						if candidate.EntityID == f.entityID {
+							entity = candidate
+						}
+					}
 					wantMetadata := runfork.RunForkMaterializedEntitySnapshotMetadata{
 						Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 						FlowInstance: "owner/one", EntityType: "review_item", Slug: "snapshot-slug", Name: "Snapshot Name",
+						ParentInstance: f.runID, InstanceKey: "one",
 						StageDefined: true, FlowTemplate: "owner", Mode: "template", Status: "active",
 						CreatedAt: f.state.CreatedAt, UpdatedAt: f.state.UpdatedAt, EnteredStateAt: f.state.EnteredStageAt,
 					}
@@ -166,11 +175,8 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 					if later := f.plan(t); !reflect.DeepEqual(later.Entities, plan.Entities) || later.ForkPoint != plan.ForkPoint {
 						t.Fatalf("fixed revision changed: before=%#v after=%#v", plan, later)
 					}
-					if order != "ordinary_materialization" {
-						if plan.ExecutionReady || len(plan.UnsupportedBlockers) != 1 || plan.UnsupportedBlockers[0].Code != runfork.RunForkBlockerFlowRouteHistoryUnproven {
-							t.Fatalf("event context must retain ordinary route-history refusal: %#v", plan.UnsupportedBlockers)
-						}
-						return
+					if !plan.ExecutionReady || !plan.ReplayResumeAdmission.StateOnlyExecutionReady || len(plan.UnsupportedBlockers) != 0 {
+						t.Fatalf("fixed snapshot acquired authority from unrelated event context: %#v", plan.UnsupportedBlockers)
 					}
 					req := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID}
 					materialized, err := f.store.MaterializeRunFork(f.ctx, req)
@@ -278,6 +284,18 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 						t.Run(invalid, func(t *testing.T) {
 							f := newSnapshotOwnershipFixture(t, backend, false, false)
 							plan := f.plan(t)
+							if len(plan.Entities) != 2 {
+								t.Fatalf("constructed parent and child headers: %#v", plan.Entities)
+							}
+							var child runfork.RunForkEntityState
+							for _, entity := range plan.Entities {
+								if entity.EntityID == f.entityID {
+									child = entity
+								}
+							}
+							if child.EntityID != f.entityID {
+								t.Fatal("fixed snapshot lost its exact child header")
+							}
 							var forkRunID string
 							var forkBefore [5]int
 							var forkEntityBefore snapshotOwnershipEntityRow
@@ -288,13 +306,13 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								}
 								forkRunID = materialized.ForkRunID
 								forkBefore = snapshotOwnershipCounts(t, f, forkRunID)
-								assertSnapshotOwnershipEntity(t, f, forkRunID, plan.Entities[0], 1)
+								assertSnapshotOwnershipEntity(t, f, forkRunID, child, 1)
 								forkEntityBefore = readSnapshotOwnershipEntity(t, f, forkRunID)
 							}
 							f.advance(t)
 							sourceEntityBefore := readSnapshotOwnershipEntity(t, f, f.runID)
 							latest, err := f.store.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: f.runID})
-							if err != nil || len(latest.Entities) != 1 {
+							if err != nil || len(latest.Entities) != 2 {
 								t.Fatalf("latest source plan: %#v, %v", latest, err)
 							}
 							var raw []byte

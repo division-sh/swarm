@@ -100,6 +100,7 @@ func (p PreparedWorkflowPublicationState) JoinAdmissionInstance(target events.Ro
 	}
 	instance, err := DecodeWorkflowInstancePersistenceRecord(WorkflowInstancePersistenceRecord{
 		EntityID: record.EntityID, FlowInstance: record.Identity.Route.InstancePath, EntityType: record.EntityType,
+		ParentInstance: record.ParentInstance, InstanceKey: record.InstanceKey,
 		WorkflowName: record.WorkflowName, WorkflowVersion: record.WorkflowVersion, Mode: record.Mode,
 		Status: record.Status, TerminatedAt: record.TerminatedAt, StageDefined: record.StageDefined, Config: record.Config,
 		CurrentState: record.CurrentState, Revision: revision, EnteredStageAt: record.EnteredStageAt,

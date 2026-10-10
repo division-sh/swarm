@@ -20,7 +20,7 @@ func TestImportBoundaryInputBindingDoesNotRouteWithoutConnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	routes := rt.ResolveForRun(eventBusTestRunID, "parent.lead_captured")
+	routes := rt.PubsubDeclarationDefinitionsFixture(t, "worker", "parent.lead_captured")
 	if len(routes) != 0 {
 		t.Fatalf("Resolve(parent.lead_captured) = %#v, want bind-only input to be inert", routes)
 	}
@@ -32,7 +32,7 @@ func TestImportBoundaryOutputBindingDoesNotRouteWithoutConnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	routes := rt.ResolveForRun(eventBusTestRunID, "worker/work.completed")
+	routes := rt.PubsubDeclarationDefinitionsFixture(t, ".", "worker/work.completed")
 	if len(routes) != 0 {
 		t.Fatalf("Resolve(worker/work.completed) = %#v, want bind-only output to be inert", routes)
 	}
@@ -44,7 +44,7 @@ func TestImportBoundaryOutputBindingDoesNotAuthorizeWildcardWithoutConnect(t *te
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	routes := rt.ResolveForRun(eventBusTestRunID, "worker/work.completed")
+	routes := rt.PubsubDeclarationDefinitionsFixture(t, ".", "worker/work.completed")
 	if len(routes) != 0 {
 		t.Fatalf("Resolve(worker/work.completed) = %#v, want bind-only output to grant no wildcard route", routes)
 	}
@@ -56,15 +56,11 @@ func TestImportBoundaryInputBindingDoesNotMaterializeTemplateRouteWithoutConnect
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	if got := rt.ResolveForRun(eventBusTestRunID, "parent.lead_captured"); len(got) != 0 {
+	if got := rt.PubsubDeclarationDefinitionsFixture(t, "worker", "parent.lead_captured"); len(got) != 0 {
 		t.Fatalf("Resolve(parent.lead_captured) before materialization = %#v, want none", got)
 	}
-	if err := rt.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("worker", "inst-1")),
-	}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
-	}
-	routes := rt.ResolveForRun(eventBusTestRunID, "parent.lead_captured")
+	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "worker", "inst-1", eventBusTestRunID)
+	routes := rt.PubsubReceiverDefinitionsFixture(t, eventBusTestRunID, instance, "parent.lead_captured")
 	if len(routes) != 0 {
 		t.Fatalf("Resolve(parent.lead_captured) = %#v, want bind-only template route to remain inert", routes)
 	}
@@ -80,7 +76,15 @@ func TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery(t *t
 		{ID: ".", FlowInstance: eventBusTestRunID, EntityID: runtimeflowidentity.EntityID(eventBusTestRunID)},
 		{ID: "worker", FlowInstance: "worker", EntityID: runtimeflowidentity.EntityID("worker")},
 	}}
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
+	root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", eventBusTestRunID)
+	worker := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "worker", "", eventBusTestRunID)
+	index := runtimebus.FlowInstanceIndexFixture(
+		runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, root, ""),
+		runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, worker, ""),
+	)
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source,
+		Durable: runtimebus.DurableDependencies{Instances: index},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}

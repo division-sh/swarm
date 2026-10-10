@@ -55,22 +55,24 @@ func seedRunForkCLIConstruction(t *testing.T, db *sql.DB, runID, bundleHash stri
 	if err != nil {
 		t.Fatal(err)
 	}
+	workflow := pipeline.NewWorkflowPersistence(selected)
 	sourceBus, err := bus.NewEventBusWithOptions(selected, bus.EventBusOptions{
 		ExecutionPosture: executionposture.Live, WorkOwner: work, PipelineObligations: selected.PipelineObligations(),
 		ContractBundle: loaded.Source, SourceArtifactFact: loaded.SourceArtifactFact,
 		RuntimeInstanceID: runtimeID, DeliveryAuthority: authority, ReceiverExecution: eventreceiver.NormalExecution(),
 		Durable: bus.DurableDependencies{
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
+
 			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
-			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected, ConstructionPublications: selected,
+			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
+			Instances: workflow, ConstructionPublications: workflow,
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	coordinator := pipeline.NewPipelineCoordinatorWithOptions(sourceBus, pipeline.PipelineCoordinatorOptions{
-		Module: loaded.Module, Persistence: pipeline.NewWorkflowPersistence(selected),
+		Module: loaded.Module, Persistence: workflow,
 		SourceArtifactFact: loaded.SourceArtifactFact, WorkOwner: work,
 		ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(),
 		RunLifecycle: selected, PipelineObligations: selected.PipelineObligations(), DeliveryStore: selected, DeadLetters: selected,

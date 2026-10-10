@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
@@ -15,6 +16,10 @@ import (
 // topology. Their caller joins timer/publication work before retiring this owner.
 func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected any) (func(pipeline.DynamicFlowRuntimeReadinessPlan) pipeline.DynamicFlowRuntimeActivationAttempt, func()) {
 	t.Helper()
+	fact, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found || fact.Validate() != nil {
+		t.Fatal("native timer attachment requires its admitted source")
+	}
 	workflows := selected.(pipeline.DynamicFlowRuntimeReadinessPersistence)
 	process, err := selected.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
 		OwnerID: "timer-replay-proof", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
@@ -48,7 +53,7 @@ func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected a
 		})
 	}
 	t.Cleanup(closeOwner)
-	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}}, nil)
+	set, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: fact.BundleHash()}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +69,7 @@ func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected a
 		t.Fatal(err)
 	}
 	grant, err := process.IssueGenerationGrant(ctx, startupownership.GrantRequest{
-		BundleHash: authorActivityTestSourceArtifactFact.BundleHash(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+		BundleHash: fact.BundleHash(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		RuntimeGeneration: 1, SourceSetRevision: set.Revision,
 	})
 	if err != nil {

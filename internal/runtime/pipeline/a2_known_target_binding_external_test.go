@@ -12,7 +12,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -22,7 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -44,9 +43,8 @@ func TestA2KnownTargetUnarmedPublicationRetainsEarlyRefusalAfterArmAndRestartOnB
 				path := "orders/" + instanceID
 				entityID := flowidentity.EntityID(path)
 				owner := testRunScopedWorkflowInstanceForRun(runID, path)
-				insertGateRecoveryRun(t, selected, runID)
-				ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, a2KnownTargetBindingFiles()))
+				ctx, fact := nativeConstructionContextFixture(t, selected.events.(storetest.RunFixtureStore), source, runID)
 				collector := externalPipelineSourceNode(t, source, "orders", "collector")
 				dispatcher := externalPipelineSourceNode(t, source, "orders", "dispatcher")
 				module := proposedEffectProofModule{source: source, nodes: []runtimepipeline.WorkflowNode{
@@ -62,7 +60,7 @@ func TestA2KnownTargetUnarmedPublicationRetainsEarlyRefusalAfterArmAndRestartOnB
 				newBus := func(observer lifecycleprobe.Observer) *runtimebus.EventBus {
 					t.Helper()
 					bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-						ContractBundle: source, TestLifecycleProbe: observer, Logger: logger,
+						ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), TestLifecycleProbe: observer, Logger: logger,
 					}, "platform.join_complete", "platform.join_timeout")
 					if err != nil {
 						t.Fatalf("new known-target EventBus: %v", err)
@@ -72,21 +70,20 @@ func TestA2KnownTargetUnarmedPublicationRetainsEarlyRefusalAfterArmAndRestartOnB
 				bus := newBus(probe)
 				schedules, _ := newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
 				pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
-					Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe,
+					Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe,
 				})
 				bus.SetInterceptors(pc)
+				commitKeylessConstructorComponent(t, ctx, selected, pc, source)
 				now := time.Now().UTC()
 				constructed := commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, runtimepipeline.WorkflowInstance{
 					InstanceID: instanceID, StorageRef: path, EntityID: entityID, WorkflowName: "orders", WorkflowVersion: source.WorkflowVersion(),
 					CurrentState: "dispatching", EntityType: "order_state", Fields: map[string]any{"order_id": instanceID, "expected": []any{"a", "b"}},
 				}, now)
-				publishRoute := func() {
+				requireConstruction := func() {
 					t.Helper()
-					if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: constructed.Identity}); err != nil {
-						t.Fatalf("publish existing receiver route: %v", err)
-					}
+					requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, constructed.Identity)
 				}
-				publishRoute()
+				requireConstruction()
 				load := func() runtimepipeline.WorkflowInstance {
 					t.Helper()
 					instance, found, err := pc.Load(ctx, owner)
@@ -182,10 +179,10 @@ func TestA2KnownTargetUnarmedPublicationRetainsEarlyRefusalAfterArmAndRestartOnB
 				bus = newBus(restartedProbe)
 				schedules, _ = newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
 				pc = newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
-					Module: module, GenericSchedules: schedules, TestLifecycleProbe: restartedProbe,
+					Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: restartedProbe,
 				})
 				bus.SetInterceptors(pc)
-				publishRoute()
+				requireConstruction()
 				beforeReplay := load()
 				if err := bus.PublishAcknowledged(ctx, prepared.Event.Event()); err != nil {
 					t.Fatalf("replay retained early publication through fresh EventBus: %v", err)
@@ -236,10 +233,9 @@ func TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothSt
 			path := "orders/" + instanceID
 			entityID := flowidentity.EntityID(path)
 			owner := testRunScopedWorkflowInstanceForRun(runID, path)
-			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			files := canonicalrouting.ArrivalJoinRoutingFiles(t, canonicalrouting.ArrivalJoinPayloadDirectedBeforeArm)
 			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))
+			ctx, fact := nativeConstructionContextFixture(t, selected.events.(storetest.RunFixtureStore), source, runID)
 			worker := externalPipelineSourceNode(t, source, ".", "worker")
 			collector := externalPipelineSourceNode(t, source, "orders", "collector")
 			dispatcher := externalPipelineSourceNode(t, source, "orders", "dispatcher")
@@ -252,14 +248,14 @@ func TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothSt
 				{Node: dispatcher, Subscriptions: []events.EventType{"orders/dispatch.completed"}, ExecutionType: runtimecontracts.SystemNodeExecutionType},
 			}}
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, TestLifecycleProbe: probe, Logger: logger,
+				ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), TestLifecycleProbe: probe, Logger: logger,
 			}, "platform.join_complete", "platform.join_timeout")
 			if err != nil {
 				t.Fatal(err)
 			}
 			schedules, _ := newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
 			pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
-				Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe,
+				Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe,
 			})
 			bus.SetInterceptors(pc)
 			now := time.Now().UTC()
@@ -271,7 +267,7 @@ func TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothSt
 			// construction or same-commit runtime boot activation.
 			readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 				Identity: flowidentity.Instance{TemplateID: "orders", ScopeKey: "orders", InstanceID: instanceID, InstancePath: path, EntityID: entityID, HasStoredPath: true},
-				RunID:    runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
+				RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 			}
 			readiness.Identity.ParentRoute = flowidentity.ParentRoute{FlowID: parent.Identity.TemplateID, FlowInstance: parent.Identity.InstancePath, EntityID: parent.Identity.EntityID}
 			readiness.Identity.ParentEntityID = parent.Identity.EntityID
@@ -282,9 +278,7 @@ func TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothSt
 				Fields: map[string]any{"order_id": instanceID, "expected": []any{"a", "b"}},
 			}, now)
 			markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)
-			if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: constructed.Identity}); err != nil {
-				t.Fatal(err)
-			}
+			requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, constructed.Identity)
 			load := func() runtimepipeline.WorkflowInstance {
 				t.Helper()
 				instance, found, err := pc.Load(ctx, owner)

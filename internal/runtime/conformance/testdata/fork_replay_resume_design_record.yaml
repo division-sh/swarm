@@ -138,17 +138,6 @@ rows:
       - {kind: go_test, name: TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerHistory}
     rationale: "Timer current rows remain fail-closed. Selected-contract execution rejects revisioned timer history and timer-capable selected sources before any fork mutation until #642 supplies a long-lived timer owner."
 
-  - id: flow_route_history
-    fact: flow_route_history
-    disposition: fail_closed_blocker
-    owner: store.run_fork.replay_resume_admission
-    blocker_codes: [flow_route_history_unproven]
-    enforcement_point: internal/store/internal/backend/runforkpersistence/run_fork_replay_resume_admission.go
-    proof_refs:
-      - {kind: go_test, name: TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers}
-      - {kind: go_test, name: TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence}
-    rationale: "Source/current route rows are not copied; fork-local route proof is a separately gated sibling."
-
   - id: session_history
     fact: session_history
     disposition: fail_closed_blocker
@@ -309,10 +298,10 @@ rows:
 
   - id: routes
     fact: routes
-    disposition: split_sibling
-    owner: runtime.run_fork.selected_contract_route_recovery
+    disposition: reconstructed_fork_local_state
+    owner: runtime.run_fork.materialized_entity_snapshot_metadata
     blocker_codes:
-      - flow_route_history_unproven
+      - selected_contract_route_recovery_unproven
       - selected_contract_route_admission_non_mutating
       - selected_contract_route_topology_non_mutating
       - selected_contract_dynamic_route_topology_unproven
@@ -320,7 +309,7 @@ rows:
     proof_refs:
       - {kind: go_test, name: TestBuildContractSwapBootResumeAdmissionFailsClosedWithoutRouteRecovery}
       - {kind: go_test, name: TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence}
-    rationale: "Route truth remains a separate fork-local owner; source/current route rows are not copied."
+    rationale: "Admitted fixed construction and compiled declarations own instance identity. Selected binding/frontier recovery is a separate required proof; source/current membership rows are never copied."
 
   - id: sessions
     fact: sessions

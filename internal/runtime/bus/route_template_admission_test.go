@@ -95,16 +95,21 @@ func TestTemplateMaterializationDoesNotRepeatDeclarationAdmission(t *testing.T) 
 	if checked == 0 {
 		t.Fatal("fixture has no concrete template node handler")
 	}
-	_, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
 	source.inputLookups.Store(0)
 	source.nodeLookups.Store(0)
 	var inputLookups, nodeLookups []int64
 	for _, id := range []string{"alpha", "beta", "gamma"} {
-		if _, err := table.addFlowInstanceRouteForTopology(FlowInstanceRouteMaterializationRequest{
-			Identity: topologyOperationIdentity(t, id),
-			Instance: ConstructedFlowInstanceIdentityFixture(source, "workers", id, busInternalTestRunID),
-		}, &inputProducers); err != nil {
+		instance := ConstructedFlowInstanceIdentityFixture(source, "workers", id, busInternalTestRunID)
+		subscribers, err := table.PubsubReceiverDefinitions(busInternalTestRunID, instance, []string{instance.InstancePath + "/item.finished"})
+		if err != nil {
 			t.Fatal(err)
+		}
+		if len(subscribers) != 1 || subscribers[0].Path != instance.InstancePath || subscribers[0].LocalizedEvent != "item.finished" {
+			t.Fatalf("compiled receiver binding = %#v, want its exact local handler", subscribers)
+		}
+		want := table.templates[instance.ScopeKey].Subscribers[0].TargetHandler
+		if !subscribers[0].targetHandler.Equal(want) {
+			t.Fatalf("receiver binding changed its admitted target handler: %#v", subscribers[0])
 		}
 		inputLookups = append(inputLookups, source.inputLookups.Load())
 		nodeLookups = append(nodeLookups, source.nodeLookups.Load())

@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -41,7 +42,7 @@ func TestDynamicFlowTopologyReadyAcknowledgedFaultCompletesCreationBothStores(t 
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithOptions(t, backend, true, true)
-			fact, _ := correlation.SourceArtifactFactFromContext(f.ctx)
+			f.constructKeylessRoot(t)
 			source := semanticview.Wrap(f.bundle)
 			descriptors, err := runtimepkg.AuthorActivityEventDescriptors(source)
 			if err != nil {
@@ -53,10 +54,7 @@ func TestDynamicFlowTopologyReadyAcknowledgedFaultCompletesCreationBothStores(t 
 				t.Fatal(err)
 			}
 			t.Cleanup(lease.Release)
-			publisher, err := newStoreTestEventBus(t, f.store.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, RuntimeInstanceID: scope.RuntimeInstanceID})
-			if err != nil {
-				t.Fatal(err)
-			}
+			publisher := f.newRuntimeEventBus(t, bus.EventBusOptions{})
 			req := f.request("acknowledged-ready", "ti-acknowledged", "committed")
 			supplied := receiverSuppliedPayload(t, req)
 			supplied["nested"] = []any{int64(7), float64(7)}
@@ -94,8 +92,17 @@ func TestDynamicFlowTopologyReadyAcknowledgedFaultCompletesCreationBothStores(t 
 				t.Fatalf("committed readiness = %+v found=%v loadErr=%v finalizeErr=%v", readiness, found, err, finalizeErr)
 			}
 			restarted.requireCreationOccurrence(t, plan, 1)
-			if len(restarted.bus.routePaths()) != 1 {
-				t.Fatalf("acknowledged readiness retired process route: %v", restarted.bus.routePaths())
+			if len(plan.Readiness.Agents) != 1 {
+				t.Fatalf("acknowledged readiness requires one actual agent: %+v", plan.Readiness.Agents)
+			}
+			for _, expected := range plan.Readiness.Agents {
+				state, found, err := f.store.(manager.AgentLifecycleStateReader).LoadAgentLifecycleState(f.ctx, expected.Identity)
+				owned := state.Topology.Authority.Readiness
+				if err != nil || !found || state.Phase != manager.AgentLifecycleRegistered || state.RunMode != manager.AgentRunModeStopped ||
+					state.ConfigRevision != expected.ConfigRevision || owned == nil || owned.RunID != plan.Readiness.RunID ||
+					owned.InstancePath != plan.Identity.InstancePath || owned.PlanFingerprint != readiness.PlanHash || owned.AttemptID == "" {
+					t.Fatalf("acknowledged readiness lost its exact prepared receiver: %+v readiness=%+v found=%t err=%v", state, owned, found, err)
+				}
 			}
 			if err := restarted.manager.Shutdown(); err != nil {
 				t.Fatal(err)

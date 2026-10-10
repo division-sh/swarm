@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -27,7 +26,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"github.com/google/uuid"
 )
 
@@ -140,8 +138,6 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 				}
 				selected := backend.open(t)
 				runID := uuid.NewString()
-				insertGateRecoveryRun(t, selected, runID)
-				ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				variant := canonicalrouting.ArrivalJoinPayloadDirected
 				flows := []string{"orders", "orders"}
 				if multipleRecipients {
@@ -150,6 +146,7 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 				}
 				files := canonicalrouting.ArrivalJoinRoutingFiles(t, variant)
 				source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))
+				ctx, fact := nativeConstructionContextFixture(t, selected.events.(storetest.RunFixtureStore), source, runID)
 				worker := externalPipelineSourceNode(t, source, ".", "worker")
 				collectors := []identity.ExecutableNode{externalPipelineSourceNode(t, source, flows[0], "collector"), externalPipelineSourceNode(t, source, flows[1], "collector")}
 				dispatchers := []identity.ExecutableNode{externalPipelineSourceNode(t, source, flows[0], "dispatcher"), externalPipelineSourceNode(t, source, flows[1], "dispatcher")}
@@ -176,13 +173,13 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 						runtimepipeline.WorkflowNode{Node: collectors[1], Subscriptions: []events.EventType{"mirror/item.completed"}, ExecutionType: runtimecontracts.SystemNodeExecutionType},
 						runtimepipeline.WorkflowNode{Node: dispatchers[1], Subscriptions: []events.EventType{"mirror/manual.abort", "mirror/dispatch.completed"}, ExecutionType: runtimecontracts.SystemNodeExecutionType})
 				}
-				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, TestLifecycleProbe: probe, Logger: logger},
+				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), TestLifecycleProbe: probe, Logger: logger},
 					"platform.join_complete", "platform.join_timeout")
 				if err != nil {
 					t.Fatal(err)
 				}
 				schedules, _ := newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
-				options := runtimepipeline.PipelineCoordinatorOptions{Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe}
+				options := runtimepipeline.PipelineCoordinatorOptions{Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe}
 				pc := newGateRecoveryCoordinator(bus, selected, options)
 				bus.SetInterceptors(pc)
 				now := time.Now().UTC()
@@ -219,7 +216,7 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 					path := paths[index]
 					readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 						Identity: flowidentity.Instance{TemplateID: flows[index], ScopeKey: flows[index], InstanceID: keys[index], InstancePath: path, EntityID: flowidentity.EntityID(path), HasStoredPath: true},
-						RunID:    runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
+						RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 					}
 					readiness.Identity.ParentRoute = flowidentity.ParentRoute{FlowID: parent.Identity.TemplateID, FlowInstance: parent.Identity.InstancePath, EntityID: parent.Identity.EntityID}
 					readiness.Identity.ParentEntityID = parent.Identity.EntityID
@@ -229,9 +226,7 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 						Mode: "template", RuntimeReadiness: &readiness, CurrentState: "awaiting", EntityType: "order_state", Fields: map[string]any{"order_id": keys[index], "expected": []any{"a", "b"}},
 					}, now)
 					markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)
-					if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, path), Instance: constructed.Identity}); err != nil {
-						t.Fatal(err)
-					}
+					requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, constructed.Identity)
 				}
 				original := []timeridentity.StageEntryRef{entry(0), entry(1)}
 				payload, err := json.Marshal(map[string]any{"prefix": keys[selectedCollector][:18], "suffix": keys[selectedCollector][18:]})

@@ -104,7 +104,7 @@ func TestPrepareInboundDeliveryBatchRejectsInvalidProviderOutputAuthorizationBef
 
 func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthorizationIntoMutation(t *testing.T) {
 	source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
-	store := &InMemoryEventStore{}
+	store := newTargetRouteMemoryStore()
 	bus, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source, ProviderOutputVerifier: catalog,
 	})

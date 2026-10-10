@@ -172,7 +172,7 @@ func TestStandaloneDeliveryAndRunLifecycleReadsHaveNoMutationSideEffectsParity(t
 				t.Fatalf("terminalize selected-read proof run: %v", err)
 			}
 			beforeTerminalRead := captureSelectedReadSideEffects(t, db, postgres, runID)
-			err = store.RequirePublicationRunActive(ctx, runID)
+			err = store.RequireActiveRun(ctx, runID)
 			var notActive *runtimerunlifecycle.RunNotActiveError
 			if !errors.As(err, &notActive) || notActive.State != runtimerunlifecycle.StateCancelled {
 				t.Fatalf("terminal publication preflight error = %v, want cancelled RunNotActiveError", err)
@@ -193,7 +193,6 @@ type selectedReadProof struct {
 type selectedReaderAsWriterStore interface {
 	RequirePresentRun(context.Context, string) error
 	RequireActiveRun(context.Context, string) error
-	RequirePublicationRunActive(context.Context, string) error
 	RequirePresentRunSource(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
 	RequireActiveRunSource(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
 	ScanDeliveryContinuations(context.Context, runtimedelivery.ExecutionAuthority, runtimedelivery.ContinuationCursor, int) (runtimedelivery.ContinuationPage, error)
@@ -204,7 +203,6 @@ func selectedReaderAsWriterProofs(store selectedReaderAsWriterStore, authority r
 	return []selectedReadProof{
 		{name: "require present run", run: func(ctx context.Context) error { return store.RequirePresentRun(ctx, runID) }},
 		{name: "require active run", run: func(ctx context.Context) error { return store.RequireActiveRun(ctx, runID) }},
-		{name: "require publication run active", run: func(ctx context.Context) error { return store.RequirePublicationRunActive(ctx, runID) }},
 		{name: "require present run source", run: func(ctx context.Context) error { _, err := store.RequirePresentRunSource(ctx, runID); return err }},
 		{name: "require active run source", run: func(ctx context.Context) error { _, err := store.RequireActiveRunSource(ctx, runID); return err }},
 		{name: "scan delivery continuations", run: func(ctx context.Context) error {
@@ -302,7 +300,6 @@ func TestStandaloneSelectedReadAccessModeGuard(t *testing.T) {
 		for _, method := range []string{"RequirePresentRun", "RequireActiveRun", "RequirePresentRunSource", "RequireActiveRunSource"} {
 			tests = append(tests, selectedReadGuard{path: lifecyclePath, receiver: "RunLifecycle" + backend + "Owner", method: method, required: wrapper})
 		}
-		tests = append(tests, selectedReadGuard{path: lifecyclePath, receiver: "RunLifecycle" + backend + "Owner", method: "RequirePublicationRunActive", required: "runRead"})
 	}
 	for _, method := range []string{"ListAgentDeliveryLifecycleFacts", "readOperatorAgentSummarySnapshot", "LoadOperatorAgentDiagnosis"} {
 		tests = append(tests, selectedReadGuard{path: "internal/store/internal/operatorsurface/sqlite_operator_agent_conversation_read_surface.go", receiver: "AgentSQLite", method: method, required: "RunReadTransaction"})
