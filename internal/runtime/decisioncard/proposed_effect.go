@@ -6,10 +6,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 )
@@ -23,45 +25,48 @@ const (
 )
 
 type ProposedEffectContinuation struct {
-	CardID            string
-	RunID             string
-	RequestEventID    string
-	ActivityID        string
-	Tool              string
-	BundleHash        string
-	WorkflowVersion   string
-	Input             semanticvalue.Value
-	EffectContentHash string
-	EffectClass       runtimecontracts.ActivityEffectClass
-	SuccessEvent      string
-	FailureEvent      string
-	RevisionEvent     string
-	RejectedEvent     string
-	RetryMaxAttempts  int
-	RetryBackoff      string
-	ForkPolicy        runtimecontracts.ActivityForkPolicy
-	EntityID          string
-	NodeID            string
-	FlowID            string
-	FlowInstance      string
-	HandlerEventKey   string
-	SourceEventID     string
-	SourceRunID       string
-	SourceTaskID      string
-	ParentEventID     string
-	ChainDepth        int
-	Attempt           int
-	Generation        attemptgeneration.Generation
-	LoopStage         string
-	ExecutionMode     executionmode.Mode
-	ReplyContextID    string
-	State             string
-	Verdict           string
-	DecisionEventID   string
-	RouteEventID      string
-	SupersededReason  string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	CardID                      string
+	RunID                       string
+	RequestEventID              string
+	ActivityID                  string
+	Tool                        string
+	NativeSessionTarget         string
+	PlanGeneration              plangeneration.Generation
+	ChannelActivationGeneration channelonboarding.ChannelActivationGeneration
+	BundleHash                  string
+	WorkflowVersion             string
+	Input                       semanticvalue.Value
+	EffectContentHash           string
+	EffectClass                 runtimecontracts.ActivityEffectClass
+	SuccessEvent                string
+	FailureEvent                string
+	RevisionEvent               string
+	RejectedEvent               string
+	RetryMaxAttempts            int
+	RetryBackoff                string
+	ForkPolicy                  runtimecontracts.ActivityForkPolicy
+	EntityID                    string
+	NodeID                      string
+	FlowID                      string
+	FlowInstance                string
+	HandlerEventKey             string
+	SourceEventID               string
+	SourceRunID                 string
+	SourceTaskID                string
+	ParentEventID               string
+	ChainDepth                  int
+	Attempt                     int
+	Generation                  attemptgeneration.Generation
+	LoopStage                   string
+	ExecutionMode               executionmode.Mode
+	ReplyContextID              string
+	State                       string
+	Verdict                     string
+	DecisionEventID             string
+	RouteEventID                string
+	SupersededReason            string
+	CreatedAt                   time.Time
+	UpdatedAt                   time.Time
 }
 
 func ProposedEffectCardID(requestEventID, decision string) string {
@@ -80,6 +85,7 @@ func (c ProposedEffectContinuation) Canonical() ProposedEffectContinuation {
 	c.RequestEventID = strings.TrimSpace(c.RequestEventID)
 	c.ActivityID = strings.TrimSpace(c.ActivityID)
 	c.Tool = strings.TrimSpace(c.Tool)
+	c.NativeSessionTarget = strings.TrimSpace(c.NativeSessionTarget)
 	c.BundleHash = strings.TrimSpace(c.BundleHash)
 	c.WorkflowVersion = strings.TrimSpace(c.WorkflowVersion)
 	c.EffectContentHash = strings.TrimSpace(c.EffectContentHash)
@@ -119,7 +125,7 @@ func (c ProposedEffectContinuation) Canonical() ProposedEffectContinuation {
 
 func (c ProposedEffectContinuation) EffectValue() (semanticvalue.Value, error) {
 	c = c.Canonical()
-	value, err := canonicaljson.FromGo(map[string]any{
+	fields := map[string]any{
 		"request_event_id":   c.RequestEventID,
 		"activity_id":        c.ActivityID,
 		"tool":               c.Tool,
@@ -148,7 +154,16 @@ func (c ProposedEffectContinuation) EffectValue() (semanticvalue.Value, error) {
 		"loop_stage":         c.LoopStage,
 		"execution_mode":     c.ExecutionMode,
 		"reply_context_id":   c.ReplyContextID,
-	})
+	}
+	if c.NativeSessionTarget != "" {
+		if !strings.HasPrefix(c.NativeSessionTarget, runtimecontracts.PrivateChannelActivityPrefix) || !c.PlanGeneration.Valid() || !c.ChannelActivationGeneration.Valid() {
+			return semanticvalue.Value{}, fmt.Errorf("native proposed effect requires its exact frozen target and generations")
+		}
+		fields["native_session_target"] = c.NativeSessionTarget
+		fields["plan_generation"] = c.PlanGeneration
+		fields["channel_activation_generation"] = c.ChannelActivationGeneration
+	}
+	value, err := canonicaljson.FromGo(fields)
 	if err != nil {
 		return semanticvalue.Value{}, err
 	}

@@ -1,0 +1,21 @@
+id: provider.whatsapp.hitl_channel
+version: 0.1.0
+platform_version: '>=0.7.0 <0.8.0'
+type: channel
+implements: [swarm.hitl-channel/v2]
+manifest_hash: sha256:b3488106385f2f9590786beadeb041d1e3d99a05fdc04c32e4fd9285e5a6095e
+provenance:
+  source: platform
+capabilities:
+  can: {}
+  cannot:
+    - inspect provider opaque references
+    - select inbound targets
+    - bypass activity attempts
+requires:
+  packs:
+    trigger: provider.whatsapp
+    connector: provider.whatsapp.connector
+tests:
+  - packs/hitl_channel_whatsapp
+  - sessionprovider/whatsapp_channel_write

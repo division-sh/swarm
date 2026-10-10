@@ -158,6 +158,14 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 	if err := mutation.ValidateTransitionEvidence(); err != nil {
 		return runtimeengine.CommittedEngineMutation{}, err
 	}
+	if len(mutation.ActivityIntents) != 0 {
+		prepared, release, err := o.state.coordinator.prepareSessionActivityIntents(ctx, mutation.ActivityIntents)
+		if err != nil {
+			return runtimeengine.CommittedEngineMutation{}, err
+		}
+		defer release()
+		mutation.ActivityIntents = prepared
+	}
 	if o.store != nil && o.store.enabled() {
 		if o.store.engineMutations == nil {
 			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("selected workflow engine mutation owner is required")

@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/google/uuid"
 )
 
 var (
@@ -105,7 +106,10 @@ func (p Phase) Valid() bool {
 	return false
 }
 
-func (p Phase) RequiresExecutableTarget() bool {
+func (p Phase) RequiresExecutableTarget(posture ActivationPosture) bool {
+	if posture == ActivationSessionConnection && (p == PhaseActivatingProvider || p == PhaseAwaitingExternalIdentity || p == PhaseAwaitingOperatorConfirmation) {
+		return false
+	}
 	return p != PhasePreparing && p != PhaseCredentialsAdmitted && p != PhaseFailed && p != PhaseRetired
 }
 
@@ -217,11 +221,14 @@ func (c ChannelRuntimeContextCoordinate) ValidateContext() error {
 	return nil
 }
 
-func (c ChannelRuntimeContextCoordinate) ValidateForPhase(phase Phase) error {
+func (c ChannelRuntimeContextCoordinate) ValidateForPhase(phase Phase, posture ActivationPosture) error {
+	if !posture.Valid() {
+		return fmt.Errorf("channel coordinate requires its activation posture")
+	}
 	if !phase.Valid() {
 		return fmt.Errorf("channel onboarding phase %q is invalid", phase)
 	}
-	if phase.RequiresExecutableTarget() {
+	if phase.RequiresExecutableTarget(posture) {
 		return c.Validate()
 	}
 	return c.ValidateContext()
@@ -245,6 +252,12 @@ func (c ChannelRuntimeContextCoordinate) Matches(other ChannelRuntimeContextCoor
 
 func (c ChannelRuntimeContextCoordinate) MatchesDeclaration(other ChannelRuntimeContextCoordinate) bool {
 	return c.ValidateContext() == nil && other.ValidateContext() == nil && c.Normalized() == other.Normalized()
+}
+
+// MatchesRuntimeContext fences the source/plan and live runtime occurrence.
+// Business target generation is a separate admission, not connection identity.
+func (c ChannelRuntimeContextCoordinate) MatchesRuntimeContext(other ChannelRuntimeContextCoordinate) bool {
+	return c.MatchesDurableIdentity(other) && c.MatchesContextOccurrence(other.RuntimeInstanceID, other.ContextPublicationGeneration)
 }
 
 type SlotState string
@@ -427,11 +440,11 @@ func ProjectReadiness(f ReadinessFacts) ConnectedChannelReadiness {
 	if !f.ConfirmationTerminalSuccess || f.ConfirmationActivationRevision != f.ActivationRevision || f.ConfirmationBindingRevision != f.BindingRevision {
 		return fail(ReadinessConfirmationUnavailable)
 	}
+	if f.TargetGeneration == 0 || f.TargetGeneration != f.ExpectedTargetGeneration || f.TargetGeneration != f.Coordinate.TargetGeneration {
+		return fail(ReadinessTargetUnavailable)
+	}
 	switch f.Posture {
 	case ActivationWebhookRegistration:
-		if f.TargetGeneration == 0 || f.TargetGeneration != f.ExpectedTargetGeneration || f.TargetGeneration != f.Coordinate.TargetGeneration {
-			return fail(ReadinessTargetUnavailable)
-		}
 		if strings.TrimSpace(f.ExposureGeneration) == "" || f.ExposureGeneration != f.ExpectedExposureGeneration {
 			return fail(ReadinessExposureUnavailable)
 		}
@@ -531,12 +544,7 @@ func (r StartRequest) Validate() error {
 	if !r.Posture.Valid() || !r.Ceremony.Valid() {
 		return fmt.Errorf("%w: activation posture and identity ceremony are required", ErrInvalidRequest)
 	}
-	if r.Posture == ActivationSessionConnection {
-		if err := r.Coordinate.Validate(); err != nil {
-			return err
-		}
-	}
-	if len(r.CredentialReservations) == 0 {
+	if len(r.CredentialReservations) == 0 && r.Posture != ActivationSessionConnection {
 		return fmt.Errorf("%w: at least one credential reservation is required", ErrInvalidRequest)
 	}
 	roles := map[string]struct{}{}
@@ -581,6 +589,9 @@ type Operation struct {
 	RequestedAt             time.Time                         `json:"requested_at"`
 	UpdatedAt               time.Time                         `json:"updated_at"`
 	CompletedAt             time.Time                         `json:"completed_at,omitzero"`
+
+	SessionConnectionID string                                  `json:"-"`
+	SessionAccount      operatorchannel.SessionAccountAdmission `json:"-"`
 }
 
 type AdvanceRequest struct {
@@ -590,6 +601,7 @@ type AdvanceRequest struct {
 	RebindCoordinate             *ChannelRuntimeContextCoordinate
 	CredentialAdmissions         []CredentialAdmission
 	ReplaceCredentialAdmissions  bool
+	SessionAccount               *operatorchannel.SessionAccountAdmission
 	IdentityOperationID          string
 	BindingRevision              int64
 	ConfirmationOperationID      string
@@ -597,6 +609,57 @@ type AdvanceRequest struct {
 	FailureCode                  string
 	FailureMessage               string
 	Now                          time.Time
+}
+
+// PairingReadback is authenticated control-plane material, never READY or a
+// principal/account admission. QR contents must not enter logs or durable DTOs.
+type PairingReadback struct {
+	Status    string    `json:"status"`
+	Code      string    `json:"code,omitempty"`
+	ExpiresAt time.Time `json:"expires_at,omitzero"`
+	Paired    bool      `json:"paired"`
+	Connected bool      `json:"connected"`
+}
+
+// ValidateSessionAccount checks retained provenance, not executable authority.
+func (o Operation) ValidateSessionAccount() error {
+	if !o.Phase.Valid() {
+		return fmt.Errorf("%w: session provenance requires an exact posture and phase", ErrInvalidRequest)
+	}
+	if o.Posture == ActivationSessionConnection {
+		parsed, err := uuid.Parse(o.SessionConnectionID)
+		if err != nil || parsed == uuid.Nil || parsed.String() != o.SessionConnectionID ||
+			o.SessionAccount != (operatorchannel.SessionAccountAdmission{}) && o.SessionAccount.ConnectionID != o.SessionConnectionID {
+			return fmt.Errorf("%w: session provenance requires its exact reserved connection", ErrInvalidRequest)
+		}
+	} else if o.SessionConnectionID != "" {
+		return fmt.Errorf("%w: webhook responsibility cannot reserve a session connection", ErrInvalidRequest)
+	}
+	if o.SessionAccount != (operatorchannel.SessionAccountAdmission{}) && (o.Phase == PhasePreparing || o.Phase == PhaseCredentialsAdmitted) {
+		return fmt.Errorf("%w: session account evidence contradicts its onboarding responsibility", ErrInvalidRequest)
+	}
+	required := o.Posture == ActivationSessionConnection && o.Phase != PhasePreparing && o.Phase != PhaseCredentialsAdmitted &&
+		o.Phase != PhaseActivatingProvider && o.Phase != PhaseFailed && o.Phase != PhaseRetired
+	return validateSessionAccount(o.Posture, o.Provider, o.SessionAccount, required)
+}
+
+func validateSessionAccount(posture ActivationPosture, provider string, account operatorchannel.SessionAccountAdmission, required bool) error {
+	if !posture.Valid() {
+		return fmt.Errorf("%w: session provenance requires an exact activation posture", ErrInvalidRequest)
+	}
+	if account == (operatorchannel.SessionAccountAdmission{}) {
+		if required {
+			return fmt.Errorf("%w: paired session account evidence is required", ErrInvalidRequest)
+		}
+		return nil
+	}
+	if posture != ActivationSessionConnection || account.Provider != provider {
+		return fmt.Errorf("%w: session account evidence contradicts its provider responsibility", ErrInvalidRequest)
+	}
+	if err := account.Validate(); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidRequest, err)
+	}
+	return nil
 }
 
 // Locale declarations have their own fence: changing client language must not
@@ -657,6 +720,12 @@ type ConnectedChannelActivation struct {
 	UpdatedAt            time.Time                         `json:"updated_at"`
 	RetiredAt            time.Time                         `json:"retired_at,omitzero"`
 	RetirementReason     string                            `json:"retirement_reason,omitempty"`
+
+	SessionAccount operatorchannel.SessionAccountAdmission `json:"-"`
+}
+
+func (a ConnectedChannelActivation) ValidateSessionAccount() error {
+	return validateSessionAccount(a.Posture, a.Provider, a.SessionAccount, a.Posture == ActivationSessionConnection)
 }
 
 type PublishActivationRequest struct {
@@ -685,6 +754,7 @@ type Store interface {
 	ListChannelOnboardingOperations(context.Context) ([]Operation, error)
 	AdvanceChannelOnboarding(context.Context, AdvanceRequest) (Operation, error)
 	ReconcileChannelOnboardingBinding(context.Context, ReconcileBindingRequest) (Operation, error)
+	SessionStandingBindingCurrent(context.Context, Operation) (bool, error)
 	ResetChannelOnboardingPendingIdentity(context.Context, PendingResetRequest) (Operation, error)
 	PublishConnectedChannelActivation(context.Context, PublishActivationRequest) (Operation, ConnectedChannelActivation, error)
 	GetConnectedChannelActivation(context.Context, string) (ConnectedChannelActivation, error)

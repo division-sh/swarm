@@ -1,0 +1,19 @@
+id: provider.whatsapp.connector
+version: 0.1.0
+platform_version: '>=0.7.0 <0.8.0'
+type: connector
+manifest_hash: sha256:f7fdf6d3620a1b54b5cfe1c0ecd054daba7bd2cc77c9a263f16f55beee2ba1ea
+provenance:
+  source: platform
+capabilities:
+  can:
+    call_provider_actions: [whatsapp.send_text]
+    lower_through_activity: true
+    journal_activity_attempts: true
+  cannot:
+    - bypass activity_attempts
+    - retry non_idempotent_write automatically
+    - expose credential values
+requires: {}
+tests:
+  - sessionprovider/whatsapp_channel_write

@@ -85,6 +85,9 @@ func ValidateSource(source semanticview.Source) []error {
 	if source == nil {
 		return nil
 	}
+	if err := semanticview.ValidateToolDeclarationNames(source); err != nil {
+		return []error{err}
+	}
 	tools := source.ToolEntries()
 	names := make([]string, 0, len(tools))
 	for name := range tools {
@@ -120,6 +123,9 @@ func HasEffectiveConnectors(source semanticview.Source) bool {
 func CapabilitySubjects(ctx context.Context, source semanticview.Source, opts CapabilityOptions) ([]packs.Subject, error) {
 	if source == nil {
 		return nil, nil
+	}
+	if err := semanticview.ValidateToolDeclarationNames(source); err != nil {
+		return nil, err
 	}
 	if opts.Registry == nil {
 		return nil, fmt.Errorf("provider connector pack registry is required")
@@ -171,6 +177,12 @@ func isProviderRegistration(tool runtimecontracts.ToolSchemaEntry) bool {
 }
 
 func validateRegistrationTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error {
+	if err := tool.ValidateDeclarationName(toolID); err != nil {
+		return []error{err}
+	}
+	if tool.Handler() == runtimecontracts.ToolHandlerInProcess {
+		return validateNativeProviderTool(toolID, tool, runtimecontracts.ToolCategoryProviderRegistration)
+	}
 	context := fmt.Sprintf("provider registration tool %q", strings.TrimSpace(toolID))
 	var errs []error
 	if _, _, ok := splitToolID(toolID); !ok {
@@ -206,6 +218,12 @@ func validateRegistrationTool(toolID string, tool runtimecontracts.ToolSchemaEnt
 }
 
 func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error {
+	if err := tool.ValidateDeclarationName(toolID); err != nil {
+		return []error{err}
+	}
+	if tool.Handler() == runtimecontracts.ToolHandlerInProcess {
+		return validateNativeProviderTool(toolID, tool, runtimecontracts.ToolCategoryProviderConnector)
+	}
 	context := fmt.Sprintf("provider connector tool %q", strings.TrimSpace(toolID))
 	var errs []error
 	provider, action, ok := splitToolID(toolID)
@@ -243,6 +261,21 @@ func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error 
 	}
 	if tool.RatePolicy().Enabled() {
 		errs = append(errs, fmt.Errorf("%s uses rate_limit; connector activity rate-limit admission is split", context))
+	}
+	return errs
+}
+
+// Native intent consumes the shared closed target contract. It is not an HTTP
+// auth exception and does not qualify a runtime connection or executable tool.
+func validateNativeProviderTool(toolID string, tool runtimecontracts.ToolSchemaEntry, category runtimecontracts.ToolCategory) []error {
+	var errs []error
+	if err := tool.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("native provider tool %q: %w", toolID, err))
+	}
+	provider, _, named := splitToolID(toolID)
+	target, native := tool.InProcess()
+	if !named || !native || provider != target.Provider() || tool.Category() != category {
+		errs = append(errs, fmt.Errorf("native provider tool %q must retain its target's provider and category", toolID))
 	}
 	return errs
 }
