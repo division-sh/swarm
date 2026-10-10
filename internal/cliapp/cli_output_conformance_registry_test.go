@@ -72,6 +72,7 @@ var cliOutputSharedOwnerProofs = map[string]cliOutputSharedOwnerProof{
 	"swarm channel list":      {Constructor: "newChannelListCommand", Runner: "runChannelList"},
 	"swarm channel status":    {Constructor: "newChannelStatusCommand", Runner: "runChannelStatus"},
 	"swarm channel unbind":    {Constructor: "newChannelUnbindCommand", Runner: "runChannelUnbind"},
+	"swarm channel logout":    {Constructor: "newChannelLogoutCommand", Runner: "runChannelLogout"},
 }
 
 var cliOutputGrandfatheredNonSharedRows = map[string]string{
@@ -154,6 +155,7 @@ var cliOutputExpectedFactOwners = map[string]string{
 	"swarm channel list":      "/v1/rpc channel.list",
 	"swarm channel status":    "/v1/rpc channel.list",
 	"swarm channel unbind":    "/v1/rpc channel.unbind",
+	"swarm channel logout":    "/v1/rpc channel.logout",
 }
 
 var cliOutputSharedDisplayProofs = map[string][]string{

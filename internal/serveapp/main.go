@@ -1525,7 +1525,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(20, "channel_onboarding", err)
 		return 1
 	}
-	channelDestructive, err := channelonboarding.NewDestructiveService(channelOnboardingStore, operatorChannels, credentialWriter, channelActivationRefresher, opts.TestChannelOnboardingNow, opts.TestChannelOnboardingBarrier)
+	channelDestructive, err := channelonboarding.NewDestructiveService(channelOnboardingStore, operatorChannels, credentialWriter, channelActivationRefresher, opts.TestChannelOnboardingNow, opts.TestChannelOnboardingBarrier, nil)
 	if err != nil {
 		presenter.fail(20, "channel_onboarding", err)
 		return 1

@@ -572,19 +572,31 @@ func reserveTeardown(ctx context.Context, r runner, req domain.ReserveTeardownRe
 	if err := req.Validate(); err != nil {
 		return domain.TeardownOperation{}, err
 	}
+	req.Scope = req.Scope.Normalized()
 	req.RequestedAt = canonicalTime(req.RequestedAt)
 	var out domain.TeardownOperation
 	err := r.mutate(ctx, "reserve channel teardown", func(txctx context.Context, tx *sql.Tx) error {
-		existing, found, err := loadTeardownByRequestKey(txctx, tx, r.dialect(), req.RequestKeyHash, true)
+		prepared, err := prepareTeardownReservationTx(txctx, tx, r.dialect(), req)
 		if err != nil {
 			return err
 		}
-		if found {
-			if existing.RequestHash != req.RequestHash || existing.Kind != req.Kind {
-				return domain.ErrConflict
-			}
-			out = existing
+		if prepared.replay != nil {
+			out = *prepared.replay
 			return nil
+		}
+		var logoutConnection, logoutTarget any
+		phase, retiredOperations, retiredActivations := domain.TeardownReserved, int64(0), int64(0)
+		if req.Kind == domain.TeardownLogout {
+			encoded, err := json.Marshal(req.Logout)
+			if err != nil {
+				return err
+			}
+			logoutConnection, logoutTarget = req.Logout.Account.ConnectionID, string(encoded)
+			retiredOperations, retiredActivations, err = fenceLogoutConnectionTx(txctx, tx, r.dialect(), prepared.logout, req.RequestedAt)
+			if err != nil {
+				return err
+			}
+			phase = domain.TeardownAuthorityRetired
 		}
 		scope := req.Scope
 		i := scope.Interface.Normalized()
@@ -601,11 +613,12 @@ func reserveTeardown(ctx context.Context, r runner, req domain.ReserveTeardownRe
 			teardown_id,request_key_hash,request_hash,kind,principal_id,
 			interface_key,interface_ref,channel_pack_id,channel_pack_version,channel_manifest_hash,semantic_generation,
 			bundle_hash,context_publication_generation,expected_binding_revision,expected_proof_revision,phase,teardown_revision,
-			retired_operations,retired_activations,requested_at,updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'reserved',1,0,0,?,?)`),
+			retired_operations,retired_activations,requested_at,updated_at,logout_connection_id,logout_target
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?)`),
 			req.TeardownID, req.RequestKeyHash, req.RequestHash, string(req.Kind), req.PrincipalID,
 			interfaceKey, interfaceRef, channelPackID, channelPackVersion, channelManifestHash, semanticGeneration,
-			nullable(scope.BundleHash), nullableUint(scope.ContextPublicationGeneration), nullableInt(req.ExpectedBindingRevision), nullableInt(req.ExpectedProofRevision), req.RequestedAt, req.RequestedAt)
+			nullable(scope.BundleHash), nullableUint(scope.ContextPublicationGeneration), nullableInt(req.ExpectedBindingRevision), nullableInt(req.ExpectedProofRevision), string(phase),
+			retiredOperations, retiredActivations, req.RequestedAt, req.RequestedAt, logoutConnection, logoutTarget)
 		if err != nil {
 			return fmt.Errorf("insert channel teardown: %w", err)
 		}
@@ -752,6 +765,9 @@ func completeTeardown(ctx context.Context, r runner, req domain.CompleteTeardown
 		if !found {
 			return domain.ErrNotFound
 		}
+		if op.Kind == domain.TeardownLogout {
+			return fmt.Errorf("%w: logout completion belongs to its selected effect settlement", domain.ErrConflict)
+		}
 		if op.Phase.Terminal() {
 			out = op
 			return nil
@@ -777,7 +793,7 @@ func completeTeardown(ctx context.Context, r runner, req domain.CompleteTeardown
 const teardownSelect = `SELECT teardown_id,request_key_hash,request_hash,kind,principal_id,
 	interface_ref,channel_pack_id,channel_pack_version,channel_manifest_hash,semantic_generation,
 	bundle_hash,context_publication_generation,expected_binding_revision,expected_proof_revision,phase,teardown_revision,
-	retired_operations,retired_activations,failure_code,failure_message,requested_at,updated_at,completed_at
+	retired_operations,retired_activations,failure_code,failure_message,requested_at,updated_at,completed_at,logout_connection_id,logout_target
 	FROM channel_onboarding_teardowns`
 
 func loadTeardownByRequestKey(ctx context.Context, q queryer, d dialect, key string, lock bool) (domain.TeardownOperation, bool, error) {
@@ -803,10 +819,11 @@ func scanTeardownRow(row rowScanner) (domain.TeardownOperation, bool, error) {
 	var bundleHash, failureCode, failureMessage sql.NullString
 	var publicationGeneration, bindingRevision, proofRevision sql.NullInt64
 	var requested, updated, completed any
+	var logoutConnection, logoutTarget sql.NullString
 	err := row.Scan(&op.TeardownID, &op.RequestKeyHash, &op.RequestHash, &kind, &op.PrincipalID,
 		&interfaceRef, &packID, &packVersion, &manifestHash, &semanticGeneration,
 		&bundleHash, &publicationGeneration, &bindingRevision, &proofRevision, &phase, &op.Revision,
-		&op.RetiredOperations, &op.RetiredActivations, &failureCode, &failureMessage, &requested, &updated, &completed)
+		&op.RetiredOperations, &op.RetiredActivations, &failureCode, &failureMessage, &requested, &updated, &completed, &logoutConnection, &logoutTarget)
 	if err == sql.ErrNoRows {
 		return domain.TeardownOperation{}, false, nil
 	}
@@ -814,6 +831,9 @@ func scanTeardownRow(row rowScanner) (domain.TeardownOperation, bool, error) {
 		return domain.TeardownOperation{}, false, err
 	}
 	op.Kind, op.Phase = domain.TeardownKind(kind), domain.TeardownPhase(phase)
+	if op.Logout, err = decodeLogoutTarget(op.Kind, logoutConnection, logoutTarget); err != nil {
+		return domain.TeardownOperation{}, false, err
+	}
 	op.Scope = domain.TeardownScope{
 		Interface:  operatorInterface(interfaceRef.String, packID.String, packVersion.String, manifestHash.String, semanticGeneration.String),
 		BundleHash: bundleHash.String, ContextPublicationGeneration: uint64(publicationGeneration.Int64),

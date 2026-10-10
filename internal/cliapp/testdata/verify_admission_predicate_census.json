@@ -267,7 +267,7 @@
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.Recover",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "02d056f50364e805c7a13e596ff6480c0e9b6dc75daa10eb0c932ac4dd3fcad9"
+    "body_sha256": "75c6ce9e582347e5c185aa773e31e8dba2a625262448cbd6b61776b266d27b2d"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.RetireContext",
@@ -315,7 +315,7 @@
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.retainedCredentialEvidence",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "abaffb91dc8f240f951ac8084e2796c1b9d91165929c0c3b953500ec85a0e905"
+    "body_sha256": "c2b04a454fbe712df25fc51b59e2230f3de27a1df0199e284c193305a7e7bc8a"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.retireAuthority",
@@ -327,19 +327,19 @@
     "owner": "internal/channelonboarding/teardown.go::NewDestructiveService",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "9f14c1c072caa84172fe02c6cb8db923ff496c43ba9e8ec37aeb269b8035f8c6"
+    "body_sha256": "76557eb41e8ea5d81907e4918db2350891efb5f36a7fa3b6fa529a084a8530d2"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::ReserveTeardownRequest.Validate",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "d9f566bffa19edc1bf2b4ad1010bcd9e23ec1f5ff8985e7384f85bc25fde2929"
+    "body_sha256": "95c04a88e01541d584e33da28d30b02f8a6aedf42f5f87dd285384a25ad7f2e2"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::TeardownKind.Valid",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "70b13e271dce38d063d4964f95c89263c38d7e8910fbc9b13c4e7e730c628728"
+    "body_sha256": "dc0273cb71fc9a994809db51743fc2fe8121f8a383e4497974041b01c9b214fa"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::TeardownPhase.Terminal",
@@ -348,22 +348,28 @@
     "body_sha256": "c2a08450675ba535548a217aeedbcd80316b4e07cd59c2c0646c10ca2150df0e"
   },
   {
+    "owner": "internal/channelonboarding/teardown.go::TeardownPhase.Valid",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "381aac55aa97dfbf5422edfeb9b021ea3926c3f875ec63c56ed277fca045cc92"
+  },
+  {
+    "owner": "internal/channelonboarding/teardown.go::TeardownScope.Normalized",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "9e0279703052ca2ddfce27451e7c9762716bbe8729997d482989535351c1e5d8"
+  },
+  {
     "owner": "internal/channelonboarding/teardown.go::TeardownScope.Validate",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "22397c063f82f64fd5085fa90c8f4e93899a9dfbbe1d68156c59c4481edccacb"
-  },
-  {
-    "owner": "internal/channelonboarding/teardown.go::TeardownScope.normalized",
-    "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
-    "body_sha256": "c796e57bc1db099bd1fbd1a468473705406fd6cc5f1383b6072394b83285aaef"
+    "body_sha256": "62123ec2f6a23a1ba5d0b9fc6d4eb76fb59efb46f3bf442492be0b78fa2fe2af"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::teardownScopeMatchesOperation",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "f721fdd2b90727837635573c79032bbe04d0e9a6237b548f0503b9619f30496f"
+    "body_sha256": "8b194ef6ed3b223944f0b292609df35e7cc1c99fa156a32d9f14c124f201cc8d"
   },
   {
     "owner": "internal/cliapp/local_preflight.go::*LocalPreflightReport.add",
@@ -3921,7 +3927,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
-    "body_sha256": "f45d24c4f7554720943445e7e3ed53705144358b32c294b968001196ec8de2e9"
+    "body_sha256": "fa5048060b6a123ea9a15df159b0f0cabd1d48e7470ae1b8954fc892af02d4d6"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
