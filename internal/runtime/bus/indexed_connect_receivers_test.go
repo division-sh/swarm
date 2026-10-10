@@ -69,6 +69,55 @@ func TestTargetOwnerProjectionConsumesOnlyScopedIndexObservations(t *testing.T) 
 	}
 }
 
+func TestMaterializedTargetProjectionUsesExactIndexScope(t *testing.T) {
+	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting))
+	ctx := constructionIndexContext(t, source)
+	event := eventtest.RuntimeControl(eventtest.UUID("materialized-index-event"), "account.ready", "", "", nil, 0,
+		busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	identity := ConstructedFlowInstanceIdentityFixture(source, "account", "one", event.RunID())
+	observed := constructionIndexObservation(t, source, event.RunID(), identity, "42")
+	reader := &unscopedConnectIndexTestReader{constructionIndexTestReader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{observed}}}
+	bus := &EventBus{semanticSource: source, durable: DurableDependencies{Instances: reader}}
+	bus.rebuildRoutePlanners()
+	plan := newRoutePlan(event)
+	plan.DeliveryIntents = []RoutePlanDeliveryIntent{{TargetBlueprint: events.RouteIdentity{
+		FlowID: identity.TemplateID, FlowInstance: identity.InstancePath, EntityID: identity.EntityID,
+	}}}
+	projection, err := bus.deliveryPlanner.materializedTargetOwnerProjection(ctx, event, plan)
+	if err != nil || len(projection.descriptors) != 1 || projection.descriptors[0].EntityID != identity.EntityID {
+		t.Fatalf("materialized receiver lost exact native owner: %+v err=%v", projection.descriptors, err)
+	}
+	if len(reader.requested) != 1 || len(reader.requested[0].FlowIDs()) != 0 || len(reader.requested[0].Coordinates()) != 1 || reader.requested[0].Coordinates()[0].Key() != observed.Owner().Key() {
+		t.Fatalf("materializer escaped exact receiver scope: %+v", reader.requested)
+	}
+	reader.observations = nil
+	projection, err = bus.deliveryPlanner.materializedTargetOwnerProjection(ctx, event, plan)
+	if err != nil || len(projection.descriptors) != 0 {
+		t.Fatalf("materializer substituted declarations for native absence: %+v err=%v", projection.descriptors, err)
+	}
+	for _, failure := range []error{context.Canceled, errors.New("materializer index failure"), errors.Join(context.Canceled, errors.New("independent materializer failure"))} {
+		reader.err = failure
+		if _, err := bus.deliveryPlanner.materializedTargetOwnerProjection(ctx, event, plan); !errors.Is(err, failure) {
+			t.Fatalf("materializer suppressed index failure: got=%v want=%v", err, failure)
+		}
+	}
+	reader.err = nil
+	sibling := ConstructedFlowInstanceIdentityFixture(source, "account", "two", event.RunID())
+	reader.observations = []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, event.RunID(), sibling, "43")}
+	if _, err := bus.deliveryPlanner.materializedTargetOwnerProjection(ctx, event, plan); err == nil {
+		t.Fatal("materializer admitted an unselected sibling from the index")
+	}
+	foreignRun := eventtest.UUID("materialized-foreign-run")
+	foreign := ConstructedFlowInstanceIdentityFixture(source, "account", "one", foreignRun)
+	reader.observations = []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, foreignRun, foreign, "42")}
+	if _, err := bus.deliveryPlanner.materializedTargetOwnerProjection(ctx, event, plan); err == nil {
+		t.Fatal("materializer admitted a receiver from another run")
+	}
+	if _, err := bus.deliveryPlanner.materializedTargetOwnerProjection(context.Background(), event, plan); err == nil {
+		t.Fatal("materializer accepted missing admitted source evidence")
+	}
+}
+
 func TestReplyOriginLookupPreservesPreparedConstructionAndIndependentFailures(t *testing.T) {
 	source := connectRoutePlanCarriedKeyResolutionSource(t, contracts.FlowInputResolutionModeSelect)
 	ctx := constructionIndexContext(t, source)

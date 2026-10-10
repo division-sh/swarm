@@ -313,14 +313,6 @@ func connectRecipientSubscribers(evaluation runtimepinrouting.ConnectRecipientEv
 	return dedupeSubscribers(out)
 }
 
-func newRouteTable(source semanticview.Source) *RouteTable {
-	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
-	rt := newRouteTableWithGraph(source, graph)
-	rt.inputProducers = inputProducers
-	rt.compiledSourceReady = true
-	return rt
-}
-
 func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.CompiledConnectGraph) *RouteTable {
 	return &RouteTable{
 		source:           source,
@@ -366,11 +358,6 @@ func routeApplyResolvedPattern(subscriber Subscriber, resolved routeResolvedPatt
 	return subscriber
 }
 
-func routeFlowLocalEventSet(source semanticview.Source, scope semanticview.FlowScope) map[string]struct{} {
-	_, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
-	return routeFlowLocalEventSetWithInputProducers(scope, inputProducers)
-}
-
 func routeFlowLocalEventSetWithInputProducers(scope semanticview.FlowScope, inputProducers runtimepinrouting.FlowInputProducerResolver) map[string]struct{} {
 	out := routeEventKeys(scope.Events)
 	for _, eventType := range scope.OutputEvents {
@@ -391,14 +378,6 @@ func routeFlowLocalEventSetWithInputProducers(scope semanticview.FlowScope, inpu
 		out[autoEmit] = struct{}{}
 	}
 	return out
-}
-
-func routeFlowInputHasExternalProducer(source semanticview.Source, flowID, eventType string) bool {
-	if source == nil {
-		return false
-	}
-	resolution := runtimepinrouting.ResolveFlowInputProducer(source, flowID, eventType)
-	return routeFlowInputProducerIsExternal(resolution)
 }
 
 func routeFlowInputProducerIsExternal(resolution runtimecontracts.FlowInputProducerResolution) bool {
@@ -526,11 +505,6 @@ func routeExecutableNodeDeclarations(source semanticview.Source, flowPath string
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Node.Key() < out[j].Node.Key() })
 	return out, nil
-}
-
-func routeResolveSubscriberPatterns(source semanticview.Source, kind subscriberKind, flowID string, inputEvents []string, authorityPath, routePath string, localEvents map[string]struct{}, raw string) ([]routeResolvedPattern, error) {
-	_, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
-	return routeResolveSubscriberPatternsWithInputProducers(source, kind, flowID, inputEvents, authorityPath, routePath, localEvents, raw, inputProducers)
 }
 
 func routeResolveSubscriberPatternsWithInputProducers(source semanticview.Source, kind subscriberKind, flowID string, inputEvents []string, authorityPath, routePath string, localEvents map[string]struct{}, raw string, inputProducers runtimepinrouting.FlowInputProducerResolver) ([]routeResolvedPattern, error) {

@@ -454,6 +454,26 @@ func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRout
 	return routePlan.Normalized()
 }
 
+func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, evt events.Event, plan RoutePlan) (selectedRunTargetOwnerProjection, error) {
+	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
+	if p.connectPlanner.source != nil {
+		var targets []events.RouteIdentity
+		for _, intent := range plan.DeliveryIntents {
+			targets = append(targets, intent.TargetBlueprint)
+		}
+		owners, err := p.connectPlanner.exactLookupCoordinates(evt.RunID(), targets)
+		if err != nil {
+			return selectedRunTargetOwnerProjection{}, err
+		}
+		scope, err := p.connectPlanner.lookupTargetScope(ctx, evt.RunID(), nil, owners)
+		if err != nil {
+			return selectedRunTargetOwnerProjection{}, err
+		}
+		ctx = withSelectedTargetOwnerLookupScope(ctx, scope)
+	}
+	return p.recipientPolicy.loadSelectedRunTargetOwnerProjection(ctx)
+}
+
 func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recipients []string) (RoutePlan, error) {
 	routePlan := newRoutePlan(evt)
 	if evt.Type() == events.EventType("platform.runtime_log") {

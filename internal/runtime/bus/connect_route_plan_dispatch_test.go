@@ -1971,7 +1971,10 @@ func TestEventBusMultiPlanMatchedEmptyPersistsEveryPlanOutcome(t *testing.T) {
 		testSelectedRunTargetOwner("consumer-a-owner", "consumer-a", "consumer-a-owner"),
 		testSelectedRunTargetOwner("consumer-b-owner", "consumer-b", "consumer-b-owner"),
 	)
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}, RouteTable: newRouteTable(source)})
+	routes := derivedRouteTableFixture(t, source)
+	// Remove registrations explicitly after complete compilation to inject this fault.
+	routes.connectDefinitions = nil
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}, RouteTable: routes})
 	if err != nil {
 		t.Fatal(err)
 	}
