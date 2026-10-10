@@ -101,7 +101,7 @@ func TestDynamicReadinessRunOwnershipBeforeEnqueueAndAfterAdmission(t *testing.T
 		for _, failure := range []string{"foreign", "fenced", "invalid"} {
 			t.Run(map[bool]string{false: "before-enqueue", true: "already-queued"}[queued]+"/"+failure, func(t *testing.T) {
 				instances := &flowActivationTestInstanceStore{}
-				bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+				bus := &flowActivationTestBus{}
 				am := newFlowActivationManager(t, bus, instances)
 				bundle := testFlowBundle(t, "")
 				setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
