@@ -1404,3 +1404,33 @@ serveapp-channel unit precede renewed exact-head core22/all12 supplements and
 hosted full. Any settled-before-crash setting that later becomes uncertain
 requires STOP and a bounded native-owner runtime gate. Existing2353/harness
 watchlist owns this second fixture manifestation; no new issue or closure claim.
+
+## Revised Focused-Only Qualification Ruling
+
+Reviewer-G6092846414 supersedes the earlier Local core22/all12 duplicate
+requirement under the user-ratified2026-10-10 policy. LOCAL is focused only;
+unaffected1a43 pressure, peer-order, census and structural receipts carry.
+Fresh repaired-head E2E-13 both-store proof and affected guards remain required;
+E2E-14 is an affected sibling control because its existing observer constructor
+is shared, not a second semantic repair. No local core/lifecycle/full tier or
+server2 duplicate reservation. The prior obsolete matrix requirements and red
+receipts remain historical records, not current qualification instructions.
+
+HOSTED remains CI-Tier full ONLY because the corrected common pressure helper
+is consumed by the full-only900s SQLite/PostgreSQL soak units. Lifecycle plus
+those named units would be sufficient, but current hosted selection has no
+extra-units parser/gate. No one-off CI selector is added here;2535 tracks that
+infrastructure gap. Hosted full and both long soaks must pass at the repaired
+pushed head. Remove Local-Tier core from the PR body and name focused receipts
+in the final audit. The present failed CI is not retried or waived.
+
+The real pending-install negative control is retained as RED37.521s on both
+stores; its source/log patch and hashes are recorded in PR6092799025. Repaired
+E2E-13 on the repair tree PASSES race5/15 records/126.467s with the actual
+barrier,15s/count/identity assertions unchanged. A preliminary fixture build
+failure (public activation DTO exposes revision only) remains failed evidence;
+use its public Operation ID for exact native qualification instead of inventing
+activation fields. Fresh committed-head focused controls follow. Upon the new
+qualification ruling, two queued duplicate sweeps and one begun whole-unit run
+are interrupted and joined; their incomplete receipts earn no credit. No fresh
+core, server2 qualification or hosted rerun has started.
