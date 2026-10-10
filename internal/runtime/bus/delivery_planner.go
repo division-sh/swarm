@@ -494,6 +494,13 @@ func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recip
 		return RoutePlan{}, errors.New("direct delivery recipients are required")
 	}
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
+	scope, bounded, err := p.connectPlanner.selectedTargetScope(ctx, evt)
+	if err != nil {
+		return RoutePlan{}, err
+	}
+	if bounded {
+		ctx = withSelectedTargetOwnerLookupScope(ctx, scope)
+	}
 	projection, err := p.recipientPolicy.loadSelectedRunTargetOwnerProjection(ctx)
 	if err != nil {
 		return RoutePlan{}, err

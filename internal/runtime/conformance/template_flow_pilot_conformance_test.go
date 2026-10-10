@@ -20,7 +20,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimeentity "github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -396,12 +395,6 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		receipts.add(t, source, parent.RunID(), instance, key)
 	}
 	store := &fanOutPinRouteMemoryStore{
-		sourceArtifactFact: sourceFact,
-		workflowVersion:    source.WorkflowVersion(),
-		flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
-			{RunID: parent.RunID(), InstanceID: "acct-a", EntityID: accountAEntityID, FlowInstance: "account/acct-a", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
-			{RunID: parent.RunID(), InstanceID: "acct-b", EntityID: accountBEntityID, FlowInstance: "account/acct-b", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-b"}},
-		},
 		activeAgents: []runtimebus.ActiveAgentDescriptor{
 			{Identity: agentidentitytest.DeclaredForRun(t, parent.RunID(), "account-worker", "notify-all-children/account", "account", "acct-a", "account/acct-a"), EntityID: accountAEntityID},
 			{Identity: agentidentitytest.DeclaredForRun(t, parent.RunID(), "account-worker", "notify-all-children/account", "account", "acct-b", "account/acct-b"), EntityID: accountBEntityID},
@@ -416,7 +409,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 			ActiveAgents:             store,
 		},
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
-			t.Fatal("existing account route descriptors should satisfy fan-out delivery")
+			t.Fatal("admitted account instances should satisfy fan-out delivery")
 			return runtimepipeline.FlowInstanceActivationPlan{}, nil
 		}),
 	})
@@ -560,7 +553,6 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 	tests := []struct {
 		name               string
 		payload            json.RawMessage
-		flowInstances      []runtimebus.ActiveFlowInstanceDescriptor
 		wantAdmissionError string
 	}{
 		{
@@ -571,20 +563,12 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 		{
 			name:    "ambiguous account key",
 			payload: json.RawMessage(`{"account_id":"acct-a","command":"refresh"}`),
-			flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
-				{RunID: eventtest.UUID("run-notify-all-children"), InstanceID: "acct-a-one", EntityID: runtimeflowidentity.EntityID("ent-a1"), FlowInstance: "account/acct-a-one", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
-				{RunID: eventtest.UUID("run-notify-all-children"), InstanceID: "acct-a-two", EntityID: runtimeflowidentity.EntityID("ent-a2"), FlowInstance: "account/acct-a-two", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
-			},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			sourceFact := conformanceSourceArtifactFact(t, source)
-			store := &fanOutPinRouteMemoryStore{
-				sourceArtifactFact: sourceFact,
-				workflowVersion:    source.WorkflowVersion(),
-				flowInstances:      tc.flowInstances,
-			}
+			store := &fanOutPinRouteMemoryStore{}
 			eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 				ContractBundle:     source,
 				SourceArtifactFact: sourceFact,
@@ -684,29 +668,8 @@ func (fanOutPinRouteLocker) WithEntityLock(ctx context.Context, _ runtimeidentit
 
 type fanOutPinRouteMemoryStore struct {
 	runtimebus.InMemoryEventStore
-	sourceArtifactFact runtimecorrelation.SourceArtifactFact
-	workflowVersion    string
-	flowInstances      []runtimebus.ActiveFlowInstanceDescriptor
-	activeAgents       []runtimebus.ActiveAgentDescriptor
-	deliveryRoutes     map[string][]events.DeliveryRoute
-}
-
-func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	sourceFact := s.sourceArtifactFact
-	if strings.TrimSpace(sourceFact.BundleHash()) == "" {
-		sourceFact = authorActivityTestSourceArtifactFact
-	}
-	bundleHash := sourceFact.BundleHash()
-	descriptors := append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...)
-	for i := range descriptors {
-		if descriptors[i].BundleHash == "" {
-			descriptors[i].BundleHash = bundleHash
-		}
-		if descriptors[i].WorkflowVersion == "" {
-			descriptors[i].WorkflowVersion = strings.TrimSpace(s.workflowVersion)
-		}
-	}
-	return descriptors, nil
+	activeAgents   []runtimebus.ActiveAgentDescriptor
+	deliveryRoutes map[string][]events.DeliveryRoute
 }
 
 func (s *fanOutPinRouteMemoryStore) ListActiveAgentDescriptors(context.Context, string) ([]runtimebus.ActiveAgentDescriptor, error) {

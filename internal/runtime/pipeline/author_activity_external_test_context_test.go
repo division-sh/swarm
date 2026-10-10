@@ -161,7 +161,6 @@ type scopedTestDurableStore interface {
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
 	runtimebus.ActiveAgentDescriptorLister
-	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder

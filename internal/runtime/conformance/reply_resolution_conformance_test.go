@@ -575,7 +575,9 @@ func TestReplyResolutionConformance_TypedHumanTaskPreservesReplyAuthorityAcrossR
 			}
 			deferEvent := replyConformanceCardLifecycleEvent(t, deferred.Card, uuid.NewString(), "mailbox.card_deferred", deferredAt)
 			if err := resumedBus.Publish(ctx, deferEvent); err != nil {
-				t.Fatalf("publish typed human-task defer: %v", err)
+				var failure *runtimefailures.Error
+				errors.As(err, &failure)
+				t.Fatalf("publish typed human-task defer: %v (cause: %v)", err, failure.Unwrap())
 			}
 			deferredOutcome := receiveReplyConformanceHumanTaskOutcome(t, outcomes, "human_task.deferred")
 			if got := deferredOutcome.DeliveryContext().ReplyContextID(); got != deliveryContext.ReplyContextID() {
@@ -1131,10 +1133,6 @@ func (s *replyConformanceStore) CommitPublication(ctx context.Context, command b
 		s.scopes[req.Event.ID()] = req.ReplayScope
 		return nil
 	})
-}
-
-func (s *replyConformanceStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]bus.ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
 }
 
 func replyConformanceTargetOwners() []bus.ActiveTargetDescriptor {
