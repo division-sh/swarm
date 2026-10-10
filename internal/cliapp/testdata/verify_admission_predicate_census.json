@@ -2210,134 +2210,146 @@
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.AdmitChannelStandingTarget",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
-    "body_sha256": "d868b382cfdab202ac9931c75a497334cb725991fb5ccd3f50229aa61e62873b"
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "32abe18396a49e6c5e74da5ec21c622a21cef8d2e272fa78340f60284a89e2f5"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.AdmitInboundCredentials",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "3290c1645a3f1ff5ddf3090eadc13cef8000b26721014ca6eee7f165ec31294e"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.IneligibleStandingIngress",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "7478aabf39f3dfa083dbe80cb8dd8b12bb3341b501beb1c587dbee2b65a80710"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.ValidateStandingIngressCredentials",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
-    "body_sha256": "d1aaba5372701352070d1480256ff10d6392fff7ccd81bcea801a071cf383e30"
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "3195f4b3b2e5853f6d7bc7bca9f7dbaeef2c384185c14e21d4cebbe7b5a45505"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.currentStandingCredentialAdmissions",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "2d711e9ee9e2b80a639b970e11023652712c08adba7fd68c2c1064ef8bf1575b"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.evaluateStandingIngressAdmission",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "43751c1ed40db3804d829ee1495cd96303e0065b7e1a7279ee462ca99a0d854f"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.ineligibleStandingCapabilitySubjects",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "cb64bec27e9dd9702c87f7612aa149766dc18f3f495cb86ef687dcb96f99267c"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.observeStandingBindingCredentials",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
-    "body_sha256": "062ff43e3b951137fddefb30e62b1146990aadb375d12162cef79dfeb775d318"
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "54c3e6949f9371fa61e4f89025cd0de679f24ea727d63b0e68a4438b0136ad35"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.observeStandingCredentials",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "b199697e867a2651062a02ab56818fb5cb8594c0c82717d07800320817d95398"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.projectCommittedStandingTargets",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "f987624e4e6610a79040ed53c2dc213be0830c3fccf2de2d57d14c7dec90cb55"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.refreshStandingCredentialAdmission",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
-    "body_sha256": "d290f73b389941bb04b9a2423f1a2765937d7a69642c33e6232ebca044c8b9dc"
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "6923e265aa3ed4fa7aa971a20325d4baf445c7267cbb1cca30c0e087336818be"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.standingBindingCredentialRoles",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "66653122dfb4c9e29ce840c64e47c04f114da51c9747c5bbb4621b5c8d029669"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.standingCredentialPlanScope",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "bc011a72ea6e7fe9f53d9d46e565d8261587859d21559a878fe2d99f85450bb1"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.standingCredentials",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "2dc2ea252edd90d954b868104d1ae210a40f3dd054a3ab039ab1744a282f4c4b"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.standingIngressCredentialScope",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
-    "body_sha256": "c02636ca1e1eb282d3c1fa11cc4443374385beb21bad3ff3095c8891ad59c933"
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "dfdb9f6d96c7e67d8f969d93631dc13eb2cc99a68f017ba7bb4455779452017e"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::observeStandingCredentialRole",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "131255f853c00134a888d9cf674dfdfbf2d0dc19b56ee7a9f64a864830c6ccf1"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::standingCredentialPlanScope.addCurrentActivations",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "d1279c145d6edb4a20abd0bcafa87b82eef1003130a0fb64f06133280cb11998"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::standingCredentialPlanScope.addPendingOperations",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "e76104af0a0ed7d49f765f4bd9a82cd587403f67547199ea9590df6a767f517b"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::standingCredentialPlanScope.admit",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "defb4e323a6014d237cab54c21ace87baba5bacb430c56c36622042ced74eff3"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::standingCredentialPlanScope.matches",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "b099354a55df462df042bf7c21e04cc219bff009116d11a3b1390bc5b4689e8e"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::standingIngressSelector",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "4800c21f53257b40ee71bdbb0f3e3bcf2d8136cfd695fcc7eb545503b4d3ebbc"
   },
   {
     "owner": "internal/runtime/standing_ingress_credentials.go::validateEnabledStandingAliases",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-boot,2577-native-dormancy,P08,P10,P21",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
     "body_sha256": "00ac8e0331a397065590dfe8b6687155077c39961e4de19b9ba6fb1b82d44d1a"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_session.go::*Runtime.observeStandingSessionBinding",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-frozen-session,P08,P10,P21",
+    "body_sha256": "bc90614695d973161559107a2388f9bf190e220943d242d11db4d19fcba23e59"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_session.go::*Runtime.validateStandingSessionBinding",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-frozen-session,P08,P10,P21",
+    "body_sha256": "314f59737c9114533e57ef39b90c018639c7492bab8eff8285be937e93737352"
   },
   {
     "owner": "internal/runtime/startup_recovery_diagnostics.go::*Runtime.inspectDeliveryRecoveryInventory",
@@ -2853,7 +2865,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.AdmitChannelTarget",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement",
-    "body_sha256": "3a60e4306d9934023a4b7086304cbaecacec69cb55196b11dc3d4f0f1d7ba0ee"
+    "body_sha256": "854b7594397794ac641448c96dbc83a24606764261f7b77f6293b5e4c70145a3"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.PreflightChannelActivation",
@@ -4060,6 +4072,30 @@
     "audit_rows": "A10,A27",
     "proof_families": "2577-native-boot,P08,P10,P21",
     "body_sha256": "c89c933e881329091c0faf959e3bd6b9d834da22eebd75b8be0a5835817b7318"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/session_standing.go::*PostgresOwner.SessionStandingBindingCurrent",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-withdrawal,P08,P10,P21",
+    "body_sha256": "e55c1432d5a470fdbb6b227f09915f8c46336289e12b6710f68cbf256d6b608e"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/session_standing.go::*SQLiteOwner.SessionStandingBindingCurrent",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-withdrawal,P08,P10,P21",
+    "body_sha256": "a36e4699c6bd90a9a12fc45c3f9f65d6de3b5a4147950d16ca96a43d8c14342b"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/session_standing.go::sessionStandingBindingCurrent",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-withdrawal,P08,P10,P21",
+    "body_sha256": "cf5006a21fec12dee8a912cb0cdecbf6b8c3696bdff28b1474204e27c53a8570"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/session_standing.go::sessionStandingOperationMatches",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-withdrawal,P08,P10,P21",
+    "body_sha256": "88e4c3cfdafa62c92902ffd0f2a5a3e8c2801a83fa3259912e4012d9d61b25e6"
   },
   {
     "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.BeginTx",

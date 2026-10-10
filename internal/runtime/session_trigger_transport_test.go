@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -83,8 +83,7 @@ func TestSessionTriggerCannotEnterWebhookStandingCredentialAdmission(t *testing.
 	result, err := rt.observeStandingBindingCredentials(context.Background(), nil,
 		StandingTargetDeclaration{FlowPath: ".", Alias: "chat", SourcePath: "schema.yaml"},
 		StandingIngressBinding{Provider: "acme", AdmissionPlan: plan}, nil)
-	var unavailable *operatorchannel.SessionProviderUnavailableError
-	if !errors.As(err, &unavailable) || unavailable.Provider != "acme" || result.enabled {
+	if err != nil || result.enabled || result.blockReason != runtimerunlifecycle.StandingBindingSessionRequired || result.signingKey != "" {
 		t.Fatalf("session declaration acquired webhook credential authority: %+v, %v", result, err)
 	}
 }

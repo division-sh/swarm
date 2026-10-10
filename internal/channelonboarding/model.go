@@ -754,6 +754,7 @@ type Store interface {
 	ListChannelOnboardingOperations(context.Context) ([]Operation, error)
 	AdvanceChannelOnboarding(context.Context, AdvanceRequest) (Operation, error)
 	ReconcileChannelOnboardingBinding(context.Context, ReconcileBindingRequest) (Operation, error)
+	SessionStandingBindingCurrent(context.Context, Operation) (bool, error)
 	ResetChannelOnboardingPendingIdentity(context.Context, PendingResetRequest) (Operation, error)
 	PublishConnectedChannelActivation(context.Context, PublishActivationRequest) (Operation, ConnectedChannelActivation, error)
 	GetConnectedChannelActivation(context.Context, string) (ConnectedChannelActivation, error)
