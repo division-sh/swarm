@@ -206,7 +206,7 @@ func TestPersistenceAuthorityDebtRunFixturePolicyDestinationMatchesSource(t *tes
 	if err != nil || digest != debtFixtureRoleCollectorTo {
 		t.Fatalf("reviewed role-preserving successor=%s actual=%s error=%v", debtFixtureRoleCollectorTo, digest, err)
 	}
-	prior := materializeDebtBase(t, root, "a6703f780ae50fc73808770456de6c3cc0c12d4b")
+	prior := materializeDebtBase(t, root, "23ae8f9b4a09ac9c01483a2cb001fff9f71baf66")
 	if digest, err := debtCollectorDigest(prior); err != nil || digest != debtRunFixtureCollectorTo {
 		t.Fatalf("immutable run-fixture policy destination changed: digest=%s error=%v", digest, err)
 	}
