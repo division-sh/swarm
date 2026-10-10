@@ -20010,9 +20010,11 @@ run_model:
   fork:
     description: 'Fork creates an isolated run by reconstructing provable current state at a selected event revision,
       optionally loading selected contracts, and then executing only owner-admitted fork-local work. The supported
-      model is bounded re-execution from inputs: delivery_event_replay_ready pending unstarted agent deliveries and
-      deferred-work-free selected-contract frontier execution (no selected revision timer history, workflow timers,
-      or timed joins). The system does not infer arbitrary
+      model includes delivery_event_replay_ready pending unstarted agent deliveries and independently admitted
+      selected-contract frontier execution. Selected workflow and arrival schedules additionally continue only
+      through exact fixed-cut source evidence, complete native child inventory and current selected execution
+      authority. An armed arrival deadline is owed work even without a replayable business event; availability does
+      not discharge materialization or grant execution. The system does not infer arbitrary
       unfinished work; in-progress delivery, session, turn, audit, non-agent, route, retry/idempotency, and other
       unsupported historical facts remain permanently fail-closed unless a later issue names a concrete consumer and
       proves a new owner.'
@@ -20815,11 +20817,11 @@ run_model:
       runtime.run_fork.historical_replay_execution. This legacy-named owner consumes runtime.run_fork.historical_replay_execution_admission
       and the canonical store.run_fork.replay_resume_admission taxonomy, validates that every historical source fact
       family has exactly one executable, reconstructed, lineage-only, fail-closed, or split-sibling classification, and
-      emits the executable work set that downstream store/runtime writers may mutate. The current supported closure
-      level is canonical owner promotion with delivery_event_replay_ready and deferred-work-free selected-contract
-      frontier execution (no selected revision timer history, workflow timers, or timed joins). Timer history remains
-      a fail-closed/split fact under #642; a stale reconstruction disposition cannot
-      authorize mutation, and no current store or runtime owner writes fork-local reconstructed timer rows. The
+      emits the executable work set that downstream store/runtime writers may mutate. The delivery_event_replay_ready
+      primitive remains distinct from selected-contract frontier and schedule continuation. Selected workflow and
+      arrival schedules consume exact fixed-cut evidence, canonical native restoration/readback and current selected
+      authority under #642; owner availability or a stale reconstruction disposition cannot authorize mutation.
+      Other unproved timer history remains fail-closed/split. The
       selected-contract contract-swap child runtime.run_fork.historical_replay_execution.contract_swap_boot_resume may
       execute only already-admitted delivery_event_replay_ready work under selected/swapped contracts. Full
       product-complete source-run resumption for routes, sessions, turns, audits, non-agent/node/system work,
@@ -21321,10 +21323,12 @@ run_model:
         them against the reconstructed fork-local state and admitted fork fact matrix. Boot only the fork-local runtime
         context required by approved owners; boot does not reconstruct source sessions, turns, audits, routes,
         idempotency, or arbitrary in-flight work.'
-      5_resume: 'Execute only owner-admitted fork-local work under the new run_id. Today that means the
-        delivery_event_replay_ready primitive and deferred-work-free selected-contract frontier execution when
-        independently admitted: no selected revision timer history, workflow timers, timed joins, or semantically
-        dynamic-flow-creating input resolution. Unsupported
+      5_resume: 'Execute only owner-admitted fork-local work under the new run_id. The delivery_event_replay_ready
+        primitive and selected-contract frontier execution retain their distinct admission owners. Workflow and
+        arrival schedules require exact retained source evidence, native child inventory and current selected
+        authority; pending arrival deadlines continue their original due and membership through actual publication,
+        delivery and settlement. Completed or failed source occurrences are not fresh arms. Handler fan-out barriers,
+        semantically dynamic-flow-creating input resolution and other unproved capabilities remain blocked. Unsupported
         historical fact families
         fail closed with typed blockers; the platform never infers unfinished source work from current rows.'
     parallel_safety: 'Each source transaction publishes all changed fork-reader families under one commit-serialized

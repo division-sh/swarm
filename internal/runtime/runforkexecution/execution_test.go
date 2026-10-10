@@ -102,11 +102,11 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			seedSourceTimer: true,
 		},
 		{
-			name:           "selected handler can arm workflow join timeout",
+			name:           "timed join composition still requires dynamic flow creation owner",
 			fixture:        "examples/routing/fan-in/barrier",
 			eventName:      "portfolio.setup",
 			wantCode:       selectedContractDeferredWorkOwnerUnavailable,
-			wantCapability: selectedContractDeferredWorkWorkflowJoinTimeout,
+			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
 		},
 		{
 			name:           "selected connect can create dynamic flow",
@@ -189,7 +189,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			catalog := &observedSelectedJoinCatalog{SelectedContractForkLifecycle: owner.ports.fork, t: t, resolve: pg.ResolveAuthorActivityEventDescriptor}
 			if test.fanOutBarrier {
 				catalog.want = []string{"platform.join_complete"}
-			} else if test.wantCapability == selectedContractDeferredWorkWorkflowJoinTimeout {
+			} else if test.fixture == "examples/routing/fan-in/barrier" {
 				catalog.want = []string{"platform.join_complete", "platform.join_timeout"}
 			}
 			owner.ports.fork = catalog
@@ -443,19 +443,19 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 		{name: "delivery replay fan-out barrier", fanOutBarrier: true, eventName: "items.ready", wantCapability: selectedContractDeferredWorkFanOutBarrier},
 		{name: "state only fan-out barrier", fanOutBarrier: true, stateOnly: true, eventName: "items.ready", wantCapability: selectedContractDeferredWorkFanOutBarrier},
 		{
-			name:           "delivery replay workflow join timeout",
+			name:           "delivery replay timed join composition requires dynamic owner",
 			fixture:        "examples/routing/fan-in/barrier",
 			eventName:      "portfolio/portfolio.setup",
 			inputFlow:      "portfolio",
 			inputPayload:   `{"portfolio_id":"portfolio","expected_operating_ids":["op-a","op-b"],"period_id":"2026-Q1"}`,
-			wantCapability: selectedContractDeferredWorkWorkflowJoinTimeout,
+			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
 		},
 		{
-			name:           "state only workflow join timeout",
+			name:           "state only timed join composition requires dynamic owner",
 			fixture:        "examples/routing/fan-in/barrier",
 			eventName:      "portfolio.setup",
 			stateOnly:      true,
-			wantCapability: selectedContractDeferredWorkWorkflowJoinTimeout,
+			wantCapability: selectedContractDeferredWorkDynamicFlowCreation,
 		},
 		{
 			name:           "delivery replay dynamic flow creation",

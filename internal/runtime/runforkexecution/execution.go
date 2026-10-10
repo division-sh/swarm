@@ -15,6 +15,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
@@ -259,14 +260,7 @@ func admitSelectedDeploymentRevisionFrontier(plan runfork.RunForkPlan, frontier 
 		return plan.ForkPoint.Validate()
 	}
 	if plan.ForkPoint.Kind != runfork.RunForkPointDeploymentRevision {
-		for _, timer := range plan.WorkflowTimers {
-			if timer.Status == "active" {
-				// A recorded obligation is owed work even with no replayable
-				// business message. Native readback still gates execution.
-				return plan.ForkPoint.Validate()
-			}
-		}
-		return fmt.Errorf("selected-contract event-point execution requires selected frontier events")
+		return admitSelectedEventPointOwedSchedule(plan)
 	}
 	if err := plan.ForkPoint.Validate(); err != nil {
 		return fmt.Errorf("selected-contract deployment fork point: %w", err)
@@ -279,6 +273,29 @@ func admitSelectedDeploymentRevisionFrontier(plan runfork.RunForkPlan, frontier 
 		return fmt.Errorf("selected-contract deployment revision has no fixed-revision feed work")
 	}
 	return nil
+}
+
+func admitSelectedEventPointOwedSchedule(plan runfork.RunForkPlan) error {
+	// Availability is not execution: native source and child inventory checks
+	// still prove every retained obligation before activation and recovery.
+	for _, timer := range plan.WorkflowTimers {
+		if timer.Status == "active" {
+			return plan.ForkPoint.Validate()
+		}
+	}
+	for _, schedule := range plan.JoinSchedules {
+		if schedule.Status != genericschedule.StatusActive {
+			continue
+		}
+		if err := schedule.Validate(); err != nil {
+			return err
+		}
+		if schedule.Command.RunID != plan.SourceRunID {
+			return fmt.Errorf("selected-contract owed schedule belongs to another source run")
+		}
+		return plan.ForkPoint.Validate()
+	}
+	return fmt.Errorf("selected-contract event-point execution requires selected frontier events or an exact owed schedule")
 }
 
 type selectedForkFailureDiscard struct {
