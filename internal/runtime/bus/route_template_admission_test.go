@@ -29,17 +29,24 @@ func TestTemplateSubscriptionProjectionMatchesFreshAdmission(t *testing.T) {
 			}
 			_, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
 			for path, template := range table.templates {
+				scope, found := source.FlowScopeByID(template.FlowID)
+				if !found {
+					t.Fatalf("compiled template has no source declaration: %s", template.FlowID)
+				}
+				localEvents := routeFlowLocalEventSetWithInputProducers(scope, inputProducers)
 				authorityPath := path
 				if template.FlowID == semanticview.RootExecutionFlowID(source) {
 					authorityPath = ""
 				}
 				for _, subscriber := range template.Subscribers {
 					for _, pattern := range subscriber.Patterns {
+						admission := routeClassifyAuthoredSubscription(source, subscriber.Kind, scope.ID, scope.InputEvents, authorityPath, localEvents, pattern.raw)
+						if !admission.Admitted() {
+							t.Fatal(admission.Message())
+						}
+						inputEvent := !admission.Pattern() && source.FlowHasInputEvent(scope.ID, admission.LocalEvent())
 						for _, instancePath := range []string{path + "/first", path + "/second"} {
-							want, err := routeResolveSubscriberPatternsWithInputProducers(source, subscriber.Kind, template.FlowID, template.InputEvents, authorityPath, instancePath, template.LocalEvents, pattern.raw, inputProducers)
-							if err != nil {
-								t.Fatal(err)
-							}
+							want := routeProjectAdmittedSubscriberPatterns(admission, template.FlowID, instancePath, inputEvent, inputProducers)
 							got := routeProjectAdmittedSubscriberPatterns(pattern.admission, template.FlowID, instancePath, pattern.inputEvent, inputProducers)
 							if !reflect.DeepEqual(got, want) {
 								t.Fatalf("%s %s %s: compiled projection = %#v, fresh admission = %#v", path, pattern.raw, instancePath, got, want)

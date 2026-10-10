@@ -26,25 +26,18 @@ func TestNamesOnlyPrivateInputDoesNotInventExternalProducer(t *testing.T) {
 
 func TestRouteResolveSubscriberPatterns_PrivatePinKeepsOrdinarySubscription(t *testing.T) {
 	source := loadNamesOnlyRouteSource(t, canonicalrouting.WritePublicTemplateInputRoute(t))
-	scope, ok := source.FlowScopeByID("operating")
-	if !ok {
+	routes := derivedRouteTableFixture(t, source)
+	scope, found := source.FlowScopeByID("operating")
+	if !found {
 		t.Fatal("worker flow scope missing")
 	}
-	routes := derivedRouteTableFixture(t, source)
-	patterns, err := routeResolveSubscriberPatternsWithInputProducers(
-		source,
-		subscriberNode,
-		scope.ID,
-		scope.InputEvents,
-		scope.Path,
-		scope.Path,
-		routes.templates["operating"].LocalEvents,
-		"opco.product_initialization_requested",
-		routes.inputProducers,
-	)
-	if err != nil {
-		t.Fatalf("resolve subscriber patterns: %v", err)
+	admission := routeClassifyAuthoredSubscription(source, subscriberNode, scope.ID, scope.InputEvents, scope.Path,
+		routeFlowLocalEventSetWithInputProducers(scope, routes.inputProducers), "opco.product_initialization_requested")
+	if !admission.Admitted() {
+		t.Fatal(admission.Message())
 	}
+	inputEvent := !admission.Pattern() && source.FlowHasInputEvent(scope.ID, admission.LocalEvent())
+	patterns := routeProjectAdmittedSubscriberPatterns(admission, scope.ID, scope.Path, inputEvent, routes.inputProducers)
 	if len(patterns) == 0 {
 		t.Fatal("ordinary authored subscription did not resolve")
 	}
