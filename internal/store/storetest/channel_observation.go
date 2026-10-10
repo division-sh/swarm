@@ -69,6 +69,9 @@ func (o channelObservation) CountRunNamedEventStorage(ctx context.Context, runID
 }
 
 func (o channelObservation) ObserveChannelIntent(ctx context.Context, demand render.IntentObservationQuery) (render.IntentObservation, bool, error) {
+	if err := demand.Validate(); err != nil {
+		return render.IntentObservation{}, false, err
+	}
 	var result render.IntentObservation
 	var found bool
 	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
