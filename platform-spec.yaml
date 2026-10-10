@@ -18333,6 +18333,10 @@ platform_tables:
         conversation context (all messages, all tool results) in one row.'
     routing_rules:
       retired_api: 'Standalone UpsertFlowInstanceRoute, DeleteFlowInstanceRoute and ListFlowInstanceRoutes are unsupported.
+        ReplaceFlowInstanceRouteTopology, its transaction variant and the materialized topology replacement role are
+        unsupported. No independent selected-store operation writes, diffs, replaces or acknowledges an instance-route
+        mirror. Native construction/publication commits persist the exact construction and admitted delivery facts;
+        operation-local recipient binding consumes those facts without a compensating topology transaction.
         EventBus.StageFlowInstanceRouteContext and the injected FlowRouteTopology persistence role are unsupported;
         EventBus neither stages nor acknowledges a persisted instance-membership mirror. Construction and attachment
         acknowledgment belong to their native commit owners, independently of any process route table.

@@ -14,7 +14,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -79,36 +78,10 @@ type notifyAllChildrenStore interface {
 
 type failingNotifyAllChildrenPostgresStore struct {
 	*store.PostgresStore
-	failNextRouteReplacement atomic.Bool
-	transientRouteFailures   atomic.Int32
-}
-
-func (s *failingNotifyAllChildrenPostgresStore) ReplaceFlowInstanceRouteTopology(
-	ctx context.Context,
-	sets []runtimebus.FlowInstanceRouteRecordSet,
-) (runtimebus.FlowInstanceRouteTopologyResult, error) {
-	if s.failNextRouteReplacement.Swap(false) {
-		s.transientRouteFailures.Add(1)
-		return runtimebus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("injected transient postgres exact route replacement failure")
-	}
-	return s.PostgresStore.ReplaceFlowInstanceRouteTopology(ctx, sets)
 }
 
 type failingNotifyAllChildrenSQLiteStore struct {
 	*store.SQLiteRuntimeStore
-	failNextRouteReplacement atomic.Bool
-	transientRouteFailures   atomic.Int32
-}
-
-func (s *failingNotifyAllChildrenSQLiteStore) ReplaceFlowInstanceRouteTopology(
-	ctx context.Context,
-	sets []runtimebus.FlowInstanceRouteRecordSet,
-) (runtimebus.FlowInstanceRouteTopologyResult, error) {
-	if s.failNextRouteReplacement.Swap(false) {
-		s.transientRouteFailures.Add(1)
-		return runtimebus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("injected transient sqlite exact route replacement failure")
-	}
-	return s.SQLiteRuntimeStore.ReplaceFlowInstanceRouteTopology(ctx, sets)
 }
 
 type notifyAllChildrenRuntime struct {

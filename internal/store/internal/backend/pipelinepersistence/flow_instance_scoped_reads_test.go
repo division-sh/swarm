@@ -33,10 +33,10 @@ func TestScopedFlowDescriptorAndTargetReadsBothStores(t *testing.T) {
 			var db *sql.DB
 			runID := uuid.NewString()
 			if postgres {
-				db, _ = postgresRouteStatementFixture(t, 0, false)
+				db = postgresRouteStatementFixture(t)
 				runID = postgresStatementRunID
 			} else {
-				db, _ = sqliteRouteStatementFixture(t, 0)
+				db = sqliteRouteStatementFixture(t)
 				runlifecyclefixture.RequireSQLite(t, context.Background(), db, runlifecyclefixture.Fixture{
 					RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(),
 				})
@@ -152,10 +152,10 @@ func TestKeyedFlowDescriptorCandidatesBothStores(t *testing.T) {
 			var db *sql.DB
 			runID := uuid.NewString()
 			if postgres {
-				db, _ = postgresRouteStatementFixture(t, 0, false)
+				db = postgresRouteStatementFixture(t)
 				runID = postgresStatementRunID
 			} else {
-				db, _ = sqliteRouteStatementFixture(t, 0)
+				db = sqliteRouteStatementFixture(t)
 				runlifecyclefixture.RequireSQLite(t, context.Background(), db, runlifecyclefixture.Fixture{
 					RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(),
 				})

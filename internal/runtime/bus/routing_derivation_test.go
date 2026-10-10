@@ -487,31 +487,6 @@ func (s *routePersistenceTestStore) UpsertFlowInstanceRoute(_ context.Context, r
 	return nil
 }
 
-func (s *routePersistenceTestStore) ReplaceFlowInstanceRouteTopology(
-	ctx context.Context,
-	sets []runtimebus.FlowInstanceRouteRecordSet,
-) (runtimebus.FlowInstanceRouteTopologyResult, error) {
-	before := make(map[string]runtimebus.FlowInstanceRouteRecord, len(s.routes))
-	for key, route := range s.routes {
-		before[key] = route
-	}
-	for _, set := range sets {
-		s.replaceCalls = append(s.replaceCalls, set.Identity)
-		for key, route := range s.routes {
-			if route.Identity == set.Identity {
-				delete(s.routes, key)
-			}
-		}
-		for _, route := range set.Routes {
-			if err := s.UpsertFlowInstanceRoute(ctx, route); err != nil {
-				s.routes = before
-				return runtimebus.FlowInstanceRouteTopologyResult{}, err
-			}
-		}
-	}
-	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
-}
-
 func (s *routePersistenceTestStore) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
 	return fn(ctx)
 }

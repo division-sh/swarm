@@ -331,33 +331,6 @@ func (s *targetRouteMemoryStore) LoadPreparedPublishEvent(_ context.Context, eve
 	return PreparedPublishEvent{Event: admitted, Settlement: settlement, DeliveryRoutes: routes}, true, nil
 }
 
-func (s *targetRouteMemoryStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []FlowInstanceRouteRecordSet) error {
-	if err := validateFlowInstanceRouteTopology(sets); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.replaceFlowInstanceRouteTopologyLocked(sets)
-	return nil
-}
-
-func (s *targetRouteMemoryStore) replaceFlowInstanceRouteTopologyLocked(sets []FlowInstanceRouteRecordSet) {
-	for _, set := range sets {
-		identity := targetRouteIdentity(set.Identity)
-		retained := s.flowRoutes[:0]
-		for _, existing := range s.flowRoutes {
-			if !sameTargetRoute(existing.Identity, identity) {
-				retained = append(retained, existing)
-			}
-		}
-		s.flowRoutes = retained
-		for _, route := range set.Routes {
-			route.Identity = targetRouteIdentity(route.Identity)
-			s.flowRoutes = append(s.flowRoutes, route)
-		}
-	}
-}
-
 func (s *targetRouteMemoryStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

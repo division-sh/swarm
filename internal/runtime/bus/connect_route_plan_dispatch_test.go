@@ -147,11 +147,6 @@ func (s *apiEventPublicationMemoryStore) CommitAPIEventPublication(ctx context.C
 	return CommittedAPIEventPublication{Publication: publication, Completion: command.Completion, Acknowledged: publication.Acknowledged}, nil
 }
 
-func (s *connectRoutePlanDescriptorStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []FlowInstanceRouteRecordSet) (FlowInstanceRouteTopologyResult, error) {
-	err := validateFlowInstanceRouteTopology(sets)
-	return FlowInstanceRouteTopologyResult{Acknowledged: err == nil}, err
-}
-
 type connectRoutePlanNodeInterceptor struct {
 	mu    sync.Mutex
 	count int

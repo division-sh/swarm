@@ -515,42 +515,8 @@ type FlowInstanceRouteRecord struct {
 	SourceFlow     string
 }
 
-// FlowInstanceRouteRecordSet is one exact route owner's complete materialized
-// record set within a topology replacement.
-type FlowInstanceRouteRecordSet struct {
-	Identity runtimeflowidentity.RunScopedFlowInstance
-	Routes   []FlowInstanceRouteRecord
-}
-
-func validateFlowInstanceRouteTopology(sets []FlowInstanceRouteRecordSet) error {
-	seen := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(sets))
-	for setIndex, set := range sets {
-		identity := set.Identity.Normalize()
-		if err := identity.Validate(); err != nil || identity != set.Identity {
-			return fmt.Errorf("route set %d requires canonical exact identity", setIndex)
-		}
-		if _, exists := seen[identity]; exists {
-			return fmt.Errorf("route set %d repeats owner %s", setIndex, identity.Key())
-		}
-		seen[identity] = struct{}{}
-		for routeIndex, route := range set.Routes {
-			if route.Identity != identity || strings.TrimSpace(route.EventPattern) == "" ||
-				strings.TrimSpace(route.SubscriberType) == "" || strings.TrimSpace(route.SubscriberID) == "" {
-				return fmt.Errorf("route set %d record %d requires exact owner, event pattern, and subscriber", setIndex, routeIndex)
-			}
-		}
-	}
-	return nil
-}
-
-// FlowInstanceRouteTopologyPersistence atomically replaces every affected
-// route owner in one closed selected-store operation.
 type FlowInstanceRouteTopologyResult struct {
 	Acknowledged bool
-}
-
-type FlowInstanceRouteTopologyPersistence interface {
-	ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []FlowInstanceRouteRecordSet) (FlowInstanceRouteTopologyResult, error)
 }
 
 type FlowInstanceRouteRecordReader interface {

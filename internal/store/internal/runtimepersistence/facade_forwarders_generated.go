@@ -1071,10 +1071,6 @@ func (s *PostgresStore) RepairAuthority(ctx context.Context, req startupownershi
 	return s.startupPostgresOwner.RepairAuthority(ctx, req)
 }
 
-func (s *PostgresStore) ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []bus.FlowInstanceRouteRecordSet) (bus.FlowInstanceRouteTopologyResult, error) {
-	return s.pipelinePostgresOwner.ReplaceFlowInstanceRouteTopology(ctx, sets)
-}
-
 func (s *PostgresStore) RequestCompletionCandidate(ctx context.Context, request runlifecycle.CandidateRequest) (runlifecycle.CandidateRequestDisposition, error) {
 	return s.runLifecyclePostgresOwner.RequestCompletionCandidate(ctx, request)
 }
@@ -2305,10 +2301,6 @@ func (s *SQLiteRuntimeStore) RenewDirectiveExecutionLease(ctx context.Context, o
 
 func (s *SQLiteRuntimeStore) RepairAuthority(ctx context.Context, req startupownership.AuthorityRepairRequest) (startupownership.AuthorityRepairResult, error) {
 	return s.startupSQLiteOwner.RepairAuthority(ctx, req)
-}
-
-func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []bus.FlowInstanceRouteRecordSet) (bus.FlowInstanceRouteTopologyResult, error) {
-	return s.pipelineSQLiteOwner.ReplaceFlowInstanceRouteTopology(ctx, sets)
 }
 
 func (s *SQLiteRuntimeStore) RequestCompletionCandidate(ctx context.Context, request runlifecycle.CandidateRequest) (runlifecycle.CandidateRequestDisposition, error) {

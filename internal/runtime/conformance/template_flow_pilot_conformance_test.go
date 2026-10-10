@@ -691,15 +691,6 @@ type fanOutPinRouteMemoryStore struct {
 	deliveryRoutes     map[string][]events.DeliveryRoute
 }
 
-func (s *fanOutPinRouteMemoryStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []runtimebus.FlowInstanceRouteRecordSet) (runtimebus.FlowInstanceRouteTopologyResult, error) {
-	for _, set := range sets {
-		if err := set.Identity.Validate(); err != nil {
-			return runtimebus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("invalid flow-instance route identity: %#v", set.Identity)
-		}
-	}
-	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
-}
-
 func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	sourceFact := s.sourceArtifactFact
 	if strings.TrimSpace(sourceFact.BundleHash()) == "" {
