@@ -21,12 +21,12 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{
 				"bundle_hash": rt.BundleHash, "event_name": "item.received", "payload": map[string]any{"item_id": "ordinary-start"},
 			}, &started)
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"bundle_hash": rt.BundleHash, "run_id": started.RunID, "event_name": "item.processed",
 				"payload": map[string]any{"item_id": "review"}, "idempotency_key": "root-source-ingress",
 			})
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			requireServedRunStatus(t, rt.Endpoint, started.RunID, "completed")
 			var kind, sourceRoute string
 			if err := rt.DB.QueryRow(`SELECT routing_source_kind, CAST(source_route AS TEXT) FROM events WHERE event_id=$1`, published.EventID).Scan(&kind, &sourceRoute); err != nil {
@@ -46,7 +46,7 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 			if fork.ExecutedEventCount != 1 || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID {
 				t.Fatalf("fork result: %+v", fork)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 			requireServedRunStatus(t, rt.Endpoint, fork.ForkRunID, "completed")
 			var replay apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)

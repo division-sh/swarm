@@ -30,6 +30,26 @@ type QueryRower interface {
 
 const occurrenceSelect = `SELECT CAST(occurrence_id AS TEXT), sequence, kind, version, transition, source_owner, source_identity, dedup_key, COALESCE(CAST(run_id AS TEXT), ''), COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(agent_id, ''), COALESCE(flow_id, ''), scope_kind, COALESCE(CAST(runtime_instance_id AS TEXT), ''), COALESCE(bundle_hash, ''), projection, failure, occurred_at FROM author_activity_occurrences`
 
+func CountRecordedDeadLetterStorage(ctx context.Context, tx *sql.Tx, postgres bool, runID string) (int, error) {
+	query := `SELECT COUNT(*) FROM author_activity_occurrences aa
+JOIN dead_letters dl ON aa.source_identity=dl.dead_letter_id::text
+WHERE aa.run_id=$1::uuid AND aa.kind='dead_letter.recorded' AND aa.version=2
+AND aa.transition='recorded' AND aa.source_owner='dead_letters'
+AND aa.projection->>'subject_id'=dl.original_event_id::text`
+	if !postgres {
+		query = `SELECT COUNT(*) FROM author_activity_occurrences aa
+JOIN dead_letters dl ON aa.source_identity=CAST(dl.dead_letter_id AS TEXT)
+WHERE aa.run_id=? AND aa.kind='dead_letter.recorded' AND aa.version=2
+AND aa.transition='recorded' AND aa.source_owner='dead_letters'
+AND json_extract(aa.projection,'$.subject_id')=CAST(dl.original_event_id AS TEXT)`
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, query, runID).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func Head(ctx context.Context, db QueryRower) (int64, error) {
 	if db == nil {
 		return 0, fmt.Errorf("author activity reader is required")

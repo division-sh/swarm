@@ -7,16 +7,29 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestRetainedNodeContractHandlerUsesRuntimeEnginePath(t *testing.T) {
-	pc, bus, ctx := newConstructorHandlerUnitCoordinator(t, handlerEngineProjectNodeModule(t))
+func VerifyRetainedNodeContractHandlerUsesRuntimeEnginePathForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
+	fixture, pc, ctx, bus := nativeHandlerEngineExistingEntityForTest(t, open, testPipelineRunID)
 
-	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
-		"00000000-0000-0000-0000-000000000001", events.EventType("custom.trigger"), "", "", nil, 0, testPipelineRunID, "",
+	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
+		"00000000-0000-0000-0000-000000000001", events.EventType("custom.trigger"), "", "", nil, 0, testPipelineRunID,
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID}), eventtest.StaticFlowRoutingSource(".", testPipelineRunID, ""), time.Unix(1, 0).UTC(),
 	)
-	ctx, state := prepareConstructorUnitDelivery(t, pc, ctx, ".", "node-a", evt)
+	node := pipelineNode(t, ".", "node-a")
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{
+		FlowID: ".", FlowInstance: testPipelineRunID, EntityID: testPipelineRunID,
+	})}
+	fixture.Publish(ctx, evt, route)
+	ctx, stop := claimNativeWorkflowHandlerPublicationForTest(t, pc, ctx, evt, route)
+	defer func() {
+		if err := stop(); err != nil {
+			t.Error(err)
+		}
+	}()
+	state := mustCurrentWorkflowState(t, pc, ctx, flowidentity.StoredRoute(".", testPipelineRunID, testPipelineRunID), testPipelineRunID)
 	outcome, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{Event: evt, State: state, HandlerEventKey: "custom.trigger"}, false)

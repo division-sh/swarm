@@ -23,12 +23,12 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 type flowInstanceDescriptorAuthorityStore interface {
+	storetest.RunFixtureStore
 	externalStoreTestDurableEventBusStore
 	runtimebus.FlowInstanceRouteSetPersistence
 	runtimebus.FlowInstanceRouteRecordReader
@@ -37,6 +37,7 @@ type flowInstanceDescriptorAuthorityStore interface {
 }
 
 type dynamicFlowSourceProjectionStore interface {
+	storetest.RunFixtureStore
 	sourceartifactfixture.Writer
 	runtimerunlifecycle.OperationOwner
 	InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.SourceArtifactFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error)
@@ -69,15 +70,8 @@ func TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores(t *testing.T)
 			hashB := sourceB.BundleHash()
 			runA, runB := uuid.NewString(), uuid.NewString()
 			ctx := testAuthorActivityContext()
-			fixtureA := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runA, BundleHash: hashA}
-			fixtureB := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runB, Artifact: sourceBArtifact}
-			if sqlite {
-				runlifecyclefixture.RequireSQLite(t, ctx, db, fixtureA)
-				runlifecyclefixture.RequireSQLite(t, ctx, db, fixtureB)
-			} else {
-				runlifecyclefixture.RequirePostgres(t, ctx, db, fixtureA)
-				runlifecyclefixture.RequirePostgres(t, ctx, db, fixtureB)
-			}
+			storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runA, BundleHash: hashA})
+			storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runB, Artifact: sourceBArtifact})
 			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runA, uuid.NewString(), "account/a", hashA)
 			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runB, uuid.NewString(), "account/b", hashB)
 			seedStaticFlowInstanceRouteWithoutReadiness(t, db, sqlite, runA, "standing/a")
@@ -153,14 +147,14 @@ func TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothSto
 				{uuid.NewString(), "account/transition-pending", predecessorHash, false},
 			}
 			for _, row := range rows {
-				requireReadinessRun(t, ctx, db, sqlite, row.runID, currentHash)
+				requireReadinessRun(t, ctx, selected, row.runID, currentHash)
 				seedExactFlowInstanceDescriptorOwner(t, db, sqlite, row.runID, uuid.NewString(), row.path, row.planHash)
 				if row.complete {
 					setReadinessCoordinate(t, db, sqlite, row.runID, row.path, "phase", time.Now().UTC())
 				}
 			}
 			foreignRun := uuid.NewString()
-			requireReadinessRun(t, ctx, db, sqlite, foreignRun, foreignHash, foreignArtifact)
+			requireReadinessRun(t, ctx, selected, foreignRun, foreignHash, foreignArtifact)
 			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, foreignRun, uuid.NewString(), "account/foreign-malformed", foreignHash)
 			setReadinessPlanRaw(t, db, sqlite, foreignRun, "account/foreign-malformed", `{}`)
 
@@ -224,7 +218,7 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 					runID := uuid.NewString()
 					path := "account/guard-" + race + "-" + uuid.NewString()
 					ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
-					requireReadinessRun(t, ctx, db, sqlite, runID, bundleHash)
+					requireReadinessRun(t, ctx, selected, runID, bundleHash)
 					seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runID, uuid.NewString(), path, bundleHash)
 					observed, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
 					if err != nil || !found {
@@ -302,7 +296,7 @@ func TestDynamicFlowRuntimeReadinessRejectsABAObservationBothStores(t *testing.T
 			runID := uuid.NewString()
 			path := "account/aba-" + uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
-			requireReadinessRun(t, ctx, db, sqlite, runID, source.BundleHash())
+			requireReadinessRun(t, ctx, selected, runID, source.BundleHash())
 			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runID, uuid.NewString(), path, source.BundleHash())
 			load := func() runtimepipeline.DynamicFlowRuntimeReadiness {
 				t.Helper()
@@ -364,7 +358,7 @@ func TestDynamicFlowRuntimeReadinessPlanBatchIsAtomicBothStores(t *testing.T) {
 				t.Helper()
 				runID := uuid.NewString()
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
-				requireReadinessRun(t, ctx, db, sqlite, runID, bundleHash)
+				requireReadinessRun(t, ctx, selected, runID, bundleHash)
 				requests := make([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, 0, 2)
 				for index := range 2 {
 					path := fmt.Sprintf("account/%s-%d-%s", label, index, uuid.NewString())
@@ -508,25 +502,12 @@ func TestActiveFlowInstanceDescriptorAuthorityScopesCensusToExactRunBothStores(t
 			bundleHash := source.BundleHash()
 			ctxA := runtimecorrelation.WithRunID(testAuthorActivityContext(), runA)
 			ctxB := runtimecorrelation.WithRunID(testAuthorActivityContext(), runB)
-			if sqlite {
-				runlifecyclefixture.RequireSQLite(t, ctxA, db, runlifecyclefixture.Fixture{
-					Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runA,
-					BundleHash: bundleHash,
-				})
-				runlifecyclefixture.RequireSQLite(t, ctxB, db, runlifecyclefixture.Fixture{
-					Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runB,
-					BundleHash: bundleHash,
-				})
-			} else {
-				runlifecyclefixture.RequirePostgres(t, ctxA, db, runlifecyclefixture.Fixture{
-					Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runA,
-					BundleHash: bundleHash,
-				})
-				runlifecyclefixture.RequirePostgres(t, ctxB, db, runlifecyclefixture.Fixture{
-					Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runB,
-					BundleHash: bundleHash,
-				})
-			}
+			storetest.RequireRun(t, ctxA, selected, storetest.RunFixture{
+				Origin: storetest.ScenarioSetupOrigin(), RunID: runA, BundleHash: bundleHash,
+			})
+			storetest.RequireRun(t, ctxB, selected, storetest.RunFixture{
+				Origin: storetest.ScenarioSetupOrigin(), RunID: runB, BundleHash: bundleHash,
+			})
 
 			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runA, entityA, "account/a", bundleHash)
 			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runB, entityB, "account/b", bundleHash)
@@ -607,21 +588,17 @@ func seedExactFlowInstanceDescriptorOwner(
 	}
 }
 
-func requireReadinessRun(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, runID, bundleHash string, artifacts ...*sourceartifact.AdmittedSourceArtifact) {
+func requireReadinessRun(t *testing.T, ctx context.Context, selected storetest.RunFixtureStore, runID, bundleHash string, artifacts ...*sourceartifact.AdmittedSourceArtifact) {
 	t.Helper()
-	fixture := runlifecyclefixture.Fixture{
-		Origin:     runlifecyclefixture.ScenarioSetupOrigin(),
+	fixture := storetest.RunFixture{
+		Origin:     storetest.ScenarioSetupOrigin(),
 		RunID:      runID,
 		BundleHash: bundleHash,
 	}
 	if len(artifacts) > 0 {
 		fixture.Artifact = artifacts[0]
 	}
-	if sqlite {
-		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
-		return
-	}
-	runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
+	storetest.RequireRun(t, ctx, selected, fixture)
 }
 
 func setReadinessPlanRaw(t *testing.T, db *sql.DB, sqlite bool, runID, instancePath, plan string) {
@@ -768,6 +745,7 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 					seedFlowInstanceDescriptorAuthorityCase(
 						t,
 						ctx,
+						selected,
 						db,
 						sqlite,
 						runID,
@@ -915,6 +893,7 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 func seedFlowInstanceDescriptorAuthorityCase(
 	t *testing.T,
 	ctx context.Context,
+	selected storetest.RunFixtureStore,
 	db *sql.DB,
 	sqlite bool,
 	runID string,
@@ -937,10 +916,10 @@ func seedFlowInstanceDescriptorAuthorityCase(
 	}
 	if sqlite {
 		now := time.Now().UTC()
-		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+		storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 			RunID: runID, StartedAt: now, BundleHash: bundleHash,
 		})
-		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+		storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 			RunID: wrongRunID, StartedAt: now, BundleHash: bundleHash,
 		})
 		if _, err := db.ExecContext(ctx, `
@@ -988,10 +967,10 @@ func seedFlowInstanceDescriptorAuthorityCase(
 		return
 	}
 
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: runID, BundleHash: bundleHash,
 	})
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: wrongRunID, BundleHash: bundleHash,
 	})
 	if _, err := db.ExecContext(ctx, `

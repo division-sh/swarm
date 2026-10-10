@@ -37,7 +37,6 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 			if err := h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "start.seeded", Payload: map[string]any{"token": "selected"}}, 20*time.Second, true); err != nil {
 				t.Fatal(err)
 			}
-			var inputID string
 			inputName := "start.seeded"
 			if publicationFrontier {
 				inputName = "receiver.seeded"
@@ -45,7 +44,8 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 					t.Fatal(err)
 				}
 			}
-			if err := h.db.QueryRowContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2`, catalogRuntimeRunID, inputName).Scan(&inputID); err != nil {
+			inputID, err := h.readRunNamedEventIdentity(ctx, catalogRuntimeRunID, inputName)
+			if err != nil {
 				t.Fatal(err)
 			}
 			var sourceExecutionsBefore int
@@ -84,7 +84,7 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 			var eventID string
 			deadline := time.Now().Add(20 * time.Second)
 			for {
-				err = h.db.QueryRowContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name='receiver.seeded'`, child).Scan(&eventID)
+				eventID, err = h.readRunNamedEventIdentity(ctx, child, "receiver.seeded")
 				if err == nil || time.Now().After(deadline) {
 					break
 				}

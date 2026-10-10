@@ -1,18 +1,19 @@
 package pipeline
 
 import (
-	"context"
 	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -39,7 +40,7 @@ func transitionMutationSource(t *testing.T) semanticview.Source {
 	})
 }
 
-func TestPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStores(t *testing.T) {
+func VerifyPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStoresForTest(t *testing.T, backend string, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := transitionMutationSource(t)
 	graph, ok := semanticview.WorkflowStageTopology(source, ".")
 	if !ok {
@@ -150,169 +151,184 @@ func TestPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStores(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			db, store := openHandlerEntityRequirementStore(t, backend)
-			pc := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
-				Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
-				PipelineObligations: unavailablePipelineTestObligationOwner{},
-			})
-			var ctx context.Context
-			if backend == "sqlite" {
-				ctx = sqliteExactOnceRunContext(t, db)
-			} else {
-				ctx = testPipelineRunContext(t, db)
+	fixture := open(t, source)
+	pc := fixture.NewCoordinator(PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}})
+	ctx := correlation.WithRunID(fixture.Context, testPipelineRunID)
+	if err := fixture.RequireRun(ctx, testPipelineRunID); err != nil {
+		t.Fatal(err)
+	}
+	entityID := eventtest.UUID("transition-hostility-" + backend)
+	address := testEngineStateAddress(".", testPipelineRunID, entityID)
+	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
+		InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
+		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: contracts.FlowModeStatic,
+		CurrentState: "ready", Fields: map[string]any{"marker": "unchanged"}, EntityType: "test_entity",
+	})
+	if err := fixture.Construct(ctx, instance); err != nil {
+		t.Fatal(err)
+	}
+	accepted := eventtest.ExistingRunRootIngressWithRoutingSource(eventtest.UUID("accepted-"+backend), "advance", "", "", nil, 0,
+		testPipelineRunID, handlerTestWorkflowEnvelope(".", testPipelineRunID, entityID), testWorkflowRoutingSource(".", testPipelineRunID, entityID), time.Now().UTC())
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: entityID})}
+	fixture.Publish(ctx, accepted, route)
+	ctx, stop := claimNativeWorkflowHandlerPublicationForTest(t, pc, ctx, accepted, route)
+	defer func() {
+		if err := stop(); err != nil {
+			t.Error(err)
+		}
+	}()
+	application, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), MustDeliveryTargetHandler(node).ForEvent(accepted.Type()), handlers["advance"], accepted, route.Target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = withDeliveryTargetApplication(ctx, application)
+	ctx = correlation.WithInboundEvent(ctx, application.Event())
+	publicationEffect, err := workflowlifecycle.NewAcceptedEvent(address.FlowInstance.Route, identity.NormalizeEntityID(entityID), accepted.ID(), string(accepted.Type()), executionmode.Live, accepted.CreatedAt(), &cause)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim, claimed := deliverylifecycle.ClaimFromContext(ctx)
+	if !claimed {
+		t.Fatal("compiled transition requires its exact acquired native delivery")
+	}
+	publicationEffect, err = publicationEffect.WithExecutionOccurrence("delivery", claim.DeliveryID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, hasEntry, err := publicationEffect.StageEntry(address.FlowInstance)
+	if err != nil || !hasEntry {
+		t.Fatalf("component publication occurrence: found=%v err=%v", hasEntry, err)
+	}
+	before, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, address.FlowInstance)
+	if err != nil || !found {
+		t.Fatalf("initial read: found=%v err=%v", found, err)
+	}
+	rowCounts := func() map[string]int {
+		raw, err := fixture.ApplicationStorage(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var snapshot map[string]struct{ Rows []string }
+		if err := json.Unmarshal(raw, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]int{}
+		for _, table := range []string{
+			"entity_state", "flow_instances", "entity_mutations", "workflow_instance_initial_materializations",
+			"events", "event_deliveries", "event_receipts", "timers", "activity_attempts",
+			"event_delivery_handler_rule_selections", "event_delivery_attempts",
+			"author_activity_occurrences", "fan_out_intents", "fan_out_outcomes",
+		} {
+			value, found := snapshot[table]
+			if !found {
+				t.Fatalf("native application snapshot omitted %s", table)
 			}
-			entityID := eventtest.UUID("transition-hostility-" + backend)
-			address := testEngineStateAddress(".", testPipelineRunID, entityID)
-			instance := materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
-				WorkflowName: ".", WorkflowVersion: "1", Mode: contracts.FlowModeStatic,
-				CurrentState: "ready", Fields: map[string]any{"marker": "unchanged"}, EntityType: "test_entity",
-			})
-			if err := store.upsert(ctx, instance); err != nil {
-				t.Fatal(err)
-			}
-			accepted := handlerTestRootIngress(eventtest.UUID("accepted-"+backend), "advance", "", "", nil, 0,
-				testPipelineRunID, "", handlerTestWorkflowEnvelope(".", testPipelineRunID, entityID), time.Now().UTC())
-			seedExactOnceEvent(t, store, ctx, accepted)
-			ctx = correlation.WithInboundEvent(ctx, accepted)
-			publicationEffect, err := workflowlifecycle.NewAcceptedEvent(address.FlowInstance.Route, identity.NormalizeEntityID(entityID), accepted.ID(), string(accepted.Type()), executionmode.Live, accepted.CreatedAt(), &cause)
+			out[table] = len(value.Rows)
+		}
+		return out
+	}
+	counts := rowCounts()
+	evaluated, found, err := workflowEngineEvaluationSnapshot(source, address.FlowID.String(), address, before, nil)
+	if err != nil || !found {
+		t.Fatalf("capture transition R1: found=%v error=%v", found, err)
+	}
+	owner := pipelineEngineMutationOwner{store: pc.workflowStore, state: pipelineEngineStateRepo{coordinator: pc}}
+	completeMutation := func(state engine.StateMutation) engine.EngineMutation {
+		t.Helper()
+		result := engine.EngineMutation{Address: address, EvaluatedState: evaluated, State: state, HandlerRuleSelection: handlerselection.NotApplicable()}
+		if state.Transition != nil {
+			result.HandlerRuleSelection = state.Transition.RuleSelection()
+			effect, err := workflowlifecycle.NewAcceptedEvent(address.FlowInstance.Route, identity.NormalizeEntityID(entityID), state.TriggerEventID, state.TriggerEventType, executionmode.Live, state.TriggeredAt, state.Transition)
 			if err != nil {
 				t.Fatal(err)
 			}
-			publicationEffect, err = admitTestLifecycleDeliveryOccurrence(ctx, pc, publicationEffect)
+			effect, err = effect.WithExecutionOccurrence("delivery", entry.OccurrenceID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			entry, hasEntry, err := publicationEffect.StageEntry(address.FlowInstance)
-			if err != nil || !hasEntry {
-				t.Fatalf("component publication occurrence: found=%v err=%v", hasEntry, err)
-			}
-			before, found, err := store.Load(ctx, address.FlowInstance)
-			if err != nil || !found {
-				t.Fatalf("initial read: found=%v err=%v", found, err)
-			}
-			rowCounts := func() map[string]int {
-				out := map[string]int{}
-				for _, table := range []string{
-					"entity_state", "flow_instances", "entity_mutations", "workflow_instance_initial_materializations",
-					"events", "event_deliveries", "event_receipts", "timers", "activity_attempts",
-					"event_delivery_handler_rule_selections", "event_delivery_attempts",
-					"author_activity_occurrences", "fan_out_intents", "fan_out_outcomes",
-				} {
-					var n int
-					if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&n); err != nil {
-						t.Fatal(err)
-					}
-					out[table] = n
-				}
-				return out
-			}
-			counts := rowCounts()
-			evaluated, found, err := workflowEngineEvaluationSnapshot(source, address.FlowID.String(), address, before, nil)
-			if err != nil || !found {
-				t.Fatalf("capture transition R1: found=%v error=%v", found, err)
-			}
-			owner := pipelineEngineMutationOwner{store: store, state: pipelineEngineStateRepo{coordinator: pc}}
-			completeMutation := func(state engine.StateMutation) engine.EngineMutation {
-				t.Helper()
-				result := engine.EngineMutation{Address: address, EvaluatedState: evaluated, State: state, HandlerRuleSelection: handlerselection.NotApplicable()}
-				if state.Transition != nil {
-					result.HandlerRuleSelection = state.Transition.RuleSelection()
-					effect, err := workflowlifecycle.NewAcceptedEvent(address.FlowInstance.Route, identity.NormalizeEntityID(entityID), state.TriggerEventID, state.TriggerEventType, executionmode.Live, state.TriggeredAt, state.Transition)
-					if err != nil {
-						t.Fatal(err)
-					}
-					effect, err = effect.WithExecutionOccurrence("delivery", entry.OccurrenceID)
-					if err != nil {
-						t.Fatal(err)
-					}
-					result.LifecycleEffects = []workflowlifecycle.Effect{effect}
-				}
-				return result
-			}
-			for _, tc := range []struct {
-				name, next string
-				evidence   *workflowlifecycle.Transition
-				wantError  string
-			}{
-				{"missing", "done", nil, "requires exact admitted carrier"},
-				{"foreign_rule", "done", &foreignCause, "selected rule is not owned"},
-				{"wrong_context", "done", &contextCause, "selected rule is not owned"},
-				{"other_selected_source", "other", &alternateCause, "no selected compiled carrier"},
-				{"forged_gate", "done", &gateCause, "no authoritative activation/card"},
-				{"foreign_flow", "done", foreignFlowCause, "belongs to another flow"},
-				{"unknown_node", "done", unknownNodeCause, "no selected compiled carrier"},
-				{"unknown_handler", "done", unknownHandlerCause, "no selected compiled carrier"},
-				{"wrong_source", "done", wrongSourceCause, "requires exact admitted carrier"},
-				{"unknown_loop", "done", unknownLoopCause, "no selected compiled carrier"},
-				{"unknown_timer", "done", unknownTimerCause, "no selected compiled carrier"},
-				{"forged_guard", "done", &forgedGuard, "guard"},
-				{"wrong_target", "other", &cause, "disagrees with state"},
-				{"noop_cannot_smuggle_evidence", "ready", &cause, "disagrees with state"},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil, nil)
-					mutation.NextState, mutation.Transition = tc.next, tc.evidence
-					mutation.TriggerEventID, mutation.TriggerEventType = accepted.ID(), string(accepted.Type())
-					mutation.TriggeredAt = accepted.CreatedAt()
-					if _, err := owner.CommitEngineMutation(ctx, completeMutation(mutation)); err == nil || !strings.Contains(err.Error(), tc.wantError) {
-						t.Fatalf("wanted %q rejection, got %v", tc.wantError, err)
-					}
-					after, found, err := store.Load(ctx, address.FlowInstance)
-					if err != nil || !found || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(counts, rowCounts()) {
-						t.Fatalf("rejection mutated durable state: found=%v err=%v before=%#v after=%#v", found, err, before, after)
-					}
-				})
-			}
-			mutation := testEngineStateMutation(map[string]any{"marker": "committed"}, nil, nil)
-			mutation.NextState, mutation.Transition = "done", &cause
+			result.LifecycleEffects = []workflowlifecycle.Effect{effect}
+		}
+		return result
+	}
+	for _, tc := range []struct {
+		name, next string
+		evidence   *workflowlifecycle.Transition
+		wantError  string
+	}{
+		{"missing", "done", nil, "requires exact admitted carrier"},
+		{"foreign_rule", "done", &foreignCause, "selected rule is not owned"},
+		{"wrong_context", "done", &contextCause, "selected rule is not owned"},
+		{"other_selected_source", "other", &alternateCause, "no selected compiled carrier"},
+		{"forged_gate", "done", &gateCause, "no authoritative activation/card"},
+		{"foreign_flow", "done", foreignFlowCause, "belongs to another flow"},
+		{"unknown_node", "done", unknownNodeCause, "no selected compiled carrier"},
+		{"unknown_handler", "done", unknownHandlerCause, "no selected compiled carrier"},
+		{"wrong_source", "done", wrongSourceCause, "requires exact admitted carrier"},
+		{"unknown_loop", "done", unknownLoopCause, "no selected compiled carrier"},
+		{"unknown_timer", "done", unknownTimerCause, "no selected compiled carrier"},
+		{"forged_guard", "done", &forgedGuard, "guard"},
+		{"wrong_target", "other", &cause, "disagrees with state"},
+		{"noop_cannot_smuggle_evidence", "ready", &cause, "disagrees with state"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil, nil)
+			mutation.NextState, mutation.Transition = tc.next, tc.evidence
 			mutation.TriggerEventID, mutation.TriggerEventType = accepted.ID(), string(accepted.Type())
 			mutation.TriggeredAt = accepted.CreatedAt()
-			for _, tc := range []struct {
-				name  string
-				alter func(*engine.EngineMutation)
-			}{
-				{"selected_fact", func(m *engine.EngineMutation) { m.HandlerRuleSelection = foreignSelection }},
-				{"missing_effect", func(m *engine.EngineMutation) { m.LifecycleEffects = nil }},
-				{"duplicate_effect", func(m *engine.EngineMutation) { m.LifecycleEffects = append(m.LifecycleEffects, m.LifecycleEffects[0]) }},
-				{"event_id", func(m *engine.EngineMutation) { m.State.TriggerEventID = eventtest.UUID("different-event") }},
-				{"event_type", func(m *engine.EngineMutation) { m.State.TriggerEventType = "foreign" }},
-				{"event_time", func(m *engine.EngineMutation) { m.State.TriggeredAt = m.State.TriggeredAt.Add(time.Second) }},
-				{"missing_state_cause", func(m *engine.EngineMutation) { m.State.Transition = nil }},
-			} {
-				t.Run("projection_"+tc.name, func(t *testing.T) {
-					candidate := completeMutation(mutation)
-					tc.alter(&candidate)
-					if _, err := owner.CommitEngineMutation(ctx, candidate); err == nil {
-						t.Fatal("contradictory projections committed")
-					}
-					after, found, err := store.Load(ctx, address.FlowInstance)
-					if err != nil || !found || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(counts, rowCounts()) {
-						t.Fatalf("projection rejection changed state: found=%v err=%v", found, err)
-					}
-				})
+			if _, err := owner.CommitEngineMutation(ctx, completeMutation(mutation)); err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("wanted %q rejection, got %v", tc.wantError, err)
 			}
-			if _, err := owner.CommitEngineMutation(ctx, completeMutation(mutation)); err != nil {
-				t.Fatal(err)
-			}
-			after, found, err := store.Load(ctx, address.FlowInstance)
-			if err != nil || !found || after.CurrentState != "done" || after.Revision != before.Revision+1 || len(after.TransitionHistory) != 1 {
-				t.Fatalf("accepted transition not persisted: %#v found=%v err=%v", after, found, err)
-			}
-			record := after.TransitionHistory[0]
-			if !record.Evidence.RuleSelection().Equal(selection) || record.TransitionID != cause.ID() || record.TriggerEventID != mutation.TriggerEventID {
-				t.Fatalf("selected evidence lost: %#v", record)
-			}
-			raw, err := json.Marshal(record)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var hydrated WorkflowTransitionRecord
-			if err := json.Unmarshal(raw, &hydrated); err != nil || !reflect.DeepEqual(record, hydrated) {
-				t.Fatalf("history roundtrip differs: %v", err)
+			after, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, address.FlowInstance)
+			if err != nil || !found || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(counts, rowCounts()) {
+				t.Fatalf("rejection mutated durable state: found=%v err=%v before=%#v after=%#v", found, err, before, after)
 			}
 		})
+	}
+	mutation := testEngineStateMutation(map[string]any{"marker": "committed"}, nil, nil)
+	mutation.NextState, mutation.Transition = "done", &cause
+	mutation.TriggerEventID, mutation.TriggerEventType = accepted.ID(), string(accepted.Type())
+	mutation.TriggeredAt = accepted.CreatedAt()
+	for _, tc := range []struct {
+		name  string
+		alter func(*engine.EngineMutation)
+	}{
+		{"selected_fact", func(m *engine.EngineMutation) { m.HandlerRuleSelection = foreignSelection }},
+		{"missing_effect", func(m *engine.EngineMutation) { m.LifecycleEffects = nil }},
+		{"duplicate_effect", func(m *engine.EngineMutation) { m.LifecycleEffects = append(m.LifecycleEffects, m.LifecycleEffects[0]) }},
+		{"event_id", func(m *engine.EngineMutation) { m.State.TriggerEventID = eventtest.UUID("different-event") }},
+		{"event_type", func(m *engine.EngineMutation) { m.State.TriggerEventType = "foreign" }},
+		{"event_time", func(m *engine.EngineMutation) { m.State.TriggeredAt = m.State.TriggeredAt.Add(time.Second) }},
+		{"missing_state_cause", func(m *engine.EngineMutation) { m.State.Transition = nil }},
+	} {
+		t.Run("projection_"+tc.name, func(t *testing.T) {
+			candidate := completeMutation(mutation)
+			tc.alter(&candidate)
+			if _, err := owner.CommitEngineMutation(ctx, candidate); err == nil {
+				t.Fatal("contradictory projections committed")
+			}
+			after, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, address.FlowInstance)
+			if err != nil || !found || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(counts, rowCounts()) {
+				t.Fatalf("projection rejection changed state: found=%v err=%v", found, err)
+			}
+		})
+	}
+	if _, err := owner.CommitEngineMutation(ctx, completeMutation(mutation)); err != nil {
+		t.Fatal(err)
+	}
+	after, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, address.FlowInstance)
+	if err != nil || !found || after.CurrentState != "done" || after.Revision != before.Revision+1 || len(after.TransitionHistory) != 1 {
+		t.Fatalf("accepted transition not persisted: %#v found=%v err=%v", after, found, err)
+	}
+	record := after.TransitionHistory[0]
+	if !record.Evidence.RuleSelection().Equal(selection) || record.TransitionID != cause.ID() || record.TriggerEventID != mutation.TriggerEventID {
+		t.Fatalf("selected evidence lost: %#v", record)
+	}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hydrated WorkflowTransitionRecord
+	if err := json.Unmarshal(raw, &hydrated); err != nil || !reflect.DeepEqual(record, hydrated) {
+		t.Fatalf("history roundtrip differs: %v", err)
 	}
 }

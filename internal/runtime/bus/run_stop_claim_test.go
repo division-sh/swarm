@@ -13,6 +13,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -94,9 +95,9 @@ func TestRunStopPreservesForegroundClaimFenceBothStores(t *testing.T) {
 			if err := f.bus.WaitForQuiescence(ctx); err != nil {
 				t.Fatal(err)
 			}
-			var outcome string
-			if err := f.db.QueryRow(`SELECT outcome FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, event.ID()).Scan(&outcome); err != nil || outcome != "success" {
-				t.Fatalf("original foreground claimant could not settle after stop rollback: outcome=%s err=%v", outcome, err)
+			outcome, err := storetest.ReadExactPipelineReceiptOutcomeReason(context.Background(), f.store, event.ID())
+			if err != nil || outcome.Outcome != "success" {
+				t.Fatalf("original foreground claimant could not settle after stop rollback: outcome=%s err=%v", outcome.Outcome, err)
 			}
 		})
 	}
@@ -146,7 +147,7 @@ func TestRunStopDrainsRecoveryBeforeMutationAndRequiredPublicationBothStores(t *
 				// A different run must not wait for this held recovery, including
 				// when both run controllers use the very same scanning bus.
 				unrelatedRun := uuid.NewString()
-				seedCompleteEventDispatchRun(t, f.ctx, f.db, backend, unrelatedRun, time.Now().UTC())
+				seedCompleteEventDispatchRun(t, f.ctx, f.store, unrelatedRun, time.Now().UTC())
 				unrelatedCtx, unrelatedCancel := context.WithTimeout(f.ctx, time.Second)
 				defer unrelatedCancel()
 				if _, err := runtimeruncontrol.NewController(store, stopBus, runtimeruncontrol.Options{}).Stop(unrelatedCtx, runtimeruncontrol.TransitionRequest{RunID: unrelatedRun}); err != nil {
@@ -198,9 +199,9 @@ func TestRunStopDrainsRecoveryBeforeMutationAndRequiredPublicationBothStores(t *
 					t.Fatalf("stop did not settle run after recovery: %+v", after)
 				}
 				for _, eventID := range []string{f.event.ID(), child.ID()} {
-					var outcome string
-					if err := f.db.QueryRow(`SELECT outcome FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, eventID).Scan(&outcome); err != nil || outcome != "success" {
-						t.Fatalf("stop overwrote completed recovery/publication: event=%s outcome=%s err=%v", eventID, outcome, err)
+					outcome, err := storetest.ReadExactPipelineReceiptOutcomeReason(context.Background(), f.store, eventID)
+					if err != nil || outcome.Outcome != "success" {
+						t.Fatalf("stop overwrote completed recovery/publication: event=%s outcome=%s err=%v", eventID, outcome.Outcome, err)
 					}
 				}
 			})
@@ -215,15 +216,9 @@ type stopClaimRunSnapshot struct {
 
 func readStopClaimRun(t *testing.T, f completeEventDispatchFixture) stopClaimRunSnapshot {
 	t.Helper()
-	var result stopClaimRunSnapshot
-	if err := f.db.QueryRow(`SELECT r.status,COALESCE(c.control_status,'') FROM runs r LEFT JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`, f.event.RunID()).Scan(&result.status, &result.control); err != nil {
+	out, err := storetest.ReadRunStopStorage(context.Background(), f.store, f.event.RunID())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.db.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','processing','retrying')`, f.event.RunID()).Scan(&result.pending); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.db.QueryRow(`SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1`, f.event.RunID()).Scan(&result.revisions); err != nil {
-		t.Fatal(err)
-	}
-	return result
+	return stopClaimRunSnapshot{status: out.Status, control: out.Control, pending: out.Pending, revisions: int(out.Revisions)}
 }

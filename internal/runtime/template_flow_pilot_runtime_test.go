@@ -57,7 +57,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
+	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              newRuntimeTestWorkflowModule(t, source),
 		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),

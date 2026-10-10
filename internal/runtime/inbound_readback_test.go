@@ -152,8 +152,3 @@ func countInboundPipelineReceipts(t *testing.T, ctx context.Context, selected in
 	t.Helper()
 	return storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, eventID).PipelineReceiptCount
 }
-
-func countInboundNonPlatformReceipts(t *testing.T, ctx context.Context, selected inboundGatewayReadback, runID, eventID string) int {
-	t.Helper()
-	return storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, eventID).NonPlatformReceiptCount
-}

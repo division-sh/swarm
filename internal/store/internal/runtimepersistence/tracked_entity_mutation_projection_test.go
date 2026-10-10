@@ -26,7 +26,7 @@ func TestTrackedMutationProjectionPreservesScopeOrderAndNullBothStores(t *testin
 			}
 			defer restore()
 			got, err := ReadTrackedEntityMutationProjectionStorageForTest(ctx, fixture.store, run, entity)
-			if err != nil || got.CurrentState != "queued" || len(got.Mutations) != 4 || !bytes.Equal(got.Gates, []byte(`{}`)) {
+			if err != nil || got.EntityType != "storage_witness" || got.Revision != 7 || got.CurrentState != "queued" || len(got.Mutations) != 4 || !bytes.Equal(got.Gates, []byte(`{}`)) {
 				t.Fatalf("projection=%+v/%v", got, err)
 			}
 			var want []TrackedProjectionMutationStorage

@@ -34,7 +34,7 @@ func TestFlowActivationSourceSetRebindBothStores(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			runID, path := uuid.NewString(), "account/restamp"
 			hash := mustExternalStoreTestSourceArtifactFact().BundleHash()
-			requireReadinessRun(t, ctx, db, sqlite, runID, hash)
+			requireReadinessRun(t, ctx, selected, runID, hash)
 			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runID, uuid.NewString(), path, hash)
 			runtimeID := uuid.NewString()
 			process, err := selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "readiness-restamp", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID})

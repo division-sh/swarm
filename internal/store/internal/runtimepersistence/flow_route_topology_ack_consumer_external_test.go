@@ -60,7 +60,7 @@ func TestFlowRouteTopologyAcknowledgedFaultCompletesProcessFollowupBothStores(t 
 			scope, _ := runtimeauthoractivity.ScopeFromContext(ctx)
 			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(scope.RuntimeInstanceID, fact.BundleHash()))
 			storetest.RequireBundleDataCatalog(t, ctx, selected, bundle)
-			seedFlowInstanceDescriptorAuthorityCase(t, ctx, db, sqlite, runID, uuid.NewString(), fact.BundleHash(), fact.BundleHash(), source.WorkflowVersion(), "exact", false)
+			seedFlowInstanceDescriptorAuthorityCase(t, ctx, selected, db, sqlite, runID, uuid.NewString(), fact.BundleHash(), fact.BundleHash(), source.WorkflowVersion(), "exact", false)
 			fault := errors.New("injected route topology postcommit cleanup failure")
 			wrapped := &routeTopologyAfterCommitFaultStore{flowInstanceDescriptorAuthorityStore: selected, fault: fault}
 			eventBus, err := newStoreTestEventBus(t, wrapped, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact})

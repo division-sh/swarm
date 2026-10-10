@@ -261,12 +261,12 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	runtimeLogEventID := uuid.NewString()
 	readyEventID := uuid.NewString()
 
-	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.backend.ConstructionHandle(), runlifecyclefixture.Fixture{
-		RunID: blockedRunID, Origin: runlifecyclefixture.EventOrigin(t, activeEventID, "quiescence.active_delivery"),
+	requireRunFixtureForTest(t, ctx, sqliteStore, semanticRunFixture{
+		RunID: blockedRunID, Origin: semanticEventRunOriginForTest(t, activeEventID, "quiescence.active_delivery"),
 		StartedAt: now.Add(-time.Minute),
 	})
-	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.backend.ConstructionHandle(), runlifecyclefixture.Fixture{
-		RunID: readyRunID, Origin: runlifecyclefixture.EventOrigin(t, readyEventID, "quiescence.ready"),
+	requireRunFixtureForTest(t, ctx, sqliteStore, semanticRunFixture{
+		RunID: readyRunID, Origin: semanticEventRunOriginForTest(t, readyEventID, "quiescence.ready"),
 		StartedAt: now.Add(-time.Minute),
 	})
 	for _, fixture := range []struct {

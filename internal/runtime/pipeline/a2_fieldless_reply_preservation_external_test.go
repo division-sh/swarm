@@ -35,7 +35,7 @@ func TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores(t *test
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			runID, token := uuid.NewString(), uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
+			insertGateRecoveryRun(t, selected.events, runID)
 			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, canonicalrouting.ArrivalJoinRoutingFiles(t, canonicalrouting.ArrivalJoinFieldlessReply)))
 			if issues := pinrouting.CompileConnectGraph(source).Issues(); len(issues) != 0 || len(source.WorkflowJoins()) != 0 {

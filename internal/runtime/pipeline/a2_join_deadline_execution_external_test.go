@@ -60,7 +60,7 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
 			t.Run(backend.name+"/"+name, func(t *testing.T) {
 				selected := backend.open(t)
 				runID := uuid.NewString()
-				insertGateRecoveryRun(t, selected, runID)
+				insertGateRecoveryRun(t, selected.events, runID)
 				ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				files := a2CountJoinFiles(2)
 				files["schema.yaml"] = strings.Replace(files["schema.yaml"], "[item.completed, halt.requested]", "[item.completed, halt.requested, touch]", 1)

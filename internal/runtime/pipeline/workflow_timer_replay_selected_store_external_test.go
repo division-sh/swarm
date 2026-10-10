@@ -49,7 +49,7 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 					}
 					pc := newTimerReplayCoordinator(t, bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 						Module: gateRecoveryModule{source: source}, TimerScheduler: scheduler, WorkOwner: pipelineExternalTestWorkOwner(t),
-					})
+					}, authorActivityTestSourceArtifactFact)
 					var once sync.Once
 					stop := func() {
 						t.Helper()

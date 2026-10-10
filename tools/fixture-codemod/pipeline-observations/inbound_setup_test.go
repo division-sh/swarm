@@ -15,18 +15,40 @@ func TestInboundRecipesChangeOnlyTheUnusedSeedPool(t *testing.T) {
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	count := 0
 	for _, row := range rows {
-		if row.Family != "inbound-unused-pool" {
-			continue
+		if row.Family == "inbound-unused-pool" {
+			t.Fatal("upstream-superseded pool recipes must not overwrite current construction owners")
 		}
-		count++
-		t.Run(row.File+"/"+row.Function, func(t *testing.T) {
-			assertInboundRecipeChangesOnlyUnusedPool(t, row)
-		})
 	}
-	if count != 19 {
-		t.Fatalf("family count=%d, want 19", count)
+	// Master already retired this cohort. Keep the pure rewrite proof, but do
+	// not replay obsolete fixture snapshots over its admitted construction.
+	for _, row := range []recipe{
+		{Function: "seedPostgresInboundGatewayRuntime", Before: "func seedPostgresInboundGatewayRuntime(t *testing.T, ctx context.Context, db *sql.DB, pg Store, run, entity, flow, slug, provider, secret, agent string) Target { return originalWorkload(ctx, pg, run, entity, flow, slug, provider, secret, agent) }", After: "func seedPostgresInboundGatewayRuntime(t *testing.T, ctx context.Context, pg Store, run, entity, flow, slug, provider, secret, agent string) Target { return originalWorkload(ctx, pg, run, entity, flow, slug, provider, secret, agent) }"},
+		{Function: "probe", Before: "func probe() { seedPostgresInboundGatewayRuntime(t, ctx, db, pg, run, entity, flow, slug, provider, secret, agent) }", After: "func probe() { seedPostgresInboundGatewayRuntime(t, ctx, pg, run, entity, flow, slug, provider, secret, agent) }"},
+		{Function: "openProviderRawSettlementStore", Before: "func openProviderRawSettlementStore(backend string) (Store, *sql.DB) { if backend == \"sqlite\" { return sqliteOwner, db }; return postgresOwner, db }", After: "func openProviderRawSettlementStore(backend string) Store { if backend == \"sqlite\" { return sqliteOwner }; return postgresOwner }"},
+		{Function: "TestInboundGatewayProviderRawSettlementSQLitePostgres", Before: "func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) { owner, db := openProviderRawSettlementStore(backend); seedProviderRawSettlementRuntime(t, ctx, owner, db, run, entity, flow, provider, secret, agent) }", After: "func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) { owner := openProviderRawSettlementStore(backend); seedProviderRawSettlementRuntime(t, ctx, owner, run, entity, flow, provider, secret, agent) }"},
+		{Function: "seedProviderRawSettlementRuntime", Before: "func seedProviderRawSettlementRuntime(t *testing.T, ctx context.Context, selected Store, db *sql.DB, run, entity, flow, provider, secret, agent string) { seedPostgresInboundGatewayRuntime(t, ctx, db, selected, run, entity, flow, slug, provider, secret, agent) }", After: "func seedProviderRawSettlementRuntime(t *testing.T, ctx context.Context, selected Store, run, entity, flow, provider, secret, agent string) { seedPostgresInboundGatewayRuntime(t, ctx, selected, run, entity, flow, slug, provider, secret, agent) }"},
+	} {
+		assertInboundRecipeChangesOnlyUnusedPool(t, row)
+	}
+	for _, row := range []struct{ file, function string }{
+		{"internal/runtime/inbound_postgres_test.go", "seedPostgresInboundGatewayRuntime"},
+		{"internal/runtime/inbound_raw_settlement_store_test.go", "seedProviderRawSettlementRuntime"},
+		{"internal/runtime/inbound_raw_settlement_store_test.go", "openProviderRawSettlementStore"},
+	} {
+		fn := projectionShapeFunction(t, selectedCausalObservationBody(t, row.file, row.function))
+		for _, parameter := range fn.Type.Params.List {
+			if formattedNativeReadNode(parameter.Type) == "*sql.DB" {
+				t.Fatalf("retired seed pool parameter returned: %s", row.function)
+			}
+		}
+		if fn.Type.Results != nil {
+			for _, result := range fn.Type.Results.List {
+				if formattedNativeReadNode(result.Type) == "*sql.DB" {
+					t.Fatalf("retired provider pool result returned: %s", row.function)
+				}
+			}
+		}
 	}
 }
 
@@ -58,7 +80,7 @@ func assertInboundRecipeChangesOnlyUnusedPool(t *testing.T, row recipe) {
 	if err := format.Node(&expected, token.NewFileSet(), fn); err != nil {
 		t.Fatal(err)
 	}
-	actual, err := canonicalFunction(row.After)
+	actual, err := canonicalFunction(normalizeInboundReceiptWitnessCalls(row.After))
 	if err != nil || actual != expected.String() {
 		t.Fatalf("recipe changed other fixture/workload/assertion statements: %v", err)
 	}

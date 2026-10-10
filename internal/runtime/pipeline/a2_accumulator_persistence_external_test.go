@@ -108,7 +108,7 @@ collector:
 `,
 	}))
 	runID := uuid.NewString()
-	insertGateRecoveryRun(t, selected, runID)
+	insertGateRecoveryRun(t, selected.events, runID)
 	ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 	bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {

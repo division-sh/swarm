@@ -2,12 +2,9 @@ package bus_test
 
 import (
 	"context"
-	"database/sql"
 	"sync"
 	"testing"
 	"time"
-
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -17,16 +14,12 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eb, err := newScopedTestEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -39,7 +32,7 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	pausedRunID := uuid.NewString()
 	otherRunID := uuid.NewString()
 	for _, runID := range []string{pausedRunID, otherRunID} {
-		seedRunControlTestRun(t, ctx, db, runID)
+		seedRunControlTestRun(t, ctx, pg, runID)
 	}
 	pausedIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, pausedRunID, agentID)
 	otherIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, otherRunID, agentID)
@@ -67,7 +60,7 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 		t.Fatalf("Publish paused run event: %v", err)
 	}
 	requireNoBusEvent(t, pausedCh, "paused run before continue")
-	if got := countPipelineReceiptsForEvent(t, ctx, db, pausedEventID); got != 0 {
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, pausedEventID); got != 0 {
 		t.Fatalf("paused run pipeline receipts = %d, want 0", got)
 	}
 
@@ -101,17 +94,14 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	if got.ID() != pausedEventID {
 		t.Fatalf("released event = %s, want paused run %s", got.ID(), pausedEventID)
 	}
-	if got := countPipelineReceiptsForEvent(t, ctx, db, pausedEventID); got != 1 {
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, pausedEventID); got != 1 {
 		t.Fatalf("paused run pipeline receipts after continue = %d, want 1", got)
 	}
 }
 
 func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eb, err := newScopedTestEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -122,7 +112,7 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 	agentID := "agent-run-control-acked"
 	eventType := events.EventType("custom.run_control.acked")
 	runID := uuid.NewString()
-	seedRunControlTestRun(t, ctx, db, runID)
+	seedRunControlTestRun(t, ctx, pg, runID)
 	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, runID, agentID)
 	ch := runtimebustest.SubscribeForRun(t, eb, runID, agentID, eventType)
 	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
@@ -156,7 +146,7 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 	if _, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("test_handed")); err != nil {
 		t.Fatalf("commit handed checkpoint: %v", err)
 	}
-	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, eventID); got != 1 {
 		t.Fatalf("queued event pipeline receipts = %d, want 1", got)
 	}
 
@@ -171,11 +161,8 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 }
 
 func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eventType := events.EventType("custom.run_control.intercepted")
 	deferredType := events.EventType("custom.run_control.deferred")
 	recorder := &runControlRecordingInterceptor{
@@ -193,7 +180,7 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 
 	agentID := "agent-run-control-interceptor"
 	runID := uuid.NewString()
-	seedRunControlTestRun(t, ctx, db, runID)
+	seedRunControlTestRun(t, ctx, pg, runID)
 	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, runID, agentID)
 	ch := runtimebustest.SubscribeForRun(t, eb, runID, agentID, eventType, deferredType)
 	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
@@ -220,7 +207,7 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 	if got := recorder.count(); got != 0 {
 		t.Fatalf("interceptor executions before continue = %d, want 0", got)
 	}
-	if got := countPipelineReceiptsForEvent(t, ctx, db, queuedEventID); got != 0 {
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, queuedEventID); got != 0 {
 		t.Fatalf("queued event receipts before continue = %d, want 0", got)
 	}
 
@@ -236,17 +223,14 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 	}
 
 	requireBusEventTypes(t, ch, "released original and deferred events", eventType, deferredType)
-	if got := countPipelineReceiptsForEvent(t, ctx, db, queuedEventID); got != 1 {
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, queuedEventID); got != 1 {
 		t.Fatalf("queued event receipts after continue = %d, want 1", got)
 	}
 }
 
 func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eventType := events.EventType("custom.run_control.postcommit")
 	deferredType := events.EventType("custom.run_control.postcommit.deferred")
 	recorder := &runControlRecordingInterceptor{
@@ -264,7 +248,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 
 	agentID := "agent-run-control-postcommit"
 	runID := uuid.NewString()
-	seedRunControlTestRun(t, ctx, db, runID)
+	seedRunControlTestRun(t, ctx, pg, runID)
 	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, runID, agentID)
 	ch := runtimebustest.SubscribeForRun(t, eb, runID, agentID, eventType, deferredType)
 	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
@@ -292,7 +276,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	if got := recorder.count(); got != 0 {
 		t.Fatalf("post-commit interceptor executions while paused = %d, want 0", got)
 	}
-	if got := countPipelineReceiptsForEvent(t, ctx, db, intent.Event.ID()); got != 0 {
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, intent.Event.ID()); got != 0 {
 		t.Fatalf("post-commit event receipts while paused = %d, want 0", got)
 	}
 	blockedWaitCtx, blockedWaitCancel := context.WithTimeout(ctx, 5*time.Second)
@@ -313,14 +297,14 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 		t.Fatalf("post-commit interceptor executions after continue = %d, want 1", got)
 	}
 	requireBusEventTypes(t, ch, "released post-commit original and deferred events", eventType, deferredType)
-	if got := countPipelineReceiptsForEvent(t, ctx, db, intent.Event.ID()); got != 1 {
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, intent.Event.ID()); got != 1 {
 		t.Fatalf("post-commit event receipts after continue = %d, want 1", got)
 	}
 }
 
-func seedRunControlTestRun(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
+func seedRunControlTestRun(t *testing.T, ctx context.Context, selected storetest.RunFixtureStore, runID string) {
 	t.Helper()
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: authorActivityTestBundleHash})
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: authorActivityTestBundleHash})
 }
 
 type runControlRecordingInterceptor struct {

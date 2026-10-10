@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,33 +11,38 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
 )
 
+type ExactHandoffNativeFixtureForTest struct {
+	Store         runtimedelivery.Store
+	Authority     runtimedelivery.ExecutionAuthority
+	Context       context.Context
+	SelectedEvent events.Event
+	SelectedRoute events.DeliveryRoute
+	Seed          func(*testing.T, string, string, events.DeliveryRoute) events.Event
+	Session       func(*testing.T, agentidentity.Identity) string
+	Load          func(*testing.T, string) events.Event
+}
+
+type ExactHandoffNativeOpenerForTest func(*testing.T, bool) ExactHandoffNativeFixtureForTest
+
+// The spy records the exact source and injects only the named handoff fault.
+// Native owners retain every storage operation and acknowledgment.
 type exactHandoffProofStore struct {
 	InMemoryEventStore
 	runtimedelivery.Store
-	db          *sql.DB
-	adapter     *deliveryfixture.Adapter
-	authority   runtimedelivery.ExecutionAuthority
-	mu          sync.Mutex
-	attempts    int
-	binds       int
-	failOnce    bool
-	handoffFact runtimecorrelation.SourceArtifactFact
-	bindFact    runtimecorrelation.SourceArtifactFact
+	fixture               ExactHandoffNativeFixtureForTest
+	authority             runtimedelivery.ExecutionAuthority
+	mu                    sync.Mutex
+	attempts, binds       int
+	failOnce              bool
+	handoffFact, bindFact runtimecorrelation.SourceArtifactFact
 }
 
 func (s *exactHandoffProofStore) ProveHandoff(ctx context.Context, eventID string, route events.DeliveryRoute) (runtimedelivery.DurableHandoffProof, error) {
@@ -50,7 +54,7 @@ func (s *exactHandoffProofStore) ProveHandoff(ctx context.Context, eventID strin
 	if fail {
 		return runtimedelivery.DurableHandoffProof{}, errors.New("injected handoff proof failure")
 	}
-	return s.adapter.ProveHandoff(ctx, s.db, eventID, route)
+	return s.Store.ProveHandoff(ctx, eventID, route)
 }
 
 func (s *exactHandoffProofStore) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.ClaimCommit, error) {
@@ -58,276 +62,31 @@ func (s *exactHandoffProofStore) BindAgentSession(ctx context.Context, claim run
 	s.binds++
 	s.bindFact, _ = runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	s.mu.Unlock()
-	var snapshot runtimedelivery.Snapshot
-	result := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(ctx context.Context, attempt *eventfixture.Attempt) error {
-		var err error
-		snapshot, err = s.adapter.BindAgentSession(ctx, attempt, claim, sessionID)
-		return err
-	})
-	_, acknowledged := result.Value()
-	if !acknowledged {
-		return runtimedelivery.ClaimCommit{}, result.Err()
-	}
-	return runtimedelivery.ClaimCommit{Snapshot: snapshot, Acknowledged: true}, result.Err()
+	return s.Store.BindAgentSession(ctx, claim, sessionID)
 }
 
-func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofStore {
-	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+uuid.NewString()+"?mode=memory&cache=shared")
-	if err != nil {
-		t.Fatalf("open exact handoff proof store: %v", err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	for _, ddl := range []string{
-		`CREATE TABLE run_fork_revision_heads (
-			run_id TEXT PRIMARY KEY,
-			last_revision INTEGER NOT NULL DEFAULT 0,
-			updated_at TIMESTAMP
-		)`,
-		`CREATE TABLE run_fork_revisions (
-			run_id TEXT,
-			revision INTEGER,
-			recorded_at TIMESTAMP
-		)`,
-		`CREATE TABLE run_fork_fact_revisions (
-			run_id TEXT,
-			revision INTEGER,
-			family TEXT,
-			fact_key TEXT,
-			fact TEXT,
-			present BOOLEAN
-		)`,
-		`CREATE TABLE events (
-			event_class TEXT NOT NULL,
-			event_id TEXT PRIMARY KEY,
-			run_id TEXT,
-			event_name TEXT NOT NULL,
-			task_id TEXT,
-			entity_id TEXT,
-			flow_instance TEXT,
-			scope TEXT NOT NULL,
-			payload BLOB NOT NULL,
-			payload_bytes BLOB NOT NULL,
-			payload_schema_bundle_hash TEXT NOT NULL,
-			payload_schema_flow_id TEXT,
-			payload_schema_event_key TEXT NOT NULL,
-			payload_schema_digest TEXT NOT NULL,
-			payload_schema_class TEXT NOT NULL,
-			execution_mode TEXT NOT NULL,
-			chain_depth INTEGER NOT NULL,
-			produced_by TEXT NOT NULL,
-			produced_by_type TEXT NOT NULL,
-			handler_node TEXT,
-			idempotency_key TEXT,
-			source_event_id TEXT,
-			created_at TIMESTAMP NOT NULL,
-			routing_source_kind TEXT NOT NULL,
-			routing_source_authority TEXT,
-			source_route BLOB NOT NULL,
-			target_route BLOB NOT NULL,
-			target_set BLOB NOT NULL,
-			operator_reference_event_id TEXT,
-			inherited_fan_out_origin BLOB
-			,route_settlement BLOB NOT NULL
-		)`,
-		`CREATE TABLE event_deliveries (
-			delivery_id TEXT PRIMARY KEY,
-			run_id TEXT,
-			event_id TEXT NOT NULL,
-			route_identity TEXT NOT NULL,
-			subscriber_type TEXT NOT NULL,
-			subscriber_id TEXT NOT NULL,
-			agent_name_owner TEXT NOT NULL,
-			agent_name_source TEXT NOT NULL,
-			agent_route_presence TEXT NOT NULL,
-			agent_flow_scope_key TEXT NOT NULL,
-			agent_flow_instance_id TEXT NOT NULL,
-			agent_flow_instance_path TEXT NOT NULL,
-			delivery_target_route BLOB NOT NULL,
-			delivery_context BLOB NOT NULL,
-			delivery_payload_projection BLOB NOT NULL,
-			connect_execution_claim BLOB NOT NULL,
-			receiver_materialization_plan BLOB NOT NULL DEFAULT 'null',
-			execution_authority_kind TEXT NOT NULL,
-			authority_bundle_hash TEXT NOT NULL,
-			execution_authority_id TEXT NOT NULL,
-			execution_authority_generation INTEGER NOT NULL,
-			selected_execution_id TEXT,
-			selected_fork_run_id TEXT,
-			selected_execution_generation INTEGER,
-			continuation_handoff_at TIMESTAMP,
-			status TEXT NOT NULL,
-			retry_count INTEGER NOT NULL,
-			max_retries INTEGER NOT NULL,
-			next_eligible_at TIMESTAMP,
-			claim_version INTEGER NOT NULL,
-			current_attempt_version INTEGER,
-			current_attempt_open BOOLEAN,
-			reason_code TEXT,
-			failure BLOB,
-			started_at TIMESTAMP,
-			settled_at TIMESTAMP,
-			created_at TIMESTAMP NOT NULL,
-			updated_at TIMESTAMP NOT NULL,
-			UNIQUE (event_id, route_identity)
-		)`,
-		`CREATE TABLE event_delivery_handler_rule_selections (
-			delivery_id TEXT PRIMARY KEY REFERENCES event_deliveries(delivery_id),
-			selection_context TEXT NOT NULL, disposition TEXT NOT NULL,
-			flow_path TEXT, declaration_family TEXT, semantic_path TEXT,
-			display_label TEXT NOT NULL DEFAULT ''
-		)`,
-		`CREATE TABLE event_delivery_attempts (
-			delivery_id TEXT NOT NULL,
-			claim_version INTEGER NOT NULL,
-			claim_token TEXT NOT NULL UNIQUE,
-			started_at TIMESTAMP NOT NULL,
-			lease_expires_at TIMESTAMP NOT NULL,
-			current_delivery_id TEXT,
-			active_session_id TEXT,
-			session_delivery_id TEXT,
-			session_run_id TEXT,
-			session_subscriber_type TEXT,
-			session_agent_id TEXT,
-			session_agent_name_owner TEXT,
-			session_agent_name_source TEXT,
-			session_agent_route_presence TEXT,
-			session_agent_flow_scope_key TEXT,
-			session_agent_flow_instance_id TEXT,
-			session_agent_flow_instance_path TEXT,
-			open_marker BOOLEAN NOT NULL,
-			closure_kind TEXT NOT NULL,
-			outcome TEXT,
-			reason_code TEXT,
-			failure BLOB,
-			side_effects BLOB NOT NULL DEFAULT '[]',
-			duration_ms INTEGER,
-			completed_at TIMESTAMP,
-			PRIMARY KEY(delivery_id, claim_version)
-		)`,
-		`CREATE TABLE author_activity_order (
-			singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
-			last_sequence BIGINT NOT NULL CHECK (last_sequence >= 0)
-		)`,
-		`CREATE TABLE author_activity_occurrences (
-			occurrence_id TEXT PRIMARY KEY,
-			sequence BIGINT NOT NULL UNIQUE CHECK (sequence > 0),
-			kind TEXT NOT NULL,
-			version INTEGER NOT NULL CHECK (version = 2),
-			transition TEXT NOT NULL,
-			source_owner TEXT NOT NULL,
-			source_identity TEXT NOT NULL,
-			dedup_key TEXT NOT NULL UNIQUE,
-			run_id TEXT,
-			entity_id TEXT,
-			agent_id TEXT,
-			flow_id TEXT,
-			scope_kind TEXT NOT NULL,
-			runtime_instance_id TEXT,
-			bundle_hash TEXT,
-			author_safe_summary TEXT,
-			projection TEXT NOT NULL DEFAULT '{}',
-			failure TEXT,
-			occurred_at TIMESTAMP NOT NULL
-		)`,
-		`CREATE TABLE agent_sessions (
-			session_id TEXT PRIMARY KEY,
-			run_id TEXT NOT NULL,
-			agent_id TEXT NOT NULL,
-			agent_name_owner TEXT NOT NULL,
-			agent_name_source TEXT NOT NULL,
-			agent_route_presence TEXT NOT NULL,
-			flow_scope_key TEXT NOT NULL,
-			flow_instance_id TEXT NOT NULL,
-			flow_instance TEXT NOT NULL,
-			status TEXT NOT NULL
-		)`,
-	} {
-		if _, err := db.Exec(ddl); err != nil {
-			t.Fatalf("create exact handoff proof schema: %v", err)
-		}
-	}
-	if err := runlifecyclefixture.CreateSQLiteScenarioSchema(context.Background(), db); err != nil {
-		t.Fatalf("create exact handoff lifecycle schema: %v", err)
-	}
-	if err := deliveryfixture.CreateSQLiteRunAdmissionSchema(context.Background(), db); err != nil {
-		t.Fatalf("create exact handoff run admission schema: %v", err)
-	}
-	adapter, err := deliveryfixture.NewAdapter(deliveryfixture.DialectSQLite)
-	if err != nil {
-		t.Fatalf("create exact handoff adapter: %v", err)
-	}
-	source := sourceartifactfixture.Fact()
-	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, "exact-handoff-test", 1)
-	if err != nil {
-		t.Fatalf("create exact handoff authority: %v", err)
-	}
-	return &exactHandoffProofStore{db: db, adapter: adapter, authority: authority, failOnce: failOnce}
+func newExactHandoffProofStore(fixture ExactHandoffNativeFixtureForTest, failOnce bool) *exactHandoffProofStore {
+	return &exactHandoffProofStore{Store: fixture.Store, fixture: fixture, authority: fixture.Authority, failOnce: failOnce}
 }
 
-func (s *exactHandoffProofStore) seed(t *testing.T, eventID, runID string, route events.DeliveryRoute) {
+func (s *exactHandoffProofStore) seed(t *testing.T, eventID, runID string, route events.DeliveryRoute) events.Event {
 	t.Helper()
-	ctx := context.Background()
-	if err := runlifecyclefixture.Materialize(ctx, s.db, runlifecyclefixture.DialectSQLite, runlifecyclefixture.Fixture{
-		RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Artifact: sourceartifactfixture.Artifact(),
-	}); err != nil {
-		t.Fatalf("seed exact handoff run: %v", err)
-	}
-	evt := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-	if err := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(ctx context.Context, attempt *eventfixture.Attempt) error {
-		return eventfixture.Insert(ctx, attempt, authoractivityfixture.DialectSQLite, evt)
-	}).Err(); err != nil {
-		t.Fatalf("seed exact handoff event: %v", err)
-	}
-	if err := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(ctx context.Context, attempt *eventfixture.Attempt) error {
-		_, err := s.adapter.CommitInitial(ctx, attempt, eventID, runID, []events.DeliveryRoute{route}, s.authority)
-		return err
-	}).Err(); err != nil {
-		t.Fatalf("commit exact handoff obligation: %v", err)
-	}
-}
-
-func (s *exactHandoffProofStore) seedSession(t *testing.T, sessionID, runID string, identity agentidentity.Identity) {
-	t.Helper()
-	fields, err := identity.StorageFields()
-	if err != nil {
-		t.Fatalf("read exact delivery session identity: %v", err)
-	}
-	if _, err := s.db.Exec(
-		`INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, status
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
-		sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-	); err != nil {
-		t.Fatalf("seed exact delivery agent session: %v", err)
-	}
+	return s.fixture.Seed(t, eventID, runID, route)
 }
 
 func (s *exactHandoffProofStore) claim(t *testing.T, eventID, runID string, route events.DeliveryRoute) runtimedelivery.Claim {
 	t.Helper()
-	ctx := runtimeauthoractivity.WithScope(
-		context.Background(),
-		runtimeauthoractivity.BundleScope("exact-claim-runtime", "exact-claim-bundle"),
-	)
-	evt := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-	var claimed runtimedelivery.ClaimedObligation
-	err := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(ctx context.Context, attempt *eventfixture.Attempt) error {
-		result, err := s.adapter.ClaimExactResult(ctx, attempt, s.authority, evt, route, runtimedelivery.DefaultLeaseTTL)
-		if err != nil {
-			return err
-		}
-		var ok bool
-		claimed, ok = result.Acquired()
-		if !ok {
-			return fmt.Errorf("claim exact delivery disposition = %s", result.Disposition)
-		}
-		return nil
-	}).Err()
+	event := s.fixture.Load(t, eventID)
+	if event.RunID() != runID {
+		t.Fatal("native handoff claim lost exact run identity")
+	}
+	result, err := s.Store.ClaimDelivery(s.fixture.Context, s.authority, event, route)
 	if err != nil {
-		t.Fatalf("claim exact delivery: %v", err)
+		t.Fatal(err)
+	}
+	claimed, ok := result.Acquired()
+	if !ok {
+		t.Fatalf("native handoff claim disposition=%s", result.Disposition)
 	}
 	return claimed.Claim
 }
@@ -338,23 +97,13 @@ func deliverToTestAgent(ctx context.Context, eb *EventBus, evt events.Event, ide
 	return err
 }
 
-func TestSelectedDeliveryTransfersAcceptCommittedIsAtomic(t *testing.T) {
-	store := newExactHandoffProofStore(t, false)
-	forkRunID := uuid.NewString()
-	authority, err := runtimedelivery.NewSelectedExecutionAuthority(
-		store.authority.SourceArtifact(),
-		uuid.NewString(),
-		forkRunID,
-		1,
-	)
-	if err != nil {
-		t.Fatalf("construct selected delivery authority: %v", err)
-	}
-	store.authority = authority
-	eventID := uuid.NewString()
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("selected-agent"), AgentIdentity: testAgentRouteIdentityForRun(t, forkRunID, "selected-agent", "")}
+func VerifySelectedDeliveryTransfersAcceptCommittedIsAtomicForTest(t *testing.T, open ExactHandoffNativeOpenerForTest) {
+	fixture := open(t, true)
+	store := newExactHandoffProofStore(fixture, false)
+	authority := fixture.Authority
+	eventID, forkRunID, route := fixture.SelectedEvent.ID(), fixture.SelectedEvent.RunID(), fixture.SelectedRoute
 	store.seed(t, eventID, forkRunID, route)
-	proof, err := store.ProveHandoff(context.Background(), eventID, route)
+	proof, err := store.ProveHandoff(fixture.Context, eventID, route)
 	if err != nil {
 		t.Fatalf("prove selected committed handoff: %v", err)
 	}
@@ -505,8 +254,8 @@ func TestEventBusAgentRouteRemovalWaitsForDequeuedWork(t *testing.T) {
 	}
 }
 
-func TestEventBusSnapshottedAgentRouteSendLinearizesWithRemoval(t *testing.T) {
-	store := newExactHandoffProofStore(t, false)
+func VerifyEventBusSnapshottedAgentRouteSendLinearizesWithRemovalForTest(t *testing.T, open ExactHandoffNativeOpenerForTest) {
+	store := newExactHandoffProofStore(open(t, false), false)
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)

@@ -19,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -51,9 +50,7 @@ func TestScenarioCardFactoringActualContinuationBothStores(t *testing.T) {
 					storetest.RequireRun(t, ctx, s, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
 					selected = s
 				} else {
-					_, db, cleanup := testutil.StartPostgres(t)
-					t.Cleanup(cleanup)
-					s := storetest.AdmitPostgresRuntimeStore(t, db)
+					s := storetest.StartPostgresRuntimeStore(t)
 					storetest.RequireRun(t, ctx, s, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
 					selected = s
 				}

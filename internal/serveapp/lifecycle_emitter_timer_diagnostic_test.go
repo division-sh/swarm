@@ -28,6 +28,8 @@ type lifecycleTimerContenderDiagnostic struct {
 // failure snapshot runs. Cleanup registration keeps reads ahead of shutdown/drop.
 func startLifecycleTimerContenderDiagnostic(t *testing.T, root string) (servedControlProofRuntime, *lifecycleTimerContenderDiagnostic) {
 	t.Helper()
+	var deliveryReader servedRunDeliveryReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 	d := &lifecycleTimerContenderDiagnostic{}
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 	var receiverReader receiverProofStateReader
@@ -81,6 +83,7 @@ func startLifecycleTimerContenderDiagnostic(t *testing.T, root string) (servedCo
 	}
 	rt.Endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, d.server.String()) + "/v1/rpc"
 	rt.ReceiverStateReader = receiverReader
+	rt.ReadRunDeliveries = deliveryReader
 	return rt, d
 }
 

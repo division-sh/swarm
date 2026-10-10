@@ -66,7 +66,7 @@ func TestMailboxRefusalAtPreparationAndCommitBothStores(t *testing.T) {
 										}
 									} else {
 										requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", winnerParams, &winResult)
-										waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, card.RunID)
+										waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, card.RunID)
 									}
 									before = mailboxCompletionRunEffects(t, rt, card.RunID)
 								}

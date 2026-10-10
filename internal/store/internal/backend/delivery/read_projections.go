@@ -17,8 +17,352 @@ import (
 	"github.com/google/uuid"
 )
 
+type PreparedTargetConflictStorage struct {
+	Count                                       int
+	SubscriberID, RouteIdentity, TargetEncoding string
+}
+
+func ReadPreparedTargetConflictTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, routeIdentity string) (PreparedTargetConflictStorage, error) {
+	if tx == nil {
+		return PreparedTargetConflictStorage{}, fmt.Errorf("prepared target conflict requires its selected read transaction")
+	}
+	query := `SELECT COUNT(*), MIN(subscriber_id), MIN(route_identity), MIN(delivery_target_route) FROM event_deliveries WHERE event_id=? AND route_identity=?`
+	if postgres {
+		query = `SELECT COUNT(*), MIN(subscriber_id), MIN(route_identity), MIN(delivery_target_route::text) FROM event_deliveries WHERE event_id=$1::uuid AND route_identity=$2`
+	}
+	var out PreparedTargetConflictStorage
+	if err := tx.QueryRowContext(ctx, query, eventID, routeIdentity).Scan(&out.Count, &out.SubscriberID, &out.RouteIdentity, &out.TargetEncoding); err != nil {
+		return PreparedTargetConflictStorage{}, err
+	}
+	return out, nil
+}
+
 type ReceiverDeliveryStorageRow struct {
 	DeliveryID, EventID, Status, Target string
+}
+
+type StandaloneAgentDeliveryStorage struct{ Status, RunStatus string }
+
+func ReadExactAgentDeliveryStatusTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, agentID string) (string, error) {
+	query := `SELECT status FROM event_deliveries WHERE event_id=? AND subscriber_type='agent' AND subscriber_id=?`
+	if postgres {
+		query = `SELECT status FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_type='agent' AND subscriber_id=$2`
+	}
+	var status string
+	if err := tx.QueryRowContext(ctx, query, eventID, agentID).Scan(&status); err != nil {
+		return "", err
+	}
+	return status, nil
+}
+
+func ReadStopPendingDeliveryCountTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','processing','retrying')`, runID).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func ReadStandaloneAgentDeliveryStorageTx(ctx context.Context, tx *sql.Tx, eventID, agentID string) (StandaloneAgentDeliveryStorage, error) {
+	if tx == nil {
+		return StandaloneAgentDeliveryStorage{}, fmt.Errorf("standalone delivery evidence requires its selected read transaction")
+	}
+	var out StandaloneAgentDeliveryStorage
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(d.status,''), COALESCE(r.status,'')
+FROM event_deliveries d INNER JOIN runs r ON r.run_id=d.run_id
+WHERE d.event_id=$1 AND d.subscriber_type='agent' AND d.subscriber_id=$2`, eventID, agentID).Scan(&out.Status, &out.RunStatus)
+	if err != nil {
+		return StandaloneAgentDeliveryStorage{}, err
+	}
+	return out, nil
+}
+
+type CausalDeliveryStatusCount struct {
+	Class, Subscriber, Status, Reason string
+	Count                             int
+}
+
+func ReadSubscriberEventNamesCreatedSince(ctx context.Context, q queryer, since time.Time, subscriberID string) ([]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT e.event_name FROM event_deliveries d
+JOIN events e ON e.event_id=d.event_id
+WHERE d.created_at >= $1 AND d.subscriber_id=$2
+ORDER BY d.created_at ASC,e.event_id ASC`, since, subscriberID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+type CausalDeliveryFrontier struct {
+	Observed, Unsettled, DeadLetters int
+}
+
+const causalDeliveryFrontierQuery = `WITH RECURSIVE run_events AS MATERIALIZED (
+	SELECT event_id,source_event_id FROM events WHERE run_id=$1 AND event_name<>'platform.runtime_log'
+), descendants(event_id) AS (
+	SELECT event_id FROM run_events WHERE event_id=$2
+	UNION
+	SELECT e.event_id FROM run_events e JOIN descendants p ON e.source_event_id=p.event_id
+), delivery_counts AS (
+	SELECT p.event_id, COUNT(d.delivery_id) AS total,
+		COALESCE(SUM(CASE WHEN d.status<>'delivered' THEN 1 ELSE 0 END),0) AS unsettled
+	FROM descendants p LEFT JOIN event_deliveries d ON d.event_id=p.event_id
+	GROUP BY p.event_id
+)
+SELECT (SELECT COUNT(*) FROM descendants),
+	(SELECT COUNT(*) FROM delivery_counts WHERE total<>1 OR unsettled<>0),
+	(SELECT COUNT(*) FROM dead_letters d JOIN descendants p ON d.original_event_id=p.event_id)`
+
+func ReadCausalDeliveryFrontier(ctx context.Context, q queryer, runID, eventID string) (CausalDeliveryFrontier, error) {
+	var out CausalDeliveryFrontier
+	if err := q.QueryRowContext(ctx, causalDeliveryFrontierQuery, runID, eventID).Scan(&out.Observed, &out.Unsettled, &out.DeadLetters); err != nil {
+		return CausalDeliveryFrontier{}, err
+	}
+	return out, nil
+}
+
+type CausalDeliveryFrontierProbe uint8
+
+const (
+	FrontierComplete CausalDeliveryFrontierProbe = iota + 1
+	FrontierMissing
+	FrontierPending
+	FrontierDuplicateDelivery
+	FrontierDeadLetterDelivery
+)
+
+func ProbeCausalDeliveryFrontier(ctx context.Context, q queryer, probe CausalDeliveryFrontierProbe) (CausalDeliveryFrontier, error) {
+	var deliveries string
+	switch probe {
+	case FrontierComplete:
+		deliveries = "('r','root','delivered'),('c','child','delivered'),('g','grandchild','delivered')"
+	case FrontierMissing:
+		deliveries = "('r','root','delivered')"
+	case FrontierPending:
+		deliveries = "('r','root','delivered'),('c','child','pending'),('g','grandchild','delivered')"
+	case FrontierDuplicateDelivery:
+		deliveries = "('r','root','delivered'),('c','child','delivered'),('c2','child','delivered'),('g','grandchild','delivered')"
+	case FrontierDeadLetterDelivery:
+		deliveries = "('r','root','delivered'),('c','child','dead_letter'),('g','grandchild','delivered')"
+	default:
+		return CausalDeliveryFrontier{}, fmt.Errorf("unsupported causal frontier probe %d", probe)
+	}
+	const prefix = `WITH RECURSIVE events(event_id,run_id,event_name,source_event_id) AS (VALUES
+('root','run','root',''),('child','run','child','root'),('grandchild','run','grandchild','child'),
+('log','run','platform.runtime_log','root'),('log-child','run','hidden','log'),
+('foreign','other','child','root')),
+dead_letters(original_event_id) AS (VALUES ('child'),('child'),('foreign'),('log')),
+event_deliveries(delivery_id,event_id,status) AS (VALUES `
+	query := prefix + deliveries + "), " + strings.TrimPrefix(causalDeliveryFrontierQuery, "WITH RECURSIVE ")
+	var out CausalDeliveryFrontier
+	if err := q.QueryRowContext(ctx, query, "run", "root").Scan(&out.Observed, &out.Unsettled, &out.DeadLetters); err != nil {
+		return CausalDeliveryFrontier{}, err
+	}
+	return out, nil
+}
+
+func ReadCausalDeliveryStatusCounts(ctx context.Context, q queryer, runID, eventID string) ([]CausalDeliveryStatusCount, error) {
+	rows, err := q.QueryContext(ctx, `WITH RECURSIVE descendants(event_id) AS (
+SELECT event_id FROM events WHERE run_id=$1 AND event_id=$2
+UNION
+SELECT child.event_id FROM events child JOIN descendants parent ON child.source_event_id=parent.event_id
+WHERE child.run_id=$1)
+SELECT d.subscriber_type,d.subscriber_id,d.status,COALESCE(d.reason_code,''),COUNT(*)
+FROM event_deliveries d JOIN descendants event ON event.event_id=d.event_id
+WHERE d.run_id=$1
+GROUP BY d.subscriber_type,d.subscriber_id,d.status,COALESCE(d.reason_code,'')
+ORDER BY d.subscriber_type,d.subscriber_id,d.status,COALESCE(d.reason_code,'')`, runID, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CausalDeliveryStatusCount
+	for rows.Next() {
+		var row CausalDeliveryStatusCount
+		if err := rows.Scan(&row.Class, &row.Subscriber, &row.Status, &row.Reason, &row.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadNonLogRunDeliveryClaimTotals(ctx context.Context, q queryer, runID string) (deliveries, claims int64, err error) {
+	err = q.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(d.claim_version),0)
+FROM event_deliveries d JOIN events e ON e.event_id=d.event_id
+WHERE e.run_id=$1 AND e.event_name<>'platform.runtime_log'`, runID).Scan(&deliveries, &claims)
+	if err != nil {
+		return 0, 0, err
+	}
+	return deliveries, claims, nil
+}
+
+type DeliveryAttemptDiagnosticRow struct {
+	Version                           int
+	Closure, Outcome, Reason, Failure string
+}
+
+type EventDeliveryDiagnosticRow struct {
+	SubscriberType, SubscriberID, Status, Reason, FlowInstance, EntityID string
+}
+
+func ReadNodeDeliveryTargetEncodingTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, nodeID string) (string, error) {
+	query := `SELECT delivery_target_route FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
+	if postgres {
+		query = `SELECT delivery_target_route::text FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
+	}
+	var raw string
+	if err := tx.QueryRowContext(ctx, query, eventID, nodeID).Scan(&raw); err != nil {
+		return "", err
+	}
+	return raw, nil
+}
+
+func ReadNodeDeadLetterDiagnosticLinesTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) ([]string, error) {
+	query := `SELECT COALESCE(handler_node, ''), COALESCE(json_extract(failure, '$.class'), ''), COALESCE(failure, '')
+FROM dead_letters WHERE original_event_id = ? ORDER BY created_at ASC`
+	if postgres {
+		query = `SELECT COALESCE(handler_node, ''), COALESCE(failure->>'class', ''), COALESCE(failure::text, '')
+FROM dead_letters WHERE original_event_id = $1::uuid ORDER BY created_at ASC`
+	}
+	rows, err := tx.QueryContext(ctx, query, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var node, failure, message string
+		if err := rows.Scan(&node, &failure, &message); err != nil {
+			return nil, err
+		}
+		out = append(out, node+" failure="+failure+" detail="+message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadNodeDeliveryDiagnosticLinesTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) ([]string, error) {
+	query := `SELECT subscriber_id, COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(delivery_target_route, '')
+FROM event_deliveries WHERE event_id = ? ORDER BY subscriber_id, delivery_target_route`
+	if postgres {
+		query = `SELECT subscriber_id, COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(delivery_target_route::text, '')
+FROM event_deliveries WHERE event_id = $1::uuid ORDER BY subscriber_id, delivery_target_route::text`
+	}
+	rows, err := tx.QueryContext(ctx, query, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var subscriber, status, reason, target string
+		if err := rows.Scan(&subscriber, &status, &reason, &target); err != nil {
+			return nil, err
+		}
+		out = append(out, subscriber+" status="+status+" reason="+reason+" target="+target)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadEventDeliveryDiagnosticRows(ctx context.Context, q queryer, eventID string, postgres bool) ([]EventDeliveryDiagnosticRow, error) {
+	query := `
+		SELECT COALESCE(subscriber_type, ''),
+		       COALESCE(subscriber_id, ''),
+		       COALESCE(status, ''),
+		       COALESCE(reason_code, ''),
+		       COALESCE(delivery_target_route->'route'->>'flow_instance', ''),
+		       COALESCE(delivery_target_route->'route'->>'entity_id', '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		ORDER BY created_at ASC, delivery_id ASC`
+	if !postgres {
+		query = `
+			SELECT COALESCE(subscriber_type, ''),
+			       COALESCE(subscriber_id, ''),
+			       COALESCE(status, ''),
+			       COALESCE(reason_code, ''),
+			       COALESCE(json_extract(delivery_target_route, '$.route.flow_instance'), ''),
+			       COALESCE(json_extract(delivery_target_route, '$.route.entity_id'), '')
+			FROM event_deliveries
+			WHERE event_id = ?
+			ORDER BY created_at ASC, delivery_id ASC`
+	}
+	rows, err := q.QueryContext(ctx, query, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []EventDeliveryDiagnosticRow
+	for rows.Next() {
+		var row EventDeliveryDiagnosticRow
+		if err := rows.Scan(&row.SubscriberType, &row.SubscriberID, &row.Status, &row.Reason, &row.FlowInstance, &row.EntityID); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadDeliveryAttemptDiagnosticRows(ctx context.Context, q queryer, deliveryID string) ([]DeliveryAttemptDiagnosticRow, error) {
+	rows, err := q.QueryContext(ctx, `SELECT claim_version,closure_kind,COALESCE(outcome,''),COALESCE(reason_code,''),COALESCE(CAST(failure AS TEXT),'') FROM event_delivery_attempts WHERE delivery_id=$1 ORDER BY claim_version`, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeliveryAttemptDiagnosticRow
+	for rows.Next() {
+		var row DeliveryAttemptDiagnosticRow
+		if err := rows.Scan(&row.Version, &row.Closure, &row.Outcome, &row.Reason, &row.Failure); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 type PipelineHandoffDeliveryFacts struct {
@@ -220,6 +564,18 @@ func ReadSemanticEventSettledAttemptCount(ctx context.Context, q queryer, eventI
 		JOIN event_deliveries d ON d.delivery_id=a.delivery_id
 		WHERE d.event_id=$1 AND a.closure_kind='settled'`, eventID).Scan(&count)
 	return count, err
+}
+
+func ReadAgentSettledAttemptCountTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, agentID string) (int, error) {
+	query := `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = ? AND d.subscriber_type = 'agent' AND d.subscriber_id = ?`
+	if postgres {
+		query = `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id = $2`
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, query, eventID, agentID).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func ReadSemanticEventDeliveryStorage(ctx context.Context, q queryer, eventID string) (map[string][18]string, map[string]string, error) {
@@ -1080,6 +1436,17 @@ func UnfinishedRunDeliveryCountTx(ctx context.Context, tx *sql.Tx, runID string)
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries
 		WHERE run_id=$1 AND (status<>'delivered' OR continuation_handoff_at IS NULL)`, runID).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count unfinished run deliveries: %w", err)
+	}
+	return count, nil
+}
+
+func FixtureAgentEventCardinalityTx(ctx context.Context, tx *sql.Tx, eventID string) (int, error) {
+	if tx == nil {
+		return 0, fmt.Errorf("agent event cardinality requires a selected read transaction")
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='agent'`, eventID).Scan(&count); err != nil {
+		return 0, err
 	}
 	return count, nil
 }

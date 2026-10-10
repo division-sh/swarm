@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -125,9 +124,8 @@ func conformanceProviderCredentialResolver(t testing.TB, key, value string) runt
 	return runtimellm.NewProviderCredentialResolver(store)
 }
 
-func acquireLiveConversationSession(t *testing.T, ctx context.Context, db *sql.DB, identity agentmemory.Identity) *runtimesessions.Lease {
+func acquireLiveConversationSession(t *testing.T, ctx context.Context, registry runtimesessions.Registry, identity agentmemory.Identity) *runtimesessions.Lease {
 	t.Helper()
-	registry := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
 	lease, err := registry.Acquire(ctx, identity, "test-owner")
 	if err != nil {
@@ -138,15 +136,14 @@ func acquireLiveConversationSession(t *testing.T, ctx context.Context, db *sql.D
 
 func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(context.Background()), runtimeeffects.ExecutionModeLive)
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	runID := uuid.NewString()
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	seedConformanceAgent(t, ctx, pg, runID, "agent-1")
 	sessionID := uuid.NewString()
-	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, db, pg, runtimellm.AgentTurnRecord{
+	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",
 		Memory:    agentmemory.Plan{},
 		SessionID: sessionID,
@@ -207,8 +204,7 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 
 func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	runID := uuid.NewString()
@@ -217,13 +213,17 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 	ctx = runtimeeffects.WithLifecycleToken(ctx, lifecycleToken)
 
 	identity := lifecycleToken.Identity
-	lease := acquireLiveConversationSession(t, ctx, db, identity)
-	sessionID := lease.SessionID
+	probe := storetest.CollectTransactions(t, pg, storetest.TransactionProbeOptions{})
+	lease := acquireLiveConversationSession(t, ctx, pg, identity)
 	defer func() {
 		if _, err := pg.ReleaseOutcome(ctx, lease); err != nil {
 			t.Errorf("release conversation proof grant: %v", err)
 		}
 	}()
+	if counts := probe.Snapshot(); counts.Total.WriteCommits != 1 || counts.Active != 0 {
+		t.Fatalf("conversation acquisition escaped original selected coordinator: %+v", counts)
+	}
+	sessionID := lease.SessionID
 	if err := pg.UpsertConversation(ctx, lease, runtimellm.ConversationRecord{
 		SessionID: sessionID,
 		AgentID:   "agent-1",
@@ -637,8 +637,7 @@ func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(context.Background()), runtimeeffects.ExecutionModeLive)
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	runID := uuid.NewString()
@@ -664,7 +663,7 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 	}
 
 	auditSessionID := uuid.NewString()
-	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, db, pg, runtimellm.AgentTurnRecord{
+	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		SessionID: auditSessionID,
 		AgentID:   "agent-1",
 		RunID:     runID,
@@ -697,8 +696,7 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 
 func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
@@ -990,9 +988,7 @@ func loadConformanceWorkflowFixtureModule(t *testing.T, fixtureRoot string) conf
 
 func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
 	if _, err := pg.AdmitGenericScheduleOutcome(ctx, runtimegenericschedule.AdmissionCommand{
@@ -1334,9 +1330,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 
 func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	module := loadConformanceWorkflowFixtureModule(t, filepath.Join("..", "..", "..", "tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
@@ -1667,15 +1661,14 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 
 func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProjection(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(context.Background()), runtimeeffects.ExecutionModeLive)
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	runID := uuid.NewString()
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	seedConformanceAgent(t, ctx, pg, runID, "agent-1")
 	sessionID := uuid.NewString()
-	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, db, pg, runtimellm.AgentTurnRecord{
+	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",
 		Memory:    agentmemory.Plan{},
 		RunID:     runID,

@@ -1,26 +1,23 @@
 package pipeline
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 // These are ordinary handler effects, not a replacement Git or mailbox capability.
-func TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores(t *testing.T) {
+func VerifySupportedHandlerAppendEmitReadbackAndRollbackBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, outcome := range []string{"accepted", "rejected", "outbox_failure"} {
 			t.Run(backend+"/"+outcome, func(t *testing.T) {
-				db, store := openHandlerEntityRequirementStore(t, backend)
 				source := loadWorkflowTempSource(t, map[string]string{
 					"schema.yaml":   "name: findings\nstages:\n  active: {}\n  done: {final: true}\n",
 					"types.yaml":    "types:\n  Finding:\n    summary: text\n",
@@ -49,26 +46,9 @@ func TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores(t *testing.T) {
 				if !ok {
 					t.Fatal("missing source bundle")
 				}
-				bus := &recordingPipelineBus{}
-				newCoordinator := func() *PipelineCoordinator {
-					var reopened *workflowInstanceStore
-					if backend == "sqlite" {
-						reopened = newSQLiteWorkflowInstanceStoreForTest(t, db)
-					} else {
-						reopened = newPostgresWorkflowInstanceStoreForTest(db)
-					}
-					return &PipelineCoordinator{
-						workflowStore: reopened, bus: bus,
-						module:      handlerTestWorkflowModuleWithBundle(bundle, "findings", "writer"),
-						entityLocks: map[string]*sync.Mutex{},
-					}
-				}
-				var ctx context.Context
-				if backend == "sqlite" {
-					ctx = sqliteExactOnceRunContext(t, db)
-				} else {
-					ctx = testPipelineRunContext(t, db)
-				}
+				fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+				bus := observeNativePipelineDeliveryBusForTest(t, pc)
+				runID := correlation.RunIDFromContext(ctx)
 				node := pipelineSourceNode(t, source, ".", "writer")
 				constructor, err := CompileFlowConstructor(source, semanticview.RootExecutionFlowID(source), "")
 				if err != nil {
@@ -80,18 +60,18 @@ func TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores(t *testing.T) {
 				}
 				// Explicit component setup; public construction is qualified separately.
 				at := time.Now().UTC()
-				if err := store.create(ctx, WorkflowInstance{
-					InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: testPipelineRunID,
+				if err := fixture.Construct(ctx, WorkflowInstance{
+					InstanceID: runID, StorageRef: runID, EntityID: runID,
 					EntityType: "work", WorkflowName: semanticview.RootExecutionFlowID(source), WorkflowVersion: source.WorkflowVersion(), Mode: "static",
-					CurrentState: "active", StageDefined: true, Fields: fields, CreatedAt: at, EnteredStageAt: at,
+					CurrentState: "active", StageDefined: true, Status: "active", Fields: fields, CreatedAt: at, EnteredStageAt: at, UpdatedAt: at,
 				}); err != nil {
 					t.Fatal(err)
 				}
-				receiver := events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(source), FlowInstance: testPipelineRunID, EntityID: testPipelineRunID}
-				ctx = runtimedelivery.WithRoute(ctx, events.DeliveryRoute{
+				receiver := events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(source), FlowInstance: runID, EntityID: runID}
+				route := events.DeliveryRoute{
 					Recipient: events.MustNodeDeliveryRecipient(node),
 					Target:    events.MustExistingEntityTarget(receiver),
-				})
+				}
 				producerID := eventtest.UUID("different-producer")
 				handler := bundle.Nodes["writer"].EventHandlers["finding.received"]
 				for i := 0; i < 2; i++ {
@@ -99,14 +79,19 @@ func TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores(t *testing.T) {
 					if outcome == "outbox_failure" {
 						status = "accepted"
 					}
-					event := handlerTestRootIngress(eventtest.UUID(fmt.Sprintf("%s-%s-%d", backend, outcome, i)), "finding.received", "", "",
-						mustJSON(map[string]any{"summary": fmt.Sprintf("finding-%d", i), "status": status}), 3, testPipelineRunID, "",
-						events.EnvelopeForEntityID(events.EventEnvelope{}, producerID), time.Time{})
-					seedExactOnceEvent(t, store, ctx, event)
-					if outcome == "outbox_failure" && i == 1 {
-						bus.outboxErr = errors.New("outbox unavailable")
+					envelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, receiver)
+					event := eventtest.ExistingRunRootIngressWithRoutingSource(eventtest.UUID(fmt.Sprintf("%s-%s-%d", backend, outcome, i)), "finding.received", "", "",
+						mustJSON(map[string]any{"summary": fmt.Sprintf("finding-%d", i), "status": status}), 3, runID,
+						envelope, testWorkflowRoutingSource(".", producerID, producerID), time.Now().UTC())
+					if err := fixture.PublishNode(ctx, event, route); err != nil {
+						t.Fatal(err)
 					}
-					result, err := executeNodeContractHandlerWithHandoff(t, newCoordinator(), ctx, node, handler, workflowTriggerContext{Event: event}, false)
+					if outcome == "outbox_failure" && i == 1 {
+						bus.prepareFailure = errors.New("outbox unavailable")
+					}
+					deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, route)
+					result, err := executeNativeClaimedPipelineHandlerForTest(t, pc, deliveryCtx, node, handler,
+						workflowTriggerContext{Event: eventtest.TargetRouted(event, receiver), HandlerEventKey: "finding.received"})
 					failed := outcome == "outbox_failure" && i == 1
 					if failed {
 						if err == nil || !strings.Contains(err.Error(), "outbox unavailable") {
@@ -115,9 +100,12 @@ func TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores(t *testing.T) {
 					} else if err != nil || !result.Handled {
 						t.Fatalf("execute: handled=%t err=%v", result.Handled, err)
 					}
-					// A new store and coordinator read the durable state after each invocation.
-					restarted := newCoordinator()
-					current, found, err := restarted.workflowStore.Load(ctx, testRunScopedWorkflowInstanceForRun(testPipelineRunID, testPipelineRunID))
+					// A fresh read adapter consumes the original selected projection.
+					restarted := fixture.FreshProjection()
+					if restarted.store == fixture.Persistence.store {
+						t.Fatal("readback reused the predecessor projection adapter")
+					}
+					current, found, err := restarted.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceForRun(runID, runID))
 					if err != nil || !found {
 						t.Fatalf("readback: found=%t err=%v", found, err)
 					}
@@ -137,11 +125,11 @@ func TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores(t *testing.T) {
 							t.Fatalf("finding %d = %#v", j, got)
 						}
 					}
-					if bus.outboxCount() != wantCount || bus.publishedCount() != wantCount {
-						t.Fatalf("emissions: outbox=%d published=%d want=%d", bus.outboxCount(), bus.publishedCount(), wantCount)
+					if bus.committedCount() != wantCount || bus.publishedCount() != wantCount {
+						t.Fatalf("emissions: committed=%d published=%d want=%d", bus.committedCount(), bus.publishedCount(), wantCount)
 					}
 					if !failed {
-						emitted := bus.outboxIntent(i).Event
+						emitted := bus.persistedPublishedEvent(t, fixture, ctx, i)
 						if emitted.RoutingSource().Kind() != events.RoutingSourceStaticFlow || emitted.SourceRoute() != receiver || emitted.ParentEventID() != event.ID() || emitted.RunID() != event.RunID() || emitted.ChainDepth() != event.ChainDepth()+1 {
 							t.Fatalf("emission lineage: %#v", emitted)
 						}

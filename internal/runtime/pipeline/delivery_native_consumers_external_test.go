@@ -1,0 +1,471 @@
+package pipeline_test
+
+import (
+	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+)
+
+func TestNativePipelineDeliveryReopenUsesFreshOccurrenceAndOriginalReceiptsBothStores(t *testing.T) {
+	pipeline.VerifyNativePipelineDeliveryReopenUsesFreshOccurrenceAndOriginalReceiptsForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestNativePipelineAdmissionTransactionCutHasClosedLifetimeBothStores(t *testing.T) {
+	pipeline.VerifyNativePipelineAdmissionTransactionCutHasClosedLifetimeForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestEntitylessNodeContractEmissionDoesNotMaterializeWorkflowStateOnSQLiteAndPostgres(t *testing.T) {
+	pipeline.VerifyNativeEntitylessNodeContractEmissionDoesNotMaterializeWorkflowStateOnSQLiteAndPostgresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestEntitylessPayloadGuardDoesNotPublishOrMaterializeOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeEntitylessPayloadGuardDoesNotPublishOrMaterializeOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores(t *testing.T) {
+	pipeline.VerifySupportedHandlerAppendEmitReadbackAndRollbackBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRows(t *testing.T) {
+	pipeline.VerifySQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRowsForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *testing.T) {
+	pipeline.VerifySQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunnerForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestArmWorkflowJoinPersistsActivationAndScheduleAtomically(t *testing.T) {
+	pipeline.VerifyNativeArmWorkflowJoinPersistsActivationAndScheduleAtomicallyForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestArmWorkflowJoinPostgresParity(t *testing.T) {
+	pipeline.VerifyNativeArmWorkflowJoinPostgresParityForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowGateDecisionWaitsForItsRecordedBundlePinOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowGateDecisionWaitsForItsRecordedBundlePinOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestInitialStageLifecycleArmsStandingGateOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeInitialStageLifecycleArmsStandingGateOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleOneShotExactCompletionOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleOneShotExactCompletionOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecyclePreservesMockExecutionModeOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecyclePreservesMockExecutionModeOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestAcceptedWorkflowTimerEventRoutingMatrixOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeAcceptedWorkflowTimerEventRoutingMatrixOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerActiveProjectionRequiresSchedulerOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerActiveProjectionRequiresSchedulerOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleExactCauseReplayConvergesAfterTerminalStateOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleExactCauseReplayConvergesAfterTerminalStateOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleCommitOrdersConvergeOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleCommitOrdersConvergeOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleRejectsMissingAndMismatchedCallbacksOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleRejectsMissingAndMismatchedCallbacksOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestCommittedLifecycleGenericFailureStillReconcilesWorkflowTimerBothStores(t *testing.T) {
+	pipeline.VerifyNativeCommittedLifecycleGenericFailureStillReconcilesWorkflowTimerBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleStopFencesRestoreAndRecoveryOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleStopFencesRestoreAndRecoveryOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecyclePostgresFireDoesNotJoinOuterTestMutation(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecyclePostgresFireDoesNotJoinOuterTestMutationForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleWakeupPublishesItsDurableIntentOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleWakeupPublishesItsDurableIntentOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerReconcileWithRecoveryQueuesAndConvergesOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerReconcileWithRecoveryQueuesAndConvergesOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoins(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoinsForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDoesNotAuthorizeRootResult(t *testing.T) {
+	pipeline.VerifyNativePipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDoesNotAuthorizeRootResultForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRootResult(t *testing.T) {
+	pipeline.VerifyNativePipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRootResultForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChildContinuation(t *testing.T) {
+	pipeline.VerifyNativePipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChildContinuationForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey(t *testing.T) {
+	pipeline.VerifyNativeTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKeyForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *testing.T) {
+	pipeline.VerifyNativeExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitionsForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
+	pipeline.VerifyNativePipelineIntercept_HandlesChildFlowOutputForRootListenerForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
+	pipeline.VerifyNativeExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandlerForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog(t *testing.T) {
+	pipeline.VerifyNativeWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLogForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowJoinCountWaitsDespiteEmptyStateMembersOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowJoinCountWaitsDespiteEmptyStateMembersOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowJoinDurableIdentityIncludesStageOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowJoinSchedulePreservesMockExecutionModeOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowJoinSchedulePreservesMockExecutionModeOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores(t *testing.T) {
+	pipeline.VerifyNativePipelineCompiledLoopCarrierSourceAdmissionOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineCompiledLoopOperationEvidenceOnBothStores(t *testing.T) {
+	pipeline.VerifyNativePipelineCompiledLoopOperationEvidenceOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowLifecycleOwnerIsConstructedBeforeDurableStoreReachabilityOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowLifecycleOwnerIsConstructedBeforeDurableStoreReachabilityOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T) {
+	pipeline.VerifyNativeCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutationsForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *testing.T) {
+	pipeline.VerifyNativeDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandlerForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores(t *testing.T) {
+	pipeline.VerifyNativeHandlerCommittedCleanupErrorRetainsExactOutcomeBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores(t *testing.T) {
+	pipeline.VerifyNativeGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestCommittedAttemptFailureNotificationKeepsRetryContinuationBothStores(t *testing.T) {
+	pipeline.VerifyNativeCommittedAttemptFailureNotificationKeepsRetryContinuationBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores(t *testing.T) {
+	pipeline.VerifyNativeReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestAuthoredRuleReceiverPreparationRetryBothStores(t *testing.T) {
+	pipeline.VerifyNativeAuthoredRuleReceiverPreparationRetryBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestReceiverPreparationUnsettledAuthorityBothStores(t *testing.T) {
+	pipeline.VerifyNativeReceiverPreparationUnsettledAuthorityBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestReceiverPreparationFailureClaimMatrixBothStores(t *testing.T) {
+	pipeline.VerifyNativeReceiverPreparationFailureClaimMatrixBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestAuthoredSelectionRetryReloadsCurrentStateBothStores(t *testing.T) {
+	pipeline.VerifyNativeAuthoredSelectionRetryReloadsCurrentStateBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAuthorityLog(t *testing.T) {
+	pipeline.VerifyNativePipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAuthorityLogForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecution(t *testing.T) {
+	pipeline.VerifyNativePipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecutionForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery(t *testing.T) {
+	pipeline.VerifyNativePipelineCoordinatorInterceptSettlesAuthorizedNodeDeliveryForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
+	pipeline.VerifyNativeWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParityForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores(t *testing.T) {
+	pipeline.VerifyNativePipelineCompiledOrdinaryCarrierExecutionOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineCompiledTransitionNoOpOnBothStores(t *testing.T) {
+	pipeline.VerifyNativePipelineCompiledTransitionNoOpOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineCompiledTransitionGuardDispositionOnBothStores(t *testing.T) {
+	pipeline.VerifyNativePipelineCompiledTransitionGuardDispositionOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores(t *testing.T) {
+	pipeline.VerifyNativeGuardKillUsesExactStageInEitherDeclarationOrderBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineCompiledTransitionStageGuardsOnBothStores(t *testing.T) {
+	pipeline.VerifyNativePipelineCompiledTransitionStageGuardsOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestTerminalReceiverClaimFailsClosedWithoutEngineMutationBothStores(t *testing.T) {
+	pipeline.VerifyNativeTerminalReceiverClaimFailsClosedWithoutEngineMutationBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestCaseDistinctReadyReceiverClaimExecutesAndSettlesBothStores(t *testing.T) {
+	pipeline.VerifyNativeCaseDistinctReadyReceiverClaimExecutesAndSettlesBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestInactiveCompanionRefusesNonterminalClaimBothStores(t *testing.T) {
+	pipeline.VerifyNativeInactiveCompanionRefusesNonterminalClaimBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestFallbackClaimSettlesWithoutBusinessTransitionBothStores(t *testing.T) {
+	pipeline.VerifyNativeFallbackClaimSettlesWithoutBusinessTransitionBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestGuardRefusalClaimSettlesWithoutBusinessTransitionBothStores(t *testing.T) {
+	pipeline.VerifyNativeGuardRefusalClaimSettlesWithoutBusinessTransitionBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineCompiledTransitionInitialAdmissionOnBothStores(t *testing.T) {
+	pipeline.VerifyNativePipelineCompiledTransitionInitialAdmissionOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeCompiledTransitionPreviewExecutionAgreementOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestGuardTerminationVerifiedExecutionAndRestartBothStores(t *testing.T) {
+	pipeline.VerifyNativeGuardTerminationVerifiedExecutionAndRestartBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWithoutStampedClaim(t *testing.T) {
+	pipeline.VerifyNativePipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWithoutStampedClaimForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestNativePipelineTransitionEvidenceFaultPreservesOtherCoordinatesBothStores(t *testing.T) {
+	pipeline.VerifyNativePipelineTransitionEvidenceFaultPreservesOtherCoordinatesForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *testing.T) {
+	pipeline.VerifyNativeTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstanceForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInputConnectEvent(t *testing.T) {
+	pipeline.VerifyNativeFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInputConnectEventForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback(t *testing.T) {
+	pipeline.VerifyNativeSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadbackForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestSingletonCoordinatorPilotPipelineRejectsContainedItemDeliveryTarget(t *testing.T) {
+	pipeline.VerifyNativeSingletonCoordinatorPilotPipelineRejectsContainedItemDeliveryTargetForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleRecurringAdvancesPersistedCoordinateOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleRecurringAdvancesPersistedCoordinateOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerInitialWakeupRetirementJoinsAndRearmsOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerInitialWakeupRetirementJoinsAndRearmsOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerWakeupReconciliationSerializesCancellationOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerWakeupReconciliationSerializesCancellationOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleSchedulerRetryPreservesOccurrenceOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleSchedulerRetryPreservesOccurrenceOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleWakeupDeadlineJoinsShutdownOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleWakeupDeadlineJoinsShutdownOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleListsScopeWildcardsOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleRollbackAndCancellationOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleRollbackAndCancellationOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleIsolatesStaleActivationAcrossCancelAndReentryOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleIsolatesStaleActivationAcrossCancelAndReentryOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerWakeupRejectsForeignDeclarationSourceOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerWakeupRejectsForeignDeclarationSourceOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerWakeupReconciliationRetiresTerminalAndMissingRowsOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerWakeupReconciliationRetiresTerminalAndMissingRowsOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestNativeWorkflowTimerFaultsRequireExactActivationOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerFaultsRequireExactActivationOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleReactivatesOnlyOnLaterStageEntryOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleReactivatesOnlyOnLaterStageEntryOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerMissingOrInvalidCommitResultDoesNotDispatch(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerMissingOrInvalidCommitResultDoesNotDispatchForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRestartOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRestartOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleScopesDeclarationsToOwningFlowOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleScopesDeclarationsToOwningFlowOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestApplyWorkflowGateMutation_LogsMutationRow(t *testing.T) {
+	pipeline.VerifyNativeApplyWorkflowGateMutation_LogsMutationRowForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestAccumulatorAppend_LogsMutationRow(t *testing.T) {
+	pipeline.VerifyNativeAccumulatorAppend_LogsMutationRowForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *testing.T) {
+	pipeline.VerifyNativeMutationLoggedGateAndAccumulatorWritesFailClosedWithoutJournalForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLog(t *testing.T) {
+	pipeline.VerifyNativeWorkflowInstanceStoreTracksFieldsGatesAndAccumulatorInMutationLogForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowInstanceStore_ReplaysContainedStateMapListProjection(t *testing.T) {
+	pipeline.VerifyNativeWorkflowInstanceStoreReplaysContainedStateMapListProjectionForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestMutationLogSchemaRejectsMissingDomainPath(t *testing.T) {
+	pipeline.VerifyNativeMutationLogSchemaRejectsMissingDomainPathForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
+	pipeline.VerifyNativeWorkflowInstanceStoreLoadRouteRecoveryProjectionForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowInstanceStoreLoadRouteRecoveryProjectionRejectsTerminatedTimestamp(t *testing.T) {
+	pipeline.VerifyNativeWorkflowInstanceStoreLoadRouteRecoveryProjectionRejectsTerminatedTimestampForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestSQLiteEntityStateDiffRequiresExistingCanonicalRunBeforeMutation(t *testing.T) {
+	pipeline.VerifyNativeEntityStateDiffRequiresExistingCanonicalRunBeforeMutationForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestSQLiteInitialValueMutationRequiresExistingCanonicalRunBeforeMutation(t *testing.T) {
+	pipeline.VerifyNativeInitialValueMutationRequiresExistingCanonicalRunBeforeMutationForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestPipelineCompiledTimerTransitionEvidenceOnBothStores(t *testing.T) {
+	pipeline.VerifyNativePipelineCompiledTimerTransitionEvidenceOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestHumanTaskDeferredAndExpiredOutcomesUseRequesterRouteOnBothStores(t *testing.T) {
+	pipeline.VerifyNativeHumanTaskDeferredAndExpiredOutcomesUseRequesterRouteOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestSQLiteWorkflowInstanceStore_runPipelineMutationUsesRuntimeMutationRunner(t *testing.T) {
+	pipeline.VerifyNativeWorkflowMutationUsesOneSelectedCommitForTest(t, pipelineDeliveryNativeFixture)
+}
+
+func TestSQLiteWorkflowInstanceStore_runPipelineMutationDoesNotRetryActiveTransaction(t *testing.T) {
+	pipeline.VerifyNativeWorkflowMutationDoesNotRetryClosedOwnerRefusalForTest(t, "sqlite", pipelineDeliveryNativeFixture)
+}
+
+func TestWorkflowInstanceStore_runPipelineMutationDoesNotRetryPostgresDialect(t *testing.T) {
+	pipeline.VerifyNativeWorkflowMutationDoesNotRetryClosedOwnerRefusalForTest(t, "postgres", pipelineDeliveryNativeFixture)
+}
+
+func TestSQLiteWorkflowInstanceStore_runPipelineMutationRejectsUnownedRawTransaction(t *testing.T) {
+	pipeline.VerifyNativeWorkflowPersistenceHasNoRawTransactionProtocolForTest(t, pipelineDeliveryNativeFixture)
+}

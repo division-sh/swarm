@@ -8,8 +8,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
@@ -172,11 +175,17 @@ func ClaimDelivery(ctx context.Context, selected DeliveryLifecycleStore, event e
 // runtime recovery and replay readers.
 func LoadCanonicalEventRecord(t testing.TB, ctx context.Context, selectedStore any, eventID string) events.Event {
 	t.Helper()
-	event, err := private.LoadCanonicalEventRecordForTest(ctx, selectedStore, eventID)
-	if err != nil {
-		t.Fatalf("load canonical event record %s: %v", eventID, err)
+	event, found, err := private.ReadCanonicalEventRecordForTest(ctx, selectedStore, eventID)
+	if err != nil || !found {
+		t.Fatalf("load canonical event record %s: found=%v err=%v", eventID, found, err)
 	}
 	return event
+}
+
+// ReadCanonicalEventRecord preserves the same complete-record ownership with
+// an explicit missing result for optional observation consumers.
+func ReadCanonicalEventRecord(ctx context.Context, selectedStore any, eventID string) (events.Event, bool, error) {
+	return private.ReadCanonicalEventRecordForTest(ctx, selectedStore, eventID)
 }
 
 func InsertExistingRunRootEventRecord(
@@ -256,21 +265,39 @@ func InsertUnrevisionedChildEventRecord(
 func InsertDiagnosticDirectEventRecord(
 	t testing.TB,
 	ctx context.Context,
-	db *sql.DB,
-	dialect authoractivityfixture.Dialect,
+	selected any,
 	eventID string,
-	producerID string,
 	payload []byte,
 	createdAt time.Time,
 ) events.Event {
 	t.Helper()
-	var event events.Event
-	err := runCanonicalEventMutation(ctx, db, dialect, func(txctx context.Context, attempt *mutationprotocol.Attempt) (err error) {
-		event, err = eventfixture.DiagnosticDirect(txctx, attempt, dialect, eventID, producerID, payload, createdAt)
-		return err
-	})
+	event := eventtest.DiagnosticDirect(eventID, events.EventTypePlatformRuntimeLog, "runtime", "", payload, 0, "", "", events.EventEnvelope{Scope: events.EventScopeGlobal}, createdAt)
+	bound, err := eventfixture.BindPayload(event)
 	if err != nil {
-		t.Fatalf("construct canonical diagnostic-direct event record %s: %v", eventID, err)
+		t.Fatalf("bind diagnostic-direct payload: %v", err)
+	}
+	admission, ok := bound.PayloadAdmission()
+	if !ok {
+		t.Fatal("diagnostic-direct fixture requires payload admission")
+	}
+	var writer runtimepkg.RuntimeLogPersistence
+	switch owner := selected.(type) {
+	case *private.PostgresStore:
+		if owner != nil {
+			writer = owner
+		}
+	case *private.SQLiteRuntimeStore:
+		if owner != nil {
+			writer = owner
+		}
+	}
+	if writer == nil {
+		t.Fatalf("diagnostic-direct fixture requires the original selected owner, got %T", selected)
+	}
+	if err := writer.PersistRuntimeLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{
+		EventID: eventID, Payload: payload, PayloadAdmission: admission, CreatedAt: createdAt, ExecutionMode: executionmode.Live,
+	}); err != nil {
+		t.Fatalf("persist diagnostic-direct fixture through named owner: %v", err)
 	}
 	return event
 }

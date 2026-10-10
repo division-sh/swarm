@@ -59,6 +59,10 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 		"platform-spec.yaml":                                    50,
 	}
 	expectedUnrelatedTextCounts := map[string]int{
+		// Exact historical and current factory/producer-label snapshots, pinned by
+		// the finite codemod guards; these do not restore the retired product.
+		"tools/fixture-codemod/pipeline-observations/recipes.json":                          8,
+		"tools/fixture-codemod/pipeline-observations/family144-transitions.json":            4,
 		"internal/runtime/bootverify/workflow_transition_relation_test.go":                  1,
 		"internal/runtime/semanticview/lifecycle_emitter_ownership_guard_test.go":           1,
 		"internal/store/internal/runtimepersistence/dynamic_flow_creation_revision_test.go": 1,
@@ -214,6 +218,44 @@ func retiredBuilderCandidates(relative string, body []byte) ([]retiredBuilderCan
 }
 
 func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
+	const recipePath = "tools/fixture-codemod/pipeline-observations/recipes.json"
+	recipes, recipeErr := os.ReadFile(filepath.Join(repoRootForTest(), recipePath))
+	recipeCandidates, scanErr := retiredBuilderCandidates(recipePath, recipes)
+	if recipeErr != nil || scanErr != nil || len(recipeCandidates) != 8 {
+		t.Fatalf("exact runtime factory snapshot inventory changed: %+v, %v, %v", recipeCandidates, recipeErr, scanErr)
+	}
+	for _, candidate := range recipeCandidates {
+		if !isExplicitUnrelatedBuilderText(recipePath, candidate.text) {
+			t.Fatal("runtime factory snapshot lost its exact disposition")
+		}
+	}
+	extraRecipe := append(append([]byte(nil), recipes...), []byte("\n\"After\": \"func foreignFactory() { builder() }\"\n")...)
+	extraCandidates, extraErr := retiredBuilderCandidates(recipePath, extraRecipe)
+	if extraErr != nil || len(extraCandidates) != 9 || isExplicitUnrelatedBuilderText(recipePath, extraCandidates[8].text) {
+		t.Fatalf("foreign snapshot text escaped exact inventory: %+v, %v", extraCandidates, extraErr)
+	}
+	const transitionPath = "tools/fixture-codemod/pipeline-observations/family144-transitions.json"
+	transitionBytes, err := os.ReadFile(filepath.Join(repoRootForTest(), transitionPath))
+	transitionCandidates, scanErr := retiredBuilderCandidates(transitionPath, transitionBytes)
+	if err != nil || scanErr != nil || len(transitionCandidates) != 4 {
+		t.Fatalf("exact run-fixture transition inventory changed: %+v, %v, %v", transitionCandidates, err, scanErr)
+	}
+	for _, candidate := range transitionCandidates {
+		if !isExplicitUnrelatedBuilderText(transitionPath, candidate.text) {
+			t.Fatal("run-fixture transition lost its exact disposition")
+		}
+	}
+	for _, hostile := range []string{
+		`"After": "func foreignFactory() { builder() }"`,
+		`"After": "func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t *testing.T) { builder() }"`,
+		`"Successor": "func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t *testing.T) {\n builder() }"`,
+	} {
+		candidate := append(append([]byte(nil), transitionBytes...), []byte("\n"+hostile+"\n")...)
+		got, err := retiredBuilderCandidates(transitionPath, candidate)
+		if err != nil || len(got) != 5 {
+			t.Fatalf("additional transition escaped exact four-reference inventory: %+v, %v", got, err)
+		}
+	}
 	const path = "internal/store/persistence_authority_debt_test.go"
 	body, err := os.ReadFile(filepath.Join(repoRootForTest(), path))
 	if err != nil {
@@ -281,6 +323,18 @@ func retiredBuilderCandidateLines(body []byte, include func(start, end int) bool
 func isExplicitUnrelatedBuilderText(relative, line string) bool {
 	lower := strings.ToLower(line)
 	switch {
+	case (relative == "tools/fixture-codemod/pipeline-observations/recipes.json" ||
+		relative == "tools/fixture-codemod/pipeline-observations/family144-transitions.json") &&
+		isExplicitRunFixtureSnapshot(line):
+		return true
+	case relative == "tools/fixture-codemod/pipeline-observations/recipes.json" &&
+		strings.HasPrefix(strings.TrimSpace(line), `"Successor": `) &&
+		isExplicitRunFixtureSnapshot(strings.Replace(line, `"Successor":`, `"After":`, 1)):
+		return true
+	case relative == "tools/fixture-codemod/pipeline-observations/recipes.json" &&
+		(strings.HasPrefix(strings.TrimSpace(line), `"Before": "func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(`) ||
+			strings.HasPrefix(strings.TrimSpace(line), `"After": "func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(`)):
+		return true
 	case relative == "internal/runtime/bootverify/workflow_transition_relation_test.go" && strings.Contains(lower, "graph builders"):
 		return true
 	case relative == "internal/runtime/semanticview/lifecycle_emitter_ownership_guard_test.go" && strings.Contains(lower, "(*endpointcensusbuilder).addlifecycleendpoints"):
@@ -311,4 +365,19 @@ func isExplicitUnrelatedBuilderText(relative, line string) bool {
 	default:
 		return false
 	}
+}
+
+func isExplicitRunFixtureSnapshot(line string) bool {
+	line = strings.TrimSpace(line)
+	for _, declaration := range []string{
+		"TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority",
+		"TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun",
+	} {
+		for _, field := range []string{"Before", "After"} {
+			if strings.HasPrefix(line, `"`+field+`": "func `+declaration+`(t *testing.T) {\n`) {
+				return true
+			}
+		}
+	}
+	return false
 }

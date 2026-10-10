@@ -20,12 +20,10 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 )
 
 func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
-	db := storetest.Database(sqliteStore)
 	controller := &fakeAgentControlController{
 		directiveResponse: "accepted",
 	}
@@ -92,7 +90,7 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 		t.Fatalf("restart calls after replay = %d, want 1", controller.restartCalls)
 	}
 
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
+	if count := countAPIIdempotencyRows(t, sqliteStore); count != 1 {
 		t.Fatalf("api_idempotency rows = %d, want 1 (directive projection belongs to its operation owner)", count)
 	}
 }
@@ -199,7 +197,6 @@ func TestOperatorAgentDirectiveFailureUsesCanonicalNestedEnvelope(t *testing.T) 
 
 func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
-	db := storetest.Database(sqliteStore)
 	missingRunID := "00000000-0000-0000-0000-000000000404"
 	terminalRunID := "00000000-0000-0000-0000-000000000405"
 	handler := testHandler(t, Options{
@@ -242,7 +239,7 @@ func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
 			t.Fatalf("%s data = %#v, want %s", tc.name, data, tc.code)
 		}
 	}
-	if count := countAPIIdempotencyRows(t, db); count != 0 {
+	if count := countAPIIdempotencyRows(t, sqliteStore); count != 0 {
 		t.Fatalf("idempotency rows after run target errors = %d, want 0", count)
 	}
 }
@@ -274,8 +271,8 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 			t.Errorf("shutdown directive integration manager: %v", err)
 		}
 	})
-	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
+	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
 		BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
 	})
 	materializeAPITestAgent(t, testAuthorActivityContext(context.Background()), pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic"}))
@@ -300,7 +297,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	if agent.calls != 1 {
 		t.Fatalf("BoardStep calls = %d, want 1", agent.calls)
 	}
-	if count := countDirectiveEvents(t, db); count != 1 {
+	if count := countDirectiveEvents(t, pg); count != 1 {
 		t.Fatalf("platform.agent_directive rows = %d, want 1", count)
 	}
 	conflict := rpcCall(t, handler, agentDirectiveBody("agent-1", "different", "idem-directive-integration"))
@@ -310,7 +307,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	if agent.calls != 1 {
 		t.Fatalf("BoardStep calls after conflict = %d, want 1", agent.calls)
 	}
-	if count := countDirectiveEvents(t, db); count != 1 {
+	if count := countDirectiveEvents(t, pg); count != 1 {
 		t.Fatalf("platform.agent_directive rows after conflict = %d, want 1", count)
 	}
 }
@@ -346,8 +343,8 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 			t.Errorf("shutdown canonical source manager: %v", err)
 		}
 	})
-	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
+	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
 		BundleHash: bootFact.BundleHash(),
 	})
 	materializeAPITestAgent(t, testAuthorActivityContextForSource(context.Background(), bootFact), pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic"}))
@@ -562,10 +559,10 @@ func agentDirectiveBodyWithRun(agentID, runID, directive, idempotencyKey string)
 	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"agent-directive","method":"agent.send_directive","params":{"agent_id":%q,"run_id":%q,"directive":%q,"idempotency_key":%q}}`, agentID, runID, directive, idempotencyKey)
 }
 
-func countDirectiveEvents(t *testing.T, db *sql.DB) int {
+func countDirectiveEvents(t *testing.T, selected any) int {
 	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = 'platform.agent_directive'`).Scan(&count); err != nil {
+	count, err := storetest.CountEventNameStorage(context.Background(), selected, "platform.agent_directive")
+	if err != nil {
 		t.Fatalf("count directive events: %v", err)
 	}
 	return count

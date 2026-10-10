@@ -13,8 +13,6 @@ import (
 	"testing"
 	"time"
 
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
-
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
@@ -1331,7 +1329,7 @@ accounts:
 	}
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	storetest.RequireDurableDataCatalog(t, ctx, pg, bundleHash)
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
 	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
 		stateEventID, "fork.state_entry", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
@@ -1436,7 +1434,7 @@ accounts:
 	}
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	storetest.RequireDurableDataCatalog(t, ctx, pg, bundleHash)
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
 	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
 		stateEventID, "fork.state_entry", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
@@ -2240,9 +2238,9 @@ foreign:
 		Tools:         []string{"save_entity_field", "get_entity"},
 	}
 	_, db, _ := testutil.StartPostgres(t)
-	ensureEntityToolTestRun(t, db)
 	bus := &entityToolRuntimeLogBus{}
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	ensureEntityToolTestRun(t, pg)
 	exec := runtimetools.NewExecutorWithOptions(bus, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
 		EntityWriter:                   newEntityToolPipeline(t, pg, semanticview.Wrap(bundle)),
@@ -2791,9 +2789,9 @@ func newEntityToolTestHarnessWithBundleAndLegacyAccess(t *testing.T, actor model
 
 const entityToolTestRunID = "11111111-1111-1111-1111-111111111111"
 
-func ensureEntityToolTestRun(t *testing.T, db *sql.DB) {
+func ensureEntityToolTestRun(t *testing.T, selected storetest.RunFixtureStore) {
 	t.Helper()
-	runlifecyclefixture.RequirePostgres(t, unmanagedToolTestContext(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: entityToolTestRunID, BundleHash: authorActivityTestBundleHash})
+	storetest.RequireRun(t, unmanagedToolTestContext(), selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: entityToolTestRunID, BundleHash: authorActivityTestBundleHash})
 }
 
 func asString(v any) string {

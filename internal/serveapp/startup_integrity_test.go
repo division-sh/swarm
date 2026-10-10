@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -72,13 +71,10 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 					t.Fatal(err)
 				}
 				runID := uuid.NewString()
-				fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: artifact.BundleHash()}
+				storetest.RequireRun(t, ctx, artifacts.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: artifact.BundleHash()})
 				placeholder := "?"
-				if backend == "sqlite" {
-					runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
-				} else {
+				if backend != "sqlite" {
 					placeholder = "$1"
-					runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
 				}
 				// Deliberately corrupt a valid historical record after canonical admission.
 				// Serve loads a different authored source and must not repair this one.

@@ -68,7 +68,7 @@ func TestWorkflowFinalInitialTimersRemainUnarmedAcrossRestartBothStores(t *testi
 					}
 					pc := newTimerReplayCoordinator(t, bus, selected, pipeline.PipelineCoordinatorOptions{
 						Module: gateRecoveryModule{source: source}, TimerScheduler: scheduler, WorkOwner: pipelineExternalTestWorkOwner(t),
-					})
+					}, authorActivityTestSourceArtifactFact)
 					bus.SetInterceptors(pc)
 					stop := func() {
 						t.Helper()

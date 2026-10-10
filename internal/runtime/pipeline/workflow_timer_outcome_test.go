@@ -8,6 +8,8 @@ import (
 	"time"
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -113,26 +115,21 @@ func (o *timerResultControlOwner) CommitWorkflowTimerOccurrence(context.Context,
 	return o.result, nil
 }
 
-func TestWorkflowTimerMissingOrInvalidCommitResultDoesNotDispatch(t *testing.T) {
+func VerifyNativeWorkflowTimerMissingOrInvalidCommitResultDoesNotDispatchForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, backend := range workflowJoinStoreCases() {
 		for _, phase := range []string{"zero_nil_error", "invalid_acknowledged"} {
 			t.Run(backend.name+"/"+phase, func(t *testing.T) {
-				store, ctx := backend.open(t)
-				bus := &recordingPipelineBus{}
-				pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, bus, false)
-				defer pc.StopWorkflowTimerLifecycle(context.Background())
+				_, pc, ctx, bus, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, backend.name, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
 				owner := &timerResultControlOwner{}
 				want := WorkflowTimerFireRetry
 				if phase == "invalid_acknowledged" {
 					owner.result.Outcome, want = WorkflowTimerOccurrenceCommitted, WorkflowTimerFireTerminal
 				}
 				pc.workflowTimers.storeOwner.timerOccurrences = owner
-				planner := &outcomeEnginePlanner{recordingPipelineBus: bus}
+				planner := &timerOutcomePublicationControl{EnginePublicationPlanner: bus}
 				pc.workflowTimers.publication = planner
-				// This control calls Fire directly: suppress asynchronous recovery
-				// so one malformed owner response cannot race fixture teardown.
-				pc.workflowTimers.workOwner = nil
-				pc.workflowTimers.scheduler = nil
+				// Only the malformed typed result is controlled. Native planning,
+				// release and joined teardown remain with their original owners.
 				wakeup, err := newWorkflowTimerWakeup(activation)
 				if err != nil {
 					t.Fatal(err)
@@ -144,4 +141,19 @@ func TestWorkflowTimerMissingOrInvalidCommitResultDoesNotDispatch(t *testing.T) 
 			})
 		}
 	}
+}
+
+type timerOutcomePublicationControl struct {
+	EnginePublicationPlanner
+	releases, finalizes int
+}
+
+func (p *timerOutcomePublicationControl) ReleaseEnginePublications(ctx context.Context, plans []runtimeengine.DurablePublicationPlan) error {
+	p.releases++
+	return p.EnginePublicationPlanner.ReleaseEnginePublications(ctx, plans)
+}
+
+func (p *timerOutcomePublicationControl) FinalizeEnginePublications(ctx context.Context, evidence []runtimeengine.CommittedDurablePublication) error {
+	p.finalizes++
+	return p.EnginePublicationPlanner.FinalizeEnginePublications(ctx, evidence)
 }

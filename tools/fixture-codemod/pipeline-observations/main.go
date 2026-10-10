@@ -3,6 +3,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
 	"flag"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
@@ -25,6 +27,16 @@ var recipeBytes []byte
 
 type recipe struct {
 	Family, File, Function, Before, After string
+	Successor                             string              `json:"Successor,omitempty"`
+	Removed                               bool                `json:"Removed,omitempty"`
+	Mechanical                            *mechanicalSnapshot `json:"Mechanical,omitempty"`
+}
+
+// Mechanical is proof history only; migrate never applies it to current source.
+type mechanicalSnapshot struct {
+	SourceCommit string
+	BeforeSHA256 string
+	After        string
 }
 
 type pendingFile struct {
@@ -82,6 +94,9 @@ func prepareFiles(root string, recipes []recipe) ([]pendingFile, []recipe, error
 		if !filepath.IsLocal(row.File) || filepath.ToSlash(filepath.Clean(row.File)) != row.File {
 			return nil, nil, fmt.Errorf("noncanonical recipe path %q", row.File)
 		}
+		if err := validateRecipeSnapshots(row); err != nil {
+			return nil, nil, err
+		}
 		grouped[row.File] = append(grouped[row.File], row)
 	}
 	var paths []string
@@ -95,6 +110,9 @@ func prepareFiles(root string, recipes []recipe) ([]pendingFile, []recipe, error
 		absolute := filepath.Join(root, path)
 		info, err := os.Lstat(absolute)
 		if err != nil {
+			if os.IsNotExist(err) && allRecipesRemoved(grouped[path]) {
+				continue
+			}
 			return nil, nil, err
 		}
 		if !info.Mode().IsRegular() {
@@ -104,7 +122,11 @@ func prepareFiles(root string, recipes []recipe) ([]pendingFile, []recipe, error
 		if err != nil {
 			return nil, nil, err
 		}
-		result, applied, err := rewriteSource(path, source, grouped[path])
+		current, err := checkpointRecipes(source, grouped[path])
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", path, err)
+		}
+		result, applied, err := rewriteSource(path, source, current)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -114,6 +136,66 @@ func prepareFiles(root string, recipes []recipe) ([]pendingFile, []recipe, error
 		}
 	}
 	return files, changed, nil
+}
+
+func validateRecipeSnapshots(row recipe) error {
+	if row.Removed && row.Successor != "" {
+		return fmt.Errorf("retired recipe also has a successor: %s", row.Function)
+	}
+	for _, source := range []string{row.Before, row.After} {
+		if _, err := canonicalFunction(source); err != nil {
+			return err
+		}
+	}
+	if row.Mechanical != nil {
+		if len(row.Mechanical.SourceCommit) != 40 || strings.Trim(row.Mechanical.SourceCommit, "0123456789abcdef") != "" ||
+			row.Mechanical.BeforeSHA256 != fmt.Sprintf("%x", sha256.Sum256([]byte(row.Before))) {
+			return fmt.Errorf("invalid mechanical snapshot provenance: %s", row.Function)
+		}
+		if _, err := canonicalFunction(row.Mechanical.After); err != nil {
+			return fmt.Errorf("invalid mechanical snapshot: %s: %w", row.Function, err)
+		}
+	}
+	if row.Successor != "" {
+		_, err := canonicalFunction(row.Successor)
+		return err
+	}
+	return nil
+}
+
+func allRecipesRemoved(rows []recipe) bool {
+	for _, row := range rows {
+		if !row.Removed {
+			return false
+		}
+	}
+	return len(rows) > 0
+}
+
+// Historical transformations stay pinned; later owner retirement has its own cut.
+func checkpointRecipes(source []byte, rows []recipe) ([]recipe, error) {
+	file, err := parser.ParseFile(token.NewFileSet(), "checkpoint.go", source, parser.AllErrors)
+	if err != nil {
+		return nil, err
+	}
+	var current []recipe
+	for _, row := range rows {
+		if row.Removed {
+			if row.Successor != "" {
+				return nil, fmt.Errorf("retired recipe also has a successor: %s", row.Function)
+			}
+			if _, err := uniqueRecipeFunction(file, row); err == nil || !strings.HasPrefix(err.Error(), "missing original/replacement function ") {
+				return nil, fmt.Errorf("retired function survives or is ambiguous: %s", row.Function)
+			}
+			continue
+		}
+		if row.Successor != "" {
+			row.Before, row.After = row.After, row.Successor
+			row.Successor = ""
+		}
+		current = append(current, row)
+	}
+	return current, nil
 }
 
 func rewriteSource(path string, source []byte, recipes []recipe) ([]byte, []recipe, error) {
@@ -137,7 +219,16 @@ func rewriteSource(path string, source []byte, recipes []recipe) ([]byte, []reci
 	if err != nil {
 		return nil, nil, err
 	}
-	astutil.AddImport(set, file, "github.com/division-sh/swarm/internal/store/storetest")
+	const storetestImport = "github.com/division-sh/swarm/internal/store/storetest"
+	hasStoretest := false
+	for _, imported := range file.Imports {
+		if imported.Path.Value == `"`+storetestImport+`"` {
+			hasStoretest = true
+		}
+	}
+	if !hasStoretest {
+		astutil.AddImport(set, file, storetestImport)
+	}
 	var out bytes.Buffer
 	if err := format.Node(&out, set, file); err != nil {
 		return nil, nil, err
@@ -193,7 +284,7 @@ func uniqueRecipeFunction(file *ast.File, row recipe) (*ast.FuncDecl, error) {
 	var found *ast.FuncDecl
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || (fn.Name.Name != row.Function && fn.Name.Name != after.Name.Name) {
+		if !ok || (fn.Name.Name != row.Function && fn.Name.Name != after.Name.Name) || (after.Recv != nil && !sameRecipeReceiver(fn, after)) {
 			continue
 		}
 		if found != nil {
@@ -205,6 +296,23 @@ func uniqueRecipeFunction(file *ast.File, row recipe) (*ast.FuncDecl, error) {
 		return nil, fmt.Errorf("missing original/replacement function %s", row.Function)
 	}
 	return found, nil
+}
+
+func sameRecipeReceiver(left, right *ast.FuncDecl) bool {
+	if left.Recv == nil || right.Recv == nil {
+		return left.Recv == nil && right.Recv == nil
+	}
+	if len(left.Recv.List) != 1 || len(right.Recv.List) != 1 {
+		return false
+	}
+	var first, second bytes.Buffer
+	if err := format.Node(&first, token.NewFileSet(), left.Recv.List[0].Type); err != nil {
+		return false
+	}
+	if err := format.Node(&second, token.NewFileSet(), right.Recv.List[0].Type); err != nil {
+		return false
+	}
+	return first.String() == second.String()
 }
 
 func uniqueFunction(file *ast.File, name string) (*ast.FuncDecl, error) {
@@ -251,7 +359,7 @@ func checkTypes(root string, files []pendingFile) error {
 	pkgs, err := packages.Load(&packages.Config{
 		Dir: root, Tests: true, Overlay: overlay,
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedTypes | packages.NeedImports,
-	}, "./internal/runtime", "./internal/runtime/pipeline", "./internal/apiv1")
+	}, "./internal/runtime", "./internal/runtime/pipeline", "./internal/runtime/tools", "./internal/apiv1")
 	if err != nil {
 		return err
 	}

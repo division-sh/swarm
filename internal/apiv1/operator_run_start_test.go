@@ -22,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -89,11 +88,11 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 	if result["run_id"] != runID || result["status"] != "running" {
 		t.Fatalf("run.start result = %#v", result)
 	}
-	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count = %d, want 1", count)
 	}
 	assertRunStartPersistence(t, db, runID, "scan.requested")
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
+	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
 
@@ -104,7 +103,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 	if replayResult := asMap(t, replay.Result); replayResult["run_id"] != runID || replayResult["status"] != "running" {
 		t.Fatalf("run.start replay result = %#v", replayResult)
 	}
-	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
 	}
 
@@ -115,7 +114,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 	if data := asMap(t, conflict.Error.Data); data["code"] != IdempotencyConflictCode {
 		t.Fatalf("run.start conflict data = %#v", data)
 	}
-	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after conflict = %d, want 1", count)
 	}
 
@@ -134,7 +133,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 	if data := asMap(t, conflictEvent.Error.Data); data["code"] != IdempotencyConflictCode {
 		t.Fatalf("run.start event-change conflict data = %#v", data)
 	}
-	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after body-domain conflicts = %d, want 1", count)
 	}
 }
@@ -162,8 +161,7 @@ func TestOperatorRunStartHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t
 }
 
 func TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActiveRuntimeFact(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	handler := runStartTestHandler(t, pg, missingRunStartBundleScopePublisher{}, source)
 	runID := uuid.NewString()
@@ -175,12 +173,12 @@ func TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActive
 	if data := asMap(t, started.Error.Data); data["code"] != BundleScopeRequiredCode {
 		t.Fatalf("missing bundle scope data = %#v", data)
 	}
-	assertNoRunStartPersistence(t, db, runID)
+	assertNoRunStartPersistence(t, pg, runID)
 
 	retiredRunID := uuid.NewString()
 	retired := rpcCall(t, handler, runStartBodyWithRetiredBundleInput(retiredRunID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-start-retired-input"))
 	assertInvalidRunStartParam(t, retired, retiredBundleInputName())
-	assertNoRunStartPersistence(t, db, retiredRunID)
+	assertNoRunStartPersistence(t, pg, retiredRunID)
 }
 
 func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *testing.T) {
@@ -202,8 +200,7 @@ func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *te
 }
 
 func TestOperatorRunStartRejectsFlowScopedEventName(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(flowScopedEventPublishTestBundle())
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -224,13 +221,12 @@ func TestOperatorRunStartRejectsFlowScopedEventName(t *testing.T) {
 	if details["event_name"] != "repo-scaffold/repo_scaffold.repo_commit_succeeded" || details["reason"] != "not_declared_root_input" {
 		t.Fatalf("run.start flow-scoped details = %#v", details)
 	}
-	assertNoRunStartPersistence(t, db, runID)
+	assertNoRunStartPersistence(t, pg, runID)
 }
 
 func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	t.Run("non-routable bundle hash", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -246,12 +242,11 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if data := asMap(t, resp.Error.Data); data["code"] != BundleUnavailableCode {
 			t.Fatalf("bundle unavailable data = %#v", data)
 		}
-		assertNoRunStartPersistence(t, db, runID)
+		assertNoRunStartPersistence(t, pg, runID)
 	})
 
 	t.Run("existing run bundle mismatch", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -259,7 +254,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		}
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
-		runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+		storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 			RunID:      runID,
 			BundleHash: runStartTestBundleHash,
 		})
@@ -271,17 +266,16 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if data := asMap(t, resp.Error.Data); data["code"] != BundleMismatchCode {
 			t.Fatalf("bundle mismatch data = %#v", data)
 		}
-		if count := countEventRowsByRunID(t, db, runID); count != 0 {
+		if count := countEventRowsByRunID(t, pg, runID); count != 0 {
 			t.Fatalf("event rows for mismatched run = %d, want 0", count)
 		}
-		if count := countAPIIdempotencyRows(t, db); count != 0 {
+		if count := countAPIIdempotencyRows(t, pg); count != 0 {
 			t.Fatalf("api_idempotency rows after mismatch = %d, want 0", count)
 		}
 	})
 
 	t.Run("invalid canonical bundle hash", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -297,12 +291,11 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleHashCode {
 			t.Fatalf("unsupported bundle hash data = %#v", data)
 		}
-		assertNoRunStartPersistence(t, db, runID)
+		assertNoRunStartPersistence(t, pg, runID)
 	})
 
 	t.Run("invalid canonical bundle hash", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -318,12 +311,11 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleHashCode {
 			t.Fatalf("unsupported bundle hash data = %#v", data)
 		}
-		assertNoRunStartPersistence(t, db, runID)
+		assertNoRunStartPersistence(t, pg, runID)
 	})
 
 	t.Run("retired bundle input is rejected", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -334,12 +326,11 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 		resp := rpcCall(t, handler, runStartBodyWithCanonicalAndRetiredInput(runID, runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "idem-retired-bundle-input"))
 		assertInvalidRunStartParam(t, resp, retiredBundleInputName())
-		assertNoRunStartPersistence(t, db, runID)
+		assertNoRunStartPersistence(t, pg, runID)
 	})
 
 	t.Run("undeclared event", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -366,12 +357,11 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 				t.Fatalf("undeclared routable_events = %#v", got)
 			}
 		}
-		assertNoRunStartPersistence(t, db, runID)
+		assertNoRunStartPersistence(t, pg, runID)
 	})
 
 	t.Run("declared but unroutable root input", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		const eventName = "scan.unroutable_requested"
 		bundle := runStartTestBundle(eventName)
 		bundle.Nodes, bundle.FlowTree.Root.Nodes = nil, nil
@@ -408,12 +398,11 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if got := stringSliceFromAny(t, details["routable_events"]); len(got) != 0 {
 			t.Fatalf("declared unroutable routable_events = %#v, want empty", got)
 		}
-		assertNoRunStartPersistence(t, db, runID)
+		assertNoRunStartPersistence(t, pg, runID)
 	})
 
 	t.Run("payload validation", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 			ContractBundle:     source,
@@ -438,12 +427,11 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if data := asMap(t, resp.Error.Data); data["code"] != PayloadValidationFailedCode {
 			t.Fatalf("payload validation data = %#v", data)
 		}
-		assertNoRunStartPersistence(t, db, runID)
+		assertNoRunStartPersistence(t, pg, runID)
 	})
 
 	t.Run("invalid caller run id", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -461,20 +449,19 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if details := asMap(t, resp.Error.Data)["details"]; asMap(t, details)["field"] != "run_id" {
 			t.Fatalf("invalid run_id details = %#v", details)
 		}
-		if count := countAllRunRows(t, db); count != 0 {
+		if count := countAllRunRows(t, pg); count != 0 {
 			t.Fatalf("run rows after invalid run_id = %d, want 0", count)
 		}
-		if count := countEventsByName(t, db, "scan.requested"); count != 0 {
+		if count := countEventsByName(t, pg, "scan.requested"); count != 0 {
 			t.Fatalf("event rows after invalid run_id = %d, want 0", count)
 		}
-		if count := countAPIIdempotencyRows(t, db); count != 0 {
+		if count := countAPIIdempotencyRows(t, pg); count != 0 {
 			t.Fatalf("api_idempotency rows after invalid run_id = %d, want 0", count)
 		}
 	})
 
 	t.Run("payload entity id is not envelope authority", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -488,19 +475,27 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if resp.Error != nil {
 			t.Fatalf("run.start payload entity_id error = %#v", resp.Error)
 		}
-		var eventID, eventEntityID, eventFlowInstance, targetRoute, targetSet string
-		var payload json.RawMessage
-		if err := db.QueryRow(`
-				SELECT event_id::text, COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''),
-				       COALESCE(target_route::text, '{}'), COALESCE(target_set::text, '[]'), payload
-				FROM events
-				WHERE run_id = $1::uuid AND event_name = 'scan.requested'
-			`, runID).Scan(&eventID, &eventEntityID, &eventFlowInstance, &targetRoute, &targetSet, &payload); err != nil {
+		eventID, err := storetest.ReadLatestNamedEventIdentityStorage(context.Background(), pg, "scan.requested", "")
+		if err != nil {
 			t.Fatalf("load run.start event row: %v", err)
 		}
-		assertStoredEventProjectionMatchesDeliveries(t, eventEntityID, eventFlowInstance, targetRoute, targetSet, runID, postgresEventDeliveryTargetRoutes(t, db, eventID))
+		evidence := storetest.ReadSemanticEventFixtureEvidence(t, context.Background(), pg, runID, eventID)
+		if !evidence.RecordFound || evidence.Record.EventID != eventID || evidence.Record.RunID != runID || evidence.Record.EventName != "scan.requested" {
+			t.Fatalf("run.start physical event identity changed: %+v", evidence.Record)
+		}
+		var deliveryTargets []events.RouteIdentity
+		for _, projection := range evidence.DeliveryProjections {
+			var target events.DeliveryTargetOwnership
+			// Column 9 is the original physical delivery_target_route encoding.
+			if err := json.Unmarshal([]byte(projection[9]), &target); err != nil {
+				t.Fatalf("decode physical delivery target: %v", err)
+			}
+			deliveryTargets = append(deliveryTargets, target.Route())
+		}
+		assertStoredEventProjectionMatchesDeliveries(t, evidence.Record.EntityID, evidence.Record.FlowInstance,
+			string(evidence.Record.TargetRoute), string(evidence.Record.TargetSet), runID, deliveryTargets)
 		var decoded map[string]any
-		if err := json.Unmarshal(payload, &decoded); err != nil {
+		if err := json.Unmarshal(evidence.Record.Payload, &decoded); err != nil {
 			t.Fatalf("decode persisted payload: %v", err)
 		}
 		if decoded["entity_id"] != payloadEntityID || decoded["topic"] != "medicine" {
@@ -509,8 +504,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	})
 
 	t.Run("publish failure", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		handler := runStartTestHandler(t, pg, admittedRunStartFailurePublisher{failingRunStartPublisher{err: errors.New("simulated run.start publish failure")}}, source)
 		runID := uuid.NewString()
@@ -527,12 +521,11 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if details["event_name"] != "scan.requested" || details["run_id"] != runID || details["phase"] != "publish" || !strings.Contains(fmt.Sprint(details["reason"]), "simulated run.start publish failure") {
 			t.Fatalf("publish failure details = %#v", details)
 		}
-		assertNoRunStartPersistence(t, db, runID)
+		assertNoRunStartPersistence(t, pg, runID)
 	})
 
 	t.Run("post-validation invalid event type is a publish contradiction", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		handler := runStartTestHandler(t, pg, admittedRunStartFailurePublisher{failingRunStartPublisher{err: runtimebus.ErrInvalidEventType}}, source)
 		runID := uuid.NewString()
@@ -555,7 +548,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		if details["reason"] != runtimebus.ErrInvalidEventType.Error() {
 			t.Fatalf("post-validation reason = %#v", details["reason"])
 		}
-		assertNoRunStartPersistence(t, db, runID)
+		assertNoRunStartPersistence(t, pg, runID)
 	})
 }
 
@@ -848,41 +841,45 @@ func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName string
 	}
 }
 
-func assertNoRunStartPersistence(t *testing.T, db *sql.DB, runID string) {
+func assertNoRunStartPersistence(t *testing.T, selected any, runID string) {
 	t.Helper()
-	if count := countRunRowsByID(t, db, runID); count != 0 {
+	evidence, err := storetest.ReadAPIRunStartRefusalStorage(context.Background(), selected, runID)
+	if err != nil {
+		t.Fatalf("load publication cardinality evidence: %v", err)
+	}
+	if count := evidence.Runs; count != 0 {
 		t.Fatalf("run rows for %s = %d, want 0", runID, count)
 	}
-	if count := countEventRowsByRunID(t, db, runID); count != 0 {
+	if count := evidence.Events; count != 0 {
 		t.Fatalf("event rows for %s = %d, want 0", runID, count)
 	}
-	if count := countAPIIdempotencyRows(t, db); count != 0 {
+	if count := evidence.APICompletions; count != 0 {
 		t.Fatalf("api_idempotency rows = %d, want 0", count)
 	}
 }
 
-func countRunRowsByID(t *testing.T, db *sql.DB, runID string) int {
+func countRunRowsByID(t *testing.T, selected any, runID string) int {
 	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`, runID).Scan(&count); err != nil {
+	count, err := storetest.CountPhysicalRunIdentity(context.Background(), selected, runID)
+	if err != nil {
 		t.Fatalf("count run rows: %v", err)
 	}
 	return count
 }
 
-func countEventRowsByRunID(t *testing.T, db *sql.DB, runID string) int {
+func countEventRowsByRunID(t *testing.T, selected any, runID string) int {
 	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`, runID).Scan(&count); err != nil {
+	count, err := storetest.CountPhysicalRunEvents(context.Background(), selected, runID)
+	if err != nil {
 		t.Fatalf("count event rows: %v", err)
 	}
 	return count
 }
 
-func countAllRunRows(t *testing.T, db *sql.DB) int {
+func countAllRunRows(t *testing.T, selected any) int {
 	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil {
+	count, err := storetest.CountPhysicalRuns(context.Background(), selected)
+	if err != nil {
 		t.Fatalf("count all run rows: %v", err)
 	}
 	return count

@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -26,7 +27,15 @@ func TestDynamicFlowCreationDispatchModeValidation(t *testing.T) {
 	}
 	event := eventtest.ChildWithLineage(eventID, events.EventType(plan.CreationEvent.EventType), "flow-instance-activator", "", []byte(`{}`), 1,
 		events.EventLineage{RunID: runID, ParentEventID: parentID, ExecutionMode: executionmode.Live}, events.EventEnvelope{}, createdAt)
-	attempt := pipelineTestFlowActivationAttempt(t, runID, plan.Identity.InstancePath, plan.BundleHash)
+	// This is an unissued model value for dispatch-mode validation only. It is
+	// never submitted to storage or consumed as executable attachment authority.
+	attempt, err := NewDynamicFlowRuntimeActivationAttempt("1", runID, plan.Identity.InstancePath, processbinding.Binding{
+		ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "dispatch-mode-value", ProcessBootID: uuid.NewString(),
+		GenerationGrantID: uuid.NewString(), BundleHash: plan.BundleHash, RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, mode := range []DynamicFlowRuntimeCreationDispatchMode{DynamicFlowRuntimeCreationDispatchAsync, DynamicFlowRuntimeCreationDispatchStartupRecovery, 255} {
 		err := (DynamicFlowRuntimeCreationOccurrenceRequest{
 			RunID: runID, InstancePath: plan.Identity.InstancePath, Plan: plan, Attempt: attempt, Event: event, OccurredAt: createdAt, DispatchMode: mode,

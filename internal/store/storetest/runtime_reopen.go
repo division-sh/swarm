@@ -3,6 +3,7 @@ package storetest
 import (
 	"context"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,17 +33,28 @@ func StartPostgresRuntimeStoreWithReopen(t *testing.T, locations ...string) (*st
 	} else {
 		dsn = testutil.StartPostgresDSN(t)
 	}
+	var ownersMu sync.Mutex
+	var owners []*store.PostgresStore
+	// Register once, before consumers. Later peers must not jump ahead of
+	// the consumer's join in the testing cleanup stack.
+	t.Cleanup(func() {
+		ownersMu.Lock()
+		defer ownersMu.Unlock()
+		for i := len(owners) - 1; i >= 0; i-- {
+			if err := owners[i].Close(); err != nil {
+				t.Errorf("close postgres runtime store: %v", err)
+			}
+		}
+	})
 	open := func() *store.PostgresStore {
 		t.Helper()
 		selected, err := store.NewPostgresStore(dsn)
 		if err != nil {
 			t.Fatalf("construct postgres runtime store: %v", err)
 		}
-		t.Cleanup(func() {
-			if err := selected.Close(); err != nil {
-				t.Errorf("close postgres runtime store: %v", err)
-			}
-		})
+		ownersMu.Lock()
+		owners = append(owners, selected)
+		ownersMu.Unlock()
 		BootstrapPostgresRuntimeStore(t, selected)
 		bindTestPayloadAdmitter(selected)
 		return selected
@@ -68,17 +80,26 @@ func StartSQLiteRuntimeStoreWithReopen(t testing.TB, ctx context.Context, locati
 			SwarmVersion: "storetest", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC(),
 		},
 	}
+	var ownersMu sync.Mutex
+	var owners []*store.SQLiteRuntimeStore
+	t.Cleanup(func() {
+		ownersMu.Lock()
+		defer ownersMu.Unlock()
+		for i := len(owners) - 1; i >= 0; i-- {
+			if err := owners[i].Close(); err != nil {
+				t.Errorf("close sqlite runtime store: %v", err)
+			}
+		}
+	})
 	open := func() *store.SQLiteRuntimeStore {
 		t.Helper()
 		selected, err := store.NewSQLiteRuntimeStore(path)
 		if err != nil {
 			t.Fatalf("construct sqlite runtime store: %v", err)
 		}
-		t.Cleanup(func() {
-			if err := selected.Close(); err != nil {
-				t.Errorf("close sqlite runtime store: %v", err)
-			}
-		})
+		ownersMu.Lock()
+		owners = append(owners, selected)
+		ownersMu.Unlock()
 		if err := selected.BootstrapSchema(ctx, request); err != nil {
 			t.Fatalf("bootstrap sqlite runtime store: %v", err)
 		}

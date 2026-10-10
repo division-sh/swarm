@@ -79,7 +79,7 @@ func TestReceiverCompositionFailureSettlementBothStores(t *testing.T) {
 				t.Fatalf("invalidate exact receiver: %d %v", n, err)
 			}
 			once.Do(func() { close(release) })
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			if err := rt.DB.QueryRow(`SELECT status FROM event_deliveries WHERE delivery_id=$1`, claim.DeliveryID()).Scan(&status); err != nil {
 				t.Fatal(err)
 			}

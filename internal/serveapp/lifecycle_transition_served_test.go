@@ -43,7 +43,7 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 							for _, recipient := range recipients {
 								requireLifecycleFlowEntity(t, rt, seed.RunID, recipient, "done")
 							}
-							waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+							waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 							for _, recipient := range recipients {
 								entityID := requireLifecycleFlowEntity(t, rt, seed.RunID, recipient, "done")
 								history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)

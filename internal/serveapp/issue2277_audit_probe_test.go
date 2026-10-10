@@ -26,9 +26,9 @@ func TestAudit2277ForkCompletionLoss(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string { return canonicalrouting.CopyRootIngressServedFollowUp(t) })
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "event_name": "item.received", "payload": map[string]any{"item_id": "hold"}, "idempotency_key": "audit2277-source"})
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			point := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "run_id": seed.RunID, "event_name": "item.processed", "payload": map[string]any{"item_id": "hold"}, "idempotency_key": "audit2277-point"})
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			if rt.Backend == "sqlite" {
 				if _, err := rt.DB.Exec(`CREATE TRIGGER audit2277_completion BEFORE INSERT ON api_idempotency WHEN NEW.method='run.fork' BEGIN SELECT RAISE(ABORT, 'audit2277 post-domain completion loss'); END`); err != nil {
 					t.Fatal(err)
@@ -104,6 +104,8 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			opts.TestLifecycleProbe = probe
 			var db *sql.DB
+			var deliveryReader servedRunDeliveryReader
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 			if backend == "sqlite" {
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "audit2277.sqlite"))
 				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
@@ -131,7 +133,7 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 			requireServedEventPublishEntityState(t, db, backend, seed.RunID, "", "waiting")
 			spinup := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"run_id": seed.RunID, "source_event_id": seed.EventID, "event_name": "opco.spinup_requested", "payload": map[string]any{"instance_id": "11111111-1111-4111-8111-111111111111", "product_id": "product-1"}, "idempotency_key": "audit2277-spinup"})
 			waitServedEventPublishEventID(t, db, backend, seed.RunID, servedTypedCreationInstancePath+"/opco.product_initialization_requested")
-			waitServedRunDeliveryQuiescence(t, db, backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, deliveryReader, seed.RunID)
 			probe.Expect(seed.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
 			probe.Expect(spinup.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
 			var readiness int

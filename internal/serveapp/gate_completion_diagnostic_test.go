@@ -91,7 +91,7 @@ func TestServedGateCompletionInterruptionDiagnosticOnBothStores(t *testing.T) {
 						t.Fatal("acknowledged control did not answer")
 					}
 					requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "done")
-					waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					ack := gateCompletionRead(t, rt, "acknowledged_success", seed.RunID, cardID, domain)
 					gateCompletionAssertResponse(t, firstReply, ack, false)
 				}
@@ -110,7 +110,7 @@ func TestServedGateCompletionInterruptionDiagnosticOnBothStores(t *testing.T) {
 				setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 				second, rt := start()
 				requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "done")
-				waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				after := gateCompletionRead(t, rt, "after_restart_before_retry", seed.RunID, cardID, domain)
 				retry := gateCompletionHTTP(ctx, rt.Endpoint, params)
 				final := gateCompletionRead(t, rt, "after_same_key_retry", seed.RunID, cardID, domain)

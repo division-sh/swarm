@@ -5,11 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -38,11 +39,11 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
 type fanInBarrierConformanceStore interface {
+	storetest.RunFixtureStore
 	agentfixture.Store
 	runtimemanager.ManagerPersistence
 	conformanceDurableEventBusStore
@@ -118,7 +119,7 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			backend, db := tc.setup(t)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
-			seedFanInBarrierRun(t, ctx, backend, db, source, runID)
+			seedFanInBarrierRun(t, ctx, backend, source, runID)
 			runtime := newFanInBarrierRuntime(t, backend, source)
 			const periodID = "2026-Q3"
 			const portfolioID = "portfolio-one"
@@ -282,10 +283,10 @@ func TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends(t 
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			backend, db := tc.setup(t)
+			backend, _ := tc.setup(t)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
-			seedFanInBarrierRun(t, ctx, backend, db, source, runID)
+			seedFanInBarrierRun(t, ctx, backend, source, runID)
 			runtime := newFanInBarrierRuntime(t, backend, source)
 			constructionCtx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 			construction, err := runtime.manager.PrepareFlowInstanceActivation(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
@@ -433,7 +434,7 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 			backend, db := tc.setup(t)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
-			seedFanInBarrierRun(t, ctx, backend, db, source, runID)
+			seedFanInBarrierRun(t, ctx, backend, source, runID)
 			selectedOwner := eventtest.UUID("fan-in-selected-owner-" + tc.name)
 			selectedTarget := events.RouteIdentity{
 				FlowID: "portfolio", FlowInstance: "portfolio/selected-period", EntityID: selectedOwner,
@@ -948,21 +949,16 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 	return fanInBarrierRuntime{bus: eventBus, diagnostics: diagnosticBus, pipeline: coordinator, manager: manager, workOwner: workOwner, grant: grant, schedules: schedules}
 }
 
-func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB, source semanticview.Source, runID string) {
+func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, source semanticview.Source, runID string) {
 	t.Helper()
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
 		t.Fatal("fan-in run requires an admitted source bundle")
 	}
-	fixture := runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID,
-		Source: conformanceSourceArtifactFact(t, source), Artifact: bundle.SourceArtifact,
-	}
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
-	} else {
-		runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
-	}
+	storetest.RequireRun(t, ctx, backend, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
+		BundleHash: conformanceSourceArtifactFact(t, source).BundleHash(), Artifact: bundle.SourceArtifact,
+	})
 }
 
 func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, manager *runtimemanager.AgentManager, source semanticview.Source, entityID string) {

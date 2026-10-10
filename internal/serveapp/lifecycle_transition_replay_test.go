@@ -35,7 +35,7 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
 			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), repeated.EventID, "review", "drafting")
 			requireLifecycleFlowEntity(t, rt, seed.RunID, "ordinary/", "observed")
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
 			// The public replay endpoint requires agent delivery history. Do not
 			// manufacture that history for this real node-only execution.
@@ -43,7 +43,7 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 			if replay.Data["code"] != "EVENT_REPLAY_NO_DELIVERY_HISTORY" {
 				t.Fatalf("node-only replay=%#v", replay)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
 				t.Fatal("refused node-only replay mutated the next attempt")
 			}
@@ -88,7 +88,7 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 				}
 				accepted[result.EventID] = true
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			closed := readLifecycleLoop(t, rt, seed.RunID, entityID)
 			if closed.Status != loopruntime.StatusClosed || closed.Attempt != 2 || closed.RevisionID != current.RevisionID {
 				t.Fatalf("race loop=%#v", closed)

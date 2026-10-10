@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"math"
 	"reflect"
@@ -13,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -22,13 +20,11 @@ func TestPublicOperationSemanticCarrierParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
 			var selected canonicalEventPublishProofStore
-			var db *sql.DB
 			if backend == "sqlite" {
 				s := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				selected, db = s, storetest.DatabaseForTest(s)
+				selected = s
 			} else {
-				_, db, _ = testutil.StartPostgres(t)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			}
 			bundle := runStartTestBundle("scan.requested")
 			event := bundle.Events["scan.requested"]
@@ -51,15 +47,9 @@ func TestPublicOperationSemanticCarrierParity(t *testing.T) {
 			})
 			counts := func() map[string]int {
 				t.Helper()
-				out := map[string]int{}
-				for _, table := range []string{"runs", "events", "event_deliveries", "entity_state", "api_idempotency"} {
-					var n int
-					if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
-						t.Fatal(err)
-					}
-					out[table] = n
-				}
-				return out
+				observed := storetest.ObserveActivityResultPublicationStorage(t, ctx, selected)
+				return map[string]int{"runs": observed.Runs, "events": observed.Events, "event_deliveries": observed.Deliveries,
+					"entity_state": observed.Entities, "api_idempotency": observed.Receipts}
 			}
 			for _, method := range []string{"event.publish", "run.start"} {
 				t.Run(method, func(t *testing.T) {
@@ -99,12 +89,16 @@ func TestPublicOperationSemanticCarrierParity(t *testing.T) {
 						if err := json.Unmarshal(raw, &ids); err != nil {
 							t.Fatal(err)
 						}
-						var payload string
-						if err := db.QueryRow(`SELECT CAST(payload AS TEXT) FROM events WHERE CAST(run_id AS TEXT)=$1 AND event_name='scan.requested'`, ids.RunID).Scan(&payload); err != nil {
+						eventID, err := storetest.ReadLatestNamedEventIdentityStorage(ctx, selected, "scan.requested", "")
+						if err != nil {
 							t.Fatal(err)
 						}
+						evidence := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, ids.RunID, eventID)
+						if !evidence.RecordFound || evidence.Record.RunID != ids.RunID || evidence.Record.EventName != "scan.requested" || evidence.Record.EventID != eventID {
+							t.Fatalf("numeric operation lost exact stored event identity: %+v", evidence.Record)
+						}
 						var decoded map[string]any
-						if err := canonicaljson.DecodePreservingNumberLexemes([]byte(payload), &decoded); err != nil {
+						if err := canonicaljson.DecodePreservingNumberLexemes(evidence.Record.Payload, &decoded); err != nil {
 							t.Fatal(err)
 						}
 						projected, err := workflowexpr.ProjectCELValue(decoded)

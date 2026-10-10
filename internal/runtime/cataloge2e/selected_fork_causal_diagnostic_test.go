@@ -59,9 +59,13 @@ func (g causalSelectedGrant) CommitAgentLifecycleTransition(ctx context.Context,
 		return manager.AgentLifecycleTransitionResult{}, fmt.Errorf("causal proof requires the actual selected actor grant")
 	}
 	parent := activityidentity.ForkLineageEventID(req.Identity.RunID, g.probe.sourceEvent)
-	var exists int
-	if err := g.probe.h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id=$1 AND run_id=$2`, parent, req.Identity.RunID).Scan(&exists); err != nil || exists != 1 {
-		return manager.AgentLifecycleTransitionResult{}, fmt.Errorf("selected parent was not actually published: count=%d err=%v", exists, err)
+	reader, err := g.probe.h.catalogOperatorEventLister()
+	if err != nil {
+		return manager.AgentLifecycleTransitionResult{}, err
+	}
+	publishedParent, found, err := storetest.ReadCanonicalEventRecord(ctx, reader, parent)
+	if err != nil || !found || publishedParent.RunID() != req.Identity.RunID {
+		return manager.AgentLifecycleTransitionResult{}, fmt.Errorf("selected parent was not actually published: found=%t run=%s err=%v", found, publishedParent.RunID(), err)
 	}
 	lineage := correlation.RuntimeLineage{
 		Owner: runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner,
@@ -101,16 +105,13 @@ func (g causalSelectedGrant) CommitAgentLifecycleTransition(ctx context.Context,
 					if err := logger.ProjectLifecycleDiagnostic(consumer, item); err == nil || !strings.Contains(err.Error(), "does not exist") {
 						return result, fmt.Errorf("missing causal parent refusal: %v", err)
 					}
-					query := `SELECT COUNT(*) FROM events WHERE json_extract(payload,'$.details.outbox_id')=$1`
-					if g.probe.h.pg != nil {
-						query = `SELECT COUNT(*) FROM events WHERE payload->'details'->>'outbox_id'=$1`
-					}
-					var count int
-					if err := g.probe.h.db.QueryRowContext(ctx, query, item.OutboxID).Scan(&count); err != nil || count != 0 {
+					observed, err := storetest.ReadSelectedCausalDiagnosticConservation(ctx, diagnostics, item.OutboxID)
+					count := observed.Events
+					if err != nil || count != 0 {
 						return result, fmt.Errorf("missing parent emitted diagnostic: count=%d err=%v", count, err)
 					}
-					var pendingCount int
-					if err := g.probe.h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_lifecycle_diagnostic_outbox WHERE outbox_id=$1 AND projected_at IS NULL`, item.OutboxID).Scan(&pendingCount); err != nil || pendingCount != 1 {
+					pendingCount := observed.Pending
+					if pendingCount != 1 {
 						return result, fmt.Errorf("missing parent acknowledged diagnostic: pending=%d err=%v", pendingCount, err)
 					}
 					g.probe.mu.Lock()
@@ -133,6 +134,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 			t.Run(string(backend)+"/"+kind, func(t *testing.T) {
 				root := localReadinessFixture(t, 1, "agent")
 				h := newRuntimeHarnessForBackend(t, root, backend, true)
+				h.db = nil // Every physical witness must consume its original native owner.
 				ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
 				frontierID := activateLocalReadinessFrontier(t, ctx, h, "worker.ready")
 				var sourceStore interface {
@@ -189,34 +191,23 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 
 func assertSelectedCausalDiagnosticReadback(t *testing.T, h *runtimeHarness, item diaglog.LifecycleDiagnostic, kind, parent string) {
 	t.Helper()
-	query := `SELECT run_id,source_event_id FROM events WHERE json_extract(payload,'$.details.outbox_id')=$1`
+	var selected any = h.sqlite
 	if h.pg != nil {
-		query = `SELECT run_id::text,source_event_id::text FROM events WHERE payload->'details'->>'outbox_id'=$1`
+		selected = h.pg
 	}
-	rows, err := h.db.Query(query, item.OutboxID)
+	observed, err := storetest.ReadSelectedCausalDiagnosticStorage(context.Background(), selected, item.OutboxID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	count := 0
-	for rows.Next() {
-		var run, cause string
-		if err := rows.Scan(&run, &cause); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range observed.Events {
+		run, cause := row.RunID, row.SourceEventID
 		if run != item.Identity.RunID || cause != parent {
 			t.Fatalf("selected event lineage: %s/%s", run, cause)
 		}
 		count++
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
-	var raw []byte
-	if err := h.db.QueryRow(`SELECT projection FROM agent_lifecycle_diagnostic_outbox WHERE outbox_id=$1`, item.OutboxID).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
+	raw := observed.Projection
 	var receipt struct {
 		RunID              string `json:"run_id"`
 		ParentEventID      string `json:"parent_event_id"`

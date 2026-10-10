@@ -16,3 +16,14 @@ type SelectedForkLifecycleDiagnosticStorage = private.SelectedForkLifecycleDiagn
 func ReadSelectedForkLifecycleDiagnosticStorage(ctx context.Context, selected any, runID string) (SelectedForkLifecycleDiagnosticStorage, error) {
 	return private.ReadSelectedForkLifecycleDiagnosticStorageForTest(ctx, selected, runID)
 }
+
+type SelectedCausalDiagnosticStorage = private.SelectedCausalDiagnosticStorage
+type SelectedCausalDiagnosticConservation = private.SelectedCausalDiagnosticConservation
+
+func ReadSelectedCausalDiagnosticStorage(ctx context.Context, selected any, outboxID string) (SelectedCausalDiagnosticStorage, error) {
+	return private.ReadSelectedCausalDiagnosticStorageForTest(ctx, selected, outboxID)
+}
+
+func ReadSelectedCausalDiagnosticConservation(ctx context.Context, selected any, outboxID string) (SelectedCausalDiagnosticConservation, error) {
+	return private.ReadSelectedCausalDiagnosticConservationForTest(ctx, selected, outboxID)
+}

@@ -886,7 +886,6 @@ units:
     run: '^TestIssue2564(ReconstructedEquivalentH2BothStores|H2.*)$'
     required_children:
       TestIssue2564ReconstructedEquivalentH2BothStores: [sqlite/dense, sqlite/paced, postgres/dense, postgres/paced]
-      TestIssue2564H2SynchronizedBranchesBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full
@@ -929,6 +928,15 @@ units:
         - TestNativeLoopClaimFixturesDoNotReceiveRawAuthority
         - TestNativeMockFixturesDoNotReceiveRawAuthority
         - TestNativeAPIReadSetupDoesNotReceiveRawAuthority
+        - TestNativeProjectionRoundTripFixturesDoNotReceiveRawAuthority
+        - TestNativeStorageIdentityFixturesDoNotReceiveRawAuthority
+        - TestNativeProjectionStorageFixturesDoNotReceiveRawAuthority
+        - TestNativeProjectionShapeFixturesDoNotReceiveRawAuthority
+        - TestNativeProjectionHeaderFixturesDoNotReceiveRawAuthority
+        - TestNativeMutationSeedFixturesDoNotReceiveRawAuthority
+        - TestNativeLookupMissFixturesDoNotReceiveRawAuthority
+        - TestNativeBookkeepingFixturesDoNotReceiveRawAuthority
+        - TestNativeHandlerFixturesDoNotReceiveRawAuthority
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad

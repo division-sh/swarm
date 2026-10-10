@@ -27,6 +27,8 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 			unsetStoreSelectorEnv(t)
 			stubServeRuntimeWorkspaceLifecycle(t)
 			var db *sql.DB
+			var deliveryReader servedRunDeliveryReader
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			dialect := "sqlite"
 			if backend == servedparity.BackendExplicitPostgres {
@@ -41,7 +43,7 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 			start := func() (*serveRuntimeTestProcess, servedControlProofRuntime) {
 				process := startServeRuntimeTestProcess(t, opts)
 				process.waitForReadyLine()
-				return process, servedControlProofRuntime{Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc", DB: db, Backend: dialect, BundleHash: servedEventPublishFixtureBundleHash(t, root), Runtime: servedTestProcessRuntime(t, process)}
+				return process, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc", DB: db, Backend: dialect, BundleHash: servedEventPublishFixtureBundleHash(t, root), Runtime: servedTestProcessRuntime(t, process)}
 			}
 			process, rt := start()
 			run := uuid.NewString()

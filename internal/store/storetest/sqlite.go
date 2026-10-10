@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -30,68 +29,19 @@ func StartSQLiteRuntimeStore(t testing.TB) *store.SQLiteRuntimeStore {
 // must survive process-local store reconstruction.
 func StartSQLiteRuntimeStorePair(t testing.TB) (*store.SQLiteRuntimeStore, *store.SQLiteRuntimeStore) {
 	t.Helper()
-
-	platformSpec, plans := canonicalPlatformPlans(t)
-	dbPath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	open := func() *store.SQLiteRuntimeStore {
-		sqliteStore, err := store.NewSQLiteRuntimeStore(dbPath)
-		if err != nil {
-			t.Fatalf("NewSQLiteRuntimeStore: %v", err)
-		}
-		if err := sqliteStore.BootstrapSchema(context.Background(), store.SchemaBootstrapRequest{
-			PlatformPlans: plans,
-			Origin: store.RuntimeStoreOrigin{
-				SwarmVersion:    "storetest",
-				PlatformVersion: platformSpec.Platform.Version,
-				CreatedAt:       time.Now().UTC(),
-			},
-		}); err != nil {
-			_ = sqliteStore.Close()
-			t.Fatalf("BootstrapSchema: %v", err)
-		}
-		bindTestPayloadAdmitter(sqliteStore)
-		t.Cleanup(func() {
-			if err := sqliteStore.Close(); err != nil {
-				t.Errorf("close sqlite runtime store: %v", err)
-			}
-		})
-		return sqliteStore
-	}
-	primary := open()
-	reconstructed := open()
-	if _, err := os.Stat(dbPath); err != nil {
-		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", dbPath, err)
+	primary, reopen := StartSQLiteRuntimeStoreWithReopen(t, context.Background())
+	reconstructed := reopen()
+	if _, err := os.Stat(primary.Path()); err != nil {
+		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", primary.Path(), err)
 	}
 	return primary, reconstructed
 }
 
 func StartSQLiteRuntimeStoreWithContext(t testing.TB, ctx context.Context) *store.SQLiteRuntimeStore {
 	t.Helper()
-
-	platformSpec, plans := canonicalPlatformPlans(t)
-	dbPath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	sqliteStore, err := store.NewSQLiteRuntimeStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := sqliteStore.Close(); err != nil {
-			t.Fatalf("close sqlite runtime store: %v", err)
-		}
-	})
-	if err := sqliteStore.BootstrapSchema(ctx, store.SchemaBootstrapRequest{
-		PlatformPlans: plans,
-		Origin: store.RuntimeStoreOrigin{
-			SwarmVersion:    "storetest",
-			PlatformVersion: platformSpec.Platform.Version,
-			CreatedAt:       time.Now().UTC(),
-		},
-	}); err != nil {
-		t.Fatalf("BootstrapSchema: %v", err)
-	}
-	bindTestPayloadAdmitter(sqliteStore)
-	if _, err := os.Stat(dbPath); err != nil {
-		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", dbPath, err)
+	sqliteStore, _ := StartSQLiteRuntimeStoreWithReopen(t, ctx)
+	if _, err := os.Stat(sqliteStore.Path()); err != nil {
+		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", sqliteStore.Path(), err)
 	}
 	return sqliteStore
 }

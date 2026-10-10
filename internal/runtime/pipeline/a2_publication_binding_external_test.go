@@ -140,7 +140,7 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 				}
 				selected := backend.open(t)
 				runID := uuid.NewString()
-				insertGateRecoveryRun(t, selected, runID)
+				insertGateRecoveryRun(t, selected.events, runID)
 				ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				variant := canonicalrouting.ArrivalJoinPayloadDirected
 				flows := []string{"orders", "orders"}

@@ -71,7 +71,7 @@ func TestMailboxSourceAdmissionBeforeReplayAndAtCommitBothStores(t *testing.T) {
 						}
 						var result map[string]any
 						requireServedJSONRPCResult(t, rt.Endpoint, method, params, &result)
-						waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, f.base.RunID)
+						waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, f.base.RunID)
 						before := mailboxCompletionRunEffects(t, rt, f.base.RunID)
 						for _, ctx := range []context.Context{context.Background(), correlation.WithSourceArtifactFact(f.ctx, mustServeTestPersistedSourceArtifactFact(unavailable))} {
 							_, replayed, err := mailboxTokenlessMutation(ctx, rt, owner, req, params)

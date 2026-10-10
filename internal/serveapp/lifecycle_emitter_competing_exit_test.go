@@ -125,7 +125,7 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 							if exit == "timer" && time.Now().Before(due.Add(100*time.Millisecond)) {
 								time.Sleep(time.Until(due.Add(100 * time.Millisecond)))
 							}
-							waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+							waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 							requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
 							won := entity.Entity.CurrentState == "done"
 							if (order == "gate_first" && !won) || (order == "exit_first" && won) {

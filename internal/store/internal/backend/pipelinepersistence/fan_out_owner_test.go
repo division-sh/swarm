@@ -20,6 +20,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -181,7 +182,7 @@ func persistFanOutReadbackChunk(t *testing.T, db *sql.DB, command runtimepipelin
 	}
 }
 
-func fanOutReadbackTestDB(t *testing.T, backend string) *sql.DB {
+func fanOutReadbackTestDB(t *testing.T, backend string, pausedRun ...string) *sql.DB {
 	t.Helper()
 	var db *sql.DB
 	if backend == "postgres" {
@@ -193,6 +194,20 @@ func fanOutReadbackTestDB(t *testing.T, backend string) *sql.DB {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = db.Close() })
+	}
+	if len(pausedRun) > 1 {
+		t.Fatal("fan-out readback fixture accepts one exact paused run")
+	}
+	if len(pausedRun) == 1 {
+		var owner runlifecycle.OperationOwner
+		if backend == "postgres" {
+			owner = materializePostgresStatementRuns(t, db, true, pausedRun[0])
+		} else {
+			owner = materializeSQLiteStatementRuns(t, db, true, pausedRun[0])
+		}
+		if _, err := owner.TransitionActiveRun(context.Background(), runlifecycle.ActiveTransitionRequest{RunID: pausedRun[0], State: runlifecycle.StatePaused}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	statements := []string{
 		`CREATE TABLE fan_out_intents (
@@ -226,10 +241,16 @@ func fanOutReadbackTestDB(t *testing.T, backend string) *sql.DB {
 	return db
 }
 
-func seedFanOutReadbackClaim(t *testing.T, db *sql.DB) runtimepipeline.FanOutChunkCommand {
+func seedFanOutReadbackClaim(t *testing.T, db *sql.DB, runIDs ...string) runtimepipeline.FanOutChunkCommand {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	runID, eventID, deliveryID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if len(runIDs) > 1 {
+		t.Fatal("fan-out claim fixture accepts one exact run")
+	}
+	if len(runIDs) == 1 {
+		runID = runIDs[0]
+	}
 	elementRef := runtimecontracts.FanOutElementRef{FlowPath: "root", Family: "handler_rule", SemanticPath: `handlers["items.ready"].rules[0]`}
 	evidence, digest := a2CollectionFixtureEvidence(t, elementRef, "payload.items", runtimecontracts.CatalogTypeReference{Type: "[jsonb]"})
 	producer, err := events.NewRootRoutingSource(uuid.NewString())

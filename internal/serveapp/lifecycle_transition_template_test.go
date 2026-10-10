@@ -316,7 +316,7 @@ func TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores(t *test
 			rt := startLifecycleTemplateRuntime(t, backend, root)
 			runID, sourceEvent, siblings := prepareLifecycleTemplateSiblings(t, rt)
 			completeLifecycleTemplateSiblings(t, rt, runID, siblings)
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, runID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			var count int
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, runID).Scan(&count); err != nil {
 				t.Fatal(err)
@@ -347,7 +347,7 @@ func TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStore
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startLifecycleTemplateRuntime(t, backend, canonicalrouting.CopyLifecycleNestedTemplates(t))
 			runID, sourceEvent, siblings := prepareLifecycleTemplateSiblings(t, rt)
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, runID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "template-pause"})
 			frontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.observed", "run_id": runID, "source_event_id": sourceEvent, "payload": map[string]any{"seed": true}, "idempotency_key": "template-frontier"})
 			before := snapshotForkReceiverApplication(t, rt)
