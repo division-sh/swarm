@@ -20,24 +20,6 @@ type flowInstanceDescriptorQueryer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-func normalizeFlowInstanceRouteRecord(route runtimebus.FlowInstanceRouteRecord) (runtimebus.FlowInstanceRouteRecord, error) {
-	route.Identity = route.Identity.Normalize()
-	if err := route.Identity.Validate(); err != nil {
-		return runtimebus.FlowInstanceRouteRecord{}, fmt.Errorf("run_id, scope_key, instance_id, and instance_path are required")
-	}
-	route.EventPattern = strings.TrimSpace(route.EventPattern)
-	route.SubscriberType = strings.TrimSpace(route.SubscriberType)
-	route.SubscriberID = strings.TrimSpace(route.SubscriberID)
-	route.SourceFlow = strings.TrimSpace(route.SourceFlow)
-	if route.SourceFlow == "" {
-		route.SourceFlow = route.Identity.Route.ScopeKey
-	}
-	if route.EventPattern == "" || route.SubscriberType == "" || route.SubscriberID == "" {
-		return runtimebus.FlowInstanceRouteRecord{}, fmt.Errorf("flow-instance route record requires event pattern and subscriber identity")
-	}
-	return route, nil
-}
-
 func (s *PipelinePostgresOwner) ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("postgres store is required for flow instance routes")
