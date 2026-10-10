@@ -60,6 +60,17 @@ func readRunForkTransferredJoinInventory(ctx context.Context, attempt *mutationp
 	if len(expected) == 0 {
 		return nil, nil
 	}
+	actual, err := loadRunForkTransferredJoinInventory(ctx, attempt, childRunID)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireRunForkTransferredJoinInventory(childRunID, expected, actual); err != nil {
+		return nil, err
+	}
+	return actual, nil
+}
+
+func loadRunForkTransferredJoinInventory(ctx context.Context, attempt *mutationprotocol.Attempt, childRunID string) ([]genericschedule.TransferredJoinOccurrence, error) {
 	var actual []genericschedule.TransferredJoinOccurrence
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, `SELECT accumulator FROM flow_instances WHERE run_id=$1`, childRunID)
@@ -84,23 +95,24 @@ func readRunForkTransferredJoinInventory(ctx context.Context, attempt *mutationp
 		}
 		return rows.Err()
 	})
-	if err != nil {
-		return nil, err
-	}
+	return actual, err
+}
+
+func requireRunForkTransferredJoinInventory(childRunID string, expected, actual []genericschedule.TransferredJoinOccurrence) error {
 	want, err := runForkTransferredJoinEvidence(childRunID, expected)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	got, err := runForkTransferredJoinEvidence(childRunID, actual)
 	if err != nil || len(want) != len(got) {
-		return nil, fmt.Errorf("inherited transferred join inventory differs from its exact projection: %w", err)
+		return fmt.Errorf("inherited transferred join inventory differs from its exact projection: %w", err)
 	}
 	for index := range want {
 		if want[index] != got[index] {
-			return nil, fmt.Errorf("inherited transferred join changed its retained publication evidence")
+			return fmt.Errorf("inherited transferred join changed its retained publication evidence")
 		}
 	}
-	return actual, nil
+	return nil
 }
 
 func runForkTransferredJoinAccumulator(raw map[string]any) ([]genericschedule.TransferredJoinOccurrence, error) {

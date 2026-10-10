@@ -117,11 +117,7 @@ func projectRunForkEntityExecutionState(entity runfork.RunForkEntityState, sourc
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		child, err := source.WithForkReference(ref)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		child, err = projectRunForkJoinPublication(entity, source, child)
+		child, err := projectRunForkReferencedJoin(entity, source, ref)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -136,6 +132,14 @@ func projectRunForkEntityExecutionState(entity runfork.RunForkEntityState, sourc
 		delete(stored, source.Key())
 	}
 	return bookkeeping, accumulator, correspondence, nil
+}
+
+func projectRunForkReferencedJoin(entity runfork.RunForkEntityState, source joinruntime.Activation, ref timeridentity.JoinRef) (joinruntime.Activation, error) {
+	child, err := source.WithForkReference(ref)
+	if err != nil {
+		return joinruntime.Activation{}, err
+	}
+	return projectRunForkJoinPublication(entity, source, child)
 }
 
 func projectRunForkJoinPublication(entity runfork.RunForkEntityState, source, child joinruntime.Activation) (joinruntime.Activation, error) {

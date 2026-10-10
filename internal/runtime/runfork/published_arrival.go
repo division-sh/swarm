@@ -68,21 +68,12 @@ func (p RunForkPlan) WithHistoricalArrivalPublications(revision int64, publicati
 		if event.RunID() != p.SourceRunID || !members[event.ID()] {
 			return RunForkPlan{}, fmt.Errorf("arrival publication is outside fixed source history")
 		}
-		if publication.transferred == nil {
-			if _, err := publication.activation.ValidatePublishedOccurrence(event); err != nil {
-				return RunForkPlan{}, err
-			}
-		} else {
-			if err := publication.transferred.ValidateEvent(event); err != nil {
-				return RunForkPlan{}, err
-			}
+		identity, err := publication.validatedIdentity()
+		if err != nil {
+			return RunForkPlan{}, err
 		}
 		if _, duplicate := p.historicalArrivals[event.ID()]; duplicate {
 			return RunForkPlan{}, fmt.Errorf("arrival history repeats a published event")
-		}
-		identity := publication.activation.ID
-		if publication.transferred != nil {
-			identity = publication.transferred.Publication.EventID
 		}
 		if _, duplicate := byActivation[identity]; duplicate {
 			return RunForkPlan{}, fmt.Errorf("arrival history repeats a published activation")
@@ -91,21 +82,8 @@ func (p RunForkPlan) WithHistoricalArrivalPublications(revision int64, publicati
 		p.historicalArrivals[event.ID()] = publication
 	}
 	for _, source := range p.TransferredJoins {
-		publication, found := byActivation[source.Publication.EventID]
-		if !found {
-			// A transferred obligation can be retained before its publication.
-			if members[source.Publication.EventID] {
-				return RunForkPlan{}, fmt.Errorf("arrival history omits a transferred publication")
-			}
-			continue
-		}
-		want, err := source.EvidenceDigest()
-		if err != nil || publication.transferred == nil {
-			return RunForkPlan{}, fmt.Errorf("arrival publication lacks its exact transferred owner")
-		}
-		got, err := publication.transferred.EvidenceDigest()
-		if err != nil || got != want {
-			return RunForkPlan{}, fmt.Errorf("arrival publication contradicts its transferred owner")
+		if err := requireTransferredArrivalPublication(source, byActivation, members); err != nil {
+			return RunForkPlan{}, err
 		}
 		delete(byActivation, source.Publication.EventID)
 	}
@@ -131,6 +109,33 @@ func (p RunForkPlan) WithHistoricalArrivalPublications(revision int64, publicati
 		return RunForkPlan{}, fmt.Errorf("arrival history contains an unowned accepted occurrence")
 	}
 	return p, nil
+}
+
+func (p PublishedArrival) validatedIdentity() (string, error) {
+	if p.transferred != nil {
+		return p.transferred.Publication.EventID, p.transferred.ValidateEvent(p.event)
+	}
+	_, err := p.activation.ValidatePublishedOccurrence(p.event)
+	return p.activation.ID, err
+}
+
+func requireTransferredArrivalPublication(source genericschedule.TransferredJoinOccurrence, publications map[string]PublishedArrival, members map[string]bool) error {
+	publication, found := publications[source.Publication.EventID]
+	if !found {
+		if members[source.Publication.EventID] {
+			return fmt.Errorf("arrival history omits a transferred publication")
+		}
+		return source.Validate()
+	}
+	want, err := source.EvidenceDigest()
+	if err != nil || publication.transferred == nil {
+		return fmt.Errorf("arrival publication lacks its exact transferred owner")
+	}
+	got, err := publication.transferred.EvidenceDigest()
+	if err != nil || got != want {
+		return fmt.Errorf("arrival publication contradicts its transferred owner")
+	}
+	return nil
 }
 
 func (p RunForkPlan) HistoricalArrivalPublication(eventID string) (PublishedArrival, bool) {
