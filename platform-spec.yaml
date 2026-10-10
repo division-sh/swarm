@@ -11296,6 +11296,11 @@ tool_model:
         grants no new work. Destructive device deletion additionally requires explicit current logout and cannot use
         an inherited transaction to bypass retirement. Ordinary disconnect, provider-side unlink, pairing failure,
         reset and source retirement do not authorize automatic local session deletion.
+      session_response_waiter_ownership: >
+        Response delivery, cancellation and disconnect cleanup arbitrate ownership of each exact SDK IQ or ACK
+        waiter. Once the reader claims a response, late cancellation cannot close its channel; cancellation of an
+        older waiter cannot remove a replacement under the same request identity. A canceled or lost-result caller
+        grants no automatic resend, new occurrence adoption or successful external-effect settlement.
       session_explicit_logout_drain: >
         An explicit logout reserves the original SDK occurrence against new sends before draining its already
         admitted work. This process-local reservation does not authorize destruction: the authenticated destructive
