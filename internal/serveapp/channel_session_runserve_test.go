@@ -29,7 +29,7 @@ func TestRunServeWhatsAppUnpairedDeclarationBothStores(t *testing.T) {
 				opts.ConfigPath = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, backend,
 					filepath.Join(t.TempDir(), "native-serve.sqlite"), channelOnboardingHostWorkspaceFields())
 			} else {
-				dsn, _, _ := testutil.StartPostgres(t)
+				dsn := testutil.StartEmptyPostgresDSN(t)
 				opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 			}
 			for range 2 {
