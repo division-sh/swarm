@@ -25,15 +25,19 @@ import (
 )
 
 func TestRunServeWhatsAppSignedPairingBothStores(t *testing.T) {
-	testRunServeWhatsAppSignedPairing(t, false, nil, false)
+	testRunServeWhatsAppSignedPairing(t, false, nil, false, false)
 }
 
 func TestRunServeWhatsAppQuotedCardDecisionBothStores(t *testing.T) {
-	testRunServeWhatsAppSignedPairing(t, true, nil, false)
+	testRunServeWhatsAppSignedPairing(t, true, nil, false, false)
 }
 
 func TestRunServeWhatsAppAuthoredCustomerReplyBothStores(t *testing.T) {
-	testRunServeWhatsAppSignedPairing(t, false, nil, true)
+	testRunServeWhatsAppSignedPairing(t, false, nil, true, false)
+}
+
+func TestRunServeWhatsAppAuthoredUncertainReplyRestartBothStores(t *testing.T) {
+	testRunServeWhatsAppSignedPairing(t, false, nil, true, true)
 }
 
 func TestRunServeWhatsAppPublicResetRetainsPairingBothStores(t *testing.T) {
@@ -42,11 +46,11 @@ func TestRunServeWhatsAppPublicResetRetainsPairingBothStores(t *testing.T) {
 		if clearSource {
 			name = "cleared_source"
 		}
-		t.Run(name, func(t *testing.T) { testRunServeWhatsAppSignedPairing(t, false, &clearSource, false) })
+		t.Run(name, func(t *testing.T) { testRunServeWhatsAppSignedPairing(t, false, &clearSource, false, false) })
 	}
 }
 
-func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool, resetSources *bool, authoredReply bool) {
+func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool, resetSources *bool, authoredReply, uncertainReply bool) {
 	t.Helper()
 	if resetSources != nil {
 		prior := buildSelectedAPICapabilities
@@ -214,7 +218,20 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool, rese
 				}
 			})
 			if authoredReply {
-				requireServedNativeAuthoredCustomerReply(t, endpoint, peer)
+				message := requireServedNativeAuthoredCustomerReply(t, endpoint, peer, uncertainReply)
+				if code := process.stop(); code != 0 {
+					t.Fatal("authored activity RunServe did not join before restart", code, process.outputString())
+				}
+				process = startServeRuntimeTestProcess(t, opts)
+				process.waitForReadyLine()
+				endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+				peer.awaitPostLogin()
+				requireServedNativeActivityResult(t, endpoint, message.ID, "15551234571@s.whatsapp.net", message.Body.GetConversation(), uncertainReply)
+				select {
+				case resent := <-peer.sent:
+					t.Fatal("restart resent a terminal or uncertain authored activity", resent.ID)
+				default:
+				}
 			}
 			if quotedRetirement {
 				peer.text("Please review the service", "SERVED_RETIRE_TRIGGER")

@@ -38,9 +38,14 @@ func TestWhatsAppAuthoredReplyFixtureUsesInstalledPrivateConnector(t *testing.T)
 	}
 }
 
-func requireServedNativeAuthoredCustomerReply(t *testing.T, endpoint string, peer *serveNativeProtocolPeer) {
+func requireServedNativeAuthoredCustomerReply(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, uncertain bool) servedNativeMessage {
 	t.Helper()
 	const text = "A genuine customer message for the authored activity"
+	if uncertain {
+		peer.mu.Lock()
+		peer.malformedAck = text
+		peer.mu.Unlock()
+	}
 	customer, customerLID := peer.customer(text, "SERVED_AUTHORED_CUSTOMER")
 	deadline := time.After(5 * time.Second)
 	for {
@@ -55,8 +60,8 @@ func requireServedNativeAuthoredCustomerReply(t *testing.T, endpoint string, pee
 			if sent.Body.GetConversation() != text || sent.ID == "" {
 				t.Fatal("authored activity changed the admitted customer input", sent.ID, sent.Body)
 			}
-			requireServedNativeActivityResult(t, endpoint, sent.ID, customer.String(), text)
-			return
+			requireServedNativeActivityResult(t, endpoint, sent.ID, customer.String(), text, uncertain)
+			return sent
 		case <-deadline:
 			logServedNativeActivityFailure(t, endpoint)
 			t.Fatal("enabled authored native activity did not produce a genuine encrypted customer reply")
@@ -64,7 +69,7 @@ func requireServedNativeAuthoredCustomerReply(t *testing.T, endpoint string, pee
 	}
 }
 
-func requireServedNativeActivityResult(t *testing.T, endpoint, messageID, destination, text string) {
+func requireServedNativeActivityResult(t *testing.T, endpoint, messageID, destination, text string, uncertain bool) {
 	t.Helper()
 	var runs struct {
 		Runs []operatorread.RunHeader `json:"runs"`
@@ -84,19 +89,35 @@ func requireServedNativeActivityResult(t *testing.T, endpoint, messageID, destin
 				input, _ := request.Payload["input"].(map[string]any)
 				if !strings.HasPrefix(target, contracts.PrivateChannelActivityPrefix) || request.Payload["plan_generation"] == nil ||
 					request.Payload["channel_activation_generation"] == nil || request.Payload["bundle_hash"] == "" ||
-					request.Payload["workflow_version"] == "" || input["destination"] != destination || input["text"] != text {
+					request.Payload["workflow_version"] == "" || input["destination"] != destination || input["text"] != text ||
+					strings.ReplaceAll(request.EventID, "-", "") != messageID || len(requests.Events) != 1 {
 					t.Fatal("served native request lost its immutable source/target/input", request.Payload)
+				}
+				outcome := request.Payload["success_event"]
+				if uncertain {
+					outcome = request.Payload["failure_event"]
 				}
 				var results operatorread.OperatorEventListResult
 				requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
-					"filter": map[string]any{"run_id": run.RunID, "event_name": request.Payload["success_event"]}, "limit": 10}, &results)
+					"filter": map[string]any{"run_id": run.RunID, "event_name": outcome}, "limit": 10}, &results)
 				for _, result := range results.Events {
 					if result.Payload["activity_id"] != request.Payload["activity_id"] {
 						continue
 					}
-					value, _ := result.Payload["result"].(map[string]any)
-					if len(value) != 1 || value["id"] != messageID || result.Payload["tool"] != "whatsapp.send_text" {
-						t.Fatal("authored result adopted channel receipt semantics or changed the observed acknowledgment", result.Payload)
+					if result.SourceEventID != request.Payload["source_event_id"] || len(results.Events) != 1 || result.Payload["tool"] != "whatsapp.send_text" {
+						t.Fatal("native activity outcome lost its original request", result)
+					}
+					if uncertain {
+						failure, _ := result.Payload["failure"].(map[string]any)
+						detail, _ := failure["detail"].(map[string]any)
+						if failure["class"] != "platform.outcome_uncertain" || detail["code"] != "native_activity_acknowledgment_invalid" {
+							t.Fatal("malformed provider acknowledgment became success or lost uncertainty", result.Payload)
+						}
+					} else {
+						value, _ := result.Payload["result"].(map[string]any)
+						if len(value) != 1 || value["id"] != messageID {
+							t.Fatal("authored result adopted channel receipt semantics or changed the observed acknowledgment", result.Payload)
+						}
 					}
 					return
 				}

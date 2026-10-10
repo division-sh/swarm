@@ -47,6 +47,7 @@ type serveNativeProtocolPeer struct {
 	from          types.JID
 	fromLID       types.JID
 	sent          chan servedNativeMessage
+	malformedAck  string
 }
 
 type servedNativeMessage struct {
@@ -437,5 +438,12 @@ func (p *serveNativeProtocolPeer) acceptMessage(wire *whatsappfixture.Transport,
 	default:
 		return fmt.Errorf("outbound plaintext evidence overflow")
 	}
-	return wire.Send(p.ctx, waBinary.Node{Tag: "ack", Attrs: waBinary.Attrs{"id": id, "class": "message", "t": time.Now().Unix()}})
+	p.mu.Lock()
+	malformed := message.GetConversation() == p.malformedAck && p.malformedAck != ""
+	p.mu.Unlock()
+	timestamp := time.Now().Unix()
+	if malformed {
+		timestamp = 0
+	}
+	return wire.Send(p.ctx, waBinary.Node{Tag: "ack", Attrs: waBinary.Attrs{"id": id, "class": "message", "t": timestamp}})
 }
