@@ -85,7 +85,11 @@ func TestNativePipelineColdJoinConstructorAndFanOutRecipesStaySourcePinned(t *te
 			t.Fatalf("changed native source admitted: %s", row.Function)
 		}
 		actual, err := canonicalFunction(selectedCausalObservationBody(t, row.File, nativePipelineRecipeReplacementName(t, row)))
-		want, afterErr := canonicalFunction(row.After)
+		current := row.After
+		if row.Successor != "" {
+			current = row.Successor
+		}
+		want, afterErr := canonicalFunction(current)
 		if err != nil || afterErr != nil || actual != want {
 			t.Fatalf("native repair differs from its reviewed snapshot: %s/%v/%v", row.Function, err, afterErr)
 		}

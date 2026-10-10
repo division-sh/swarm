@@ -127,7 +127,11 @@ func TestPipelineDeliveryCompiledCallerRecipesPreserveAssertions(t *testing.T) {
 			continue
 		}
 		actual, err := canonicalFunction(selectedCausalObservationBody(t, row.File, "VerifyNative"+strings.TrimPrefix(row.Function, "Test")+"ForTest"))
-		want, afterErr := canonicalFunction(row.After)
+		current := row.After
+		if row.Successor != "" {
+			current = row.Successor
+		}
+		want, afterErr := canonicalFunction(current)
 		if err != nil || afterErr != nil || actual != want {
 			t.Fatalf("native pipeline caller differs from its source-pinned repair: %s/%v/%v", row.Function, err, afterErr)
 		}

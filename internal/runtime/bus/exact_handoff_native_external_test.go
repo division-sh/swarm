@@ -67,7 +67,7 @@ func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool
 			storetest.RequireRunningRun(t, ctx, owner, runID, time.Now().UTC())
 			event = eventtest.RuntimeControl(eventID, "test.work", "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 		}
-		storetest.CommitNativeDeliveryPublication(t, ctx, owner, event, []events.DeliveryRoute{route}, authority, nil)
+		storetest.CommitNativeDeliveryPublication(t, ctx, owner, storetest.AdmitNativeDeliveryEvent(t, event), []events.DeliveryRoute{route}, authority, nil)
 		return storetest.LoadCanonicalEventRecord(t, ctx, owner, eventID)
 	}
 	fixture.Load = func(t *testing.T, eventID string) events.Event {

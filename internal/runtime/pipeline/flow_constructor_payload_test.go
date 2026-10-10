@@ -12,6 +12,30 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestFlowConstructorInitialStateUsesCompiledOwner(t *testing.T) {
+	for _, test := range []struct {
+		name, stages, flowID, want string
+		stateless                  bool
+	}{
+		{"stateless_child", "stages:\n  root: {}\n", "child", "pending", true},
+		{"declaration_order", "stages:\n  z_entry: {}\n  a_later: {}\n", ".", "z_entry", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := loadWorkflowTempSource(t, map[string]string{"schema.yaml": "name: constructor-initial\n" + test.stages, "child/schema.yaml": "name: stateless-child\n"})
+			constructor, err := CompileFlowConstructor(source, test.flowID, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := constructor.InitialStoredStage(); err != nil || got.ID() != test.want || got.IsStatelessPosture() != test.stateless {
+				t.Fatalf("compiled initial stage=%+v err=%v want=%q stateless=%t", got, err, test.want, test.stateless)
+			}
+		})
+	}
+	if state, err := (FlowConstructor{}).InitialStoredStage(); err == nil || state.ID() != "" {
+		t.Fatalf("zero constructor acquired initial-state evidence: %+v %v", state, err)
+	}
+}
+
 func TestFlowConstructorPayloadConsumesExactDeliveryProjection(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 		"schema.yaml":   "name: constructor-projection\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",

@@ -4200,7 +4200,9 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	}
 	if got := strings.TrimSpace(root.CurrentState); got != "done" {
 		rows, err := storetest.ReadGlobalEventChronology(context.Background(), pg)
-		if err != nil { t.Fatalf("read root-state event diagnostic: %v", err) }
+		if err != nil {
+			t.Fatalf("read root-state event diagnostic: %v", err)
+		}
 		dump := make([]string, 0)
 		for _, row := range rows {
 			dump = append(dump, row.Name+" entity="+row.EntityID+" flow="+row.FlowInstance)

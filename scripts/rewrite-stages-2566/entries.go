@@ -10,15 +10,16 @@ import (
 )
 
 type entryGolden struct {
-	File         string   `json:"file"`
-	Source       string   `json:"source"`
-	Flow         string   `json:"flow"`
-	Entry        string   `json:"entry"`
-	Order        []string `json:"order"`
-	Finals       []string `json:"finals"`
-	Function     string   `json:"function,omitempty"`
-	Literal      int      `json:"literal,omitempty"`
-	EmbeddedPath []string `json:"embedded_path,omitempty"`
+	File         string                `json:"file"`
+	Source       string                `json:"source"`
+	Flow         string                `json:"flow"`
+	Entry        string                `json:"entry"`
+	Order        []string              `json:"order"`
+	Finals       []string              `json:"finals"`
+	Function     string                `json:"function,omitempty"`
+	Literal      int                   `json:"literal,omitempty"`
+	EmbeddedPath []string              `json:"embedded_path,omitempty"`
+	Current      *currentEntrySelector `json:"current_selector,omitempty"`
 }
 
 // Expected entry comes from the pre-change review, never the current parser.
@@ -73,11 +74,32 @@ func prepareEntryGoldens(root, ledger string) error {
 	if len(entries) == 0 {
 		return fmt.Errorf("missing reviewed baseline entry decisions")
 	}
+	path := filepath.Join(root, "scripts/rewrite-stages-2566/entries.json")
+	previous, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read retained current selectors: %w", err)
+	}
+	var retained []entryGolden
+	if err := json.Unmarshal(previous, &retained); err != nil {
+		return err
+	}
+	entries, err = retainCurrentEntrySelectors(entries, retained)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.Current == nil {
+			continue
+		}
+		if _, err := readEntryLiteral(root, entry.Current.File, entry.Current.Function, entry.Current.Literal); err != nil {
+			return err
+		}
+	}
 	body, err = json.MarshalIndent(entries, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(root, "scripts/rewrite-stages-2566/entries.json"), append(body, '\n'), 0644); err != nil {
+	if err := os.WriteFile(path, append(body, '\n'), 0644); err != nil {
 		return err
 	}
 	fmt.Printf("%d baseline-reviewed source/flow entry goldens written\n", len(entries))

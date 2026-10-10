@@ -27,6 +27,16 @@ func (c FlowConstructor) Refusals() []string { return append([]string(nil), c.re
 
 func (c FlowConstructor) FlowID() string { return c.flowID }
 func (c FlowConstructor) Input() string  { return c.input }
+
+// InitialStoredStage retains the compiled distinction between an authored stage
+// and a stateless storage posture.
+func (constructor FlowConstructor) InitialStoredStage() (c.StoredStageRef, error) {
+	if !constructor.Eligible() {
+		return c.StoredStageRef{}, fmt.Errorf("initial stage requires an eligible compiled flow constructor")
+	}
+	return workflowInitialStoredStageForFlow(constructor.source, constructor.flowID)
+}
+
 func (c FlowConstructor) KeyField() string {
 	if c.analysis == nil {
 		return ""

@@ -124,7 +124,7 @@ func publishManagerNativeDelivery(t *testing.T, ctx context.Context, selected ma
 
 func publishManagerNativeDeliveryWithRoot(t *testing.T, ctx context.Context, selected managerNativeDeliveryOwner, event events.Event, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority, root *runtimebus.FlowInstanceActivationCommand) {
 	t.Helper()
-	storetest.CommitNativeDeliveryPublication(t, ctx, selected, event, routes, authority, root)
+	storetest.CommitNativeDeliveryPublication(t, ctx, selected, storetest.AdmitNativeDeliveryEvent(t, event), routes, authority, root)
 }
 
 func TestManagerDeliveryNativeOwnerRequiresExplicitPublicationBothStores(t *testing.T) {

@@ -203,8 +203,12 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 func TestPersistenceAuthorityDebtRunFixturePolicyDestinationMatchesSource(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	digest, err := debtCollectorDigest(root)
-	if err != nil || digest != debtRunFixtureCollectorTo {
-		t.Fatalf("reviewed policy destination=%s actual=%s error=%v", debtRunFixtureCollectorTo, digest, err)
+	if err != nil || digest != debtFixtureRoleCollectorTo {
+		t.Fatalf("reviewed role-preserving successor=%s actual=%s error=%v", debtFixtureRoleCollectorTo, digest, err)
+	}
+	prior := materializeDebtBase(t, root, "a6703f780ae50fc73808770456de6c3cc0c12d4b")
+	if digest, err := debtCollectorDigest(prior); err != nil || digest != debtRunFixtureCollectorTo {
+		t.Fatalf("immutable run-fixture policy destination changed: digest=%s error=%v", digest, err)
 	}
 	// This immutable master ancestor contains the identical nine predecessor
 	// calls; unlike the old pre-rebase branch commit it survives fresh CI clones.

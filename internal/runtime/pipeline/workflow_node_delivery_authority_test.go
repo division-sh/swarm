@@ -19,6 +19,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -270,14 +271,8 @@ func VerifyNativePipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutG
 }
 
 func VerifyNativePipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWithoutStampedClaimForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
-	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":          "name: connected-collision\nconnect:\n  - {event: deploy.done, from: producer, to: receiver, rename: deploy.accepted}\n  - {event: deploy.done, from: producer, to: receiver, rename: deploy.audited}\n",
-		"entities.yaml":        "test_entity: {}\n",
-		"producer/schema.yaml": "name: producer\npins:\n  outputs: [deploy.done]\n",
-		"producer/events.yaml": "deploy.done:\n",
-		"receiver/schema.yaml": "name: receiver\npins:\n  inputs: [deploy.accepted, deploy.audited]\n",
-		"receiver/nodes.yaml":  "receiver-node:\n  execution_type: system_node\n  subscribes_to: [deploy.accepted, deploy.audited]\n  event_handlers:\n    deploy.accepted: {}\n    deploy.audited: {}\n",
-	})
+	source := loadNamesOnlyPipelineSource(t, canonicalrouting.CopyPipelineConnectedDeliveryCollision(t))
+	bundle, _ := semanticview.Bundle(source)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := open(t, backend, semanticview.Wrap(bundle))
@@ -409,13 +404,8 @@ func VerifyNativeWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParityForTest(t
 	const retryBase = 30 * time.Second
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			bundle := loadWorkflowTempBundle(t, map[string]string{
-				"schema.yaml":   "name: delivery-retry\nstages:\n  queued: {}\n  done: {final: true}\n",
-				"entities.yaml": "test_entity: {}\n",
-				"events.yaml":   "source.evt:\nnode.completed:\n",
-				"policy.yaml":   "handler_retry_base_seconds: 30\n",
-				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      emit: node.completed\n",
-			})
+			source := loadNamesOnlyPipelineSource(t, canonicalrouting.CopyPipelineDeliveryRetry(t))
+			bundle, _ := semanticview.Bundle(source)
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 			module.workflowNodes = []WorkflowNode{{
 				Node: pipelineNode(t, ".", "node-a"), Subscriptions: []events.EventType{"source.evt"},
@@ -534,14 +524,9 @@ func VerifyNativeWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParityForTest(t
 
 func deliveryAuthoritySourceForTest(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	// Delivery authority exercises unconditional advancement, not rule selection.
-	// The old raw rule was non-authored and produced a NotApplicable selection fact.
-	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: delivery-authority\nstages:\n  queued: {}\n  done: {final: true}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "source.evt:\n",
-		"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      advances_to: done\n",
-	})
+	source := loadNamesOnlyPipelineSource(t, canonicalrouting.CopyPipelineDeliveryAuthority(t))
+	bundle, _ := semanticview.Bundle(source)
+	return bundle
 }
 
 func deliveryAuthorityLogCount(logs []RuntimeLogEntry) int {

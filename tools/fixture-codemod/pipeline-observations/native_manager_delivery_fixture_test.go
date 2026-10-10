@@ -185,7 +185,11 @@ func checkManagerDeliveryRecipe(t *testing.T, row recipe) {
 	t.Helper()
 	actualName := "ProveNative" + strings.TrimPrefix(row.Function, "Test")
 	actual, err := canonicalFunction(selectedCausalObservationBody(t, row.File, actualName))
-	expected, wantErr := canonicalFunction(row.After)
+	current := row.After
+	if row.Successor != "" {
+		current = row.Successor
+	}
+	expected, wantErr := canonicalFunction(current)
 	if err != nil || wantErr != nil || actual != expected {
 		t.Fatalf("manager caller source diverged: %s", row.Function)
 	}

@@ -81,8 +81,19 @@ unchanged fixture/gate beside selected and propagating its two consumers passes
 the production guard and six native both-store race roots, but the ratchet
 correctly rejects20 new fixture-consumption/construction occurrences there.
 That attempted placement and its spec statement are reverted completely.
-The remaining single production-import failure requires an explicit placement/
-ownership ruling before push; no guard, collector, role or baseline is relaxed.
+The single production-import failure is repaired under comment6094588197 by
+extracting the census's existing pure package-role predicate unchanged into
+internal/checkoutsource. The selected-import check consumes that same owner;
+fixture enumeration and every other boundary check remain active. Production
+imports/references to fixture authority still fail the census. The fixture and
+both external-test consumers remain in their original locations; no runtime
+recipe, construction authority, file exception or baseline permission changes.
+
+The focused manager recipe sweep also exposed one preexisting rebase pin
+mismatch: its current-source check compared only historical After, ignoring
+the already-reviewed Successor. It now consumes that exact current pin, using
+the same bounded rule as the served quiescence control. Historical mechanical
+rewrites, foreign-construction negatives and runtime assertions are unchanged.
 
 The newly incoming Q6 native byte proof supplies the existing admitted ordinary
 fixture fact to the now-explicit constructor. It decodes the actual typed
@@ -95,8 +106,16 @@ path or runtime admission change is added.
 Generated facade, describe, startup-predicate and node-ID artifacts regenerate
 unchanged. The finding registry remains fully classified. Actual downward-only
 census:14388 ->10698 debt findings,3690 removed,0 added;7754 confirmed raw debt
-sites and67 unresolved excluded occurrences remain. Collector identity stays
-dd36814075a0641f1085eb8fe8d74ae1cd61d8fba3b6047a8514b175ddbfa53e.
+sites and67 unresolved excluded occurrences remain. The shared role owner is
+included in the collector fingerprint and its existing analysis-cache input.
+The exact authorized metadata-only transition is:
+dd36814075a0641f1085eb8fe8d74ae1cd61d8fba3b6047a8514b175ddbfa53e ->
+3958381013996586ea697cd868abcacec29e9316706276f603f32523f74b5cb6.
+Only that extraction pair and the already-approved historical chain compose;
+foreign/reverse/unrotated transitions and changed site/count/uncertainty
+populations fail. Missing or malformed current role source fails closed;
+only exact immutable older policy fingerprints predate that file. The sidecar
+is regenerated normally; the historical TSV and all debt rows are unchanged.
 The intermediate exact-master seed is not removal proof or permission; only
 the fresh census and final read-only subset validation supply that evidence.
 
@@ -118,6 +137,7 @@ aggregate proof. No local tier, server2 tier or2599-specific check is run.
 | Q6 bounded producer and native header/history integration | reproduced and fixed | Producer bounds/bytes, full transient validation, cumulative-decoder refusal, preview/execution agreement, both manually resolved join roots; native200-transition byte/cut/reopen proof and typed-cell negative controls. |
 | Served Q6 carrier and restart integration | execution-proven through the same corrected path | Selected-carrier root under race on both stores; gate-outcome restart and shared mailbox observer consumer proofs, retaining exact current/fixed-cut assertions. |
 |2601 venue and census-child integration | execution-proven through the same corrected path |19 planner/timing/catalog roots: both-direction venue binding, all12 environment declarations, fail-closed unknown/ambiguous declarations, complete partition, required children and timing contracts. |
+| Selected fixture-role interpretation disagreement | reproduced and fixed | Exact unchanged selectedtest recipe accepted; same import in ordinary/private/near-miss paths rejected; production fixture import and typed authority reference both rejected; fixture reflection/BundleWriter checks and canonical enumeration remain active. |
 | Remaining raw getters, unconverted families, strict zero-debt/SQLite fork closure and M09 | split / escalated as separate class | Explicit incremental boundary:2542/2151 retain the remaining same-parent migration and final closure; M09 remains unclassified on2353, not an inherited/fixed claim. |
 
 Initial missing-constructor-argument and scalar-cell integration failures are
@@ -152,16 +172,52 @@ results and any unresolved disposition are appended below before push.
 | complexity/delta.json | Independently measured ac00d5269 versus336e69353:557 ->557 cognitive and259 ->259 cyclomatic30-level hotspots. |
 | unused.log / unused-repaired.log | Initial sweep RED on the orphan inspection opener; after deletion native default/race/issue2413 exits0. No Linux/Darwin union claim; final-source follow-up follows the bounded guard edits. |
 
-Placement ruling request: #2542 comment6094528166. No push or PR while the
-deterministic production-import guard remains red. No known failure is hidden
-behind the source-pinned family approvals, the ratchet pass or hosted full.
+Placement request6094528166 is superseded by bounded authorization6094588197.
+The prior boundary/attempted-relocation and recipe-pin failures remain honest
+red receipts; the repaired controls have separate passing receipts below.
+No known runtime failure is hidden behind family approvals or the ratchet pass.
+
+### Shared-Role Extraction Proof
+
+Receipts use ~/.cache/swarm-2542-role-* on vemew with the same Go1.26.8 and
+GOMAXPROCS3; all census runs are fresh, not analysis-cache substitutions.
+An ephemeral test driver calls debtLoadPersistenceAuthorityFindings and the
+selected-boundary collector on an explicit source root, sorts every finding
+key with multiplicity retained, and serializes authorityDebtSites with fixed
+metadata for exact byte comparison. It exports no runtime authority and is
+removed before each source census. The independently compiled pre-repair
+collector and repaired collector scan the SAME repaired source, not separate
+source snapshots. Separately, the old collector also scans immutable6a03e25a2.
+
+All three populations are byte-identical:54772 total finding occurrences and
+10698 debt occurrences; no source-induced additions or removals, no erased
+raw debt or uncertainty. Finding-key SHA256:
+bf79b6b3c525e59c5029dbb3a4ce2ac378610ab0ca72807dec79aa1c53d2faed.
+Canonical debt-row SHA256 (fixed comparison metadata):
+c0e7863b4e9bc3dee037d1dd621a250a5c15a9b786a5f5f85b7a592609d5c841.
+The committed TSV checksum remains:
+eb156b5f2a8f2c78a8bd211015ba2eb15d01b30470428ac3a74586b4e9fe992a.
+
+| New receipt | Result |
+| --- | --- |
+| role-pre.log / role-old-same-source.log / role-new-same-source.log | Three fresh independent collections PASS; full identity/multiplicity and debt-row comparisons byte-identical. |
+| role-boundary.jsonl / role-hostiles.jsonl | Shared-role repository/import parity, exact fixture acceptance, production/private/near-miss refusal, active fixture enumeration, other boundaries, exact transition and helper fingerprint hostile controls PASS. |
+| role-census-guards.jsonl |17 roots and301 children PASS, including full fresh read-only ratchet, all16 mandatory native-family children, exact classified registry, sidecar, historical transitions and retirement/restoration negatives. |
+| role-recipes-retirement.jsonl | RED on the manager historical/current pin mismatch; not relabeled. |
+| role-recipes-retirement-fixed.jsonl | All selected owner, finite recipe, historical/current, changed-binding and retired capability checks PASS after the exact Successor repair. |
+| role-planner-timing-catalog.jsonl | Census partition, complete root/catalog ownership, timing contracts and workload controls PASS; no duplicate local tier. |
+
+Six unchanged manager/handoff both-store race receipts carry from the execution
+table above. No runtime recipe or production authority behavior changed in the
+role repair. Native unused and signed-head complexity results are recorded in
+the PR proof audit; no local Linux/Darwin union result is claimed.
 
 ## Closure, Tracking And Architecture Feedback
 
-Whole-cohort closure is not yet claimed while the selected-fixture placement
-failure above remains unresolved. Otherwise the frozen capability retirements
-and their source-pinned receipts carry, with surviving distinct contracts named
-in their existing audits. Parent2542/2151 remains open;
+The frozen capability retirements and shared role interpretation are closed at
+their enumerated cohort boundary, with surviving distinct contracts named in
+their existing audits. This is an incremental landing, not parent failure-class
+elimination. Parent2542/2151 remains open;
 no generic getter deletion, strict zero-debt or final SQLite fork qualification
 is claimed. Remaining tail has construction/lifetime, pipeline/served helpers,
 live faults and final global-guard/integrated proof groups; exact effort cannot
@@ -181,3 +237,16 @@ and proof-selection changes, with exactly one CI-Tier declaration and no named
 unit duplication. Unaffected receipts carry. Approval is pinned only after
 reviewing the final pushed SHA; merge additionally requires exact-head full
 gate green and no unresolved required failures/conflicts.
+
+Hosted static checks at2d5ba0d7c exposed four formatting omissions in the frozen
+source (job114153991434, run38031757421). Both Go1.25 and Go1.26 report them;
+this is not toolchain variance. The required RED stays recorded. The follow-up
+changes only statement expansion, range/comment placement, one blank line and
+alignment in eventbus_publish_test.go, receipt_settlement_outcome_test.go,
+constructor_unit_fixture_test.go and native_tool_run_seed_test.go. No runtime
+behavior, workload, assertion, recipe snapshot or collector policy changes.
+The complete Go1.25 formatting scan is empty. Affected current/historical pins
+and the read-only census are checked separately before the replacement push;
+native unused and runtime race receipts carry because their semantics are
+unchanged. Complexity is remeasured at the new signed commit. This creates no
+additional PR, migration family or qualification tier.

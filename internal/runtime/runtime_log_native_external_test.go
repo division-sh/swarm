@@ -74,7 +74,7 @@ func nativeRuntimeLogFixture(t *testing.T, backend string, artifact *sourceartif
 			storetest.CommitSemanticEvent(t, ctx, selected, event)
 		},
 		PublishDelivery: func(ctx context.Context, event events.Event, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) events.Event {
-			storetest.CommitNativeDeliveryPublication(t, ctx, selected, event, routes, authority, nil)
+			storetest.CommitNativeDeliveryPublication(t, ctx, selected, storetest.AdmitNativeDeliveryEvent(t, event), routes, authority, nil)
 			return storetest.LoadCanonicalEventRecord(t, ctx, selected, event.ID())
 		},
 		Physical: func(ctx context.Context) runtimepkg.RuntimeLogPhysicalForTest {
