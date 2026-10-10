@@ -119,6 +119,7 @@ func scalarTemplateKeyedDescriptors(descriptors []runtimebus.ActiveFlowInstanceD
 
 type scalarTemplateInstanceParityStore interface {
 	componentFlowConstructionStore
+	storetest.RunFixtureStore
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.PreparedPublishEventReader
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
@@ -346,14 +347,14 @@ func TestParentLocalReturnPersistsExactNativeReceiverBothStores(t *testing.T) {
 			source := semanticview.Wrap(bundle)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
-			selected, db := newScalarTemplateInstanceParityStore(t, backend, ctx)
-			at := time.Now().UTC()
-			run := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: testSourceArtifactFact(source), Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)}
+			var selected scalarTemplateInstanceParityStore
 			if backend == "postgres" {
-				runlifecyclefixture.RequirePostgres(t, ctx, db, run)
+				selected = &postgresScalarTemplateInstanceStore{PostgresStore: storetest.StartPostgresRuntimeStore(t)}
 			} else {
-				runlifecyclefixture.RequireSQLite(t, ctx, db, run)
+				selected = &sqliteScalarTemplateInstanceStore{SQLiteRuntimeStore: storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)}
 			}
+			at := time.Now().UTC()
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
 			for _, flowID := range []string{".", "child", "child/grandchild"} {
 				identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, flowID, "", runID)
 				instance := runtimepipeline.WorkflowInstance{
