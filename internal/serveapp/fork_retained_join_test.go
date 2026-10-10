@@ -79,6 +79,12 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			waitForkReceiverSourceCompletion(t, rt, started.RunID)
 			current, sourceJoins := readRetainedRootJoins(t, rt, started.RunID)
+			// Closure is persisted before its scheduled outcome is published.
+			waitForServeStory(t, func() bool {
+				current, sourceJoins = readRetainedRootJoins(t, rt, started.RunID)
+				return len(sourceJoins) == 2 && sourceJoins[0].OutcomeFired && sourceJoins[1].OutcomeFired
+			})
+			waitForkReceiverSourceCompletion(t, rt, started.RunID)
 			if current.Attempt != 2 || current.ActivationID != first.ActivationID || len(sourceJoins) != 2 {
 				t.Fatalf("ordinary repeat lost retained joins: loop=%+v joins=%+v", current, sourceJoins)
 			}
@@ -148,7 +154,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			for attempt := 0; attempt < 2; attempt++ {
 				child, err := owner.Materialize(servedControlProofAuthorActivityContext(t, rt), request)
 				if err == nil || err.Error() != refusal {
-					t.Fatalf("completed ordinary join history must retain both exact policy blockers: result=%+v err=%v", child, err)
+					t.Fatalf("completed ordinary join history must retain its exact policy blocker: result=%+v err=%v", child, err)
 				}
 				if child.ForkRunID != "" || child.MaterializedEntityCount != 0 {
 					t.Fatalf("refused materialization returned child work: %+v", child)
