@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -21,14 +22,32 @@ func TestConnectSelectionPreservesJoinedLookupFailure(t *testing.T) {
 	rootObservation := constructionIndexObservation(t, source, busInternalTestRunID, root, "")
 	missing := &pipeline.WorkflowInstanceLookupMiss{RequestedKey: "account"}
 	independent := errors.New("independent index failure")
+	terminal := &pipeline.TerminalReceiverError{FlowID: "account", Stage: "completed"}
+	foreign := &pipeline.TerminalReceiverError{FlowID: "foreign", Stage: "completed"}
+	corrupt := &pipeline.FlowInstanceConstructionCorruption{RunID: busInternalTestRunID, FlowID: "account", Cause: terminal}
+	terminated := &pipeline.TerminatedReceiverError{FlowID: "account"}
 	for _, test := range []struct {
 		name   string
 		err    error
 		mapped bool
+		kept   []error
 	}{
-		{"isolated miss", missing, true},
-		{"wrapped miss", fmt.Errorf("lookup: %w", missing), true},
-		{"joined independent failure", errors.Join(missing, independent), false},
+		{"isolated miss", missing, true, nil},
+		{"wrapped miss", fmt.Errorf("lookup: %w", missing), true, nil},
+		{"joined independent failure", errors.Join(missing, independent), false, []error{missing, independent}},
+		{"isolated terminal", terminal, true, nil},
+		{"wrapped terminal", fmt.Errorf("lookup: %w", terminal), true, nil},
+		{"single terminal join", errors.Join(terminal), true, nil},
+		{"joined terminal failure", errors.Join(terminal, independent), false, []error{terminal, independent}},
+		{"foreign terminal", foreign, false, []error{foreign}},
+		{"corruption wrapping terminal", corrupt, false, []error{corrupt, terminal}},
+		{"isolated terminated", terminated, true, nil},
+		{"wrapped terminated", fmt.Errorf("lookup: %w", terminated), true, nil},
+		{"joined terminated failure", errors.Join(terminated, independent), false, []error{terminated, independent}},
+		{"unknown lifecycle failure", independent, false, []error{independent}},
+		{"canceled lookup", context.Canceled, false, []error{context.Canceled}},
+		{"joined terminal cancellation", errors.Join(terminal, context.Canceled), false, []error{terminal, context.Canceled}},
+		{"joined terminated cancellation", errors.Join(terminated, context.Canceled), false, []error{terminated, context.Canceled}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			selector := connectInstanceSelector{source: source, index: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{rootObservation}, selectionErr: test.err}}
@@ -41,8 +60,15 @@ func TestConnectSelectionPreservesJoinedLookupFailure(t *testing.T) {
 				if err != nil || materialized.Failure != pinrouting.ConnectFailureTargetUnresolved {
 					t.Fatalf("isolated miss: %+v %v", materialized, err)
 				}
-			} else if !errors.Is(err, independent) || !errors.Is(err, missing) || !materialized.Failure.Empty() {
-				t.Fatalf("independent error was mapped away: %+v %v", materialized, err)
+			} else {
+				if err == nil || !materialized.Failure.Empty() {
+					t.Fatalf("independent error was mapped away: %+v %v", materialized, err)
+				}
+				for _, kept := range test.kept {
+					if !errors.Is(err, kept) {
+						t.Fatalf("selection lost cause %v: %v", kept, err)
+					}
+				}
 			}
 		})
 	}
