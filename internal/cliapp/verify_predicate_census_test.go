@@ -34,6 +34,7 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/channelonboarding/retained_inspection.go", "A10,A27", "P08,P10,P21"},
 	{"internal/channelonboarding/teardown.go", "A10,A27", "P08,P10,P21"},
 	{"internal/serveapp/channel_onboarding.go", "A10,A27", "P08,P10,P21"},
+	{"internal/serveapp/channel_session_startup.go", "A10,A27", "P08,P10,P21,2577-native-startup"},
 	{"internal/cliapp/verify_retained_dependencies.go", "A11,A12,A13,A14,A22,A24,A25", "P09,P10,P11,P12,P15,P20,P21"},
 	{"internal/cliapp/serve_admission.go", "A02,A26", "P02,P16"},
 	{"internal/cliapp/serve_preflight_shared.go", "A02,A18,A26,A27", "P02,P15,P16"},

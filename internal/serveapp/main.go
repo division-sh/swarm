@@ -1331,19 +1331,10 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(5, "operator_channel", err)
 		return 1
 	}
-	sessionBootstrap, err := newServeSessionBootstrap(serveSessionBootstrapRuntimeSelector(runtimeContextManager), channelOnboardingStore, providerCredentialOwner, swarmDir.Path)
+	sessionBootstrap, channelProviderOwner, err := newServeChannelProviderOwners(runtimeContextManager, channelOnboardingStore, providerCredentialOwner, swarmDir.Path)
 	if err != nil {
-		var unsupported *operatorchannel.SessionProviderUnavailableError
-		if !errors.As(err, &unsupported) {
-			presenter.fail(5, "channel_onboarding", err)
-			return 1
-		}
-		// Unsupported hosts retain native refusal; webhook admission still
-		// consumes the original credential owner.
-	}
-	var channelProviderOwner operatorchannel.CredentialCurrentness = providerCredentialOwner
-	if sessionBootstrap != nil {
-		channelProviderOwner = sessionBootstrap
+		presenter.fail(5, "channel_onboarding", err)
+		return 1
 	}
 	operatorChannels, err := operatorchannel.NewService(stores.OperatorChannels(), proofStore, channelProviderOwner, channelInterfaces, runtimeInstanceID)
 	if err != nil {
@@ -1696,13 +1687,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return err
 		}
 		supervisor.resetContextsManaged = true
-		if err := reconcileRetiredConnectedChannelContexts(ctx, runtimeContextManager, channelOnboardingStore, channelDestructive); err != nil {
-			return err
-		}
-		if err := channelOnboarding.RestoreSessions(ctx); err != nil {
-			return fmt.Errorf("restore native ownership before retained channel proofs: %w", err)
-		}
-		_, recoveredBindings, err := operatorChannels.Bootstrap(ctx, bootStartedAt)
+		recoveredBindings, err := restoreServeChannelStartup(ctx, runtimeContextManager, channelOnboardingStore, channelDestructive, channelOnboarding, operatorChannels, bootStartedAt)
 		if err != nil {
 			return fmt.Errorf("recover retained channel proofs: %w", err)
 		}
