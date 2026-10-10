@@ -158,7 +158,7 @@ func killSelectedForkAtCheckpoint(t *testing.T, backend, dsn, cut string) select
 	defer writer.Close()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSelectedForkCrashProcessHelper$")
 	cmd.Env = append(os.Environ(), "SWARM_SELECTED_CRASH_BACKEND="+backend, "SWARM_SELECTED_CRASH_DSN="+dsn, "SWARM_SELECTED_CRASH_CUT="+cut)
-	if cut == "native_before_activation" || strings.HasPrefix(cut, "retained_timer_") {
+	if cut == "native_before_activation" || strings.HasPrefix(cut, "retained_timer_") || strings.HasPrefix(cut, "retained_join_") {
 		// The killed child cannot release its sealed source projections. Keep
 		// every private scratch root under the parent's exact cleanup ownership.
 		root := t.TempDir()
@@ -292,8 +292,11 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: filepath.Join(root, "tests/tier1-primitives/test-emits-multiple"), PlatformSpecPath: contracts.DefaultPlatformSpecFile(root)}
 	cut := os.Getenv("SWARM_SELECTED_CRASH_CUT")
 	timerCut := strings.HasPrefix(cut, "retained_timer_")
+	joinCut := strings.HasPrefix(cut, "retained_join_")
 	if timerCut {
 		loader.SourceRoot = issue642TimerCrashFixture(t, root)
+	} else if joinCut {
+		loader.SourceRoot = publishedJoinFixture(t)
 	}
 	options := SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}
 	if cut == "native_before_activation" {
@@ -319,6 +322,8 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	sourceRun, eventID := uuid.NewString(), uuid.NewString()
 	if timerCut {
 		eventID = seedIssue642TimerCrashSource(t, ctx, selected, owner, loaded, sourceRun)
+	} else if joinCut {
+		eventID, _ = seedPublishedJoinSource(t, ctx, selected, owner, loaded, sourceRun)
 	} else if cut == "native_before_activation" {
 		seedSelectedAgentExecutionSource(t, ctx, capabilityStore, loaded, sourceRun, eventID, time.Unix(1700002303, 0).UTC(), executionmode.Mock)
 	} else {
@@ -338,12 +343,12 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 		owner.ports.fork = selectedCrashMaterialization{SelectedContractForkLifecycle: owner.ports.fork, before: cut == "before_materialization", checkpoint: checkpoint}
 	} else if cut == "execution_issued" || cut == "execution_claimed" {
 		owner.ports.runtimeExecution = selectedCrashExecution{SelectedContractRuntimeExecutionLifecycle: owner.ports.runtimeExecution, issued: cut == "execution_issued", checkpoint: checkpoint}
-	} else if cut == "event_committed" || cut == "retained_event_committed" {
+	} else if cut == "event_committed" || cut == "retained_event_committed" || cut == "retained_join_event_committed" {
 		owner.ports.replay = selectedOperationPublicationProbe{SelectedContractReplayPersistence: owner.ports.replay, after: func(ctx context.Context) {
 			occurrence, _ := worklifetime.OccurrenceFromContext(ctx)
 			checkpoint(occurrence.(*worklifetime.SelectedForkOccurrence).Identity().RunID)
 		}}
-	} else if cut == "retained_after_activation" || cut == "retained_timer_after_activation" {
+	} else if cut == "retained_after_activation" || cut == "retained_timer_after_activation" || cut == "retained_join_after_activation" {
 		owner.ports.fork = selectedCrashActivated{SelectedContractForkLifecycle: owner.ports.fork, checkpoint: checkpoint}
 	} else if cut == "retained_timer_occurrence_committed" {
 		owner.ports.workflow = newIssue642TimerCrashPersistence(t, selected, checkpoint)
@@ -367,7 +372,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cut == "retained_event_committed" || cut == "retained_timer_occurrence_committed" {
+	if cut == "retained_event_committed" || cut == "retained_timer_occurrence_committed" || cut == "retained_join_event_committed" {
 		<-ctx.Done()
 		t.Fatal("retained execution stopped before its publication checkpoint")
 	}

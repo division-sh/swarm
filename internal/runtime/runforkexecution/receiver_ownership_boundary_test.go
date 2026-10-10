@@ -284,11 +284,17 @@ func receiverOwnershipCollect(pkg *types.Package, info *types.Info, fset *token.
 			case *ast.TypeSpec:
 				if obj := info.Defs[n.Name]; obj != nil && receiverOwnershipCarrier(obj.Type()) {
 					structure := obj.Type().Underlying().(*types.Struct)
-					// InputPublication carries the strict original event for bounded
-					// input revalidation, not a competing receiver/source identity.
+					// Publication carriers retain original facts. The route remains
+					// a typed delivery owned by the canonical fixed-cut projection.
 					allowed := map[string]bool{"SourceEventID": true, "EventName": true, "ExecutionMode": true, "Scope": true, "RoutingSource": true, "Payload": true}
 					for i := 0; i < structure.NumFields(); i++ {
 						if field := structure.Field(i); field.Name() == "InputPublication" && receiverOwnershipType(field.Type()) == "runtime/runfork.InputPublication" {
+							continue
+						}
+						if field := structure.Field(i); field.Name() == "PublishedArrival" && receiverOwnershipType(field.Type()) == "runtime/genericschedule.PublishedJoinContinuation" {
+							continue
+						}
+						if field := structure.Field(i); field.Name() == "PublishedArrivalRoute" && receiverOwnershipType(field.Type()) == "events.DeliveryRoute" {
 							continue
 						}
 						if !allowed[structure.Field(i).Name()] {
@@ -357,8 +363,8 @@ type EntityIdentity struct { EntityID, FlowInstance string }
 func ordinary(a, b string) EntityIdentity { return EntityIdentity{a, b} }
 `, []string{"ordinary/write:runtime/runfork.EntityIdentity.EntityID", "ordinary/write:runtime/runfork.EntityIdentity.FlowInstance"}},
 		{"carrier_cannot_grow_competing_fields", "runtime/runfork", "models.go", `package runfork
-type RunForkSelectedContractSourceEvent struct { SourceEventID string; EntityID string; FlowInstance string; AlternateOwner string; InputPublication string }
-`, []string{"competing_source_carrier_field:EntityID", "competing_source_carrier_field:FlowInstance", "competing_source_carrier_field:AlternateOwner", "competing_source_carrier_field:InputPublication"}},
+type RunForkSelectedContractSourceEvent struct { SourceEventID string; EntityID string; FlowInstance string; AlternateOwner string; InputPublication string; PublishedArrival string; PublishedArrivalRoute string }
+`, []string{"competing_source_carrier_field:EntityID", "competing_source_carrier_field:FlowInstance", "competing_source_carrier_field:AlternateOwner", "competing_source_carrier_field:InputPublication", "competing_source_carrier_field:PublishedArrival", "competing_source_carrier_field:PublishedArrivalRoute"}},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			fset := token.NewFileSet()

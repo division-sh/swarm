@@ -170,6 +170,16 @@ func runForkTimerHistoryMaterializable(plan runfork.RunForkPlan) (bool, error) {
 		return false, nil
 	}
 	for _, schedule := range plan.JoinSchedules {
+		if schedule.Status == genericschedule.StatusFired {
+			publication, found := plan.HistoricalArrivalPublication(schedule.CurrentEventID)
+			if !found {
+				return false, nil
+			}
+			if _, err := schedule.ValidatePublishedOccurrence(publication.Event()); err != nil {
+				return false, err
+			}
+			continue
+		}
 		if err := schedule.ValidateForkJoinRestorationSource(); err != nil {
 			return false, nil
 		}
@@ -197,7 +207,7 @@ func runForkTimerHistoryMaterializable(plan runfork.RunForkPlan) (bool, error) {
 	return facts == 1 && blockers == 1, nil
 }
 
-func runForkTimerAppliedCertificate(pending, forkRunID string, bornAt time.Time, projected []runForkWorkflowTimerProjection, arrival []genericschedule.Activation) (string, error) {
+func runForkTimerAppliedCertificate(pending, forkRunID string, bornAt time.Time, projected []runForkWorkflowTimerProjection, arrival []genericschedule.Activation, published []runfork.InputPublicationCoordinates) (string, error) {
 	type projection struct {
 		Record  pipeline.WorkflowTimerActivationPersistenceRecord
 		Removed bool
@@ -227,7 +237,8 @@ func runForkTimerAppliedCertificate(pending, forkRunID string, bornAt time.Time,
 		RemovedCount  int
 		Projections   []projection
 		Arrival       []runForkArrivalScheduleRecord
-	}{pending, forkRunID, bornAt, len(records) + len(arrivals), removed, records, arrivals})
+		Published     []runfork.InputPublicationCoordinates
+	}{pending, forkRunID, bornAt, len(records) + len(arrivals) + len(published), removed, records, arrivals, published})
 	if err != nil {
 		return "", err
 	}

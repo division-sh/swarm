@@ -63,17 +63,18 @@ func requireRunForkTimerHistory(ctx context.Context, attempt *mutationprotocol.A
 	if err != nil {
 		return admission, err
 	}
-	if len(projected) != len(inventory.ActiveTimerIDs) || len(arrivals) != len(inventory.ArrivalScheduleIDs) {
+	published := plan.HistoricalArrivalCoordinates()
+	if len(projected) != len(inventory.ActiveTimerIDs) || len(arrivals)+len(published) != len(inventory.ArrivalScheduleIDs) {
 		return admission, fmt.Errorf("timer history readback omitted an inherited family")
 	}
-	applied, err := runForkTimerAppliedCertificate(pending, childRunID, bornAt, projected, arrivals)
+	applied, err := runForkTimerAppliedCertificate(pending, childRunID, bornAt, projected, arrivals, published)
 	if err != nil {
 		return admission, err
 	}
 	if err := attempt.RequireExistingSQLFrame(ctx); err != nil {
 		return admission, err
 	}
-	return dischargeMaterializedRunForkTimerAdmission(admission, pending, applied, len(projected)+len(arrivals))
+	return dischargeMaterializedRunForkTimerAdmission(admission, pending, applied, len(projected)+len(arrivals)+len(published))
 }
 
 func hasRunForkTimerHistory(plan runfork.RunForkPlan, admission runfork.RunForkReplayResumeAdmission) bool {
