@@ -1993,47 +1993,47 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 	if err != nil {
 		t.Fatalf("load fixture bundle: %v", err)
 	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	source := semanticview.Wrap(bundle)
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.PublishPersistedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("worker", "w-001"))}); err != nil {
-		t.Fatalf("PublishPersistedFlowInstanceRouteFixture: %v", err)
+	installConnectionSourceConstruction(t, eb, source, ".")
+	instance := StoredFlowInstanceIdentityFixture(source, "worker", "w-001", busInternalTestRunID, eventtest.UUID("worker/w-001"))
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, instance, "w-001"))
+	store.installConstructionReceipt(testRunScopedFlowRoute(instance.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: instance, InstanceKey: "w-001"})
+	bound, err := eb.RouteTable().PubsubReceiverDefinitions(busInternalTestRunID, instance, []string{instance.InstancePath + "/work.assign"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	materialized := eb.RouteTable().MaterializedRoutes(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("worker", "w-001")))
 	taskHandler := testFlowNode(t, "worker", "task-handler")
-	hasRoute := func(eventPattern string) bool {
-		for _, route := range materialized {
-			if route.EventPattern == eventPattern && route.SubscriberID == taskHandler.Key() {
-				return true
-			}
-		}
-		return false
+	if len(bound) != 1 || bound[0].Recipient.ID() != taskHandler.Key() || bound[0].Path != instance.InstancePath || bound[0].LocalizedEvent != "work.assign" || bound[0].MatchPattern != instance.InstancePath+"/work.assign" {
+		t.Fatalf("compiled receivers = %#v, want the exact task-handler local subscription", bound)
 	}
-	if !hasRoute("worker/w-001/work.assign") {
-		t.Fatalf("materialized routes = %#v, want task-handler instance-scoped work.assign route; node entries=%v", materialized, semanticview.Wrap(bundle).ExecutableNodeRecords())
-	}
-	if subscriberListContainsRouteSource(eb.RouteTable().ResolveForRun(busInternalTestRunID, "worker/w-001/work.assign"), "task-handler", "worker/w-001", "receiver_carrier") {
-		t.Fatalf("Resolve(worker/w-001/work.assign) = %#v, want no receiver_carrier route for unrelated target-route fixture", eb.RouteTable().ResolveForRun(busInternalTestRunID, "worker/w-001/work.assign"))
-	}
-	if resolved := eb.RouteTable().ResolveForRun(busInternalTestRunID, "worker/w-001/work.assign"); subscriberListContainsRouteSource(resolved, "task-handler", "worker/w-001", "receiver_carrier") {
-		t.Fatalf("Resolve(worker/w-001/work.assign) = %#v, want no receiver_carrier route for unrelated target-route fixture", resolved)
+	if subscriberListContainsRouteSource(bound, "task-handler", instance.InstancePath, "receiver_carrier") {
+		t.Fatalf("compiled receivers = %#v, want no receiver_carrier route", bound)
 	}
 	target := events.RouteIdentity{
 		FlowID:       "worker",
 		FlowInstance: "worker/w-001",
 		EntityID:     runtimeflowidentity.EntityID(eventtest.UUID("worker/w-001")),
 	}
-	evt := eventtest.RuntimeControl(
+	routingSource, err := events.NewConcreteTemplateInstanceRoutingSource(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 		uuid.NewString(),
-		events.EventType("worker/work.assign"),
+		events.EventType(instance.InstancePath+"/work.assign"),
 		"",
 		"",
 		[]byte(`{"task_label":"route-me"}`),
 		0,
 		busInternalTestRunID,
-		"",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target),
+		routingSource,
 		time.Now().UTC(),
 	)
 

@@ -2439,6 +2439,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:          source,
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
+		Durable:                 DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2463,8 +2464,12 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 		t.Fatalf("preview target = %#v, want deterministic consumer flow instance", previewTarget)
 	}
 	previewIdentity := testRunScopedFlowRouteForRun(evt.RunID(), runtimeflowidentity.StoredRoute("consumer", runtimeflowidentity.LogicalInstanceID(previewTarget.FlowInstance), previewTarget.FlowInstance))
-	if routes := eb.RouteTable().MaterializedRoutes(previewIdentity); len(routes) != 0 {
-		t.Fatalf("preview route table state leaked after preflight: %#v", routes)
+	lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, eb.sourceArtifactFact, previewIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed, found, err := store.LookupFlowInstance(constructionIndexContext(t, source), lookup); err != nil || found || observed.Valid() {
+		t.Fatalf("preview published a native receiver: observed=%+v found=%v err=%v", observed, found, err)
 	}
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
@@ -3513,6 +3518,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionDoesNotReuseUnr
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:          source,
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
+		Durable:                 DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -3536,8 +3542,9 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionDoesNotReuseUnr
 	if got := len(store.flowInstances); got != 1 {
 		t.Fatalf("flow instance descriptors = %d, want descriptor visible from failed activation", got)
 	}
-	if routes := eb.RouteTable().MaterializedRoutes(testRunScopedFlowRoute(store.activations[0].Instance.Route())); len(routes) != 0 {
-		t.Fatalf("materialized routes after failed activation = %#v, want none", routes)
+	failed := store.activations[0].Instance
+	if evidence, err := store.LoadFlowConstructionPublication(context.Background(), testRunScopedFlowRoute(failed.Route()), failed.EntityID); err != nil || evidence.Identity != failed || evidence.InstanceKey != "acct-partial" || evidence.CreatingInput.EventID != eventID || evidence.CreatingInput.Input != "account.ready" {
+		t.Fatalf("attachment failure lost the exact acknowledged construction: evidence=%+v err=%v", evidence, err)
 	}
 	if routes := store.routes[eventID]; len(routes) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want the durable route to survive process-local activation failure", routes)

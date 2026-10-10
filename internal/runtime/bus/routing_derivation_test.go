@@ -828,22 +828,17 @@ func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryP
 }
 
 func TestRouteTableFlowInstanceRouteKeepsAgentNameStableAcrossActivationConfig(t *testing.T) {
-	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(routeMaterializationConfigVarBundle(t)))
+	source := semanticview.Wrap(routeMaterializationConfigVarBundle(t))
+	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	firstRoute := runtimeflowidentity.DeriveRoute("operating", "11111111-1111-4111-8111-111111111111")
-	identity := testRunScopedFlowRoute(firstRoute)
-	if err := rt.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: identity,
-		ActivationVariables: map[string]string{
-			"vertical_id": "11111111-1111-4111-8111-111111111111",
-		},
-	}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	first := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "operating", firstRoute.InstanceID, eventBusTestRunID)
+	got, err := rt.PubsubReceiverDefinitions(eventBusTestRunID, first, []string{first.InstancePath + "/opco.product_initialization_requested"})
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	got := rt.ResolveForRun(eventBusTestRunID, "operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested")
 	if len(got) != 1 {
 		t.Fatalf("resolved subscribers = %#v, want one ceo route", got)
 	}
@@ -854,24 +849,18 @@ func TestRouteTableFlowInstanceRouteKeepsAgentNameStableAcrossActivationConfig(t
 		t.Fatalf("resolved subscriber identity = %#v, want exact first instance", got[0].AgentPlan)
 	}
 	siblingRoute := runtimeflowidentity.DeriveRoute("operating", "22222222-2222-4222-8222-222222222222")
-	siblingIdentity := testRunScopedFlowRoute(siblingRoute)
-	if err := rt.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: siblingIdentity,
-		ActivationVariables: map[string]string{
-			"vertical_id": "11111111-1111-4111-8111-111111111111",
-		},
-	}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute sibling: %v", err)
+	second := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "operating", siblingRoute.InstanceID, eventBusTestRunID)
+	sibling, err := rt.PubsubReceiverDefinitions(eventBusTestRunID, second, []string{second.InstancePath + "/opco.product_initialization_requested"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	sibling := rt.ResolveForRun(eventBusTestRunID, "operating/22222222-2222-4222-8222-222222222222/opco.product_initialization_requested")
 	if len(sibling) != 1 || sibling[0].Recipient.LocalID() != got[0].Recipient.LocalID() ||
 		sibling[0].AgentPlan.FlowInstance() != siblingRoute.InstancePath ||
 		sibling[0].AgentPlan == got[0].AgentPlan {
 		t.Fatalf("resolved sibling subscriber = %#v, want same slug with distinct concrete identity from %#v", sibling, got[0])
 	}
-	routes := rt.MaterializedRoutes(identity)
-	if len(routes) != 1 || routes[0].SubscriberID != "ceo" {
-		t.Fatalf("materialized routes = %#v, want stable declared ceo subscriber", routes)
+	if len(rt.ConnectDeclarationDefinitions("operating")) != 0 {
+		t.Fatal("local subscription acquired an undeclared connection")
 	}
 }
 
@@ -1469,7 +1458,7 @@ func TestDeriveRouteTable_NestedPackageConnectLocalizesWithinParentFlow(t *testi
 	}
 }
 
-func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *testing.T) {
+func TestDeriveRouteTable_NestedTemplateInstancesBindSemanticScopeKey(t *testing.T) {
 	grandchild := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child/grandchild"},
 		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
@@ -1514,27 +1503,25 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatal(err)
 	}
-	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	source := semanticview.Wrap(bundle)
+	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	firstRoute := runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1")
-	identity := testRunScopedFlowRoute(firstRoute)
-	if err := rt.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
-		t.Fatalf("AddFlowInstance: %v", err)
+	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "child/grandchild", "inst-1", eventBusTestRunID)
+	routes, err := rt.PubsubReceiverDefinitions(eventBusTestRunID, instance, []string{instance.InstancePath + "/micro.started"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	routes := rt.MaterializedRoutes(identity)
 	if len(routes) != 1 {
-		t.Fatalf("MaterializedRoutes = %#v, want 1 route", routes)
+		t.Fatalf("compiled receiver definitions = %#v, want 1 route", routes)
 	}
-	if routes[0].Identity.Route.ScopeKey != "child/grandchild" {
-		t.Fatalf("ScopeKey = %q, want child/grandchild", routes[0].Identity.Route.ScopeKey)
+	if instance.ScopeKey != "child/grandchild" || instance.InstanceID != "inst-1" {
+		t.Fatalf("compiled receiver identity = %#v, want exact nested scope/key", instance)
 	}
-	if routes[0].Identity.Route.InstanceID != "inst-1" {
-		t.Fatalf("InstanceID = %q, want inst-1", routes[0].Identity.Route.InstanceID)
-	}
-	if routes[0].SourceFlow != "child/grandchild" {
-		t.Fatalf("SourceFlow = %q, want child/grandchild", routes[0].SourceFlow)
+	node, isNode := routes[0].Recipient.Node()
+	if !isNode || routes[0].Path != instance.InstancePath || node.FlowPath() != "child/grandchild" || routes[0].LocalizedEvent != "micro.started" {
+		t.Fatalf("compiled subscriber = %#v, want exact nested handler/local event", routes[0])
 	}
 
 }

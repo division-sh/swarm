@@ -53,15 +53,6 @@ func TestRouteIncrementalResolutionMatchesFullRebuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("removal")
-	staged, err := runtimeflowidentity.NewRunScopedFlowInstance(busInternalTestRunID, runtimeflowidentity.DeriveRoute("workers", "gamma"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if added, err := rt.addFlowInstanceRouteForTopology(rt.ConstructedRouteRequestFixture(FlowInstanceRouteMaterializationRequest{Identity: staged}), nil); err != nil || !added {
-		t.Fatalf("staged addition: added=%t err=%v", added, err)
-	}
-	rt.rebuildStagedFlowInstanceRoutes()
-	check("staged")
 	add(busInternalTestRunID, "delta")
 }
 

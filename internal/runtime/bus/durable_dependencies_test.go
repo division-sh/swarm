@@ -31,6 +31,12 @@ func TestEventBusHasNoPersistedTopologyOwner(t *testing.T) {
 	}
 }
 
+func TestCompiledRoutesCannotExportMaterializedMembership(t *testing.T) {
+	if _, present := reflect.TypeOf((*RouteTable)(nil)).MethodByName("MaterializedRoutes"); present {
+		t.Error("compiled source table still exports retired materialized membership")
+	}
+}
+
 type unexpectedDurableTestRoles struct {
 	runtimerunlifecycle.OperationOwner
 }
