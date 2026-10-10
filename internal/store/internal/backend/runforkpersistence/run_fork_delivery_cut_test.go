@@ -104,7 +104,7 @@ func TestRunForkReplayCutRetainsExactPublicationAndReceiver(t *testing.T) {
 }
 
 func TestRunForkReplayCutRejectsForeignDuplicateAndUnversionedFacts(t *testing.T) {
-	for _, fault := range []string{"nil", "run", "revision", "event_id", "event_run", "event_first", "event_before_first", "event_after_cut", "event_duplicate", "delivery_id", "delivery_run", "delivery_first", "delivery_before_first", "delivery_after_cut", "delivery_duplicate"} {
+	for _, fault := range []string{"nil", "run", "revision", "event_id", "event_run", "event_first", "event_before_first", "event_after_cut", "event_duplicate", "delivery_id", "delivery_event", "delivery_run", "delivery_first", "delivery_before_first", "delivery_after_cut", "delivery_duplicate"} {
 		t.Run(fault, func(t *testing.T) {
 			snapshot, _, _ := replayCutFixture(t)
 			switch fault {
@@ -128,6 +128,8 @@ func TestRunForkReplayCutRejectsForeignDuplicateAndUnversionedFacts(t *testing.T
 				snapshot.Events = append(snapshot.Events, snapshot.Events[0])
 			case "delivery_id":
 				snapshot.Deliveries[0].Snapshot.DeliveryID = ""
+			case "delivery_event":
+				snapshot.Deliveries[0].Snapshot.EventID = uuid.NewString()
 			case "delivery_run":
 				snapshot.Deliveries[0].Snapshot.RunID = uuid.NewString()
 			case "delivery_first":

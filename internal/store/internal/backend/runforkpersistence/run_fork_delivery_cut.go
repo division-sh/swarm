@@ -37,6 +37,9 @@ func newRunForkReplayCut(snapshot *runForkRevisionSnapshot) (runForkReplayCut, e
 		if err := cut.requireFact(row.Snapshot.RunID, row.Snapshot.DeliveryID, row.runForkRevisionedFact); err != nil {
 			return runForkReplayCut{}, err
 		}
+		if _, found := cut.events[row.Snapshot.EventID]; !found {
+			return runForkReplayCut{}, fmt.Errorf("fork replay delivery %s has no publication at the cut", row.Snapshot.DeliveryID)
+		}
 		if _, duplicate := cut.deliveries[row.Snapshot.DeliveryID]; duplicate {
 			return runForkReplayCut{}, fmt.Errorf("fork replay delivery %s is duplicated at the cut", row.Snapshot.DeliveryID)
 		}
