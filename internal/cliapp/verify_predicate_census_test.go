@@ -35,7 +35,7 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/channelonboarding/admission_current.go", "A10,A27", "2577-native-confirmed-retention,2577-native-held-target,P08,P10,P21"},
 	{"internal/channelonboarding/compiler.go", "A10,A27", "2577-native-publication,P08,P10,P21"},
 	{"internal/channelonboarding/publication.go", "A10,A27", "2577-native-publication,P08,P10,P21"},
-	{"internal/runtime/channel_activation_admission.go", "A10,A27", "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21"},
+	{"internal/runtime/channel_activation_admission.go", "A10,A27", "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21"},
 	{"internal/runtime/channelactivation/owner.go", "A10,A27", "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21"},
 	{"internal/channelonboarding/teardown.go", "A10,A27", "P08,P10,P21"},
 	{"internal/serveapp/channel_onboarding.go", "A10,A27", "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication"},

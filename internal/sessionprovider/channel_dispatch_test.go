@@ -61,7 +61,13 @@ func TestWhatsAppOwnedChannelDispatchRefusesReconstructedAndChangedSelectionBoth
 					if _, err := row.executor.DeliverChannelConfirmation(row.ctx, row.operationID, row.operation, row.toolID, row.tool, input, nil); err == nil {
 						t.Fatal("unowned dispatch succeeded")
 					}
+					if _, err := row.executor.ExecuteChannelActivity(row.ctx, row.operationID, row.operation, row.toolID, row.tool, input); err == nil {
+						t.Fatal("unowned private activity dispatch succeeded")
+					}
 				})
+			}
+			if _, err := executor.ExecuteChannelActivity(context.Background(), f.operation.OperationID, "deliver", toolID, tool, input); err == nil {
+				t.Fatal("original facade executed an activity without its selected journal launch")
 			}
 			if _, found, err := f.selected.(runtimeeffects.OutcomeStore).GetExternalEffectOutcome(ctx, f.operation.ConfirmationOperationID); err != nil || found {
 				t.Fatalf("refused dispatch mutated journal: found=%t %v", found, err)

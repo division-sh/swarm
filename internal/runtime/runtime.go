@@ -1258,6 +1258,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			ScenarioExecutionProfiles: runtimeDeps.ScenarioExecutionProfiles,
 			EffectiveSourceIdentity:   boot.EffectiveSourceIdentity,
 			ChannelActivations:        rt.ChannelActivations,
+			NativeChannelExecution:    rt.nativeChannelExecution,
 			SourceArtifactFact:        opts.SourceArtifactFact,
 			DecisionCardCadence: decisioncard.CadencePolicy{
 				FirstReminderDelay: rt.Config.Runtime.DecisionCardFirstReminder,

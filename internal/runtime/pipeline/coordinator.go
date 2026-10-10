@@ -38,6 +38,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
+	sessionexecution "github.com/division-sh/swarm/internal/sessionprovider/execution"
 	"github.com/google/uuid"
 )
 
@@ -81,6 +82,7 @@ type PipelineCoordinator struct {
 	scenarioProfiles       ScenarioExecutionProfileReader
 	effectiveSource        scenarioexecution.EffectiveSourceIdentity
 	channelActivations     *runtimechannelactivation.Owner
+	nativeChannelExecution func(context.Context, channelonboarding.CompiledActivation) (sessionexecution.Channel, error)
 	sourceArtifactFact     runtimecorrelation.SourceArtifactFact
 	runBundleAvailability  RunBundleAvailabilityReader
 	decisionCardCadence    decisioncard.CadencePolicy
@@ -126,6 +128,7 @@ type PipelineCoordinatorOptions struct {
 	ScenarioExecutionProfiles        ScenarioExecutionProfileReader
 	EffectiveSourceIdentity          scenarioexecution.EffectiveSourceIdentity
 	ChannelActivations               *runtimechannelactivation.Owner
+	NativeChannelExecution           func(context.Context, channelonboarding.CompiledActivation) (sessionexecution.Channel, error)
 	SourceArtifactFact               runtimecorrelation.SourceArtifactFact
 	RunBundleAvailability            RunBundleAvailabilityReader
 	DecisionCardCadence              decisioncard.CadencePolicy
@@ -148,6 +151,8 @@ type channelActivityTargetValue struct {
 	admissions     []channelonboarding.CredentialAdmission
 	lease          *runtimechannelactivation.Lease
 	projection     *runtimecredentials.SecretBindingProjection
+	activation     channelonboarding.CompiledActivation
+	operation      string
 }
 
 func NewChannelActivityTarget(tool runtimecontracts.ToolSchemaEntry, generation plangeneration.Generation) (ChannelActivityTarget, error) {
@@ -222,6 +227,8 @@ func (pc *PipelineCoordinator) channelActivityTarget(ctx context.Context, toolID
 	for _, activation := range lease.Activations() {
 		if activation.Plan.BindingID() == operation.Binding.BindingID() {
 			target.value.admissions = activation.CredentialAdmissions
+			target.value.activation = activation
+			target.value.operation = operation.Name
 			break
 		}
 	}
@@ -367,6 +374,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		scenarioProfiles:                 opts.ScenarioExecutionProfiles,
 		effectiveSource:                  opts.EffectiveSourceIdentity,
 		channelActivations:               opts.ChannelActivations,
+		nativeChannelExecution:           opts.NativeChannelExecution,
 		sourceArtifactFact:               opts.SourceArtifactFact,
 		runBundleAvailability:            opts.RunBundleAvailability,
 		decisionCardCadence:              opts.DecisionCardCadence.Normalize(),

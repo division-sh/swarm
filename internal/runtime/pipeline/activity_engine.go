@@ -514,6 +514,9 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 		stored, committed, err := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
 		return d.publishCommittedActivityAttempt(ctx, intent, stored, committed, err, "complete_activity_attempt")
 	}
+	if _, native := tool.InProcess(); native {
+		return d.executeClaimedNativeActivity(ctx, intent, tool, started, success, failure)
+	}
 	client := d.client
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}

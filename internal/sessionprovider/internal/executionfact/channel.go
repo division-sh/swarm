@@ -11,6 +11,14 @@ import (
 
 type channelOwner interface {
 	ExecuteChannelWrite(context.Context, string, string, runtimecontracts.ToolSchemaEntry, map[string]any, map[string]string, runtimeeffects.AuthorityKind) (registration.DeliveryResult, error)
+	ExecuteChannelActivity(context.Context, string, string, runtimecontracts.ToolSchemaEntry, map[string]any) (any, error)
+}
+
+func (c Channel) ExecuteChannelActivity(ctx context.Context, operationID, operation, toolID string, tool runtimecontracts.ToolSchemaEntry, input map[string]any) (any, error) {
+	if ctx == nil || ctx.Err() != nil || c.owner == nil || c.operationID == "" || c.operationID != operationID {
+		return nil, fmt.Errorf("native activity requires its exact owned connection operation")
+	}
+	return c.owner.ExecuteChannelActivity(ctx, operation, toolID, tool, input)
 }
 
 // Channel carries a private session owner's execution, never a caller's SDK or callback.

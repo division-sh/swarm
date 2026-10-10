@@ -443,6 +443,23 @@ func (c *RuntimeConnection) ExecuteChannelWrite(ctx context.Context, operation, 
 	return (sessionChannelExecutor{owner: owner, plan: c.plan}).ExecuteChannelWrite(work.Context(), operation, toolID, tool, input, lineage, kind)
 }
 
+func (c *RuntimeConnection) ExecuteChannelActivity(ctx context.Context, operation, toolID string, tool contracts.ToolSchemaEntry, input map[string]any) (result any, err error) {
+	work, err := c.begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, work.Done()) }()
+	op, err := c.currentOperation(work.Context())
+	if err != nil {
+		return nil, err
+	}
+	owner, err := newSessionAuthorityOwner(c.state, c.store, op, c.credentials)
+	if err != nil {
+		return nil, err
+	}
+	return (sessionChannelExecutor{owner: owner, plan: c.plan}).ExecuteChannelActivity(work.Context(), operation, toolID, tool, input)
+}
+
 func (c *RuntimeConnection) joinRetirement() {
 	select {
 	case <-c.ctx.Done():

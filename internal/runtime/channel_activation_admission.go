@@ -8,10 +8,33 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
+	sessionexecution "github.com/division-sh/swarm/internal/sessionprovider/execution"
 )
 
 type channelSessionAdmission struct {
 	owner operatorchannel.SessionAdmissionOwner
+}
+
+func (rt *Runtime) nativeChannelExecution(ctx context.Context, activation channelonboarding.CompiledActivation) (sessionexecution.Channel, error) {
+	var absent sessionexecution.Channel
+	if err := rt.validateLearnedChannelPublication(ctx, activation); err != nil {
+		return absent, err
+	}
+	binding := rt.channelSessions.Load()
+	if binding == nil {
+		return absent, &operatorchannel.SessionProviderUnavailableError{Provider: activation.SessionAccount.Provider}
+	}
+	owner, ok := binding.owner.(interface {
+		ChannelExecution(context.Context, channelonboarding.Operation) (sessionexecution.Channel, error)
+	})
+	if !ok {
+		return absent, &operatorchannel.SessionProviderUnavailableError{Provider: activation.SessionAccount.Provider}
+	}
+	op, err := rt.Options.ChannelOnboardingStore.GetChannelOnboarding(ctx, activation.OnboardingOperationID)
+	if err != nil {
+		return absent, err
+	}
+	return owner.ChannelExecution(ctx, op)
 }
 
 func (rt *Runtime) bindChannelSessionAdmission(binding *channelSessionAdmission) error {

@@ -932,25 +932,31 @@
   {
     "owner": "internal/runtime/channel_activation_admission.go::*Runtime.bindChannelSessionAdmission",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21",
     "body_sha256": "5ca46f5a4fbbf32fc7606ef8a4ddf6f88be2d9adc74d0d99e3e420181b1b106e"
+  },
+  {
+    "owner": "internal/runtime/channel_activation_admission.go::*Runtime.nativeChannelExecution",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21",
+    "body_sha256": "ca874f301c966841ad5fab3e18bd086eb23f447813d57bb0fd68a252d718512c"
   },
   {
     "owner": "internal/runtime/channel_activation_admission.go::*Runtime.validateChannelActivationPublication",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21",
     "body_sha256": "c5763ef499e9da3967be66b097e8fb1112eb71bd5de8df3722afe84b9bc28227"
   },
   {
     "owner": "internal/runtime/channel_activation_admission.go::*Runtime.validateLearnedChannelPublication",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21",
     "body_sha256": "5a37d5674c4ca610ab010ddc90cdc7acd50e73826f3f355e8731cf292a46033c"
   },
   {
     "owner": "internal/runtime/channel_activation_admission.go::*Runtime.validateNativeChannelPublication",
     "audit_rows": "A10,A27",
-    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21",
     "body_sha256": "0c940826e2af59b198d6a6d298d42e9644d184a66bfe0cadebd033f08c032354"
   },
   {
@@ -2289,7 +2295,7 @@
     "owner": "internal/runtime/runtime.go::newRuntime",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "968faaa641b423fa43e17f505d3b2593733432baa2f205d78caff7f937bae313"
+    "body_sha256": "7441ae564123494e971a45cb9171cd970a7515bf6b9e7e44a2b10cc0911fe14b"
   },
   {
     "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
