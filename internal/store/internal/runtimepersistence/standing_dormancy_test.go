@@ -23,6 +23,7 @@ func TestDormantStandingQuiescenceDoesNotReplayOnRestorationBothStores(t *testin
 		for _, reason := range []runtimerunlifecycle.StandingBindingBlockReason{
 			runtimerunlifecycle.StandingBindingCredentialsAbsent,
 			runtimerunlifecycle.StandingBindingRecoveryRequired,
+			runtimerunlifecycle.StandingBindingSessionRequired,
 		} {
 			t.Run(backend+"/"+string(reason), func(t *testing.T) {
 				f := openStandingDispositionParityFixture(t, backend)
@@ -77,6 +78,9 @@ func TestDormantStandingQuiescenceDoesNotReplayOnRestorationBothStores(t *testin
 				wantKind, wantReason := runtimerunlifecycle.StandingRestartCredentialDormant, "ingress_credentials_absent"
 				if reason == runtimerunlifecycle.StandingBindingRecoveryRequired {
 					wantKind, wantReason = runtimerunlifecycle.StandingRestartRecoveryRequired, "ingress_authority_stale"
+				}
+				if reason == runtimerunlifecycle.StandingBindingSessionRequired {
+					wantKind, wantReason = runtimerunlifecycle.StandingRestartSessionDormant, "ingress_session_admission_required"
 				}
 				parked, err := f.workflow.ReconcileStandingService(ctx, candidate)
 				if err != nil || parked.RestartDisposition.Kind != wantKind || !parked.DeliveryContinuationRequired {
@@ -174,13 +178,18 @@ func TestDormantStandingReconciliationBothStores(t *testing.T) {
 				Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()), BindingEnabled: false,
 				BindingBlockReason: runtimerunlifecycle.StandingBindingCredentialsAbsent,
 			}
-			if _, err := coordinator.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate}); err != nil {
-				t.Fatal(err)
-			}
-			for _, table := range []string{"standing_services", "standing_service_generations", "standing_service_journal", "runs"} {
-				var count int
-				if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil || count != 0 {
-					t.Fatalf("fresh dormant %s count=%d err=%v", table, count, err)
+			for _, reason := range []runtimerunlifecycle.StandingBindingBlockReason{
+				runtimerunlifecycle.StandingBindingCredentialsAbsent, runtimerunlifecycle.StandingBindingSessionRequired,
+			} {
+				candidate.BindingBlockReason = reason
+				if _, err := coordinator.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate}); err != nil {
+					t.Fatal(err)
+				}
+				for _, table := range []string{"standing_services", "standing_service_generations", "standing_service_journal", "runs"} {
+					var count int
+					if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil || count != 0 {
+						t.Fatalf("fresh dormant %s/%s count=%d err=%v", reason, table, count, err)
+					}
 				}
 			}
 			candidate.BindingEnabled = true
