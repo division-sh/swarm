@@ -1,21 +1,28 @@
 package providertriggers
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	nativeinput "github.com/division-sh/swarm/internal/sessionprovider/input"
 )
 
 // PublicationAdmission transfers an authenticated plan's exact outputs. It is
-// neither receiver permission nor a provider-delivery receipt identity.
+// not receiver permission. HTTP receipts consume its authenticated delivery ID;
+// native receipt coordinates remain owned by the original capture.
 type PublicationAdmission struct {
-	bundleHash string
-	flowID     string
-	provider   string
-	outputs    []admittedPublicationOutput
+	bundleHash  string
+	flowID      string
+	provider    string
+	deliveryID  string
+	outputs     []admittedPublicationOutput
+	nativeInput *nativeinput.Admission
+	generation  triggergeneration.Generation
 }
 
 type admittedPublicationOutput struct {
@@ -25,7 +32,19 @@ type admittedPublicationOutput struct {
 	authorization provideroutput.Authorization
 }
 
+func (a PublicationAdmission) SourceBundleHash() string { return a.bundleHash }
+
 func (p InboundAdmissionPlan) ProjectPublication(admitted AdmittedRequest, bundleHash, flowID string) (Delivery, PublicationAdmission, error) {
+	if admitted.sessionInput != nil {
+		if err := admitted.sessionInput.RequireBusiness(admitted.sessionInput.Context(), p.provider, p.generation); err != nil {
+			return Delivery{}, PublicationAdmission{}, err
+		}
+		coordinate := admitted.sessionInput.Coordinate()
+		target, err := packs.ParseChannelRegistrationTarget(admitted.sessionInput.TargetSelector())
+		if err != nil || coordinate.Validate() != nil || coordinate.BundleHash != bundleHash || target.FlowPath != flowID || target.Provider != p.provider {
+			return Delivery{}, PublicationAdmission{}, fmt.Errorf("session publication requires its exact executable source and target")
+		}
+	}
 	if _, err := packs.IngressSubjectID(bundleHash, flowID, p.provider); err != nil {
 		return Delivery{}, PublicationAdmission{}, err
 	}
@@ -33,10 +52,11 @@ func (p InboundAdmissionPlan) ProjectPublication(admitted AdmittedRequest, bundl
 	if err != nil {
 		return Delivery{}, PublicationAdmission{}, err
 	}
-	if delivery.Response != nil || delivery.ProviderEventID != admitted.ProviderEventID || delivery.ProviderEventType != admitted.ProviderEventType {
+	if delivery.Response != nil || delivery.ProviderEventID != admitted.ProviderEventID() || delivery.ProviderEventType != admitted.ProviderEventType() {
 		return Delivery{}, PublicationAdmission{}, fmt.Errorf("publication requires the exact admitted delivery, not a challenge or changed identity")
 	}
-	admission := PublicationAdmission{bundleHash: bundleHash, flowID: flowID, provider: p.provider}
+	admission := PublicationAdmission{bundleHash: bundleHash, flowID: flowID, provider: p.provider,
+		deliveryID: delivery.ProviderEventID, nativeInput: admitted.sessionInput, generation: p.generation}
 	for _, output := range delivery.Events {
 		payload, err := canonicaljson.Bytes(output.Payload)
 		if err != nil {
@@ -51,12 +71,85 @@ func (p InboundAdmissionPlan) ProjectPublication(admitted AdmittedRequest, bundl
 }
 
 func (a PublicationAdmission) ValidateOutput(bundleHash, provider string, ordinal, count int, event events.Event, kind provideroutput.Kind, authorization provideroutput.Authorization) error {
+	if event.EntityID() != "" || event.FlowInstance() != "" {
+		return fmt.Errorf("provider input cannot claim a concrete sender or receiver before route planning")
+	}
+	if a.nativeInput != nil {
+		if err := a.nativeInput.RequireBusiness(a.nativeInput.Context(), provider, a.generation); err != nil {
+			return err
+		}
+		if event.RunID() != a.nativeInput.PublicationRunID() {
+			return fmt.Errorf("native publication changed its admitted run")
+		}
+	}
+	return a.validateOutput(bundleHash, provider, ordinal, count, event, kind, authorization)
+}
+
+// NativeInput transfers only the opaque native owner's product, not a writable
+// authority record. HTTP admissions have no native responsibility to fence.
+func (a PublicationAdmission) NativeInput() (nativeinput.Admission, bool) {
+	if a.nativeInput == nil {
+		return nativeinput.Admission{}, false
+	}
+	return *a.nativeInput, true
+}
+
+// SameOwner compares the immutable output seal issued by ProjectPublication,
+// not reconstructed provider coordinates or a caller's copy of output facts.
+func (a PublicationAdmission) SameOwner(other PublicationAdmission) bool {
+	return len(a.outputs) > 0 && len(a.outputs) == len(other.outputs) && &a.outputs[0] == &other.outputs[0]
+}
+
+// Operator input consumes one authenticated normalized output without publishing
+// business events. SQL owners separately fence its selected native responsibility.
+func (a PublicationAdmission) ValidateOperatorOutput(ctx context.Context, bundleHash, flowID, provider, receiptID string, output DeliveryEvent) error {
+	if ctx == nil || ctx.Err() != nil || a.bundleHash == "" || a.bundleHash != bundleHash || a.flowID != flowID ||
+		a.provider != provider || output.Kind != OutputKindNormalized {
+		return fmt.Errorf("operator input requires its exact authenticated normalized output")
+	}
+	if a.nativeInput == nil && (a.deliveryID == "" || a.deliveryID != receiptID) {
+		return fmt.Errorf("HTTP operator input changed its authenticated provider delivery identity")
+	}
+	if a.nativeInput != nil && !a.nativeInput.LifetimeCurrent(ctx) {
+		return fmt.Errorf("operator input no longer owns its native lifetime")
+	}
+	payload, err := canonicaljson.Bytes(output.Payload)
+	if err != nil {
+		return err
+	}
+	matches := 0
+	for _, admitted := range a.outputs {
+		if admitted.name == output.Name && admitted.kind == provideroutput.KindNormalized &&
+			!admitted.authorization.Empty() && admitted.authorization.Matches(output.Authorization) &&
+			admitted.payloadDigest == canonicaljson.HashBytes(payload) {
+			matches++
+		}
+	}
+	if matches != 1 {
+		return fmt.Errorf("operator input changed or ambiguously selected its admitted output")
+	}
+	return nil
+}
+
+// ValidateCommitOutput is store-safe: selected responsibility is checked by its
+// transaction owner, not by re-entering a root-store reader under SQL locks.
+func (a PublicationAdmission) ValidateCommitOutput(ctx context.Context, bundleHash, provider string, ordinal, count int, event events.Event, kind provideroutput.Kind, authorization provideroutput.Authorization) error {
+	if (event.EntityID() != "" || event.FlowInstance() != "") && event.TargetRoute().Empty() {
+		return fmt.Errorf("prepared provider output requires canonical receiver coordinates, not a concrete sender claim")
+	}
+	if a.nativeInput != nil && (!a.nativeInput.LifetimeCurrent(ctx) || event.RunID() != a.nativeInput.PublicationRunID()) {
+		return fmt.Errorf("native publication no longer owns its admitted lifetime and run")
+	}
+	return a.validateOutput(bundleHash, provider, ordinal, count, event, kind, authorization)
+}
+
+func (a PublicationAdmission) validateOutput(bundleHash, provider string, ordinal, count int, event events.Event, kind provideroutput.Kind, authorization provideroutput.Authorization) error {
 	if a.bundleHash == "" || a.bundleHash != bundleHash || a.provider != provider || len(a.outputs) != count || ordinal < 0 || ordinal >= count {
 		return fmt.Errorf("provider publication requires its exact authenticated output admission")
 	}
 	source := event.RoutingSource()
 	if source.Kind() != events.RoutingSourceExternalIngress || source.Authority() != events.RoutingSourceAuthorityProviderAdmissionPlan ||
-		source.Route() != (events.RouteIdentity{FlowID: a.flowID}) || event.EntityID() != "" || event.FlowInstance() != "" {
+		source.Route() != (events.RouteIdentity{FlowID: a.flowID}) || !event.SourceRoute().Empty() {
 		return fmt.Errorf("provider publication contradicts its admitted declaration")
 	}
 	output := a.outputs[ordinal]

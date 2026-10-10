@@ -1,0 +1,56 @@
+provider: whatsapp
+transport: session
+payload_object_required: true
+delivery_id: {json_path: $.provider_message_reference, required: true}
+event_type: {json_path: $.kind, required: true}
+event_name: {literal: inbound.whatsapp}
+normalized_events:
+  - event: inbound.whatsapp.message
+    when: {equals: {kind: message}, exists: [text], absent: [target_message_reference]}
+    author_subject: {type: chat, field: conversation_reference}
+    fields:
+      text: {from: text, schema: {type: string, minLength: 1}}
+      external_account_reference: {from: external_account_reference, schema: {type: string, minLength: 1}}
+      conversation_reference: {from: conversation_reference, schema: {type: string, minLength: 1}}
+      conversation_scope: {from: conversation_scope, schema: {type: string, enum: [direct, shared]}}
+      provider_message_reference: {from: provider_message_reference, schema: {type: string, minLength: 1}}
+      provider_timestamp_ms: {from: provider_timestamp_ms, schema: {type: integer, minimum: 1}}
+      ephemeral: {from: ephemeral, schema: {type: boolean}}
+      reply_to_message_reference: {from: reply_to_message_reference, optional: true, schema: {type: string, minLength: 1}}
+      entry_invocation:
+        from: text
+        convert: {pattern: '^/(?P<reference>inbox)$'}
+        optional: true
+        schema:
+          type: object
+          additionalProperties: false
+          required: [reference]
+          properties:
+            reference: {type: string, enum: [inbox], minLength: 1, maxLength: 32}
+  - event: inbound.whatsapp.edit
+    when: {equals: {kind: edit}, exists: [text, target_message_reference]}
+    author_subject: {type: chat, field: conversation_reference}
+    fields:
+      text: {from: text, schema: {type: string, minLength: 1}}
+      target_message_reference: {from: target_message_reference, schema: {type: string, minLength: 1}}
+      external_account_reference: {from: external_account_reference, schema: {type: string, minLength: 1}}
+      conversation_reference: {from: conversation_reference, schema: {type: string, minLength: 1}}
+      conversation_scope: {from: conversation_scope, schema: {type: string, enum: [direct, shared]}}
+      provider_message_reference: {from: provider_message_reference, schema: {type: string, minLength: 1}}
+      provider_timestamp_ms: {from: provider_timestamp_ms, schema: {type: integer, minimum: 1}}
+      ephemeral: {from: ephemeral, schema: {type: boolean}}
+      reply_to_message_reference: {from: reply_to_message_reference, optional: true, schema: {type: string, minLength: 1}}
+  - event: inbound.whatsapp.revoke
+    when: {equals: {kind: revoke}, exists: [target_message_reference], absent: [text]}
+    author_subject: {type: chat, field: conversation_reference}
+    fields:
+      target_message_reference: {from: target_message_reference, schema: {type: string, minLength: 1}}
+      external_account_reference: {from: external_account_reference, schema: {type: string, minLength: 1}}
+      conversation_reference: {from: conversation_reference, schema: {type: string, minLength: 1}}
+      conversation_scope: {from: conversation_scope, schema: {type: string, enum: [direct, shared]}}
+      provider_message_reference: {from: provider_message_reference, schema: {type: string, minLength: 1}}
+      provider_timestamp_ms: {from: provider_timestamp_ms, schema: {type: integer, minimum: 1}}
+      ephemeral: {from: ephemeral, schema: {type: boolean}}
+      reply_to_message_reference: {from: reply_to_message_reference, optional: true, schema: {type: string, minLength: 1}}
+ack:
+  mode: durable_before_dispatch

@@ -1331,18 +1331,26 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(5, "operator_channel", err)
 		return 1
 	}
-	operatorChannels, err := operatorchannel.NewService(stores.OperatorChannels(), proofStore, providerCredentialOwner, channelInterfaces, runtimeInstanceID)
+	sessionBootstrap, channelProviderOwner, err := newServeChannelProviderOwners(runtimeContextManager, channelOnboardingStore, providerCredentialOwner, swarmDir.Path)
+	if err != nil {
+		presenter.fail(5, "channel_onboarding", err)
+		return 1
+	}
+	if sessionBootstrap != nil {
+		if err := runtimeContextManager.BindChannelSessionAdmissionOwner(sessionBootstrap); err != nil {
+			presenter.fail(5, "channel_onboarding", err)
+			return 1
+		}
+	}
+	operatorChannels, err := operatorchannel.NewService(stores.OperatorChannels(), proofStore, channelProviderOwner, channelInterfaces, runtimeInstanceID)
 	if err != nil {
 		presenter.fail(5, "operator_channel", err)
 		return 1
 	}
-	operatorPrincipal, recoveredBindings, err := operatorChannels.Bootstrap(ctx, bootStartedAt)
+	operatorPrincipal, err := operatorChannels.PreparePrincipal(ctx, bootStartedAt)
 	if err != nil {
 		presenter.fail(5, "operator_channel", err)
 		return 1
-	}
-	for _, binding := range recoveredBindings {
-		presenter.recordOperatorChannelProofReuse(binding)
 	}
 	bootReport := primaryContext.validation.BootReport
 	stateStoreSummary := serveRuntimeStateStoreSummary(runtimeContexts)
@@ -1478,8 +1486,10 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(20, "channel_onboarding", err)
 		return 1
 	}
+	confirmationDispatcher.sessions = sessionBootstrap
 	channelActivationRefresher := &serveChannelActivationRefresher{
 		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
+		sessions:    sessionBootstrap,
 		credentials: providerCredentialOwner, ingress: ready,
 		testBarrier: opts.TestChannelOnboardingBarrier,
 	}
@@ -1499,10 +1509,12 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
 		native:      stores.ChannelNative(),
 		credentials: providerCredentialOwner, effects: confirmationEffects, ingress: ready,
+		sessions: sessionBootstrap,
 	}
 	channelOnboarding, err := channelonboarding.NewService(channelonboarding.ServiceOptions{
 		Store: channelOnboardingStore, Identities: operatorChannels, Credentials: credentialWriter,
 		SourceArtifacts: stores.SourceArtifactStore(),
+		Sessions:        sessionBootstrap,
 		Catalog: func() (*channelonboarding.CandidateCatalog, error) {
 			return serveChannelOnboardingCatalog(runtimeContextManager)
 		},
@@ -1684,7 +1696,14 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return err
 		}
 		supervisor.resetContextsManaged = true
-		return reconcileRetiredConnectedChannelContexts(ctx, runtimeContextManager, channelOnboardingStore, channelDestructive)
+		recoveredBindings, err := restoreServeChannelStartup(ctx, runtimeContextManager, channelOnboardingStore, channelDestructive, channelOnboarding, operatorChannels, bootStartedAt)
+		if err != nil {
+			return fmt.Errorf("recover retained channel proofs: %w", err)
+		}
+		for _, binding := range recoveredBindings {
+			presenter.recordOperatorChannelProofReuse(binding)
+		}
+		return nil
 	}, channelOnboarding); err != nil {
 		presenter.fail(22, "channel_onboarding", err)
 		return 1
@@ -1784,7 +1803,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return 1
 		}
 	}
-	if !publicIngressEnabled && len(standing) > 0 {
+	if !publicIngressEnabled && requiresPublicIngressPresentation(standing) {
 		presenter.recordPublicIngressDisabledHint()
 	}
 	standing = publicIngressPresentation(standing, ready.Snapshot(time.Now().UTC()))
@@ -1865,8 +1884,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		store: stores.ChannelDelivery(), native: stores.ChannelNative(), cards: storeDeps.DecisionCards,
 		mailbox: stores.MailboxAPI(), proposedEffects: storeDeps.ProposedEffects,
 		activations: channelOnboardingStore, manager: runtimeContextManager,
-		ingress: ready,
-		effects: stores.Effects(), credentials: providerCredentialOwner,
+		sessions: sessionBootstrap,
+		ingress:  ready,
+		effects:  stores.Effects(), credentials: providerCredentialOwner,
 		posture: posture, runtimeInstanceID: runtimeInstanceID, now: time.Now,
 	}); err != nil {
 		presenter.runtimeFailure("channel_delivery", err)
@@ -2402,7 +2422,7 @@ func reportServeStandingReadiness(ctx context.Context, owner standingServiceStat
 			if out != nil {
 				fmt.Fprintf(out, "standing service %s suspended by=%s at=%s reason=%s resume=`swarm standing resume %s`\n", status.ServiceID, status.OverrideActor, status.OverrideAt.Format(time.RFC3339), status.OverrideReason, status.ServiceID)
 			}
-		case runtimerunlifecycle.StandingRestartCredentialDormant, runtimerunlifecycle.StandingRestartRecoveryRequired:
+		case runtimerunlifecycle.StandingRestartCredentialDormant, runtimerunlifecycle.StandingRestartSessionDormant, runtimerunlifecycle.StandingRestartRecoveryRequired:
 			if out != nil {
 				fmt.Fprintf(out, "standing service %s %s declaration_present=true binding_enabled=false run=%s generation=%d override=%s remediation=%s\n", status.ServiceID, status.RestartDisposition.Kind, status.RunID, status.Generation, status.RestartDisposition.OperatorOverride, status.RestartDisposition.RunControlGuidance())
 			}

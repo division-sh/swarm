@@ -86,6 +86,7 @@ var humanCodePhrases = map[HumanCodeFamily]map[string]string{
 	},
 	HumanCodeProviderCapability: {
 		"receive_https_route":       "receive HTTPS route",
+		"receive_session_events":    "receive authenticated session events",
 		"verify_secret":             "verify named secret",
 		"emit_event":                "emit named event",
 		"persist_dedupe_markers":    "persist dedupe markers",

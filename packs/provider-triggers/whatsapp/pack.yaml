@@ -1,0 +1,24 @@
+id: provider.whatsapp
+version: 0.1.0
+platform_version: '>=0.7.0 <0.8.0'
+type: trigger
+manifest_hash: sha256:d48061410533e79556688fa1d7aad975175e95529c8c09874a2cc0ee352b4205
+provenance:
+    source: platform
+capabilities:
+    can:
+        receive_session_events: whatsapp
+        emit_events:
+            - inbound.whatsapp
+            - inbound.whatsapp.edit
+            - inbound.whatsapp.message
+            - inbound.whatsapp.revoke
+        persist_dedupe_markers: true
+    cannot:
+        - emit_undeclared_events
+        - run_code_before_admission
+        - touch_unbound_resources
+requires: {}
+tests:
+    - providertriggers/whatsapp
+    - sessionprovider/whatsapp_capture_publication

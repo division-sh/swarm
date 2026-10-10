@@ -156,7 +156,7 @@ func admitEnvelopeCapabilities(value, typeValue yamlsource.Value, e *Envelope) e
 	allowed := []string{}
 	switch e.Type {
 	case TypeTrigger:
-		allowed = []string{"receive_https_route", "verify_secret", "emit_events", "persist_dedupe_markers"}
+		allowed = []string{"receive_https_route", "receive_session_events", "verify_secret", "emit_events", "persist_dedupe_markers"}
 	case TypeConnector:
 		allowed = []string{"call_provider_actions", "lower_through_activity", "journal_activity_attempts"}
 	case TypeChannel:
@@ -169,8 +169,16 @@ func admitEnvelopeCapabilities(value, typeValue yamlsource.Value, e *Envelope) e
 	}
 	switch e.Type {
 	case TypeTrigger:
-		if err := envelopeRequired(capabilities["can"], can, "receive_https_route", "emit_events", "persist_dedupe_markers"); err != nil {
+		if err := envelopeRequired(capabilities["can"], can, "emit_events", "persist_dedupe_markers"); err != nil {
 			return err
+		}
+		_, webhook := can["receive_https_route"]
+		_, session := can["receive_session_events"]
+		if webhook == session {
+			return envelopeError(capabilities["can"], "exactly one of receive_https_route or receive_session_events is required")
+		}
+		if _, secret := can["verify_secret"]; session && secret {
+			return envelopeError(can["verify_secret"], "session capability forbids webhook verify_secret")
 		}
 	case TypeConnector:
 		if err := envelopeRequired(capabilities["can"], can, "call_provider_actions", "lower_through_activity", "journal_activity_attempts"); err != nil {
@@ -229,7 +237,7 @@ func admitEnvelopeRequirements(value yamlsource.Value, e *Envelope) error {
 
 func admitEnvelopeCanValues(can map[string]yamlsource.Value, e *Envelope) error {
 	var err error
-	for name, target := range map[string]*string{"receive_https_route": &e.Capabilities.Can.ReceiveHTTPSRoute, "verify_secret": &e.Capabilities.Can.VerifySecret} {
+	for name, target := range map[string]*string{"receive_https_route": &e.Capabilities.Can.ReceiveHTTPSRoute, "receive_session_events": &e.Capabilities.Can.ReceiveSessionEvents, "verify_secret": &e.Capabilities.Can.VerifySecret} {
 		if field, present := can[name]; present {
 			if *target, err = envelopeText(field); err != nil {
 				return err

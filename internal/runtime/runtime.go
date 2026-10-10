@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -282,6 +283,7 @@ type Runtime struct {
 	LLMRuntimes        *llm.AgentRuntimeSet
 	ToolExecutor       *runtimetools.Executor
 	ChannelActivations *runtimechannelactivation.Owner
+	channelSessions    atomic.Pointer[channelSessionAdmission]
 	Manager            *runtimemanager.AgentManager
 	RuntimeIngress     *runtimeingress.Controller
 	RunControl         *runtimeruncontrol.Controller
@@ -1265,6 +1267,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			ScenarioExecutionProfiles: runtimeDeps.ScenarioExecutionProfiles,
 			EffectiveSourceIdentity:   boot.EffectiveSourceIdentity,
 			ChannelActivations:        rt.ChannelActivations,
+			NativeChannelExecution:    rt.nativeChannelExecution,
 			SourceArtifactFact:        opts.SourceArtifactFact,
 			DecisionCardCadence: decisioncard.CadencePolicy{
 				FirstReminderDelay: rt.Config.Runtime.DecisionCardFirstReminder,

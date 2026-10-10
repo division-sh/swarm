@@ -159,6 +159,7 @@ type TriggerEvent struct {
 type TriggerPackDescriptor struct {
 	Identity   PackIdentity                 `json:"identity"`
 	Provider   string                       `json:"provider"`
+	Transport  ChannelTransport             `json:"transport"`
 	Generation triggergeneration.Generation `json:"generation"`
 	Events     map[string]TriggerEvent      `json:"events"`
 }
@@ -739,6 +740,7 @@ type compiledChannelMapping struct {
 type compiledChannelOperation struct {
 	name          channelPlanIdentity
 	tool          channelPlanIdentity
+	declaration   runtimecontracts.ToolSchemaEntry
 	toolSchema    runtimecontracts.ToolSchemaEntry
 	effect        runtimecontracts.ActivityEffectClass
 	inputSchema   runtimecontracts.ToolInputSchema
@@ -992,6 +994,19 @@ func (p SatisfactionPlan) ConnectorOperation(name string) (string, runtimecontra
 	return operation.tool.String(), operation.toolSchema, nil
 }
 
+// ConnectorDeclaration preserves the admitted connector before the channel
+// compiler adds its result mapping. It grants no execution authority.
+func (p SatisfactionPlan) ConnectorDeclaration(name string) (string, runtimecontracts.ToolSchemaEntry, error) {
+	if err := p.requireOperation(strings.TrimSpace(name)); err != nil {
+		return "", runtimecontracts.ToolSchemaEntry{}, err
+	}
+	operation, ok := p.operations[strings.TrimSpace(name)]
+	if !ok {
+		return "", runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("channel operation %q is not compiled", name)
+	}
+	return operation.tool.String(), operation.declaration, nil
+}
+
 func (p SatisfactionPlan) OperationEffectClass(name string) (runtimecontracts.ActivityEffectClass, error) {
 	if err := p.requireOperation(strings.TrimSpace(name)); err != nil {
 		return "", err
@@ -1045,6 +1060,10 @@ func (p OutboundBindingPlan) CredentialStoreKeys() map[string]string {
 
 func (p OutboundBindingPlan) RegistrationTarget() string {
 	return strings.TrimSpace(p.registrationTarget)
+}
+
+func (p OutboundBindingPlan) TriggerIdentity() PackIdentity {
+	return p.structural.trigger
 }
 
 func NewOutboundBindingPlan(id string, structural SatisfactionPlan, destination any, requirements []Requirement) (OutboundBindingPlan, error) {
@@ -1132,6 +1151,10 @@ func (p OutboundBindingPlan) RuntimeTools() (map[string]runtimecontracts.ToolSch
 // bound channel write. Runtime execution does not reconstruct this from YAML.
 func (p OutboundBindingPlan) ConnectorOperation(operation string) (string, runtimecontracts.ToolSchemaEntry, error) {
 	return p.structural.ConnectorOperation(operation)
+}
+
+func (p OutboundBindingPlan) ConnectorDeclaration(operation string) (string, runtimecontracts.ToolSchemaEntry, error) {
+	return p.structural.ConnectorDeclaration(operation)
 }
 
 func (p OutboundBindingPlan) PrepareOperation(operation string, input any) (string, map[string]any, error) {
@@ -1465,6 +1488,9 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 	if err := validateAcceptedTriggerDescriptor(trigger); err != nil {
 		return SatisfactionPlan{}, err
 	}
+	if channel.Manifest.Transport != trigger.Transport {
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q transport %q does not match verified trigger %q transport %q", channel.Envelope.ID, channel.Manifest.Transport, trigger.Identity.ID(), trigger.Transport)
+	}
 	if err := validateAcceptedConnectorDescriptor(connector); err != nil {
 		return SatisfactionPlan{}, err
 	}
@@ -1610,6 +1636,9 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 }
 
 func validateAcceptedTriggerDescriptor(trigger TriggerPackDescriptor) error {
+	if _, err := trigger.Transport.ActivationPosture(); err != nil {
+		return fmt.Errorf("accepted trigger %q: %w", trigger.Identity.ID(), err)
+	}
 	if !trigger.Generation.Valid() {
 		return fmt.Errorf("accepted trigger %q generation is missing", trigger.Identity.ID())
 	}
@@ -1624,6 +1653,9 @@ func validateAcceptedTriggerDescriptor(trigger TriggerPackDescriptor) error {
 }
 
 func validateAcceptedConnectorDescriptor(connector ConnectorPackDescriptor) error {
+	if err := runtimecontracts.ValidateToolDeclarationNames(connector.Tools); err != nil {
+		return fmt.Errorf("accepted connector %q: %w", connector.Identity.ID(), err)
+	}
 	for toolName, tool := range connector.Tools {
 		if err := tool.InputSchema().ValidateDefinition(); err != nil {
 			return fmt.Errorf("accepted connector %q tool %q input schema: %w", connector.Identity.ID(), toolName, err)
@@ -1960,7 +1992,7 @@ func compileAdmittedChannelOperation(draft channelOperationDraft, inputTopology,
 		}
 	}
 	return compiledChannelOperation{
-		name: draft.name, tool: draft.tool, toolSchema: tool, effect: draft.effect,
+		name: draft.name, tool: draft.tool, declaration: draft.toolSchema, toolSchema: tool, effect: draft.effect,
 		inputSchema: inputSchema, contextSchema: contextSchema, outputSchema: outputSchema,
 		hasContext: len(draft.interfaceValue.Context) > 0,
 		input:      inputMappings, output: outputMappings,

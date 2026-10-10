@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -392,6 +393,32 @@ type RuntimeContextManager struct {
 	suppressedStandingServices map[string]struct{}
 	pendingSourceSetTransition *runtimeSourceSetTransitionAdmission
 	resetExecutionFenced       bool
+	channelSessions            *channelSessionAdmission
+}
+
+// The platform installs one original native issuer, not a provider registry.
+func (m *RuntimeContextManager) BindChannelSessionAdmissionOwner(owner operatorchannel.SessionAdmissionOwner) error {
+	if m == nil || owner == nil {
+		return fmt.Errorf("channel session admission owner is required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.channelSessions != nil {
+		return fmt.Errorf("channel session admission owner is already installed")
+	}
+	binding := &channelSessionAdmission{owner: owner}
+	for _, entry := range m.contexts {
+		if entry.runtime == nil || entry.runtime.channelSessions.Load() != nil {
+			return fmt.Errorf("runtime context has another channel session admission owner")
+		}
+	}
+	for _, entry := range m.contexts {
+		if err := entry.runtime.bindChannelSessionAdmission(binding); err != nil {
+			return err
+		}
+	}
+	m.channelSessions = binding
+	return nil
 }
 
 // RuntimeContextPublicationSnapshot is the current public identity of the
@@ -1027,6 +1054,15 @@ func (m *RuntimeContextManager) publishRuntimeContextVisibilityLocked(updates ..
 		}
 		seen[update.entry] = struct{}{}
 	}
+	if m.channelSessions != nil {
+		for _, update := range updates {
+			if update.state == RuntimeContextStateLoaded {
+				if err := update.entry.runtime.bindChannelSessionAdmission(m.channelSessions); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	for _, update := range updates {
 		previous = append(previous, priorVisibility{entry: update.entry, state: update.entry.state, cause: update.entry.cause})
 		update.entry.state = update.state
@@ -1218,6 +1254,9 @@ func currentChannelActivationSigningKeys(entry *runtimeContextEntry) (map[string
 		}
 		if !matched {
 			return nil, fmt.Errorf("channel activation registration target %q has no exact standing target", selector)
+		}
+		if activation.Plan.Transport() == packs.ChannelTransportSession {
+			continue
 		}
 		registration, ok := activation.Plan.Registration()
 		if !ok {
@@ -2133,7 +2172,7 @@ func (m *RuntimeContextManager) PublishStandingServiceTargets(serviceID string, 
 
 // Admission and publication share source-set ownership. Alias refusal must
 // precede the durable standing mutation, not merely route publication.
-func (m *RuntimeContextManager) AdmitChannelStandingTarget(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, barrier channelonboarding.TestLifecycleBarrier) error {
+func (m *RuntimeContextManager) AdmitChannelStandingTarget(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, session operatorchannel.ProviderAuthority, barrier channelonboarding.TestLifecycleBarrier) error {
 	if m == nil {
 		return errors.New("runtime context manager is required")
 	}
@@ -2179,7 +2218,7 @@ func (m *RuntimeContextManager) AdmitChannelStandingTarget(ctx context.Context, 
 		return err
 	}
 	defer func() { _ = use.Done() }()
-	targets, activations, err := use.Runtime().AdmitChannelStandingTarget(use.WorkContext(), op, candidate)
+	targets, activations, err := use.Runtime().AdmitChannelStandingTarget(use.WorkContext(), op, candidate, session)
 	if err != nil {
 		return err
 	}
