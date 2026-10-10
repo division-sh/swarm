@@ -1,6 +1,27 @@
 package toolidentity
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
+
+func TestDeclarationNamesRetainsRoutingIdentities(t *testing.T) {
+	for _, row := range []struct {
+		name string
+		want []string
+	}{
+		{"", []string{}},
+		{" read_file ", []string{"read_file"}},
+		{"Read", []string{"Read", "read_file"}},
+		{"mcp__runtime-tools__Read", []string{"mcp__runtime-tools__Read", "Read", "read_file"}},
+		{"mcp__runtime-tools__emit_probe", []string{"mcp__runtime-tools__emit_probe", "emit_probe"}},
+		{"mcp__runtime-tools__read_file", []string{"mcp__runtime-tools__read_file", "read_file"}},
+	} {
+		if got := DeclarationNames(row.name); !reflect.DeepEqual(got, row.want) {
+			t.Fatalf("DeclarationNames(%q) = %v, want %v", row.name, got, row.want)
+		}
+	}
+}
 
 func TestCanonicalName(t *testing.T) {
 	t.Parallel()

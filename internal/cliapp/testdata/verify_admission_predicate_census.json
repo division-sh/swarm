@@ -1,5 +1,191 @@
 [
   {
+    "owner": "internal/channelonboarding/admission_current.go::AdmissionResponsibility.MatchesActivation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-held-target,P08,P10,P21",
+    "body_sha256": "8cb671a6490bbd01f743063a4e28fe8c9c7d79bc3db6eb2ffafb96b85d6eeebd"
+  },
+  {
+    "owner": "internal/channelonboarding/admission_current.go::AdmissionResponsibility.MatchesBusinessBinding",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-held-target,P08,P10,P21",
+    "body_sha256": "fc2a17e66af2c5a9d91b9ae5799a3bf5650c0fa71980dd73cc704dc62b50338c"
+  },
+  {
+    "owner": "internal/channelonboarding/admission_current.go::AdmissionResponsibility.MatchesOperation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-held-target,P08,P10,P21",
+    "body_sha256": "a592104d293661690efcb578e07715d8e6a4f5148bca621ec61bef8e9a556310"
+  },
+  {
+    "owner": "internal/channelonboarding/admission_current.go::AdmissionResponsibility.ResumeSessionBusiness",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-held-target,P08,P10,P21",
+    "body_sha256": "0eb58e7924bd941698d6e572174a8436f9df1f75a22e981f270da9839dadb8a9"
+  },
+  {
+    "owner": "internal/channelonboarding/admission_current.go::AdmissionResponsibilityCurrent",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-held-target,P08,P10,P21",
+    "body_sha256": "19e77a3587191870d730a44999a02b0e9e9a4d5e200f7e36bb963e2365f74cea"
+  },
+  {
+    "owner": "internal/channelonboarding/admission_current.go::Phase.SupportsPrebindingRegistration",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-held-target,P08,P10,P21",
+    "body_sha256": "4825811e3cbbc954c2692c65e456691167b7588ea46c01254e63878fdbdf08e9"
+  },
+  {
+    "owner": "internal/channelonboarding/admission_current.go::RequireSessionStandingAdmission",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-held-target,P08,P10,P21",
+    "body_sha256": "8e31f4d2c27b355fbde1d867944b92d01cacf5186c7ac4660b9b80c816b843b8"
+  },
+  {
+    "owner": "internal/channelonboarding/admission_current.go::RetainedSessionCurrent",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-held-target,P08,P10,P21",
+    "body_sha256": "a165ca5025fa8e6440991824367e99b96b9a33107c51dfbcb6a6dd05d6325345"
+  },
+  {
+    "owner": "internal/channelonboarding/compiler.go::CompileLearnedActivation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "ce6c16fc3c2f5a1e7c792f1afee620190ce2f63bab1e0aa8f119008b8b40b9d4"
+  },
+  {
+    "owner": "internal/channelonboarding/compiler.go::CompiledActivation.AdmissionResponsibility",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "87b21ab27eeeefa3a680dbe1f62648a967fe8ab94f6d0a2113e7f046a08c18ac"
+  },
+  {
+    "owner": "internal/channelonboarding/compiler.go::CompiledActivation.Validate",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "98c795a6787f134c327054bf901f0ae7cdff095b9836ac4b351dd2350a051388"
+  },
+  {
+    "owner": "internal/channelonboarding/compiler.go::CompiledActivation.validateProviderAuthority",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "9cee20729cf6162f2932e452d292c187f48edf16d5f92c121b0461e4039d68af"
+  },
+  {
+    "owner": "internal/channelonboarding/compiler.go::LearnedBindingID",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "b14e6221949de88fc5ac35af8072f8a7408413e0474835f43160c7aca0933281"
+  },
+  {
+    "owner": "internal/channelonboarding/compiler.go::MergeCompiledActivations",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "e8544919aa82a84497ea727e1599dea8d9d002f0f76c09bcf2d78d696b5b9871"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::*ChannelActivationGeneration.UnmarshalJSON",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "5ce10d5a84f3dae399931a71859c36128fae0a1c8df8600f37a6186700561095"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::ChannelActivationGeneration.Diagnostic",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "690eb1e4039e635df37d3c97aa4fbc5e00f3b3fca47e1a3f9367b35f14f828f4"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::ChannelActivationGeneration.Equal",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "da76032b0610032af413f6dac554dac69568a14b5616fe9e96fe2cc043ab5933"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::ChannelActivationGeneration.MarshalJSON",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "de071963c8afa8dcbec9df453be299517117b5c9f46bf6559001bb255e24bcd4"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::ChannelActivationGeneration.Valid",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "8654f813779a17ffcd437a5959691d5117fc9b1981e56750993d76bc625ac42a"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::ChannelActivationPublication.Activations",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "dcd13d36457204785a0a80cc70ebb9abdd68aeb9c9f5400533143339c6237776"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::ChannelActivationPublication.Bindings",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "9740c9ec61d493059362fb4031906f74ad293ccc4474a4d417d1006d7478d86c"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::ChannelActivationPublication.Executable",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "7288e49ee3e0858d1565ee23acff6e33f248e06fdc6ce5069a303e0d679372cc"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::ChannelActivationPublication.Generation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "1193fd08e9226f40f65c9846011fc086f15f0376c30b28550066bfe0a391521a"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::ChannelActivationPublication.Mode",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "bd12789d9026de850e2b8c048f8406d8c6199ce7e1b067d93eae5c026ebdcfa4"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::ChannelActivationPublication.Validate",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "cc78dfb2af5803527d7744038551613b2fe4842850ad4ccf03eabaf7e38195ec"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::ChannelActivationPublicationMode.Valid",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "3d12fb2ebfe953684747e1f33891b58b27803ac741531c99005996f95800a70c"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::NewChannelActivationPublication",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "f379e4542b9f3032c1eb06e45fe26c1e46f747322693fe1d4c96120310d8973c"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::NewDeclaredOnlyChannelActivationPublication",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "e2db828654abaccd07bb7a4386697d524f3a168e4c4137fa3360b04ed550aecf"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::canonicalActivationPublication",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "7b136a3520c25ddcd6d1f69bd56a74416df95737c90fc66b0f5f98ddcab6776d"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::canonicalDeclaredOnlyPublication",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "bead7d016e8a8e18aedacb034740c1d4919f2bb294a7017101f3f29ba78425e7"
+  },
+  {
+    "owner": "internal/channelonboarding/publication.go::cloneCompiledActivations",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,P08,P10,P21",
+    "body_sha256": "126f9207a6c8c68966b4b10902903489190129c15a2878c1a4aeb29638fb4d85"
+  },
+  {
     "owner": "internal/channelonboarding/retained_inspection.go::InspectPendingTeardowns",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
@@ -10,6 +196,72 @@
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
     "body_sha256": "25e5b507fb7514273d0cdcb85ec8f23538ea2affef935d5dec8f0cb573ac2ef5"
+  },
+  {
+    "owner": "internal/channelonboarding/session_activity.go::CompileSessionActivityTarget",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "8fcce620ea8e02226e2a8c02bd5a3a8b09f331870fb6efcb8edbf5e73a5237db"
+  },
+  {
+    "owner": "internal/channelonboarding/session_activity.go::CompiledSessionActivityTarget.Activation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "c756cc2f787634ef7970b4c14a730b7f3467b7660b90a3f0c8f86547c4feb0da"
+  },
+  {
+    "owner": "internal/channelonboarding/session_activity.go::CompiledSessionActivityTarget.AuthoredToolID",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "3cbb87c714e000fd6747dff8af2e6712020c69392a56f75b3f0b4811cad00f9b"
+  },
+  {
+    "owner": "internal/channelonboarding/session_activity.go::CompiledSessionActivityTarget.Operation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "cc18899246635e5fd6ab6c679917ca4ecbbc034e11f73fb960cab3d62364ec92"
+  },
+  {
+    "owner": "internal/channelonboarding/session_activity.go::CompiledSessionActivityTarget.PrivateTarget",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "1093b330967dbcd9e81ba065920d7ec0bccd62feaa0b4a040a4ff5db37a8d904"
+  },
+  {
+    "owner": "internal/channelonboarding/session_activity.go::CompiledSessionActivityTarget.PublicationGeneration",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "ef1d6c10a735b5cf137c591cccbe14eb4fcc77bb337716ba1aa7f421112b96d1"
+  },
+  {
+    "owner": "internal/channelonboarding/session_activity.go::QualifySessionActivityDeclaration",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "6e90c905dd51a3e3e46a1aec396741706d1b1c61ca3b882dfffe09b48f6aeda2"
+  },
+  {
+    "owner": "internal/channelonboarding/session_activity.go::ResolveSessionActivitySite",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "fbc8f33a3bb18d00b6bff7cd92c4850026dcd688e9d8c0de363014af5d97767a"
+  },
+  {
+    "owner": "internal/channelonboarding/session_activity.go::compileSessionActivityDeclaration",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "fe8fdf85b52e9067813125d52d5bd6a349fee894f638943f4ac5b5f96dc324b6"
+  },
+  {
+    "owner": "internal/channelonboarding/session_activity.go::matchSessionActivityConnector",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "2182b59dd0f984abba474e4b1e8f857933f3475cd77d4ad586f5fd6e53e0f5dc"
+  },
+  {
+    "owner": "internal/channelonboarding/session_activity.go::sessionActivitySiteDeclared",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "ca3e3818d703c397446774a45be0b48cd99d77c8d3df2b9baa03280c9f59c0a8"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.Recover",
@@ -672,6 +924,66 @@
     "body_sha256": "fe0a225422a51fb9ca92bd47d025d9ab8f6a9704fa6e27e827cd177f701bce18"
   },
   {
+    "owner": "internal/runtime/activity_validation.go::activityRevisionConsumerExists",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "69e32ee7e714ea66725dae6db649564fa7f86c8ea0b4f3300f16ef92e0a87075"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::activitySiteContext",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "95148d842e3288244e198a03f4dba12ddf8db00e96413d3caa47895552aba258"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::normalizeStrings",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "2f182d36db5de5c76f37a85dc0c8b82cfa7d8e366d3ad366f9e35e97796e146f"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::rejectUnsupportedNestedActivityContexts",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "0cb126c21378d17b75425fb204488de7fd9e07f84e51ee594fa11311862ba73d"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::validateActivityInputAgainstToolSchema",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "924cdd384abc34a36cc17d7ceb88429cdfe4175305bea53959568426f7e03717"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::validateActivityResultEventNameCollisions",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "f7b8816e2c672cd13c2f3ff4ae586683b708a4149de13acac1c636523efe70d0"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::validateActivitySpec",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "613b3a05a0c310297153fef9cec35116063db5e576e4371e07aa4e66de856cb7"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::validateActivityToolTransport",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "742397b14c9903473595a7780736830572f6e57b53c50f175052b9605d7b9585"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::validateDurableActivitySurface",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "3659e81b78d54c301a39fa32dbf0914fff5d8aa9e319865b3abda4c44b79d135"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::validateHandlerActivitySurface",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "953a7b88a317defad6b6dd6847475ff4293fb25aa6dde2b4da6c3f05581f1eef"
+  },
+  {
     "owner": "internal/runtime/bootverify/admission_report.go::AdmissionExecutionObligation.validIdentity",
     "audit_rows": "A28,A29,A30",
     "proof_families": "P23,P24",
@@ -742,6 +1054,204 @@
     "audit_rows": "A19,A28",
     "proof_families": "2567-P02,P08,P09",
     "body_sha256": "5395aaab510ec52788805d0c9a50383638764141528b1008729a41c13958947d"
+  },
+  {
+    "owner": "internal/runtime/channel_activation_admission.go::*Runtime.bindChannelSessionAdmission",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21",
+    "body_sha256": "5ca46f5a4fbbf32fc7606ef8a4ddf6f88be2d9adc74d0d99e3e420181b1b106e"
+  },
+  {
+    "owner": "internal/runtime/channel_activation_admission.go::*Runtime.nativeChannelExecution",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21",
+    "body_sha256": "ca874f301c966841ad5fab3e18bd086eb23f447813d57bb0fd68a252d718512c"
+  },
+  {
+    "owner": "internal/runtime/channel_activation_admission.go::*Runtime.validateChannelActivationPublication",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21",
+    "body_sha256": "c5763ef499e9da3967be66b097e8fb1112eb71bd5de8df3722afe84b9bc28227"
+  },
+  {
+    "owner": "internal/runtime/channel_activation_admission.go::*Runtime.validateLearnedChannelPublication",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21",
+    "body_sha256": "5a37d5674c4ca610ab010ddc90cdc7acd50e73826f3f355e8731cf292a46033c"
+  },
+  {
+    "owner": "internal/runtime/channel_activation_admission.go::*Runtime.validateNativeChannelPublication",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21",
+    "body_sha256": "0c940826e2af59b198d6a6d298d42e9644d184a66bfe0cadebd033f08c032354"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Lease.Activations",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "e0c1e684bcb89185aadb704675d7deb243eb415db30ae70c8ff51aae93956c5c"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Lease.BorrowRuntimeOperation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "bfabaa130db275bb968c5e85404f0d033cfe1fe5e34d7a6734d3ef297d64aaf9"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Lease.Generation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "68fa44388e16193647428abefc3514828ce01c39480846a6768ce458d811534e"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Lease.Operation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "6daf8e9b64b75fe95461ea8c77245d31a6ab7b9c5810ad3d1fc796fc21a056e9"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Lease.Release",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "1ac924bbc409921a3c2ee04b9bc244a970668487bd8897a1caa441a06919f79f"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Lease.RuntimeOperation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "ff7f4034a37ae260d26983e28b9b7b35b7551f6d41cbf8175cd668fd6580dc35"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Lease.ToolEntries",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "310db6b0ba80bed2a4dee9cec7137722308e56a5e1bc644413101e9df6809c40"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Lease.ValidateAdmission",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "bd272b05d907c9dc45047a75b48414caef8e34d2df4c732f5c6937ac53fa7a1c"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Lease.live",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "1be6c2adcfb5a2bf990c3d7299e247b84accb1402aefc4cc15498ef29dfbd4e1"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Owner.AcquireActivityOperation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "f83e79a28ea1155b4e941151dbd71561c034a5879360b91a3b3dfbee4deaf2ea"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Owner.AcquirePresentation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "b8bc3df15d272767db3bcf2def14f841b0b54632fbdad21d212ea8621c551f09"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Owner.AcquirePresentationContext",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "ad843cc640d81d5c7542f7d577510397e3f2927e83fec8cbd7f5d7354e148868"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Owner.AcquireRuntimeOperation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "c9941b2d8d793cf31af73da5f5ca346573ab1f6366530d8f5fb2319aa74bf9b3"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Owner.BorrowActivityOperation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "470abe5b13f6a1e41156213abe4f564411a91b210a48a4738ab4c31626a8a48a"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Owner.HasRuntimeTool",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "91c6e636c8bf8c5805602f0a8a1c1d1a072fec1a3bebd8e5185b0e619241b1dc"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Owner.Replace",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "ef25337cd619c6459c72e116a3d2924fb58e96d14db831a5bb3981ef047fd2bb"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Owner.ReplaceAdmittedContext",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "b2514d6c5ca8309a554a6a0ea0dc04fcec768678778409e04e907557d7e18629"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Owner.ReplaceContext",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "1079defbdebf62e667129006ba0c914dbf12d7a643a4a83f718316f30f166dae"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Owner.acquire",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "f07ef7420c0e5351bf258a6264f42a562df554de1377bf080f571eaa8c5ec528"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Owner.acquireAt",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "5d486595004bf52bba766bed0dac661c806fea2da4179fbfa1d31793240b29fd"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::*Owner.replaceContext",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "ee7a0446123357f1a4630209fde6097f33c58f2850cbfa7ccd4975390640722a"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::ExecutionLeaseFromContext",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "658f505780ff57d810776a68daad14151458c1312f263486df52d5f00ec3f56d"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::NewOwner",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "9e5422a6bebe22f42405fc35d04c3451f97611cb51bf7b133a9bb0ad9e49373e"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::WithExecutionLease",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "6f0b88b2e9fbd8d334acacdf766f792c4cf6692e9b89f060f181f4b32c5230d9"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::WithoutExecutionLease",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "ce471c134cc07218aa7b63240ca9060b9ecdfab301a2cfcc36abdad9b33c5491"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::compileSnapshot",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "daf2cef1fb34d96635617d406415cfdcfd81ddc972b8a2df49d8f36c4d5394c7"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::newOwnedLease",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "69fe7e9d6975ede1f2c46d4f9ef4bb9a359b9b05a0c2f475c354fff73153d327"
+  },
+  {
+    "owner": "internal/runtime/channelactivation/owner.go::requireNativePublicationAdmission",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
+    "body_sha256": "6e2792ee0eacadf8f6cd2756cb295ccf786baa9e78306746c03442712b251b07"
   },
   {
     "owner": "internal/runtime/llm/cli_runtime_boot.go::ValidateClaudeCLIRuntimeConfig",
@@ -1530,6 +2040,36 @@
     "body_sha256": "a4c5fb3ec27dd7cbe684fda1e3f5bb47d534be012c5080316814f0d215545d19"
   },
   {
+    "owner": "internal/runtime/pipeline/channel_session_activity.go::*PipelineCoordinator.compileAuthoredSessionActivity",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "a27c3423e0e30de90e207bca9b16a8437c6b7c0062eefa477690c68fa4fd9cc3"
+  },
+  {
+    "owner": "internal/runtime/pipeline/channel_session_activity.go::*PipelineCoordinator.prepareSessionActivityIntent",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "1a163127c8edb4337b465399d3b902fd3ceec3d80f13f51398039fc60cad8a1e"
+  },
+  {
+    "owner": "internal/runtime/pipeline/channel_session_activity.go::*PipelineCoordinator.prepareSessionActivityIntents",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "f16e25e1072a547f2801730a3471b18b767979d91bd9038dd9fd64d3a73af301"
+  },
+  {
+    "owner": "internal/runtime/pipeline/channel_session_activity.go::*PipelineCoordinator.validateAuthoredSessionActivity",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "9b6279b0169ed236c2572a0ce53bc862cbc0f8c2ae7d20fb6b1ffdc4c07fe4c2"
+  },
+  {
+    "owner": "internal/runtime/pipeline/channel_session_activity.go::validateSessionActivityRequestSelection",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "44483f18db1e9e58e075dc7da73e5705ae56a38ea7bed0652e6c7d09a2081fd2"
+  },
+  {
     "owner": "internal/runtime/runbundle/startup_admission.go::AdmitPinnedSources",
     "audit_rows": "A21",
     "proof_families": "P17,P18",
@@ -1570,6 +2110,66 @@
     "audit_rows": "A22,A24",
     "proof_families": "P03,P20,P21",
     "body_sha256": "be07d22f9a585e072fa9c697116f5f894e4845aeb73b70c9ed634e1ea868a13c"
+  },
+  {
+    "owner": "internal/runtime/runlifecycle/standing_disposition.go::ClassifyStandingRestart",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-dormancy,P08,P10,P21",
+    "body_sha256": "ca3c8d2184862a613a1dfc42e004e9cfcf1baccacc81dc88f209ff20661def2f"
+  },
+  {
+    "owner": "internal/runtime/runlifecycle/standing_disposition.go::StandingBindingBlockReason.EffectiveState",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-dormancy,P08,P10,P21",
+    "body_sha256": "98cd48716597d6fed7bd3f2bbcd7f07c0be13a6e9dac8095b2b3566538e785f8"
+  },
+  {
+    "owner": "internal/runtime/runlifecycle/standing_disposition.go::StandingBindingBlockReason.QuiescenceReason",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-dormancy,P08,P10,P21",
+    "body_sha256": "2a9bc1744fc03fb43874c9e7d01e6133c91293bbd70933d7ecd2c1c3119cc976"
+  },
+  {
+    "owner": "internal/runtime/runlifecycle/standing_disposition.go::StandingBindingBlockReason.Validate",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-dormancy,P08,P10,P21",
+    "body_sha256": "c3ee4de48774bc87b13766283d9b142e041bb0491a86ef06bd107f057dd82d56"
+  },
+  {
+    "owner": "internal/runtime/runlifecycle/standing_disposition.go::StandingRestartDisposition.ExactCurrent",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-dormancy,P08,P10,P21",
+    "body_sha256": "1585e5d30ba8673dc2b3e5e6d3a8752d077dc649cbe0d2415166e9f15b3f197b"
+  },
+  {
+    "owner": "internal/runtime/runlifecycle/standing_disposition.go::StandingRestartDisposition.Executable",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-dormancy,P08,P10,P21",
+    "body_sha256": "65c83bb8153b32f52990c6209a3957ce5237607a5dd420b527a2fe894c83a449"
+  },
+  {
+    "owner": "internal/runtime/runlifecycle/standing_disposition.go::StandingRestartDisposition.RunControlGuidance",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-dormancy,P08,P10,P21",
+    "body_sha256": "0e40efbf69bf65a9c5d95795db3e98c3e25c81ce4d1bacad53487f11c99f389f"
+  },
+  {
+    "owner": "internal/runtime/runlifecycle/standing_disposition.go::StandingRestartDisposition.UsesGenericRecovery",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-dormancy,P08,P10,P21",
+    "body_sha256": "e1424500d3944293d4a2916ee66c01b26b82b1af8b8477ade6f4e992be3d299d"
+  },
+  {
+    "owner": "internal/runtime/runlifecycle/standing_disposition.go::StandingRestartDisposition.Validate",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-dormancy,P08,P10,P21",
+    "body_sha256": "b663425dafd8627fc81db73290e9d27fb9ff94aeed860fb856b380d335470cc2"
+  },
+  {
+    "owner": "internal/runtime/runlifecycle/standing_disposition.go::validateStandingDesiredState",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-dormancy,P08,P10,P21",
+    "body_sha256": "5e387b0c3cd1792ec64ecc09a62de5b56984ead7c4a25a8ef42bdefa28c57a2b"
   },
   {
     "owner": "internal/runtime/runtime.go::*PreparedSourceSetGenerationRefresh.Abort",
@@ -1863,7 +2463,7 @@
     "owner": "internal/runtime/runtime.go::newRuntime",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "b52742ec816459cdc93bfbb8a1042d96ae6d9e42ca2a34bf30cf80b6c8c8cbd9"
+    "body_sha256": "1f24fc604a92d40d18e4cb38dca608b500e7d68c3c1a89025ad8f5f256efa7d4"
   },
   {
     "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
@@ -2148,6 +2748,162 @@
     "body_sha256": "c4542cbc5d2141a7b90e02dcc93cb8ebc319bd360fe991fb74b17604502cdd28"
   },
   {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.AdmitChannelStandingTarget",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "30a5b9290083b4fecb940802442e2bf1dcc5989983e9dc8e09c720401f89a245"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.AdmitInboundCredentials",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "3290c1645a3f1ff5ddf3090eadc13cef8000b26721014ca6eee7f165ec31294e"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.IneligibleStandingIngress",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "7478aabf39f3dfa083dbe80cb8dd8b12bb3341b501beb1c587dbee2b65a80710"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.ValidateStandingIngressCredentials",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "57ba3bf89aac21e0e53f23559f7e12ccb9ce5c7a88bde8f280d97723dd01ecf3"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.currentStandingCredentialAdmissions",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "2d711e9ee9e2b80a639b970e11023652712c08adba7fd68c2c1064ef8bf1575b"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.evaluateStandingIngressAdmission",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "43751c1ed40db3804d829ee1495cd96303e0065b7e1a7279ee462ca99a0d854f"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.ineligibleStandingCapabilitySubjects",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "cb64bec27e9dd9702c87f7612aa149766dc18f3f495cb86ef687dcb96f99267c"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.observeStandingBindingCredentials",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "54c3e6949f9371fa61e4f89025cd0de679f24ea727d63b0e68a4438b0136ad35"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.observeStandingCredentials",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "b199697e867a2651062a02ab56818fb5cb8594c0c82717d07800320817d95398"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.projectCommittedStandingTargets",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "f987624e4e6610a79040ed53c2dc213be0830c3fccf2de2d57d14c7dec90cb55"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.refreshStandingCredentialAdmission",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "266bc93a160c994ea2792b34fe246e4339b66023e8877748d32b6fde771f8f8d"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.requireStandingChannelTargetAdmission",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "46d5d8009e5e8ca7e03db75b11e76ccb98fc29c430e51482d9040ff1870de940"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.standingBindingCredentialRoles",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "66653122dfb4c9e29ce840c64e47c04f114da51c9747c5bbb4621b5c8d029669"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.standingCredentialPlanScope",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "bc011a72ea6e7fe9f53d9d46e565d8261587859d21559a878fe2d99f85450bb1"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.standingCredentials",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "2dc2ea252edd90d954b868104d1ae210a40f3dd054a3ab039ab1744a282f4c4b"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::*Runtime.standingIngressCredentialScope",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "dfdb9f6d96c7e67d8f969d93631dc13eb2cc99a68f017ba7bb4455779452017e"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::observeStandingCredentialRole",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "131255f853c00134a888d9cf674dfdfbf2d0dc19b56ee7a9f64a864830c6ccf1"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::standingCredentialPlanScope.addCurrentActivations",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "d1279c145d6edb4a20abd0bcafa87b82eef1003130a0fb64f06133280cb11998"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::standingCredentialPlanScope.addPendingOperations",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "e76104af0a0ed7d49f765f4bd9a82cd587403f67547199ea9590df6a767f517b"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::standingCredentialPlanScope.admit",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "defb4e323a6014d237cab54c21ace87baba5bacb430c56c36622042ced74eff3"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::standingCredentialPlanScope.matches",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "b099354a55df462df042bf7c21e04cc219bff009116d11a3b1390bc5b4689e8e"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::standingIngressSelector",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "4800c21f53257b40ee71bdbb0f3e3bcf2d8136cfd695fcc7eb545503b4d3ebbc"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_credentials.go::validateEnabledStandingAliases",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-dormancy,2577-native-confirmed-retention,P08,P10,P21",
+    "body_sha256": "00ac8e0331a397065590dfe8b6687155077c39961e4de19b9ba6fb1b82d44d1a"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_session.go::*Runtime.observeStandingSessionBinding",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-frozen-session,P08,P10,P21",
+    "body_sha256": "bc90614695d973161559107a2388f9bf190e220943d242d11db4d19fcba23e59"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_session.go::*Runtime.validateStandingSessionBinding",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-frozen-session,P08,P10,P21",
+    "body_sha256": "314f59737c9114533e57ef39b90c018639c7492bab8eff8285be937e93737352"
+  },
+  {
+    "owner": "internal/runtime/standing_ingress_session.go::*Runtime.validateStandingSessionBindings",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-frozen-session,P08,P10,P21",
+    "body_sha256": "86f8d43be72cb7fd0dd6e06e3bdcdea1cca8128657c85ba8dd8fada8b9286821"
+  },
+  {
     "owner": "internal/runtime/startup_recovery_diagnostics.go::*Runtime.inspectDeliveryRecoveryInventory",
     "audit_rows": "A23,A24",
     "proof_families": "P20,P21",
@@ -2394,6 +3150,18 @@
     "body_sha256": "47d9ef90d1cf5cc3aa08de428be00e84ff352565743b71ba0744dfe96c7be7ee"
   },
   {
+    "owner": "internal/runtime/tools/validation.go::ValidateToolImplementations",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "0e633bf18a34f5f43ac081c3bc2fdae1dcdee31e7bf0c682b8544ed344509b0a"
+  },
+  {
+    "owner": "internal/runtime/tools/validation.go::qualifyNativeActivityImplementation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "aec144403a08137f78ae8ad1e2168b150ddf7e1723d51e4f070d0b76435102c9"
+  },
+  {
     "owner": "internal/runtime/workflow_validation.go::DefaultWorkflowContractValidationOptions",
     "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
     "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
@@ -2556,700 +3324,1366 @@
     "body_sha256": "3e166a7acbdbf61aba966ef790ec25a9d133caf9de4ff94ef5a205f51365165c"
   },
   {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.admitInboxEntryTransport",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "d23ef0e4998fcab8f0a2b9ad7e5966ad53441e7c20a208e7d34b49f2baa39e92"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.installNativeInboxCommands",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "3c23809d65911bd8d9ae8699f7d8cfa3894626e0c783700b69747dcce1e1f2b9"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.qualifyInstalledInboxEntry",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "18affd60047e505836ad78d906bda493dde4e9acc1a3a09cd3ec445e6e1e5795"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.qualifyNativeInboxActivation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "119d77c7b40da7620eef3e4754f0f212c01259aa0205a79b65736af71c334609"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.qualifyResolvedNativeEntry",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "fc866380cf67a6cfe1eb3ff5fed8e2156358923282951d6208ad881e522a93c1"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.qualifyTextReplyInboxEntry",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "979d05f59d39d03bf2afd6dcba6e35bc216999ce578d36c150d9e222f4a5fa6c"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.readNativeInboxAddress",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "b460aa6dd9a8d2c5f4ce9a5c32a56fd98c1c814555736e921b0440b1b92be576"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.readNativeInboxCommands",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "16437f7a9bff2aebc11b1cbf296d237c0357fbc2473477d9816804f90840d869"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.readNativeInboxLanguageCommands",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "018cc6170e8e0a2209806e3a936cd0815ce81425f5059162bc0b9ab65c958c06"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.readNativeInboxLauncher",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "4eb7464206056621bbf4bdb3664e58a98aafc0982e7cd791aabf20776adbfa67"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.readNativeInboxQualification",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "516db1ba1e8e718a8720273f1483da7a12f129d82f52e58e23792297895edc7f"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.reconcileNativeInboxActivation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "1bc05ed28e9b836aef9105f879880bf03c381355ceae4ee20a4ba7eb13bd3a2c"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.reconcileNativeInboxSettings",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "f943993dfc7352c0c90e37d321b5f2af2a12d6c6c791ef811a00d47b73fcc09a"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.recordNativeQualification",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "fc80661c3a27bf252053f37c83e52f62d56ac5625fa51c71a7aedab1028b9ab7"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.resolveInboxEntry",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "60387471ae10ae2f25d32ef5af754a88bcfdd768479c5cac3500947dbe32f107"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::nativeInboxInput",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "cc53c740a90f76917712fac7960a676c4687f7c2604b9fa3893bfd6cc442654c"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::nativeInboxOperation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "73151630d4137b8b814c4dee691c8fc7b15c67ba3b360c4dd8241998c3de3baa"
+  },
+  {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.AdmitChannelTarget",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
-    "body_sha256": "3a60e4306d9934023a4b7086304cbaecacec69cb55196b11dc3d4f0f1d7ba0ee"
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
+    "body_sha256": "dc6c916a07e9441a157b3fa21365970484db85871d33bb6e4475dc2e37f7d3f1"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.PreflightChannelActivation",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "147ce36e0b596466336aadae6fe9c8d541be98a583784cbcf5d60a532f7541bf"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.PromoteChannelRegistration",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "2d2a818cd390ef1d14923db60b41778877dbf8aa2f5acbc14ce0732f3ec53f76"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.PublishChannelActivation",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "b6a6d62ae162cbae3d270efdaa60b62720a7e8ececf92979bebaf3b8e6bce9a0"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.RefreshChannelActivationCandidates",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "41b87a935e988c00b62783d658167821a747d53c71e79e90c3429aedd84877cb"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.RefreshChannelActivations",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
-    "body_sha256": "b94d05478592e8a0d3371c3e152cdbeaae700738c21367376df0d41ab25a8099"
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
+    "body_sha256": "69572887401388c3d7cdab8f83a0eddfa22b33f38e5d541e254312af39c3c414"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.publishChannelActivations",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "62ec2e01a2995016fbb1a06f0258cbd508f2fb6bc46c795e73fc215be388a85b"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.reconcileChannelRegistrations",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "8a69e033cc20d786ea92a115258d5dbf2c906e3163e8a867fc48286792e71eae"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelConfirmationDispatcher.DispatchChannelConfirmation",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
-    "body_sha256": "be24567a9ca61f5dd63885bfa75a62775baa4ffaba9687c39e57722797e58ef2"
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
+    "body_sha256": "c66055fefdbc4c3a1d0eda55834dfd3c43433ddde0fae77b17d91183f6c3998d"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelConfirmationDispatcher.ReconcileChannelEffectsBeforeRebind",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "d7b981dbea71bac73f3e530faa20f16770035139ee9fea7b0ae9c44f71e0c02d"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.ProjectConnectedChannelReadiness",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
-    "body_sha256": "acc15f8fb05e2ddb500b234b2586404a1be7f309a90cb59c649b283ff74c7ef0"
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
+    "body_sha256": "aec26198842df82ea003e44eac1ad2b43b8c02597f9d545faf7cd9840d0c6137"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.observeSessionReadiness",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
+    "body_sha256": "c6cafdd4bef9e4715800ba9575a8d82291e9f0da7070baa3f2ebc0cd1f9ede7f"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.observedAt",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "cc019793946b65c7a4338ac86d1e7223ec9e3dcebaa594576e4b733cb2b2509c"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::activateServeAfterConnectedChannelTeardownRecovery",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "77902ab764ea014301c127f73febba794f670267008a415cc783e70fa6a0f4f2"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::channelEffectTerminal",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "a343b09e4699bf9f9f5718e424b117520078c4d123db31abd308d1325ae3f177"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::channelOnboardingDeclaredPlans",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "69e5877376647430085c33253691299168a13dcdf37a3d63d54b62b9ec574ea6"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::classifyChannelEffectsBeforeRebind",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "f418eeb6bdafcf36225b6270861374b52bed779219582b40e9c4315548403c66"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::compileServeChannelActivationSnapshot",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "f6c12b1a169fb7dba783bac40c6f8f2a20b8b2afad8df8ad71f04dc068d2a217"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::compileServeDeclaredChannelActivations",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "257a1d6d9b59ff1eef10e4e27a7a11b5787069b04469bd17f96fa2c7e3a84770"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::compileServeLearnedChannelActivations",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
-    "body_sha256": "3a80233bd761ef4281e453e4d153d2e251797787ae7dc9be736312cbd2e0ce33"
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
+    "body_sha256": "bbf4b5110250ec13b225d2030c96292b118b31d98a784cf471a8e41a646f32ef"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::compileServePrebindingActivations",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "93663908e9819ea964b1620b49bcd1004d820fe50fc09ffd1e809ce1fef16603"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::declaredActivationCoordinate",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "6492985e88140eca202e4b897231fff390b875d9065d5a5e2dfa05a9d1939566"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::declaredActivationCredentialAdmissions",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "90a499d18a15edbe0e949d62376b5d6c17bbe221dbb2431594a3164a9cfdc56d"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::exactChannelActivationHandoff",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "3ab6d751957e93463d46e678208183b236abf5eb99c403ee275a59bac470e6e9"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::newServeChannelConfirmationDispatcher",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "7bd9953371b72ef1e3322f820d0e495befa117301182985b0884319feef5c170"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::observeChannelActivationAdmissions",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "4afc54c5c08b91e5bf3b04ee213ad374b7ceac17e369859d61b0d668b1b28b72"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::priorServeDeclaredActivations",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "af7204fa46877ddcc97e1112c5ff581d484cbfe12a622fac198da77d93205bd7"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::publishServeChannelActivationSnapshot",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "5950584293771ca00284937c233aff5d66393467535811e6e9af32503763568d"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::reconcileRetiredConnectedChannelContexts",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "e6247b44be304dd50828724ebe4f3374a545c852faff4681f9b38c1b1cb52f06"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::reconcileServeProviderRegistrations",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "0946f643b38c54e236eb731fd21428633f30ec942a89291607184ef37b8b4c27"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::rejectWebhookPrebindingWithoutPublicIngress",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "7359011c1db7453430c465b9e27e567d12edc847246227ed5acadbe701fb1e15"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::serveChannelCandidatesForPlan",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
-    "body_sha256": "8dafbb1f2c92b5ea6ae5dd8fe6f40bdb6c1936ec7c14847a8ac459ebd01c129c"
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
+    "body_sha256": "3aac4f75f11f583948f0803716fe6b59529b3ef0eb4a911095f79db6e9bb0439"
+  },
+  {
+    "owner": "internal/serveapp/channel_onboarding.go::serveChannelContextCandidates",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
+    "body_sha256": "366c52ef3dcba92f5906f22c05a0d533aa3174d9a536d2db9931b86559812c30"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::serveChannelDeclarationTarget",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "319b866d5ab29991bc7743144ef18282bbbf50cc416ea4bd0a2f6a7f1334bb9c"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::serveChannelOnboardingCatalog",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
-    "body_sha256": "e1cd6dbd1a500026eea6df735d2217de7f1f81ca417892a90051f73f7848edb4"
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
+    "body_sha256": "f02ea7b0b9392dd2a443f597fe02f2e17c703cd5824271b334a576457eec27a1"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::serveDeclaredRegistrationEnabled",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "372ecf09c60e74ed35c401e67532b855a508b4887ecdd1c595135585e37b5539"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::validateChannelEffectProvenance",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
     "body_sha256": "3f88247333a34e264493f5f6b49d4ce532ea7164067ca21c634d50f9b1ad5bd9"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap.go::observeServeChannelSession",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement",
+    "body_sha256": "0237f01ae8a93b182a5ccd243ca7782bdf18963d1c5344e1ea8bf16eacfee9cf"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap.go::selectServeChannelWrite",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement",
+    "body_sha256": "7d6b454f7ef49a584c5ae66e0851ae36d9f28d3ea4b0a28145d25ad3c58eba17"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap.go::serveSessionBootstrapRuntimeSelector",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement",
+    "body_sha256": "809e98603cd3a17b74c91746c5f0cf7dafacab359b8c86447f08b730a7c85f5b"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap.go::serveSessionIncomingSelection",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement",
+    "body_sha256": "e694fb34b1e291429a663bb049618dace98c504434de1b8aa751f40afbacbf8a"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap.go::unavailableServeSessionBootstrap",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement",
+    "body_sha256": "79c42f64d96dca6d59a4d4ca1b1a2b56eb3330d3cc85356204693051cf090e1f"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap.go::validateServeSessionCandidate",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement",
+    "body_sha256": "cb7a38ee9dd5598af74170c4f1a4990abe93a20051e77dd24638511c94214d83"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.AdmitSessionAccount",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "4cd35118196104b70ae65ce4081857232cbdc6252ca643a24496f38313b05b87"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.BootstrapSession",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "f248cae1ba5374b57db8be638ab9aff0519b2bcccd183e318ce64d75ac199066"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ChannelExecution",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "f9d762b3c3a5299e1a9b99d1a63867e058c4ddcf6dc691d13647500a0cd9b759"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.CheckpointSessionPairing",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "689ee0b607eb4627429ebb842f2f853651fa0adf52c19b79a4414d7c57d86d3c"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.CurrentValueMatchesSeal",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "90baafa665e87ee063bac6db1547d5aa6cf2079b13d3c9cedac9392e349060ae"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ObserveSession",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "409de740d712f4bd35b73084ccdb1cefff2c1aa8b297ad3a68964694256b5510"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.QualifySessionPlan",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "9b06101dc5334ac1fd61389dd00fb7373c4c4d75ebda6899a793547824fd242b"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ReadSessionPairing",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "59665e46245a2efc604804648dd18b51bb7610e7aefe098046928a1aa75a0cbb"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ResumeSession",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "0e6769429d2da1bac647b45726a5e49d777c19788ce7d4babe58a7cde84712ed"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.RetireInactiveSessions",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "b2be89cfa49464c8bb866786c857e2103fd70558cecbe5780dfb379733dc1b72"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.completeSessionAttempt",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "e549a0ce9b478db2fddce141170901e8b24cf4fee58863952a7d14f955b6f522"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.connection",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "1f9a7ae14a7deeb23792db0f1fd7ef29b97d3192008d07f6d2c420d6eb5e34a2"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.currentConnection",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "e8b4cda72ac559543c0e06c2ea0d5481a866b46d5cd1828d4dfcb28080837af0"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.observeSessionRetirement",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "f9ee9a461a6e68a36f25f00f5dcd9b8488f97f23a80598360d4be402bbe69704"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.openSessionAttempt",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "8cb44dfcf7c7004b3af7fdf4dc56c6291de14efeb31c723b8167ecf27ffca0fc"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.validateResumeSession",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "3b0ceea6e37dcd3d6831d1f0ecf0f615b62cc5c07fc7951b1123eb448bb9be30"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.validateRetainedSessionOperation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "f0d434f0bfe1638a0968db036e076a4937b852e93779a9f63a6e3cc9486fac74"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrapAttempt.current",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "ad4bf466f03e8784fddefad53b30f870ea8374a9f217dc5fc3d3e97bfbd5b89e"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::init",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "096dad8a6acfa957329319332b5b5e56392bdc332d84baf91d2122441a3b2568"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::newNativeServeSessionBootstrap",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "ecbebc0210b1d43bbd41e0d6233b1dbeb6c6bd0658ff65d1906701ea40ba95b7"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::serveSessionRetirementRequired",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "cd477c14da6b258e9316e122769146e662b97c359cbb61c72a4dd29941323b2f"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_startup.go::newServeChannelProviderOwners",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-startup",
+    "body_sha256": "af0767b14ccbdc669e6c94c42c8bc2334c7dddde01081af8ecaa50b44d62a111"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_startup.go::restoreServeChannelStartup",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-startup",
+    "body_sha256": "e2d604d0686701d3ce8472197f6082297799e94e865b95554c21561d62f3e125"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.ResetStandingService",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "7a22530a726d4debf96fc98feb92006258d7cc0c76e872fd938031bf8c44d36e"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.ResumeStandingService",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "2d7c5ba5188bfd522d695f5f80755e32358d3c5dde2e4a0771725a085018d3b5"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.SuspendStandingService",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "aaa056a8cd2805a7994486efc3d1b91064f5c4ae4b6262f8a93975fe75656de5"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.admitProcessTransition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "5db1254b9c4f61bcc31034354ff98be044cf4758a8f5ddc624a93e8cb8bd6d4e"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.closeAndDrain",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "6bf62dd2d06247e4f863249ee77807620b1417f383fc0f0f4fa7112e4223e68d"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.failClosedAfterReopen",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "9accc097f0068e2012eca9e9ba6cf0203c6bfecc0e5dc6af3bb34ebf7fb8a93c"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.mutateStandingService",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "721f34edf98413502485db2b8b574cbbea2a9be4a18e2f85ed5347c0a3d81cf3"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.publishActiveService",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "d9f346f0b7de0b90926ef88fd26ed17683816d14a6eeeee0a4870438d550fe79"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.restoreAdmission",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "49bc0bfae9c6cfeeb5f6312f5903eb49b06b8a990ecd7102cca42152ad6d7d41"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceTransition.Restore",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "f5d208083332e9458e4e6f87a46fd0f021e1dce6624e91008793cca139869e91"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceTransition.Retire",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "5611ad9e0e66e7fbb4a267da453e4d74e14a04feddf4612bfc33cfba8252a613"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceTransition.Wait",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "0905f9431d1b69db48c9c4b2c2a96ede2d003c4c81e62e1433eed1d12cab4e85"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStartupStandingRecoveryOwner.BeginStandingRunRecovery",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "bd53052da86e405a2ca5e89852765fcbf267c461bce78b7176c55558396075b9"
   },
   {
     "owner": "internal/serveapp/main.go::Run",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "c231ad3faf35905e31341120939e934b7e287de894617dfd185f81e111b202a8"
   },
   {
     "owner": "internal/serveapp/main.go::addrString",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "4a931937f9481804f6465554909ba349d755d9d073dcf50e0ba9b6b34977762f"
   },
   {
     "owner": "internal/serveapp/main.go::buildForkChatSandboxLLMRuntimes",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "c316c68308fc91bd91b1960eb34c912fb3bd80c694058110fd870fe6de926e0f"
   },
   {
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "a68c32b45b66149bca152b6b73529c74cc3dc6352dd68f63029b3810c6031d27"
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
+    "body_sha256": "f45d24c4f7554720943445e7e3ed53705144358b32c294b968001196ec8de2e9"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "3867e41fa17b634dbde5a122ed2c0fe4f8ee38d1a833c301f93e3c07f064433a"
   },
   {
     "owner": "internal/serveapp/main.go::buildStores",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "a5c23ad66365e6ac34f83981e5a56a6643133c72bed9e42ab596386b6dfa8551"
   },
   {
     "owner": "internal/serveapp/main.go::closeAdditionalServeRuntimeContexts",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "bbde7044cfbc8f19dd83f47fc873612f526ce2f8fc5a828fb852871fb52e4937"
   },
   {
     "owner": "internal/serveapp/main.go::compileServeSourceSetPlan",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "6b44099e3c217d0b16d43f65b1a3f88c6ac013d3efd0aceab0b39e0d29384f66"
   },
   {
     "owner": "internal/serveapp/main.go::conciseOwnershipAge",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "35145c8c4b73d54af5a5b6d7cff636ff66bf0a7357d9ee463e83d7f8c10845de"
   },
   {
     "owner": "internal/serveapp/main.go::configureWorkspaceDataProjection",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "802b85ebeed0e5f853015abb72b60a1e5fb6c63b31048242c4dcb1ed06f04f45"
   },
   {
     "owner": "internal/serveapp/main.go::createServeToolGatewayBinding",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "02865459385f85d2ed6d610904e51027936b62117396e9bd1cff572bbb813cd0"
   },
   {
     "owner": "internal/serveapp/main.go::ensureServeSchemaTables",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "f6b6efc251f3d139f897136640089af0eec4f7e6a133a8ce752d3c590cabe795"
   },
   {
     "owner": "internal/serveapp/main.go::initializeLoadedServeRuntimeStateStores",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "0065074bda3f10fa0c860e3496b081edff424702c2dc2cdc62402508093afaf0"
   },
   {
     "owner": "internal/serveapp/main.go::initializeServePlatformStateStores",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "c079505866fa465869dea229d913f2362ab358dbbaea5daf1988ce61a98a8809"
   },
   {
     "owner": "internal/serveapp/main.go::initializeStateStores",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "6fff865f9541845ec58c63bc58917ac1dede968aca05f0337479a03bce992fd9"
   },
   {
     "owner": "internal/serveapp/main.go::installServeSourceSet",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "aa30940d69b4607a5fff6d66ea459a35143580f32642155a5e5a251d77e99e43"
   },
   {
     "owner": "internal/serveapp/main.go::loadBudgetRecoveryStageSource",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "87d31f865ff5d43bfb045277273963541e9cab4e7008b97a7d8fd21bda199d8c"
   },
   {
     "owner": "internal/serveapp/main.go::loadServePlatformSpecDocument",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "3e6b65afe48548754a4e4e5344b37d559a9e0d74a567f605ee2f7f4def73fad5"
   },
   {
     "owner": "internal/serveapp/main.go::loadServeRuntimeBundle",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "fc5c93cf238f7d716c4909ed563c241c0a355b333c24e99bb333ad9e2d5baabe"
   },
   {
     "owner": "internal/serveapp/main.go::loadServeRuntimeBundleFromArtifact",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "dd148977f1d00c92907693f6954152232e881c2f94ba64c515b79bf59dfb7fcc"
   },
   {
     "owner": "internal/serveapp/main.go::loadServeRuntimeBundles",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "d9e83dcb31492af325439b1ae23af451ec8f6680363437508d81fd4645e0dd41"
   },
   {
     "owner": "internal/serveapp/main.go::materializeRuntimeBundle",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "5755530ba13174483d927427917f26ebe9b0c0f9f3d322362ab8d766837dd2c4"
   },
   {
     "owner": "internal/serveapp/main.go::newAPIServer",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "6d4b46aa207344e38a247d053dbf80d2619bff1fca5ba2c6db141d364d5ad542"
   },
   {
     "owner": "internal/serveapp/main.go::newServeStartupStandingRecoveryOwner",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "901af23f179f2bf70c7aa7b42b1afb2fb639e527a78d93fd2c15a639a1a26f99"
   },
   {
     "owner": "internal/serveapp/main.go::plannedServeRuntimeContexts",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "a70620225a22b1387e793e705dff4eb134aa2b286ba43d475c590ac953b72281"
   },
   {
     "owner": "internal/serveapp/main.go::postgresDSNFromConfig",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "1635f8ce85a6475981da760a33b2d5b305f99bef6e05b139461b20198ae533ec"
   },
   {
     "owner": "internal/serveapp/main.go::prepareLoadedServeSourceArtifact",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "ee54298ce77e1cf69125230ca037205eba61f4b3b27338c4d12b2ec5b7827457"
   },
   {
     "owner": "internal/serveapp/main.go::prepareResetServeRuntimeContexts",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "e8c2a351ec5ee4bdca271333c017c42072f58acf5222abd7c9154f32f2255557"
   },
   {
     "owner": "internal/serveapp/main.go::prepareServeRuntimeContextSet",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "58e55ee861a2101d342192e667d6d11dfabebad9ef61cd324870e2e6ca8533cc"
   },
   {
     "owner": "internal/serveapp/main.go::prepareServeRuntimeContexts",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "262e1f7bfc709cf6721545ff5136595e1852ab80e8f95cca6ddbf635c01da8fb"
   },
   {
     "owner": "internal/serveapp/main.go::probeServeHealthEndpoint",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "9a142a16f2948bdc93273479330b7732793912355c9340c963d6957654ff9497"
   },
   {
     "owner": "internal/serveapp/main.go::processOwnedDestructiveResetStore.ApplyDestructiveResetCleanup",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "bc8304600ad4fa3a687fbec4c5e01a48e5624c2a983a1f10e549b09800a31538"
   },
   {
     "owner": "internal/serveapp/main.go::processOwnedHTTPHandler",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "fd2b3703b587ca2bf9d4b6483709e58ce0a92343f7b65fd0b3fa70dfef185164"
   },
   {
     "owner": "internal/serveapp/main.go::reconcileServeRuntimeStandingTargets",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "e3684a77b3b18723bac71b4cdd9ef9e16e776e73a8ef953813ffb1202b2925bf"
   },
   {
     "owner": "internal/serveapp/main.go::reconcileServeStandingServices",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "87bb16d19a2c740e0abfc1fd8bf73b95eec6f753df12acc0c78e254a71a701b1"
   },
   {
     "owner": "internal/serveapp/main.go::reconcileStandingServiceCandidates",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "b7da14e1078cd173eb0201aae85cd6563238bc43de6f4acdce972231007694ea"
   },
   {
     "owner": "internal/serveapp/main.go::remainingServeShutdownGrace",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "ba9e47bc56e787235e752d9b4985ffcb89701c4e6f262ab8be73e08687e5d184"
   },
   {
     "owner": "internal/serveapp/main.go::reportServeStandingReadiness",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "d30eac1f5302d9a18ad20e755985fb1bcb66ab7005e29c4c4e36e01c2b6c9bac"
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
+    "body_sha256": "0e16c606bc40a678a247ba9497ed148b264466cc3a56e028337d0c8fee3bb0b6"
   },
   {
     "owner": "internal/serveapp/main.go::runServeSourceArtifactStartupRecovery",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "2f901d2092ca458f629e59fd6947c18e3e7fa01275687a1e1c5ada19731dea17"
   },
   {
     "owner": "internal/serveapp/main.go::runtimeAdmissionReady",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "cc174f2ff9a932796069cc581c4241b27a6c1e1372c38d478c60a41eaff492a4"
   },
   {
     "owner": "internal/serveapp/main.go::schemaBootstrapRequest",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "4b97f295cd7a7ddda22b1a0e96342e385222121712348784e8f4fefb22a235f8"
   },
   {
     "owner": "internal/serveapp/main.go::serveBootBundleLoadDetail",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "1a6d18f9fab1cd0529834a289b7a1f035d4e709789b3911591656e8bd36dccc9"
   },
   {
     "owner": "internal/serveapp/main.go::serveBootRegistryDetail",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "f9292437b8d12a00e47f17665cbc44c8602d3511e3b13eabe86a8c157626d2e6"
   },
   {
     "owner": "internal/serveapp/main.go::serveCancellationExitCode",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "edcad1704004f4ec12b2ab9c99c67f6aa52f9a1b9827f579fe4fb65af60cb31a"
   },
   {
     "owner": "internal/serveapp/main.go::serveConfigLoadDetail",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "848872457b5ec80393133fd5a5cb70df07e61484e953416ad8c41773ffc8a8b3"
   },
   {
     "owner": "internal/serveapp/main.go::serveHTTPServer",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "fc9fc8a13f8ffee832c56a8b3d3e544c7cc15cf1021c507e788fd909c3f52cd4"
   },
   {
     "owner": "internal/serveapp/main.go::serveHealthProbeBaseURL",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "73273f0e903c36f39cc3c7caeb2151b9881a57bbaa7530a7e9194353ad9ec320"
   },
   {
     "owner": "internal/serveapp/main.go::serveLifecyclePackFacts",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "452bb799d729ce053aa3f29f44001d18cda5addaeeae1b9cf9f72bfbb7e22a93"
   },
   {
     "owner": "internal/serveapp/main.go::serveLifecycleProjectName",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "7b765710000ddd8800001b9cb25df3ceb0c6b1f040994d9879620d476ee6cd80"
   },
   {
     "owner": "internal/serveapp/main.go::serveLifecycleSourceCounts",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "b2143fa504334feeffef4eba5adfefa8e2e9724164eee658e80bf3f42430cb9f"
   },
   {
     "owner": "internal/serveapp/main.go::serveLifecycleWorkspaceLabels",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "4ba6e3426375fc4f0721b8709a17958edea63104b64b3e0db42d3cf94673224f"
   },
   {
     "owner": "internal/serveapp/main.go::serveOperatorChannelInterfaces",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "1d2435d9cfc2b05cd546ca7e59099b28ed74e137e86bda7c48d9b7e0af332a9e"
   },
   {
     "owner": "internal/serveapp/main.go::serveOwnershipAcquisitionError",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "8f7e0b42896a78abcb416489432a34346b435ecfedf313076f96a9e2f8150713"
   },
   {
     "owner": "internal/serveapp/main.go::servePinnedBundleHashes",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "d6b9f863a785397daa5b1e0645b7b2af7c61e3754f06040153d30b1870451cf6"
   },
   {
     "owner": "internal/serveapp/main.go::servePreCatalogPlatformSpecPath",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "271e1082041583536bc5d6ac3a6dc160774e413f45bbf994c8480f77fe2764f7"
   },
   {
     "owner": "internal/serveapp/main.go::serveReadyStandingIngress",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "95b5fe1f11822a17ba52954bab9ee73556310b62739ec3abdc341ccbe6a46356"
   },
   {
     "owner": "internal/serveapp/main.go::serveRuntimeBundle.serveIdentityDetail",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "1931743be78343f4bee41c361d229f1a2ad4b572392a815b8eb1025ee9f8b49f"
   },
   {
     "owner": "internal/serveapp/main.go::serveRuntimeBundleAuthorLabel",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "3c1aaad8cd1a980b2469179bc0e28b28f58e67167fdb1118ac82dbbb4d830534"
   },
   {
     "owner": "internal/serveapp/main.go::serveRuntimeBundleIdentitiesDetail",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "04b1d878d94b6f6803d09c90a0d00087dd9ea6ce6b14eaa7689c6b574a08b999"
   },
   {
     "owner": "internal/serveapp/main.go::serveRuntimeContextStandingTargets",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "01a0630f1f29f4db05d46aa540172b265343edfa2e58abd98fee364b9489b0cf"
   },
   {
     "owner": "internal/serveapp/main.go::serveRuntimeStateStoreSummary",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "a5ed2bb92754a478e90f58d151f61c1a22527d565ee403b064a2bcb50ba4e3ed"
   },
   {
     "owner": "internal/serveapp/main.go::serveStateStoreSummaryAt",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "3bb47af3d05c5f35d2f127891ce1626bc36d71b324965d72129176752ea00925"
   },
   {
     "owner": "internal/serveapp/main.go::shutdownHTTPServer",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "3a8f10bb7f0f8022b6e329b393e9ba6259e893f9c109dcbb5082ac3e6051b350"
   },
   {
     "owner": "internal/serveapp/main.go::startServeOwnershipWatch",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "e37c1c688e6f649a2ae0c74e2b9ffa7c5a7b6341dd232d0612b417c0e42e1e2d"
   },
   {
     "owner": "internal/serveapp/main.go::systemWorkspaceContainers",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "8843f379f9604c06a1a722b486bbaeb170350d297ed4b14af9185f0cbf34a42e"
   },
   {
     "owner": "internal/serveapp/main.go::validateServeGatewayURLEnvForNonDev",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "9a6ed63e94080dd90121df612feca389500399de9c3be95f3ff1d0c21198e836"
   },
   {
     "owner": "internal/serveapp/main.go::validateServeMultiContextToolGatewayAdmission",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "f401ece1ad136c875132205193a5117064df528ae352a032d0bbf2a83ac7f8ff"
   },
   {
     "owner": "internal/serveapp/main.go::waitForServeHealthEndpoints",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "a774f51c979b75b173cdf02738526ab1d918d8759200dd214b392cce24d409f5"
+  },
+  {
+    "owner": "internal/serveapp/public_ingress.go::*serveRegistrationSelection.Release",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-publication,P08,P10,P21",
+    "body_sha256": "5ef218bda528e675c24b64ed09164ef2d5e63f526c740d080714f5b65b22e5ac"
+  },
+  {
+    "owner": "internal/serveapp/public_ingress.go::exactActivationContext",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-publication,P08,P10,P21",
+    "body_sha256": "0a9c17c5f7f629ffd5809d24759e7484e441da6dfd65f861fc926d70b29bec50"
+  },
+  {
+    "owner": "internal/serveapp/public_ingress.go::exactContextTarget",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-publication,P08,P10,P21",
+    "body_sha256": "8bfa9808f983206a357fbefe1f4dbd58630f746b83a5a1f18ccff7d7c7ada9d6"
+  },
+  {
+    "owner": "internal/serveapp/public_ingress.go::findContextTarget",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-publication,P08,P10,P21",
+    "body_sha256": "7d074f8eb16e3d85d60aa3cd438857bf5e26c89d0ed4b74e94e22ac8942da729"
+  },
+  {
+    "owner": "internal/serveapp/public_ingress.go::publicIngressPresentation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-publication,P08,P10,P21",
+    "body_sha256": "483d8adb8ed442fdd74dff1a9b1249293cdcb93de7cf26cdb2fa55f346bf637e"
+  },
+  {
+    "owner": "internal/serveapp/public_ingress.go::requiresPublicIngressPresentation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-publication,P08,P10,P21",
+    "body_sha256": "235e1ffc33ef26fb8dab8212cf7f089c317a27a9547ccf4692f86557814efc79"
+  },
+  {
+    "owner": "internal/serveapp/public_ingress.go::resolveServePrebindingRegistrationPair",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-publication,P08,P10,P21",
+    "body_sha256": "8eb9a8870c2b4207d260706cc934ba0eceeadc1ff7efff786c22dad9f94bc1fc"
+  },
+  {
+    "owner": "internal/serveapp/public_ingress.go::resolveServeRegistrationPairs",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-publication,P08,P10,P21",
+    "body_sha256": "ddb04d1894a2072c7949840d3973b002b19dcca7a04831b0cf54b39273ea2e6d"
+  },
+  {
+    "owner": "internal/serveapp/public_ingress.go::serveRegistrationSelectionCurrent",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-publication,P08,P10,P21",
+    "body_sha256": "0dcf556fe7fa378538e3c3d44a9a989858570718b2c84ab9ca43feaebf378479"
+  },
+  {
+    "owner": "internal/serveapp/public_ingress.go::sessionIngressFact",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-publication,P08,P10,P21",
+    "body_sha256": "650d8155d670b9dbd6647ccd050bccf027eea6d13a85e1fe7dd00beedca95213"
+  },
+  {
+    "owner": "internal/serveapp/public_ingress.go::startServePublicIngressRenewal",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,2577-native-publication,P08,P10,P21",
+    "body_sha256": "68f67c09137018319e3d95b5450db9cd1c2254364103ba045d987bd2827c4c59"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.boot",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "eee97e01c5a3c836a2d45c93b2808f2d44092e18205707f087a35b121f477135"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.cleanupFailure",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "0d1f191a93d6aa1168c3c04cf18286696b66ba854791fd984c936df4a1e3c954"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.commitReady",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "1ab926d96767a54f0cdec2f8dc6fc7ec9f84d1adf78d01d3f718451d4affc03e"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.fail",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "22587e5fb029ce901bd4fa7ec1501fb16be8fef3f2399c45d170a0a579ae0973"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.failWithDiagnostic",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "d313eb4cb062a73e877ea1b62eba313fc0cd36329789f29d665e1139d4f78684"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.finish",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "8232dc58534ff2ed54a13d0af1614fc5acb275439421c5073a66b3b92267450c"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.observeBoot",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "df64490187f16d5934691ca4f9b8a50146f9c5c4fca9bc0d60353b7786ff7c57"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.ownershipLost",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "d2fe29009061ce53cd5214203b49295256462bbb4631c7ffdac24077d8ff698b"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.readyPresentation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "1ccd119c6c186b28b1af6e75c39657753578e744952a3ad9ef51882eeaf617d7"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.recordAbandonedWork",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "768be1f5e0e98ca45ab2e2750887117471aebf2d0c8525bcaafa2f4d04643afa"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.recordBootWarnings",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "8061e3861f34c89ad1ce541b64998032c182ccd50dd40d012386e1b032cf699c"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.recordClosedUnavailableWork",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "da62b96df76ba7e586522570d3979615d9198929221781166b367baf638a617b"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.recordDefaultAPITokenWarning",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "2e388d04b14b7fd351c5c5c2217eda347db3b5680986547b828882f727321ac2"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.recordIneligibleIngress",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "4380f7b5fa4ae12c8a3ef0b7f298771cf3e19a20392e942c81d47e969dff7897"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.recordNoConnectedChannels",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "ee995134ccc4eeff317937b6ffecef65e4359eb996354695a238a611aabb9641"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.recordOperatorChannelProofReuse",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "d913dd2548680ad7be45c091ed96efce4a8acda03d4dee696b6ce1b2dc2fce9b"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.recordPublicIngressDisabledHint",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "13a49475dd0cce709aecbf7bf1e85b99cba893ea64cdfb19b48d5b5c5763d3b7"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.recordRecoveredPreviousSession",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "d8e3dbcfc87feaf315261d3412358ce7a349e66d76bc13c2aee1aa53858cd2e7"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.recordStore",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "f50e7e3d71d96fd36a3febd3bc20473ee55ed324bf41243e650c4a847a1968ea"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.recordWorkspace",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "32e2c526d7cf1ca07094a94e64cfe33839ba277741c61ba0d9b5dde956f071fe"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.recoveryDetailLocked",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "538b2d6f673657b54e635ac97e10b0f116205bf79dbdcb8f9a1b8d9887b98b26"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.runtimeFailure",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "708e884662340e0cd3765f7b3d424deb82d287452ab2be1ff1044dedbc6491c5"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.runtimeSink",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "e285f670b715873871232e14300f8f12d2980379a0b53d881e8fc08d6e709ed4"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.shutdown",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "5a9a2599e8ab6bdc5298894494f2f12b13cd072a1e072f4e11a9043c2c83d1d8"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.storyWarning",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "d2ac614cc7b9cb92bec790537adfc5c18c0bbe8d855ec57c0864a40fde86e8f4"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.workspaceDetailsLocked",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "ccc8166acd6a91b97ea7a25c7c04f9d0bdf8ea48e829b6facacb0aaa239d2065"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.writeBootEventLocked",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "c75895d57ebc2b2e750bac94bdf0a9b3e6c89be68e27362b3567d703268b2ba9"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.writeBootEventsLocked",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "9077ee506d55a6a851e6489a62288794a8c829863774a0e60f248954dc7f9571"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.writeCleanupContextLocked",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "d5ac0b631bc75cfd345a956db2c9c39bd2be837d15113c517f1869d69967165d"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.writeConciseReadyLocked",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "847a0a687fa60292aa47774c860244630859fad93afc7aeeb987f2b00126f431"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.writeFailureContextLocked",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "fecb8e13e85b0afe32a7c5d05381278eb0c96cca97c8740223d20e0757fc7a4f"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.writeFailureLocked",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "75adeecbd03512cfc63ea3b64ca5be9c31292ae7c69d714d1d2f77914a31aa9e"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.writeFeedReady",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "8b1ef75d1d3ae6c6ae179476fc92a7a7d227863bc8134c46cd38ee1c3c9c0fd9"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.writeRecoveredSessionLocked",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "7f95569046811fdf073e706927b4488d64fe990a6ff666db9dd88b18d88bfec4"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.writeResolvedFactLocked",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "abfc648faf1295275dd21ddae3c5beb9d2cf9b41254f3fc2d854e437272df7c7"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.writeResolvedFactsLocked",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "8e066fd17ff8cc1df8989cbbb427a79b5aad40b1c0852a49a8f37b36db3b1cad"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.writeStandingIngressLocked",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "8a60cf04d1423e8c299399299736389a000a5fb1dbb7fde89578482cb40242af"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.writeStory",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "51b5dfed5fde690597318ff00f112bff7168912d6949b0bc071c98cca348d5db"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::*serveLifecyclePresenter.writeWarningsLocked",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "6accbb2add381a548cb79c125c491e764b996225d9d0505b734f9dad72b06f63"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::displayServeLifecycleName",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "3d7292aaa161ac7a5f453fb65a4ad246f925d9a3d49270ec8bf95c226fdc644b"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::newServeLifecyclePresenter",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "8713ce9fd8d4ce5818b010451171aa6c8c54049642f620b586c4066fa1386dad"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::recordServeAbandonOutcome",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "0d94799bfc370aef092d11da91a93c12e9d45b6b123a248dadb168148df550c4"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::serveCountLabel",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "fee7f78ee676bd1fea2ba8c5d3bb69d62d5b0c65ef049454c08c6cb3f5d46865"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::serveLifecycleErrorDetail",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "011f4ab23fea71c93cf3b5926cf69d346ad6f59bee84c41e182dd656b0fb8474"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::serveLifecycleNoticeDetail",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "29b4b4883fd8bb8e47b91896feb8d26b91b503c6658c88d99dc64f684b2281c6"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::serveLifecycleWorkspaceDetail",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "7c9ee1c84b239efc6a1057972d351e170cbc3a7f01a76ed2ba4c330a32ea1b66"
+  },
+  {
+    "owner": "internal/serveapp/serve_lifecycle_presentation.go::serveUniqueSortedStrings",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-boot,P08,P10,P21",
+    "body_sha256": "c89c933e881329091c0faf959e3bd6b9d834da22eebd75b8be0a5835817b7318"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/session_standing.go::*PostgresOwner.SessionStandingBindingCurrent",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-withdrawal,P08,P10,P21",
+    "body_sha256": "e55c1432d5a470fdbb6b227f09915f8c46336289e12b6710f68cbf256d6b608e"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/session_standing.go::*SQLiteOwner.SessionStandingBindingCurrent",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-withdrawal,P08,P10,P21",
+    "body_sha256": "a36e4699c6bd90a9a12fc45c3f9f65d6de3b5a4147950d16ca96a43d8c14342b"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/session_standing.go::sessionStandingActivationCurrent",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-withdrawal,P08,P10,P21",
+    "body_sha256": "5609c7eb18827e9d5f74c0fc65aa939eb01aa94004e0f3690b739ddbfe820faa"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/session_standing.go::sessionStandingBindingCurrent",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-withdrawal,P08,P10,P21",
+    "body_sha256": "a449a7a2974479c1e361b8d88916dc031b98cf7636f892db355e62a6cfec70cc"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/session_standing.go::sessionStandingOperationMatches",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-withdrawal,P08,P10,P21",
+    "body_sha256": "88e4c3cfdafa62c92902ffd0f2a5a3e8c2801a83fa3259912e4012d9d61b25e6"
   },
   {
     "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.BeginTx",

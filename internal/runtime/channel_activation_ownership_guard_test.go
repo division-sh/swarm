@@ -89,6 +89,44 @@ func TestChannelActivationExecutableReaderCensus(t *testing.T) {
 	}
 }
 
+func TestLearnedActivationConsumersKeepCompleteResponsibilityProjection(t *testing.T) {
+	for path, function := range map[string]string{
+		"channel_activation_admission.go":   "validateLearnedChannelPublication",
+		"../serveapp/channel_onboarding.go": "compileServeLearnedChannelActivations",
+	} {
+		t.Run(function, func(t *testing.T) {
+			parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found, calls := false, 0
+			for _, declaration := range parsed.Decls {
+				fn, ok := declaration.(*ast.FuncDecl)
+				if !ok || fn.Name.Name != function {
+					continue
+				}
+				found = true
+				ast.Inspect(fn.Body, func(node ast.Node) bool {
+					if call, ok := node.(*ast.CallExpr); ok {
+						if selector, ok := call.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "AdmissionResponsibility" {
+							calls++
+						}
+					}
+					if literal, ok := node.(*ast.CompositeLit); ok {
+						if selector, ok := literal.Type.(*ast.SelectorExpr); ok && selector.Sel.Name == "AdmissionResponsibility" {
+							t.Error("activation consumer reconstructed an incomplete responsibility")
+						}
+					}
+					return true
+				})
+			}
+			if !found || calls != 1 {
+				t.Fatal("activation consumer stopped using the complete canonical projection", found, calls)
+			}
+		})
+	}
+}
+
 func TestEffectiveSourceHasNoChannelDeploymentInterpreter(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "internal", "runtime", "effective_source.go"))
@@ -121,16 +159,18 @@ func TestStructuralReadersDoNotConstructChannelActivation(t *testing.T) {
 func TestChannelActivationExecutionConsumersUseCanonicalOwner(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	checks := map[string][]string{
-		"internal/runtime/mcp/gateway.go":              {"AcquireToolDefinitionsForActorInContext", "acquireTurnPresentation"},
-		"internal/runtime/mcp/context.go":              {"BindPresentation", "revokePresentation", "Presentation.Close"},
-		"internal/runtime/tools/channel_runtime.go":    {"PresentationFromContext", "ValidatePresentation", "BorrowRuntimeOperation"},
-		"internal/runtime/pipeline/coordinator.go":     {"AcquireActivityOperation", "BorrowActivityOperation"},
-		"internal/runtime/pipeline/activity_engine.go": {"ChannelActivationGeneration", "WithoutExecutionLease"},
-		"internal/runtime/tools/executor.go":           {"AcquireToolDefinitionsForActorInContext", "AcquirePresentationForContext"},
-		"internal/runtime/context_manager.go":          {"ReplaceChannelActivationsContext", "AcquireChannelActivationPublication"},
-		"internal/serveapp/public_ingress.go":          {"AcquireChannelActivationPublication"},
-		"internal/serveapp/channel_onboarding.go":      {"NewChannelActivationPublication", "AcquireChannelActivationPublication"},
-		"internal/serveapp/main.go":                    {"NewDeclaredOnlyChannelActivationPublication", "prepareServeRuntimeContexts", "releaseRuntimeContexts"},
+		"internal/runtime/mcp/gateway.go":                      {"AcquireToolDefinitionsForActorInContext", "acquireTurnPresentation"},
+		"internal/runtime/mcp/context.go":                      {"BindPresentation", "revokePresentation", "Presentation.Close"},
+		"internal/runtime/tools/channel_runtime.go":            {"PresentationFromContext", "ValidatePresentation", "BorrowRuntimeOperation"},
+		"internal/runtime/pipeline/coordinator.go":             {"AcquireActivityOperation", "BorrowActivityOperation"},
+		"internal/runtime/pipeline/activity_engine.go":         {"ChannelActivationGeneration", "WithoutExecutionLease"},
+		"internal/runtime/pipeline/channel_native_activity.go": {"withNativeChannelActivityLaunch", "value.lease.ValidateAdmission", "ConsumeNativeChannelActivity", "AdmissionResponsibility", "MatchesBusinessBinding"},
+		"internal/runtime/channel_activation_admission.go":     {"validateLearnedChannelPublication(ctx, activation)", "binding.owner", "owner.ChannelExecution(ctx, op)"},
+		"internal/runtime/tools/executor.go":                   {"AcquireToolDefinitionsForActorInContext", "AcquirePresentationForContext"},
+		"internal/runtime/context_manager.go":                  {"ReplaceChannelActivationsContext", "AcquireChannelActivationPublication"},
+		"internal/serveapp/public_ingress.go":                  {"AcquireChannelActivationPublication"},
+		"internal/serveapp/channel_onboarding.go":              {"NewChannelActivationPublication", "AcquireChannelActivationPublication"},
+		"internal/serveapp/main.go":                            {"NewDeclaredOnlyChannelActivationPublication", "prepareServeRuntimeContexts", "releaseRuntimeContexts"},
 	}
 	for relative, required := range checks {
 		raw, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(relative)))

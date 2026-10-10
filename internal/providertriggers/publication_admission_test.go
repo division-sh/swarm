@@ -1,10 +1,13 @@
 package providertriggers
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -58,6 +61,26 @@ func TestA9DeclarationPublicationRequiresAuthenticatedExactOutputs(t *testing.T)
 	if err := admission.ValidateOutput(bundleHash, "partner", 0, 1, event, provideroutput.KindRaw, provideroutput.Authorization{}); err != nil {
 		t.Fatalf("exact authenticated output: %v", err)
 	}
+	t.Run("prepared receiver is not a sender", func(t *testing.T) {
+		receiver := events.RouteIdentity{FlowID: ".", FlowInstance: event.RunID(), EntityID: eventtest.UUID("receiver")}
+		prepared, err := events.ResolveEnvelope(event, events.EnvelopeForTargetRoute(event.NormalizedEnvelope(), receiver))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := admission.ValidateOutput(bundleHash, "partner", 0, 1, prepared, provideroutput.KindRaw, provideroutput.Authorization{}); err == nil {
+			t.Fatal("input admission accepted a preclaimed receiver")
+		}
+		if err := admission.ValidateCommitOutput(context.Background(), bundleHash, "partner", 0, 1, prepared, provideroutput.KindRaw, provideroutput.Authorization{}); err != nil {
+			t.Fatal("prepared receiver rejected", err)
+		}
+		bare, err := events.ResolveEnvelope(event, events.EnvelopeForEntityID(event.NormalizedEnvelope(), receiver.EntityID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := admission.ValidateCommitOutput(context.Background(), bundleHash, "partner", 0, 1, bare, provideroutput.KindRaw, provideroutput.Authorization{}); err == nil {
+			t.Fatal("commit admission accepted a bare concrete claim")
+		}
+	})
 	for _, test := range []struct {
 		name   string
 		change func(*PublicationAdmission, *events.Event, *string, *string, *int, *int)
@@ -88,8 +111,129 @@ func TestA9DeclarationPublicationRequiresAuthenticatedExactOutputs(t *testing.T)
 			}
 		})
 	}
-	admitted.ProviderEventID = "different"
-	if _, _, err := plan.ProjectPublication(admitted, bundleHash, "."); err == nil {
-		t.Fatal("mutated admitted identity acquired publication authority")
+	var reconstructed AdmittedRequest
+	if err := json.Unmarshal([]byte(`{"ProviderEventID":"different","ProviderEventType":"push"}`), &reconstructed); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := plan.ProjectPublication(reconstructed, bundleHash, "."); err == nil {
+		t.Fatal("serialized metadata acquired publication authority")
+	}
+}
+
+func TestAuthenticatedPackProjectionRejectsPostAdmissionMutation(t *testing.T) {
+	for _, mutation := range []string{"payload", "digest", "serialized metadata"} {
+		t.Run(mutation, func(t *testing.T) {
+			fixture := normalizedEventTestManifest()
+			fixture.Secret.Required = true
+			fixture.Signature = SignatureManifest{Type: signatureTypeHMACSHA256, Header: "X-Signature", SignedPayload: "raw_body"}
+			manifest := fixture.mustAdmit()
+			catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: manifest, Source: "authenticated-mutation-proof",
+				Identity: PackIdentity{ID: "provider.telegram", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "test"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "signed-proof"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := []byte(`{"message":{"message_id":7,"chat":{"id":42},"text":"authenticated"}}`)
+			var payload any
+			if err := canonicaljson.DecodePreservingNumberLexemes(body, &payload); err != nil {
+				t.Fatal(err)
+			}
+			mac := hmac.New(sha256.New, []byte("signed-proof"))
+			_, _ = mac.Write(body)
+			admitted, err := plan.AdmitRequest(Request{Provider: "telegram", Target: Target{WebhookSecret: "signed-proof"},
+				Body: body, Payload: payload, Headers: http.Header{"X-Signature": {hex.EncodeToString(mac.Sum(nil))}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			const bundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+			if delivery, _, err := plan.ProjectPublication(admitted, bundleHash, "."); err != nil || len(delivery.Events) != 2 {
+				t.Fatalf("exact authenticated positive control: %+v, %v", delivery, err)
+			}
+			switch mutation {
+			case "payload":
+				payload.(map[string]any)["message"].(map[string]any)["text"] = "not authenticated"
+			case "digest":
+				admitted.semanticContentDigest = strings.Repeat("a", 64)
+			case "serialized metadata":
+				admitted = AdmittedRequest{}
+				if err := json.Unmarshal([]byte(`{"ProviderEventID":"delivery-1","ProviderEventType":"update","SemanticContentDigest":"claimed","AcknowledgeBeforeDispatch":true,"Response":{"Status":200,"Body":"Zm9yZ2Vk"}}`), &admitted); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := plan.ProjectDelivery(admitted); err == nil {
+				t.Fatal("changed authenticated request reached delivery projection")
+			}
+			if _, _, err := plan.ProjectPublication(admitted, bundleHash, "."); err == nil {
+				t.Fatal("changed authenticated request acquired publication admission")
+			}
+			if mutation == "payload" {
+				payload.(map[string]any)["message"].(map[string]any)["text"] = "authenticated"
+				messageID := payload.(map[string]any)["message"].(map[string]any)["message_id"]
+				if _, ok := messageID.(json.Number); !ok {
+					t.Fatal("request evidence lost its numeric lexeme")
+				}
+				if _, _, err := plan.ProjectPublication(admitted, bundleHash, "."); err != nil {
+					t.Fatalf("original content no longer consumes the same admission: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestAdmittedRequestMetadataHasNoWritableOrSerializableAuthority(t *testing.T) {
+	typeInfo := reflect.TypeFor[AdmittedRequest]()
+	for index := range typeInfo.NumField() {
+		if field := typeInfo.Field(index); field.IsExported() {
+			t.Fatalf("authenticated metadata exposes writable field %s", field.Name)
+		}
+	}
+	var absent AdmittedRequest
+	if absent.ProviderEventID() != "" || absent.ProviderEventType() != "" || absent.SemanticContentDigest() != "" ||
+		absent.Response() != nil || absent.AcknowledgeBeforeDispatch() {
+		t.Fatal("absent admission fabricated metadata")
+	}
+}
+
+func TestAuthenticatedChallengeReadbackCannotMutateAdmission(t *testing.T) {
+	fixture := normalizedEventTestManifest()
+	fixture.Secret.Required = true
+	fixture.Signature = SignatureManifest{Type: signatureTypeHMACSHA256, Header: "X-Signature", SignedPayload: "raw_body"}
+	fixture.Challenge = &ChallengeManifest{When: ConditionManifest{JSONPath: "$.challenge", Equals: "original"},
+		Response: ResponseManifest{JSONPath: "$.challenge", Status: http.StatusOK, ContentType: "text/plain"}}
+	catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: fixture.mustAdmit(), Source: "challenge-copy-proof",
+		Identity: PackIdentity{ID: "provider.telegram", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("d", 64), Provenance: "test"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "signed-proof"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"challenge":"original"}`)
+	mac := hmac.New(sha256.New, []byte("signed-proof"))
+	_, _ = mac.Write(body)
+	admitted, err := plan.AdmitRequest(Request{Provider: "telegram", Target: Target{WebhookSecret: "signed-proof"}, Body: body,
+		Payload: map[string]any{"challenge": "original"}, Headers: http.Header{"X-Signature": {hex.EncodeToString(mac.Sum(nil))}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := admitted.Response()
+	if view == nil || string(view.Body) != "original" || admitted.ProviderEventID() != "" || admitted.SemanticContentDigest() != "" {
+		t.Fatal("authenticated challenge fabricated delivery identity or lost its response")
+	}
+	view.Body[0] = 'X'
+	view.Status = http.StatusTeapot
+	for range 2 {
+		delivery, err := plan.ProjectDelivery(admitted)
+		if err != nil || delivery.Response == nil || delivery.Response.Status != http.StatusOK || string(delivery.Response.Body) != "original" || len(delivery.Events) != 0 {
+			t.Fatalf("challenge readback changed its private authority: %+v, %v", delivery, err)
+		}
+		delivery.Response.Body[0] = 'X'
+		if _, _, err := plan.ProjectPublication(admitted, "bundle-v2:sha256:"+strings.Repeat("a", 64), "."); err == nil {
+			t.Fatal("challenge acquired business publication authority")
+		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -190,12 +191,16 @@ func TestChannelDeliveryEffectOutcomes(t *testing.T) {
 	tool := packfixture.ConnectorTool(t, "telegram", "telegram.send_interactive").Tool
 	input := map[string]any{"chat_id": "42", "text": "Notice", "reply_markup": map[string]any{"inline_keyboard": []any{}}}
 	credentials := map[string]any{"telegram_bot_token": "bot-secret"}
-	project := func(raw any) (map[string]any, error) {
-		result, ok := raw.(map[string]any)
-		if !ok {
-			return nil, errors.New("connector result is not an object")
-		}
-		return map[string]any{"delivery_reference": map[string]any{"id": result["message_id"]}}, nil
+	projectionSchema := contracts.MustToolInputSchema(contracts.ToolSchemaObject, contracts.ToolSchemaProperties(map[string]contracts.ToolInputSchema{
+		"delivery_reference": contracts.MustToolInputSchema(contracts.ToolSchemaObject, contracts.ToolSchemaProperties(map[string]contracts.ToolInputSchema{
+			"id": contracts.MustToolInputSchema(contracts.ToolSchemaInteger),
+		}), contracts.ToolSchemaRequired("id")),
+	}), contracts.ToolSchemaRequired("delivery_reference"))
+	var err error
+	tool, err = tool.WithCompiledResult(contracts.CompiledResultProjection{
+		Fields: map[string]contracts.CompiledResultField{"delivery_reference.id": {From: "result.message_id"}}, OutputSchema: projectionSchema})
+	if err != nil {
+		t.Fatal(err)
 	}
 	t.Run("known receipt retained", func(t *testing.T) {
 		h := &channelDeliveryHarness{Harness: effecttest.New()}
@@ -205,7 +210,7 @@ func TestChannelDeliveryEffectOutcomes(t *testing.T) {
 			}
 			return registrationResponse(http.StatusOK, `{"ok":true,"result":{"message_id":91}}`), nil
 		})}}
-		result, err := executor.DeliverChannelMessage(channelDeliveryTestContext(h), "telegram.send_interactive", tool, input, credentials, nil, project)
+		result, err := executor.DeliverChannelMessage(channelDeliveryTestContext(h), "telegram.send_interactive", tool, input, credentials, nil)
 		if err != nil || result.OperationID == "" || result.Output == nil {
 			t.Fatalf("delivery = %#v, %v", result, err)
 		}
@@ -227,7 +232,7 @@ func TestChannelDeliveryEffectOutcomes(t *testing.T) {
 		executor := HTTPExecutor{Client: &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {
 			return nil, errors.New("transport lost bot-secret")
 		})}}
-		result, err := executor.DeliverChannelMessage(channelDeliveryTestContext(h), "telegram.send_interactive", tool, input, credentials, nil, project)
+		result, err := executor.DeliverChannelMessage(channelDeliveryTestContext(h), "telegram.send_interactive", tool, input, credentials, nil)
 		if err == nil || result.OperationID == "" || strings.Contains(err.Error(), "bot-secret") {
 			t.Fatalf("lost delivery response = %#v, %v", result, err)
 		}
@@ -242,7 +247,7 @@ func TestChannelDeliveryEffectOutcomes(t *testing.T) {
 			t.Fatal("prelaunch failure reached provider")
 			return nil, nil
 		})}}
-		result, err := executor.DeliverChannelMessage(channelDeliveryTestContext(h), "telegram.send_interactive", tool, input, credentials, nil, project)
+		result, err := executor.DeliverChannelMessage(channelDeliveryTestContext(h), "telegram.send_interactive", tool, input, credentials, nil)
 		if err == nil || result.OperationID == "" {
 			t.Fatalf("prelaunch delivery = %#v, %v", result, err)
 		}
@@ -250,6 +255,20 @@ func TestChannelDeliveryEffectOutcomes(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestChannelDeliveryRequiresOwnedCompiledReceiptBeforeAuthorization(t *testing.T) {
+	tool := packfixture.ConnectorTool(t, "telegram", "telegram.send_interactive").Tool
+	h := &channelDeliveryHarness{Harness: effecttest.New()}
+	executor := HTTPExecutor{Client: &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("uncompiled receipt reached provider I/O")
+		return nil, nil
+	})}}
+	if _, err := executor.DeliverChannelMessage(channelDeliveryTestContext(h), "telegram.send_interactive", tool,
+		map[string]any{"chat_id": "42", "text": "Notice", "reply_markup": map[string]any{"inline_keyboard": []any{}}},
+		map[string]any{"telegram_bot_token": "bot-secret"}, nil); err == nil || len(h.Attempts) != 0 {
+		t.Fatalf("uncompiled receipt authorized a delivery: attempts=%d %v", len(h.Attempts), err)
+	}
 }
 
 type channelActionAckHarness struct{ *effecttest.Harness }

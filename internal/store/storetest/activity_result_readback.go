@@ -12,6 +12,10 @@ type ActivityResultPublicationStorage = private.ActivityResultPublicationStorage
 
 type ActivityAttemptStorageEvidence = private.ActivityAttemptStorageEvidence
 
+func ReadServedActivityAttempt(ctx context.Context, selected ReleaseProcessReadOnlyInspection, requestID string) (runtimepipeline.ActivityAttemptRecord, bool, error) {
+	return private.ReadServedActivityAttemptForTest(ctx, selected, requestID)
+}
+
 func ReadActivityAttemptStorage(ctx context.Context, selected any, run string) ([]ActivityAttemptStorageEvidence, error) {
 	return private.ReadActivityAttemptStorageForTest(ctx, selected, run)
 }

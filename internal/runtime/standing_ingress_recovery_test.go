@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -15,6 +16,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
@@ -63,10 +65,10 @@ func TestStandingLearnedAuthorityCredentialMatrix(t *testing.T) {
 				source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
 				bundle, _ := semanticview.Bundle(source)
 				packProjection, err := packadmission.FromBundle(bundle)
-				if err != nil || len(packProjection.ChannelPlans) != 1 {
-					t.Fatalf("exact channel inventory = %#v, %v", packProjection.ChannelPlans, err)
+				if err != nil {
+					t.Fatal("exact channel inventory", err)
 				}
-				plan := packProjection.ChannelPlans[0]
+				plan := packfixture.ChannelPlanByID(t, packProjection.ChannelPlans, "provider.telegram.hitl_channel")
 				identity, err := plan.InterfaceIdentity()
 				if err != nil {
 					t.Fatal(err)
@@ -463,7 +465,7 @@ func TestExplicitStandingAdmissionCannotRefreshSiblingAuthority(t *testing.T) {
 					t.Fatalf("sibling preflight reached standing mutation: %v", recovered)
 				}
 			}()
-			if _, _, err := rt.AdmitChannelStandingTarget(ctx, operation, candidate); err == nil {
+			if _, _, err := rt.AdmitChannelStandingTarget(ctx, operation, candidate, operatorchannel.ProviderAuthority{}); err == nil {
 				t.Fatal("explicit admission adopted unrequested sibling authority")
 			}
 			if rt.standingCredentialAdmission != frozen {

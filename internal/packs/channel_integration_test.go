@@ -440,6 +440,11 @@ func TestChannelActivationPublicationGenerationRetainsCompleteNonSecretProvenanc
 	if err != nil {
 		t.Fatal(err)
 	}
+	contradictory := base
+	contradictory.SessionAccount = operatorchannel.SessionAccountAdmission{Provider: "whatsapp"}
+	if _, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{contradictory}); err == nil {
+		t.Fatal("webhook publication accepted native session authority")
+	}
 	declaredOnly, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication([]packs.OutboundBindingPlan{base.Plan})
 	if err != nil {
 		t.Fatal(err)
@@ -1924,6 +1929,44 @@ func TestToolExecutionContractHasOneAuthorityAcrossPublicConnectorAndPrivateTarg
 	}
 }
 
+func TestChannelCompilerRetainsExactConnectorDeclaration(t *testing.T) {
+	registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+	plan, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := packs.NewOutboundBindingPlan("ops", plan, "42", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, declaration, err := binding.ConnectorDeclaration("deliver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, found := connector.Tools[id]
+	if !found {
+		t.Fatal("declaration is absent from the admitted connector")
+	}
+	want, err := original.CanonicalHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := declaration.CanonicalHash()
+	if err != nil || got != want {
+		t.Fatal("channel compilation mutated the connector declaration", err, got, want)
+	}
+	executable, err := binding.OperationTool("deliver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, compiled := executable.CompiledResultExecution(); !compiled {
+		t.Fatal("preserving declaration evidence removed channel result execution")
+	}
+	if _, _, err := binding.ConnectorDeclaration("missing"); err == nil {
+		t.Fatal("undeclared operation acquired connector evidence")
+	}
+}
+
 func TestChannelCompilerZoneHasNoProviderSpecificRuntimeBranch(t *testing.T) {
 	body, err := os.ReadFile("channel.go")
 	if err != nil {
@@ -1952,10 +1995,18 @@ func loadTelegramChannelCompilerInputs(t *testing.T) (*packs.InterfaceRegistry, 
 	registry := loadChannelInterfaceRegistry(t)
 	triggerCatalog := packfixture.TriggerCatalog(t)
 	channels := packfixture.ChannelPacks(t)
-	if len(channels) != 1 {
-		t.Fatalf("Telegram channel packs = %#v, want one", channels)
+	var channel packs.LoadedChannelPack
+	count := 0
+	for _, candidate := range channels {
+		if candidate.Envelope.ID == "provider.telegram.hitl_channel" {
+			channel = candidate
+			count++
+		}
 	}
-	triggerID := channels[0].Envelope.Requires.Packs[packs.TypeTrigger]
+	if count != 1 {
+		t.Fatalf("exact Telegram channel count = %d, want one", count)
+	}
+	triggerID := channel.Envelope.Requires.Packs[packs.TypeTrigger]
 	var trigger packs.TriggerPackDescriptor
 	for _, candidate := range triggerCatalog.PackDescriptors() {
 		if candidate.Identity.ID() == triggerID {
@@ -1966,7 +2017,7 @@ func loadTelegramChannelCompilerInputs(t *testing.T) (*packs.InterfaceRegistry, 
 	if trigger.Identity.ID() == "" {
 		t.Fatalf("Telegram trigger descriptor %q is missing", triggerID)
 	}
-	connectorID := channels[0].Envelope.Requires.Packs[packs.TypeConnector]
+	connectorID := channel.Envelope.Requires.Packs[packs.TypeConnector]
 	var connector packs.ConnectorPackDescriptor
 	for _, candidate := range packfixture.ConnectorRegistry(t).PackDescriptors() {
 		if candidate.Identity.ID() == connectorID {
@@ -1977,7 +2028,7 @@ func loadTelegramChannelCompilerInputs(t *testing.T) (*packs.InterfaceRegistry, 
 	if connector.Identity.ID() == "" {
 		t.Fatalf("Telegram connector descriptor %q is missing", connectorID)
 	}
-	return registry, channels[0], trigger, connector
+	return registry, channel, trigger, connector
 }
 
 func loadChannelInterfaceRegistry(t *testing.T) *packs.InterfaceRegistry {
@@ -2230,6 +2281,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 	}
 	trigger := packs.TriggerPackDescriptor{
 		Identity: packs.MustPackIdentity("provider.mock", "0.1.0", "sha256:"+strings.Repeat("b", 64), packs.TypeTrigger, packs.MustPackSource("test", "mock-trigger")), Provider: "mock",
+		Transport:  packs.ChannelTransportWebhook,
 		Generation: triggergeneration.FromCanonicalBytes([]byte("mock-trigger-generation")),
 		Events: map[string]packs.TriggerEvent{
 			"mock.action": {Name: "mock.action", Fields: triggerFields("token", "cursor", "principal", "room", "scope", "message_ref")},
