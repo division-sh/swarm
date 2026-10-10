@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -19,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"go.mau.fi/whatsmeow/types/events"
 )
 
@@ -35,9 +37,12 @@ type runtimeIncomingStore interface {
 	channelonboarding.Store
 	sessionBusinessStore
 	ListOperatorChannelBindings(context.Context, string) ([]operatorchannel.Binding, error)
+	claimReceiptReader
+	SettleSessionChannelClaim(context.Context, authority.Claim) (operatorchannel.ClaimSettlement, error)
 }
 
 type runtimeIncoming struct {
+	mu         sync.Mutex
 	connection *RuntimeConnection
 	store      runtimeIncomingStore
 	handoff    *sessionBusinessHandoff
@@ -88,7 +93,7 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 		return err
 	}
 	defer account.Close()
-	scope, source, err := c.incoming.businessScope(work.Context())
+	scope, source, err := c.incoming.receiveScope(work.Context())
 	if err != nil {
 		return err
 	}
@@ -105,7 +110,21 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 	}
 	// Local capture, selected-store publication and the SDK receipt remain
 	// distinct. Failure preserves capture and returns non-success to the SDK.
-	return c.incoming.handoff.drain(work.Context())
+	return c.incoming.drain(work.Context())
+}
+
+func (i *runtimeIncoming) receiveScope(ctx context.Context) (captureScope, captureSource, error) {
+	op, err := i.connection.currentOperation(ctx)
+	if err != nil {
+		return captureScope{}, captureSource{}, err
+	}
+	if op.Phase != channelonboarding.PhaseAwaitingExternalIdentity || op.IdentityOperationID == "" || op.ActivationRevision != 0 {
+		return i.businessScope(ctx)
+	}
+	scope := captureScope{Kind: channelonboarding.SessionInputOnboarding, Session: op.SessionAccount,
+		Source: op.Coordinate.DurableIdentity(), OnboardingOperation: op.OperationID, OperationRevision: op.Revision,
+		TargetSelector: op.TargetSelector, PrincipalID: op.PrincipalID, BindingRevision: op.BindingRevision}
+	return scope, captureSource{Coordinate: op.Coordinate, CatalogGeneration: i.handoff.trigger.Generation()}, scope.Validate()
 }
 
 func (i *runtimeIncoming) businessScope(ctx context.Context) (captureScope, captureSource, error) {
@@ -175,5 +194,5 @@ func (c *RuntimeConnection) ReconcileIncoming(ctx context.Context) (err error) {
 	if _, err := c.currentOperation(work.Context()); err != nil {
 		return err
 	}
-	return c.incoming.handoff.drain(work.Context())
+	return c.incoming.drain(work.Context())
 }

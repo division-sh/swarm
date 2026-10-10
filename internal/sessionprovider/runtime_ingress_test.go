@@ -87,10 +87,20 @@ func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *test
 				t.Fatal("runtime incoming publication changed SDK text", payload, err)
 			}
 			rows, err := c.captures.pending(f.ctx)
-			if err != nil || len(rows) != 1 || !rows[0].SameCapture(f.claimEvent) {
-				t.Fatal("runtime publication lost onboarding history or retained completed business capture", len(rows), err)
+			if err != nil || len(rows) != 0 {
+				t.Fatal("runtime publication retained completed capture", len(rows), err)
 			}
+			assertRuntimeIncomingSetupReceipt(t, f)
 		})
+	}
+}
+
+func assertRuntimeIncomingSetupReceipt(t *testing.T, f *activeInputFixture) {
+	t.Helper()
+	receipt, found, err := f.selected.LoadOperatorChannelClaimReceipt(f.ctx, f.claim.PublicationID)
+	fingerprint, fingerprintErr := f.claimEvent.PublicationFingerprint()
+	if err != nil || !found || !receipt.Matches(f.claim) || fingerprintErr != nil || receipt.NativeCaptureFingerprint != fingerprint {
+		t.Fatal("incoming reconciliation lost historical claim evidence", found, err, fingerprintErr)
 	}
 }
 
@@ -299,9 +309,10 @@ func TestWhatsAppRuntimeIncomingRecoversOriginalRequestBothStores(t *testing.T) 
 					t.Fatal("repeated reconciliation", err)
 				}
 				rows, err := c.captures.pending(f.ctx)
-				if err != nil || len(rows) != 1 || !rows[0].SameCapture(f.claimEvent) {
-					t.Fatal("reconciliation lost setup history or retained completed business", len(rows), err)
+				if err != nil || len(rows) != 0 {
+					t.Fatal("reconciliation retained completed capture", len(rows), err)
 				}
+				assertRuntimeIncomingSetupReceipt(t, f)
 			})
 		}
 	}
@@ -330,11 +341,12 @@ func TestWhatsAppRuntimeIncomingRollbackRetainsEvidenceBothStores(t *testing.T) 
 			waitRuntimeIncomingFailure(t, f, c, id)
 			fixture, spool := openCaptureFixture(t, filepath.Join(c.state.directory.path, "provider.db"), f.operation.SessionAccount.ConnectionID)
 			rows, err := spool.pendingPublications(context.Background())
-			if err != nil || len(rows) != 2 || rows[1].event.EventID != id || rows[1].request == nil {
+			if err != nil || len(rows) != 1 || rows[0].event.EventID != id || rows[0].request == nil {
 				t.Fatal("failed installed publication discarded capture/request evidence", len(rows), err)
 			}
-			frozen := bytes.Clone(rows[1].requestBytes)
-			event := rows[1].event
+			frozen := bytes.Clone(rows[0].requestBytes)
+			event := rows[0].event
+			assertRuntimeIncomingSetupReceipt(t, f)
 			if err := fixture.Close(); err != nil {
 				t.Fatal(err)
 			}
