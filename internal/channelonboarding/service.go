@@ -222,6 +222,7 @@ type Result struct {
 	Binding           *operatorchannel.Binding   `json:"binding,omitempty"`
 	Readiness         *ConnectedChannelReadiness `json:"readiness,omitempty"`
 	Pairing           *PairingReadback           `json:"pairing,omitempty"`
+	Logout            *SessionLogoutReadback     `json:"logout,omitempty"`
 }
 
 func NewService(opts ServiceOptions) (*Service, error) {
@@ -2053,6 +2054,13 @@ func historicalCandidate(op Operation) Candidate {
 
 func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate) (Result, error) {
 	result := Result{Operation: op, Candidate: candidate}
+	if op.Posture == ActivationSessionConnection {
+		logout, err := s.sessionLogoutReadback(ctx, op)
+		if err != nil {
+			return result, err
+		}
+		result.Logout = logout
+	}
 	if op.Posture == ActivationSessionConnection && op.Phase == PhaseActivatingProvider && s.sessions != nil {
 		principal, err := s.identities.Principal()
 		if err != nil {
@@ -2085,6 +2093,9 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 	}
 	if found {
 		result.Readiness = &readiness
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
 	}
 	return result, nil
 }
