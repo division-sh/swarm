@@ -1,7 +1,6 @@
 package bus
 
 import (
-	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -69,12 +68,4 @@ func loadNamesOnlyRouteSource(t *testing.T, root string) semanticview.Source {
 		t.Fatalf("load names-only interface artifact: %v", err)
 	}
 	return semanticview.Wrap(bundle)
-}
-
-func subscriberSignature(subscribers []Subscriber) string {
-	parts := make([]string, 0, len(subscribers))
-	for _, subscriber := range subscribers {
-		parts = append(parts, strings.Join([]string{subscriber.Recipient.LocalID(), subscriber.Recipient.Code(), subscriber.Path, subscriber.MatchPattern, subscriber.RouteSourceCode(), subscriber.LocalizedEvent}, "|"))
-	}
-	return strings.Join(parts, "\n")
 }

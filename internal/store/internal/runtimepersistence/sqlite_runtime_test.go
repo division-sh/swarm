@@ -901,14 +901,6 @@ func (b *sqliteFlowActivationBus) routePaths() []string {
 	return out
 }
 
-func (b *sqliteFlowActivationBus) materializationRequests() []runtimebus.FlowInstanceRouteMaterializationRequest {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	out := make([]runtimebus.FlowInstanceRouteMaterializationRequest, len(b.routeRequests))
-	copy(out, b.routeRequests)
-	return out
-}
-
 func sqliteFlowActivationBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	const owner = "test://review/reviewer"
