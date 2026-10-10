@@ -13,7 +13,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -27,17 +26,18 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 		for _, state := range []string{"active", "fired", "cancelled", "advanced", "advanced_cancelled"} {
 			t.Run(backend+"/"+state, func(t *testing.T) {
 				selected, closeStore, reopen := openTimerReplayNativeStore(t, backend)
-				runID, entityID := uuid.NewString(), uuid.NewString()
-				ctx := testAuthorActivityContext(t, context.Background())
-				storetest.RequireRunningRun(t, ctx, selected, runID, time.Now().UTC())
-				ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
+				runID := uuid.NewString()
+				entityID := runID
 				bundle := workflowTimerServedLifecycleBundle(t, state == "advanced" || state == "advanced_cancelled")
 				source := semanticview.Wrap(bundle)
+				ctx, fact := nativeConstructionContextFixture(t, selected.(storetest.RunFixtureStore), source, runID)
 				identity := testRunScopedWorkflowInstanceForRun(runID, runID)
 				build := func() (*runtimepipeline.PipelineCoordinator, func(runtimepipeline.DynamicFlowRuntimeReadinessPlan) runtimepipeline.DynamicFlowRuntimeActivationAttempt, func()) {
 					t.Helper()
 					admitAttachment, closeAttachment := newTimerReplayAttachmentOwner(t, ctx, selected)
-					bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source}, "platform.stage_timer")
+					bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
+						ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact),
+					}, "platform.stage_timer")
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -49,7 +49,7 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 					}
 					pc := newTimerReplayCoordinator(t, bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 						Module: gateRecoveryModule{source: source}, TimerScheduler: scheduler, WorkOwner: pipelineExternalTestWorkOwner(t),
-					}, authorActivityTestSourceArtifactFact)
+					}, fact)
 					var once sync.Once
 					stop := func() {
 						t.Helper()
@@ -75,7 +75,7 @@ func TestWorkflowTimerCauseReplayReopenAndIsolationBothStores(t *testing.T) {
 				pc, admitAttachment, stop := build()
 				at := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
 				instance := runtimepipeline.WorkflowInstance{
-					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
+					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: "static",
 					CurrentState: "waiting", EntityType: "test_entity", CreatedAt: at, EnteredStageAt: at,
 				}
 				initialized, lifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, identity, instance, at)
