@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -332,22 +333,16 @@ func fixedRunForkFanOutEventDisposition(
 	if settlement.NoDelivery() {
 		return true, fanoutobligation.InheritedNoRoute, nil, "", nil
 	}
-	deadLettered := false
-	allTerminal := true
-	for _, delivery := range deliveries {
-		if delivery.Snapshot.Terminal() {
-			if string(delivery.Snapshot.Status) == "dead_letter" {
-				deadLettered = true
-			}
-			continue
-		}
-		allTerminal = false
+	recipients := make([]runtimedelivery.Snapshot, len(deliveries))
+	for i, delivery := range deliveries {
+		recipients[i] = delivery.Snapshot
 	}
-	if allTerminal {
-		if deadLettered {
-			return true, fanoutobligation.InheritedDeadLettered, nil, "", nil
-		}
-		return true, fanoutobligation.InheritedSucceeded, nil, "", nil
+	disposition, terminal, err := fanoutbarrier.RecipientDisposition(recipients)
+	if err != nil {
+		return false, "", nil, "", fmt.Errorf("event %s recipient disposition: %w", eventID, err)
+	}
+	if terminal {
+		return true, disposition, nil, "", nil
 	}
 	var phase runfork.RunForkDeploymentPendingPhase
 	if deployment != nil {

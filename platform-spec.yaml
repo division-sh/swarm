@@ -19727,6 +19727,9 @@ platform_tables:
         Immutable per-ordinal terminal issuance evidence for either exact handler key or exact deployment feed key.
         Committed events and deterministic semantic rejections advance the same contiguous cursor. Cancellation is
         represented compactly by the intent's canceled status and remaining cursor range, without invented outcomes.
+        An issued ordinal retains its actual recipient settlement separately: canceled recipients are never
+        reclassified as inherited success. Recipient reduction waits for every recipient, then uses dead-letter,
+        canceled, success precedence, identically in native barrier folds and fixed-cut fork projection.
       ddl: |
         CREATE TABLE fan_out_outcomes (
             outcome_id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -19740,7 +19743,7 @@ platform_tables:
             outcome_kind              TEXT NOT NULL CHECK (outcome_kind IN ('committed', 'semantic_rejected')),
             event_id                  UUID REFERENCES events(event_id),
             source_event_id           UUID REFERENCES events(event_id),
-            inherited_disposition     TEXT CHECK (inherited_disposition IN ('succeeded', 'dead_lettered', 'no_route')),
+            inherited_disposition     TEXT CHECK (inherited_disposition IN ('succeeded', 'dead_lettered', 'canceled', 'no_route')),
             failure                   JSONB,
             created_at                TIMESTAMPTZ NOT NULL,
             UNIQUE (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path, ordinal),
