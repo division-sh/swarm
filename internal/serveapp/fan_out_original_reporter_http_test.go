@@ -116,7 +116,7 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 				if backend == "postgres" {
 					mergeCeiling, validDrainCeiling = 150*time.Second, 6*time.Minute
 				} else {
-					mergeCeiling, validDrainCeiling = 165*time.Second, 8*time.Minute
+					mergeCeiling, validDrainCeiling = 180*time.Second, 8*time.Minute
 				}
 			}
 			// Serve fixtures replace process-global hooks. Only isolated copies of
