@@ -13,9 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
-	"github.com/division-sh/swarm/internal/operatorread"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
-	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -80,7 +78,6 @@ func TestServedWhatsAppLaunchedProcessDeathBothStores(t *testing.T) {
 					t.Fatal("process death replaced original enabled authority or lost readiness", restored)
 				}
 				if activity {
-					logServedNativeProcessActivityJournal(t, endpoint, backend, location, message.ID)
 					requireServedNativeActivityOutcome(t, endpoint, message.ID, "15551234571@s.whatsapp.net", text, "effect_recovery_outcome_unconfirmed")
 				} else {
 					requireServedNativeUncertainInbox(t, reader, message)
@@ -95,48 +92,6 @@ func TestServedWhatsAppLaunchedProcessDeathBothStores(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func logServedNativeProcessActivityJournal(t *testing.T, endpoint, backend, location, messageID string) {
-	t.Helper()
-	inspection, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := inspection.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
-	var runs struct {
-		Runs []operatorread.RunHeader `json:"runs"`
-	}
-	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"limit": 10}, &runs)
-	for _, run := range runs.Runs {
-		err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
-			rows, err := storetest.ReadActivityAttemptStorage(ctx, inspection, run.RunID)
-			t.Logf("post-death activity journal run=%s rows=%+v error=%v", run.RunID, rows, err)
-			return err
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	operationID, err := uuid.Parse(messageID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	reader, ok := inspection.(effects.OutcomeStore)
-	if !ok {
-		t.Fatal("original read-only inspection has no effect outcome projection")
-	}
-	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
-		result, found, err := reader.GetExternalEffectOutcome(ctx, operationID.String())
-		t.Logf("post-death effect journal operation=%s found=%v outcome=%+v error=%v", operationID, found, result, err)
-		return err
-	}); err != nil {
-		t.Fatal(err)
 	}
 }
 
