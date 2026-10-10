@@ -36,7 +36,14 @@ func (am *AgentManager) reconcilePendingDynamicFlowRuntimeReadiness(ctx context.
 	if err != nil {
 		return err
 	}
-	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, source.fact)
+	projection, err := am.workflowInstances.InspectDynamicFlowRuntimeReadinessForSource(ctx, source.fact)
+	if err != nil {
+		return err
+	}
+	// Full inventory admission precedes filtering only the work this retry can act on.
+	projection, err = am.filterDynamicFlowRuntimeReadiness(ctx, runtimepipeline.DynamicFlowRuntimeReadinessProjection{
+		CurrentPending: projection.CurrentPending,
+	})
 	if err != nil {
 		return err
 	}
@@ -57,6 +64,10 @@ func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.
 	if err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
 	}
+	return am.filterDynamicFlowRuntimeReadiness(ctx, projection)
+}
+
+func (am *AgentManager) filterDynamicFlowRuntimeReadiness(ctx context.Context, projection runtimepipeline.DynamicFlowRuntimeReadinessProjection) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
 	return FilterDynamicFlowRuntimeReadiness(ctx, projection, am.roles.StandingRestarts, func(ctx context.Context, runID string) (bool, error) {
 		ownership, err := am.inspectRunExecutionOwnership(ctx, runID)
 		return ownership == RunExecutionOwned, err
