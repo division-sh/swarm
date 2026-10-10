@@ -61,19 +61,6 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				harness.opts.TestChannelOnboardingBarrier = barrier.Reach
 			}
 			harness.start(t)
-			var predecessorStore *sql.DB
-			predecessorDriver := "sqlite"
-			if boundary == channelonboarding.TestAfterCredentialWriteBeforeCheckpoint || boundary == channelonboarding.TestAfterActivationCommitBeforePublication {
-				if backend == servedparity.BackendExplicitPostgres {
-					predecessorDriver = "postgres"
-				}
-				var err error
-				predecessorStore, err = sql.Open(predecessorDriver, harness.storeDSN)
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() { _ = predecessorStore.Close() })
-			}
 
 			if boundary == channelonboarding.TestAfterAuthorityRetirementBeforeCleanup {
 				runChannelOnboardingDestructiveCrashBoundary(t, backend, harness, barrier, uncheckpointedBarrier)
@@ -84,26 +71,36 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 			predecessorCallback, predecessorSigning := "", ""
 			var recoveredPublication channelOnboardingPersistedHandoff
 			var command channelOnboardingCLICommand
-			if boundary == channelonboarding.TestAfterCredentialWriteBeforeCheckpoint {
-				predecessor = runChannelOnboardingCLIJourney(t, harness.opts.ConfigPath, harness.endpoint, harness.provider, "connect", "crash-boundary-token", 7213, "private", 0)
-				if predecessor.Operation == nil || predecessor.Activation == nil || predecessor.Readiness == nil || !predecessor.Readiness.Ready {
-					t.Fatalf("%s E2E-13 predecessor = %#v", backend, predecessor)
+			if boundary == channelonboarding.TestAfterCredentialWriteBeforeCheckpoint || boundary == channelonboarding.TestAfterActivationCommitBeforePublication {
+				chatID := int64(7213)
+				if boundary == channelonboarding.TestAfterActivationCommitBeforePublication {
+					chatID = 7214
 				}
-				// This cut must not also interrupt the predecessor's provider write.
-				native := waitNativeQualification(t, harness, predecessor.Operation.OperationID, channelnative.QualificationQualified, time.Time{})
-				cardMessageID := waitChannelCardMessageID(t, predecessorStore, predecessorDriver, "telegram-ingress")
-				t.Logf("E2E-13 predecessor settled before credential cut: operation=%s setting=%s generation=%d locale=%s/%d observed=%s card_message_id=%d", predecessor.Operation.OperationID, native.SettingID, native.SettingGeneration, native.ClientLanguage, native.LocaleRevision, native.ObservedAt.Format(time.RFC3339Nano), cardMessageID)
+				predecessor = runChannelOnboardingCLIJourney(t, harness.opts.ConfigPath, harness.endpoint, harness.provider, "connect", "crash-boundary-token", chatID, "private", 0)
+				if predecessor.Operation == nil || predecessor.Activation == nil || predecessor.Readiness == nil || !predecessor.Readiness.Ready {
+					t.Fatalf("%s %s predecessor = %#v", backend, boundary, predecessor)
+				}
+				driver := "sqlite"
+				if backend == servedparity.BackendExplicitPostgres {
+					driver = "postgres"
+				}
+				db, err := sql.Open(driver, harness.storeDSN)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = db.Close() })
+				// Neither crash cut may interrupt the predecessor's provider write.
+				cardMessageID := waitChannelCardMessageID(t, db, driver, "telegram-ingress")
+				if boundary == channelonboarding.TestAfterCredentialWriteBeforeCheckpoint {
+					native := waitNativeQualification(t, harness, predecessor.Operation.OperationID, channelnative.QualificationQualified, time.Time{})
+					t.Logf("E2E-13 predecessor settled before credential cut: operation=%s setting=%s generation=%d locale=%s/%d observed=%s card_message_id=%d", predecessor.Operation.OperationID, native.SettingID, native.SettingGeneration, native.ClientLanguage, native.LocaleRevision, native.ObservedAt.Format(time.RFC3339Nano), cardMessageID)
+				}
 				predecessorCredentialCount = channelOnboardingCredentialCount(t, harness.credentialPath)
+			}
+			if boundary == channelonboarding.TestAfterCredentialWriteBeforeCheckpoint {
 				barrier.Arm()
 				command = startChannelOnboardingCLICommand(t, harness.opts.ConfigPath, harness.endpoint, []string{"channel", "reconnect", "telegram", "--yes", "--client-language", "en", "--credential-stdin"}, "crash-boundary-replacement-token\n")
 			} else if boundary == channelonboarding.TestAfterActivationCommitBeforePublication {
-				predecessor = runChannelOnboardingCLIJourney(t, harness.opts.ConfigPath, harness.endpoint, harness.provider, "connect", "crash-boundary-token", 7214, "private", 0)
-				if predecessor.Activation == nil || predecessor.Readiness == nil || !predecessor.Readiness.Ready {
-					t.Fatalf("%s E2E-14 predecessor = %#v", backend, predecessor)
-				}
-				// Rebind retires predecessor execution before its publication barrier.
-				_ = waitChannelCardMessageID(t, predecessorStore, predecessorDriver, "telegram-ingress")
-				predecessorCredentialCount = channelOnboardingCredentialCount(t, harness.credentialPath)
 				predecessorCallback, predecessorSigning, _ = harness.provider.Registration()
 				harness.provider.SetResourceID("crash-boundary-rebind-token", 420114)
 				barrier.Arm()
