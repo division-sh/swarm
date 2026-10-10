@@ -77,18 +77,6 @@ func serveChannelCandidatesForPlan(contextDef runtime.BundleContext, bundleIdent
 	}
 	posture := channelonboarding.ActivationPosture(profile.ActivationPosture())
 	ceremony := channelonboarding.IdentityCeremony(profile.IdentityCeremony())
-	if posture == channelonboarding.ActivationSessionConnection {
-		return []channelonboarding.Candidate{{
-			SourceLabel: contextDef.BundleIdentity.SourceLabel, Provider: profile.Provider(), Interface: identity,
-			Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
-				BundleHash: contextDef.BundleHash(), BundleIdentity: bundleIdentity,
-				PackInventoryGeneration: contextDef.PackInventoryDigest, RuntimeInstanceID: contextDef.RuntimeInstanceID,
-				ContextPublicationGeneration: contextDef.PublicationGeneration, PlanGeneration: generation,
-			},
-			Posture: posture, Ceremony: ceremony, ProviderCredentialRole: profile.ProviderCredential(),
-			ConfirmationOperation: profile.ConfirmationOperation(), ConnectionHealth: profile.ConnectionHealth(), Plan: plan,
-		}}, nil
-	}
 	var candidates []channelonboarding.Candidate
 	for _, declaration := range declarations {
 		for _, binding := range declaration.Ingress {

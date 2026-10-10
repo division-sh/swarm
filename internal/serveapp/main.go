@@ -1500,9 +1500,20 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		native:      stores.ChannelNative(),
 		credentials: providerCredentialOwner, effects: confirmationEffects, ingress: ready,
 	}
+	sessionBootstrap, err := newServeSessionBootstrap(serveSessionBootstrapRuntimeSelector(runtimeContextManager), channelOnboardingStore, providerCredentialOwner, swarmDir.Path)
+	if err != nil {
+		var unsupported *operatorchannel.SessionProviderUnavailableError
+		if !errors.As(err, &unsupported) {
+			presenter.fail(20, "channel_onboarding", err)
+			return 1
+		}
+		// No installer means session operations retain their typed refusal;
+		// unrelated webhook channels are unchanged on unsupported hosts.
+	}
 	channelOnboarding, err := channelonboarding.NewService(channelonboarding.ServiceOptions{
 		Store: channelOnboardingStore, Identities: operatorChannels, Credentials: credentialWriter,
 		SourceArtifacts: stores.SourceArtifactStore(),
+		Sessions:        sessionBootstrap,
 		Catalog: func() (*channelonboarding.CandidateCatalog, error) {
 			return serveChannelOnboardingCatalog(runtimeContextManager)
 		},

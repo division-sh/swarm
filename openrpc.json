@@ -15092,7 +15092,6 @@
             "items": {
               "$ref": "#/components/schemas/ChannelCredentialReservation"
             },
-            "minItems": 1,
             "type": "array"
           },
           "failure_code": {
@@ -15202,6 +15201,44 @@
           },
           "operation": {
             "$ref": "#/components/schemas/ChannelOnboardingOperation"
+          },
+          "pairing": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              "connected": {
+                "type": "boolean"
+              },
+              "expires_at": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "paired": {
+                "type": "boolean"
+              },
+              "status": {
+                "enum": [
+                  "not_started",
+                  "awaiting_qr",
+                  "qr_expired",
+                  "paired",
+                  "connected",
+                  "failed",
+                  "stopped",
+                  "recovery_required"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "paired",
+              "connected"
+            ],
+            "type": "object"
           },
           "readiness": {
             "$ref": "#/components/schemas/ConnectedChannelReadiness"

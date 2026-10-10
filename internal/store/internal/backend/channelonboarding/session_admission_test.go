@@ -57,6 +57,34 @@ func TestSessionDeclarationReservesWithoutCredentialsOrBusinessTargetBothStores(
 	}
 }
 
+func TestSessionConnectionReservationPrecedesPairingBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newCallbackLockFixture(t, backend)
+			request := sessionReservation(t, f.principal, time.Now().UTC())
+			op, err := f.selected.ReserveChannelOnboarding(context.Background(), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if uuid.Validate(op.SessionConnectionID) != nil || op.SessionConnectionID == op.OperationID {
+				t.Fatal("selected onboarding has no durable connection identity before provider pairing")
+			}
+			for range 3 {
+				request.OperationID = uuid.NewString()
+				again, err := f.selected.ReserveChannelOnboarding(context.Background(), request)
+				if err != nil || again.SessionConnectionID != op.SessionConnectionID || again.OperationID != op.OperationID {
+					t.Fatal("request replay changed reserved connection identity", err)
+				}
+			}
+			readback, err := f.selected.GetChannelOnboarding(context.Background(), op.OperationID)
+			if err != nil || readback.SessionConnectionID != op.SessionConnectionID ||
+				readback.SessionAccount != (operatorchannel.SessionAccountAdmission{}) || readback.ActivationRevision != 0 {
+				t.Fatal("reservation manufactured account or executable authority", err)
+			}
+		})
+	}
+}
+
 func TestSessionAccountEvidencePersistenceAndRevisionFencesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -80,9 +108,20 @@ func TestSessionAccountEvidencePersistenceAndRevisionFencesBothStores(t *testing
 			if err != nil || before.Revision != op.Revision || before.SessionAccount != (operatorchannel.SessionAccountAdmission{}) {
 				t.Fatalf("rejected pairing mutated responsibility: %+v %v", before, err)
 			}
-			account := operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: uuid.NewString(),
+			account := operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: op.SessionConnectionID,
 				AccountRef: "15551234567@s.whatsapp.net", AdmissionID: uuid.NewString(), Revision: 1}
 			admit := missing
+			foreign := account
+			foreign.ConnectionID = uuid.NewString()
+			admit.SessionAccount = &foreign
+			if _, err := f.selected.AdvanceChannelOnboarding(ctx, admit); !errors.Is(err, domain.ErrConflict) {
+				t.Fatal("pairing adopted another connection reservation", err)
+			}
+			unchanged, err := f.selected.GetChannelOnboarding(ctx, op.OperationID)
+			if err != nil || unchanged.Revision != op.Revision || unchanged.SessionConnectionID != op.SessionConnectionID ||
+				unchanged.SessionAccount != (operatorchannel.SessionAccountAdmission{}) {
+				t.Fatal("rejected account adoption changed reservation or evidence", err)
+			}
 			admit.SessionAccount = &account
 			op, err = f.selected.AdvanceChannelOnboarding(ctx, admit)
 			if err != nil || op.SessionAccount != account || op.Coordinate.TargetGeneration != 0 {

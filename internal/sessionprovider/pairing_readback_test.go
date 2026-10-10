@@ -77,9 +77,10 @@ func testPairingReadbackCancellation(t *testing.T, waitForSnapshot bool) {
 	}
 	principal := operatorchannel.Principal{ID: scope.PrincipalID, CreatedAt: time.Now().UTC()}
 	reader := &pairingReadbackFixture{op: channelonboarding.Operation{OperationID: scope.OperationID,
-		PrincipalID: scope.PrincipalID, Provider: "whatsapp", Coordinate: scope.Coordinate,
+		SessionConnectionID: scope.ConnectionID,
+		PrincipalID:         scope.PrincipalID, Provider: "whatsapp", Coordinate: scope.Coordinate,
 		Posture: channelonboarding.ActivationSessionConnection, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge,
-		Phase: channelonboarding.PhaseCredentialsAdmitted, Revision: 1, RequestedAt: time.Now().UTC()}}
+		Phase: channelonboarding.PhaseActivatingProvider, Revision: 1, RequestedAt: time.Now().UTC()}}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var result pairingQRSnapshot
@@ -121,7 +122,7 @@ func testPairingReadbackCancellation(t *testing.T, waitForSnapshot bool) {
 }
 
 func TestWhatsAppPairingReadbackAuthorizationIsOriginalScopeOnly(t *testing.T) {
-	for _, cell := range []string{"allowed", "foreign_principal", "missing_principal", "foreign_operation", "foreign_source",
+	for _, cell := range []string{"allowed", "foreign_principal", "missing_principal", "foreign_operation", "foreign_connection", "not_pairing", "foreign_source",
 		"successor_context", "expired_operation", "canceled_operation", "completed_operation", "wrong_provider", "wrong_transport", "io_failure", "canceled_request"} {
 		t.Run(cell, func(t *testing.T) {
 			scope := pairingScopeFixture(t)
@@ -140,9 +141,10 @@ func TestWhatsAppPairingReadbackAuthorizationIsOriginalScopeOnly(t *testing.T) {
 			}
 			principal := operatorchannel.Principal{ID: scope.PrincipalID, CreatedAt: time.Now().UTC()}
 			reader := &pairingReadbackFixture{op: channelonboarding.Operation{OperationID: scope.OperationID,
-				PrincipalID: scope.PrincipalID, Provider: "whatsapp", Coordinate: scope.Coordinate,
+				SessionConnectionID: scope.ConnectionID,
+				PrincipalID:         scope.PrincipalID, Provider: "whatsapp", Coordinate: scope.Coordinate,
 				Posture: channelonboarding.ActivationSessionConnection, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge,
-				Phase: channelonboarding.PhaseCredentialsAdmitted, Revision: 1, RequestedAt: time.Now().UTC()}}
+				Phase: channelonboarding.PhaseActivatingProvider, Revision: 1, RequestedAt: time.Now().UTC()}}
 			coordinate := scope.Coordinate
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -153,6 +155,10 @@ func TestWhatsAppPairingReadbackAuthorizationIsOriginalScopeOnly(t *testing.T) {
 				principal.ID = ""
 			case "foreign_operation":
 				reader.op.PrincipalID = uuid.NewString()
+			case "foreign_connection":
+				reader.op.SessionConnectionID = uuid.NewString()
+			case "not_pairing":
+				reader.op.Phase = channelonboarding.PhaseCredentialsAdmitted
 			case "foreign_source":
 				reader.op.Coordinate.BundleIdentity = "another source"
 			case "successor_context":
@@ -198,9 +204,10 @@ func TestWhatsAppPairingReadbackExpiryAndObservationDoNotGrantExecution(t *testi
 		}()
 		principal := operatorchannel.Principal{ID: scope.PrincipalID, CreatedAt: time.Now().UTC()}
 		reader := &pairingReadbackFixture{op: channelonboarding.Operation{OperationID: scope.OperationID,
-			PrincipalID: scope.PrincipalID, Provider: "whatsapp", Coordinate: scope.Coordinate,
+			SessionConnectionID: scope.ConnectionID,
+			PrincipalID:         scope.PrincipalID, Provider: "whatsapp", Coordinate: scope.Coordinate,
 			Posture: channelonboarding.ActivationSessionConnection, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge,
-			Phase: channelonboarding.PhaseCredentialsAdmitted, Revision: 1, RequestedAt: time.Now().UTC()}}
+			Phase: channelonboarding.PhaseActivatingProvider, Revision: 1, RequestedAt: time.Now().UTC()}}
 		if err := q.handle(&events.QR{Codes: []string{"first"}}); err != nil {
 			t.Fatal(err)
 		}

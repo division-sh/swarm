@@ -119,7 +119,7 @@ func TestWhatsAppClientOccurrenceLostResultCannotReplayOnSuccessor(t *testing.T)
 				if err := awaitOccurrenceProbe(t, peer.ctx, done); err == nil {
 					t.Fatal("lost result became successful settlement")
 				}
-				if err := o.connect(o.ctx); !errors.Is(err, errClientOccurrenceFenced) {
+				if err := o.connect(peer.ctx); !errors.Is(err, errClientOccurrenceFenced) {
 					t.Fatalf("old occurrence could reconnect: %v", err)
 				}
 				if err := runOccurrenceProbe(peer.ctx, o, operation, "FORBIDDEN_RETRY"); !errors.Is(err, errClientOccurrenceFenced) {

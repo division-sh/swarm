@@ -2727,7 +2727,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::serveChannelCandidatesForPlan",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "8dafbb1f2c92b5ea6ae5dd8fe6f40bdb6c1936ec7c14847a8ac459ebd01c129c"
+    "body_sha256": "3aac4f75f11f583948f0803716fe6b59529b3ef0eb4a911095f79db6e9bb0439"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::serveChannelDeclarationTarget",
@@ -2853,7 +2853,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "a68c32b45b66149bca152b6b73529c74cc3dc6352dd68f63029b3810c6031d27"
+    "body_sha256": "279255818e14b3dd93dcdbd950156f0692d962c238ec7ee405c1b54d9131131e"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",

@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/google/uuid"
 )
 
 var (
@@ -583,7 +584,8 @@ type Operation struct {
 	UpdatedAt               time.Time                         `json:"updated_at"`
 	CompletedAt             time.Time                         `json:"completed_at,omitzero"`
 
-	SessionAccount operatorchannel.SessionAccountAdmission `json:"-"`
+	SessionConnectionID string                                  `json:"-"`
+	SessionAccount      operatorchannel.SessionAccountAdmission `json:"-"`
 }
 
 type AdvanceRequest struct {
@@ -603,10 +605,29 @@ type AdvanceRequest struct {
 	Now                          time.Time
 }
 
+// PairingReadback is authenticated control-plane material, never READY or a
+// principal/account admission. QR contents must not enter logs or durable DTOs.
+type PairingReadback struct {
+	Status    string    `json:"status"`
+	Code      string    `json:"code,omitempty"`
+	ExpiresAt time.Time `json:"expires_at,omitzero"`
+	Paired    bool      `json:"paired"`
+	Connected bool      `json:"connected"`
+}
+
 // ValidateSessionAccount checks retained provenance, not executable authority.
 func (o Operation) ValidateSessionAccount() error {
 	if !o.Phase.Valid() {
 		return fmt.Errorf("%w: session provenance requires an exact posture and phase", ErrInvalidRequest)
+	}
+	if o.Posture == ActivationSessionConnection {
+		parsed, err := uuid.Parse(o.SessionConnectionID)
+		if err != nil || parsed == uuid.Nil || parsed.String() != o.SessionConnectionID ||
+			o.SessionAccount != (operatorchannel.SessionAccountAdmission{}) && o.SessionAccount.ConnectionID != o.SessionConnectionID {
+			return fmt.Errorf("%w: session provenance requires its exact reserved connection", ErrInvalidRequest)
+		}
+	} else if o.SessionConnectionID != "" {
+		return fmt.Errorf("%w: webhook responsibility cannot reserve a session connection", ErrInvalidRequest)
 	}
 	if o.SessionAccount != (operatorchannel.SessionAccountAdmission{}) && (o.Phase == PhasePreparing || o.Phase == PhaseCredentialsAdmitted) {
 		return fmt.Errorf("%w: session account evidence contradicts its onboarding responsibility", ErrInvalidRequest)

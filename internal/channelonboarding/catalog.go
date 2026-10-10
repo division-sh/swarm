@@ -79,10 +79,7 @@ func (c Candidate) Validate() error {
 	if err := c.Coordinate.Validate(); err != nil {
 		return err
 	}
-	if c.Posture == ActivationWebhookRegistration {
-		return c.Target.Validate()
-	}
-	return nil
+	return c.Target.Validate()
 }
 
 func (c Candidate) ValidateDeclaration() error {
@@ -115,6 +112,12 @@ func (c Candidate) ValidateDeclaration() error {
 	case ActivationSessionConnection:
 		if strings.TrimSpace(c.SigningCredentialRole) != "" || strings.TrimSpace(c.ConnectionHealth) == "" {
 			return fmt.Errorf("session channel onboarding candidate requires connection health and forbids signing credential")
+		}
+		if c.Target.Generation != c.Coordinate.TargetGeneration || c.Target.SigningCredentialKey != "" {
+			return fmt.Errorf("session declaration contradicts its target generation or carries webhook signing")
+		}
+		if err := c.Target.ValidateDeclaration(); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -11265,6 +11265,13 @@ tool_model:
         Health readback supplies a held account admission and exact connected occurrence observation, never a
         cached READY flag. The existing readiness join still owns activation, source, principal and receipt checks.
         This lifetime component alone does not install public session execution or qualify provider interoperability.
+        Declaration-first bootstrap consumes a retained activating_provider operation and its immutable connection
+        reservation, then binds the private guarded QR consumer before connecting. It carries no paired account,
+        identity claim or business generation. The public onboarding owner exposes pairing readback only to its
+        authenticated selected principal, with exact operation/source/occurrence checks at disclosure. Existing
+        activating_provider is the pairing phase; no second lifecycle or authored bootstrap flag is introduced.
+        Constructor qualification permits this scoped control-plane work only. It does not clear account,
+        operator claim/confirmation, executable activation or private-output admission requirements.
       session_pairing_qr: >
         The concrete WhatsApp pairing owner consumes the public QR and ADV-rotation events through the same guarded
         occurrence callback as incoming capture; the SDK GetQRChannel convenience helper is not a supported Swarm
@@ -16728,6 +16735,10 @@ platform_tables:
         Public DTOs omit value seals, and observed credentials own no receipt. Request-key replay,
         target-slot exclusion, phase transitions, selected-store activation publication, exact process
         publication, registration promotion, and predecessor cleanup are revision fenced.
+        Session responsibility reserves one private stable connection UUID atomically with the operation,
+        before any provider file, socket or QR effect. Exact request replay retains that UUID. It is not
+        an account admission, a principal binding, an enabled ingress or a standing target. Paired account
+        evidence must match that original reservation; the writer cannot adopt a replacement connection.
       ddl: |
         CREATE TABLE channel_onboarding_operations (
             operation_id UUID PRIMARY KEY,
@@ -16760,6 +16771,7 @@ platform_tables:
             client_locale_revision BIGINT NOT NULL DEFAULT 1 CHECK (client_locale_revision > 0),
             credential_reservations TEXT NOT NULL,
             credential_admissions TEXT NOT NULL DEFAULT '[]',
+            session_connection_id UUID,
             session_account_admission TEXT,
             identity_operation_id UUID,
             binding_revision BIGINT CHECK (binding_revision IS NULL OR binding_revision > 0),
@@ -16773,6 +16785,7 @@ platform_tables:
             CHECK ((phase IN ('succeeded','failed','retired')) = (completed_at IS NOT NULL)),
             CHECK (target_generation > 0 OR phase IN ('preparing','credentials_admitted','failed','retired') OR (activation_posture = 'session_connection' AND phase IN ('activating_provider','awaiting_external_identity','awaiting_operator_confirmation'))),
             CHECK ((activation_posture = 'webhook_registration' AND session_account_admission IS NULL) OR (activation_posture = 'session_connection' AND (session_account_admission IS NOT NULL OR phase IN ('preparing','credentials_admitted','activating_provider','failed','retired')))),
+            CHECK ((activation_posture = 'session_connection') = (session_connection_id IS NOT NULL)),
             UNIQUE INDEX idx_channel_onboarding_active_slot (slot_key) WHERE phase NOT IN ('succeeded','failed','retired'),
             INDEX idx_channel_onboarding_principal (principal_id, requested_at),
             INDEX idx_channel_onboarding_phase (phase, updated_at)
@@ -34752,7 +34765,6 @@ api_specification:
           client_locale_revision: {type: integer, minimum: 1}
           credential_reservations:
             type: array
-            minItems: 1
             items: {$ref: '#/components/schemas/ChannelCredentialReservation'}
           credential_admissions:
             type: array
@@ -34906,6 +34918,16 @@ api_specification:
           identity_operation: {$ref: '#/components/schemas/OperatorChannelOperation'}
           binding: {$ref: '#/components/schemas/OperatorChannelBinding'}
           readiness: {$ref: '#/components/schemas/ConnectedChannelReadiness'}
+          pairing:
+            type: object
+            additionalProperties: false
+            required: [status, paired, connected]
+            properties:
+              status: {type: string, enum: [not_started, awaiting_qr, qr_expired, paired, connected, failed, stopped, recovery_required]}
+              code: {type: string, minLength: 1, maxLength: 4096}
+              expires_at: {$ref: '#/components/schemas/Timestamp'}
+              paired: {type: boolean}
+              connected: {type: boolean}
       OperatorChannelOperationResult:
         type: object
         additionalProperties: false
