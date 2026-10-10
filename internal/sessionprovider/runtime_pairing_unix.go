@@ -66,10 +66,13 @@ func (c *RuntimeConnection) CheckpointPairing(ctx context.Context, expectedRevis
 			return result, false, err
 		}
 	}
-	if owned.Err() != nil || c.ctx.Err() != nil {
-		return result, false, errClientOccurrenceFenced
-	}
+	// The selected commit is authoritative even if its caller stops waiting.
+	// Publish only this occurrence's verified original account; a fresh request
+	// still has to obtain native admission and pass the lifetime fences.
 	c.account.Store(&account)
+	if owned.Err() != nil || c.ctx.Err() != nil {
+		return result, false, errors.Join(errClientOccurrenceFenced, context.Cause(owned), context.Cause(c.ctx))
+	}
 	return op, true, nil
 }
 

@@ -143,7 +143,7 @@ func (s *serveSessionBootstrap) BootstrapSession(ctx context.Context, op channel
 		err = connection.Connect(ctx)
 	}
 	if err != nil && connection != nil {
-		err = errors.Join(err, connection.Close(context.WithoutCancel(ctx)))
+		err = errors.Join(err, connection.Close(ctx))
 	}
 	if err == nil {
 		err = connection.CheckBootstrap(ctx)

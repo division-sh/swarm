@@ -397,7 +397,7 @@ func (c *RuntimeConnection) ExecuteChannelWrite(ctx context.Context, operation, 
 
 func (c *RuntimeConnection) joinRetirement() {
 	select {
-	case <-c.work.Context().Done():
+	case <-c.ctx.Done():
 		_ = c.Close(context.Background()) // Close retains the error and unreleased responsibility.
 	case <-c.closed:
 	}
@@ -410,6 +410,9 @@ func (c *RuntimeConnection) Close(ctx context.Context) error {
 	if ctx == nil || c.closed == nil || c.cancel == nil || c.work == nil || c.lifecycle == nil {
 		return errRuntimeConnection
 	}
+	// Request retirement independently of this caller's bounded join wait. The
+	// existing counted owner retains possession until SDK cleanup completes.
+	c.cancel()
 	if err := c.lockLifecycle(ctx); err != nil {
 		return err
 	}
@@ -419,7 +422,6 @@ func (c *RuntimeConnection) Close(ctx context.Context) error {
 		return c.closeErr
 	default:
 	}
-	c.cancel()
 	if c.state != nil {
 		if err := c.state.close(ctx); err != nil {
 			c.closeErr = err
