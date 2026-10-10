@@ -241,50 +241,42 @@ func selectedContractProjectedWorkflowStateRoute(forkRunID string, state runfork
 }
 
 func selectedContractWorkflowStateConfig(state selectedContractWorkflowState) ([]byte, error) {
-	identity, err := selectedContractWorkflowIdentity(state)
+	identity, recorded, err := selectedContractWorkflowIdentity(state)
 	if err != nil {
 		return nil, err
 	}
-	descriptor, err := runtimepipeline.WorkflowInstanceHeaderPayloadForIdentity(identity, state.WorkflowVersion)
-	if err != nil {
-		return nil, fmt.Errorf("encode selected-contract workflow route config: %w", err)
-	}
-	config, err := runtimecanonicaljson.MarshalPreservingNumberKinds(descriptor)
-	if err != nil {
-		return nil, fmt.Errorf("encode selected-contract root descriptor: %w", err)
-	}
-	return config, nil
+	return recorded.Project(identity.Route(), identity.ParentRoute, state.WorkflowVersion)
 }
 
-func selectedContractWorkflowIdentity(state selectedContractWorkflowState) (runtimeflowidentity.Instance, error) {
+func selectedContractWorkflowIdentity(state selectedContractWorkflowState) (runtimeflowidentity.Instance, runtimepipeline.WorkflowInstanceRecordedHeader, error) {
 	metadata := state.History.MaterializationMetadata
 	if metadata == nil || metadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner || metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance {
-		return runtimeflowidentity.Instance{}, fmt.Errorf("selected workflow identity requires recorded construction evidence")
+		return runtimeflowidentity.Instance{}, runtimepipeline.WorkflowInstanceRecordedHeader{}, fmt.Errorf("selected workflow identity requires recorded construction evidence")
 	}
 	projected, err := projectRunForkEntityOwnership(state.SourceRunID, state.RunID, state.History.EntityID, metadata.FlowInstance)
 	if err != nil || projected.Fork.EntityID != state.EntityID || projected.Fork.FlowInstance != state.Route {
-		return runtimeflowidentity.Instance{}, fmt.Errorf("selected workflow identity disagrees with admitted entity projection")
+		return runtimeflowidentity.Instance{}, runtimepipeline.WorkflowInstanceRecordedHeader{}, fmt.Errorf("selected workflow identity disagrees with admitted entity projection")
 	}
 	receipt, err := runtimepipeline.DecodeStoredFlowConstructionReceipt(metadata.InitialMaterialization,
 		state.SourceRunID, state.History.EntityID, metadata.FlowInstance, metadata.FlowTemplate)
 	if err != nil {
-		return runtimeflowidentity.Instance{}, err
+		return runtimeflowidentity.Instance{}, runtimepipeline.WorkflowInstanceRecordedHeader{}, err
 	}
 	recorded, err := runtimepipeline.DecodeWorkflowInstanceRecordedHeader(receipt.Identity.Route(), metadata.FlowConfig)
 	if err != nil {
-		return runtimeflowidentity.Instance{}, err
+		return runtimeflowidentity.Instance{}, runtimepipeline.WorkflowInstanceRecordedHeader{}, err
 	}
 	if recorded.ParentRoute() != receipt.Identity.ParentRoute {
-		return runtimeflowidentity.Instance{}, fmt.Errorf("selected workflow header contradicts immutable ancestry")
+		return runtimeflowidentity.Instance{}, runtimepipeline.WorkflowInstanceRecordedHeader{}, fmt.Errorf("selected workflow header contradicts immutable ancestry")
 	}
 	identity, err := runfork.ProjectConstructionIdentity(state.SourceRunID, state.RunID, receipt.Identity)
 	if err != nil {
-		return runtimeflowidentity.Instance{}, err
+		return runtimeflowidentity.Instance{}, runtimepipeline.WorkflowInstanceRecordedHeader{}, err
 	}
 	if identity.TemplateID != state.WorkflowName || identity.InstancePath != state.Route || identity.EntityID != state.EntityID {
-		return runtimeflowidentity.Instance{}, fmt.Errorf("selected workflow identity contradicts immutable construction")
+		return runtimeflowidentity.Instance{}, runtimepipeline.WorkflowInstanceRecordedHeader{}, fmt.Errorf("selected workflow identity contradicts immutable construction")
 	}
-	return identity, nil
+	return identity, recorded, nil
 }
 
 func requireSelectedContractWorkflowEntity(ctx context.Context, tx *sql.Tx, postgres bool, state selectedContractWorkflowState) error {
@@ -406,7 +398,7 @@ func selectedContractHistoricalHeader(state selectedContractWorkflowState, confi
 	if metadata == nil || metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance || history.EnteredStateAt == nil || history.EnteredStateAt.IsZero() || history.CurrentState == "" {
 		return runtimepipeline.WorkflowEngineStateRecord{}, fmt.Errorf("selected-contract header requires exact historical lifecycle evidence")
 	}
-	constructed, err := selectedContractWorkflowIdentity(state)
+	constructed, _, err := selectedContractWorkflowIdentity(state)
 	if err != nil {
 		return runtimepipeline.WorkflowEngineStateRecord{}, err
 	}
@@ -510,7 +502,7 @@ func selectedContractWorkflowReadiness(source runtimecorrelation.SourceArtifactF
 	if err := source.Validate(); err != nil {
 		return nil, nil, nil, fmt.Errorf("selected-contract workflow readiness source: %w", err)
 	}
-	identity, err := selectedContractWorkflowIdentity(state)
+	identity, _, err := selectedContractWorkflowIdentity(state)
 	if err != nil {
 		return nil, nil, nil, err
 	}
