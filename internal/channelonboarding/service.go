@@ -1016,11 +1016,11 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 		case PhaseActivatingProvider:
 			if op.Posture == ActivationSessionConnection {
 				if err := s.sessions.BootstrapSession(caller, op, candidate); err != nil {
-					return s.blockedResult(ctx, op, candidate, err)
+					return s.blockedResult(caller, op, candidate, err)
 				}
 				next, paired, err := s.sessions.CheckpointSessionPairing(caller, op)
 				if err != nil {
-					return s.blockedResult(ctx, op, candidate, err)
+					return s.blockedResult(caller, op, candidate, err)
 				}
 				if next.OperationID != op.OperationID || next.PrincipalID != op.PrincipalID ||
 					!next.Coordinate.MatchesDeclaration(op.Coordinate) || next.SessionConnectionID != op.SessionConnectionID ||
@@ -1030,7 +1030,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				}
 				op = next
 				if !paired {
-					return s.result(ctx, op, &candidate)
+					return s.result(caller, op, &candidate)
 				}
 				continue
 			}

@@ -375,24 +375,36 @@ func serveSessionRetirementRequired(ctx context.Context, store channelonboarding
 }
 
 func (s *serveSessionBootstrap) openSessionAttempt(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, attempt *serveSessionBootstrapAttempt, bootstrap bool) (err error) {
-	// The retained entry owns partial construction and cleanup even when the
-	// caller stops waiting. It is never an instruction to retry Connect.
-	defer func() {
+	owned, incoming, release, err := s.selectRuntime(ctx, candidate)
+	if err != nil || owned == nil || release == nil || ctx.Err() != nil {
+		if owned == nil || release == nil {
+			err = errors.Join(err, channelonboarding.ErrInvalidRequest)
+		}
+		err = errors.Join(err, context.Cause(ctx))
+		if release != nil {
+			err = errors.Join(err, release())
+		}
 		attempt.err = err
 		close(attempt.done)
-	}()
-	owned, incoming, release, err := s.selectRuntime(ctx, candidate)
-	if err != nil {
 		return err
 	}
-	if release == nil {
-		return channelonboarding.ErrInvalidRequest
+	// Selection retains counted work before launch. The original attempt joins
+	// construction and releases it even after its requesting caller stops waiting.
+	go s.completeSessionAttempt(ctx, owned, op, candidate, attempt, bootstrap, incoming, release)
+	select {
+	case <-attempt.done:
+		return errors.Join(attempt.err, context.Cause(ctx))
+	case <-ctx.Done():
+		return context.Cause(ctx)
 	}
-	defer func() { err = errors.Join(err, release()) }()
-	if owned == nil {
-		return channelonboarding.ErrInvalidRequest
-	}
-	if err := ctx.Err(); err != nil {
+}
+
+func (s *serveSessionBootstrap) completeSessionAttempt(ctx, owned context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, attempt *serveSessionBootstrapAttempt, bootstrap bool, incoming *sessionprovider.RuntimeIncomingOptions, release func() error) (err error) {
+	defer func() {
+		attempt.err = errors.Join(err, release())
+		close(attempt.done)
+	}()
+	if ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
 	options := sessionprovider.RuntimeConnectionOptions{Directory: s.directory, OperationID: op.OperationID,
