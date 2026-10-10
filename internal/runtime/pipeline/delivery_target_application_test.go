@@ -405,10 +405,9 @@ func deliveryTargetNestedOwnershipSource(t *testing.T) semanticview.Source {
 func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleWithoutMutation(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, testCase := range []struct {
-			name           string
-			wantError      string
-			wantTerminated bool
-			seed           func(*testing.T, context.Context, string, string, *workflowInstanceStore, *sql.DB)
+			name      string
+			wantError string
+			seed      func(*testing.T, context.Context, string, string, *workflowInstanceStore, *sql.DB)
 		}{
 			{
 				name: "lifecycle-only", wantError: "workflow_target_unconstructed",
@@ -445,7 +444,7 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 				},
 			},
 			{
-				name: "terminated-status", wantTerminated: true,
+				name: "terminated-status",
 				seed: func(t *testing.T, ctx context.Context, instancePath, entityID string, store *workflowInstanceStore, db *sql.DB) {
 					t.Helper()
 					instance := materializedWorkflowInstanceForTest(WorkflowInstance{
@@ -515,7 +514,7 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 				evt := handlerTestRootIngress(uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
 				_, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target))
 				var terminated *TerminatedReceiverError
-				if testCase.wantTerminated {
+				if testCase.name == "terminated-status" {
 					if !errors.As(err, &terminated) || terminated.FlowID != "." {
 						t.Fatalf("terminated persistence error = %v, want exact root-flow refusal", err)
 					}
