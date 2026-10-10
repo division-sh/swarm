@@ -33,6 +33,19 @@ func TestServeBootstrapConstructionCallerCancellationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newServeBootstrapTestFixture(t, backend)
+			selectRuntime := f.adapter.selectRuntime
+			f.adapter.selectRuntime = func(ctx context.Context, candidate channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error) {
+				owned, incoming, release, err := selectRuntime(ctx, candidate)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				// Production selection already retains this counted construction use.
+				use, err := f.owner.Begin(ctx)
+				if err != nil {
+					return nil, nil, nil, errors.Join(err, release())
+				}
+				return owned, incoming, func() error { return errors.Join(release(), use.Done()) }, nil
+			}
 			blocked := &blockedBootstrapReservationRead{Store: f.adapter.store, entered: make(chan struct{}), release: make(chan struct{})}
 			var releaseOnce sync.Once
 			release := func() { releaseOnce.Do(func() { close(blocked.release) }) }
