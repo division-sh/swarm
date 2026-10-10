@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
-
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
