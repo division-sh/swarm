@@ -136,57 +136,12 @@ func commitWorkflowHeaderAndFields(ctx context.Context, tx *sql.Tx, postgres boo
 		args = []any{record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.EntityType,
 			record.Slug, record.Name, string(record.Fields), record.CreatedAt, record.UpdatedAt}
 	} else {
-		// An unchanged data projection still requires the exact companion under
-		// the original header/field lock order before its UPDATE may be skipped.
-		header, found, err := workflowheader.LoadForMutation(ctx, tx, postgres, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath)
+		changed, err := workflowDataUpdateRequired(ctx, tx, postgres, record)
 		if err != nil {
 			return workflowEngineStateFact{}, err
 		}
-		if !found || header.EntityType != record.EntityType {
-			return workflowEngineStateFact{}, fmt.Errorf("constructed workflow %s has no exact declared field companion", record.Identity.Route.InstancePath)
-		}
-		dataQuery := `SELECT COALESCE(slug,''), COALESCE(name,''), created_at, updated_at
-			FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3 AND entity_type=$4`
-		var slug, name string
-		var createdRaw, updatedRaw any
-		if err := tx.QueryRowContext(ctx, dataQuery, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.EntityType).Scan(&slug, &name, &createdRaw, &updatedRaw); err != nil {
-			return workflowEngineStateFact{}, fmt.Errorf("read required declared data companion: %w", err)
-		}
-		createdAt, created, err := sqliteTimeValue(createdRaw)
-		if err != nil {
-			return workflowEngineStateFact{}, fmt.Errorf("invalid declared data creation clock: %w", err)
-		}
-		if !created || createdAt.IsZero() {
-			return workflowEngineStateFact{}, fmt.Errorf("declared data creation clock is missing or zero")
-		}
-		updatedAt, updated, err := sqliteTimeValue(updatedRaw)
-		if err != nil {
-			return workflowEngineStateFact{}, fmt.Errorf("invalid declared data update clock: %w", err)
-		}
-		if !updated || updatedAt.IsZero() || updatedAt.Before(createdAt) {
-			return workflowEngineStateFact{}, fmt.Errorf("declared data update clock is missing, zero or predates creation")
-		}
-		before, err := storeentity.DecodeJSONMap(header.Fields)
-		if err != nil {
-			return workflowEngineStateFact{}, err
-		}
-		after, err := storeentity.DecodeJSONMap(record.Fields)
-		if err != nil {
-			return workflowEngineStateFact{}, err
-		}
-		beforeValue, err := runtimecanonicaljson.CloneRuntimeValue(before)
-		if err != nil {
-			return workflowEngineStateFact{}, err
-		}
-		afterValue, err := runtimecanonicaljson.CloneRuntimeValue(after)
-		if err != nil {
-			return workflowEngineStateFact{}, err
-		}
-		if slug == record.Slug && name == record.Name && reflect.DeepEqual(beforeValue, afterValue) {
+		if !changed {
 			return fact, nil
-		}
-		if record.UpdatedAt.Before(updatedAt) {
-			return workflowEngineStateFact{}, fmt.Errorf("declared data update clock cannot go backwards")
 		}
 		query = `UPDATE entity_state SET slug = NULLIF(?, ''), name = NULLIF(?, ''), fields = ?,
 			updated_at = ? WHERE run_id = ? AND entity_id = ? AND flow_instance = ? AND entity_type = ?`
@@ -209,6 +164,62 @@ func commitWorkflowHeaderAndFields(ctx context.Context, tx *sql.Tx, postgres boo
 		return workflowEngineStateFact{}, fmt.Errorf("constructed workflow %s has no required field row", record.Identity.Route.InstancePath)
 	}
 	return fact, nil
+}
+
+// Admission runs after the header CAS and under the original field lock. Even
+// unchanged data must have an exact companion and valid independent clocks.
+func workflowDataUpdateRequired(ctx context.Context, tx *sql.Tx, postgres bool, record runtimepipeline.WorkflowEngineStateRecord) (bool, error) {
+	header, found, err := workflowheader.LoadForMutation(ctx, tx, postgres, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath)
+	if err != nil {
+		return false, err
+	}
+	if !found || header.EntityType != record.EntityType {
+		return false, fmt.Errorf("constructed workflow %s has no exact declared field companion", record.Identity.Route.InstancePath)
+	}
+	dataQuery := `SELECT COALESCE(slug,''), COALESCE(name,''), created_at, updated_at
+		FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3 AND entity_type=$4`
+	var slug, name string
+	var createdRaw, updatedRaw any
+	if err := tx.QueryRowContext(ctx, dataQuery, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.EntityType).Scan(&slug, &name, &createdRaw, &updatedRaw); err != nil {
+		return false, fmt.Errorf("read required declared data companion: %w", err)
+	}
+	createdAt, created, err := sqliteTimeValue(createdRaw)
+	if err != nil {
+		return false, fmt.Errorf("invalid declared data creation clock: %w", err)
+	}
+	if !created || createdAt.IsZero() {
+		return false, fmt.Errorf("declared data creation clock is missing or zero")
+	}
+	updatedAt, updated, err := sqliteTimeValue(updatedRaw)
+	if err != nil {
+		return false, fmt.Errorf("invalid declared data update clock: %w", err)
+	}
+	if !updated || updatedAt.IsZero() || updatedAt.Before(createdAt) {
+		return false, fmt.Errorf("declared data update clock is missing, zero or predates creation")
+	}
+	before, err := storeentity.DecodeJSONMap(header.Fields)
+	if err != nil {
+		return false, err
+	}
+	after, err := storeentity.DecodeJSONMap(record.Fields)
+	if err != nil {
+		return false, err
+	}
+	beforeValue, err := runtimecanonicaljson.CloneRuntimeValue(before)
+	if err != nil {
+		return false, err
+	}
+	afterValue, err := runtimecanonicaljson.CloneRuntimeValue(after)
+	if err != nil {
+		return false, err
+	}
+	if slug == record.Slug && name == record.Name && reflect.DeepEqual(beforeValue, afterValue) {
+		return false, nil
+	}
+	if record.UpdatedAt.Before(updatedAt) {
+		return false, fmt.Errorf("declared data update clock cannot go backwards")
+	}
+	return true, nil
 }
 
 func workflowEngineStateRevisionConflict(record runtimepipeline.WorkflowEngineStateRecord) error {
