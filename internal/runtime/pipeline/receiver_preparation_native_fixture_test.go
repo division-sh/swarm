@@ -29,7 +29,7 @@ func nativeReceiverPreparationFixtureForTest(t *testing.T, backend string, open 
 	if err := fixture.RequireRun(ctx, run); err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 		InstanceID: run, StorageRef: run, EntityID: run, EntityType: "test_entity", WorkflowName: ".",
 		WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "queued", Fields: map[string]any{},
 	})); err != nil {
