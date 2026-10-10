@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -137,7 +138,7 @@ func TestRunForkDeploymentNeedsNoHandlerPlanProof(t *testing.T) {
 			Deployment: &fanoutobligation.DeploymentOrigin{BundleHash: bundle},
 		}},
 	}}}
-	refs, err := resolveRunForkFanOutPlanRefs(plan, bundle, nil)
+	refs, err := resolveRunForkFanOutPlanRefs(plan, bundle, semanticview.FanOutPlanCarriage{})
 	if err != nil || len(refs) != 0 {
 		t.Fatalf("deployment borrowed a handler plan: refs=%v err=%v", refs, err)
 	}

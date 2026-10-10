@@ -207,7 +207,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err := requireOriginalFanOutCarriage(txctx, source, plan, req.OriginalLoopCarriage); err != nil {
 			return err
 		}
-		fanOutPlanRefs, err := resolveRunForkFanOutPlanRefs(plan, identity.SourceArtifactFact.BundleHash(), req.FanOutPlanRefs)
+		fanOutPlanRefs, err := resolveRunForkFanOutPlanRefs(plan, identity.SourceArtifactFact.BundleHash(), req.SelectedFanOutPlans)
 		if err != nil {
 			return err
 		}

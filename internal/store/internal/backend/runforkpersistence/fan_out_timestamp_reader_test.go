@@ -64,7 +64,7 @@ func TestFanOutTimestampReaderPresenceBothStores(t *testing.T) {
 				Request: fanoutobligation.IntentRequest{
 					Key:     fanoutobligation.IntentKey{RunID: sourceRun, TriggeringDeliveryID: triggerID, ElementRef: ref.ElementRef},
 					PlanRef: ref, Source: source, Cardinality: 2,
-					Capsule: fanoutobligation.Capsule{SourceProjection: plans[0].SemanticEvidence(), NodeKey: node.Key(), ExecutionFlowID: ".", HandlerEventKey: "items.ready",
+					Capsule: fanoutobligation.Capsule{SourcePlanRef: plans[0].Ref, SourceProjection: plans[0].SemanticEvidence(), NodeKey: node.Key(), ExecutionFlowID: ".", HandlerEventKey: "items.ready",
 						Route: flowidentity.StoredRoute(".", sourceRun, sourceRun), ProducerSource: producer,
 						Lineage: events.EventLineage{RunID: sourceRun, ParentEventID: eventID, ExecutionMode: executionmode.Live}},
 				},
