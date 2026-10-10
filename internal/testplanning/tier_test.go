@@ -34,13 +34,13 @@ func TestCITierEventDataAndConservativeDefault(t *testing.T) {
 func TestCITierCurrentBodyRejectsStaleThinnerGreen(t *testing.T) {
 	for _, effective := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {
 		for _, current := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {
-			err := CheckCurrentCITier(effective, "CI-Tier: "+current)
-			if (err == nil) != (TierRank(effective) >= TierRank(current)) {
+			err := CheckCurrentCISelection(RunPlan{Profile: effective}, "CI-Tier: "+current)
+			if (err == nil) != (effective == current) {
 				t.Fatalf("%s vs %s: %v", effective, current, err)
 			}
 		}
 	}
-	if CheckCurrentCITier(ProfileCore, "") != nil {
+	if CheckCurrentCISelection(RunPlan{Profile: ProfileCore}, "") != nil {
 		t.Fatal("missing declaration must admit core feedback")
 	}
 }

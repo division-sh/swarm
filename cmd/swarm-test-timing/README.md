@@ -87,7 +87,39 @@ checks. Archive the inputs, reviewed attribution and outputs together with the
 run/attempt links. A successful command is report generation, not proof that a
 regression, rate or lag is known.
 
-## Recorded PR #2595 Qualification Amendment
+## Named CI Supplements
+
+The current PR-body selection can retain a lower tier plus named hosted units:
+
+```text
+CI-Tier: lifecycle
+CI-Units: conformance-soak-sqlite, conformance-soak-postgres
+```
+
+`CI-Units` is a single unindented comma-space-separated line. IDs must be in the
+hosted full plan and absent from the base tier; invalid, duplicate, local-only,
+no-op or overlapping selections refuse. Selection precedes native root binding,
+batching and deferral generation; original count, recipe and backend children
+remain required. Full-only extras add the frozen full timing comparison without
+changing the pinned reference or lower-tier membership.
+
+`-ci-selection -plan PLAN -workflow-run-id ID -workflow-attempt N -result-json JSON`
+emits the plan-bound selection report. Its digest hashes compact UTF-8 JSON with
+ordered fields `version`, `tier`, `extra_units` (sorted non-null array), without
+a newline. The existing CI tier job is named:
+
+```text
+CI tier: <tier>; selection: <sha256>; run: <id>; attempt: <n>
+```
+
+The current effective tier and extras must match the qualifying plan exactly.
+Body-only selection edits require new execution, including edits after green.
+The merge gate and verified-master owner require successful same-head/run/attempt
+trusted-App selection and Required summary checks in the same suite. Selection
+metadata alone never grants proof credit; failed/cancelled/skipped/missing unit
+evidence still refuses. Native-unused remains outside the named-unit selector.
+
+## Historical PR #2595 Qualification Amendment
 
 The #2535 venue-identity repair now gives profiles and units explicit
 `environment_ids: {ci: ..., local: ...}` declarations. The plan owner resolves

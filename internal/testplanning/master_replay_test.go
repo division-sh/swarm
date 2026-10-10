@@ -54,17 +54,21 @@ func TestMasterReplayRequiresExactTreeCurrentTierAndAttempt(t *testing.T) {
 	run := QualifiedRun{ID: 123, RunAttempt: 2, HeadSHA: "branch", Event: "pull_request", Name: "CI", Status: "completed", Conclusion: "success"}
 	var checks []MergeCheck
 	var protected []ProtectedCheck
-	for i, name := range []string{"Required test summary", "SQLite local smoke"} {
-		check := MergeCheck{Name: name, HeadSHA: "branch", Status: "completed", Conclusion: "success", DetailsURL: "https://github.com/division-sh/swarm/actions/runs/123/job/" + []string{"40", "41"}[i]}
+	selection, _ := plan.CISelection()
+	for i, name := range []string{"Required test summary", "SQLite local smoke", selection.CheckName(run.ID, run.RunAttempt)} {
+		check := MergeCheck{Name: name, HeadSHA: "branch", Status: "completed", Conclusion: "success", DetailsURL: "https://github.com/division-sh/swarm/actions/runs/123/job/" + []string{"40", "41", "42"}[i]}
 		check.App.ID = 15368
+		check.CheckSuite.ID = 70
 		checks = append(checks, check)
-		protected = append(protected, ProtectedCheck{Context: name, AppID: 15368})
+		if i < 2 {
+			protected = append(protected, ProtectedCheck{Context: name, AppID: 15368})
+		}
 		run.Jobs = append(run.Jobs, MergeJob{ID: int64(40 + i), RunID: 123, RunAttempt: 2, HeadSHA: "branch", Name: name, Status: "completed", Conclusion: "success"})
 	}
 	if err := ValidateMasterReplay("division-sh/swarm", "refs/heads/master", "master", "tree", "tree", []MergedPR{pr}, run, checks, protected, plan); err != nil {
 		t.Fatal(err)
 	}
-	for _, mutation := range []string{"main", "direct", "ambiguous", "unmerged", "foreign_repo", "merge_sha", "tree", "new_tier", "malformed_tier", "failed", "attempt", "foreign_head", "duplicate_job", "wrong_app", "wrong_protection", "wrong_run", "missing_check", "duplicate_check", "invalid_plan"} {
+	for _, mutation := range []string{"main", "direct", "ambiguous", "unmerged", "foreign_repo", "merge_sha", "tree", "new_tier", "malformed_tier", "new_units", "failed", "attempt", "foreign_head", "duplicate_job", "wrong_app", "wrong_protection", "wrong_run", "missing_check", "duplicate_check", "invalid_plan", "selection_missing", "selection_skipped", "selection_foreign", "selection_attempt", "wrong_suite", "missing_suite"} {
 		t.Run(mutation, func(t *testing.T) {
 			candidate := pr
 			prs, reference, tree := []MergedPR{candidate}, "refs/heads/master", "tree"
@@ -93,6 +97,8 @@ func TestMasterReplayRequiresExactTreeCurrentTierAndAttempt(t *testing.T) {
 				prs[0].Body = "CI-Tier: lifecycle"
 			case "malformed_tier":
 				prs[0].Body = "CI-Tier: unknown"
+			case "new_units":
+				prs[0].Body += "\nCI-Units: conformance-soak-sqlite"
 			case "failed":
 				r.Conclusion = "failure"
 			case "attempt":
@@ -113,6 +119,18 @@ func TestMasterReplayRequiresExactTreeCurrentTierAndAttempt(t *testing.T) {
 				cs = append(cs, cs[0])
 			case "invalid_plan":
 				p.Digest = "stale"
+			case "selection_missing":
+				cs = cs[:2]
+			case "selection_skipped":
+				cs[2].Conclusion = "skipped"
+			case "selection_foreign":
+				cs[2].Name = "CI tier: core"
+			case "selection_attempt":
+				cs[2].Name = selection.CheckName(run.ID, run.RunAttempt-1)
+			case "wrong_suite":
+				cs[2].CheckSuite.ID++
+			case "missing_suite":
+				cs[2].CheckSuite.ID = 0
 			}
 			if ValidateMasterReplay("division-sh/swarm", reference, "master", "tree", tree, prs, r, cs, protection, p) == nil {
 				t.Fatal("uncertain master replay accepted")

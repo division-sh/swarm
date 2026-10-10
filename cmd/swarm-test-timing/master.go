@@ -206,13 +206,13 @@ func revalidateMergedObservation(ctx context.Context, cfg config, pr testplannin
 	if currentPR.Head.SHA != pr.Head.SHA {
 		return fmt.Errorf("merged PR source changed during observation")
 	}
-	return testplanning.CheckCurrentCITier(plan.Profile, currentPR.Body)
+	return testplanning.CheckCurrentCISelection(plan, currentPR.Body)
 }
 
 func mergedRequiredChecks(ctx context.Context, repository string, jobs []testplanning.MergeJob) ([]testplanning.MergeCheck, error) {
 	var checks []testplanning.MergeCheck
 	for _, job := range jobs {
-		if job.Name != "Required test summary" && job.Name != "SQLite local smoke" {
+		if job.Name != "Required test summary" && job.Name != "SQLite local smoke" && !strings.HasPrefix(job.Name, "CI tier: ") {
 			continue
 		}
 		prefix := "https://api.github.com/repos/" + repository + "/check-runs/"
@@ -321,7 +321,7 @@ func validateCurrentPlan(plan testplanning.RunPlan, cfg config) error {
 	for name := range inventory.Packages {
 		packages = append(packages, name)
 	}
-	current, err := testplanning.BuildPlan(policy, model, packages, plan.Profile, plan.Reason, plan.HeadSHA)
+	current, err := testplanning.BuildPlan(policy, model, packages, plan.Profile, plan.Reason, plan.HeadSHA, testplanning.BuildOptions{ExtraUnits: plan.ExtraUnits})
 	if err != nil {
 		return err
 	}

@@ -53,9 +53,17 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 		packages = append(packages, pkg)
 	}
 	sort.Strings(packages)
-	for _, profile := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {
-		t.Run(profile, func(t *testing.T) {
-			plan, err := BuildPlan(policy, model, packages, profile, "census", "test-head")
+	for _, selection := range []struct {
+		name, profile string
+		extras        []string
+	}{
+		{ProfileCore, ProfileCore, nil}, {ProfileLifecycle, ProfileLifecycle, nil}, {ProfileFull, ProfileFull, nil},
+		{"core-plus-soaks", ProfileCore, []string{"conformance-soak-sqlite", "conformance-soak-postgres"}},
+		{"lifecycle-plus-soaks", ProfileLifecycle, []string{"conformance-soak-sqlite", "conformance-soak-postgres"}},
+	} {
+		t.Run(selection.name, func(t *testing.T) {
+			profile := selection.profile
+			plan, err := BuildPlan(policy, model, packages, profile, "census", "test-head", BuildOptions{ExtraUnits: selection.extras})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -67,6 +75,17 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 			}
 			assertCatalogOracleCoverage(t, plan)
 			assertStaticAuthorityGuardCoverage(t, root, plan)
+			for _, id := range selection.extras {
+				unit, err := plan.Unit(id)
+				declared := policy.Units[id]
+				if err != nil || unit.CountMode != declared.CountMode || unit.Run != declared.Run || unit.Skip != declared.Skip || unit.GoTimeout != declared.GoTimeout || unit.EnvironmentID != declared.EnvironmentIDs[VenueCI] {
+					t.Fatalf("supplement changed its original execution contract: %+v %v", unit, err)
+				}
+				backend, _ := SoakBackend(unit.Run)
+				if len(unit.SelectedRoots) != 1 || len(unit.RequiredTests) != 1 || !unitRequires(unit, SoakTest) || !slices.Equal(unit.RequiredTests[0].Children, []string{backend}) {
+					t.Fatalf("supplement lost backend/child proof: %+v", unit)
+				}
+			}
 			if err := validateServedPreservationOwnership(plan); err != nil {
 				t.Fatal(err)
 			}

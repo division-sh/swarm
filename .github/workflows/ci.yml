@@ -65,6 +65,7 @@ jobs:
       profile: ${{ steps.plan.outputs.profile }}
       plan_digest: ${{ steps.plan.outputs.plan_digest }}
       execution_sha: ${{ steps.plan.outputs.execution_sha }}
+      selection_check: ${{ steps.plan.outputs.selection_check }}
       master_replay: ${{ steps.merged.outputs.result == 'verified' }}
     steps:
       - name: Checkout
@@ -180,12 +181,18 @@ jobs:
               "${profile_args[@]}"
           fi
 
+          go run ./cmd/swarm-test-timing -ci-selection \
+            -plan test-results/proof-plan.json \
+            -workflow-run-id "$GITHUB_RUN_ID" -workflow-attempt "$GITHUB_RUN_ATTEMPT" \
+            -result-json test-results/ci-selection.json -markdown test-results/ci-selection.md
+          echo "selection_check=$(jq -r .check_name test-results/ci-selection.json)" >> "$GITHUB_OUTPUT"
           echo "proof_matrix=$(jq -c '{include: .include}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
           echo "soak_matrix=$(jq -c '{include: [.include[] | select(.budget_class == "soak")]}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
           echo "profile=$(jq -r .profile test-results/proof-plan.json)" >> "$GITHUB_OUTPUT"
           echo "plan_digest=$(jq -r .digest test-results/proof-plan.json)" >> "$GITHUB_OUTPUT"
           echo "execution_sha=$execution_sha" >> "$GITHUB_OUTPUT"
           cat test-results/proof-plan.md >> "$GITHUB_STEP_SUMMARY"
+          cat test-results/ci-selection.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload proof plan
         uses: actions/upload-artifact@v4
@@ -198,6 +205,8 @@ jobs:
             test-results/proof-plan.json
             test-results/proof-matrix.json
             test-results/proof-plan.md
+            test-results/ci-selection.json
+            test-results/ci-selection.md
             test-results/master-replay.json
           if-no-files-found: error
 
@@ -717,27 +726,36 @@ jobs:
           exit "$failed"
 
   ci-tier:
-    name: 'CI tier: ${{ needs.ci-plan.outputs.profile }}'
+    name: ${{ needs.ci-plan.outputs.selection_check }}
     needs: [ci-plan, required-tests]
     if: ${{ always() && needs.ci-plan.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    permissions: {}
+    permissions:
+      actions: read
     steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ci-plan
+          path: test-results
       - name: Record same-run tier selection and proof outcome
         env:
           TIER: ${{ needs.ci-plan.outputs.profile }}
           PLAN_DIGEST: ${{ needs.ci-plan.outputs.plan_digest }}
-          EXECUTION_SHA: ${{ needs.ci-plan.outputs.execution_sha }}
+          SELECTION_CHECK: ${{ needs.ci-plan.outputs.selection_check }}
           PROOF_RESULT: ${{ needs.required-tests.result }}
         run: |
           set -euo pipefail
           case "$TIER" in core|lifecycle|full) ;; *) exit 1 ;; esac
           case "$PROOF_RESULT" in success|failure|cancelled|skipped) ;; *) exit 1 ;; esac
-          test -n "$PLAN_DIGEST"
-          test -n "$EXECUTION_SHA"
-          printf 'Tier %s selected by run %s attempt %s; execution %s; plan %s; Required test summary: %s. Tier selection alone is not qualification.\n' \
-            "$TIER" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$EXECUTION_SHA" "$PLAN_DIGEST" "$PROOF_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          jq -e --arg tier "$TIER" --arg plan "$PLAN_DIGEST" --slurpfile source test-results/proof-plan.json \
+            --arg check "$SELECTION_CHECK" --argjson run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" \
+            '.version == 1 and .tier == $tier and .plan_digest == $plan and .execution_sha == $source[0].head_sha and
+             .check_name == $check and .workflow_run_id == $run and .workflow_attempt == $attempt and
+             (.selection_digest | test("^[0-9a-f]{64}$")) and (.extra_units | type == "array")' \
+            test-results/ci-selection.json >/dev/null
+          cat test-results/ci-selection.md >> "$GITHUB_STEP_SUMMARY"
+          printf '\nRequired test summary: %s. Selection alone is not qualification.\n' "$PROOF_RESULT" >> "$GITHUB_STEP_SUMMARY"
 
   nightly-proof:
     name: Master nightly proof

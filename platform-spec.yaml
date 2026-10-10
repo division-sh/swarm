@@ -23923,14 +23923,26 @@ test_specification:
         lifecycle or full. CI reads its event JSON as data; an absent CI-Tier selects core feedback.
         Malformed or duplicate declarations select conservative full; invalid event JSON refuses planning.
         Body edits do not trigger CI. The late five-minute summary checks current body/head before success; it cannot revoke completed green.
-        An unmet tier increase requires a new signed head and higher-tier qualifying protected checks; keep the PR draft/non-mergeable until qualification.
-        Lead's final merge comparison checks current body against successful current-head trusted-App plan/summary, including post-approval edits; completed higher scope can satisfy lower.
+        A changed effective tier or extra-unit set requires new current-head qualifying execution; keep the PR non-mergeable until qualification.
+        Lead's final merge comparison checks exact current selection against successful current-head trusted-App plan/summary, including post-approval edits;
+        higher scope does not substitute for a different selection digest.
         Full is the default final-head merge gate, separately enforced by the user-run merge orchestrator;
         a lower merge tier requires an explicit reviewer tier ruling. Core feedback does not by itself waive the default full requirement.
-        The native CI tier: <tier> check records canonical plan selection after the same run's required summary reaches a terminal outcome,
+        An optional single unindented CI-Units line uses comma-space-separated existing hosted full-plan unit IDs,
+        for example 'CI-Units: conformance-soak-sqlite, conformance-soak-postgres'. Absent means no extras;
+        empty, malformed, duplicate, unknown, local-only or base-tier no-op units refuse planning. Unit order is canonicalized by sorting.
+        The planner augments before package, root, batch, projection and deferral derivation; original unit/backend/count/recipe/child contracts
+        remain exact and overlaps refuse rather than rewriting execution cells. Lifecycle and full retain every mandatory core guard/census root
+        through their existing owners; the core-only guard unit is not duplicated.
+        Selection identity is SHA256 of compact UTF-8 JSON without a trailing newline, with ordered fields
+        version (1), tier and extra_units (sorted non-null array). The plan records extra_units and includes them in its ordinary digest.
+        The native 'CI tier: <tier>; selection: <digest>; run: <run_id>; attempt: <attempt>' check records canonical plan selection after the same run's required summary reaches a terminal outcome,
         including failed proof and fail-fast sibling cancellation. Its success records valid tier metadata, not successful qualification;
         the separate Required test summary and complete receipts must succeed before merge or nightly credit. Its Actions run/attempt,
-        execution source and plan identity must match that aggregate. No privileged PR checks publisher is required.
+        execution source and plan identity must match that aggregate. Its plan artifact and human summary retain the sorted extras, selection digest,
+        source, plan digest, run/attempt and proof outcome. Verified-master reuse and the deployed merge gate require the exact current selection
+        and successful same-head/run/attempt trusted-App selection check in the same suite as Required test summary.
+        Old tier-only metadata cannot qualify supplements. No privileged PR checks publisher is required.
         The tier-check activation marker is temporary bootstrap only and activates after the first full negative/positive hosted control.
         Original PR proof stays in place until a complete healthy master-nightly and the strict merge-time nightly marker are live.
         Master nightly proof qualifies the existing ci.yml scheduled or deliberately manually dispatched full owner on master and its same-run tier/summary;
@@ -23957,6 +23969,9 @@ test_specification:
         relabeled or aliased; changed recipe identity requires fresh plan-bound proof. The pinned full reference and
         frozen tier memberships remain unchanged. Historical package weights outside a selected tier are advisory
         unselected-plan diagnostics, not proof that full coverage was removed or timing savings were earned.
+        A supplemented lower-tier plan adds the frozen full projection as a cost-accounting row, without reprojecting the frozen lower-tier
+        reference membership or changing the timing anchor/thresholds. Absent full cells remain removal-neutral and earn no execution credit;
+        new/promoted roots and retained-root growth are charged under the unchanged full growth/placement rules.
         Logical commands retain their own processes, stores, workspaces, deadlines, backend children and receipts.
         Only explicitly eligible short units with valid measured weights may share a physical runner. Each physical
         job is matched to its exact planned logical units and counted once, while every logical budget and failure
