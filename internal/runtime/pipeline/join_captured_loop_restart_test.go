@@ -36,7 +36,7 @@ func TestWorkflowExpressionAdapterCapturedLoop(t *testing.T) {
 	}
 }
 
-func TestJoinCapturedLoopOutcomeAfterRestartBothStores(t *testing.T) {
+func VerifyNativeJoinCapturedLoopOutcomeAfterRestartBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		for _, flowID := range []string{"", "orders"} {
 			for _, complete := range []bool{false, true} {
@@ -49,20 +49,18 @@ func TestJoinCapturedLoopOutcomeAfterRestartBothStores(t *testing.T) {
 					if complete {
 						members = []any{}
 					}
-					h := newExactWorkflowJoinHarness(t, storeCase, flowID, "dispatching", members)
-					h.bundle = workflowJoinLifecycleBundleWithOptions(t, false, "captured")
+					bundle := workflowJoinLifecycleBundleWithOptions(t, false, "captured")
+					h := newNativeExactWorkflowJoinHarness(t, storeCase.name, flowID, "dispatching", members, bundle, open)
 					declarationFlowID := pipelineDeclarationFlowPath(flowID)
-					h.source.plans = []runtimecontracts.WorkflowJoinPlan{exactCompiledJoinPlanForTest(h.bundle, flowID)}
-					h.source.Source = workflowJoinLifecycleRootAndFlowSource(h.bundle)
+
 					observer := pipelineNode(t, flowID, "observer")
 					handlers := h.source.Source.ExecutableNodeEventHandlers(observer)
 					start, repeat := handlers["loop.start"], handlers["loop.repeat"]
 					h.restart()
 					execute := func(eventType string, handler runtimecontracts.SystemNodeEventHandler, payload map[string]any) {
 						t.Helper()
-						event := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), events.EventType(eventType), "operator", "", mustJSON(payload), 0, runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), exactJoinRoutingSource(flowID, h.path, h.entityID), time.Now().UTC())
-						persistExactJoinEvent(t, h.store, h.ctx, event)
-						if _, err := executePublishedWorkflowJoinForTest(t, h.pc, h.ctx, pipelineNode(t, flowID, "observer"), handler, workflowTriggerContext{Event: event, State: mustCurrentWorkflowState(t, h.pc, h.ctx, h.route, h.entityID), HandlerEventKey: eventType}); err != nil {
+						event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(eventType), "operator", "", mustJSON(payload), 0, runtimecorrelation.RunIDFromContext(h.ctx), h.envelope(), exactJoinRoutingSource(flowID, h.path, h.entityID), time.Now().UTC())
+						if _, err := executeNativePublishedWorkflowJoinForTest(t, h.fixture, h.mutations, h.pc, h.ctx, pipelineNode(t, flowID, "observer"), handler, workflowTriggerContext{Event: event, State: mustCurrentWorkflowState(t, h.pc, h.ctx, h.route, h.entityID), HandlerEventKey: eventType}); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -80,7 +78,7 @@ func TestJoinCapturedLoopOutcomeAfterRestartBothStores(t *testing.T) {
 						return owner
 					}
 					captured := readLoop()
-					schedules, _ := committedWorkflowSchedulesForTest(t, h.store)
+					schedules, _ := h.mutations.schedules()
 					if len(schedules) != 1 {
 						t.Fatalf("real stage entry scheduled %d joins", len(schedules))
 					}
@@ -105,7 +103,7 @@ func TestJoinCapturedLoopOutcomeAfterRestartBothStores(t *testing.T) {
 					}
 					before := h.instance()
 					h.restart()
-					if _, err := h.fire(event); err != nil {
+					if err := h.replay(event); err != nil {
 						t.Fatalf("duplicate completed outcome after replacement: %v", err)
 					}
 					if !exactJoinSemanticStateEqual(before, h.instance()) {

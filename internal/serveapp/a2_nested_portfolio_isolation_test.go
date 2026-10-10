@@ -37,7 +37,7 @@ func TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores(t *testing.T) {
 					t.Fatalf("sibling portfolio setup changed run: %+v", setup)
 				}
 				runID = setup.RunID
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, runID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 				parents[index] = requireA2PortfolioKeyedEntity(t, rt, runID, "portfolio", "portfolio_id", portfolio)
 				payload := map[string]any{"portfolio_id": portfolio, "period_id": periodKey, "expected_operating_ids": []any{"op-a", "op-b"}}
 				forwarded := requireA2PortfolioEmission(t, rt, runID, parents[index].Entity.FlowInstance+"/period.setup", setup.EventID, payload)
@@ -66,7 +66,7 @@ func TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores(t *testing.T) {
 					"run_id": runID, "event_name": "operating.report.triggered", "idempotency_key": "a2-nested-" + portfolio + "-" + arrival.member,
 					"payload": map[string]any{"portfolio_id": portfolio, "period_id": periodKey, "operating_id": arrival.member, "revenue": arrival.revenue},
 				})
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, runID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 				payload := map[string]any{"portfolio_id": portfolio, "period_id": periodKey, "operating_id": arrival.member, "revenue": float64(arrival.revenue)}
 				requested, operating := requireA2PortfolioOperatingCreation(t, rt, trigger, payload, "operating_instance_id")
 				report := map[string]any{"portfolio_id": portfolio, "period_id": periodKey, "operating_id": arrival.member, "operating_instance_id": requested.EventID, "revenue": float64(arrival.revenue)}

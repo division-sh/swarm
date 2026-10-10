@@ -48,7 +48,7 @@ func TestKeyedPortfolioStreamRoutesAndRetainsIndependentPeriodsOnBothStores(t *t
 			backend, db := setup.open(t)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(t.Context(), conformanceSourceArtifactFact(t, source)), runID)
-			seedFanInBarrierRun(t, ctx, backend, db, source, runID)
+			seedFanInBarrierRun(t, ctx, backend, source, runID)
 			runtime := newFanInBarrierRuntime(t, backend, source)
 			if err := runtime.manager.ActivateFlowInstance(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.FlowInstanceActivationRequest{
 				ContractBundle: source,

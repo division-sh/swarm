@@ -73,7 +73,7 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 			}
 			module := newRuntimeTestWorkflowModule(t, source)
 			resultHandlerStarted := make(chan string, 4)
-			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
+			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, pg, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              module,
 				Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
@@ -229,7 +229,7 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 			}
 			module := newRuntimeTestWorkflowModule(t, source)
 			resultHandlerStarted := make(chan string, 4)
-			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
+			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, pg, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              module,
 				Persistence:         runtimepipeline.NewWorkflowPersistence(pg),

@@ -214,7 +214,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			if result.ForkRunID == "" || result.ExecutedEventCount != 1 {
 				t.Fatalf("restored historical reader did not execute actual static receiver: %#v", result)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, result.ForkRunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, result.ForkRunID)
 			childEvent := activityidentity.ForkLineageEventID(result.ForkRunID, frontier)
 			childRoute := requireForkReceiverBusinessMutation(t, rt, result.ForkRunID, childEvent, sourceRows["consumer"].ID)
 			if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) {

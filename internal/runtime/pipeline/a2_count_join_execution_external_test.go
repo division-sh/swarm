@@ -77,7 +77,7 @@ func TestA2CountJoinRealExecutionAndRestartOnBothStores(t *testing.T) {
 					selected.persistence = pipeline.NewWorkflowPersistence(cleanup)
 				}
 				runID := uuid.NewString()
-				insertGateRecoveryRun(t, selected, runID)
+				insertGateRecoveryRun(t, selected.events, runID)
 				ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, a2CountJoinFiles(scenario.count)))
 				node := externalPipelineSourceNode(t, source, ".", "collector")

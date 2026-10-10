@@ -11,11 +11,8 @@ import (
 	"testing"
 	"time"
 
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
-
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/platform"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -29,8 +26,6 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
@@ -45,16 +40,20 @@ func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnSto
 			ctx := testAuthorActivityContext(context.Background())
 			runID := uuid.NewString()
 			ctx = runtimecorrelation.WithRunID(ctx, runID)
-			fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}
-			var persistence computeReplayPersistence
+			fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}
+			var persistence interface {
+				computeReplayPersistence
+				storetest.RunFixtureStore
+			}
 			if backend == "sqlite" {
-				owner := newComputeModuleReplaySQLiteStore(t)
-				runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(owner), fixture)
-				persistence = owner
+				persistence = newComputeModuleReplaySQLiteStore(t)
 			} else {
-				_, db, _ := testutil.StartPostgres(t)
-				persistence = storetest.AdmitPostgresRuntimeStore(t, db)
-				runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
+				persistence = storetest.StartPostgresRuntimeStore(t)
+			}
+			probe := storetest.CollectTransactions(t, persistence, storetest.TransactionProbeOptions{})
+			storetest.RequireRun(t, ctx, persistence, fixture)
+			if counts := probe.Snapshot(); counts.Total.WriteCommits == 0 || counts.Active != 0 {
+				t.Fatalf("compute replay run setup escaped original selected owner: %+v", counts)
 			}
 			provePersistedComputeModuleReplay(t, ctx, persistence, runID)
 		})
@@ -141,39 +140,7 @@ func persistComputeModuleReplayEvidenceForExecution(t *testing.T, ctx context.Co
 
 func newComputeModuleReplaySQLiteStore(t *testing.T) *store.SQLiteRuntimeStore {
 	t.Helper()
-	var spec runtimecontracts.PlatformSpecDocument
-	source, err := yamlsource.Load(platform.PlatformSpecYAML())
-	if err != nil {
-		t.Fatalf("load platform spec: %v", err)
-	}
-	spec, err = runtimecontracts.AdmitPlatformSpecValue(source.Document("platform-spec.yaml").Root())
-	if err != nil {
-		t.Fatalf("decode platform spec: %v", err)
-	}
-	plans, err := store.GeneratePlatformTableDDLs(spec)
-	if err != nil {
-		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
-	}
-	dbPath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	sqliteStore, err := store.NewSQLiteRuntimeStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := sqliteStore.Close(); err != nil {
-			t.Fatalf("close sqlite runtime store: %v", err)
-		}
-	})
-	if err := sqliteStore.BootstrapSchema(context.Background(), store.SchemaBootstrapRequest{
-		PlatformPlans: plans,
-		Origin:        store.RuntimeStoreOrigin{SwarmVersion: "engine-test", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC()},
-	}); err != nil {
-		t.Fatalf("BootstrapSchema: %v", err)
-	}
-	sqliteStore.SetEventPayloadAdmitter(func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
-		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
-	})
-	return sqliteStore
+	return storetest.StartSQLiteRuntimeStore(t)
 }
 
 func computeModuleReplaySource(t *testing.T) semanticview.Source {

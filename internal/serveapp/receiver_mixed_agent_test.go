@@ -23,6 +23,8 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 			root := canonicalrouting.CopyReceiverMixedAgent(t)
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			var db *sql.DB
+			var deliveryReader servedRunDeliveryReader
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
 			if backend == "sqlite" {
 				unsetStoreSelectorEnv(t)
@@ -46,7 +48,7 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 			bundle := servedEventPublishFixtureBundleHash(t, root)
 			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": bundle, "payload": map[string]any{"seed": true}, "idempotency_key": "mixed-agent-seed"})
 			requireServedEventPublishEntityState(t, db, backend, seed.RunID, flowidentity.EntityID("sink"), "active")
-			waitServedRunDeliveryQuiescence(t, db, backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, deliveryReader, seed.RunID)
 			var childID, parentID string
 			if err := db.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance='sink'`, seed.RunID).Scan(&childID); err != nil {
 				t.Fatal(err)
@@ -58,7 +60,7 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 				t.Fatal("seed did not establish distinct receiving ownership")
 			}
 			published := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "mixed-agent"})
-			waitServedRunDeliveryQuiescence(t, db, backend, published.RunID)
+			waitServedRunDeliveryQuiescence(t, deliveryReader, published.RunID)
 			var agents, nodes, turns int
 			if err := db.QueryRow(`SELECT count(*) FROM event_deliveries WHERE run_id=$1 AND subscriber_type='agent' AND status='delivered'`, published.RunID).Scan(&agents); err != nil {
 				t.Fatal(err)
@@ -115,7 +117,7 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 			if nodeOwners != 1 || agentOwners != 1 {
 				t.Fatalf("mixed event owners node/agent=%d/%d, want 1/1", nodeOwners, agentOwners)
 			}
-			requireReceiverPublicReadback(t, servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: backend, Runtime: runtime, BundleHash: bundle}, published.RunID)
+			requireReceiverPublicReadback(t, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: backend, Runtime: runtime, BundleHash: bundle}, published.RunID)
 		})
 	}
 }

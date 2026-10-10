@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -51,12 +50,7 @@ func TestResetCoordinatorContinuesDurableReceiptsBothStores(t *testing.T) {
 				seedRun := func() string {
 					t.Helper()
 					id := uuid.NewString()
-					fixture := runlifecyclefixture.Fixture{RunID: id, Origin: runlifecyclefixture.ScenarioSetupOrigin()}
-					if backend == "sqlite" {
-						runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
-					} else {
-						runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
-					}
+					requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{RunID: id, Origin: semanticScenarioSetupRunOriginForTest()})
 					return id
 				}
 				firstRun := seedRun()

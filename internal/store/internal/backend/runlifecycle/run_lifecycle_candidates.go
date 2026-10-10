@@ -13,6 +13,34 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
+func ReadStandaloneCompletionCandidateTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) (runtimerunlifecycle.Candidate, error) {
+	if tx == nil {
+		return runtimerunlifecycle.Candidate{}, fmt.Errorf("standalone candidate evidence requires its selected read transaction")
+	}
+	var candidate runtimerunlifecycle.Candidate
+	query := `SELECT CAST(r.run_id AS TEXT),r.bundle_hash,r.completion_revision,r.completion_due_at
+FROM runs r JOIN events e ON e.run_id=r.run_id WHERE e.event_id=$1`
+	if postgres {
+		if err := tx.QueryRowContext(ctx, query, eventID).Scan(&candidate.RunID, &candidate.BundleHash, &candidate.Revision, &candidate.DueAt); err != nil {
+			return runtimerunlifecycle.Candidate{}, err
+		}
+	} else {
+		var due any
+		if err := tx.QueryRowContext(ctx, query, eventID).Scan(&candidate.RunID, &candidate.BundleHash, &candidate.Revision, &due); err != nil {
+			return runtimerunlifecycle.Candidate{}, err
+		}
+		parsed, found, err := sqliteTimeValue(due)
+		if err != nil {
+			return runtimerunlifecycle.Candidate{}, err
+		}
+		if !found {
+			return runtimerunlifecycle.Candidate{}, fmt.Errorf("standalone candidate has no stored due time")
+		}
+		candidate.DueAt = parsed
+	}
+	return candidate, nil
+}
+
 func (s *RunLifecyclePostgresOwner) ReadSelectedControlAwaitingMutationTx(ctx context.Context, tx *sql.Tx, runID, loadedBundleHash string) (bool, error) {
 	return readSelectedControlAwaitingMutationTx(ctx, tx, runID, loadedBundleHash)
 }

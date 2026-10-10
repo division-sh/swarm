@@ -25,8 +25,8 @@ func TestSelectedForkPendingRootAgentInputBothStores(t *testing.T) {
 			if err := h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "task.ready", Payload: map[string]any{}}, 10*time.Second, true); err != nil {
 				t.Fatal(err)
 			}
-			var point string
-			if err := h.db.QueryRowContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name='task.ready'`, catalogRuntimeRunID).Scan(&point); err != nil {
+			point, err := h.readRunNamedEventIdentity(ctx, catalogRuntimeRunID, "task.ready")
+			if err != nil {
 				t.Fatal(err)
 			}
 			assertPending := func() {

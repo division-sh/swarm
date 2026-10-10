@@ -41,7 +41,7 @@ func TestA2PortfolioSupportedStreamSurfaceBothStores(t *testing.T) {
 			if !first.NewRunCreated || first.RunID == "" || first.EventID == "" {
 				t.Fatalf("root stream ingress did not create a run: %+v", first)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, first.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, first.RunID)
 			q1, firstReport := requireA2PortfolioStreamChain(t, rt, first, "2026-Q1", 100)
 
 			second := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
@@ -51,7 +51,7 @@ func TestA2PortfolioSupportedStreamSurfaceBothStores(t *testing.T) {
 			if second.NewRunCreated || second.RunID != first.RunID || second.EventID == first.EventID {
 				t.Fatalf("stream continuation lost its run: first=%+v second=%+v", first, second)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, first.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, first.RunID)
 			q2, secondReport := requireA2PortfolioStreamChain(t, rt, second, "2026-Q2", 300)
 			if q1.Entity.EntityID == q2.Entity.EntityID || q1.Entity.FlowInstance == q2.Entity.FlowInstance {
 				t.Fatalf("stream period ownership collapsed: q1=%+v q2=%+v", q1, q2)
@@ -74,7 +74,7 @@ func TestA2PortfolioSupportedStreamSurfaceBothStores(t *testing.T) {
 			if replay.EventID != first.EventID || replay.RunID != first.RunID {
 				t.Fatalf("same-idempotency stream publication changed identity: first=%+v replay=%+v", first, replay)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, first.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, first.RunID)
 			if !reflect.DeepEqual(q1, requireA2PortfolioEntity(t, rt, first.RunID, q1.Entity.FlowInstance)) ||
 				!reflect.DeepEqual(q2, requireA2PortfolioEntity(t, rt, first.RunID, q2.Entity.FlowInstance)) ||
 				!reflect.DeepEqual(beforeFirst, requireA2PortfolioEvents(t, rt, first.RunID, firstReport.EventName)) ||
@@ -106,7 +106,7 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 			if !setup.NewRunCreated || setup.RunID == "" || setup.EventID == "" {
 				t.Fatalf("root join setup did not create a run: %+v", setup)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, setup.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, setup.RunID)
 			parent := requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "portfolio", "portfolio_id", "portfolio-one")
 			q1 := requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "portfolio/period", "period_id", "2026-Q1")
 			requireA2PortfolioSetupRoutes(t, rt, setup, parent, q1, "materializing_entity")
@@ -125,7 +125,7 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 				if arrival.RunID != setup.RunID || arrival.NewRunCreated || arrival.EventID == "" {
 					t.Fatalf("root join report ingress lost its run: %+v", arrival)
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, setup.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, setup.RunID)
 				payload := map[string]any{"portfolio_id": "portfolio-one", "period_id": period, "operating_id": member, "revenue": float64(revenue)}
 				requested, operating := requireA2PortfolioOperatingCreation(t, rt, arrival, payload, "operating_instance_id")
 				if _, duplicate := created[operating.Entity.EntityID]; duplicate {
@@ -153,7 +153,7 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 			if secondSetup.RunID != setup.RunID || secondSetup.NewRunCreated {
 				t.Fatalf("sibling setup lost its run: %+v", secondSetup)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, setup.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, setup.RunID)
 			q2 := requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "portfolio/period", "period_id", "2026-Q2")
 			requireA2PortfolioSetupRoutes(t, rt, secondSetup, parent, q2, "existing_entity")
 			secondArm := requireA2PortfolioJoin(t, rt, q2, 0, false, nil)
@@ -538,7 +538,7 @@ func waitA2PortfolioComplete(t *testing.T, rt servedControlProofRuntime, runID, 
 			t.Fatalf("completion poll lost the exact receiver: %+v, want %s/%s", period.Entity, runID, path)
 		}
 		if period.Entity.CurrentState == "complete" {
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, runID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			return requireA2PortfolioEntity(t, rt, runID, path)
 		}
 		time.Sleep(25 * time.Millisecond)

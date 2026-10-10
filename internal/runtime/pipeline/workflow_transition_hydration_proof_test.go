@@ -9,7 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
-func TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores(t *testing.T) {
+func VerifyNativeCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml": `name: transition-hydration
 stages:
@@ -33,7 +33,7 @@ stages:
 	})
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
+			f := newNativeCompiledAdapterFixture(t, backend, bundle, ".", "ready", true, open)
 			event := f.event("work")
 			result, err := f.execute("work", event)
 			if err != nil {
@@ -49,7 +49,7 @@ stages:
 				!record.Evidence.RuleSelection().Ref().Equal(requireResolvedSelection(t, result.RuleSelection).Ref()) || requireResolvedSelection(t, result.RuleSelection).DisplayLabel() != "selected" {
 				t.Fatalf("lost executed rule/guard/event coordinates: %#v", record)
 			}
-			timers := listWorkflowTimerOwnerActivations(t, f.store, f.ctx, f.entityID, true)
+			timers := f.persistedTimers(true)
 			if len(timers) != 1 || timers[0].Ref.Cause != timeridentity.WorkflowTimerActivationCauseTransition {
 				t.Fatalf("transition entry timer = %#v", timers)
 			}
@@ -60,23 +60,15 @@ stages:
 			if timer.Ref.ActivationID != wantTimerID {
 				t.Fatalf("timer does not carry the actual transition cause: got %s want %s", timer.Ref.ActivationID, wantTimerID)
 			}
-			restarted := newPostgresWorkflowInstanceStoreForTest(f.db)
-			if backend == "sqlite" {
-				restarted = newSQLiteWorkflowInstanceStoreForTest(t, f.db)
-			}
+			restarted := f.native.ReopenProjection().store
+			f.store = restarted
 			route := testWorkflowInstanceRoute(f.path)
 			reloaded, found, err := restarted.Load(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, route.InstancePath))
 			if err != nil || !found || !reflect.DeepEqual(before.TransitionHistory, reloaded.TransitionHistory) {
 				t.Fatalf("restart changed selected evidence: %v, %v, %#v", found, err, reloaded)
 			}
-			selectSQL := "SELECT config FROM flow_instances WHERE instance_path = ? AND run_id = ?"
-			updateSQL := "UPDATE flow_instances SET config = ? WHERE instance_path = ? AND run_id = ?"
-			if backend == "postgres" {
-				selectSQL = "SELECT config FROM flow_instances WHERE instance_path = $1 AND run_id = $2"
-				updateSQL = "UPDATE flow_instances SET config = $1::jsonb WHERE instance_path = $2 AND run_id = $3"
-			}
-			var original []byte
-			if err := f.db.QueryRowContext(f.ctx, selectSQL, f.path, correlation.RunIDFromContext(f.ctx)).Scan(&original); err != nil {
+			original, err := f.native.TransitionWire(f.ctx, correlation.RunIDFromContext(f.ctx), f.path)
+			if err != nil {
 				t.Fatal(err)
 			}
 			// Change actual stored wire coordinates, not an already-validated Go carrier.
@@ -122,19 +114,19 @@ stages:
 					if err := json.Unmarshal(hostile, &config); err != nil {
 						t.Fatal(err)
 					}
-					if _, err := f.db.ExecContext(f.ctx, updateSQL, string(hostile), f.path, correlation.RunIDFromContext(f.ctx)); err != nil {
+					if changed, err := f.native.SetTransitionWire(f.ctx, correlation.RunIDFromContext(f.ctx), f.path, hostile); err != nil || changed != 1 {
 						t.Fatal(err)
 					}
 					t.Cleanup(func() {
-						if _, err := f.db.ExecContext(f.ctx, updateSQL, string(original), f.path, correlation.RunIDFromContext(f.ctx)); err != nil {
+						if changed, err := f.native.SetTransitionWire(f.ctx, correlation.RunIDFromContext(f.ctx), f.path, original); err != nil || changed != 1 {
 							t.Error(err)
 						}
 					})
 					if _, _, err := restarted.Load(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, route.InstancePath)); err == nil {
 						t.Fatal("hydration accepted corrupted transition evidence")
 					}
-					var after []byte
-					if err := f.db.QueryRowContext(f.ctx, selectSQL, f.path, correlation.RunIDFromContext(f.ctx)).Scan(&after); err != nil {
+					after, err := f.native.TransitionWire(f.ctx, correlation.RunIDFromContext(f.ctx), f.path)
+					if err != nil {
 						t.Fatal(err)
 					}
 					var afterConfig map[string]any
@@ -144,7 +136,7 @@ stages:
 					if !reflect.DeepEqual(config, afterConfig) {
 						t.Fatal("failed hydration repaired or changed persisted data")
 					}
-					if got := listWorkflowTimerOwnerActivations(t, f.store, f.ctx, f.entityID, true); !reflect.DeepEqual(got, timers) {
+					if got := f.persistedTimers(true); !reflect.DeepEqual(got, timers) {
 						t.Fatal("failed hydration changed timer ownership")
 					}
 				})

@@ -25,6 +25,15 @@ var persistenceNativeFamilyChildren = []string{
 	"TestNativeLoopClaimFixturesDoNotReceiveRawAuthority",
 	"TestNativeMockFixturesDoNotReceiveRawAuthority",
 	"TestNativeAPIReadSetupDoesNotReceiveRawAuthority",
+	"TestNativeProjectionRoundTripFixturesDoNotReceiveRawAuthority",
+	"TestNativeStorageIdentityFixturesDoNotReceiveRawAuthority",
+	"TestNativeProjectionStorageFixturesDoNotReceiveRawAuthority",
+	"TestNativeProjectionShapeFixturesDoNotReceiveRawAuthority",
+	"TestNativeProjectionHeaderFixturesDoNotReceiveRawAuthority",
+	"TestNativeMutationSeedFixturesDoNotReceiveRawAuthority",
+	"TestNativeLookupMissFixturesDoNotReceiveRawAuthority",
+	"TestNativeBookkeepingFixturesDoNotReceiveRawAuthority",
+	"TestNativeHandlerFixturesDoNotReceiveRawAuthority",
 }
 
 func loadPersistenceDebtPolicy(t *testing.T) Policy {
@@ -128,7 +137,7 @@ func TestPersistenceAuthorityCensusPartitionPreservesEveryRoot(t *testing.T) {
 				if err != nil || len(census.RequiredTests) != 2 || census.RequiredTests[0].Name != persistenceNativeFamilyRoot || census.RequiredTests[1].Name != persistenceDebtRoot || len(census.DeferredTests) != 0 || !slices.Equal(census.RequiredChildren[persistenceNativeFamilyRoot], persistenceNativeFamilyChildren) {
 					t.Fatalf("census completion obligation missing: %+v, %v", census, err)
 				}
-				t.Logf("complete union=%d; census=2 roots plus all7 required family children; admission=%d; exact multiplicity one", wantTotal, wantTotal-2)
+				t.Logf("complete union=%d; census=2 roots plus all%d required family children; admission=%d; exact multiplicity one", wantTotal, len(persistenceNativeFamilyChildren), wantTotal-2)
 			})
 		}
 	}

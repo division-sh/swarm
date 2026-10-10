@@ -1,12 +1,18 @@
 package pipeline
 
-import "context"
+import (
+	"context"
+
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+)
 
 // Component proofs consume the original native semantic owner, never a pool
 // or a test transaction runner reconstructed around the selected database.
 type WorkflowActivityNativeFixtureForTest struct {
 	Persistence               WorkflowPersistence
 	Context                   context.Context
+	Runs                      runlifecycle.OperationOwner
 	RequireRun                func(context.Context, string) error
 	NewCoordinator            func(Bus, PipelineCoordinatorOptions) *PipelineCoordinator
 	Reopen                    func() WorkflowActivityNativeFixtureForTest
@@ -17,6 +23,8 @@ type WorkflowActivityNativeFixtureForTest struct {
 	Construct                 func(context.Context, WorkflowInstance) error
 	ClaimReplyLossCoordinator func(context.Context, Bus, PipelineCoordinatorOptions, string, string, error) (*PipelineCoordinator, func() int32)
 	ReadAttemptStatuses       func(context.Context) ([]string, error)
+	EventIDCount              func(context.Context, string) int
+	Publish                   func(context.Context, events.Event)
 }
 
 type WorkflowJournalStorageForTest struct {

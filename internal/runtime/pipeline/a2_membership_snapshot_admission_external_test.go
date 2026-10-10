@@ -186,7 +186,7 @@ type a2MembershipAdmission struct {
 
 func newA2MembershipAdmission(t *testing.T, selected gateRecoveryStoreCase, source semanticview.Source, runID string, initial pipeline.WorkflowInstance) *a2MembershipAdmission {
 	t.Helper()
-	insertGateRecoveryRun(t, selected, runID)
+	insertGateRecoveryRun(t, selected.events, runID)
 	f := &a2MembershipAdmission{selected: selected, owner: testRunScopedWorkflowInstanceForRun(runID, initial.StorageRef),
 		ctx:   withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)),
 		probe: lifecycleprobe.New(), logger: &exactJoinRuntimeLogger{},

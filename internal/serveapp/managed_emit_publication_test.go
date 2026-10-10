@@ -33,7 +33,7 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 				}
 				params := map[string]any{"event_name": request, "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "alpha"}, "idempotency_key": "managed-emit"}
 				accepted := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, accepted.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, accepted.RunID)
 				if mode == "root" {
 					instance = accepted.RunID
 				}
@@ -125,25 +125,25 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 				assertResult(accepted.RunID, scope, instance, "source-writer", "exact")
 				siblingParams := map[string]any{"event_name": "sibling.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "sibling"}, "idempotency_key": "managed-sibling"}
 				sibling := requireServedEventPublishRPCResult(t, rt.Endpoint, siblingParams)
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, sibling.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, sibling.RunID)
 				assertResult(sibling.RunID, "sibling", "sibling", "sibling-writer", true)
 				rt, _ = restart()
 				duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 				if duplicate.EventID != accepted.EventID || duplicate.RunID != accepted.RunID {
 					t.Fatal("restart duplicate changed ingress identity")
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, accepted.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, accepted.RunID)
 				assertResult(accepted.RunID, scope, instance, "source-writer", "exact")
 				siblingDuplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, siblingParams)
 				if siblingDuplicate.EventID != sibling.EventID || siblingDuplicate.RunID != sibling.RunID {
 					t.Fatal("sibling restart replay changed identity")
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, sibling.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, sibling.RunID)
 				assertResult(sibling.RunID, "sibling", "sibling", "sibling-writer", true)
 
 				hostileParams := map[string]any{"event_name": request, "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "hostile"}, "idempotency_key": "managed-hostile"}
 				hostile := requireServedEventPublishRPCResult(t, rt.Endpoint, hostileParams)
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, hostile.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, hostile.RunID)
 				var count int
 				var failure []byte
 				if err := rt.DB.QueryRow("SELECT failure FROM event_deliveries WHERE run_id=$1 AND subscriber_type='agent' AND status='dead_letter'", hostile.RunID).Scan(&failure); err != nil || len(failure) == 0 {

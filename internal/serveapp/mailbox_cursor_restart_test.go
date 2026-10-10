@@ -27,6 +27,8 @@ func TestServedMailboxCursorRetainedRestartParity(t *testing.T) {
 			stubServeRuntimeWorkspaceLifecycle(t)
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			var db *sql.DB
+			var deliveryReader servedRunDeliveryReader
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 			if backend == "sqlite" {
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "mailbox.sqlite"))
 				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
@@ -52,7 +54,7 @@ func TestServedMailboxCursorRetainedRestartParity(t *testing.T) {
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, firstProcess.outputString()) + "/v1/rpc"
 			for i := 0; i < 3; i++ {
 				published := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "review.requested", "bundle_hash": bundle, "payload": map[string]any{"item_id": uuid.NewString()}, "idempotency_key": uuid.NewString()})
-				waitServedRunDeliveryQuiescence(t, db, backend, published.RunID)
+				waitServedRunDeliveryQuiescence(t, deliveryReader, published.RunID)
 			}
 			var before, first cursorMailboxPage
 			requireServedJSONRPCResult(t, endpoint, "mailbox.list", map[string]any{}, &before)

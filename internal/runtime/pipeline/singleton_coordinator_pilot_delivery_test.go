@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
@@ -10,145 +9,136 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
-func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback(t *testing.T) {
+func VerifyNativeSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadbackForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := singletoncoordinatorpilot.LoadBundle(t, singletoncoordinatorpilot.Options{})
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pc, workflowStore := newSingletonCoordinatorPilotPipelineCoordinator(t, db, bundle, source)
-	ctx := testPipelineCoordinatorRunContext(t, pc)
-	entityID := FlowInstanceEntityID(singletoncoordinatorpilot.FlowInstance)
-	seedSingletonCoordinatorPilotInstance(t, workflowStore, ctx, bundle, entityID)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+			workflowStore := pc.workflowStore
+			entityID := FlowInstanceEntityID(singletoncoordinatorpilot.FlowInstance)
+			constructNativeSingletonCoordinatorPilotForTest(t, fixture, ctx, bundle, entityID)
 
-	target := events.RouteIdentity{
-		FlowID:       singletoncoordinatorpilot.FlowID,
-		FlowInstance: singletoncoordinatorpilot.FlowInstance,
-		EntityID:     entityID,
-	}
-	evt := eventtest.RunCreatingRootIngress(
-		uuid.NewString(),
-		events.EventType(singletoncoordinatorpilot.InputEvent),
-		singletoncoordinatorpilot.FlowID,
-		"",
-		json.RawMessage(`{"coordinator_id":"global","lead_id":"lead-42","observation":{"source":"feed","note":"first seen"},"audit":{"ref":"lead-42","action":"observed"},"followup_audit":{"ref":"lead-42","action":"queued"},"corrected_audit":{"ref":"bootstrap","action":"corrected"}}`),
-		0,
-		testPipelineRunID,
-		"",
-		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target),
-		time.Now().UTC(),
-	)
-	seedSingletonCoordinatorPilotEvent(t, db, ctx, evt)
-	node := pipelineSourceNode(t, source, singletoncoordinatorpilot.FlowID, singletoncoordinatorpilot.NodeID)
-	seedSingletonCoordinatorPilotNodeDelivery(t, db, ctx, evt.ID(), node, target)
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(target)}
+			target := events.RouteIdentity{
+				FlowID:       singletoncoordinatorpilot.FlowID,
+				FlowInstance: singletoncoordinatorpilot.FlowInstance,
+				EntityID:     entityID,
+			}
+			evt := eventtest.ExistingRunRootIngress(
+				uuid.NewString(),
+				events.EventType(singletoncoordinatorpilot.InputEvent),
+				singletoncoordinatorpilot.FlowID,
+				"",
+				json.RawMessage(`{"coordinator_id":"global","lead_id":"lead-42","observation":{"source":"feed","note":"first seen"},"audit":{"ref":"lead-42","action":"observed"},"followup_audit":{"ref":"lead-42","action":"queued"},"corrected_audit":{"ref":"bootstrap","action":"corrected"}}`),
+				0,
+				runtimecorrelation.RunIDFromContext(ctx),
+				events.EnvelopeForTargetRoute(events.EventEnvelope{}, target),
+				time.Now().UTC(),
+			)
+			node := pipelineSourceNode(t, source, singletoncoordinatorpilot.FlowID, singletoncoordinatorpilot.NodeID)
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(target)}
+			if err := fixture.PublishNode(ctx, evt, route); err != nil {
+				t.Fatal(err)
+			}
 
-	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
-	if err != nil {
-		t.Fatalf("dispatchWorkflowNodeEventResult: %v", err)
+			handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
+			if err != nil {
+				t.Fatalf("dispatchWorkflowNodeEventResult: %v", err)
+			}
+			if !handled {
+				t.Fatal("dispatchWorkflowNodeEventResult handled = false, want coordinator handler delivery")
+			}
+			loaded, ok, err := workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, singletoncoordinatorpilot.FlowInstance))
+			if err != nil {
+				t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
+			}
+			if !ok {
+				t.Fatalf("workflowStore.Load(%s) ok=false", entityID)
+			}
+			if loaded.WorkflowName != singletoncoordinatorpilot.FlowID || loaded.CurrentState != "pending" {
+				t.Fatalf("loaded singleton coordinator = storage:%q workflow:%q state:%q, want coordinator/pending", loaded.StorageRef, loaded.WorkflowName, loaded.CurrentState)
+			}
+			leadIndex, ok := loaded.Fields["lead_index"].(map[string]any)
+			if !ok {
+				t.Fatalf("lead_index = %#v, want map", loaded.Fields["lead_index"])
+			}
+			lead, ok := leadIndex["lead-42"].(map[string]any)
+			if !ok {
+				t.Fatalf("lead_index[lead-42] = %#v, want map", leadIndex["lead-42"])
+			}
+			if lead["status"] != "active" || lead["score"] != int64(1) {
+				t.Fatalf("lead_index[lead-42] = %#v, want status active score 1", lead)
+			}
+			observations, ok := lead["observations"].([]any)
+			if !ok || len(observations) != 1 {
+				t.Fatalf("lead observations = %#v, want one observation", lead["observations"])
+			}
+			observation, ok := observations[0].(map[string]any)
+			if !ok || observation["source"] != "feed" || observation["note"] != "first seen" {
+				t.Fatalf("observation = %#v, want feed/first seen", observations[0])
+			}
+			auditLog, ok := loaded.Fields["audit_log"].([]any)
+			if !ok || len(auditLog) != 3 {
+				t.Fatalf("audit_log = %#v, want three entries", loaded.Fields["audit_log"])
+			}
+			firstAudit, ok := auditLog[0].(map[string]any)
+			if !ok || firstAudit["ref"] != "bootstrap" || firstAudit["action"] != "corrected" {
+				t.Fatalf("audit_log[0] = %#v, want corrected bootstrap entry", auditLog[0])
+			}
+			secondAudit, ok := auditLog[1].(map[string]any)
+			if !ok || secondAudit["ref"] != "lead-42" || secondAudit["action"] != "observed" {
+				t.Fatalf("audit_log[1] = %#v, want observed lead-42 entry", auditLog[1])
+			}
+			thirdAudit, ok := auditLog[2].(map[string]any)
+			if !ok || thirdAudit["ref"] != "lead-42" || thirdAudit["action"] != "queued" {
+				t.Fatalf("audit_log[2] = %#v, want queued lead-42 entry", auditLog[2])
+			}
+			id, err := runtimedelivery.DeliveryID(evt.ID(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := fixture.Store.Snapshot(ctx, id)
+			if err != nil || snapshot.Status != runtimedelivery.StatusDelivered {
+				t.Fatalf("exact singleton delivery did not settle: %+v/%v", snapshot, err)
+			}
+			contained := "coordinator/lead-42"
+			if _, found, err := workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, contained)); err != nil || found {
+				t.Fatalf("contained item became a workflow projection: %t/%v", found, err)
+			}
+			footprint, err := fixture.ContainedFootprint(ctx, runtimecorrelation.RunIDFromContext(ctx), contained, FlowInstanceEntityID(contained))
+			if err != nil || footprint != (PipelineContainedFootprintForTest{}) {
+				t.Fatalf("contained item gained physical delivery/header/entity rows: %+v/%v", footprint, err)
+			}
+		})
 	}
-	if !handled {
-		t.Fatal("dispatchWorkflowNodeEventResult handled = false, want coordinator handler delivery")
-	}
-	loaded, ok, err := workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, singletoncoordinatorpilot.FlowInstance))
-	if err != nil {
-		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
-	}
-	if !ok {
-		t.Fatalf("workflowStore.Load(%s) ok=false", entityID)
-	}
-	if loaded.WorkflowName != singletoncoordinatorpilot.FlowID || loaded.CurrentState != "pending" {
-		t.Fatalf("loaded singleton coordinator = storage:%q workflow:%q state:%q, want coordinator/pending", loaded.StorageRef, loaded.WorkflowName, loaded.CurrentState)
-	}
-	leadIndex, ok := loaded.Fields["lead_index"].(map[string]any)
-	if !ok {
-		t.Fatalf("lead_index = %#v, want map", loaded.Fields["lead_index"])
-	}
-	lead, ok := leadIndex["lead-42"].(map[string]any)
-	if !ok {
-		t.Fatalf("lead_index[lead-42] = %#v, want map", leadIndex["lead-42"])
-	}
-	if lead["status"] != "active" || lead["score"] != int64(1) {
-		t.Fatalf("lead_index[lead-42] = %#v, want status active score 1", lead)
-	}
-	observations, ok := lead["observations"].([]any)
-	if !ok || len(observations) != 1 {
-		t.Fatalf("lead observations = %#v, want one observation", lead["observations"])
-	}
-	observation, ok := observations[0].(map[string]any)
-	if !ok || observation["source"] != "feed" || observation["note"] != "first seen" {
-		t.Fatalf("observation = %#v, want feed/first seen", observations[0])
-	}
-	auditLog, ok := loaded.Fields["audit_log"].([]any)
-	if !ok || len(auditLog) != 3 {
-		t.Fatalf("audit_log = %#v, want three entries", loaded.Fields["audit_log"])
-	}
-	firstAudit, ok := auditLog[0].(map[string]any)
-	if !ok || firstAudit["ref"] != "bootstrap" || firstAudit["action"] != "corrected" {
-		t.Fatalf("audit_log[0] = %#v, want corrected bootstrap entry", auditLog[0])
-	}
-	secondAudit, ok := auditLog[1].(map[string]any)
-	if !ok || secondAudit["ref"] != "lead-42" || secondAudit["action"] != "observed" {
-		t.Fatalf("audit_log[1] = %#v, want observed lead-42 entry", auditLog[1])
-	}
-	thirdAudit, ok := auditLog[2].(map[string]any)
-	if !ok || thirdAudit["ref"] != "lead-42" || thirdAudit["action"] != "queued" {
-		t.Fatalf("audit_log[2] = %#v, want queued lead-42 entry", auditLog[2])
-	}
-	assertSingletonCoordinatorPilotDeliveryStatus(t, db, evt.ID(), node.Key(), "delivered")
-	assertNoSingletonCoordinatorPilotContainedRouteRows(t, db, "coordinator/lead-42")
-	assertNoSingletonCoordinatorPilotContainedWorkflowInstance(t, db, workflowStore, ctx, "coordinator/lead-42")
 }
 
-func TestSingletonCoordinatorPilotPipelineRejectsContainedItemDeliveryTarget(t *testing.T) {
+func VerifyNativeSingletonCoordinatorPilotPipelineRejectsContainedItemDeliveryTargetForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := singletoncoordinatorpilot.LoadBundle(t, singletoncoordinatorpilot.Options{})
-	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pc, _ := newSingletonCoordinatorPilotPipelineCoordinator(t, db, bundle, source)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			_, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
 
-	containedTarget := events.RouteIdentity{
-		FlowID:       singletoncoordinatorpilot.FlowID,
-		FlowInstance: singletoncoordinatorpilot.FlowInstance + "/lead-42",
-		EntityID:     uuid.NewString(),
-	}
-	if pc.workflowNodeMatchesDeliveryTarget(pipelineNode(t, singletoncoordinatorpilot.FlowID, singletoncoordinatorpilot.NodeID), testPipelineRunID, containedTarget) {
-		t.Fatalf("contained item target %#v matched singleton coordinator node; contained map entries must not be route recipients", containedTarget)
+			containedTarget := events.RouteIdentity{
+				FlowID:       singletoncoordinatorpilot.FlowID,
+				FlowInstance: singletoncoordinatorpilot.FlowInstance + "/lead-42",
+				EntityID:     uuid.NewString(),
+			}
+			if pc.workflowNodeMatchesDeliveryTarget(pipelineNode(t, singletoncoordinatorpilot.FlowID, singletoncoordinatorpilot.NodeID), runtimecorrelation.RunIDFromContext(ctx), containedTarget) {
+				t.Fatalf("contained item target %#v matched singleton coordinator node; contained map entries must not be route recipients", containedTarget)
+			}
+		})
 	}
 }
 
-func newSingletonCoordinatorPilotPipelineCoordinator(t *testing.T, db *sql.DB, bundle *runtimecontracts.WorkflowContractBundle, source semanticview.Source) (*PipelineCoordinator, *workflowInstanceStore) {
-	t.Helper()
-	nodes, err := LoadWorkflowNodes(source)
-	if err != nil {
-		t.Fatalf("LoadWorkflowNodes: %v", err)
-	}
-	workflowStore := newPostgresWorkflowInstanceStoreForTest(db)
-	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
-	bus := &recordingPipelineBus{}
-	bus.configurePipelineTestDeliveryOwner(deliveryStore)
-	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		Module: &previewWorkflowModule{
-			bundle:        bundle,
-			workflowNodes: nodes,
-			guardRegistry: NewContractGuardRegistry(source),
-		},
-		Persistence:         workflowPersistenceForTest(workflowStore),
-		DeliveryStore:       deliveryStore,
-		DeliveryRuntime:     bus,
-		PipelineObligations: unavailablePipelineTestObligationOwner{},
-	})
-	return pc, workflowStore
-}
-
-func seedSingletonCoordinatorPilotInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, entityID string) {
+func constructNativeSingletonCoordinatorPilotForTest(t *testing.T, fixture *PipelineDeliveryNativeFixtureForTest, ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, entityID string) {
 	t.Helper()
 	graph, ok := bundle.WorkflowStageTopology(singletoncoordinatorpilot.FlowID)
 	if !ok {
@@ -159,7 +149,7 @@ func seedSingletonCoordinatorPilotInstance(t *testing.T, store *workflowInstance
 		t.Fatal(err)
 	}
 	constructed := constructorUnitIdentity(t, semanticview.Wrap(bundle), runtimecorrelation.RunIDFromContext(ctx), singletoncoordinatorpilot.FlowID)
-	if err := store.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:   singletoncoordinatorpilot.FlowInstance,
 		StorageRef:   singletoncoordinatorpilot.FlowInstance,
 		EntityID:     entityID,
@@ -177,86 +167,5 @@ func seedSingletonCoordinatorPilotInstance(t *testing.T, store *workflowInstance
 		EntityType: "coordinator_state",
 	})); err != nil {
 		t.Fatalf("seed singleton coordinator workflow instance: %v", err)
-	}
-}
-
-func seedSingletonCoordinatorPilotEvent(t *testing.T, db *sql.DB, ctx context.Context, evt events.Event) {
-	t.Helper()
-	seedPipelineEventRecord(t, ctx, db, evt)
-}
-
-func seedSingletonCoordinatorPilotNodeDelivery(t *testing.T, db *sql.DB, ctx context.Context, eventID string, node runtimeidentity.ExecutableNode, target events.RouteIdentity) {
-	t.Helper()
-	seedPipelineTestNodeDelivery(t, ctx, db, eventID, node, target)
-}
-
-func assertSingletonCoordinatorPilotDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want string) {
-	t.Helper()
-	var got string
-	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
-		SELECT COALESCE(status, '')
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = $2
-	`, eventID, nodeID).Scan(&got); err != nil {
-		t.Fatalf("load singleton coordinator pilot node delivery: %v", err)
-	}
-	if got != want {
-		t.Fatalf("singleton coordinator pilot delivery status = %q, want %q", got, want)
-	}
-}
-
-func assertNoSingletonCoordinatorPilotContainedRouteRows(t *testing.T, db *sql.DB, flowInstance string) {
-	t.Helper()
-	var count int
-	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE delivery_target_route->'route'->>'flow_instance' = $1
-	`, flowInstance).Scan(&count); err != nil {
-		t.Fatalf("count contained route delivery rows: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("contained flow_instance %q has %d delivery row(s), want none", flowInstance, count)
-	}
-}
-
-func assertNoSingletonCoordinatorPilotContainedWorkflowInstance(t *testing.T, db *sql.DB, store *workflowInstanceStore, ctx context.Context, flowInstance string) {
-	t.Helper()
-	entityID := FlowInstanceEntityID(flowInstance)
-	if _, ok, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, flowInstance)); err != nil {
-		t.Fatalf("workflowStore.Load(%s): %v", flowInstance, err)
-	} else if ok {
-		t.Fatalf("contained flow_instance %q materialized through storage-ref lookup", flowInstance)
-	}
-
-	assertNoSingletonCoordinatorPilotRow(t, db, `
-		SELECT COUNT(*)
-		FROM entity_state
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-	`, testPipelineRunID, entityID)
-	assertNoSingletonCoordinatorPilotRow(t, db, `
-		SELECT COUNT(*)
-		FROM entity_state
-		WHERE run_id = $1::uuid
-		  AND flow_instance = $2
-	`, testPipelineRunID, flowInstance)
-	assertNoSingletonCoordinatorPilotRow(t, db, `
-		SELECT COUNT(*)
-		FROM flow_instances
-		WHERE run_id = $1::uuid AND instance_path = $2
-	`, testPipelineRunID, flowInstance)
-}
-
-func assertNoSingletonCoordinatorPilotRow(t *testing.T, db *sql.DB, query string, args ...any) {
-	t.Helper()
-	var count int
-	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), query, args...).Scan(&count); err != nil {
-		t.Fatalf("count singleton coordinator pilot rows: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("singleton coordinator pilot absence query returned %d row(s), want none", count)
 	}
 }

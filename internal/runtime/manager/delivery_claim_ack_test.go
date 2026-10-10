@@ -53,19 +53,16 @@ func (b *managerClaimLogBus) LogRuntime(ctx context.Context, entry runtimepipeli
 	return b.EventBus.LogRuntime(ctx, entry)
 }
 
-func TestManagerClaimPostcommitErrorConsumesOnlyAcknowledgedClaim(t *testing.T) {
+func ProveNativeManagerClaimPostcommitErrorConsumesOnlyAcknowledgedClaim(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
 	for _, acknowledged := range []bool{false, true} {
 		t.Run(map[bool]string{false: "unacknowledged", true: "acknowledged"}[acknowledged], func(t *testing.T) {
 			runtimebus.ResumeRuntimeIngress()
 			t.Cleanup(runtimebus.ResumeRuntimeIngress)
-
-			base := newManagerDeliveryTestStore(t)
+			nativeDelivery := newNativeDelivery(t)
+			base := nativeDelivery
 			claimErr := runtimefailures.New(runtimefailures.ClassInternalFailure, "claim_cleanup_failed", "manager-test", "claim_delivery", nil)
 			faulted := &faultedManagerClaimStore{Store: base, acknowledged: acknowledged, fault: claimErr}
-			persistence := &startupReplayTestStore{
-				recoveryTestStore:        recoveryTestStore{},
-				managerDeliveryTestStore: base,
-			}
+			persistence := &startupReplayTestStore{recoveryTestStore: recoveryTestStore{}, ManagerDeliveryNativeFixture: base}
 			probe := lifecycletest.New(t)
 			eventBus, err := newTestManagerEventBus(t)
 			if err != nil {
@@ -73,32 +70,21 @@ func TestManagerClaimPostcommitErrorConsumesOnlyAcknowledgedClaim(t *testing.T) 
 			}
 			bus := &managerClaimLogBus{EventBus: eventBus, claimErrors: make(chan runtimepipeline.RuntimeLogEntry, 1)}
 			var calls atomic.Int32
-			agent := shutdownTestAgent{
-				id: "claim-fault-agent", subscriptions: []events.EventType{"test.intervention"},
-				onEvent: func(context.Context, events.Event) ([]events.Event, error) {
-					calls.Add(1)
-					return nil, nil
-				},
-			}
-			manager := newTestAgentManagerWithOptions(t, bus, func(runtimeactors.AgentConfig) (Agent, error) { return agent, nil }, AgentManagerOptions{
-				DeliveryStore: faulted, TestLifecycleProbe: probe.Raw(),
-			}, persistence)
-			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-				Topology: managerTestTopologyAdmission(t), ProcessBinding: lifecycleProbeProcessBinding(),
-				Config: managerTestAgentConfig(runtimeactors.AgentConfig{
-					ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()),
-					Subscriptions: []string{"test.intervention"},
-				}),
-			}, false); err != nil {
+			agent := shutdownTestAgent{id: "claim-fault-agent", subscriptions: []events.EventType{"test.intervention"}, onEvent: func(context.Context, events.Event) ([]events.Event, error) {
+				calls.Add(1)
+				return nil, nil
+			}}
+			manager := newTestAgentManagerWithOptions(t, bus, func(runtimeactors.AgentConfig) (Agent, error) {
+				return agent, nil
+			}, AgentManagerOptions{DeliveryStore: faulted, TestLifecycleProbe: probe.Raw()}, persistence)
+			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Topology: managerTestTopologyAdmission(t), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()), Subscriptions: []string{"test.intervention"}})}, false); err != nil {
 				t.Fatalf("spawn agent: %v", err)
 			}
 			if err := manager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 				t.Fatalf("run manager: %v", err)
 			}
-			event := eventtest.RunCreatingRootIngress(
-				eventtest.UUID("manager-claim-fault"), events.EventType("test.intervention"),
-				"test", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
-			)
+			event := eventtest.RunCreatingRootIngress(eventtest.UUID("manager-claim-fault"), events.EventType("test.intervention"), "test", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+			nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{event})
 			if err := eventBus.Publish(testAuthorActivityContext(context.Background()), event); err != nil {
 				t.Fatalf("publish event: %v", err)
 			}

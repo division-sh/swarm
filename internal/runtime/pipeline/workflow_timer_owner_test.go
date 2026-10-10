@@ -2,8 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -25,75 +23,20 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
-type workflowTimerOwnerTestBus interface{ Bus }
-
-func newWorkflowTimerOwnerPipelineCoordinator(bus workflowTimerOwnerTestBus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
-	canonicalizeWorkflowTimerModuleForTest(opts.Module)
-	opts.PipelineObligations = unavailablePipelineTestObligationOwner{}
-	return newDurablePipelineCoordinatorForTest(bus, db, opts)
-}
-
-func canonicalizeWorkflowTimerModuleForTest(module WorkflowModule) {
-	if module == nil {
-		return
-	}
-	bundle, ok := semanticview.Bundle(module.SemanticSource())
-	if !ok || bundle == nil {
-		return
-	}
-	for i := range bundle.Semantics.Timers {
-		timer := &bundle.Semantics.Timers[i]
-		if timer.StageOwned && strings.TrimSpace(timer.FlowID) == "" {
-			timer.FlowID = "."
-		}
-		if timer.Node.Valid() && timer.Node.FlowPath() == bundle.Semantics.Name {
-			timer.Node = mustPipelineNode(".", timer.Node.NodeID())
-		}
-	}
-	for i := range bundle.Semantics.Loops {
-		if strings.TrimSpace(bundle.Semantics.Loops[i].FlowID) == "" {
-			bundle.Semantics.Loops[i].FlowID = "."
-		}
-	}
-	if bundle.FlowTree.Root == nil {
-		root := &runtimecontracts.FlowContractView{
-			Path:   ".",
-			Paths:  runtimecontracts.FlowContractPaths{FlowPath: "."},
-			Schema: runtimecontracts.FlowSchemaDocument{Name: bundle.Semantics.Name},
-			Nodes:  bundle.Nodes,
-			Events: bundle.Events,
-		}
-		bundle.FlowTree.Root = root
-	}
-	if bundle.FlowTree.ByID == nil {
-		bundle.FlowTree.ByID = map[string]*runtimecontracts.FlowContractView{}
-	}
-	bundle.FlowTree.ByID["."] = bundle.FlowTree.Root
-	if bundle.RootSchema == nil {
-		bundle.RootSchema = &bundle.FlowTree.Root.Schema
-	}
-	if bundle.FlowSchemas == nil {
-		bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{}
-	}
-	bundle.FlowSchemas["."] = bundle.FlowTree.Root.Schema
-}
-
-func TestWorkflowTimerLifecycleOneShotExactCompletionOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleOneShotExactCompletionOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			bus := &recordingPipelineBus{}
-			pc, entityID, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, bus, false)
+			_, pc, ctx, bus, entityID, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
+			store := pc.workflowStore
 			occurrence := activation.occurrence()
 
 			outcome, err := fireWorkflowTimerTestWakeup(ctx, pc, activation)
@@ -135,14 +78,10 @@ func TestWorkflowTimerLifecycleOneShotExactCompletionOnBothStores(t *testing.T) 
 	}
 }
 
-func TestWorkflowTimerLifecyclePreservesMockExecutionModeOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecyclePreservesMockExecutionModeOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			bus := &recordingPipelineBus{}
-			pc, _, activation := seedWorkflowTimerOwnerActivationAt(
-				t, store, ctx, bus, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Mock,
-			)
+			_, pc, ctx, bus, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Mock, open)
 			if activation.ExecutionMode != executionmode.Mock {
 				t.Fatalf("persisted activation execution mode = %q, want mock", activation.ExecutionMode)
 			}
@@ -160,7 +99,8 @@ func TestWorkflowTimerLifecyclePreservesMockExecutionModeOnBothStores(t *testing
 				t.Fatal("readiness mode accepted a conflicting persisted initial timer")
 			}
 
-			outcome, err := fireWorkflowTimerTestWakeup(ctx, pc, activation)
+			liveCtx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+			outcome, err := fireWorkflowTimerTestWakeup(liveCtx, pc, activation)
 			if err != nil || outcome != WorkflowTimerFireCommitted {
 				t.Fatalf("FireWorkflowTimer outcome=%q err=%v, want committed", outcome, err)
 			}
@@ -171,62 +111,65 @@ func TestWorkflowTimerLifecyclePreservesMockExecutionModeOnBothStores(t *testing
 	}
 }
 
-func TestWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRestartOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRestartOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		for _, order := range []struct {
 			name    string
 			reverse bool
 		}{{name: "a_then_b"}, {name: "b_then_a", reverse: true}} {
 			t.Run(tc.name+"/"+order.name, func(t *testing.T) {
-				store, ctx := tc.open(t)
 				createdAt := canonicalWorkflowTimerTime(time.Now().UTC())
 				first := pipelineFlowPathNode(t, "a", "shared")
 				second := pipelineFlowPathNode(t, "b", "shared")
-				timers := []runtimecontracts.WorkflowTimerContract{
-					{ID: "same", Node: first, Owner: "runtime", Event: "timer.a", StartOn: "event:timer.arm", Delay: "2h"},
-					{ID: "same", Node: second, Owner: "runtime", Event: "timer.b", StartOn: "event:timer.arm", Delay: "2h"},
+				files := map[string]string{
+					"schema.yaml":   "name: workflow-timer-sibling-identity\nstages:\n  waiting: {}\n",
+					"entities.yaml": "test_entity: {}\n",
+				}
+				for _, flow := range []string{"a", "b"} {
+					files[flow+"/schema.yaml"] = fmt.Sprintf("name: %s\nstages:\n  waiting: {}\n", flow)
+					files[flow+"/entities.yaml"] = "test_entity: {}\n"
+					files[flow+"/events.yaml"] = fmt.Sprintf("timer.arm:\ntimer.%s:\n", flow)
+					files[flow+"/nodes.yaml"] = fmt.Sprintf("shared:\n  execution_type: system_node\n  timers:\n    - {id: same, event: timer.%s, start_on: 'event:%s/timer.arm', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n", flow, flow)
+				}
+				bundle := loadWorkflowTempBundle(t, files)
+				if len(bundle.Semantics.Timers) != 2 {
+					t.Fatalf("compiled sibling declarations=%d, want two", len(bundle.Semantics.Timers))
 				}
 				if order.reverse {
-					timers[0], timers[1] = timers[1], timers[0]
+					bundle.Semantics.Timers[0], bundle.Semantics.Timers[1] = bundle.Semantics.Timers[1], bundle.Semantics.Timers[0]
 				}
-				bundle := &runtimecontracts.WorkflowContractBundle{
-					Events: map[string]runtimecontracts.EventCatalogEntry{"timer.a": {}, "timer.b": {}},
-					Semantics: runtimecontracts.WorkflowSemanticView{
-						Name: "workflow-timer-sibling-identity", Version: "1.0.0",
-						StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
-							".": runtimecontracts.BuildWorkflowStageTopology(".", "waiting", []string{"waiting"}, nil, nil, nil, nil),
-							"a": runtimecontracts.BuildWorkflowStageTopology("a", "waiting", []string{"waiting"}, nil, nil, nil, nil),
-							"b": runtimecontracts.BuildWorkflowStageTopology("b", "waiting", []string{"waiting"}, nil, nil, nil, nil),
-						},
-						Timers: timers,
-					},
+				fixture, pc, ctx := nativePilotPipelineForTest(t, tc.name, bundle, open)
+				store := pc.workflowStore
+				run := runtimecorrelation.RunIDFromContext(ctx)
+				if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
+					InstanceID: run, StorageRef: run, EntityID: run, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
+					CurrentState: "waiting", CreatedAt: createdAt, EnteredStageAt: createdAt, EntityType: "test_entity",
+				})); err != nil {
+					t.Fatal(err)
 				}
-				source := semanticview.Wrap(bundle)
-				owner := pipelineTestWorkOwner(t)
-				scheduler := newWorkflowTimerTestScheduler(t, owner)
-				pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-					Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
-					WorkOwner: owner, TimerScheduler: scheduler,
+				scheduler := newWorkflowTimerTestScheduler(t, pc.workOwner)
+				if err := pc.workflowTimers.bindScheduler(scheduler); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					join, cancel := context.WithTimeout(context.Background(), time.Second)
+					defer cancel()
+					if err := pc.StopWorkflowTimerLifecycle(join); err != nil {
+						t.Error(err)
+					}
 				})
 				entityIDs := make(map[string]string, 2)
 				for _, flowID := range []string{"a", "b"} {
-					entityID := uuid.NewString()
+					instance := constructedScenarioInstanceForTest(t, pc.SemanticSource(), ctx, flowID)
+					instance.CreatedAt, instance.EnteredStageAt = createdAt, createdAt
+					entityID := instance.EntityID
 					entityIDs[flowID] = entityID
-					route := testWorkflowInstanceRoute(flowID)
-					if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, route.InstancePath, WorkflowInstance{
-						WorkflowName: flowID, WorkflowVersion: "1.0.0",
-						CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-						EntityType: "test_entity",
-					})); err != nil {
+					route := testWorkflowInstanceRoute(instance.StorageRef)
+					if err := fixture.Construct(ctx, instance); err != nil {
 						t.Fatal(err)
 					}
-					inbound := workflowLifecycleEventForTest(t, store, ctx, flowID, route.InstancePath, entityID, "timer.arm", createdAt)
-					if err := reconcileWorkflowTimerForTest(runtimecorrelation.WithInboundEvent(ctx, inbound), pc, route, entityID, "waiting", "waiting", workflowTimerCause{
-						Kind: workflowTimerCauseEvent, EventID: inbound.ID(), EventType: "timer.arm",
-						OccurredAt: createdAt, ExecutionMode: executionmode.Live,
-					}); err != nil {
-						t.Fatalf("arm %s timer: %v", flowID, err)
-					}
+					inbound := nativeWorkflowJoinEventForTest(ctx, flowID, route.InstancePath, entityID, flowID+"/timer.arm", []byte(`{}`), createdAt)
+					dispatchNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, inbound, "shared")
 				}
 				active := make([]WorkflowTimerActivation, 0, 2)
 				for _, flowID := range []string{"a", "b"} {
@@ -248,18 +191,19 @@ func TestWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRestartOnBo
 				}
 				cancel()
 
-				restartedOwner := pipelineTestWorkOwner(t)
-				restartedScheduler := newWorkflowTimerTestScheduler(t, restartedOwner)
-				restarted := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-					Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
-					WorkOwner: restartedOwner, TimerScheduler: restartedScheduler,
-				})
+				nextFixture := fixture.ReopenExecution()
+				restarted := nextFixture.NewCoordinator(PipelineCoordinatorOptions{Module: pc.module, Persistence: nextFixture.Persistence})
+				restartedScheduler := newWorkflowTimerTestScheduler(t, restarted.workOwner)
+				if err := restarted.workflowTimers.bindScheduler(restartedScheduler); err != nil {
+					t.Fatal(err)
+				}
+				restartedCtx := runtimecorrelation.WithRunID(nextFixture.Context, run)
 				t.Cleanup(func() {
 					stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 					defer cancel()
 					_ = restarted.StopWorkflowTimerLifecycle(stopCtx)
 				})
-				if err := restarted.RestoreWorkflowTimers(ctx); err != nil {
+				if err := restarted.RestoreWorkflowTimers(restartedCtx); err != nil {
 					t.Fatalf("restore package timers: %v", err)
 				}
 				if registered, draining := workflowTimerScheduledCounts(restartedScheduler); registered != 2 || draining != 0 {
@@ -270,54 +214,29 @@ func TestWorkflowTimerLifecyclePreservesSiblingFlowDeclarationsAcrossRestartOnBo
 	}
 }
 
-func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, liveCtx := tc.open(t)
+			bundle := workflowTimerFirstDeclarationRevisionBundle(t, false)
+			fixture, pcA, liveCtx := nativePilotPipelineForTest(t, tc.name, bundle, open)
+			store := pcA.workflowStore
 			createdAt := canonicalWorkflowTimerTime(time.Now().UTC().Add(-2 * time.Second))
 			runID := runtimecorrelation.RunIDFromContext(liveCtx)
 			route := workflowTimerRootRoute(liveCtx)
-			entityID := uuid.NewString()
-			sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(liveCtx)
-			if !ok {
-				t.Fatal("dynamic timer test context is missing bundle source fact")
-			}
-			bundleHash := sourceFact.BundleHash()
-			readiness := DynamicFlowRuntimeReadinessPlan{
-				Identity: runtimeflowidentity.Instance{
-					TemplateID: ".", ScopeKey: route.ScopeKey,
-					InstanceID: route.InstanceID, InstancePath: route.InstancePath,
-					EntityID: entityID, HasStoredPath: true,
-				},
-				RunID: runID, BundleHash: bundleHash,
-				WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Mock,
-			}
-
-			sourceA := semanticview.Wrap(workflowTimerFirstDeclarationRevisionBundle(t, false))
-			pcA := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module:      &pipelineFixtureWorkflowModule{source: sourceA},
-				Persistence: workflowPersistenceForTest(store),
-			})
+			entityID := runID
 			mockCtx := runtimeeffects.WithExecutionMode(liveCtx, executionmode.Mock)
-			// Seed only the unit fixture; selected-store constructor proof lives in runtimepersistence.
-			preparedInstance, preparedLifecycle, err := pcA.PrepareInitialEntryLifecycle(mockCtx, testRunScopedWorkflowRoute(mockCtx, route), workflowTimerMaterializedInstance(mockCtx, entityID, route.InstancePath, WorkflowInstance{
-				WorkflowName: "workflow-timer-first-revision", WorkflowVersion: "1.0.0",
-				RuntimeReadiness: &readiness, CurrentState: "waiting", CreatedAt: createdAt,
+			preparedInstance, preparedLifecycle, err := pcA.PrepareInitialEntryLifecycle(mockCtx, testRunScopedWorkflowRoute(mockCtx, route), materializedWorkflowInstanceForSource(t, pcA.SemanticSource(), mockCtx, WorkflowInstance{
+				InstanceID: runID, StorageRef: runID, EntityID: entityID,
+				WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
+				CurrentState: "waiting", CreatedAt: createdAt,
 				EntityType: "test_entity",
 			}), createdAt)
 			if err != nil {
 				t.Fatalf("prepare fixture lifecycle: %v", err)
 			}
-			if err := store.upsert(mockCtx, preparedInstance); err != nil {
-				t.Fatalf("seed fixture state: %v", err)
-			}
-			var committedLifecycle CommittedWorkflowLifecycleMutation
-			if err := store.runPipelineMutation(mockCtx, func(txctx context.Context) error {
-				var commitErr error
-				committedLifecycle, commitErr = commitPipelineTestWorkflowLifecycle(txctx, store, preparedLifecycle)
-				return commitErr
-			}); err != nil {
-				t.Fatalf("seed fixture lifecycle: %v", err)
+			committedLifecycle, err := fixture.ConstructInitial(mockCtx, preparedInstance, preparedLifecycle)
+			if err != nil {
+				t.Fatalf("construct timer-free native lifecycle: %v", err)
 			}
 			if err := pcA.FinalizeInitialEntryLifecycle(mockCtx, committedLifecycle); err != nil {
 				t.Fatalf("finalize fixture lifecycle: %v", err)
@@ -328,22 +247,33 @@ func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeO
 			if active := listWorkflowTimerOwnerActivations(t, store, liveCtx, entityID, true); len(active) != 0 {
 				t.Fatalf("timer-free source active timers = %#v", active)
 			}
+			if err := pcA.StopWorkflowTimerLifecycle(liveCtx); err != nil {
+				t.Fatalf("join timer-free predecessor: %v", err)
+			}
 
-			bus := &recordingPipelineBus{}
+			bus := observeNativePipelineDeliveryBusForTest(t, pcA)
 			sourceB := semanticview.Wrap(workflowTimerFirstDeclarationRevisionBundle(t, true))
-			owner := pipelineTestWorkOwner(t)
-			scheduler := newWorkflowTimerTestScheduler(t, owner)
+			scheduler := newWorkflowTimerTestScheduler(t, pcA.workOwner)
 			// Install the real wakeup while retaining this unit's explicit fire boundary.
 			if err := scheduler.PrepareStartup(); err != nil {
 				t.Fatal(err)
 			}
-			pcB := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
-				Module:      &pipelineFixtureWorkflowModule{source: sourceB},
-				Persistence: workflowPersistenceForTest(store),
-				WorkOwner:   owner, TimerScheduler: scheduler,
+			// Like the progressed-declaration control, this projects declarations
+			// without admitting a replacement source or executable runtime.
+			projection := newWorkflowTimerLifecycle(store, sourceB, bus, pcA.workOwner, scheduler, pcA.executionPosture)
+			attempt, readiness, closeAttachment := fixture.AdmitAttachment(liveCtx, runID, route.InstancePath)
+			t.Cleanup(func() {
+				join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := projection.stop(join); err != nil {
+					t.Error(err)
+				}
+				closeAttachment()
 			})
-			attempt := pipelineTestFlowActivationAttempt(t, runID, route.InstancePath, bundleHash)
-			if err := pcB.ReconcileInitialEntryTimersForAttempt(liveCtx, testRunScopedWorkflowRoute(liveCtx, route), attempt, readiness); err != nil {
+			if readiness.ExecutionMode != executionmode.Mock {
+				t.Fatalf("native construction readiness mode=%q, want mock", readiness.ExecutionMode)
+			}
+			if err := projection.reconcileInitialEntryDeclarations(liveCtx, testRunScopedWorkflowRoute(liveCtx, route), &attempt, &readiness); err != nil {
 				t.Fatalf("reconcile first initial timer with live administrative context: %v", err)
 			}
 			active := listWorkflowTimerOwnerActivations(t, store, liveCtx, entityID, true)
@@ -353,52 +283,59 @@ func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeO
 			if registered, draining := workflowTimerScheduledCounts(scheduler); registered != 1 || draining != 0 {
 				t.Fatalf("first revised timer wakeup active=%d draining=%d, want 1/0", registered, draining)
 			}
-			outcome, err := fireWorkflowTimerTestWakeup(liveCtx, pcB, active[0])
-			if err != nil || outcome != WorkflowTimerFireCommitted {
-				t.Fatalf("fire first revised timer: outcome=%q err=%v", outcome, err)
+			wakeup, err := newWorkflowTimerWakeup(active[0])
+			if err != nil {
+				t.Fatal(err)
 			}
-			if got := bus.publishedEvent(0).ExecutionMode(); got != executionmode.Mock {
-				t.Fatalf("first revised timer event execution mode = %q, want mock", got)
+			outcome, _, err := projection.fireWakeup(liveCtx, wakeup)
+			var failure *runtimefailures.Error
+			staleSourceOnly := runtimefailures.OnlyBranches(err, func(cause error) bool {
+				return cause.Error() == "accepted workflow timer declaration revision is stale"
+			})
+			if outcome != WorkflowTimerFireCommitted || !errors.As(err, &failure) || failure.Failure.Class != runtimefailures.ClassInternalFailure || failure.Failure.Detail.Code != "event_interceptor_failed" || failure.Failure.Component != "eventbus" || failure.Failure.Operation != "run_interceptor" || !staleSourceOnly {
+				t.Fatalf("prospective fire must commit publication but refuse stale-source admission: outcome=%q err=%v", outcome, err)
+			}
+			if bus.publishedCount() != 0 {
+				t.Fatalf("stale-source event dispatched successfully %d times, want zero", bus.publishedCount())
+			}
+			persisted, readErr := fixture.PublishedEvent(liveCtx, timeridentity.WorkflowTimerOccurrenceEventID(active[0].occurrence()))
+			if readErr != nil || persisted.ExecutionMode() != executionmode.Mock {
+				t.Fatalf("committed prospective timer publication mode=%q err=%v, want mock", persisted.ExecutionMode(), readErr)
 			}
 		})
 	}
 }
 
-func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
+			bundle := workflowTimerSourceRevisionBundle(t, false)
+			fixture, pcA, ctx := nativePilotPipelineForTest(t, tc.name, bundle, open)
+			store := pcA.workflowStore
 			createdAt := canonicalWorkflowTimerTime(time.Now().UTC())
-			entityID := uuid.NewString()
+			entityID := runtimecorrelation.RunIDFromContext(ctx)
 			rootRoute := workflowTimerRootRoute(ctx)
-			sourceA := semanticview.Wrap(workflowTimerSourceRevisionBundle(t, false))
-			ownerA := pipelineTestWorkOwner(t)
-			schedulerA := newWorkflowTimerTestScheduler(t, ownerA)
-			pcA := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module:         &pipelineFixtureWorkflowModule{source: sourceA},
-				Persistence:    workflowPersistenceForTest(store),
-				WorkOwner:      ownerA,
-				TimerScheduler: schedulerA,
+			schedulerA := newWorkflowTimerTestScheduler(t, pcA.workOwner)
+			pcA.timerScheduler = schedulerA
+			if err := pcA.workflowTimers.bindScheduler(schedulerA); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				join, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				if err := pcA.StopWorkflowTimerLifecycle(join); err != nil {
+					t.Error(err)
+				}
 			})
-			// Seed only the unit fixture; selected-store constructor proof lives in runtimepersistence.
-			preparedInstance, preparedLifecycle, err := pcA.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
-				WorkflowName: "workflow-timer-source-revision", WorkflowVersion: "1.0.0",
-				CurrentState: "waiting", CreatedAt: createdAt,
-				EntityType: "test_entity",
-			}), createdAt)
+			instance := constructedScenarioInstanceForTest(t, pcA.SemanticSource(), ctx, semanticview.RootExecutionFlowID(pcA.SemanticSource()))
+			instance.CreatedAt, instance.EnteredStageAt = createdAt, createdAt
+			preparedInstance, preparedLifecycle, err := pcA.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), instance, createdAt)
 			if err != nil {
 				t.Fatalf("prepare fixture lifecycle: %v", err)
 			}
-			if err := store.upsert(ctx, preparedInstance); err != nil {
-				t.Fatalf("seed fixture state: %v", err)
-			}
-			var committedLifecycle CommittedWorkflowLifecycleMutation
-			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-				var commitErr error
-				committedLifecycle, commitErr = commitPipelineTestWorkflowLifecycle(txctx, store, preparedLifecycle)
-				return commitErr
-			}); err != nil {
-				t.Fatalf("seed fixture lifecycle: %v", err)
+			committedLifecycle, err := fixture.ConstructInitial(ctx, preparedInstance, preparedLifecycle)
+			if err != nil {
+				t.Fatalf("construct native fixture lifecycle: %v", err)
 			}
 			if err := pcA.FinalizeInitialEntryLifecycle(ctx, committedLifecycle); err != nil {
 				t.Fatalf("finalize fixture lifecycle: %v", err)
@@ -422,26 +359,30 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 			cancelStop()
 
 			sourceB := semanticview.Wrap(workflowTimerSourceRevisionBundle(t, true))
-			ownerB := pipelineTestWorkOwner(t)
-			schedulerB := newWorkflowTimerTestScheduler(t, ownerB)
-			pcB := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module:         &pipelineFixtureWorkflowModule{source: sourceB},
-				Persistence:    workflowPersistenceForTest(store),
-				WorkOwner:      ownerB,
-				TimerScheduler: schedulerB,
+			// Project prospective declarations without replacing the admitted source.
+			schedulerB := newWorkflowTimerTestScheduler(t, pcA.workOwner)
+			projection := newWorkflowTimerLifecycle(store, sourceB, pcA.bus, pcA.workOwner, schedulerB, pcA.executionPosture)
+			attempt, plan, closeAttachment := fixture.AdmitAttachment(ctx, entityID, rootRoute.InstancePath)
+			t.Cleanup(func() {
+				join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := projection.stop(join); err != nil {
+					t.Error(err)
+				}
+				closeAttachment()
 			})
 			cancelledCtx, cancel := context.WithCancel(ctx)
 			cancel()
-			if err := pcB.ReconcileInitialEntryTimers(cancelledCtx, testRunScopedWorkflowRoute(cancelledCtx, rootRoute)); err == nil {
+			if err := projection.reconcileInitialEntryDeclarations(cancelledCtx, testRunScopedWorkflowRoute(cancelledCtx, rootRoute), &attempt, &plan); err == nil {
 				t.Fatal("cancelled source revision unexpectedly committed")
 			}
 			if active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true); len(active) != 3 {
 				t.Fatalf("cancelled source revision changed active timers: %#v", active)
 			}
-			if err := pcB.ReconcileInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
+			if err := projection.reconcileInitialEntryDeclarations(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), &attempt, &plan); err != nil {
 				t.Fatalf("reconcile source B: %v", err)
 			}
-			if err := pcB.ReconcileInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
+			if err := projection.reconcileInitialEntryDeclarations(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), &attempt, &plan); err != nil {
 				t.Fatalf("replay source B reconciliation: %v", err)
 			}
 
@@ -484,7 +425,7 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 			}, "source B replacement wakeups")
 
 			stale := sourceAByDeclaration[changedKey]
-			if err := pcB.workflowTimers.ReconcileWakeup(ctx, stale.Ref); err != nil {
+			if err := projection.ReconcileWakeup(ctx, stale.Ref); err != nil {
 				t.Fatalf("retire stale source A wakeup: %v", err)
 			}
 			staleEvent := eventtest.RuntimeControl(
@@ -499,25 +440,26 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 				events.EventEnvelope{EntityID: stale.EntityID, FlowInstance: stale.Route.InstancePath},
 				stale.FireAt,
 			)
-			if _, _, recognized, err := pcB.workflowTimers.AuthorizeAcceptedEvent(ctx, staleEvent); err == nil || !recognized {
+			if _, _, recognized, err := projection.AuthorizeAcceptedEvent(ctx, staleEvent); err == nil || !recognized {
 				t.Fatalf("stale source A event authorization recognized=%v err=%v, want rejection", recognized, err)
 			}
 
 			stopCtx, cancelStop = context.WithTimeout(context.Background(), time.Second)
-			if err := pcB.workflowTimers.stop(stopCtx); err != nil {
+			if err := projection.stop(stopCtx); err != nil {
 				cancelStop()
 				t.Fatalf("stop source B lifecycle: %v", err)
 			}
 			cancelStop()
-			ownerRestarted := pipelineTestWorkOwner(t)
-			schedulerRestarted := newWorkflowTimerTestScheduler(t, ownerRestarted)
-			pcRestarted := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module:         &pipelineFixtureWorkflowModule{source: sourceB},
-				Persistence:    workflowPersistenceForTest(store),
-				WorkOwner:      ownerRestarted,
-				TimerScheduler: schedulerRestarted,
+			schedulerRestarted := newWorkflowTimerTestScheduler(t, pcA.workOwner)
+			restoredProjection := newWorkflowTimerLifecycle(store, sourceB, pcA.bus, pcA.workOwner, schedulerRestarted, pcA.executionPosture)
+			t.Cleanup(func() {
+				join, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				if err := restoredProjection.stop(join); err != nil {
+					t.Error(err)
+				}
 			})
-			if err := pcRestarted.workflowTimers.Restore(ctx); err != nil {
+			if err := restoredProjection.Restore(ctx); err != nil {
 				t.Fatalf("restore source B lifecycle: %v", err)
 			}
 			if active, draining := workflowTimerScheduledCounts(schedulerRestarted); active != 3 || draining != 0 {
@@ -527,76 +469,26 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 	}
 }
 
-func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectivelyOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectivelyOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			createdAt := canonicalWorkflowTimerTime(time.Now().UTC())
-			entityID := uuid.NewString()
-			rootRoute := workflowTimerRootRoute(ctx)
-			sourceA := semanticview.Wrap(workflowTimerProgressedSourceRevisionBundle(t, false))
-			ownerA := pipelineTestWorkOwner(t)
-			schedulerA := newWorkflowTimerTestScheduler(t, ownerA)
-			pcA := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module:         &pipelineFixtureWorkflowModule{source: sourceA},
-				Persistence:    workflowPersistenceForTest(store),
-				WorkOwner:      ownerA,
-				TimerScheduler: schedulerA,
-			})
-			// Seed only the unit fixture; selected-store constructor proof lives in runtimepersistence.
-			preparedInstance, preparedLifecycle, err := pcA.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
-				WorkflowName: "workflow-timer-progressed-revision", WorkflowVersion: "1.0.0",
-				CurrentState: "waiting", CreatedAt: createdAt,
-				EntityType: "test_entity",
-			}), createdAt)
-			if err != nil {
-				t.Fatalf("prepare fixture lifecycle: %v", err)
-			}
-			if err := store.upsert(ctx, preparedInstance); err != nil {
-				t.Fatalf("seed fixture state: %v", err)
-			}
-			var committedLifecycle CommittedWorkflowLifecycleMutation
-			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-				var commitErr error
-				committedLifecycle, commitErr = commitPipelineTestWorkflowLifecycle(txctx, store, preparedLifecycle)
-				return commitErr
-			}); err != nil {
-				t.Fatalf("seed fixture lifecycle: %v", err)
-			}
-			if err := pcA.FinalizeInitialEntryLifecycle(ctx, committedLifecycle); err != nil {
-				t.Fatalf("finalize fixture lifecycle: %v", err)
+			fixture, pcA, ctx, mutations := nativeLifecycleComponentForTest(t, tc.name, workflowTimerProgressedSourceRevisionBundle(t, false), "waiting", open)
+			store := pcA.workflowStore
+			entityID := runtimecorrelation.RunIDFromContext(ctx)
+			rootRoute := testWorkflowInstanceRoute(entityID)
+			if err := applyTestInitialEntryEffect(ctx, pcA, rootRoute, entityID); err != nil {
+				t.Fatal(err)
 			}
 			if err := pcA.ArmInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
-				t.Fatalf("arm source A: %v", err)
+				t.Fatal(err)
 			}
 			sourceARows := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
 			if len(sourceARows) != 3 {
 				t.Fatalf("source A active timers = %d, want 3: %#v", len(sourceARows), sourceARows)
 			}
 			sourceAByDeclaration := workflowTimerActivationsByDeclaration(sourceARows)
-			transitionAt := createdAt.Add(time.Minute)
-			route := rootRoute
-			progressed, found, err := store.Load(ctx, testRunScopedWorkflowRoute(ctx, route))
-			if err != nil || !found {
-				t.Fatalf("load workflow instance before progress: found=%v err=%v", found, err)
-			}
-			progressed.CurrentState = "done"
-			progressed.EnteredStageAt = transitionAt
-			transition, err := compiledLifecycleTransitionForTest(pcA, progressed.WorkflowName, "waiting", "done", "test.workflow_progressed")
-			if err != nil {
-				t.Fatalf("build progressed transition: %v", err)
-			}
-			inbound := workflowLifecycleEventForTest(t, store, ctx, ".", route.InstancePath, entityID, "test.workflow_progressed", transitionAt)
-			effect, err := runtimeworkflowlifecycle.NewAcceptedEvent(route, identity.NormalizeEntityID(entityID), inbound.ID(), string(inbound.Type()), executionmode.Live, inbound.CreatedAt(), transition)
-			if err != nil {
-				t.Fatalf("build progressed lifecycle effect: %v", err)
-			}
-			effect, err = admitTestLifecycleDeliveryOccurrence(runtimecorrelation.WithInboundEvent(ctx, inbound), pcA, effect)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := commitTestWorkflowLifecycleMutation(runtimecorrelation.WithInboundEvent(ctx, inbound), pcA, route, progressed, "waiting", []runtimeworkflowlifecycle.Effect{effect}); err != nil {
-				t.Fatalf("commit progressed workflow instance: %v", err)
+			if _, err := executeNativeLifecycleTransitionForTest(t, fixture, mutations, pcA, ctx, "test.workflow_progressed"); err != nil {
+				t.Fatalf("native progress transition: %v", err)
 			}
 			if active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true); len(active) != 3 {
 				t.Fatalf("progressed active timers = %d, want 3 before source revision: %#v", len(active), active)
@@ -609,18 +501,23 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 			cancelStop()
 
 			sourceB := semanticview.Wrap(workflowTimerProgressedSourceRevisionBundle(t, true))
-			ownerB := pipelineTestWorkOwner(t)
-			schedulerB := newWorkflowTimerTestScheduler(t, ownerB)
-			pcB := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module:         &pipelineFixtureWorkflowModule{source: sourceB},
-				Persistence:    workflowPersistenceForTest(store),
-				WorkOwner:      ownerB,
-				TimerScheduler: schedulerB,
+			// This is prospective declaration projection, not admission of a
+			// replacement source or a new executable runtime over the database.
+			schedulerB := newWorkflowTimerTestScheduler(t, pcA.workOwner)
+			projection := newWorkflowTimerLifecycle(store, sourceB, pcA.bus, pcA.workOwner, schedulerB, pcA.executionPosture)
+			attempt, plan, closeAttachment := fixture.AdmitAttachment(ctx, entityID, rootRoute.InstancePath)
+			t.Cleanup(func() {
+				join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := projection.stop(join); err != nil {
+					t.Error(err)
+				}
+				closeAttachment()
 			})
-			if err := pcB.ReconcileInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
+			if err := projection.reconcileInitialEntryDeclarations(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), &attempt, &plan); err != nil {
 				t.Fatalf("reconcile progressed source B: %v", err)
 			}
-			if err := pcB.ReconcileInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
+			if err := projection.reconcileInitialEntryDeclarations(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), &attempt, &plan); err != nil {
 				t.Fatalf("replay progressed source B: %v", err)
 			}
 
@@ -656,41 +553,36 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 	}
 }
 
-func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			source := semanticview.Wrap(workflowTimerInitialAndEventBundle(t))
-			owner := pipelineTestWorkOwner(t)
-			scheduler := newWorkflowTimerTestScheduler(t, owner)
-			pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module:         &pipelineFixtureWorkflowModule{source: source},
-				Persistence:    workflowPersistenceForTest(store),
-				WorkOwner:      owner,
-				TimerScheduler: scheduler,
+			bundle := workflowTimerInitialAndEventBundle(t)
+			fixture, pc, ctx := nativePilotPipelineForTest(t, tc.name, bundle, open)
+			store := pc.workflowStore
+			scheduler := newWorkflowTimerTestScheduler(t, pc.workOwner)
+			pc.timerScheduler = scheduler
+			if err := pc.workflowTimers.bindScheduler(scheduler); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				join, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				if err := pc.StopWorkflowTimerLifecycle(join); err != nil {
+					t.Error(err)
+				}
 			})
-			entityID := uuid.NewString()
+			entityID := runtimecorrelation.RunIDFromContext(ctx)
 			rootRoute := workflowTimerRootRoute(ctx)
 			createdAt := canonicalWorkflowTimerTime(time.Now().UTC())
-			// Seed only the unit fixture; selected-store constructor proof lives in runtimepersistence.
-			preparedInstance, preparedLifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
-				WorkflowName: "workflow-timer-initial-event", WorkflowVersion: "1.0.0",
-				CurrentState: "waiting", CreatedAt: createdAt,
-				EntityType: "test_entity",
-			}), createdAt)
+			instance := constructedScenarioInstanceForTest(t, pc.SemanticSource(), ctx, semanticview.RootExecutionFlowID(pc.SemanticSource()))
+			instance.CreatedAt, instance.EnteredStageAt = createdAt, createdAt
+			preparedInstance, preparedLifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), instance, createdAt)
 			if err != nil {
 				t.Fatalf("prepare fixture lifecycle: %v", err)
 			}
-			if err := store.upsert(ctx, preparedInstance); err != nil {
-				t.Fatalf("seed fixture state: %v", err)
-			}
-			var committedLifecycle CommittedWorkflowLifecycleMutation
-			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-				var commitErr error
-				committedLifecycle, commitErr = commitPipelineTestWorkflowLifecycle(txctx, store, preparedLifecycle)
-				return commitErr
-			}); err != nil {
-				t.Fatalf("seed fixture lifecycle: %v", err)
+			committedLifecycle, err := fixture.ConstructInitial(ctx, preparedInstance, preparedLifecycle)
+			if err != nil {
+				t.Fatalf("construct native fixture lifecycle: %v", err)
 			}
 			if err := pc.FinalizeInitialEntryLifecycle(ctx, committedLifecycle); err != nil {
 				t.Fatalf("finalize fixture lifecycle: %v", err)
@@ -698,12 +590,13 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 			if err := pc.ArmInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("arm initial timer: %v", err)
 			}
-			inbound := workflowLifecycleEventForTest(t, store, ctx, ".", rootRoute.InstancePath, entityID, "timer.arm", createdAt.Add(time.Minute))
+			inbound := nativeWorkflowJoinEventForTest(ctx, ".", rootRoute.InstancePath, entityID, "timer.arm", []byte(`{}`), createdAt.Add(time.Minute))
+			publishNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, inbound, "timer-owner")
 			if err := reconcileWorkflowTimerForTest(runtimecorrelation.WithInboundEvent(ctx, inbound), pc, rootRoute, entityID, "waiting", "waiting", workflowTimerCause{
-				Kind: workflowTimerCauseEvent, EventID: inbound.ID(),
-				EventType: "timer.arm", OccurredAt: createdAt.Add(time.Minute), ExecutionMode: executionmode.Live,
+				Kind: workflowTimerCauseEvent, EventID: inbound.ID(), EventType: string(inbound.Type()),
+				OccurredAt: inbound.CreatedAt(), ExecutionMode: executionmode.Live,
 			}); err != nil {
-				t.Fatalf("arm event timer: %v", err)
+				t.Fatalf("reconcile published event through native lifecycle owner: %v", err)
 			}
 			waitForWorkflowTimerCondition(t, time.Second, func() bool {
 				active, draining := workflowTimerScheduledCounts(scheduler)
@@ -747,8 +640,8 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 				active, draining := workflowTimerScheduledCounts(scheduler)
 				return active == 2 && draining == 0
 			}, "initial retry and preserved event wakeups")
-			if _, err := store.testDB().ExecContext(ctx, `DELETE FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runtimecorrelation.RunIDFromContext(ctx), rootRoute.InstancePath); err != nil {
-				t.Fatal(err)
+			if changed, err := fixture.MissingFields(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID); err != nil || changed != 1 {
+				t.Fatalf("remove exact instance projection: changed=%d err=%v", changed, err)
 			}
 			if err := pc.RetireInitialEntryTimerWakeups(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("retire initial wakeups after instance projection loss: %v", err)
@@ -760,13 +653,13 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 			if err := pc.RetireInitialEntryTimerWakeups(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("repeat initial wakeup retirement after instance projection loss: %v", err)
 			}
-			if _, err := store.testDB().ExecContext(ctx, `UPDATE timers SET flow_instance=$1, timer_name=$2 WHERE timer_id=$3`, "other-route", "malformed", eventRef.ActivationID); err != nil {
+			if err := fixture.SetTimerForeignRouteMalformedName(ctx, runtimecorrelation.RunIDFromContext(ctx), eventRef.ActivationID); err != nil {
 				t.Fatal(err)
 			}
 			if err := pc.RetireInitialEntryTimerWakeups(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("unrelated malformed timer blocked exact retirement: %v", err)
 			}
-			if _, err := store.testDB().ExecContext(ctx, `UPDATE timers SET timer_name=$1 WHERE timer_id=$2`, "malformed", initialRef.ActivationID); err != nil {
+			if err := fixture.SetTimerMalformedName(ctx, runtimecorrelation.RunIDFromContext(ctx), initialRef.ActivationID); err != nil {
 				t.Fatal(err)
 			}
 			if err := pc.RetireInitialEntryTimerWakeups(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err == nil {
@@ -776,46 +669,45 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 	}
 }
 
-func TestWorkflowTimerLifecycleScopesDeclarationsToOwningFlowOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleScopesDeclarationsToOwningFlowOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		for _, instanceFlow := range []string{"timer-flow-scope-root", "flow-a"} {
 			t.Run(tc.name+"/"+instanceFlow, func(t *testing.T) {
-				store, ctx := tc.open(t)
-				source := semanticview.Wrap(workflowTimerFlowScopedBundle(t))
-				owner := pipelineTestWorkOwner(t)
-				scheduler := newWorkflowTimerTestScheduler(t, owner)
-				pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-					Module:         &pipelineFixtureWorkflowModule{source: source},
-					Persistence:    workflowPersistenceForTest(store),
-					WorkOwner:      owner,
-					TimerScheduler: scheduler,
-				})
-				entityID := uuid.NewString()
-				instancePath := workflowTimerRootRoute(ctx).InstancePath
-				if instanceFlow != "timer-flow-scope-root" {
-					instancePath = instanceFlow
+				bundle := workflowTimerFlowScopedBundle(t)
+				fixture, pc, ctx := nativePilotPipelineForTest(t, tc.name, bundle, open)
+				store := pc.workflowStore
+				source := pc.SemanticSource()
+				scheduler := newWorkflowTimerTestScheduler(t, pc.workOwner)
+				if err := pc.workflowTimers.bindScheduler(scheduler); err != nil {
+					t.Fatal(err)
 				}
+				t.Cleanup(func() {
+					join, cancel := context.WithTimeout(context.Background(), time.Second)
+					defer cancel()
+					if err := pc.StopWorkflowTimerLifecycle(join); err != nil {
+						t.Error(err)
+					}
+				})
+				flowID := semanticview.RootExecutionFlowID(source)
+				if instanceFlow == "flow-a" {
+					parent := constructedScenarioInstanceForTest(t, source, ctx, flowID)
+					if err := fixture.Construct(ctx, parent); err != nil {
+						t.Fatal(err)
+					}
+					flowID = instanceFlow
+				}
+				instance := constructedScenarioInstanceForTest(t, source, ctx, flowID)
+				entityID, instancePath := instance.EntityID, instance.StorageRef
 				route := testRunScopedWorkflowInstanceFromContext(ctx, instancePath).Route
 				createdAt := canonicalWorkflowTimerTime(time.Now().UTC())
-				// Seed only the unit fixture; selected-store constructor proof lives in runtimepersistence.
-				preparedInstance, preparedLifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instancePath), workflowTimerMaterializedInstance(ctx, entityID, instancePath, WorkflowInstance{
-					WorkflowName: instanceFlow, WorkflowVersion: "1.0.0",
-					CurrentState: "waiting", CreatedAt: createdAt,
-					EntityType: "test_entity",
-				}), createdAt)
+				instance.CreatedAt, instance.EnteredStageAt = createdAt, createdAt
+				preparedInstance, preparedLifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instancePath), instance, createdAt)
 				if err != nil {
 					t.Fatalf("prepare fixture lifecycle: %v", err)
 				}
-				if err := store.upsert(ctx, preparedInstance); err != nil {
-					t.Fatalf("seed fixture state: %v", err)
-				}
-				var committedLifecycle CommittedWorkflowLifecycleMutation
-				if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-					var commitErr error
-					committedLifecycle, commitErr = commitPipelineTestWorkflowLifecycle(txctx, store, preparedLifecycle)
-					return commitErr
-				}); err != nil {
-					t.Fatalf("seed fixture lifecycle: %v", err)
+				committedLifecycle, err := fixture.ConstructInitial(ctx, preparedInstance, preparedLifecycle)
+				if err != nil {
+					t.Fatalf("construct native initial lifecycle: %v", err)
 				}
 				if err := pc.FinalizeInitialEntryLifecycle(ctx, committedLifecycle); err != nil {
 					t.Fatalf("finalize fixture lifecycle: %v", err)
@@ -834,13 +726,8 @@ func TestWorkflowTimerLifecycleScopesDeclarationsToOwningFlowOnBothStores(t *tes
 				if rows[0].EventType != wantInitialEvent {
 					t.Fatalf("%s initial timer event = %q, want %q", instanceFlow, rows[0].EventType, wantInitialEvent)
 				}
-				inbound := workflowLifecycleEventForTest(t, store, ctx, instanceFlow, route.InstancePath, entityID, armEvent, createdAt.Add(time.Minute))
-				if err := reconcileWorkflowTimerForTest(runtimecorrelation.WithInboundEvent(ctx, inbound), pc, route, entityID, "waiting", "waiting", workflowTimerCause{
-					Kind: workflowTimerCauseEvent, EventID: inbound.ID(),
-					EventType: armEvent, OccurredAt: createdAt.Add(time.Minute), ExecutionMode: executionmode.Live,
-				}); err != nil {
-					t.Fatalf("reconcile %s event timer: %v", instanceFlow, err)
-				}
+				inbound := nativeWorkflowJoinEventForTest(ctx, flowID, route.InstancePath, entityID, armEvent, []byte(`{}`), createdAt.Add(time.Minute))
+				dispatchNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, inbound, "timer-owner")
 				rows = listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
 				if len(rows) != 2 {
 					t.Fatalf("%s active timers = %d, want 2: %#v", instanceFlow, len(rows), rows)
@@ -892,12 +779,10 @@ func workflowTimerNodeDeclarationKey(node identity.ExecutableNode, id string) st
 	return (runtimecontracts.WorkflowTimerContract{ID: id, Node: node}).SemanticKey()
 }
 
-func TestAcceptedWorkflowTimerEventRoutingMatrixOnBothStores(t *testing.T) {
+func VerifyNativeAcceptedWorkflowTimerEventRoutingMatrixOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			bus := &recordingPipelineBus{}
-			pc, entityID, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, bus, false)
+			_, pc, ctx, bus, entityID, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
 			if outcome, err := fireWorkflowTimerTestWakeup(ctx, pc, activation); err != nil || outcome != WorkflowTimerFireCommitted {
 				t.Fatalf("fire canonical occurrence outcome=%q err=%v", outcome, err)
 			}
@@ -984,11 +869,10 @@ func TestWorkflowTimerWakeupProjectionCarriesOnlyFamilyOccurrenceAndDueAt(t *tes
 	}
 }
 
-func TestWorkflowTimerActiveProjectionRequiresSchedulerOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerActiveProjectionRequiresSchedulerOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
+			_, pc, ctx, _, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
 
 			if err := pc.workflowTimers.ReconcileWakeup(ctx, activation.Ref); !errors.Is(err, errWorkflowTimerSchedulerRequired) {
 				t.Fatalf("ReconcileWakeup error = %v, want scheduler-required failure", err)
@@ -1000,23 +884,17 @@ func TestWorkflowTimerActiveProjectionRequiresSchedulerOnBothStores(t *testing.T
 	}
 }
 
-func TestWorkflowTimerLifecycleExactCauseReplayConvergesAfterTerminalStateOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleExactCauseReplayConvergesAfterTerminalStateOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		for _, terminal := range []string{workflowTimerStatusFired, workflowTimerStatusCancelled} {
 			t.Run(tc.name+"/"+terminal, func(t *testing.T) {
-				store, ctx := tc.open(t)
-				pc, entityID, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
+				fixture, pc, ctx, _, entityID, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
+				store := pc.workflowStore
 				if terminal == workflowTimerStatusFired {
 					if outcome, err := fireWorkflowTimerTestWakeup(ctx, pc, activation); err != nil || outcome != WorkflowTimerFireCommitted {
 						t.Fatalf("fire activation outcome=%q err=%v", outcome, err)
 					}
-				} else if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-					cancelled, changed, err := store.cancelWorkflowTimerActivation(txctx, activation.Ref)
-					if err != nil || !changed {
-						return errors.Join(err, fmt.Errorf("cancel changed=%v", changed))
-					}
-					return pc.workflowTimers.queueCancellation(txctx, cancelled)
-				}); err != nil {
+				} else if err := cancelNativeWorkflowTimerForTest(t, fixture, ctx, pc, activation); err != nil {
 					t.Fatalf("cancel activation: %v", err)
 				}
 
@@ -1038,44 +916,38 @@ func TestWorkflowTimerLifecycleExactCauseReplayConvergesAfterTerminalStateOnBoth
 	}
 }
 
-func TestWorkflowTimerLifecycleReactivatesOnlyOnLaterStageEntryOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleReactivatesOnlyOnLaterStageEntryOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			pc, entityID, first := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
+			files := workflowTimerOwnerSourceFiles()
+			files["schema.yaml"] = "name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {id: waiting.timeout, after: 1h, emit: timer.timeout}\n  done: {}\n"
+			files["events.yaml"] += "work.noted:\n"
+			files["nodes.yaml"] += "    work.noted: {}\n"
+			bundle := loadWorkflowTempBundle(t, files)
+			fixture, pc, ctx, _, entityID, first := nativeWorkflowTimerSourceActivationForTest(t, tc.name, bundle, time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
+			store := pc.workflowStore
+			pc.timerScheduler = newWorkflowTimerTestScheduler(t, pc.workOwner)
+			if err := pc.workflowTimers.bindScheduler(pc.timerScheduler); err != nil {
+				t.Fatal(err)
+			}
 			if outcome, err := fireWorkflowTimerTestWakeup(ctx, pc, first); err != nil || outcome != WorkflowTimerFireCommitted {
 				t.Fatalf("fire first activation outcome=%q err=%v", outcome, err)
 			}
 
 			unrelatedAt := canonicalWorkflowTimerTime(first.FireAt.Add(time.Minute))
-			unrelatedEvent := workflowLifecycleEventForTest(t, store, ctx, ".", workflowTimerRootRoute(ctx).InstancePath, entityID, "work.noted", unrelatedAt)
-			unrelated := workflowTimerCause{
-				Kind: workflowTimerCauseEvent, EventID: unrelatedEvent.ID(), EventType: "work.noted", OccurredAt: unrelatedAt,
-				FromState: "waiting", ToState: "waiting", ExecutionMode: executionmode.Live,
-			}
-			if err := reconcileWorkflowTimerForTest(runtimecorrelation.WithInboundEvent(ctx, unrelatedEvent), pc, workflowTimerRootRoute(ctx), entityID, "waiting", "waiting", unrelated); err != nil {
-				t.Fatalf("reconcile unrelated same-stage event: %v", err)
-			}
+			unrelatedEvent := nativeWorkflowJoinEventForTest(ctx, ".", workflowTimerRootRoute(ctx).InstancePath, entityID, "work.noted", []byte(`{}`), unrelatedAt)
+			dispatchNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, unrelatedEvent, "timer-owner")
 			all := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, false)
 			if len(all) != 1 {
 				t.Fatalf("activations after unrelated same-stage event = %d, want 1", len(all))
 			}
 
 			reentryAt := canonicalWorkflowTimerTime(unrelatedAt.Add(time.Minute))
-			reentryEvent := workflowLifecycleEventForTest(t, store, ctx, ".", workflowTimerRootRoute(ctx).InstancePath, entityID, "review.reopened", reentryAt)
-			reentry := workflowTimerCause{
-				Kind: workflowTimerCauseTransition, EventID: reentryEvent.ID(), EventType: "review.reopened", OccurredAt: reentryAt,
-				FromState: "done", ToState: "waiting", ExecutionMode: executionmode.Live,
-			}
-			activate := func() error {
-				return reconcileWorkflowTimerForTest(runtimecorrelation.WithInboundEvent(ctx, reentryEvent), pc, workflowTimerRootRoute(ctx), entityID, "done", "waiting", reentry)
-			}
-			if err := activate(); err != nil {
-				t.Fatalf("reactivate on later stage entry: %v", err)
-			}
-			if err := activate(); err != nil {
-				t.Fatalf("retry later stage entry: %v", err)
-			}
+			leaveEvent := nativeWorkflowJoinEventForTest(ctx, ".", workflowTimerRootRoute(ctx).InstancePath, entityID, "work.completed", []byte(`{}`), unrelatedAt.Add(30*time.Second))
+			dispatchNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, leaveEvent, "timer-owner")
+			reentryEvent := nativeWorkflowJoinEventForTest(ctx, ".", workflowTimerRootRoute(ctx).InstancePath, entityID, "review.reopened", []byte(`{}`), reentryAt)
+			dispatchNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, reentryEvent, "timer-owner")
+			dispatchNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, reentryEvent, "timer-owner")
 			all = listWorkflowTimerOwnerActivations(t, store, ctx, entityID, false)
 			if len(all) != 2 {
 				t.Fatalf("activations after exact reentry retry = %d, want 2", len(all))
@@ -1091,32 +963,17 @@ func TestWorkflowTimerLifecycleReactivatesOnlyOnLaterStageEntryOnBothStores(t *t
 	}
 }
 
-func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			runID := runtimecorrelation.RunIDFromContext(ctx)
-			entityID := uuid.NewString()
-			rootRoute := workflowTimerRootRoute(ctx)
 			createdAt := canonicalWorkflowTimerTime(time.Now().Add(-2 * time.Hour))
-			if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
-				WorkflowName:    ".",
-				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
-				CreatedAt:  createdAt,
-				EntityType: "test_entity",
-			})); err != nil {
-				t.Fatalf("seed workflow instance: %v", err)
-			}
 			bundle := workflowTimerEventOnlyStateTriggerBundle(t)
-			bus := &recordingPipelineBus{}
-			pc := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
-				Module: handlerTestWorkflowModuleWithBundle(bundle, ".", "observer"), Persistence: workflowPersistenceForTest(store),
-			})
-
-			if err := reconcileWorkflowTimerForTest(ctx, pc, rootRoute, entityID, "", "waiting", workflowTimerCause{
-				Kind: workflowTimerCauseInitial, OccurredAt: createdAt, ToState: "waiting", ExecutionMode: executionmode.Live,
-			}); err != nil {
-				t.Fatalf("activate state-entry timer: %v", err)
+			fixture, pc, ctx, bus, entityID, _ := nativeWorkflowTimerSourceActivationForTest(t, tc.name, bundle, createdAt, false, executionmode.Live, open)
+			store := pc.workflowStore
+			rootRoute := workflowTimerRootRoute(ctx)
+			pc.timerScheduler = newWorkflowTimerTestScheduler(t, pc.workOwner)
+			if err := pc.workflowTimers.bindScheduler(pc.timerScheduler); err != nil {
+				t.Fatal(err)
 			}
 			active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
 			stateEntryKey := workflowTimerStageDeclarationKey(".", "waiting.state_entry")
@@ -1126,16 +983,13 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 			stateTimer := active[0]
 			execute := func(eventType string, eventAt time.Time) {
 				t.Helper()
-				eventID := uuid.NewString()
-				payload := []byte(`{}`)
-				evt := eventtest.RunCreatingRootIngress(
-					eventID, events.EventType(eventType), "operator", "", payload, 0,
-					runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), eventAt,
-				)
-				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runID, entityID, payload, eventAt)
-				result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "observer"), runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
-					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, rootRoute, entityID),
-				}, false)
+				evt := nativeWorkflowJoinEventForTest(ctx, ".", rootRoute.InstancePath, entityID, eventType, []byte(`{}`), eventAt)
+				route := publishNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, evt, "observer")
+				node := pipelineNode(t, ".", "observer")
+				handler := pc.SemanticSource().ExecutableNodeEventHandlers(node)[eventType]
+				result, err := executeNativeClaimedPipelineHandlerForTest(t, pc, withWorkflowNodeDeliveryRoute(ctx, route), node, handler, workflowTriggerContext{
+					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, rootRoute, entityID), HandlerEventKey: eventType,
+				})
 				if err != nil {
 					t.Fatalf("execute %s event-only handler: %v", eventType, err)
 				}
@@ -1189,43 +1043,29 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 	}
 }
 
-func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			entityID := uuid.NewString()
+			fixture, pc, ctx, _ := nativeLifecycleComponentForTest(t, tc.name, workflowTimerHandledOutcomeBundle(t), "waiting", open)
+			store := pc.workflowStore
+			entityID := runtimecorrelation.RunIDFromContext(ctx)
 			rootRoute := workflowTimerRootRoute(ctx)
 			createdAt := canonicalWorkflowTimerTime(time.Now())
-			if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
-				WorkflowName:    ".",
-				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
-				CreatedAt:  createdAt,
-				EntityType: "test_entity",
-			})); err != nil {
-				t.Fatalf("seed workflow instance: %v", err)
-			}
-			pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module:      handlerTestWorkflowModuleWithBundle(workflowTimerHandledOutcomeBundle(t), ".", "observer"),
-				Persistence: workflowPersistenceForTest(store),
-			})
 			eventOffset := time.Duration(0)
-			execute := func(eventType string, payload []byte, handler runtimecontracts.SystemNodeEventHandler, wantHandled bool) {
+			execute := func(eventType string, payload []byte, wantHandled bool) {
 				t.Helper()
 				eventOffset++
 				if len(payload) == 0 {
 					payload = []byte(`{}`)
 				}
-				eventID := uuid.NewString()
 				eventAt := createdAt.Add(eventOffset * time.Minute)
-				evt := eventtest.RunCreatingRootIngress(
-					eventID, events.EventType(eventType), "operator", "", payload, 0,
-					runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-					eventAt,
-				)
-				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runtimecorrelation.RunIDFromContext(ctx), entityID, payload, eventAt)
-				result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "observer"), handler, workflowTriggerContext{
-					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, rootRoute, entityID),
-				}, false)
+				evt := nativeWorkflowJoinEventForTest(ctx, ".", rootRoute.InstancePath, entityID, eventType, payload, eventAt)
+				route := publishNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, evt, "observer")
+				node := pipelineNode(t, ".", "observer")
+				handler := pc.SemanticSource().ExecutableNodeEventHandlers(node)[eventType]
+				result, err := executeNativeClaimedPipelineHandlerForTest(t, pc, withWorkflowNodeDeliveryRoute(ctx, route), node, handler, workflowTriggerContext{
+					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, rootRoute, entityID), HandlerEventKey: eventType,
+				})
 				if err != nil {
 					t.Fatalf("execute %s handler: %v", eventType, err)
 				}
@@ -1253,51 +1093,46 @@ func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *test
 				}
 			}
 
-			execute("accepted.start", nil, runtimecontracts.SystemNodeEventHandler{}, true)
+			execute("accepted.start", nil, true)
 			assertOneStatus("accepted", workflowTimerStatusActive)
-			execute("accepted.cancel", nil, runtimecontracts.SystemNodeEventHandler{}, true)
+			execute("accepted.cancel", nil, true)
 			assertOneStatus("accepted", workflowTimerStatusCancelled)
 
-			execute("reject.target", nil, runtimecontracts.SystemNodeEventHandler{}, true)
-			execute("guard.reject", nil, runtimecontracts.SystemNodeEventHandler{
-				Guard: &runtimecontracts.GuardSpec{Check: "false", OnFail: "reject"},
-			}, false)
+			execute("reject.target", nil, true)
+			execute("guard.reject", nil, false)
 			if matched := declarations("reject.start"); len(matched) != 0 {
 				t.Fatalf("guard reject created timer: %#v", matched)
 			}
 			assertOneStatus("reject.target", workflowTimerStatusActive)
 
-			execute("discard.target", nil, runtimecontracts.SystemNodeEventHandler{}, true)
-			execute("guard.discard", nil, runtimecontracts.SystemNodeEventHandler{
-				Guard: &runtimecontracts.GuardSpec{Check: "false", OnFail: "discard"},
-			}, false)
+			execute("discard.target", nil, true)
+			execute("guard.discard", nil, false)
 			if matched := declarations("discard.start"); len(matched) != 0 {
 				t.Fatalf("guard discard created timer: %#v", matched)
 			}
 			assertOneStatus("discard.target", workflowTimerStatusActive)
 
-			dedupHandler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{
-				Into: "items", From: "payload", Key: "payload.item_id",
-			}}
-			execute("dedup.event", []byte(`{"item_id":"item-1"}`), dedupHandler, true)
+			execute("dedup.event", []byte(`{"item_id":"item-1"}`), true)
 			assertOneStatus("dedup.start", workflowTimerStatusActive)
-			execute("dedup.reset", nil, runtimecontracts.SystemNodeEventHandler{}, true)
+			execute("dedup.reset", nil, true)
 			assertOneStatus("dedup.start", workflowTimerStatusCancelled)
-			execute("dedup.target", nil, runtimecontracts.SystemNodeEventHandler{}, true)
+			execute("dedup.target", nil, true)
 			assertOneStatus("dedup.target", workflowTimerStatusActive)
-			execute("dedup.event", []byte(`{"item_id":"item-1"}`), dedupHandler, false)
+			execute("dedup.event", []byte(`{"item_id":"item-1"}`), false)
 			assertOneStatus("dedup.start", workflowTimerStatusCancelled)
 			assertOneStatus("dedup.target", workflowTimerStatusActive)
 		})
 	}
 }
 
-func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
+			bundle := workflowTimerLoopEventBundle(t)
+			fixture, pc, ctx := nativePilotPipelineForTest(t, tc.name, bundle, open)
+			store := pc.workflowStore
 			runID := runtimecorrelation.RunIDFromContext(ctx)
-			entityID := uuid.NewString()
+			entityID := runID
 			createdAt := canonicalWorkflowTimerTime(time.Now())
 			loopActivation, err := loopruntime.New(
 				runID, entityID, ".", "revision", "revision_id", uuid.NewString(), "waiting", 3, createdAt,
@@ -1311,19 +1146,28 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 			if err := loopruntime.Store(carrier.StateBuckets, loopActivation); err != nil {
 				t.Fatalf("store loop activation: %v", err)
 			}
-			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".",
-				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
+				WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "waiting", EnteredStageAt: createdAt,
 				CreatedAt: createdAt, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
 				EntityType: "test_entity",
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 
-			bus := &recordingPipelineBus{}
-			pc := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
-				Module:      handlerTestWorkflowModuleWithBundle(workflowTimerLoopEventBundle(t), ".", "observer"),
-				Persistence: workflowPersistenceForTest(store),
+			bus := observeNativePipelineDeliveryBusForTest(t, pc)
+			pc.workflowTimers.publication = bus
+			pc.workflowTimers.dispatcher = bus.EngineDispatcher()
+			pc.timerScheduler = newWorkflowTimerTestScheduler(t, pc.workOwner)
+			if err := pc.workflowTimers.bindScheduler(pc.timerScheduler); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := pc.StopWorkflowTimerLifecycle(join); err != nil {
+					t.Error(err)
+				}
 			})
 			handlers := pc.SemanticSource().ExecutableNodeEventHandlers(pipelineNode(t, ".", "observer"))
 			armHandler := handlers["timer.arm"]
@@ -1331,15 +1175,16 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 				t.Helper()
 				payload := []byte(fmt.Sprintf(`{"revision_id":%q}`, revisionID))
 				eventAt := createdAt.Add(time.Minute)
-				evt := eventtest.RunCreatingRootIngress(
+				target := events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}
+				evt := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(
 					eventID, events.EventType(eventType), "operator", "",
-					payload, 0, runID, "",
-					events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), eventAt,
+					payload, 0, runID,
+					events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), testWorkflowRoutingSource(".", runID, entityID), eventAt, executionmode.Live,
 				)
-				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runID, entityID, payload, eventAt)
-				result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "observer"), handler, workflowTriggerContext{
-					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(runID), entityID),
-				}, false)
+				route := publishNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, evt, "observer")
+				result, err := executeNativeClaimedPipelineHandlerForTest(t, pc, withWorkflowNodeDeliveryRoute(ctx, route), pipelineNode(t, ".", "observer"), handler, workflowTriggerContext{
+					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(runID), entityID), HandlerEventKey: eventType,
+				})
 				if err != nil {
 					t.Fatalf("execute %s handler: %v", eventType, err)
 				}
@@ -1401,44 +1246,46 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 	}
 }
 
-func TestWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			entityID := uuid.NewString()
+			files := workflowTimerOwnerSourceFiles()
+			files["events.yaml"] += "work.created:\n"
+			files["nodes.yaml"] += "    work.created: {}\n  timers:\n    - {id: waiting.timeout, event: timer.timeout, start_on: 'event:work.created', delay: 1h}\n"
+			bundle := loadWorkflowTempBundle(t, files)
+			fixture, pc, ctx := nativePilotPipelineForTest(t, tc.name, bundle, open)
+			store := pc.workflowStore
+			entityID := runtimecorrelation.RunIDFromContext(ctx)
 			rootRoute := workflowTimerRootRoute(ctx)
 			createdAt := canonicalWorkflowTimerTime(time.Now())
-			if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
-				WorkflowName:    "workflow-timer-owner-test",
-				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
-				CreatedAt:  createdAt,
-				EntityType: "test_entity",
-			})); err != nil {
-				t.Fatalf("seed workflow instance: %v", err)
-			}
-			bundle := workflowTimerOwnerBundle(t, false)
-			bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{"timer-owner": {ExecutionType: "system_node"}}
-			bundle.Semantics.Timers[0].Stage = ""
-			bundle.Semantics.Timers[0].StageOwned = false
-			bundle.Semantics.Timers[0].Node = pipelineNode(t, "", "timer-owner")
-			bundle.Semantics.Timers[0].StartOn = "event:work.created"
-			pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store),
+			instance := materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
+				InstanceID: entityID, StorageRef: entityID, EntityID: entityID, WorkflowName: ".",
+				WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "waiting", EntityType: "test_entity", CreatedAt: createdAt,
 			})
-			initial := workflowTimerCause{
-				Kind: workflowTimerCauseInitial, EventType: "state:waiting", OccurredAt: createdAt, ToState: "waiting", ExecutionMode: executionmode.Live,
+			prepared, lifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), instance, createdAt)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if err := reconcileWorkflowTimerForTest(ctx, pc, rootRoute, entityID, "", "waiting", initial); err != nil {
-				t.Fatalf("reconcile initial entrance: %v", err)
+			if _, err := fixture.ConstructInitial(ctx, prepared, lifecycle); err != nil {
+				t.Fatalf("reconcile native initial entrance: %v", err)
 			}
-			inbound := workflowLifecycleEventForTest(t, store, ctx, ".", rootRoute.InstancePath, entityID, "work.created", createdAt)
+			if initial := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, false); len(initial) != 0 {
+				t.Fatalf("initial entrance created event-only timers: %#v", initial)
+			}
+			pc.timerScheduler = newWorkflowTimerTestScheduler(t, pc.workOwner)
+			if err := pc.workflowTimers.bindScheduler(pc.timerScheduler); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				join, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				if err := pc.StopWorkflowTimerLifecycle(join); err != nil {
+					t.Error(err)
+				}
+			})
+			inbound := nativeWorkflowJoinEventForTest(ctx, ".", rootRoute.InstancePath, entityID, "work.created", []byte(`{}`), createdAt)
 			eventID := inbound.ID()
-			if err := reconcileWorkflowTimerForTest(runtimecorrelation.WithInboundEvent(ctx, inbound), pc, rootRoute, entityID, "waiting", "waiting", workflowTimerCause{
-				Kind: workflowTimerCauseEvent, EventID: eventID, EventType: "work.created", OccurredAt: createdAt,
-				FromState: "waiting", ToState: "waiting", ExecutionMode: executionmode.Live,
-			}); err != nil {
-				t.Fatalf("reconcile event entrance: %v", err)
-			}
+			dispatchNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, inbound, "timer-owner")
 			activations := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
 			if len(activations) != 1 {
 				t.Fatalf("active event timer activations = %d, want 1", len(activations))
@@ -1461,12 +1308,11 @@ func TestWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnBothStore
 	}
 }
 
-func TestWorkflowTimerLifecycleRecurringAdvancesPersistedCoordinateOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleRecurringAdvancesPersistedCoordinateOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			bus := &recordingPipelineBus{}
-			pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, bus, true)
+			fixture, pc, ctx, bus, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, true, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
+			store := pc.workflowStore
 			firstOccurrence := activation.occurrence()
 
 			outcome, err := fireWorkflowTimerTestWakeup(ctx, pc, activation)
@@ -1500,20 +1346,22 @@ func TestWorkflowTimerLifecycleRecurringAdvancesPersistedCoordinateOnBothStores(
 				t.Fatalf("recurring event ids = (%q, %q), want distinct deterministic (%q, %q)", bus.publishedEvent(0).ID(), bus.publishedEvent(1).ID(), firstID, secondID)
 			}
 
-			restartedOwner := pipelineTestWorkOwner(t)
-			restartedScheduler := newWorkflowTimerTestScheduler(t, restartedOwner)
-			restarted := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
-				Module:         &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowTimerOwnerBundle(t, true))},
-				Persistence:    workflowPersistenceForTest(store),
-				WorkOwner:      restartedOwner,
-				TimerScheduler: restartedScheduler,
-			})
+			if err := pc.StopWorkflowTimerLifecycle(ctx); err != nil {
+				t.Fatalf("join predecessor timer lifecycle: %v", err)
+			}
+			nextFixture := fixture.ReopenExecution()
+			restarted := nextFixture.NewCoordinator(PipelineCoordinatorOptions{Module: pc.module, Persistence: nextFixture.Persistence})
+			restartedScheduler := newWorkflowTimerTestScheduler(t, restarted.workOwner)
+			if err := restarted.workflowTimers.bindScheduler(restartedScheduler); err != nil {
+				t.Fatal(err)
+			}
+			restartedCtx := runtimecorrelation.WithRunID(nextFixture.Context, activation.RunID)
 			t.Cleanup(func() {
 				stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 				defer cancel()
 				_ = restarted.StopWorkflowTimerLifecycle(stopCtx)
 			})
-			if err := restarted.RestoreWorkflowTimers(ctx); err != nil {
+			if err := restarted.RestoreWorkflowTimers(restartedCtx); err != nil {
 				t.Fatalf("RestoreWorkflowTimers: %v", err)
 			}
 			registered, _ := workflowTimerScheduledCounts(restartedScheduler)
@@ -1524,11 +1372,11 @@ func TestWorkflowTimerLifecycleRecurringAdvancesPersistedCoordinateOnBothStores(
 	}
 }
 
-func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleListsScopeWildcardsOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			_, entityID, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
+			fixture, pc, ctx, _, entityID, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now(), false, executionmode.Live, open)
+			store := pc.workflowStore
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			lookalikeTaskID := "workflowXtimer:v1:generic"
 			routing, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
@@ -1540,11 +1388,14 @@ func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
 			command := runtimegenericschedule.AdmissionCommand{
 				ScheduleKey: lookalikeTaskID, RunID: runID, EntityID: entityID, FlowInstance: "generic",
 				OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: "generic",
-				EventType: "generic.tick", Payload: semanticvalue.EmptyObject(), RoutingSource: routing,
+				EventType: "timer.task_timeout", Payload: semanticvalue.EmptyObject(), RoutingSource: routing,
 				ExecutionMode: executionmode.Live,
 				Due:           runtimegenericschedule.AbsoluteDue(activation.FireAt), TaskID: lookalikeTaskID,
 			}
-			insertGenericSchedulePersistenceFixture(t, ctx, store.testDB(), !store.isSQLite(), command)
+			committed, err := fixture.AdmitSchedule(ctx, command)
+			if err != nil || !committed.Acknowledged || committed.Result.Outcome != runtimegenericschedule.AdmissionCreated {
+				t.Fatalf("admit lookalike generic timer: %+v err=%v", committed, err)
+			}
 
 			for _, filter := range []struct {
 				name     string
@@ -1557,7 +1408,7 @@ func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
 				{name: "both_wildcards"},
 			} {
 				t.Run(filter.name, func(t *testing.T) {
-					activations, err := store.listWorkflowTimerActivations(ctx, filter.runID, filter.entityID, true)
+					activations, err := store.listPersistedWorkflowTimerActivations(ctx, filter.runID, filter.entityID, true)
 					if err != nil {
 						t.Fatalf("list workflow timer activations: %v", err)
 					}
@@ -1570,35 +1421,20 @@ func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
 	}
 }
 
-func TestWorkflowTimerWakeupRejectsForeignDeclarationSourceOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerWakeupRejectsForeignDeclarationSourceOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			pc, _, activation := seedWorkflowTimerOwnerActivationAt(
-				t, store, ctx, &recordingPipelineBus{}, false, "1h", time.Now(), false,
-			)
-			pc.workflowTimers.workOwner = pipelineTestWorkOwner(t)
+			fixture, pc, ctx, _, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now(), false, executionmode.Live, open)
 			scheduler := newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)
 			if err := pc.workflowTimers.bindScheduler(scheduler); err != nil {
 				t.Fatalf("bind workflow timer scheduler: %v", err)
 			}
-			foreignSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
-				FlowID: "foreign", FlowInstance: activation.Route.InstancePath, EntityID: activation.EntityID,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			raw, err := json.Marshal(foreignSource)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if store.isSQLite() {
-				_, err = store.testDB().ExecContext(ctx, `UPDATE timers SET routing_source = ?, fire_event = ? WHERE timer_id = ?`, raw, "foreign/timer.timeout", activation.Ref.ActivationID)
-			} else {
-				_, err = store.testDB().ExecContext(ctx, `UPDATE timers SET routing_source = $1::jsonb, fire_event = $2 WHERE timer_id = $3::uuid`, raw, "foreign/timer.timeout", activation.Ref.ActivationID)
-			}
-			if err != nil {
+			before := fixture.Transactions()
+			if err := fixture.SetTimerForeignDeclaration(ctx, activation.RunID, activation.Ref.ActivationID); err != nil {
 				t.Fatalf("install foreign workflow timer source: %v", err)
+			}
+			if after := fixture.Transactions(); after.OtherCommits != before.OtherCommits+1 || after.Active != 0 {
+				t.Fatalf("foreign timer fault escaped its original coordinator: before=%+v after=%+v", before, after)
 			}
 
 			if err := pc.workflowTimers.ReconcileWakeup(ctx, activation.Ref); err == nil || !strings.Contains(err.Error(), "does not match declaration") {
@@ -1611,13 +1447,13 @@ func TestWorkflowTimerWakeupRejectsForeignDeclarationSourceOnBothStores(t *testi
 	}
 }
 
-func TestWorkflowTimerLifecycleRollbackAndCancellationOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleRollbackAndCancellationOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
+			fixture, pc, ctx, bus, entityID, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
+			store := pc.workflowStore
 			publishFailure := errors.New("publish failed")
-			bus := &recordingPipelineBus{publishErr: publishFailure}
-			pc, entityID, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, bus, false)
+			bus.prepareFailure = publishFailure
 
 			outcome, err := fireWorkflowTimerTestWakeup(ctx, pc, activation)
 			if !errors.Is(err, publishFailure) || outcome != WorkflowTimerFireRetry {
@@ -1628,35 +1464,31 @@ func TestWorkflowTimerLifecycleRollbackAndCancellationOnBothStores(t *testing.T)
 				t.Fatalf("rolled-back activation = %#v, want unchanged active row", persisted)
 			}
 
-			bus.publishErr = nil
+			bus.prepareFailure = nil
 			transitionAt := canonicalWorkflowTimerTime(time.Now())
-			inbound := workflowLifecycleEventForTest(t, store, ctx, ".", workflowTimerRootRoute(ctx).InstancePath, entityID, "work.completed", transitionAt)
-			err = reconcileWorkflowTimerForTest(runtimecorrelation.WithInboundEvent(ctx, inbound), pc, workflowTimerRootRoute(ctx), entityID, "waiting", "done", workflowTimerCause{
-				Kind: workflowTimerCauseTransition, EventID: inbound.ID(), EventType: "work.completed",
-				OccurredAt: transitionAt, FromState: "waiting", ToState: "done", ExecutionMode: executionmode.Live,
-			})
-			if err != nil {
-				t.Fatalf("cancel timer on transition: %v", err)
-			}
+			inbound := nativeWorkflowJoinEventForTest(ctx, ".", workflowTimerRootRoute(ctx).InstancePath, entityID, "work.completed", []byte(`{}`), transitionAt)
+			dispatchNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, inbound, "timer-owner")
 			persisted = loadWorkflowTimerOwnerActivation(t, store, ctx, activation.Ref.ActivationID)
 			if persisted.Status != workflowTimerStatusCancelled {
 				t.Fatalf("cancelled activation status = %q, want cancelled", persisted.Status)
 			}
 
-			restartedOwner := pipelineTestWorkOwner(t)
-			restartedScheduler := newWorkflowTimerTestScheduler(t, restartedOwner)
-			restarted := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
-				Module:         &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowTimerOwnerBundle(t, false))},
-				Persistence:    workflowPersistenceForTest(store),
-				WorkOwner:      restartedOwner,
-				TimerScheduler: restartedScheduler,
-			})
+			if err := pc.StopWorkflowTimerLifecycle(ctx); err != nil {
+				t.Fatalf("join cancelled predecessor: %v", err)
+			}
+			nextFixture := fixture.ReopenExecution()
+			restarted := nextFixture.NewCoordinator(PipelineCoordinatorOptions{Module: pc.module, Persistence: nextFixture.Persistence})
+			restartedScheduler := newWorkflowTimerTestScheduler(t, restarted.workOwner)
+			if err := restarted.workflowTimers.bindScheduler(restartedScheduler); err != nil {
+				t.Fatal(err)
+			}
+			restartedCtx := runtimecorrelation.WithRunID(nextFixture.Context, activation.RunID)
 			t.Cleanup(func() {
 				stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 				defer cancel()
 				_ = restarted.StopWorkflowTimerLifecycle(stopCtx)
 			})
-			if err := restarted.RestoreWorkflowTimers(ctx); err != nil {
+			if err := restarted.RestoreWorkflowTimers(restartedCtx); err != nil {
 				t.Fatalf("restore after cancel: %v", err)
 			}
 			registered, _ := workflowTimerScheduledCounts(restartedScheduler)
@@ -1667,7 +1499,7 @@ func TestWorkflowTimerLifecycleRollbackAndCancellationOnBothStores(t *testing.T)
 	}
 }
 
-func TestWorkflowTimerLifecycleCommitOrdersConvergeOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleCommitOrdersConvergeOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	tests := []struct {
 		name          string
 		steps         []string
@@ -1684,9 +1516,8 @@ func TestWorkflowTimerLifecycleCommitOrdersConvergeOnBothStores(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		for _, test := range tests {
 			t.Run(tc.name+"/"+test.name, func(t *testing.T) {
-				store, ctx := tc.open(t)
-				bus := &recordingPipelineBus{}
-				pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, bus, false)
+				fixture, pc, ctx, bus, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
+				store := pc.workflowStore
 				unrelatedApplied := false
 				for _, step := range test.steps {
 					switch step {
@@ -1702,10 +1533,7 @@ func TestWorkflowTimerLifecycleCommitOrdersConvergeOnBothStores(t *testing.T) {
 							t.Fatalf("fire outcome = %q, want committed", outcome)
 						}
 					case "cancel":
-						if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-							_, _, err := store.cancelWorkflowTimerActivation(txctx, activation.Ref)
-							return err
-						}); err != nil {
+						if err := cancelNativeWorkflowTimerForTest(t, fixture, ctx, pc, activation); err != nil {
 							t.Fatalf("cancel: %v", err)
 						}
 					case "unrelated":
@@ -1739,12 +1567,11 @@ func TestWorkflowTimerLifecycleCommitOrdersConvergeOnBothStores(t *testing.T) {
 	}
 }
 
-func TestWorkflowTimerLifecycleRejectsMissingAndMismatchedCallbacksOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleRejectsMissingAndMismatchedCallbacksOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			bus := &recordingPipelineBus{}
-			pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, bus, false)
+			_, pc, ctx, bus, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
+			store := pc.workflowStore
 
 			missingRef := activation.Ref
 			missingRef.ActivationID = uuid.NewString()
@@ -1780,28 +1607,17 @@ func TestWorkflowTimerLifecycleRejectsMissingAndMismatchedCallbacksOnBothStores(
 	}
 }
 
-func TestWorkflowTimerLifecycleIsolatesStaleActivationAcrossCancelAndReentryOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleIsolatesStaleActivationAcrossCancelAndReentryOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			bus := &recordingPipelineBus{}
-			pc, entityID, first := seedWorkflowTimerOwnerActivation(t, store, ctx, bus, false)
+			fixture, pc, ctx, bus, entityID, first := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
+			store := pc.workflowStore
 			cancelAt := canonicalWorkflowTimerTime(first.CreatedAt.Add(time.Minute))
-			cancelEvent := workflowLifecycleEventForTest(t, store, ctx, ".", workflowTimerRootRoute(ctx).InstancePath, entityID, "work.completed", cancelAt)
-			if err := reconcileWorkflowTimerForTest(runtimecorrelation.WithInboundEvent(ctx, cancelEvent), pc, workflowTimerRootRoute(ctx), entityID, "waiting", "done", workflowTimerCause{
-				Kind: workflowTimerCauseTransition, EventID: cancelEvent.ID(), EventType: "work.completed",
-				OccurredAt: cancelAt, FromState: "waiting", ToState: "done", ExecutionMode: executionmode.Live,
-			}); err != nil {
-				t.Fatalf("cancel first activation: %v", err)
-			}
+			cancelEvent := nativeWorkflowJoinEventForTest(ctx, ".", workflowTimerRootRoute(ctx).InstancePath, entityID, "work.completed", []byte(`{}`), cancelAt)
+			dispatchNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, cancelEvent, "timer-owner")
 			reenterAt := canonicalWorkflowTimerTime(cancelAt.Add(time.Minute))
-			reenterEvent := workflowLifecycleEventForTest(t, store, ctx, ".", workflowTimerRootRoute(ctx).InstancePath, entityID, "work.reopened", reenterAt)
-			if err := reconcileWorkflowTimerForTest(runtimecorrelation.WithInboundEvent(ctx, reenterEvent), pc, workflowTimerRootRoute(ctx), entityID, "done", "waiting", workflowTimerCause{
-				Kind: workflowTimerCauseTransition, EventID: reenterEvent.ID(), EventType: "work.reopened",
-				OccurredAt: reenterAt, FromState: "done", ToState: "waiting", ExecutionMode: executionmode.Live,
-			}); err != nil {
-				t.Fatalf("activate replacement timer: %v", err)
-			}
+			reenterEvent := nativeWorkflowJoinEventForTest(ctx, ".", workflowTimerRootRoute(ctx).InstancePath, entityID, "work.reopened", []byte(`{}`), reenterAt)
+			dispatchNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, reenterEvent, "timer-owner")
 			active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
 			if len(active) != 1 || active[0].Ref.ActivationID == first.Ref.ActivationID {
 				t.Fatalf("replacement activation = %#v, want one distinct active row", active)
@@ -1823,11 +1639,13 @@ func TestWorkflowTimerLifecycleIsolatesStaleActivationAcrossCancelAndReentryOnBo
 	}
 }
 
-func TestWorkflowTimerWakeupReconciliationSerializesCancellationOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerWakeupReconciliationSerializesCancellationOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			pc, _, activation := seedWorkflowTimerOwnerActivationWithDelay(t, store, ctx, &recordingPipelineBus{}, false, "1h")
+			fixture, pc, ctx, _, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now(), true, executionmode.Live, open)
+			store := pc.workflowStore
+			attempt, _, settle := fixture.AdmitAttachment(ctx, activation.RunID, activation.Route.InstancePath)
+			defer settle()
 			loaded := make(chan struct{})
 			release := make(chan struct{})
 			defer func() {
@@ -1857,7 +1675,8 @@ func TestWorkflowTimerWakeupReconciliationSerializesCancellationOnBothStores(t *
 			go func() {
 				committed, err := store.timerActivations.CommitWorkflowTimerReconciliation(ctx, WorkflowTimerReconciliationCommand{
 					RunID: activation.RunID, Route: activation.Route, EntityID: activation.EntityID,
-					Plan: WorkflowLifecycleMutationPlan{Timers: []WorkflowTimerMutation{{Kind: WorkflowTimerMutationCancel, Activation: activation}}},
+					ActivationAttempt: &attempt,
+					Plan:              WorkflowLifecycleMutationPlan{Timers: []WorkflowTimerMutation{{Kind: WorkflowTimerMutationCancel, Activation: activation}}},
 				})
 				if err != nil {
 					cancelErr <- err
@@ -1883,11 +1702,10 @@ func TestWorkflowTimerWakeupReconciliationSerializesCancellationOnBothStores(t *
 	}
 }
 
-func TestWorkflowTimerReconcileWithRecoveryQueuesAndConvergesOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerReconcileWithRecoveryQueuesAndConvergesOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			pc, _, activation := seedWorkflowTimerOwnerActivationWithDelay(t, store, ctx, &recordingPipelineBus{}, false, "1h")
+			_, pc, ctx, _, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now(), true, executionmode.Live, open)
 			scheduler := pc.workflowTimers.scheduler
 			if err := scheduler.cancelWorkflowTimerWakeup(activation.Ref); err != nil {
 				t.Fatal(err)
@@ -1917,30 +1735,32 @@ func TestWorkflowTimerReconcileWithRecoveryQueuesAndConvergesOnBothStores(t *tes
 	}
 }
 
-func TestWorkflowTimerWakeupReconciliationRetiresTerminalAndMissingRowsOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerWakeupReconciliationRetiresTerminalAndMissingRowsOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		for _, state := range []string{"terminal", "missing"} {
 			t.Run(tc.name+"/"+state, func(t *testing.T) {
-				store, ctx := tc.open(t)
-				pc, _, activation := seedWorkflowTimerOwnerActivationWithDelay(t, store, ctx, &recordingPipelineBus{}, false, "1h")
+				fixture, pc, ctx, _, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now(), true, executionmode.Live, open)
 				switch state {
 				case "terminal":
-					if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-						_, changed, err := store.cancelWorkflowTimerActivation(txctx, activation.Ref)
-						if err == nil && !changed {
-							return errors.New("workflow timer cancellation did not change the active row")
-						}
-						return err
-					}); err != nil {
+					attempt, _, release := fixture.AdmitAttachment(ctx, activation.RunID, activation.Route.InstancePath)
+					defer release()
+					committed, err := pc.workflowStore.timerActivations.CommitWorkflowTimerReconciliation(ctx, WorkflowTimerReconciliationCommand{
+						RunID: activation.RunID, Route: activation.Route, EntityID: activation.EntityID, ActivationAttempt: &attempt,
+						Plan: WorkflowLifecycleMutationPlan{Timers: []WorkflowTimerMutation{{Kind: WorkflowTimerMutationCancel, Activation: activation}}},
+					})
+					if err != nil {
 						t.Fatalf("terminalize workflow timer: %v", err)
 					}
-				case "missing":
-					placeholder := "$1"
-					if store.isSQLite() {
-						placeholder = "?"
+					if len(committed.Cancellations) != 1 || committed.Cancellations[0] != activation.Ref {
+						t.Fatalf("workflow timer cancellation evidence = %#v", committed.Cancellations)
 					}
-					if _, err := store.testDB().ExecContext(ctx, "DELETE FROM timers WHERE timer_id = "+placeholder, activation.Ref.ActivationID); err != nil {
+				case "missing":
+					before := fixture.Transactions()
+					if err := fixture.RemoveTimer(ctx, activation.RunID, activation.Ref.ActivationID); err != nil {
 						t.Fatalf("delete workflow timer row: %v", err)
+					}
+					if after := fixture.Transactions(); after.OtherCommits != before.OtherCommits+1 || after.Active != 0 {
+						t.Fatalf("missing timer fault escaped its original coordinator: before=%+v after=%+v", before, after)
 					}
 				default:
 					t.Fatalf("unsupported state %q", state)
@@ -1955,12 +1775,11 @@ func TestWorkflowTimerWakeupReconciliationRetiresTerminalAndMissingRowsOnBothSto
 	}
 }
 
-func TestWorkflowTimerLifecycleStopFencesRestoreAndRecoveryOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleStopFencesRestoreAndRecoveryOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		for _, operation := range []string{"restore", "recovery"} {
 			t.Run(tc.name+"/"+operation, func(t *testing.T) {
-				store, ctx := tc.open(t)
-				pc, _, activation := seedWorkflowTimerOwnerActivationWithDelay(t, store, ctx, &recordingPipelineBus{}, false, "1h")
+				_, pc, ctx, _, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now(), true, executionmode.Live, open)
 				if err := pc.workflowTimers.retireWakeup(activation.Ref); err != nil {
 					t.Fatalf("retire initial wakeup: %v", err)
 				}
@@ -2032,17 +1851,10 @@ func TestWorkflowTimerLifecycleStopFencesRestoreAndRecoveryOnBothStores(t *testi
 	}
 }
 
-func TestWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoins(t *testing.T) {
+func VerifyNativeWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoinsForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name+"/coalesces", func(t *testing.T) {
-			store, ctx := tc.open(t)
-			pc, _, activation := seedWorkflowTimerOwnerActivationAt(
-				t, store, ctx, &recordingPipelineBus{}, false, "1h", time.Now(), false,
-			)
-			pc.workflowTimers.workOwner = pipelineTestWorkOwner(t)
-			if err := pc.workflowTimers.bindScheduler(newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)); err != nil {
-				t.Fatalf("bind workflow timer scheduler: %v", err)
-			}
+			_, pc, ctx, _, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now(), true, executionmode.Live, open)
 			if err := pc.workflowTimers.retireWakeup(activation.Ref); err != nil {
 				t.Fatalf("retire initial workflow timer wakeup: %v", err)
 			}
@@ -2050,11 +1862,28 @@ func TestWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoins(t *testing.T) {
 				active, draining := workflowTimerScheduledCounts(pc.workflowTimers.scheduler)
 				return active == 0 && draining == 0
 			}, "initial typed wakeup cancellation")
-
+			loaded, release := make(chan struct{}), make(chan struct{})
+			defer func() {
+				select {
+				case <-release:
+				default:
+					close(release)
+				}
+			}()
+			var once sync.Once
+			pc.workflowTimers.testAfterWakeupLoad = func() {
+				once.Do(func() { close(loaded) })
+				<-release
+			}
 			for attempt := 0; attempt < 3; attempt++ {
 				if !pc.workflowTimers.startWakeupRecovery(activation.Ref) {
 					t.Fatalf("start coalesced recovery attempt %d", attempt+1)
 				}
+			}
+			select {
+			case <-loaded:
+			case <-time.After(time.Second):
+				t.Fatal("coalesced native recovery did not reach its load cut")
 			}
 			pc.workflowTimers.recoveryMu.Lock()
 			recovering := len(pc.workflowTimers.recovering)
@@ -2062,6 +1891,7 @@ func TestWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoins(t *testing.T) {
 			if recovering != 1 {
 				t.Fatalf("coalesced recoveries = %d, want 1", recovering)
 			}
+			close(release)
 			waitForWorkflowTimerCondition(t, 5*time.Second, func() bool {
 				active, _ := workflowTimerScheduledCounts(pc.workflowTimers.scheduler)
 				return active == 1
@@ -2081,14 +1911,7 @@ func TestWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoins(t *testing.T) {
 		})
 
 		t.Run(tc.name+"/shutdown_cancels_pending", func(t *testing.T) {
-			store, ctx := tc.open(t)
-			pc, _, activation := seedWorkflowTimerOwnerActivationAt(
-				t, store, ctx, &recordingPipelineBus{}, false, "1h", time.Now(), false,
-			)
-			pc.workflowTimers.workOwner = pipelineTestWorkOwner(t)
-			if err := pc.workflowTimers.bindScheduler(newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)); err != nil {
-				t.Fatalf("bind workflow timer scheduler: %v", err)
-			}
+			_, pc, ctx, _, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now(), true, executionmode.Live, open)
 			if err := pc.workflowTimers.retireWakeup(activation.Ref); err != nil {
 				t.Fatalf("retire initial workflow timer wakeup: %v", err)
 			}
@@ -2111,10 +1934,11 @@ func TestWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoins(t *testing.T) {
 	}
 }
 
-func TestWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
+			fixture, pc, ctx, _, _, _ := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now(), false, executionmode.Live, open)
+			store := pc.workflowStore
 			standingCtx := ctx
 			flowPath := "standing-workflow-timer"
 			// This component test owns timer storage and restoration, not standing
@@ -2124,15 +1948,15 @@ func TestWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothSto
 				Generation: 1, ExactCurrent: true, DeclarationPresent: true, BindingEnabled: true,
 				EffectiveState: "active", OperatorOverride: "none", RunState: "running",
 			}}
-			pc, _, _ := seedWorkflowTimerOwnerActivationAt(
-				t, store, standingCtx, &recordingPipelineBus{}, false, "1h", time.Now(), false,
-			)
 			scheduler := newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)
 			if err := pc.workflowTimers.bindScheduler(scheduler); err != nil {
 				t.Fatalf("bind workflow timer scheduler: %v", err)
 			}
 
-			globalCtx := testAuthorActivityContext(t, context.Background())
+			globalCtx := fixture.Context
+			if runtimecorrelation.RunIDFromContext(globalCtx) != "" {
+				t.Fatal("global timer restore context unexpectedly carries a run")
+			}
 			if err := pc.RestoreWorkflowTimers(globalCtx); err != nil {
 				t.Fatalf("global restore workflow timers: %v", err)
 			}
@@ -2162,49 +1986,41 @@ func (c workflowTimerStandingReadControl) StandingRunRestartDisposition(_ contex
 	return runtimerunlifecycle.ClassifyStandingRestart(c.fact)
 }
 
-func TestWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			owner := pipelineTestWorkOwner(t)
-			scheduler := newWorkflowTimerTestScheduler(t, owner)
-			published := make(chan events.Event, 1)
-			bus := &recordingPipelineBus{
-				publishInMutationHook: func(_ context.Context, event events.Event) error {
-					published <- event
-					return nil
-				},
+			bundle := workflowTimerOwnerBundleWithDelay(t, false, "1ns")
+			fixture, pc, ctx := nativePilotPipelineForTest(t, tc.name, bundle, open)
+			store := pc.workflowStore
+			bus := observeNativePipelineDeliveryBusForTest(t, pc)
+			pc.workflowTimers.publication = bus
+			pc.workflowTimers.dispatcher = bus.EngineDispatcher()
+			scheduler := newWorkflowTimerTestScheduler(t, pc.workOwner)
+			if err := pc.workflowTimers.bindScheduler(scheduler); err != nil {
+				t.Fatal(err)
 			}
-			pc := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
-				Module: &pipelineFixtureWorkflowModule{
-					source: semanticview.Wrap(workflowTimerOwnerBundleWithDelay(t, false, "1ns")),
-				},
-				Persistence:    workflowPersistenceForTest(store),
-				WorkOwner:      owner,
-				TimerScheduler: scheduler,
+			t.Cleanup(func() {
+				join, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				if err := pc.StopWorkflowTimerLifecycle(join); err != nil {
+					t.Error(err)
+				}
 			})
-			entityID := uuid.NewString()
+			entityID := runtimecorrelation.RunIDFromContext(ctx)
 			rootRoute := workflowTimerRootRoute(ctx)
 			createdAt := canonicalWorkflowTimerTime(time.Now().Add(-time.Second))
-			// Seed only the unit fixture; selected-store constructor proof lives in runtimepersistence.
-			preparedInstance, preparedLifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
-				WorkflowName:    "workflow-timer-owner-test",
-				WorkflowVersion: "1.0.0", CurrentState: "waiting",
-				EntityType: "test_entity",
-			}), createdAt)
+			instance := materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
+				InstanceID: entityID, StorageRef: entityID, EntityID: entityID, WorkflowName: ".",
+				WorkflowVersion: bundle.WorkflowVersion(), CurrentState: "waiting",
+				EntityType: "test_entity", CreatedAt: createdAt,
+			})
+			preparedInstance, preparedLifecycle, err := pc.PrepareInitialEntryLifecycle(ctx, testRunScopedWorkflowRoute(ctx, rootRoute), instance, createdAt)
 			if err != nil {
 				t.Fatalf("prepare fixture lifecycle: %v", err)
 			}
-			if err := store.upsert(ctx, preparedInstance); err != nil {
-				t.Fatalf("seed fixture state: %v", err)
-			}
-			var committedLifecycle CommittedWorkflowLifecycleMutation
-			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-				var commitErr error
-				committedLifecycle, commitErr = commitPipelineTestWorkflowLifecycle(txctx, store, preparedLifecycle)
-				return commitErr
-			}); err != nil {
-				t.Fatalf("seed fixture lifecycle: %v", err)
+			committedLifecycle, err := fixture.ConstructInitial(ctx, preparedInstance, preparedLifecycle)
+			if err != nil {
+				t.Fatalf("construct native initial lifecycle: %v", err)
 			}
 			if err := pc.FinalizeInitialEntryLifecycle(ctx, committedLifecycle); err != nil {
 				t.Fatalf("finalize fixture lifecycle: %v", err)
@@ -2216,52 +2032,31 @@ func TestWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStores(t *te
 			if scheduled, draining := workflowTimerScheduledCounts(scheduler); scheduled != 0 || draining != 0 {
 				t.Fatalf("pre-arm wakeups active=%d draining=%d, want 0", scheduled, draining)
 			}
-			select {
-			case event := <-published:
-				t.Fatalf("initial timer published before explicit arm: %s", event.ID())
-			default:
+			if bus.publishedCount() != 0 {
+				t.Fatalf("initial timer published before explicit arm: %s", bus.publishedEvent(0).ID())
 			}
 
 			if err := pc.ArmInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
 				t.Fatalf("ArmInitialEntryTimers: %v", err)
 			}
-			var event events.Event
-			select {
-			case event = <-published:
-			case <-time.After(time.Second):
-				t.Fatal("timed out waiting for explicitly armed initial timer")
-			}
+			waitForWorkflowTimerCondition(t, time.Second, func() bool { return bus.publishedCount() > 0 }, "explicitly armed initial timer")
+			event := bus.publishedEvent(0)
 			if event.RunID() != runtimecorrelation.RunIDFromContext(ctx) || event.EntityID() != entityID {
 				t.Fatalf("published timer scope run=%q entity=%q, want run=%q entity=%q", event.RunID(), event.EntityID(), runtimecorrelation.RunIDFromContext(ctx), entityID)
 			}
 			waitForWorkflowTimerPersistedStatus(t, store, ctx, active[0].Ref.ActivationID, workflowTimerStatusFired)
-			select {
-			case duplicate := <-published:
-				t.Fatalf("initial timer published more than once: %s", duplicate.ID())
-			default:
+			if bus.publishedCount() != 1 || fixture.EventIDCount(ctx, event.ID()) != 1 {
+				t.Fatalf("initial timer published more than once: %s", event.ID())
 			}
 		})
 	}
 }
 
-func TestWorkflowTimerInitialWakeupRetirementJoinsAndRearmsOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerInitialWakeupRetirementJoinsAndRearmsOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			pc, _, activation := seedWorkflowTimerOwnerActivationAt(
-				t,
-				store,
-				ctx,
-				&recordingPipelineBus{},
-				false,
-				"1h",
-				time.Now(),
-				false,
-			)
-			pc.workflowTimers.workOwner = pipelineTestWorkOwner(t)
-			if err := pc.workflowTimers.bindScheduler(newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)); err != nil {
-				t.Fatalf("bind workflow timer scheduler: %v", err)
-			}
+			_, pc, ctx, _, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now(), true, executionmode.Live, open)
+			store := pc.workflowStore
 			if err := pc.ArmInitialEntryTimers(ctx, testRunScopedWorkflowRoute(ctx, workflowTimerRootRoute(ctx))); err != nil {
 				t.Fatalf("arm initial workflow timer: %v", err)
 			}
@@ -2313,7 +2108,7 @@ func waitForWorkflowTimerPersistedStatus(
 	deadline := time.Now().Add(time.Second)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		activation, found, err := store.loadWorkflowTimerActivation(ctx, activationID, false)
+		activation, found, err := store.loadPersistedWorkflowTimerActivation(ctx, activationID)
 		if err == nil && found && activation.Status == want {
 			return
 		}
@@ -2337,20 +2132,23 @@ func waitForWorkflowTimerSchedulerEmpty(t *testing.T, scheduler *Scheduler) {
 	t.Fatalf("workflow timer scheduler active=%d draining=%d, want empty", active, draining)
 }
 
-func TestWorkflowTimerLifecycleSchedulerRetryPreservesOccurrenceOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleSchedulerRetryPreservesOccurrenceOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
+			fixture, pc, ctx, bus, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1ms", time.Now().Add(-time.Hour), false, executionmode.Live, open)
+			store := pc.workflowStore
 			publishFailure := errors.New("transient publish failure")
-			bus := &failOnceWorkflowTimerBus{recordingPipelineBus: &recordingPipelineBus{}, err: publishFailure}
-			bus.failures.Store(1)
-			pc, _, activation := seedWorkflowTimerOwnerActivationWithDelay(t, store, ctx, bus, false, "1ms")
-			pc.workflowTimers.workOwner = pipelineTestWorkOwner(t)
-			t.Cleanup(func() {
-				stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-				defer cancel()
-				_ = pc.StopWorkflowTimerLifecycle(stopCtx)
-			})
+			var failures atomic.Int32
+			failures.Store(1)
+			bus.beforePrepare = func(context.Context) error {
+				if failures.CompareAndSwap(1, 0) {
+					return publishFailure
+				}
+				return nil
+			}
+			if err := pc.workflowTimers.bindScheduler(newWorkflowTimerTestScheduler(t, pc.workOwner)); err != nil {
+				t.Fatal(err)
+			}
 			if err := pc.workflowTimers.ReconcileWakeup(ctx, activation.Ref); err != nil {
 				t.Fatalf("register workflow timer wakeup: %v", err)
 			}
@@ -2372,19 +2170,22 @@ func TestWorkflowTimerLifecycleSchedulerRetryPreservesOccurrenceOnBothStores(t *
 			if persisted.Status != workflowTimerStatusFired {
 				t.Fatalf("retried activation status = %q, want fired", persisted.Status)
 			}
+			if failures.Load() != 0 || fixture.EventIDCount(ctx, wantEventID) != 1 {
+				t.Fatal("retry did not consume the refusal and persist exactly one occurrence")
+			}
 		})
 	}
 }
 
-func TestWorkflowTimerLifecycleWakeupDeadlineJoinsShutdownOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleWakeupDeadlineJoinsShutdownOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
+			fixture, pc, ctx, bus, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1ms", time.Now().Add(-time.Hour), false, executionmode.Live, open)
+			store := pc.workflowStore
 			publishStarted := make(chan struct{})
 			publishSettled := make(chan struct{})
 			var publishOnce sync.Once
-			bus := &recordingPipelineBus{}
-			bus.publishInMutationHook = func(callbackCtx context.Context, _ events.Event) error {
+			bus.beforePrepare = func(callbackCtx context.Context) error {
 				publishOnce.Do(func() { close(publishStarted) })
 				if _, ok := callbackCtx.Deadline(); !ok {
 					return errors.New("workflow timer publication context has no deadline")
@@ -2393,11 +2194,7 @@ func TestWorkflowTimerLifecycleWakeupDeadlineJoinsShutdownOnBothStores(t *testin
 				close(publishSettled)
 				return callbackCtx.Err()
 			}
-			pc, _, activation := seedWorkflowTimerOwnerActivationAt(
-				t, store, ctx, bus, false, "1ms", time.Now().Add(-time.Hour), false,
-			)
 			pc.workflowTimers.wakeupCallbackTimeout = 50 * time.Millisecond
-			pc.workflowTimers.workOwner = pipelineTestWorkOwner(t)
 			if err := pc.workflowTimers.bindScheduler(newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)); err != nil {
 				t.Fatalf("bind workflow timer scheduler: %v", err)
 			}
@@ -2425,51 +2222,44 @@ func TestWorkflowTimerLifecycleWakeupDeadlineJoinsShutdownOnBothStores(t *testin
 			if persisted.Status != workflowTimerStatusActive {
 				t.Fatalf("timed-out workflow timer status = %q, want active for durable recovery", persisted.Status)
 			}
+			if fixture.EventIDCount(ctx, timeridentity.WorkflowTimerOccurrenceEventID(activation.occurrence())) != 0 {
+				t.Fatal("timed-out preparation persisted an occurrence publication")
+			}
 		})
 	}
 }
 
-type failOnceWorkflowTimerBus struct {
-	*recordingPipelineBus
-	failures atomic.Int32
-	err      error
-}
-
-func (b *failOnceWorkflowTimerBus) PrepareEnginePublications(ctx context.Context, intents []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
-	if b.failures.CompareAndSwap(1, 0) {
-		return nil, b.err
-	}
-	return b.recordingPipelineBus.PrepareEnginePublications(ctx, intents)
-}
-
-func (b *failOnceWorkflowTimerBus) PublishInMutation(ctx context.Context, evt events.Event) error {
-	if b.failures.CompareAndSwap(1, 0) {
-		return b.err
-	}
-	return b.recordingPipelineBus.PublishInMutation(ctx, evt)
-}
-
-func TestWorkflowTimerLifecyclePostgresFireDoesNotJoinOuterTestMutation(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecyclePostgresFireDoesNotJoinOuterTestMutationForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		if tc.name != "postgres" {
 			continue
 		}
-		store, ctx := tc.open(t)
-		bus := &recordingPipelineBus{}
-		pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, bus, false)
-
-		tx, err := store.testDB().BeginTx(ctx, nil)
+		fixture, pc, ctx, _, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
+		store := pc.workflowStore
+		rollback, err := fixture.HoldUnstampedAdmissionTransaction(ctx, activation.RunID)
 		if err != nil {
-			t.Fatalf("BeginTx: %v", err)
+			t.Fatalf("hold original-coordinator outer mutation: %v", err)
 		}
-		t.Cleanup(func() { _ = tx.Rollback() })
-		txctx := WithPipelineSQLTxContext(ctx, tx)
-		outcome, err := fireWorkflowTimerTestWakeup(txctx, pc, activation)
+		t.Cleanup(func() {
+			if err := rollback(); err != nil {
+				t.Error(err)
+			}
+		})
+		if fixture.Transactions().Active != 1 {
+			t.Fatal("outer mutation did not reach the original coordinator")
+		}
+		outcome, err := fireWorkflowTimerTestWakeup(ctx, pc, activation)
 		if err != nil || outcome != WorkflowTimerFireCommitted {
 			t.Fatalf("FireWorkflowTimer outcome=%q err=%v, want independently committed named operation", outcome, err)
 		}
-		if err := tx.Rollback(); err != nil {
+		if fixture.Transactions().Active != 1 {
+			t.Fatal("independent fire settled or retained the outer transaction")
+		}
+		if err := rollback(); err != nil {
 			t.Fatalf("Rollback: %v", err)
+		}
+		if fixture.Transactions().Active != 0 {
+			t.Fatal("outer rollback did not join its original transaction")
 		}
 		persisted := loadWorkflowTimerOwnerActivation(t, store, ctx, activation.Ref.ActivationID)
 		if persisted.Status != workflowTimerStatusFired {
@@ -2478,12 +2268,11 @@ func TestWorkflowTimerLifecyclePostgresFireDoesNotJoinOuterTestMutation(t *testi
 	}
 }
 
-func TestWorkflowTimerLifecycleWakeupPublishesItsDurableIntentOnBothStores(t *testing.T) {
+func VerifyNativeWorkflowTimerLifecycleWakeupPublishesItsDurableIntentOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			bus := &recordingPipelineBus{}
-			pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, bus, false)
+			fixture, pc, ctx, bus, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
+			store := pc.workflowStore
 			wakeup, err := newWorkflowTimerWakeup(activation)
 			if err != nil {
 				t.Fatalf("new workflow timer wakeup: %v", err)
@@ -2492,87 +2281,16 @@ func TestWorkflowTimerLifecycleWakeupPublishesItsDurableIntentOnBothStores(t *te
 			if got := bus.publishedCount(); got != 1 {
 				t.Fatalf("durable timer publications = %d, want 1", got)
 			}
+			published := bus.publishedEvent(0)
+			if fixture.EventIDCount(ctx, published.ID()) != 1 {
+				t.Fatal("timer handoff has no exact original-store publication")
+			}
 			persisted := loadWorkflowTimerOwnerActivation(t, store, ctx, activation.Ref.ActivationID)
 			if persisted.Status != workflowTimerStatusFired {
 				t.Fatalf("durable timer status = %q, want fired", persisted.Status)
 			}
 		})
 	}
-}
-
-func seedWorkflowTimerOwnerActivation(
-	t *testing.T,
-	store *workflowInstanceStore,
-	ctx context.Context,
-	bus workflowTimerOwnerTestBus,
-	recurring bool,
-) (*PipelineCoordinator, string, WorkflowTimerActivation) {
-	t.Helper()
-	return seedWorkflowTimerOwnerActivationAt(t, store, ctx, bus, recurring, "1h", time.Now().Add(-2*time.Hour), false)
-}
-
-func seedWorkflowTimerOwnerActivationWithDelay(
-	t *testing.T,
-	store *workflowInstanceStore,
-	ctx context.Context,
-	bus workflowTimerOwnerTestBus,
-	recurring bool,
-	delay string,
-) (*PipelineCoordinator, string, WorkflowTimerActivation) {
-	t.Helper()
-	return seedWorkflowTimerOwnerActivationAt(t, store, ctx, bus, recurring, delay, time.Now(), true)
-}
-
-func seedWorkflowTimerOwnerActivationAt(
-	t *testing.T,
-	store *workflowInstanceStore,
-	ctx context.Context,
-	bus workflowTimerOwnerTestBus,
-	recurring bool,
-	delay string,
-	created time.Time,
-	register bool,
-	executionModes ...executionmode.Mode,
-) (*PipelineCoordinator, string, WorkflowTimerActivation) {
-	t.Helper()
-	executionMode := executionmode.Live
-	if len(executionModes) > 0 {
-		executionMode = executionModes[0]
-	}
-	entityID := uuid.NewString()
-	createdAt := canonicalWorkflowTimerTime(created)
-	if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, workflowTimerRootRoute(ctx).InstancePath, WorkflowInstance{
-		WorkflowName:    "workflow-timer-owner-test",
-		WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
-		CreatedAt:  createdAt,
-		EntityType: "test_entity",
-	})); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
-	owner := pipelineTestWorkOwner(t)
-	var scheduler *Scheduler
-	if register {
-		scheduler = newWorkflowTimerTestScheduler(t, owner)
-	}
-	pc := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
-		Module:         &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowTimerOwnerBundleWithDelay(t, recurring, delay))},
-		Persistence:    workflowPersistenceForTest(store),
-		WorkOwner:      owner,
-		TimerScheduler: scheduler,
-	})
-	if err := reconcileWorkflowTimerForTest(ctx, pc, workflowTimerRootRoute(ctx), entityID, "", "waiting", workflowTimerCause{
-		Kind: workflowTimerCauseInitial, OccurredAt: createdAt, ToState: "waiting", ExecutionMode: executionMode,
-	}); err != nil {
-		t.Fatalf("activate workflow timer: %v", err)
-	}
-	activations, err := store.listWorkflowTimerActivations(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID, true)
-	if err != nil {
-		t.Fatalf("list workflow timer activations: %v", err)
-	}
-	if len(activations) != 1 {
-		t.Fatalf("active workflow timers = %d, want 1: %#v", len(activations), activations)
-	}
-	return pc, entityID, activations[0]
 }
 
 func workflowTimerRootRoute(ctx context.Context) runtimeflowidentity.Route {
@@ -2639,7 +2357,7 @@ func WorkflowTimerScheduledCountsForTest(scheduler *Scheduler) (active, draining
 
 func loadWorkflowTimerOwnerActivation(t *testing.T, store *workflowInstanceStore, ctx context.Context, activationID string) WorkflowTimerActivation {
 	t.Helper()
-	activation, found, err := store.loadWorkflowTimerActivation(ctx, activationID, false)
+	activation, found, err := store.loadPersistedWorkflowTimerActivation(ctx, activationID)
 	if err != nil || !found {
 		t.Fatalf("load workflow timer activation found=%v err=%v", found, err)
 	}
@@ -2648,31 +2366,11 @@ func loadWorkflowTimerOwnerActivation(t *testing.T, store *workflowInstanceStore
 
 func listWorkflowTimerOwnerActivations(t *testing.T, store *workflowInstanceStore, ctx context.Context, entityID string, activeOnly bool) []WorkflowTimerActivation {
 	t.Helper()
-	activations, err := store.listWorkflowTimerActivations(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID, activeOnly)
+	activations, err := store.listPersistedWorkflowTimerActivations(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID, activeOnly)
 	if err != nil {
 		t.Fatalf("list workflow timer activations: %v", err)
 	}
 	return activations
-}
-
-func persistWorkflowTimerEvent(
-	t *testing.T,
-	store *workflowInstanceStore,
-	ctx context.Context,
-	eventID, eventType, runID, entityID string,
-	payload []byte,
-	createdAt time.Time,
-) {
-	t.Helper()
-	dialect := authoractivityfixture.DialectPostgres
-	if store.isSQLite() {
-		dialect = authoractivityfixture.DialectSQLite
-	}
-	event := eventtest.RunCreatingRootIngress(
-		eventID, events.EventType(eventType), "operator", "", payload, 0, runID, "",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), createdAt.UTC(),
-	)
-	seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, event)
 }
 
 func workflowTimerOwnerBundle(t *testing.T, recurring bool) *runtimecontracts.WorkflowContractBundle {
@@ -2753,8 +2451,8 @@ func workflowTimerInitialAndEventBundle(t *testing.T) *runtimecontracts.Workflow
 	return loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":   "name: workflow-timer-initial-event\nstages:\n  waiting:\n    timers:\n      - {id: waiting.initial, after: 2h, emit: timer.initial}\n",
 		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "timer.initial:\ntimer.event:\n",
-		"nodes.yaml":    "timer-owner:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event, event: timer.event, start_on: 'event:timer.arm', delay: 2h}\n",
+		"events.yaml":   "timer.arm:\ntimer.initial:\ntimer.event:\n",
+		"nodes.yaml":    "timer-owner:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event, event: timer.event, start_on: 'event:timer.arm', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n",
 	})
 }
 
@@ -2771,7 +2469,7 @@ func workflowTimerFlowScopedBundle(t *testing.T) *runtimecontracts.WorkflowContr
 		files[path+"schema.yaml"] = fmt.Sprintf("name: %s\nstages:\n  waiting:\n    timers:\n      - {id: initial.local, after: 2h, emit: %s.initial}\n", name, prefix)
 		files[path+"entities.yaml"] = "test_entity: {}\n"
 		files[path+"events.yaml"] = fmt.Sprintf("timer.arm:\n%s.initial:\n%s.event:\n", prefix, prefix)
-		files[path+"nodes.yaml"] = fmt.Sprintf("timer-owner:\n  execution_type: system_node\n  timers:\n    - {id: event.local, event: %s.event, start_on: 'event:%s', delay: 2h}\n", prefix, armEvent)
+		files[path+"nodes.yaml"] = fmt.Sprintf("timer-owner:\n  execution_type: system_node\n  timers:\n    - {id: event.local, event: %s.event, start_on: 'event:%s', delay: 2h}\n  event_handlers:\n    timer.arm: {}\n", prefix, armEvent)
 	}
 	return loadWorkflowTempBundle(t, files)
 }
@@ -2781,8 +2479,8 @@ func workflowTimerEventOnlyStateTriggerBundle(t *testing.T) *runtimecontracts.Wo
 	return loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting:\n    timers:\n      - {id: waiting.state_entry, after: 1h, emit: timer.state_entry}\n",
 		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "timer.arm:\ntimer.state_entry:\ntimer.event_armed:\n",
-		"nodes.yaml":    "observer:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event_armed, event: timer.event_armed, start_on: 'event:timer.arm', cancel_on: 'state:waiting', delay: 1h}\n  event_handlers:\n    timer.arm: {}\n",
+		"events.yaml":   "timer.arm:\nwork.noted:\ntimer.state_entry:\ntimer.event_armed:\n",
+		"nodes.yaml":    "observer:\n  execution_type: system_node\n  timers:\n    - {id: waiting.event_armed, event: timer.event_armed, start_on: 'event:timer.arm', cancel_on: 'state:waiting', delay: 1h}\n  event_handlers:\n    timer.arm: {}\n    work.noted: {}\n",
 	})
 }
 
@@ -2814,7 +2512,7 @@ func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowC
 	return loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":   "name: workflow-timer-owner-test\nstages:\n  waiting: {}\n",
 		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "dedup.event:\n  item_id: text\ntimer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.discard.start:\ntimer.discard.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
+		"events.yaml":   "accepted.start:\naccepted.cancel:\nreject.target:\nguard.reject:\ndiscard.target:\nguard.discard:\ndedup.reset:\ndedup.target:\ndedup.event:\n  item_id: text\ntimer.accepted:\ntimer.reject.start:\ntimer.reject.target:\ntimer.discard.start:\ntimer.discard.target:\ntimer.dedup.start:\ntimer.dedup.target:\n",
 		"nodes.yaml": `observer:
   execution_type: system_node
   timers:
@@ -2825,6 +2523,23 @@ func workflowTimerHandledOutcomeBundle(t *testing.T) *runtimecontracts.WorkflowC
     - {id: discard.target, event: timer.discard.target, start_on: 'event:discard.target', cancel_on: 'event:guard.discard', delay: 1h}
     - {id: dedup.start, event: timer.dedup.start, start_on: 'event:dedup.event', cancel_on: 'event:dedup.reset', delay: 1h}
     - {id: dedup.target, event: timer.dedup.target, start_on: 'event:dedup.target', cancel_on: 'event:dedup.event', delay: 1h}
+  event_handlers:
+    accepted.start: {}
+    accepted.cancel: {}
+    reject.target: {}
+    guard.reject:
+      guard:
+        check: false
+        on_fail: reject
+    discard.target: {}
+    guard.discard:
+      guard:
+        check: false
+        on_fail: discard
+    dedup.event:
+      accumulate: {into: items, from: payload, key: payload.item_id}
+    dedup.reset: {}
+    dedup.target: {}
 `,
 	})
 }

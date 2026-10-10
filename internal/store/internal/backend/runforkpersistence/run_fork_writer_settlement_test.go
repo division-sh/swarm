@@ -6,10 +6,13 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -18,8 +21,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	runstore "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
+	artifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -137,14 +144,10 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 		t.Run(cut, func(t *testing.T) {
 			dsn, db, _ := testutil.StartEmptyPostgres(t)
 			s, probe, _ := selectedWriterProbeDatabase(t, dsn, db)
+			runs := selectedClaimNativeRunOwner(t, s)
 			// Minimal relational fixture; the existing selected-store matrix covers
 			// schema/admission parity. Here the real claim SQL and COMMIT are used.
 			if _, err := db.Exec(`
-				CREATE TABLE source_artifacts (bundle_hash text PRIMARY KEY);
-				CREATE TABLE runs (run_id uuid PRIMARY KEY, status text, bundle_hash text,
-					origin_kind text, trigger_event_id uuid, trigger_event_type text,
-					origin_service_id uuid, origin_generation bigint,
-					forked_from_run_id uuid, forked_from_event_id uuid, started_at timestamptz);
 				CREATE TABLE run_fork_selected_contract_runtime_executions (
 					execution_id uuid PRIMARY KEY, fork_run_id uuid, generation bigint,
 					fork_point_kind text, fork_revision bigint, fork_event_id uuid,
@@ -164,7 +167,7 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 				)`); err != nil {
 				t.Fatal(err)
 			}
-			hash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+			hash := sourceartifactfixture.BundleHash
 			issued := runfork.SelectedContractRuntimeExecution{
 				ExecutionID: uuid.NewString(), ForkRunID: uuid.NewString(), Generation: 1,
 				SourceRunID: uuid.NewString(), ForkEventID: uuid.NewString(),
@@ -174,9 +177,6 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 				ExecutionMode: executionmode.Live, FenceGeneration: 1,
 			}
 			issued.ForkPoint = runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: issued.ForkEventID, Revision: 1}
-			if _, err := db.Exec(`INSERT INTO source_artifacts VALUES ($1)`, hash); err != nil {
-				t.Fatal(err)
-			}
 			source, err := correlation.NewSourceArtifactFact(hash)
 			if err != nil {
 				t.Fatal(err)
@@ -185,17 +185,15 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			tx, err := db.BeginTx(context.Background(), nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer tx.Rollback()
-			if _, err := runlifecyclefixture.PostgresCreateRunInMutation(context.Background(), tx, runlifecycle.CreateRequest{
-				RunID: issued.ForkRunID, Source: source, Origin: origin, StartedAt: time.Now().UTC(),
+			setup := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(uuid.NewString(), hash))
+			if _, err := runs.CreateRun(setup, runlifecycle.CreateRequest{
+				RunID: issued.SourceRunID, Source: source, Origin: runlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC(),
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if err := tx.Commit(); err != nil {
+			if _, err := runs.CreateRun(setup, runlifecycle.CreateRequest{
+				RunID: issued.ForkRunID, Source: source, Origin: origin, StartedAt: time.Now().UTC(),
+			}); err != nil {
 				t.Fatal(err)
 			}
 			preparation := selectedClaimPreparationFixture(t, db, issued, hash)
@@ -219,6 +217,7 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 			defer cancel()
 			primary := errors.New("selected claim exit failure")
 			runner := selectedClaimCleanupProbe{Backend: s.backend}
+			commitsBeforeClaim := probe.commits
 			if cut == "before_begin" {
 				cancel()
 			}
@@ -258,11 +257,58 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 			if cut == "before_begin" || cut == "before_commit" {
 				wantState = "prepared"
 			}
-			if state != wantState || probe.commits > 1 || probe.contextWrong {
+			if state != wantState || probe.commits-commitsBeforeClaim > 1 || probe.contextWrong {
 				t.Fatalf("state=%s want=%s commits=%d contextWrong=%t", state, wantState, probe.commits, probe.contextWrong)
 			}
 		})
 	}
+}
+
+// Only valid run/source setup is shared here. The prepared-execution rows remain
+// an explicit lower-storage claim/acknowledgment oracle, not issued runtime proof.
+func selectedClaimNativeRunOwner(t *testing.T, selected *RunForkPostgresOwner) *runstore.RunLifecyclePostgresOwner {
+	t.Helper()
+	spec, err := contracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "platform-spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, err := schemastore.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var runPlans []schemastore.SchemaTableDDL
+	for _, plan := range plans {
+		switch plan.TableName {
+		case "runtime_store_metadata", "runs", "source_artifacts", "author_activity_order", "author_activity_occurrences", "run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions":
+			runPlans = append(runPlans, plan)
+		}
+	}
+	if len(runPlans) != 8 {
+		t.Fatalf("native selected-claim run plans=%d, want 8", len(runPlans))
+	}
+	schema, err := schemastore.NewPostgres(selected.backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
+	if err := schema.BootstrapSchema(ctx, schemastore.SchemaBootstrapRequest{
+		PlatformPlans: runPlans, Origin: schemastore.RuntimeStoreOrigin{SwarmVersion: "native-selected-claim-proof", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	selected.requireCurrent = schema.RequireCurrent
+	artifacts, err := artifactstore.NewPostgres(selected.backend, schema.RequireCurrent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := artifacts.EnsureSourceArtifact(ctx, sourceartifactfixture.Artifact()); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := runstore.NewPostgres(selected.backend, schema.RequireCurrent, runhandoff.NewCandidateCoordinator())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runs
 }
 
 func selectedClaimPreparationFixture(t *testing.T, db *sql.DB, issued runfork.SelectedContractRuntimeExecution, hash string) runfork.SelectedForkPreparationBinding {

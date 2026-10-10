@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,7 +21,6 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -32,7 +30,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 			bundle := runCompletionSystemNodeBundle(t)
 			fact := sourceArtifactFactForTestBundle(t, bundle)
 			ctx := testAuthorActivityContextForSource(context.Background(), fact)
-			cardStore, humanStore, idempotency, mailbox, workflowStore, db := newHumanTaskAckLossOwners(t, ctx, backend)
+			cardStore, humanStore, idempotency, mailbox, workflowStore := newHumanTaskAckLossOwners(t, ctx, backend)
 			principal, err := cardStore.(interface {
 				EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)
 			}).EnsureOperatorPrincipal(ctx, time.Now())
@@ -86,14 +84,10 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 			if authority.successfulMutations != 2 {
 				t.Fatalf("successful mutation calls = %d, want two API transactions", authority.successfulMutations)
 			}
-			query := `SELECT COUNT(*) FROM events WHERE event_id = ?`
-			arg := any(committed.DecisionEventID)
-			if backend == "postgres" {
-				query = `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`
-			}
-			var eventCount int
-			if err := db.QueryRowContext(ctx, query, arg).Scan(&eventCount); err != nil || eventCount != 1 {
-				t.Fatalf("durable decision event count = %d, %v; want exactly one", eventCount, err)
+			decisionEvent, found, err := storetest.ReadCanonicalEventRecord(ctx, cardStore, committed.DecisionEventID)
+			// The event ID is a primary key: exact presence proves cardinality one.
+			if err != nil || !found || decisionEvent.ID() != committed.DecisionEventID || decisionEvent.RunID() != runID {
+				t.Fatalf("durable decision event = %s/%s, found=%t, %v; want exactly one %s/%s", decisionEvent.RunID(), decisionEvent.ID(), found, err, runID, committed.DecisionEventID)
 			}
 			reloaded, err := cardStore.GetDecisionCard(ctx, card.CardID)
 			if err != nil || reloaded.DecisionEventID != committed.DecisionEventID || reloaded.Verdict != "approve" {
@@ -119,17 +113,15 @@ func newHumanTaskAckLossOwners(
 	t *testing.T,
 	ctx context.Context,
 	backend string,
-) (humanTaskAckLossCardFixtureStore, decisioncard.HumanTaskStore, APIIdempotencyStore, MailboxAPIStore, DecisionCardAuthority, *sql.DB) {
+) (humanTaskAckLossCardFixtureStore, decisioncard.HumanTaskStore, APIIdempotencyStore, MailboxAPIStore, DecisionCardAuthority) {
 	t.Helper()
 	if backend == "postgres" {
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		return pg, pg, pg, pg, newHumanTaskAckLossDecisionAuthority(t, db, pg, runtimepipeline.NewWorkflowPersistence(pg), pg, pg), db
+		pg := storetest.StartPostgresRuntimeStore(t)
+		return pg, pg, pg, pg, newHumanTaskAckLossDecisionAuthority(t, pg, runtimepipeline.NewWorkflowPersistence(pg), pg, pg)
 	}
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	return sqliteStore, sqliteStore, sqliteStore, sqliteStore,
-		newHumanTaskAckLossDecisionAuthority(t, storetest.Database(sqliteStore), sqliteStore, runtimepipeline.NewWorkflowPersistence(sqliteStore), sqliteStore, sqliteStore), storetest.Database(sqliteStore)
+		newHumanTaskAckLossDecisionAuthority(t, sqliteStore, runtimepipeline.NewWorkflowPersistence(sqliteStore), sqliteStore, sqliteStore)
 }
 
 type humanTaskAckLossCardFixtureStore interface {
@@ -146,7 +138,6 @@ type humanTaskAckLossPersistence interface {
 
 func newHumanTaskAckLossDecisionAuthority(
 	t *testing.T,
-	db *sql.DB,
 	selected humanTaskAckLossPersistence,
 	persistence runtimepipeline.WorkflowPersistence,
 	cards decisioncard.Store,

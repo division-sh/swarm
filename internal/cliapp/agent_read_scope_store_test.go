@@ -24,7 +24,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -52,9 +51,7 @@ func TestReadProofFactoringCompiledAgentScopeBothStores(t *testing.T) {
 			if backend == "sqlite" {
 				selected = storetest.StartSQLiteRuntimeStore(t)
 			} else {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			}
 			fact, err := correlation.NewSourceArtifactFact(storetest.SemanticFixtureBundleHash)
 			if err != nil {

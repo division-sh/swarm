@@ -130,7 +130,7 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 				"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"work_id": "fork-connected-history"}, "idempotency_key": "fork-history-seed",
 			})
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			live := readServedForkDeliveryEvidence(t, rt, seed.RunID)
 			if selected == nil {
 				t.Fatal("served runtime did not expose its selected persistence owner")

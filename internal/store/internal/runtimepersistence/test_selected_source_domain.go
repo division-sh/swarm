@@ -43,7 +43,7 @@ func ReadSelectedForkSourceDomainForTest(ctx context.Context, selected any, runI
 		for table, snapshot := range tables {
 			evidence := SelectedForkStorageTableSnapshot{Columns: snapshot.Columns, Rows: []string{}}
 			for _, values := range snapshot.Rows {
-				encoded, err := encodeSelectedForkSnapshotValues(values)
+				encoded, err := encodeSelectedForkSnapshotValues(snapshot.Columns, values)
 				if err != nil {
 					return err
 				}

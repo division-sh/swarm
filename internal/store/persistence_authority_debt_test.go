@@ -28,6 +28,8 @@ import (
 const debtBaselinePath = "internal/store/testdata/persistence_authority_debt_baseline.tsv"
 const debtRefreshEnv = "SWARM_REFRESH_PERSISTENCE_AUTHORITY_DEBT"
 const debtG01CollectorFrom = "494fd3b6300c4163241395ef9e3aa59ce58eb32f45e9f5d8bc5a5078401303d5"
+const debtQuiescenceCollectorFrom = "65fe2e66c01eb0e19ce2b44d53f545cc76dd823f5f8b58562e139a362cc9c267"
+const debtRunFixtureCollectorFrom = "4ab44a86253d3b09474c20463ca1a4e5c6296f4a4694e4d80d904832757ae047"
 
 // The reviewed, unlanded bootstrap cannot move when its guard PR is rebased.
 const debtBootstrapSource = "52b954ec26c85a47605cefb8d7030f2a842f8c24"
@@ -131,10 +133,102 @@ func authorityDebtSubset(actual, allowed map[string]authorityDebtSite, label str
 }
 
 func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDebtSite) []string {
-	failures := authorityDebtSubset(actual, head, "actual -> head baseline")
+	head, base, baseActual, failures := debtRunFixtureSignatureComparisons(actual, head, base, baseActual)
+	if len(failures) != 0 {
+		return failures
+	}
+	old, current := debtQuiescenceUncertaintyTransition()
+	for _, state := range []map[string]authorityDebtSite{actual, head, base, baseActual} {
+		if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
+			return []string{"both reviewed uncertainty identities survive; owner=exact served delivery quiescence reader"}
+		}
+	}
+	// This exact forward substitution is inert once the trusted source lands it.
+	if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
+		base[old.identity()] == old && base[current.identity()].Multiplicity == 0 &&
+		baseActual[old.identity()] == old && baseActual[current.identity()].Multiplicity == 0 {
+		head = debtForwardQuiescenceUncertainty(head, old, current)
+		base = debtForwardQuiescenceUncertainty(base, old, current)
+		baseActual = debtForwardQuiescenceUncertainty(baseActual, old, current)
+	}
+	failures = authorityDebtSubset(actual, head, "actual -> head baseline")
 	failures = append(failures, authorityDebtSubset(head, base, "head -> trusted baseline")...)
 	failures = append(failures, authorityDebtSubset(actual, baseActual, "actual -> trusted source (resurrection)")...)
 	return failures
+}
+
+// Reviewed at 2b699b9af7c05fb8f319ae190f9c2f802bd7bd10 ->
+// 762f3084c5f6f50539c9f56a3dc15a1b603822f3 (ruling 6091976606).
+// These nine unchanged calls reuse the registrar's existing selected owner.
+// Its raw input, admission and registration remain debt; only the result changed.
+func debtRunFixtureSignatureTransitions() [9][2]authorityDebtSite {
+	const old = "func=func(t *testing.T, ctx context.Context, db *database/sql.DB, sourceRoot string) string|recv=<nil>|arg=*testing.T|arg=context.Context|arg=*database/sql.DB|arg=string|results=(string)"
+	const current = "func=func(t *testing.T, ctx context.Context, db *database/sql.DB, sourceRoot string) (string, github.com/division-sh/swarm/internal/store/storetest.RunFixtureStore)|recv=<nil>|arg=*testing.T|arg=context.Context|arg=*database/sql.DB|arg=string|results=(string,github.com/division-sh/swarm/internal/store/storetest.RunFixtureStore)"
+	return [9][2]authorityDebtSite{
+		{debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmission", old), debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmission", current)},
+		{debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplayWithoutPersistedRouteRecovery", old), debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplayWithoutPersistedRouteRecovery", current)},
+		{debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_DryRunBundleAddsContractFrontierAdmissionJSON", old), debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_DryRunBundleAddsContractFrontierAdmissionJSON", current)},
+		{debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON", old), debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON", current)},
+		{debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_PersistedBundleDoesNotRequireAmbientSource", old), debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_PersistedBundleDoesNotRequireAmbientSource", current)},
+		{debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvancedBranchJSON", old), debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvancedBranchJSON", current)},
+		{debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwnerJSON", old), debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwnerJSON", current)},
+		{debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_SelectedContractsExecutesExplicitHostRefusal", old), debtRunFixtureSignatureSite("TestRunForkRuntimeOwnerHarness_SelectedContractsExecutesExplicitHostRefusal", current)},
+		{debtRunFixtureSignatureSite("seedRunForkCLIActivationSourceWithoutRevision", old), debtRunFixtureSignatureSite("seedRunForkCLIActivationSourceWithoutRevision", current)},
+	}
+}
+
+func debtRunFixtureSignatureSite(declaration, resolved string) authorityDebtSite {
+	return authorityDebtSite{
+		Kind: "raw-operation", File: "internal/serveapp/run_fork_runtime_test.go", Declaration: declaration,
+		Operation: "call:github.com/division-sh/swarm/internal/serveapp.registerRunForkCLIContractCatalog",
+		Resolved:  resolved, Family: "fork", Replacement: "selected fork/source/event/lifecycle operation and bounded fork observation", Multiplicity: 1,
+	}
+}
+
+func debtRunFixtureSignatureComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
+	for _, pair := range debtRunFixtureSignatureTransitions() {
+		old, current := pair[0], pair[1]
+		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
+			if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
+				return head, base, source, []string{"both reviewed run-fixture signature identities survive: " + old.Declaration}
+			}
+		}
+		if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
+			base[old.identity()] == old && base[current.identity()].Multiplicity == 0 &&
+			source[old.identity()] == old && source[current.identity()].Multiplicity == 0 {
+			head = debtForwardQuiescenceUncertainty(head, old, current)
+			base = debtForwardQuiescenceUncertainty(base, old, current)
+			source = debtForwardQuiescenceUncertainty(source, old, current)
+		}
+	}
+	return head, base, source, nil
+}
+
+func debtQuiescenceUncertaintyTransition() (authorityDebtSite, authorityDebtSite) {
+	old := authorityDebtSite{
+		Kind: "unresolved-excluded-source", File: "internal/serveapp/a2_nested_portfolio_isolation_test.go",
+		Declaration: "TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores",
+		Operation:   "declaration:facfe2d5f45cc0bfd4df3a8a37eddc3609a5f880fd001b91a277966bf6d9a802",
+		Resolved:    "unresolved|source-context:4b4e4348dc36ff1ca795a129d908f43ec58f41675314b93feca26224afffc5b4",
+		Family:      "excluded-source-uncertainty", Replacement: "existing canonical owner or narrow source-evidenced classification; never a file exemption or baseline increase",
+		Multiplicity: 1,
+	}
+	current := old
+	current.Operation = "declaration:02a974ebc762c71be9999ece645b4d35076f0518811a05b09851433a9a67ff06"
+	return old, current
+}
+
+func debtForwardQuiescenceUncertainty(sites map[string]authorityDebtSite, old, current authorityDebtSite) map[string]authorityDebtSite {
+	if sites[old.identity()] != old || sites[current.identity()].Multiplicity != 0 {
+		return sites
+	}
+	forward := make(map[string]authorityDebtSite, len(sites))
+	for key, site := range sites {
+		forward[key] = site
+	}
+	delete(forward, old.identity())
+	forward[current.identity()] = current
+	return forward
 }
 
 func parseAuthorityDebtBaseline(data []byte) (authorityDebtBaseline, error) {
@@ -540,8 +634,9 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	}
 	if refresh == "downward" {
 		removed := authorityDebtCount(head.Sites) - authorityDebtCount(actual)
-		for _, key := range debtSortedKeys(head.Sites) {
-			before := head.Sites[key]
+		normalized, _, _, _ := debtRunFixtureSignatureComparisons(actual, head.Sites, trusted.Sites, baseActual)
+		for _, key := range debtSortedKeys(normalized) {
+			before := normalized[key]
 			after := actual[key].Multiplicity
 			if after < before.Multiplicity {
 				t.Logf("debt removed=%d %s", before.Multiplicity-after, key)
@@ -606,7 +701,45 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil
 	}
+	if current == debtRunFixtureCollectorTo && head.Collector == debtRunFixtureCollectorTo &&
+		debtRunFixtureSignatureCollectorTransition(trusted.Sites, head.Sites) &&
+		debtRunFixtureCollectorPredecessor(base, trusted, head) {
+		return nil
+	}
+	old, forward := debtQuiescenceUncertaintyTransition()
+	if base == debtQuiescenceCollectorFrom && trusted.Collector == debtQuiescenceCollectorFrom &&
+		current == debtQuiescenceCollectorTo && head.Collector == debtQuiescenceCollectorTo &&
+		trusted.Sites[old.identity()] == old && trusted.Sites[forward.identity()].Multiplicity == 0 &&
+		(head.Sites[old.identity()] == old || head.Sites[forward.identity()] == forward) &&
+		len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0 {
+		return nil
+	}
 	return fmt.Errorf("authority census/role policy changed outside the exact reviewed transition; silent scan narrowing is forbidden")
+}
+
+func debtRunFixtureCollectorPredecessor(base string, trusted, head authorityDebtBaseline) bool {
+	if base == debtRunFixtureCollectorFrom && trusted.Collector == base {
+		return true
+	}
+	// The accumulated branch may land both reviewed transitions together. Prove
+	// the exact preceding quiescence step, rather than admitting a foreign origin.
+	if base != debtQuiescenceCollectorFrom || trusted.Collector != base {
+		return false
+	}
+	intermediate := head
+	intermediate.Collector = debtRunFixtureCollectorFrom
+	return debtValidateCollectorIdentity(base, debtRunFixtureCollectorFrom, trusted, intermediate, "") == nil
+}
+
+func debtRunFixtureSignatureCollectorTransition(trusted, head map[string]authorityDebtSite) bool {
+	for _, pair := range debtRunFixtureSignatureTransitions() {
+		old, current := pair[0], pair[1]
+		if trusted[old.identity()] != old || trusted[current.identity()].Multiplicity != 0 ||
+			(head[old.identity()] != old && head[current.identity()] != current) {
+			return false
+		}
+	}
+	return len(authorityDebtRatchet(head, head, trusted, trusted)) == 0
 }
 
 func debtSitesEqual(left, right map[string]authorityDebtSite) bool {

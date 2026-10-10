@@ -59,7 +59,7 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 	publishedRunID := stringValue(t, publishedResult["run_id"], "run_id")
 	publishedEventID := stringValue(t, publishedResult["event_id"], "event_id")
 	assertRunBundleIdentity(t, fixture.db, publishedRunID, runtimeContextTestBundleHashB)
-	if got := countEventsByName(t, fixture.db, "triage.requested"); got != 1 {
+	if got := countEventsByName(t, fixture.pg, "triage.requested"); got != 1 {
 		t.Fatalf("triage.requested count after event.publish = %d, want 1", got)
 	}
 	got := fixture.probeB.require(t, "selected context dispatch")
@@ -74,7 +74,7 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 		t.Fatalf("run.start error = %#v", started.Error)
 	}
 	assertRunBundleIdentity(t, fixture.db, runID, runtimeContextTestBundleHashB)
-	if got := countEventsByName(t, fixture.db, "triage.requested"); got != 2 {
+	if got := countEventsByName(t, fixture.pg, "triage.requested"); got != 2 {
 		t.Fatalf("triage.requested count after run.start = %d, want 2", got)
 	}
 }
@@ -105,7 +105,7 @@ func TestOperatorEventPublishIdempotencyReplayDoesNotRequireLoadedRuntimeContext
 	if replayEventID := stringValue(t, asMap(t, replay.Result)["event_id"], "event_id"); replayEventID != firstEventID {
 		t.Fatalf("event.publish replay event_id = %q, want stored %q", replayEventID, firstEventID)
 	}
-	if got := countEventsByName(t, fixture.db, "triage.requested"); got != 1 {
+	if got := countEventsByName(t, fixture.pg, "triage.requested"); got != 1 {
 		t.Fatalf("triage.requested count after replay = %d, want 1", got)
 	}
 }
@@ -141,7 +141,7 @@ func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing
 	}
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
 	assertEventPublishDeliveriesContain(t, deliveries, "node", identitytest.FlowNode(t, "discovery", "scan-orchestrator").Key(), "pending", 1)
-	if got := countEventRowsByRunID(t, fixture.db, runID); got != 1 {
+	if got := countEventRowsByRunID(t, fixture.pg, runID); got != 1 {
 		t.Fatalf("event rows for existing run = %d, want 1", got)
 	}
 	assertRunBundleIdentity(t, fixture.db, runID, runtimeContextTestBundleHashB)
@@ -207,7 +207,7 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunUnavailableSourceStates(
 			for _, call := range calls {
 				resp := rpcCall(t, handler, call.body)
 				assertRuntimeContextBundleError(t, resp, call.method, tt.wantCode, tt.wantCause)
-				if got := countEventRowsByRunID(t, fixture.db, runID); got != 0 {
+				if got := countEventRowsByRunID(t, fixture.pg, runID); got != 0 {
 					t.Fatalf("%s event rows for unavailable run = %d, want 0", call.method, got)
 				}
 			}
@@ -242,7 +242,7 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunRequestedHashMismatch(t 
 
 			resp := rpcCall(t, handler, tt.body(runID))
 			assertRuntimeContextBundleError(t, resp, tt.method, BundleMismatchCode, "")
-			if got := countEventRowsByRunID(t, fixture.db, runID); got != 0 {
+			if got := countEventRowsByRunID(t, fixture.pg, runID); got != 0 {
 				t.Fatalf("%s event rows for mismatched run = %d, want 0", tt.method, got)
 			}
 		})
@@ -275,7 +275,7 @@ func TestOperatorRuntimeContextManagerRoutesEventReplayByOriginalRunBundle(t *te
 	auditEventID := stringValue(t, result["audit_event_id"], "audit_event_id")
 	assertReplayEventDelivered(t, chSelected, replayEventID, original.EventID)
 	assertNoReplayEvent(t, chPrimary)
-	assertReplayPersistence(t, fixture.db, original.EventID, replayEventID, auditEventID, 1)
+	assertReplayPersistence(t, fixture.pg, original.EventID, replayEventID, auditEventID, 1)
 }
 
 func TestOperatorRuntimeContextManagerRoutesRunControlByStoredBundle(t *testing.T) {
@@ -444,7 +444,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle(t *testing.T)
 	if data["code"] != BundleUnavailableCode || details["cause"] != "runtime_context_not_loaded" {
 		t.Fatalf("event.publish unloaded bundle error data = %#v", data)
 	}
-	if got := countAllRunRows(t, fixture.db); got != 0 {
+	if got := countAllRunRows(t, fixture.pg); got != 0 {
 		t.Fatalf("run rows after unloaded bundle = %d, want 0", got)
 	}
 
@@ -491,7 +491,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing
 	if data["code"] != BundleUnavailableCode || details["cause"] != swruntime.RuntimeContextCauseUnloaded {
 		t.Fatalf("event.publish deactivated explicit hash error data = %#v", data)
 	}
-	if got := countAllRunRows(t, fixture.db); got != 0 {
+	if got := countAllRunRows(t, fixture.pg); got != 0 {
 		t.Fatalf("run rows after explicit deactivated bundle = %d, want 0", got)
 	}
 
@@ -506,7 +506,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing
 	if data["code"] != BundleUnavailableCode || details["cause"] != swruntime.RuntimeContextCauseUnloaded {
 		t.Fatalf("event.publish deactivated run context error data = %#v", data)
 	}
-	if got := countEventRowsByRunID(t, fixture.db, runID); got != 0 {
+	if got := countEventRowsByRunID(t, fixture.pg, runID); got != 0 {
 		t.Fatalf("event rows for deactivated existing run = %d, want 0", got)
 	}
 

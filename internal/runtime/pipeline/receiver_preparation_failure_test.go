@@ -8,14 +8,12 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/google/uuid"
 )
 
 type failingReceiverPersistenceReader struct {
@@ -71,40 +69,21 @@ func (s *receiverSettlementFaultStore) SettleFailure(ctx context.Context, claim 
 	return s.Store.SettleFailure(ctx, claim, settlement)
 }
 
-func TestReceiverPreparationUnsettledAuthorityBothStores(t *testing.T) {
-	for _, backend := range workflowJoinStoreCases() {
+func VerifyNativeReceiverPreparationUnsettledAuthorityBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, fault := range []string{"heartbeat_start", "settlement_renewal", "settlement_rollback", "cancellation", "newer_claim"} {
-			t.Run(backend.name+"/"+fault, func(t *testing.T) {
-				store, ctx := backend.open(t)
-				pc, bus := newDeliveryAuthorityCoordinator(t, store.testDB())
-				pc.workflowStore = store
-				owner := newPipelineTestDeliveryOwnerForDB(t, store.testDB())
-				pc.deliveryStore = owner
-				configurePipelineTestDeliveryOwner(t, pc)
-				runID := runtimecorrelation.RunIDFromContext(ctx)
-				entityID := runID
-				evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "source.evt", "src", "", []byte("{}"), 0, runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), time.Now().UTC())
-				dialect := authoractivityfixture.DialectPostgres
-				if store.isSQLite() {
-					dialect = authoractivityfixture.DialectSQLite
-				}
-				seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
-				if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "v-test", CurrentState: "queued", EntityType: "test_entity", Fields: map[string]any{}})); err != nil {
-					t.Fatal(err)
-				}
-				node := pipelineNode(t, ".", "node-a")
-				route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID})}
-				if err := owner.commitInitial(ctx, evt, route); err != nil {
-					t.Fatal(err)
-				}
+			t.Run(backend+"/"+fault, func(t *testing.T) {
+				fixture, pc, ctx, evt, route := nativeReceiverPreparationFixtureForTest(t, backend, open)
+				owner := fixture.Store
+				bus := observeNativePipelineDeliveryBusForTest(t, pc)
 				id, err := runtimedelivery.DeliveryID(evt.ID(), route)
 				if err != nil {
 					t.Fatal(err)
 				}
 				faultStore := &receiverSettlementFaultStore{Store: owner}
 				pc.deliveryStore = faultStore
-				reader := &failingReceiverPersistenceReader{WorkflowTargetPersistenceReader: store.targetReader, failure: errors.New("injected receiver preparation failure")}
-				store.targetReader = reader
+				reader := &failingReceiverPersistenceReader{WorkflowTargetPersistenceReader: pc.workflowStore.targetReader, failure: errors.New("injected receiver preparation failure")}
+				pc.workflowStore.targetReader = reader
 				attemptCtx, cancel := context.WithCancel(withWorkflowNodeDeliveryRoute(ctx, route))
 				defer cancel()
 				switch fault {
@@ -131,9 +110,8 @@ func TestReceiverPreparationUnsettledAuthorityBothStores(t *testing.T) {
 				if err != nil || len(outcomes) != 0 {
 					t.Fatalf("invented settlement: %#v %v", outcomes, err)
 				}
-				bus.deliveryContinuations.mu.Lock()
-				_, retained := bus.deliveryContinuations.held[id]
-				bus.deliveryContinuations.mu.Unlock()
+				acquisition, acquisitionErr := fixture.Continuations.Acquire(id)
+				retained := acquisitionErr == nil && acquisition.Validate(id) == nil && acquisition.Disposition() == worklifetime.DeliveryAlreadyOwned
 				if !retained || bus.publishedCount() != 0 {
 					t.Fatal("unsettled attempt lost continuation or emitted business work")
 				}
@@ -150,7 +128,7 @@ func TestReceiverPreparationUnsettledAuthorityBothStores(t *testing.T) {
 					if _, err := owner.SettleFailure(ctx, *claim, runtimedelivery.Settlement{Disposition: runtimedelivery.FailureRetry, ReasonCode: "receiver_test_handoff", Failure: &failure.Failure, RetryBase: time.Millisecond, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation()}); err != nil {
 						t.Fatal(err)
 					}
-					if err := owner.makeRetryEligible(ctx, id); err != nil {
+					if err := fixture.RetryEligible(ctx, evt, route); err != nil {
 						t.Fatal(err)
 					}
 					result, err := owner.ClaimDelivery(ctx, snapshot.Authority, evt, route)
@@ -171,9 +149,8 @@ func TestReceiverPreparationUnsettledAuthorityBothStores(t *testing.T) {
 					if err != nil || current.Status != runtimedelivery.StatusInProgress || current.ClaimVersion <= snapshot.ClaimVersion {
 						t.Fatalf("stale attempt damaged newer claim: %#v %v", current, err)
 					}
-					bus.deliveryContinuations.mu.Lock()
-					_, retained := bus.deliveryContinuations.held[id]
-					bus.deliveryContinuations.mu.Unlock()
+					acquisition, acquisitionErr := fixture.Continuations.Acquire(id)
+					retained := acquisitionErr == nil && acquisition.Validate(id) == nil && acquisition.Disposition() == worklifetime.DeliveryAlreadyOwned
 					if !retained {
 						t.Fatal("stale attempt released newer claimant continuation")
 					}
@@ -202,11 +179,11 @@ func TestReceiverPreparationUnsettledAuthorityBothStores(t *testing.T) {
 	}
 }
 
-func TestReceiverPreparationFailureClaimMatrixBothStores(t *testing.T) {
-	for _, backend := range workflowJoinStoreCases() {
+func VerifyNativeReceiverPreparationFailureClaimMatrixBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, recovered := range []bool{false, true} {
 			for _, transient := range []bool{false, true} {
-				name := backend.name
+				name := backend
 				if recovered {
 					name += "/recovered"
 				} else {
@@ -218,50 +195,31 @@ func TestReceiverPreparationFailureClaimMatrixBothStores(t *testing.T) {
 					name += "/missing_target"
 				}
 				t.Run(name, func(t *testing.T) {
-					store, ctx := backend.open(t)
-					pc, bus := newDeliveryAuthorityCoordinator(t, store.testDB())
-					pc.workflowStore = store
-					owner := newPipelineTestDeliveryOwnerForDB(t, store.testDB())
-					pc.deliveryStore = owner
-					configurePipelineTestDeliveryOwner(t, pc)
+					fixture, pc, ctx, evt, route := nativeReceiverPreparationFixtureForTest(t, backend, open)
+					owner := fixture.Store
+					bus := observeNativePipelineDeliveryBusForTest(t, pc)
 					runID := runtimecorrelation.RunIDFromContext(ctx)
 					entityID := runID
-					evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "source.evt", "src", "", []byte("{}"), 0, runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), time.Now().UTC())
-					dialect := authoractivityfixture.DialectPostgres
-					if store.isSQLite() {
-						dialect = authoractivityfixture.DialectSQLite
-					}
-					seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
-					if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-						InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "v-test",
-						CurrentState: "queued", EntityType: "test_entity", Fields: map[string]any{},
-					})); err != nil {
-						t.Fatal(err)
-					}
-					node := pipelineNode(t, ".", "node-a")
-					route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID})}
-					if err := owner.commitInitial(ctx, evt, route); err != nil {
-						t.Fatal(err)
-					}
 					id, err := runtimedelivery.DeliveryID(evt.ID(), route)
 					if err != nil {
 						t.Fatal(err)
 					}
-					reader := &failingReceiverPersistenceReader{WorkflowTargetPersistenceReader: store.targetReader}
+					reader := &failingReceiverPersistenceReader{WorkflowTargetPersistenceReader: pc.workflowStore.targetReader}
 					if transient {
 						reader.failure = runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "receiver_read_unavailable", "receiver-test", "load_target", nil, errors.New("injected independent target read failure"))
 					} else {
 						// The delivery was valid at publication; storage disappears afterwards.
-						if _, err := store.testDB().Exec(`DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, entityID); err != nil {
-							t.Fatal(err)
+						if removed, err := fixture.MissingFields(ctx, runID, entityID); err != nil || removed != 1 {
+							t.Fatalf("remove exact receiver fields: %d/%v", removed, err)
 						}
-						if _, err := store.testDB().Exec(`DELETE FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, runID, runID); err != nil {
-							t.Fatal(err)
+						if removed, err := fixture.MissingHeader(ctx, runID, runID); err != nil || removed != 1 {
+							t.Fatalf("remove exact receiver header: %d/%v", removed, err)
 						}
 					}
-					store.targetReader = reader
+					pc.workflowStore.targetReader = reader
 					attemptCtx := withWorkflowNodeDeliveryRoute(ctx, route)
 					if recovered {
+						consumeNativePipelineDeliveryCarrierForTest(t, fixture, ctx, id)
 						snapshot, err := owner.Snapshot(ctx, id)
 						if err != nil {
 							t.Fatal(err)
@@ -307,23 +265,25 @@ func TestReceiverPreparationFailureClaimMatrixBothStores(t *testing.T) {
 					if len(outcomes) != 1 {
 						t.Fatalf("outcomes: %#v", outcomes)
 					}
-					bus.deliveryContinuations.mu.Lock()
-					held, present := bus.deliveryContinuations.held[id]
-					bus.deliveryContinuations.mu.Unlock()
-					if transient && (!present || !held) {
-						t.Fatal("retry has no retained continuation authority")
+					acquisition, acquisitionErr := fixture.Continuations.Acquire(id)
+					if acquisitionErr != nil || acquisition.Validate(id) != nil {
+						t.Fatalf("observe native failure continuation: %v", acquisitionErr)
 					}
-					if !transient && present {
-						t.Fatal("terminal receiver failure retained its continuation")
+					if transient && acquisition.Disposition() != worklifetime.DeliveryAlreadyOwned {
+						t.Fatal("retry has no retained native attempt")
+					}
+					if !transient && acquisition.Disposition() != worklifetime.DeliveryTerminallyFenced {
+						t.Fatal("terminal receiver failure retained executable continuation authority")
 					}
 					if got := bus.publishedCount(); got != 0 {
 						t.Fatalf("failed receiver emitted %d events", got)
 					}
 					if transient {
 						reader.failure = nil
-						if err := owner.makeRetryEligible(ctx, id); err != nil {
+						if err := fixture.RetryEligible(ctx, evt, route); err != nil {
 							t.Fatal(err)
 						}
+						recoverNativePipelineRetryForTest(t, fixture, ctx)
 						if _, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt); err != nil {
 							t.Fatal(err)
 						}

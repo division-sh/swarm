@@ -767,6 +767,15 @@ func TestPersistenceAuthorityDebtRatchetIsSelectedInEveryTier(t *testing.T) {
 				"TestNativeLoopClaimFixturesDoNotReceiveRawAuthority",
 				"TestNativeMockFixturesDoNotReceiveRawAuthority",
 				"TestNativeAPIReadSetupDoesNotReceiveRawAuthority",
+				"TestNativeProjectionRoundTripFixturesDoNotReceiveRawAuthority",
+				"TestNativeStorageIdentityFixturesDoNotReceiveRawAuthority",
+				"TestNativeProjectionStorageFixturesDoNotReceiveRawAuthority",
+				"TestNativeProjectionShapeFixturesDoNotReceiveRawAuthority",
+				"TestNativeProjectionHeaderFixturesDoNotReceiveRawAuthority",
+				"TestNativeMutationSeedFixturesDoNotReceiveRawAuthority",
+				"TestNativeLookupMissFixturesDoNotReceiveRawAuthority",
+				"TestNativeBookkeepingFixturesDoNotReceiveRawAuthority",
+				"TestNativeHandlerFixturesDoNotReceiveRawAuthority",
 			}
 			if family.Name != "TestNativeFixtureFamiliesDoNotReceiveRawAuthority" || family.Package != root.Package || !slices.Equal(unit.RequiredChildren[family.Name], children) {
 				t.Fatalf("census lost a required native family: %+v, %v", family, unit.RequiredChildren)

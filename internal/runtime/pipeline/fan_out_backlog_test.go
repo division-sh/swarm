@@ -2,12 +2,11 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/google/uuid"
 	"strings"
@@ -37,23 +36,22 @@ func (o *fanOutBacklogTestOwner) CommitFanOutChunk(ctx context.Context, c FanOut
 	}
 	return result, err
 }
-func TestFanOutCompletedIntentRefillsCoalescedBacklog(t *testing.T) {
-	fanOutBacklogProbe(t, 0)
+func VerifyNativeFanOutCompletedIntentRefillsCoalescedBacklogForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
+	fanOutBacklogProbe(t, backend, open, 0)
 }
 
-func TestFanOutCoalescedBacklogAcceleratedControl(t *testing.T) {
-	fanOutBacklogProbe(t, 10*time.Millisecond)
+func VerifyNativeFanOutCoalescedBacklogAcceleratedControlForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
+	fanOutBacklogProbe(t, backend, open, 10*time.Millisecond)
 }
 
-func fanOutBacklogProbe(t *testing.T, interval time.Duration) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	workflowStore := newSQLiteWorkflowInstanceStoreForTest(t, db)
-	ctx := sqliteExactOnceRunContext(t, db)
-	pc, bus := newSQLiteDynamicActivationCoordinator(t, db, workflowStore)
+func fanOutBacklogProbe(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest, interval time.Duration) {
+	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, sqliteDynamicActivationBundle(t), open)
+	nativeBus := observeNativePipelineDeliveryBusForTest(t, pc)
+	bus := &recordingPipelineBus{}
 	parentPath := runtimecorrelation.RunIDFromContext(ctx)
 	parentEntityID := parentPath
 
-	parent := eventtest.RunCreatingRootIngress(
+	parent := eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		events.EventType("component_scaffold.batch_requested"),
 		"",
@@ -66,27 +64,13 @@ func fanOutBacklogProbe(t *testing.T, interval time.Duration) {
 		}),
 		0,
 		runtimecorrelation.RunIDFromContext(ctx),
-		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, parentEntityID), parentPath),
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: parentPath, EntityID: parentEntityID}),
 		time.Now().UTC(),
 	)
 
-	if err := workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      parentPath,
-		StorageRef:      parentPath,
-		EntityID:        parentEntityID,
-		EntityType:      "parent",
-		WorkflowName:    ".",
-		WorkflowVersion: "v-test",
-		CurrentState:    "pending",
-		Fields:          map[string]any{},
-		CreatedAt:       time.Now().UTC(),
-		UpdatedAt:       time.Now().UTC(),
-	})); err != nil {
-		t.Fatalf("seed parent workflow instance: %v", err)
-	}
+	constructNativePipelineScenarioForTest(t, fixture, pc, ctx, ".")
 	parentNode := pipelineSourceNode(t, pc.SemanticSource(), ".", "fanout-node")
-	parentRoute := seedExactOnceEventDelivery(t, pc, ctx, parent, parentNode)
+	parentRoute := nativeFanOutTriggerRouteForTest(t, fixture, pc, ctx, parent, parentNode)
 	state, err := pc.currentWorkflowState(runtimecorrelation.WithInboundEvent(ctx, parent), testRunScopedWorkflowInstanceFromContext(ctx, parentPath), identity.NormalizeEntityID(parentEntityID))
 	if err != nil {
 		t.Fatalf("load parent workflow state: %v", err)
@@ -102,55 +86,22 @@ func fanOutBacklogProbe(t *testing.T, interval time.Duration) {
 	if !handled {
 		t.Fatal("parent fan-out dispatch handled=false, want true")
 	}
-	if got := bus.publishedCount(); got != 0 {
+	if got := nativeBus.publishedCount(); got != 0 {
 		t.Fatalf("trigger transaction published %d eager child events", got)
 	}
-	assertDeliveryStatusCount(t, workflowStore, ctx, parent.ID(), parentNode.Key(), "delivered", 1)
-	var cardinality, cursor int
-	var status, sourceKind, sourceEventID, sourceField string
-	if err := db.QueryRowContext(ctx, `SELECT cardinality,cursor,status,source_kind,source_event_id,source_field FROM fan_out_intents WHERE run_id=?`, runtimecorrelation.RunIDFromContext(ctx)).Scan(
-		&cardinality, &cursor, &status, &sourceKind, &sourceEventID, &sourceField,
-	); err != nil {
-		t.Fatalf("load durable fan-out intent: %v", err)
+	snapshot, err := fixture.NodeDeliverySnapshot(ctx, parent.RunID(), parent.ID(), parentNode.Key())
+	if err != nil || snapshot.Status != runtimedelivery.StatusDelivered {
+		t.Fatalf("native trigger settlement: %+v/%v", snapshot, err)
 	}
-	if cardinality != 2 || cursor != 0 || status != "open" || sourceKind != "event_payload_field" || sourceEventID != parent.ID() || sourceField != "components" {
-		t.Fatalf("fan-out intent = cardinality:%d cursor:%d status:%s source:%s/%s/%s", cardinality, cursor, status, sourceKind, sourceEventID, sourceField)
+	intent := nativeFanOutIntentObservationForTest(t, fixture, pc, ctx, parent, parentNode)
+	if intent.Request.Cardinality != 2 || intent.Cursor != 0 || intent.Status != fanoutobligation.StatusOpen || intent.Source.Kind != fanoutobligation.SourceEventPayloadField || intent.Source.EventID != parent.ID() || intent.Source.Field != "components" {
+		t.Fatalf("native fan-out intent has wrong cardinality, cursor, status or pinned source: %#v", intent)
 	}
-	if logs := bus.runtimeLogEntries(); len(logs) != 0 {
-		t.Fatalf("runtime logs = %#v, want none", logs)
+	if nativeBus.publishedCount() != 0 || len(nativeBus.runtimeLogEntries()) != 0 {
+		t.Fatal("native trigger eagerly published or logged a failure")
 	}
+	bundleHash := intent.Request.PlanRef.BundleHash
 
-	var deliveryID, flowPath, family, semanticPath, bundleHash, semanticDigest string
-	var capsuleRaw []byte
-	if err := db.QueryRowContext(ctx, `SELECT triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,capsule FROM fan_out_intents WHERE run_id=?`, runtimecorrelation.RunIDFromContext(ctx)).Scan(
-		&deliveryID, &flowPath, &family, &semanticPath, &bundleHash, &semanticDigest, &capsuleRaw,
-	); err != nil {
-		t.Fatalf("load durable fan-out execution identity: %v", err)
-	}
-	var capsule fanoutobligation.Capsule
-	if err := json.Unmarshal(capsuleRaw, &capsule); err != nil {
-		t.Fatalf("decode durable fan-out capsule: %v", err)
-	}
-	intent := fanoutobligation.Intent{
-		Request: fanoutobligation.IntentRequest{
-			Key: fanoutobligation.IntentKey{
-				RunID:                runtimecorrelation.RunIDFromContext(ctx),
-				TriggeringDeliveryID: deliveryID,
-				ElementRef:           runtimecontracts.FanOutElementRef{FlowPath: flowPath, Family: family, SemanticPath: semanticPath},
-			},
-			PlanRef: runtimecontracts.FanOutPlanRef{
-				BundleHash: bundleHash, ElementRef: runtimecontracts.FanOutElementRef{FlowPath: flowPath, Family: family, SemanticPath: semanticPath}, SemanticDigest: semanticDigest,
-			},
-			Source:      fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, EventID: parent.ID(), Field: "components"},
-			Cardinality: 2,
-			Capsule:     capsule,
-		},
-		Source:        fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, EventID: parent.ID(), Field: "components"},
-		Status:        fanoutobligation.StatusOpen,
-		NextChunkSize: fanoutobligation.InitialChunkSize,
-		CreatedAt:     parent.CreatedAt(),
-		UpdatedAt:     parent.CreatedAt(),
-	}
 	owner := &singleTurnFanOutOwner{
 		intent: intent,
 		input: FanOutEvaluationInput{

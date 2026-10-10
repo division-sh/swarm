@@ -49,7 +49,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				"event_name": "work.requested", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"token": "member-one"}, "idempotency_key": "retained-join-start",
 			})
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			rows, err := rt.DB.Query(`SELECT CAST(d.failure AS TEXT) FROM dead_letters d JOIN events e ON e.event_id=d.original_event_id WHERE e.run_id=$1`, started.RunID)
 			if err != nil {
 				t.Fatal(err)
@@ -76,7 +76,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				"event_name": "review.retry", "run_id": started.RunID, "source_event_id": started.EventID,
 				"payload": map[string]any{"revision_id": first.RevisionID, "token": "member-one"}, "idempotency_key": "retained-join-repeat",
 			})
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			waitForkReceiverSourceCompletion(t, rt, started.RunID)
 			current, sourceJoins := readRetainedRootJoins(t, rt, started.RunID)
 			if current.Attempt != 2 || current.ActivationID != first.ActivationID || len(sourceJoins) != 2 {
@@ -122,7 +122,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 					"event_name": "checkpoint.requested", "run_id": started.RunID, "source_event_id": started.EventID,
 					"payload": map[string]any{"revision_id": current.RevisionID}, "idempotency_key": "retained-join-checkpoint",
 				})
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 				waitForkReceiverSourceCompletion(t, rt, started.RunID)
 			}
 			var frontier string

@@ -44,7 +44,7 @@ func TestA2KnownTargetUnarmedPublicationRetainsEarlyRefusalAfterArmAndRestartOnB
 				path := "orders/" + instanceID
 				entityID := flowidentity.EntityID(path)
 				owner := testRunScopedWorkflowInstanceForRun(runID, path)
-				insertGateRecoveryRun(t, selected, runID)
+				insertGateRecoveryRun(t, selected.events, runID)
 				ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, a2KnownTargetBindingFiles()))
 				collector := externalPipelineSourceNode(t, source, "orders", "collector")
@@ -236,7 +236,7 @@ func TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothSt
 			path := "orders/" + instanceID
 			entityID := flowidentity.EntityID(path)
 			owner := testRunScopedWorkflowInstanceForRun(runID, path)
-			insertGateRecoveryRun(t, selected, runID)
+			insertGateRecoveryRun(t, selected.events, runID)
 			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			files := canonicalrouting.ArrivalJoinRoutingFiles(t, canonicalrouting.ArrivalJoinPayloadDirectedBeforeArm)
 			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))

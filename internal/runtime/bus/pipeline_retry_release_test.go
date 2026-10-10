@@ -3,6 +3,7 @@ package bus_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -327,8 +328,7 @@ func TestPostgresRetryReleaseClaimSpansBoundedSweepWindow(t *testing.T) {
 		release:      releaseLater,
 	})
 
-	competingStore := storetest.AdmitPostgresRuntimeStore(t, fixture.db)
-	competingBus, err := newScopedTestEventBus(competingStore)
+	competingBus, err := newScopedTestEventBus(fixture.store)
 	if err != nil {
 		t.Fatalf("create competing event bus: %v", err)
 	}
@@ -339,7 +339,16 @@ func TestPostgresRetryReleaseClaimSpansBoundedSweepWindow(t *testing.T) {
 	})
 
 	firstDone := make(chan error, 1)
+	var firstWorker sync.WaitGroup
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseLater) }) }
+	defer func() {
+		release()
+		firstWorker.Wait()
+	}()
+	firstWorker.Add(1)
 	go func() {
+		defer firstWorker.Done()
 		_, sweepErr := fixture.bus.SweepPipelineObligations(fixture.ctx, 2)
 		firstDone <- sweepErr
 	}()
@@ -363,7 +372,7 @@ func TestPostgresRetryReleaseClaimSpansBoundedSweepWindow(t *testing.T) {
 		t.Fatalf("abandon competing cursor: %v", err)
 	}
 
-	close(releaseLater)
+	release()
 	select {
 	case err := <-firstDone:
 		if err != nil {
@@ -624,7 +633,7 @@ func TestRunContinueProcessesOnlyTargetRunDecisionRoutesOnSQLiteAndPostgres(t *t
 
 			foreignRunID := uuid.NewString()
 			foreignAt := target.CreatedAt().Add(time.Microsecond)
-			seedCompleteEventDispatchRun(t, fixture.ctx, fixture.db, backend, foreignRunID, foreignAt.Add(-time.Second))
+			seedCompleteEventDispatchRun(t, fixture.ctx, fixture.store, foreignRunID, foreignAt.Add(-time.Second))
 			foreign := newRetryReleaseRunRoot(foreignRunID, foreignAt)
 			storetest.CommitSemanticEventWithRoutes(
 				t,
@@ -928,7 +937,7 @@ func TestPipelineScanRunLocalBlockDoesNotStarveLaterRunOnSQLiteAndPostgres(t *te
 				fixture := newCompleteEventDispatchFixture(t, backend, route == "decision")
 				laterRunID := uuid.NewString()
 				laterAt := fixture.event.CreatedAt().Add(time.Microsecond)
-				seedCompleteEventDispatchRun(t, fixture.ctx, fixture.db, backend, laterRunID, laterAt.Add(-time.Second))
+				seedCompleteEventDispatchRun(t, fixture.ctx, fixture.store, laterRunID, laterAt.Add(-time.Second))
 				later := newRetryReleaseRunRoot(laterRunID, laterAt)
 				storetest.CommitSemanticEventWithRoutes(
 					t,
@@ -1025,12 +1034,8 @@ func assertRetryReleaseReplayable(t *testing.T, fixture completeEventDispatchFix
 
 func retryReleasePipelineReceiptCount(t *testing.T, fixture completeEventDispatchFixture, eventID string) int {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
-	if fixture.dialect == "postgres" {
-		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
-	}
-	var count int
-	if err := fixture.db.QueryRowContext(fixture.ctx, query, eventID).Scan(&count); err != nil {
+	count, err := storetest.CountPipelineEventReceiptStorage(fixture.ctx, fixture.store, eventID)
+	if err != nil {
 		t.Fatalf("count pipeline receipts: %v", err)
 	}
 	return count

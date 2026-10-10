@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,22 +15,17 @@ import (
 	"testing"
 	"time"
 
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
-
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -146,11 +140,9 @@ type recordingPipelineBus struct {
 	outboxErr             error
 	finalizeErr           error
 	runtimeLogErr         error
-	deliveryOwner         *pipelineTestDeliveryOwner
-	deliveryContinuations *pipelineTestContinuationOwner
 }
 
-func handlerEngineProjectNodeModule(t *testing.T, fields ...map[string]runtimecontracts.EntityFieldDecl) *previewWorkflowModule {
+func handlerEngineProjectNodeModule(t *testing.T) *previewWorkflowModule {
 	t.Helper()
 	module := &previewWorkflowModule{bundle: loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":   "name: handler-engine-test\nstages:\n  queued: {}\n",
@@ -159,57 +151,7 @@ func handlerEngineProjectNodeModule(t *testing.T, fields ...map[string]runtimeco
 		"types.yaml":    "types:\n  EmitSummary:\n    entity_id: text\n    stage: text\n  EmitFlags:\n    ready: boolean\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
 	})}
-	if len(fields) > 0 {
-		module.bundle.RootEntities["test_entity"] = runtimecontracts.EntityContract{Fields: fields[0]}
-	}
 	return module
-}
-
-func (b *recordingPipelineBus) configurePipelineTestDeliveryOwner(owner *pipelineTestDeliveryOwner) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.deliveryOwner = owner
-	b.deliveryContinuations = newPipelineTestContinuationOwner()
-}
-
-func (b *recordingPipelineBus) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error) {
-	b.mu.Lock()
-	owner := b.deliveryOwner
-	b.mu.Unlock()
-	if owner == nil {
-		return runtimedelivery.ExecutionAuthority{}, errors.New("pipeline test delivery authority is not configured")
-	}
-	return owner.activeExecutionAuthority(context.Background())
-}
-
-func (b *recordingPipelineBus) AcquireDeliveryContinuation(deliveryID string) (worklifetime.DeliveryAcquisition, error) {
-	b.mu.Lock()
-	owner := b.deliveryContinuations
-	b.mu.Unlock()
-	if owner == nil {
-		return worklifetime.DeliveryAcquisition{}, errors.New("pipeline test delivery continuation owner is not configured")
-	}
-	return owner.Acquire(deliveryID)
-}
-
-func (b *recordingPipelineBus) RetainDeliveryContinuation(snapshot runtimedelivery.Snapshot) error {
-	b.mu.Lock()
-	owner := b.deliveryContinuations
-	b.mu.Unlock()
-	if owner == nil {
-		return errors.New("pipeline test delivery continuation owner is not configured")
-	}
-	return owner.Retain(snapshot)
-}
-
-func (b *recordingPipelineBus) ReleaseDeliveryContinuation(deliveryID string) error {
-	b.mu.Lock()
-	owner := b.deliveryContinuations
-	b.mu.Unlock()
-	if owner == nil {
-		return errors.New("pipeline test delivery continuation owner is not configured")
-	}
-	return owner.Release(deliveryID)
 }
 
 type recordingPipelineDispatcher struct {
@@ -217,23 +159,6 @@ type recordingPipelineDispatcher struct {
 }
 
 func (b *recordingPipelineBus) Publish(ctx context.Context, evt events.Event) error {
-	if b.publishErr != nil {
-		return b.publishErr
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.publishes = append(b.publishes, evt)
-	b.publishContexts = append(b.publishContexts, events.DeliveryContextFromContext(ctx))
-	return nil
-}
-
-func (b *recordingPipelineBus) PublishInMutation(ctx context.Context, evt events.Event) error {
-	if _, ok := PipelineSQLTxFromContext(ctx); !ok {
-		return errors.New("pipeline transaction is required")
-	}
-	if b.publishInMutationHook != nil {
-		return b.publishInMutationHook(ctx, evt)
-	}
 	if b.publishErr != nil {
 		return b.publishErr
 	}
@@ -258,22 +183,6 @@ func (b *recordingPipelineBus) PublishDirect(ctx context.Context, evt events.Eve
 	b.directRecipients = append(b.directRecipients, append([]string(nil), recipients...))
 	b.directContexts = append(b.directContexts, events.DeliveryContextFromContext(ctx))
 	b.directInMutation = append(b.directInMutation, false)
-	return nil
-}
-func (b *recordingPipelineBus) PublishDirectInMutation(ctx context.Context, evt events.Event, recipients []string) error {
-	_, inMutation := PipelineSQLTxFromContext(ctx)
-	if !inMutation {
-		return errors.New("pipeline transaction is required")
-	}
-	if b.publishErr != nil {
-		return b.publishErr
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.directPublishes = append(b.directPublishes, evt)
-	b.directRecipients = append(b.directRecipients, append([]string(nil), recipients...))
-	b.directContexts = append(b.directContexts, events.DeliveryContextFromContext(ctx))
-	b.directInMutation = append(b.directInMutation, inMutation)
 	return nil
 }
 func (*recordingPipelineBus) ResolveSubscribedRecipients(string) []string { return nil }
@@ -319,12 +228,6 @@ func (b *recordingPipelineBus) outboxCount() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return len(b.outboxIntents)
-}
-
-func (b *recordingPipelineBus) outboxIntent(i int) runtimeengine.EmitIntent {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.outboxIntents[i]
 }
 
 func (b *recordingPipelineBus) runtimeLogEntries() []RuntimeLogEntry {
@@ -390,7 +293,7 @@ func TestLogComputeModuleReplayEvidenceEmitsRuntimeLogCarrier(t *testing.T) {
 	}
 }
 
-func TestExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureReturn(t *testing.T) {
+func VerifyNativeExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureReturnForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
 	source := pipelineSourceWithStructuredRendererModule(t, map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
@@ -399,13 +302,19 @@ func TestExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureR
 			"missing": map[string]any{"type": "string"},
 		},
 	})
-	pc, bus, ctx := newConstructorHandlerUnitCoordinator(t, staticSemanticWorkflowModule{source: source})
-	event := handlerTestRootIngress(uuid.NewString(), "render.requested", "", "", mustJSON(map[string]any{
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("native renderer requires its compiled artifact")
+	}
+	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+	bus := observeNativePipelineDeliveryBusForTest(t, pc)
+	run := runtimecorrelation.RunIDFromContext(ctx)
+	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "render.requested", "operator", "", mustJSON(map[string]any{
 		"component": "api", "owner": "platform", "language": "go",
 		"files": []any{"main.go", "README.md", "service.yaml"},
-	}), 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
-	ctx, state := prepareConstructorUnitDelivery(t, pc, ctx, ".", "node-a", event)
-	_, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	}), 0, run, events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: run, EntityID: run}), time.Now().UTC())
+	ctx, state := prepareNativeConstructorHandlerDeliveryForTest(t, fixture, pc, ctx, ".", "node-a", event)
+	_, err := executeNativeClaimedPipelineHandlerForTest(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Compute: &runtimecontracts.ComputeSpec{
 			Operation: runtimecontracts.ComputeOpModule,
 			StoreAs:   "computed.rendered_bundle",
@@ -423,7 +332,7 @@ func TestExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureR
 		},
 	}, workflowTriggerContext{
 		Event: event, State: state,
-	}, false)
+	})
 	if err == nil {
 		t.Fatal("executeNodeContractHandler error = nil, want output-schema failure")
 	}
@@ -432,8 +341,8 @@ func TestExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureR
 		t.Fatalf("executeNodeContractHandler error = %#v, want compute module ABI failure", err)
 	}
 	logs := bus.runtimeLogEntries()
-	if len(logs) != 1 {
-		t.Fatalf("runtime logs = %#v, want failure replay evidence before error return", logs)
+	if len(logs) != 2 || logs[0].Component != "compute_module" || logs[0].Action != computemodule.ReplayEvidenceAction || logs[1].Action != "handler_error" || logs[1].Failure == nil {
+		t.Fatalf("runtime logs = %#v, want one compute replay before native handler failure settlement", logs)
 	}
 	detail, ok := logs[0].Detail.(map[string]any)
 	if !ok {
@@ -466,14 +375,10 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 	if err := os.WriteFile(modulePath, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: render\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: render\nstages:\n  ready: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "nodes.yaml"), []byte("node-a:\n  execution_type: system_node\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := sourceartifact.AdmitDirectory(root)
-	if err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(raw)
@@ -504,11 +409,32 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 			OutputBytes: 1024,
 		},
 	}
+	declaration := map[string]any{
+		"handler_type": module.Kind, "path": module.Path, "abi": module.ABI, "entry": module.Entry, "digest": module.Digest,
+		"input_schema": module.InputSchema, "output_schema": module.OutputSchema,
+		"limits": map[string]any{"gas": module.Limits.Gas, "memory_pages": module.Limits.MemoryPages, "output_bytes": module.Limits.OutputBytes},
+	}
+	wire, err := json.Marshal(map[string]any{"structured_renderer": declaration})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tools.yaml"), wire, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "entities.yaml"), []byte("render_entity: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("render.requested:\n  component: text\n  owner: text\n  language: text\n  files: list<text>\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact("../../..", artifact, "", runtimecontracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	bundle.FlowTree.Root.Tools = map[string]runtimecontracts.ToolSchemaEntry{"structured_renderer": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind(module.Kind)), runtimecontracts.WithToolModule(module))}
 	return semanticview.Wrap(bundle)
 }
 
@@ -526,7 +452,7 @@ func TestPipelineCoordinatorPublish_ReturnsBusPublishError(t *testing.T) {
 	}
 }
 
-func TestExecuteNodeContractHandlerUsesConstructedEntityIdentityForWritesAndEmit(t *testing.T) {
+func VerifyExecuteNodeContractHandlerUsesConstructedEntityIdentityForWritesAndEmitForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "name: runtime-test\n",
@@ -548,11 +474,44 @@ node-a:
 	if !ok {
 		t.Fatal("expected temp workflow bundle")
 	}
-	pc, bus, ctx := newConstructorHandlerUnitCoordinator(t, canonicalPreviewWorkflowModuleForTest(&previewWorkflowModule{bundle: bundle}))
-	event := handlerTestRootIngress(uuid.NewString(), "custom.trigger", "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
-	ctx, state := prepareConstructorUnitDelivery(t, pc, ctx, "scoring", "node-a", event)
+	module := canonicalPreviewWorkflowModuleForTest(&previewWorkflowModule{bundle: bundle})
+	fixture := open(t, module.SemanticSource())
+	pc := fixture.NewCoordinator(PipelineCoordinatorOptions{Module: module})
+	ctx := runtimecorrelation.WithRunID(fixture.Context, testPipelineRunID)
+	if err := fixture.RequireRun(ctx, testPipelineRunID); err != nil {
+		t.Fatal(err)
+	}
+	instance := constructedScenarioInstanceForTest(t, module.SemanticSource(), ctx, "scoring")
+	if err := fixture.Construct(ctx, instance); err != nil {
+		t.Fatal(err)
+	}
+	before, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef))
+	if err != nil || !found || before.EntityID != instance.EntityID || before.CurrentState != instance.CurrentState || !reflect.DeepEqual(cloneMap(before.Fields), cloneMap(instance.Fields)) || before.Revision != 1 {
+		t.Fatalf("native child construction changed authored pre-state: found=%t err=%v stored=%+v", found, err, before)
+	}
+	planner, ok := pc.bus.(EngineMutationPublicationPlanner)
+	if !ok {
+		t.Fatal("native child handler requires the original publication planner")
+	}
+	bus := &nativeHandlerDispatchObservationForTest{Bus: pc.bus, EngineMutationPublicationPlanner: planner}
+	pc.bus = bus
+	event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "custom.trigger", "", "", nil, 0, testPipelineRunID, events.EventEnvelope{}, eventtest.RootRoutingSource(testPipelineRunID), time.Now().UTC())
+	node := pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a")
+	route := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(node),
+		Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "scoring", FlowInstance: instance.StorageRef, EntityID: instance.EntityID}),
+	}
+	fixture.Publish(ctx, event, route)
+	event = eventtest.TargetRouted(event, route.Target.Route())
+	ctx, stop := claimNativeWorkflowHandlerPublicationForTest(t, pc, ctx, event, route)
+	defer func() {
+		if err := stop(); err != nil {
+			t.Error(err)
+		}
+	}()
+	state := mustCurrentWorkflowState(t, pc, ctx, runtimeflowidentity.StoredRoute("scoring", instance.InstanceID, instance.StorageRef), instance.EntityID)
 
-	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, node, runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "name", Value: runtimecontracts.LiteralExpression("Updated Entity")},
@@ -580,35 +539,29 @@ node-a:
 	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil || payload["label"] != "Updated Entity" {
 		t.Fatalf("updated constructed field did not reach emit.fields: payload=%#v err=%v", payload, err)
 	}
+	stored, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef))
+	if err != nil || !found || stored.EntityID != FlowInstanceEntityID("scoring") || stored.Fields["name"] != "Updated Entity" || stored.Revision != before.Revision+1 {
+		t.Fatalf("constructed child write was not durable: found=%t err=%v stored=%+v", found, err, stored)
+	}
+	persisted, err := fixture.PublishedEvent(ctx, bus.publishedEvent(0).ID())
+	if err != nil || !reflect.DeepEqual(persisted, bus.publishedEvent(0)) {
+		t.Fatalf("child emission diverged from original selected receipt: err=%v persisted=%+v", err, persisted)
+	}
 }
 
-func TestExecuteNodeContractHandlerRejectsMissingWriteSourceBeforeEmit(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pc, bus := newEmitPersistenceTestCoordinator(t, db)
-	const entityID = testPipelineRunID
-	ctx := testPipelineCoordinatorRunContext(t, pc)
-	runID := runtimecorrelation.RunIDFromContext(ctx)
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      runID,
-		StorageRef:      runID,
-		EntityID:        entityID,
-		WorkflowName:    ".",
-		WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
-		CurrentState:    "researching",
-		Fields:          map[string]any{},
-		EntityType:      "test_entity",
-	})); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
+func VerifyNativeExecuteNodeContractHandlerRejectsMissingWriteSourceBeforeEmitForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
+	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, nativeEmitPersistenceBundleForTest(t), open)
+	bus := observeNativePipelineDeliveryBusForTest(t, pc)
+	instance := constructNativePipelineScenarioForTest(t, fixture, pc, ctx, ".")
+	runID, entityID := runtimecorrelation.RunIDFromContext(ctx), instance.EntityID
+	evt := nativeWorkflowJoinEventForTest(ctx, ".", runID, entityID, "research.completed", mustJSON(map[string]any{}), time.Now().UTC())
+	node := pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a")
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(evt.Envelope().Target)}
+	if err := fixture.PublishNode(ctx, evt, route); err != nil {
+		t.Fatal(err)
 	}
-
-	evt := handlerTestRootIngress(
-		uuid.NewString(), events.EventType("research.completed"), "", "", mustJSON(map[string]any{}), 0,
-		runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
-	)
-	seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
-	_, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	ctx = withWorkflowNodeDeliveryRoute(ctx, route)
+	_, err := executeNativeClaimedPipelineHandlerForTest(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "business_brief"},
@@ -625,7 +578,7 @@ func TestExecuteNodeContractHandlerRejectsMissingWriteSourceBeforeEmit(t *testin
 			Stage:    WorkflowStateID("researching"),
 			Metadata: map[string]any{},
 		},
-	}, false)
+	})
 	if err == nil || !strings.Contains(err.Error(), "business_brief") || !strings.Contains(err.Error(), "absent") {
 		t.Fatalf("executeNodeContractHandler error = %v, want missing source rejection", err)
 	}
@@ -633,7 +586,7 @@ func TestExecuteNodeContractHandlerRejectsMissingWriteSourceBeforeEmit(t *testin
 		t.Fatalf("published count = %d, want 0 after missing source rejection", got)
 	}
 
-	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(runID))
+	instance, ok, loadErr := pc.workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
 	if loadErr != nil {
 		t.Fatalf("load workflow instance: %v", loadErr)
 	}
@@ -657,38 +610,19 @@ func TestVerifyPreparedWorkflowEmitPersistenceRejectsMissingExpectedField(t *tes
 	}
 }
 
-func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSucceeds(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pc, bus := newEmitPersistenceTestCoordinator(t, db)
-	const entityID = testPipelineRunID
-	ctx := testPipelineCoordinatorRunContext(t, pc)
-	runID := runtimecorrelation.RunIDFromContext(ctx)
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      runID,
-		StorageRef:      runID,
-		EntityID:        entityID,
-		WorkflowName:    ".",
-		WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
-		CurrentState:    "researching",
-		Fields:          map[string]any{},
-		EntityType:      "test_entity",
-	})); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
-
-	evt := handlerTestRootIngress(
-		uuid.NewString(), events.EventType("research.completed"), "", "",
-		mustJSON(map[string]any{"business_brief": map[string]any{"summary": "validated"}}), 0,
-		runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
-	)
-	seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
+func VerifyNativeExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSucceedsForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
+	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, nativeEmitPersistenceBundleForTest(t), open)
+	bus := observeNativePipelineDeliveryBusForTest(t, pc)
+	instance := constructNativePipelineScenarioForTest(t, fixture, pc, ctx, ".")
+	runID, entityID := runtimecorrelation.RunIDFromContext(ctx), instance.EntityID
+	evt := nativeWorkflowJoinEventForTest(ctx, ".", runID, entityID, "research.completed", mustJSON(map[string]any{"business_brief": map[string]any{"summary": "validated"}}), time.Now().UTC())
 	node := pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a")
-	ctx = withClaimedWorkflowNodePublicationForTest(t, pc, ctx, evt, events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}),
-	})
-	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, node, runtimecontracts.SystemNodeEventHandler{
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(evt.Envelope().Target)}
+	if err := fixture.PublishNode(ctx, evt, route); err != nil {
+		t.Fatal(err)
+	}
+	ctx = withWorkflowNodeDeliveryRoute(ctx, route)
+	result, err := executeNativeClaimedPipelineHandlerForTest(t, pc, ctx, node, runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "business_brief"},
@@ -705,7 +639,7 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 			Stage:    WorkflowStateID("researching"),
 			Metadata: map[string]any{},
 		},
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -719,7 +653,7 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 		t.Fatalf("published type = %q, want spec.requested", got)
 	}
 
-	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(runID))
+	instance, ok, loadErr := pc.workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, runID))
 	if loadErr != nil {
 		t.Fatalf("load workflow instance: %v", loadErr)
 	}
@@ -745,31 +679,11 @@ func handlerDataAccumulationModule(t *testing.T) *previewWorkflowModule {
 	})}
 }
 
-func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
-		Module: handlerDataAccumulationModule(t),
-	})
+func VerifyExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpressionForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	const entityID = testPipelineRunID
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      testPipelineRunID,
-		StorageRef:      testPipelineRunID,
-		EntityID:        entityID,
-		WorkflowName:    ".",
-		WorkflowVersion: "v-test",
-		CurrentState:    "queued",
-		Fields:          map[string]any{"revision_count": 0},
-		EntityType:      "test_entity",
-	})); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
-
-	ctx := testPipelineCoordinatorRunContext(t, pc)
+	fixture, pc, ctx, bus := nativeHandlerEngineExistingEntityWithModuleForTest(t, open, handlerDataAccumulationModule(t), entityID, map[string]any{"revision_count": 0})
 	trigger := handlerTestRootIngress("", events.EventType("validation.spec_requested"), "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{})
-	seedPipelineEventRecord(t, ctx, db, trigger)
-	_, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNativeHandlerEngineWithHandoffForTest(t, fixture, pc, ctx, bus, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "revision_count", Value: runtimecontracts.CELExpression("entity.revision_count + 1")},
@@ -778,12 +692,12 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 	}, workflowTriggerContext{
 		Event: trigger,
 		State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(testPipelineRunID), entityID),
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
 
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(testPipelineRunID))
+	instance, ok, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, testPipelineRunID))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -808,31 +722,11 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 	}
 }
 
-func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
-		Module: handlerDataAccumulationModule(t),
-	})
+func VerifyExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeErrorForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	const entityID = testPipelineRunID
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      testPipelineRunID,
-		StorageRef:      testPipelineRunID,
-		EntityID:        entityID,
-		WorkflowName:    ".",
-		WorkflowVersion: "v-test",
-		CurrentState:    "queued",
-		Fields:          map[string]any{},
-		EntityType:      "test_entity",
-	})); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
-
-	ctx := testPipelineCoordinatorRunContext(t, pc)
+	fixture, pc, ctx, bus := nativeHandlerEngineExistingEntityWithModuleForTest(t, open, handlerDataAccumulationModule(t), entityID, nil)
 	trigger := handlerTestRootIngress("", events.EventType("validation.spec_requested"), "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{})
-	seedPipelineEventRecord(t, ctx, db, trigger)
-	_, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNativeHandlerEngineWithHandoffForTest(t, fixture, pc, ctx, bus, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "revision_count", Value: runtimecontracts.CELExpression("entity.revision_count + payload.missing_delta")},
@@ -841,7 +735,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 	}, workflowTriggerContext{
 		Event: trigger,
 		State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(testPipelineRunID), entityID),
-	}, false)
+	})
 	if err == nil {
 		t.Fatal("expected executeNodeContractHandler to fail on data accumulation CEL runtime error")
 	}
@@ -849,7 +743,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 		t.Fatalf("error = %v, want data_accumulation target context", err)
 	}
 
-	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(testPipelineRunID))
+	instance, ok, loadErr := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, testPipelineRunID))
 	if loadErr != nil {
 		t.Fatalf("load workflow instance: %v", loadErr)
 	}
@@ -861,31 +755,11 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 	}
 }
 
-func TestExecuteNodeContractHandlerPersistsExplicitAbsenceDecision(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
-		Module: handlerDataAccumulationModule(t),
-	})
+func VerifyExecuteNodeContractHandlerPersistsExplicitAbsenceDecisionForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	const entityID = testPipelineRunID
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      testPipelineRunID,
-		StorageRef:      testPipelineRunID,
-		EntityID:        entityID,
-		WorkflowName:    ".",
-		WorkflowVersion: "v-test",
-		CurrentState:    "queued",
-		Fields:          map[string]any{},
-		EntityType:      "test_entity",
-	})); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
-
-	ctx := testPipelineCoordinatorRunContext(t, pc)
+	fixture, pc, ctx, bus := nativeHandlerEngineExistingEntityWithModuleForTest(t, open, handlerDataAccumulationModule(t), entityID, nil)
 	trigger := handlerTestRootIngress("", events.EventType("validation.spec_requested"), "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{})
-	seedPipelineEventRecord(t, ctx, db, trigger)
-	_, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNativeHandlerEngineWithHandoffForTest(t, fixture, pc, ctx, bus, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "kill_reason_missing", Value: runtimecontracts.CELExpression("!has(entity.kill_reason)")},
@@ -894,12 +768,12 @@ func TestExecuteNodeContractHandlerPersistsExplicitAbsenceDecision(t *testing.T)
 	}, workflowTriggerContext{
 		Event: trigger,
 		State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(testPipelineRunID), entityID),
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
 
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(testPipelineRunID))
+	instance, ok, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, testPipelineRunID))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -909,28 +783,6 @@ func TestExecuteNodeContractHandlerPersistsExplicitAbsenceDecision(t *testing.T)
 	if got := instance.Fields["kill_reason_missing"]; got != true {
 		t.Fatalf("kill_reason_missing = %#v, want true for unassigned field", got)
 	}
-}
-
-func newEmitPersistenceTestCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordinator, *recordingPipelineBus) {
-	t.Helper()
-	bus := &recordingPipelineBus{}
-	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: validation\nstages:\n  researching: {}\n  mvp_speccing: {}\n",
-		"entities.yaml": "test_entity:\n  business_brief: {type: BusinessBrief}\n",
-		"types.yaml":    "types:\n  BusinessBrief:\n    summary: text\n",
-		"events.yaml":   "research.completed:\n  business_brief: BusinessBrief?\nspec.requested:\n",
-		"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [research.completed]\n  event_handlers:\n    research.completed:\n      advances_to: mvp_speccing\n",
-	})
-	pc := &PipelineCoordinator{
-		bus:            bus,
-		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
-		module: canonicalPreviewWorkflowModuleForTest(&previewWorkflowModule{
-			bundle: bundle,
-		}),
-	}
-	return pc, bus
 }
 
 func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefaults(t *testing.T) {
@@ -969,11 +821,7 @@ func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefault
 	}
 }
 
-func TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReads(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	bus := &recordingPipelineBus{}
+func VerifyNativeExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReadsForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "name: runtime-test\n",
@@ -988,6 +836,7 @@ validation_entity:
     initial: 0
   kill_reason: text
 `,
+		"validation/events.yaml": "candidate.discovered:\nentity.created:\n  revision_count: integer\n",
 		"validation/nodes.yaml": `
 node-a:
   execution_type: system_node
@@ -997,21 +846,12 @@ node-a:
 	if !ok {
 		t.Fatal("expected temp workflow bundle")
 	}
-	pc := &PipelineCoordinator{
-		bus:            bus,
-		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
-		module: &previewWorkflowModule{
-			bundle: bundle,
-		},
-	}
-
-	ctx := testPipelineCoordinatorRunContext(t, pc)
-	trigger := handlerTestRootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{})
-	seedPipelineEventRecord(t, ctx, db, trigger)
-	ctx, state := prepareConstructorUnitDelivery(t, pc, ctx, "validation", "node-a", trigger)
-	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+	bus := &nativePipelineDeliveryBusObservationForTest{Bus: pc.bus, EngineMutationPublicationPlanner: pc.bus.(EngineMutationPublicationPlanner)}
+	pc.bus = bus
+	trigger := nativeWorkflowJoinEventForTest(ctx, "validation", "validation", FlowInstanceEntityID("validation"), "candidate.discovered", nil, time.Now().UTC())
+	ctx, state := prepareNativeConstructorHandlerDeliveryForTest(t, fixture, pc, ctx, "validation", "node-a", trigger)
+	result, err := executeNativeClaimedPipelineHandlerForTest(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{Check: `entity.revision_count == 0 && !has(entity.kill_reason)`},
 		Emit: runtimecontracts.EmitSpec{
 			Event: "entity.created",
@@ -1022,7 +862,7 @@ node-a:
 	}, workflowTriggerContext{
 		Event: trigger,
 		State: state,
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -1045,7 +885,7 @@ node-a:
 		t.Fatalf("emitted payload revision_count = %#v, want 0", got)
 	}
 
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(emitted.FlowInstance()))
+	instance, ok, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, emitted.FlowInstance()))
 	if err != nil {
 		t.Fatalf("workflowStore.Load: %v", err)
 	}
@@ -1058,31 +898,13 @@ node-a:
 	if _, present := instance.Fields["kill_reason"]; present {
 		t.Fatalf("creation synthesized an uninitialized field: %#v", instance.Fields)
 	}
-	assertCreatedChildFlowIdentityCoherent(t, db, "validation", entityID, emitted, instance)
-
-	rows, err := db.QueryContext(testAuthorActivityContext(t, context.Background()), `
-		SELECT domain, path, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
-		FROM entity_mutations
-		WHERE entity_id = $1::uuid
-		ORDER BY domain, path, created_at
-	`, entityID)
-	if err != nil {
-		t.Fatalf("query entity_mutations: %v", err)
-	}
-	defer rows.Close()
+	assertNativeCreatedChildFlowIdentityCoherentForTest(t, fixture, ctx, "validation", entityID, emitted, instance)
 
 	initialMutations := map[string][3]string{}
-	for rows.Next() {
-		var domain, path, writerType, writerID, handlerStep string
-		if err := rows.Scan(&domain, &path, &writerType, &writerID, &handlerStep); err != nil {
-			t.Fatalf("scan entity_mutations: %v", err)
+	for _, row := range fixture.MutationHistory(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID) {
+		if row.WriterType == "platform" && row.WriterID == "entity_initial_value" {
+			initialMutations[row.Domain+":"+row.Path] = [3]string{row.WriterType, row.WriterID, row.HandlerStep}
 		}
-		if writerType == "platform" && writerID == "entity_initial_value" {
-			initialMutations[domain+":"+path] = [3]string{writerType, writerID, handlerStep}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows error: %v", err)
 	}
 	if got, ok := initialMutations["authored_field:revision_count"]; !ok {
 		t.Fatalf("expected initial-value mutation for revision_count, got %#v", initialMutations)
@@ -1091,11 +913,7 @@ node-a:
 	}
 }
 
-func TestExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContext(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	bus := &recordingPipelineBus{}
+func VerifyNativeExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContextForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "name: runtime-test\n",
@@ -1124,21 +942,15 @@ node-a:
 	if !ok {
 		t.Fatal("expected temp workflow bundle")
 	}
-	pc := &PipelineCoordinator{
-		bus:            bus,
-		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
-		module: &previewWorkflowModule{
-			bundle: bundle,
-		},
-	}
-	ctx := testPipelineCoordinatorRunContext(t, pc)
+	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+	bus := observeNativePipelineDeliveryBusForTest(t, pc)
 	const otherRunID = "88888888-8888-8888-8888-888888888888"
-	runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: otherRunID})
-	otherCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), otherRunID)
-	seedQueryEntitiesGuardInstance(t, pc, ctx, "11111111-1111-1111-1111-111111111111", "req-existing")
-	seedQueryEntitiesGuardInstance(t, pc, otherCtx, "22222222-2222-2222-2222-222222222222", "req-cross-run")
+	if err := fixture.RequireRun(ctx, otherRunID); err != nil {
+		t.Fatal(err)
+	}
+	otherCtx := runtimecorrelation.WithRunID(fixture.Context, otherRunID)
+	constructNativeQueryEntitiesGuardInstanceForTest(t, fixture, pc, ctx, "11111111-1111-1111-1111-111111111111", "req-existing")
+	constructNativeQueryEntitiesGuardInstanceForTest(t, fixture, pc, otherCtx, "22222222-2222-2222-2222-222222222222", "req-cross-run")
 
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{Check: `query_entities(request_id == payload.request_id).count == 0`},
@@ -1150,30 +962,19 @@ node-a:
 		},
 	}
 	runHandler := func(entityID, requestID string) error {
-		instance := seedQueryEntitiesGuardInstance(t, pc, ctx, entityID, "")
-		event := handlerTestRootIngress(
-			uuid.NewString(),
-			events.EventType("request.received"),
-			"",
-			"",
-			mustJSON(map[string]any{"request_id": requestID}),
-			0,
-			testPipelineRunID,
-			"",
-			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-			time.Time{},
-		)
-		seedPipelineEventRecord(t, ctx, db, event)
+		instance := constructNativeQueryEntitiesGuardInstanceForTest(t, fixture, pc, ctx, entityID, "")
+		event := nativeWorkflowJoinEventForTest(ctx, "validation", instance.StorageRef, instance.EntityID, "request.received", mustJSON(map[string]any{"request_id": requestID}), time.Now().UTC())
 		node := pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a")
-		deliveryCtx := withClaimedWorkflowNodePublicationForTest(t, pc, ctx, event, events.DeliveryRoute{
-			Recipient: events.MustNodeDeliveryRecipient(node),
-			Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "validation", FlowInstance: instance.StorageRef, EntityID: entityID}),
-		})
-		state := mustCurrentWorkflowState(t, pc, deliveryCtx, runtimeflowidentity.StoredRoute("validation", instance.InstanceID, instance.StorageRef), entityID)
-		_, err := executeNodeContractHandlerWithHandoff(t, pc, deliveryCtx, node, handler, workflowTriggerContext{
+		route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(event.Envelope().Target)}
+		if err := fixture.PublishNode(ctx, event, route); err != nil {
+			return err
+		}
+		deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, route)
+		state := mustCurrentWorkflowState(t, pc, deliveryCtx, runtimeflowidentity.StoredRoute("validation", instance.InstanceID, instance.StorageRef), instance.EntityID)
+		_, err := executeNativeClaimedPipelineHandlerForTest(t, pc, deliveryCtx, node, handler, workflowTriggerContext{
 			Event: event,
 			State: state,
-		}, false)
+		})
 		return err
 	}
 
@@ -1194,36 +995,7 @@ node-a:
 	}
 }
 
-func seedQueryEntitiesGuardInstance(t *testing.T, pc *PipelineCoordinator, ctx context.Context, entityID, requestID string) WorkflowInstance {
-	t.Helper()
-	storageRef := "validation/" + entityID
-	// Paired pre-state isolates collection lookup/guard behavior, not construction.
-	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      runtimeflowidentity.LogicalInstanceID(storageRef),
-		StorageRef:      storageRef,
-		EntityID:        entityID,
-		WorkflowName:    "validation",
-		WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
-		Mode:            "template",
-		StageDefined:    true,
-		CurrentState:    "queued",
-		Fields:          map[string]any{"validation_id": entityID, "request_id": requestID},
-		EntityType:      "validation_request",
-	})
-	instance.InitialFieldValues = cloneStringAnyMap(instance.Fields)
-	runID := runtimecorrelation.RunIDFromContext(ctx)
-	instance.ParentFlowID, instance.ParentFlowInstance, instance.ParentEntityID = ".", runID, runtimeflowidentity.EntityID(runID)
-	if err := pc.workflowStore.create(ctx, instance); err != nil {
-		t.Fatalf("seed query_entities guard instance %s: %v", entityID, err)
-	}
-	return instance
-}
-
-func TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentity(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	bus := &recordingPipelineBus{}
+func VerifyNativeExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentityForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "name: runtime-test\n",
@@ -1237,6 +1009,7 @@ review_entity:
     type: text
     initial: pending
 `,
+		"review/events.yaml": "candidate.ready:\nreview.created:\n  status: text\n",
 		"review/nodes.yaml": `
 node-a:
   execution_type: system_node
@@ -1246,21 +1019,12 @@ node-a:
 	if !ok {
 		t.Fatal("expected temp workflow bundle")
 	}
-	pc := &PipelineCoordinator{
-		bus:            bus,
-		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
-		module: &previewWorkflowModule{
-			bundle: bundle,
-		},
-	}
-
-	ctx := testPipelineCoordinatorRunContext(t, pc)
-	trigger := handlerTestRootIngress("", events.EventType("candidate.ready"), "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{})
-	seedPipelineEventRecord(t, ctx, db, trigger)
-	ctx, state := prepareConstructorUnitDelivery(t, pc, ctx, "review", "node-a", trigger)
-	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+	bus := &nativePipelineDeliveryBusObservationForTest{Bus: pc.bus, EngineMutationPublicationPlanner: pc.bus.(EngineMutationPublicationPlanner)}
+	pc.bus = bus
+	trigger := nativeWorkflowJoinEventForTest(ctx, "review", "review", FlowInstanceEntityID("review"), "candidate.ready", nil, time.Now().UTC())
+	ctx, state := prepareNativeConstructorHandlerDeliveryForTest(t, fixture, pc, ctx, "review", "node-a", trigger)
+	result, err := executeNativeClaimedPipelineHandlerForTest(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{Check: `entity.status == "pending"`},
 		Emit: runtimecontracts.EmitSpec{
 			Event: "review.created",
@@ -1271,7 +1035,7 @@ node-a:
 	}, workflowTriggerContext{
 		Event: trigger,
 		State: state,
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -1286,7 +1050,7 @@ node-a:
 	if entityID == "" {
 		t.Fatal("expected emitted event to carry created entity id")
 	}
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(emitted.FlowInstance()))
+	instance, ok, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, emitted.FlowInstance()))
 	if err != nil {
 		t.Fatalf("workflowStore.Load: %v", err)
 	}
@@ -1296,47 +1060,10 @@ node-a:
 	if got := instance.Fields["status"]; got != "pending" {
 		t.Fatalf("persisted status = %#v, want pending", got)
 	}
-	assertCreatedChildFlowIdentityCoherent(t, db, "review", entityID, emitted, instance)
+	assertNativeCreatedChildFlowIdentityCoherentForTest(t, fixture, ctx, "review", entityID, emitted, instance)
 }
 
-func assertCreatedChildFlowIdentityCoherent(t *testing.T, db *sql.DB, flowID, entityID string, emitted events.Event, instance WorkflowInstance) {
-	t.Helper()
-	instanceID := strings.TrimSpace(instance.InstanceID)
-	if instanceID == "" {
-		t.Fatalf("created %s entity %s missing typed instance_id", flowID, entityID)
-	}
-	flowPath := flowID
-	if got := strings.TrimSpace(instance.StorageRef); got != flowPath {
-		t.Fatalf("created %s entity storage_ref = %q, want %q", flowID, got, flowPath)
-	}
-	if got := entityID; got != FlowInstanceEntityID(flowPath) {
-		t.Fatalf("created %s entity id = %q, want %q for flow path %q", flowID, got, FlowInstanceEntityID(flowPath), flowPath)
-	}
-	if got := emitted.FlowInstance(); got != flowID {
-		t.Fatalf("created %s emitted flow_instance = %q, want static scope %q", flowID, got, flowID)
-	}
-	wantSource := (events.RouteIdentity{FlowID: flowID, FlowInstance: flowID, EntityID: entityID}).Normalized()
-	if got := emitted.SourceRoute(); got != wantSource {
-		t.Fatalf("created %s emitted source route = %#v, want static scope %#v", flowID, got, wantSource)
-	}
-	var rowOwner string
-	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
-		SELECT flow_instance
-		FROM entity_state
-		WHERE entity_id = $1::uuid
-	`, entityID).Scan(&rowOwner); err != nil {
-		t.Fatalf("query created %s entity_state owner: %v", flowID, err)
-	}
-	if got := strings.TrimSpace(rowOwner); got != flowPath {
-		t.Fatalf("created %s entity_state.flow_instance = %q, want %q", flowID, got, flowPath)
-	}
-}
-
-func TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValue(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	bus := &recordingPipelineBus{}
+func VerifyNativeExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValueForTest(t *testing.T, backend string, open pipelineDeliveryNativeOpenerForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "name: runtime-test\n",
@@ -1350,6 +1077,7 @@ validation_entity:
     type: integer?
     initial: 0
 `,
+		"validation/events.yaml": "candidate.discovered:\nentity.created:\n",
 		"validation/nodes.yaml": `
 node-a:
   execution_type: system_node
@@ -1359,21 +1087,12 @@ node-a:
 	if !ok {
 		t.Fatal("expected temp workflow bundle")
 	}
-	pc := &PipelineCoordinator{
-		bus:            bus,
-		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
-		module: &previewWorkflowModule{
-			bundle: bundle,
-		},
-	}
-
-	ctx := testPipelineCoordinatorRunContext(t, pc)
-	trigger := handlerTestRootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{})
-	seedPipelineEventRecord(t, ctx, db, trigger)
-	ctx, state := prepareConstructorUnitDelivery(t, pc, ctx, "validation", "node-a", trigger)
-	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+	bus := &nativePipelineDeliveryBusObservationForTest{Bus: pc.bus, EngineMutationPublicationPlanner: pc.bus.(EngineMutationPublicationPlanner)}
+	pc.bus = bus
+	trigger := nativeWorkflowJoinEventForTest(ctx, "validation", "validation", FlowInstanceEntityID("validation"), "candidate.discovered", nil, time.Now().UTC())
+	ctx, state := prepareNativeConstructorHandlerDeliveryForTest(t, fixture, pc, ctx, "validation", "node-a", trigger)
+	result, err := executeNativeClaimedPipelineHandlerForTest(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
 			{Operation: runtimecontracts.WorkflowDataOperationClear, TargetRef: "entity.revision_count"},
 		}},
@@ -1381,7 +1100,7 @@ node-a:
 	}, workflowTriggerContext{
 		Event: trigger,
 		State: state,
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -1397,7 +1116,7 @@ node-a:
 		t.Fatal("expected emitted event to carry created entity id")
 	}
 
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(emitted.FlowInstance()))
+	instance, ok, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, emitted.FlowInstance()))
 	if err != nil {
 		t.Fatalf("workflowStore.Load: %v", err)
 	}
@@ -1408,173 +1127,99 @@ node-a:
 		t.Fatalf("persisted revision_count = %#v, want field cleared", instance.Fields["revision_count"])
 	}
 
-	rows, err := db.QueryContext(testAuthorActivityContext(t, context.Background()), `
-		SELECT domain, path, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
-		FROM entity_mutations
-		WHERE entity_id = $1::uuid AND domain = 'authored_field' AND path = 'revision_count'
-		ORDER BY created_at
-	`, entityID)
-	if err != nil {
-		t.Fatalf("query entity_mutations: %v", err)
-	}
-	defer rows.Close()
-
 	var sawInitial bool
-	for rows.Next() {
-		var domain, path, writerType, writerID, handlerStep string
-		if err := rows.Scan(&domain, &path, &writerType, &writerID, &handlerStep); err != nil {
-			t.Fatalf("scan entity_mutations: %v", err)
-		}
-		if writerType == "platform" && writerID == "entity_initial_value" && handlerStep == "create_entity" {
+	for _, row := range fixture.MutationHistory(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID) {
+		if row.Domain == "authored_field" && row.Path == "revision_count" && row.WriterType == "platform" && row.WriterID == "entity_initial_value" && row.HandlerStep == "create_entity" {
 			sawInitial = true
 		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows error: %v", err)
 	}
 	if !sawInitial {
 		t.Fatal("expected initial-value mutation for revision_count before later clear")
 	}
 }
 
-func TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity(t *testing.T) {
-	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml": "name: demo\nstages:\n  queued: {}\n  done: {final: true}\n",
-		"nodes.yaml":  "node-a:\n  execution_type: system_node\n  subscribes_to: [custom.trigger]\n  event_handlers:\n    custom.trigger: {}\n",
-		"events.yaml": "custom.trigger:\n",
-	})
-	pc, _, ctx := newConstructorHandlerUnitCoordinator(t, &previewWorkflowModule{bundle: bundle})
-	event := handlerTestRootIngress(uuid.NewString(), "custom.trigger", "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Now().UTC())
-	ctx, _ = prepareConstructorUnitDelivery(t, pc, ctx, ".", "node-a", event)
-	instance, found, err := pc.workflowStore.Load(ctx, testRunScopedWorkflowInstance(testPipelineRunID))
-	if err != nil || !found {
-		t.Fatalf("constructed terminal-control owner: found=%v err=%v", found, err)
-	}
-	instance.CurrentState = "done"
-	if err := pc.workflowStore.upsert(ctx, instance); err != nil {
-		t.Fatal(err)
-	}
-	state := mustCurrentWorkflowState(t, pc, ctx, runtimeflowidentity.StoredRoute(".", testPipelineRunID, testPipelineRunID), testPipelineRunID)
-	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
-		Event: event, State: state,
-	}, false)
-	var refusal *TerminalReceiverError
-	if !errors.As(err, &refusal) || refusal.Stage != "done" || refusal.FlowID != "." || result.Committed {
-		t.Fatalf("terminal target admission result=%#v err=%v, want exact terminal refusal before mutation", result, err)
-	}
-	after, found, loadErr := pc.workflowStore.Load(ctx, testRunScopedWorkflowInstance(testPipelineRunID))
-	if loadErr != nil || !found || after.Revision != instance.Revision+1 || after.CurrentState != "done" || pc.bus.(*recordingPipelineBus).publishedCount() != 0 {
-		t.Fatalf("terminal refusal changed durable state or published: found=%v revision=%d stage=%s err=%v", found, after.Revision, after.CurrentState, loadErr)
+func VerifyNativeExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntityForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			bundle := loadWorkflowTempBundle(t, map[string]string{
+				"schema.yaml":   "name: demo\nstages:\n  queued: {}\n  done: {final: true}\n",
+				"entities.yaml": "test_entity: {}\n",
+				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  event_handlers:\n    finish:\n      advances_to: done\n    custom.trigger: {}\n",
+				"events.yaml":   "finish:\ncustom.trigger:\n",
+			})
+			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+			bus := observeNativePipelineDeliveryBusForTest(t, pc)
+			instance := constructNativePipelineScenarioForTest(t, fixture, pc, ctx, ".")
+			finish := nativeWorkflowJoinEventForTest(ctx, ".", instance.StorageRef, instance.EntityID, "finish", []byte(`{}`), time.Now().UTC())
+			dispatchNativeWorkflowJoinEventForTest(t, fixture, pc, ctx, finish, "node-a")
+			instance, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef))
+			if err != nil || !found || instance.CurrentState != "done" {
+				t.Fatalf("real terminal control: %#v/%t/%v", instance, found, err)
+			}
+			event := nativeWorkflowJoinEventForTest(ctx, ".", instance.StorageRef, instance.EntityID, "custom.trigger", []byte(`{}`), time.Now().UTC())
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(pipelineNode(t, ".", "node-a")), Target: events.MustExistingEntityTarget(event.TargetRoute())}
+			if err := fixture.PublishNode(ctx, event, route); err != nil {
+				t.Fatal(err)
+			}
+			ctx = withWorkflowNodeDeliveryRoute(ctx, route)
+			state := mustCurrentWorkflowState(t, pc, ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef).Route, instance.EntityID)
+			counts := fixture.Transactions()
+			result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{Event: event, State: state}, false)
+			var refusal *TerminalReceiverError
+			if !errors.As(err, &refusal) || refusal.Stage != "done" || refusal.FlowID != "." || result.Committed {
+				t.Fatalf("terminal target admission result=%#v err=%v, want exact terminal refusal before mutation", result, err)
+			}
+			after, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instance.StorageRef))
+			if err != nil || !found || !reflect.DeepEqual(instance, after) || fixture.Transactions().Claims != counts.Claims || bus.publishedCount() != 0 {
+				t.Fatalf("terminal refusal changed state, acquired a claim or published: %#v/%t/%v", after, found, err)
+			}
+		})
 	}
 }
 
-func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRepositoryRootHandler(t *testing.T) {
-	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
-	bundle, ok := semanticview.Bundle(source)
-	if !ok {
-		t.Fatal("expected workflow fixture bundle")
-	}
-	module, err := newPipelineFixtureWorkflowModule(bundle)
-	if err != nil {
-		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
-	}
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	store := newPostgresWorkflowInstanceStoreForTest(db)
-	bus := &recordingPipelineBus{}
-	pc := &PipelineCoordinator{
-		bus:            bus,
-		module:         module,
-		workflowStore:  store,
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
-	}
-
-	const (
-		rootEntityID = "11111111-1111-1111-1111-111111111111"
-	)
-	childEntityID := FlowInstanceEntityID("child/inst-1")
-	grandchildEntityID := FlowInstanceEntityID("child/grandchild/inst-1")
-	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      "inst-1",
-		StorageRef:      "child/inst-1",
-		EntityID:        childEntityID,
-		ParentEntityID:  rootEntityID,
-		WorkflowName:    "child",
-		WorkflowVersion: bundle.WorkflowVersion(),
-		CurrentState:    "waiting",
-		Fields:          map[string]any{},
-		EntityType:      "test_entity",
-	})); err != nil {
-		t.Fatalf("seed child instance: %v", err)
-	}
-	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      "inst-1",
-		StorageRef:      "child/grandchild/inst-1",
-		EntityID:        grandchildEntityID,
-		ParentEntityID:  childEntityID,
-		WorkflowName:    "child/grandchild",
-		WorkflowVersion: bundle.WorkflowVersion(),
-		CurrentState:    "finished",
-		Fields:          map[string]any{},
-		EntityType:      "test_entity",
-	})); err != nil {
-		t.Fatalf("seed grandchild instance: %v", err)
-	}
-	if consume, handled, err := pc.workflowNodeInterceptPolicy(testAuthorActivityContext(t, context.Background()), "child/grandchild/micro.done", handlerTestRootIngress(
-		"",
-		events.EventType("child/grandchild/micro.done"),
-		"",
-		"",
-		nil,
-		0,
-		testPipelineRunID,
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, grandchildEntityID),
-		time.Time{},
-	)); err != nil || handled || consume {
-		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, err = %v, want no unstamped match", handled, consume, err)
-	}
-
-	evt := handlerTestRootIngress(
-		uuid.NewString(),
-		events.EventType("child/grandchild/micro.done"),
-		"",
-		"",
-		nil,
-		0,
-		testPipelineRunID,
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, grandchildEntityID),
-		time.Time{},
-	)
-
-	configurePipelineTestDeliveryOwner(t, pc)
-	route := seedPipelineNodeDeliveryRouteAuthority(t, db, evt, events.DeliveryRoute{
-		Recipient: events.MustNodeDeliveryRecipient(pipelineNode(t, ".", "root-collector")),
-		Target: events.MustExistingEntityTarget(events.RouteIdentity{
-			FlowID: ".", FlowInstance: testPipelineRunID, EntityID: rootEntityID,
-		}),
-	})
-	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(testWorkflowStoreRunContext(t, store), route), evt)
-	if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
-		t.Fatalf("nested authoring-flow delivery error = %v, want stamped connect claim", err)
-	}
-	if handled {
-		t.Fatal("nested authoring-flow delivery handled without a stamped connect claim")
-	}
-	child, found, err := store.Load(testWorkflowStoreRunContext(t, store), testRunScopedWorkflowInstance("child/inst-1"))
-	if err != nil {
-		t.Fatalf("load child instance: %v", err)
-	}
-	if !found {
-		t.Fatal("expected child instance")
-	}
-	if got := strings.TrimSpace(child.CurrentState); got != "waiting" {
-		t.Fatalf("child current_state = %q, want waiting", got)
-	}
-	if got := bus.publishedCount(); got != 0 {
-		t.Fatalf("published count = %d, want 0 without subject-link back-propagation", got)
+func VerifyNativeExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRepositoryRootHandlerForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
+			bundle, ok := semanticview.Bundle(source)
+			if !ok {
+				t.Fatal("expected workflow fixture bundle")
+			}
+			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
+			bus := observeNativePipelineDeliveryBusForTest(t, pc)
+			root := constructNativePipelineScenarioForTest(t, fixture, pc, ctx, ".")
+			child := constructNativePipelineScenarioForTest(t, fixture, pc, ctx, "child")
+			grandchild := constructNativePipelineScenarioForTest(t, fixture, pc, ctx, "child/grandchild")
+			if child.CurrentState != "waiting" {
+				t.Fatalf("compiled preconditions: child=%s grandchild=%s", child.CurrentState, grandchild.CurrentState)
+			}
+			target := events.RouteIdentity{FlowID: ".", FlowInstance: root.StorageRef, EntityID: root.EntityID}
+			envelope := events.EnvelopeForTargetRoute(events.EnvelopeForEntityID(events.EventEnvelope{}, grandchild.EntityID), target)
+			unstamped := eventtest.ExistingRunRootIngress("", "child/grandchild/micro.done", "operator", "", nil, 0, runtimecorrelation.RunIDFromContext(ctx), envelope, time.Time{})
+			if consume, handled, err := pc.workflowNodeInterceptPolicy(ctx, string(unstamped.Type()), unstamped); err != nil || handled || consume {
+				t.Fatalf("unstamped intercept: handled=%t consume=%t error=%v", handled, consume, err)
+			}
+			evt := eventtest.ExistingRunRootIngress(uuid.NewString(), unstamped.Type(), "operator", "", nil, 0, runtimecorrelation.RunIDFromContext(ctx), envelope, time.Now().UTC())
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(pipelineNode(t, ".", "root-collector")), Target: events.MustExistingEntityTarget(target)}
+			if err := fixture.PublishNode(ctx, evt, route); err != nil {
+				t.Fatal(err)
+			}
+			handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
+			if err == nil || !strings.Contains(err.Error(), "stamped connect claim") || handled {
+				t.Fatalf("nested authoring delivery: handled=%t error=%v, want stamped connect claim refusal", handled, err)
+			}
+			stored, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, child.StorageRef))
+			if err != nil || !found || stored.CurrentState != "waiting" {
+				t.Fatalf("unstamped delivery changed child: found=%t instance=%#v error=%v", found, stored, err)
+			}
+			storedGrandchild, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, grandchild.StorageRef))
+			if err != nil || !found || !reflect.DeepEqual(grandchild, storedGrandchild) {
+				t.Fatalf("unstamped delivery changed the constructed descendant: found=%t error=%v", found, err)
+			}
+			if got := bus.publishedCount(); got != 0 {
+				t.Fatalf("unstamped delivery published=%d, want zero", got)
+			}
+		})
 	}
 }
 
@@ -1654,22 +1299,9 @@ func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRulesW
 	}
 }
 
-func declarativeEmitContractTestBundle(t *testing.T, eventType string) *runtimecontracts.WorkflowContractBundle {
+func declarativeEmitContractTestBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	bundle := declarativeEmitContractTestBundleWithEntry(t, eventType, runtimecontracts.EventCatalogEntry{
-		Payload: runtimecontracts.EventPayloadSpec{
-			Properties: map[string]runtimecontracts.EventFieldSpec{
-				"label": {Type: "string"},
-			},
-			Required: []string{"label"},
-		},
-	})
-	bundle.Events["batch.submitted"] = runtimecontracts.EventCatalogEntry{
-		Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-			"items": {Type: "[json]"},
-		}},
-	}
-	return bundle
+	return declarativeEmitContractSourceForTest(t, "custom.emitted:\n  label: text\n")
 }
 
 func additiveOnSuccessContractBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
@@ -1692,82 +1324,11 @@ func rulesEmitTemplateContractBundle(t *testing.T) *runtimecontracts.WorkflowCon
 	})
 }
 
-func declarativeEmitContractTestBundleWithEntry(t *testing.T, eventType string, entry runtimecontracts.EventCatalogEntry) *runtimecontracts.WorkflowContractBundle {
-	t.Helper()
-	eventType = strings.TrimSpace(eventType)
-	eventsByType := map[string]runtimecontracts.EventCatalogEntry{
-		eventType: entry,
-		"custom.trigger": {
-			Payload: runtimecontracts.EventPayloadSpec{
-				Properties: map[string]runtimecontracts.EventFieldSpec{
-					"reason": {Type: "string"},
-					"score":  {Type: "number"},
-				},
-				Required: []string{"reason", "score"},
-			},
-		},
-	}
-	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: test\nstages:\n  queued: {}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
-		"events.yaml":   eventType + ":\n",
-	})
-	for key, value := range eventsByType {
-		bundle.Events[key] = value
-		bundle.FlowTree.Root.Events[key] = value
-	}
-	return bundle
-}
-
-func newDeclarativeEmitContractCoordinator(t *testing.T, eventType string) (*PipelineCoordinator, *recordingPipelineBus) {
-	t.Helper()
-	return newDeclarativeEmitContractCoordinatorWithBundle(declarativeEmitContractTestBundle(t, eventType))
-}
-
-func newDeclarativeEmitContractCoordinatorWithBundle(bundle *runtimecontracts.WorkflowContractBundle) (*PipelineCoordinator, *recordingPipelineBus) {
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(err)
-	}
-	bus := &recordingPipelineBus{}
-	module := handlerTestWorkflowModuleWithBundle(bundle, bundle.Semantics.Name, "node-a")
-	return &PipelineCoordinator{
-		bus:            bus,
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
-		module:         module,
-	}, bus
-}
-
-func seedHandlerEngineExistingEntity(t *testing.T, pc *PipelineCoordinator, entityID string) context.Context {
-	t.Helper()
-	db, store := openHandlerEntityRequirementStore(t, "sqlite")
-	pc.workflowStore = store
-	configureWorkflowLifecycleForTest(t, pc)
-	ctx := sqliteExactOnceRunContext(t, db)
-	runID := runtimecorrelation.RunIDFromContext(ctx)
-	if err := pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: entityID,
-		WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
-		CurrentState: "queued", EntityType: "test_entity", Fields: map[string]any{},
-	})); err != nil {
-		t.Fatal(err)
-	}
-	return ctx
-}
-
-func TestExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayload(t *testing.T) {
-	bus := &recordingPipelineBus{}
+func VerifyExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayloadForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	entityID := eventtest.UUID("env-ent")
-	pc := &PipelineCoordinator{
-		bus:            bus,
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
-		module:         handlerEngineProjectNodeModule(t),
-	}
-	ctx := seedHandlerEngineExistingEntity(t, pc, entityID)
+	fixture, pc, ctx, bus := nativeHandlerEngineExistingEntityForTest(t, open, entityID)
 
-	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNativeHandlerEngineWithHandoffForTest(t, fixture, pc, ctx, bus, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress(
@@ -1783,7 +1344,7 @@ func TestExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayload(t *testi
 			time.Now().UTC(),
 		),
 		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -1804,15 +1365,12 @@ func TestExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayload(t *testi
 		t.Fatalf("emitted payload must not carry envelope entity_id: %#v", payload["entity_id"])
 	}
 }
-func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) {
-	bus := &recordingPipelineBus{}
-	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
-		Module: canonicalPreviewWorkflowModuleForTest(&previewWorkflowModule{bundle: additiveOnSuccessContractBundle(t)}),
-	})
+func VerifyExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrderForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
+	module := handlerTestWorkflowModuleWithBundle(additiveOnSuccessContractBundle(t), ".", "node-a")
 	entityID := eventtest.UUID("ent-1")
-	ctx := seedHandlerEngineExistingEntity(t, pc, entityID)
+	fixture, pc, ctx, bus := nativeHandlerEngineExistingEntityWithModuleForTest(t, open, module, entityID, nil)
 
-	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNativeHandlerEngineWithHandoffForTest(t, fixture, pc, ctx, bus, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
 		Rules: []runtimecontracts.HandlerRuleEntry{
 			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
@@ -1820,7 +1378,7 @@ func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) 
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{}),
 		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -1834,15 +1392,12 @@ func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) 
 		t.Fatalf("published order = %#v", got)
 	}
 }
-func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *testing.T) {
-	bus := &recordingPipelineBus{}
-	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
-		Module: canonicalPreviewWorkflowModuleForTest(&previewWorkflowModule{bundle: rulesEmitTemplateContractBundle(t)}),
-	})
+func VerifyExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEventForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
+	module := handlerTestWorkflowModuleWithBundle(rulesEmitTemplateContractBundle(t), ".", "node-a")
 	entityID := eventtest.UUID("ent-1")
-	ctx := seedHandlerEngineExistingEntity(t, pc, entityID)
+	fixture, pc, ctx, bus := nativeHandlerEngineExistingEntityWithModuleForTest(t, open, module, entityID, nil)
 
-	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNativeHandlerEngineWithHandoffForTest(t, fixture, pc, ctx, bus, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{
 			Event: "account.bucketed",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -1887,7 +1442,7 @@ func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *t
 			time.Time{},
 		),
 		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -1916,11 +1471,13 @@ func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *t
 	}
 }
 
-func TestExecuteNodeContractHandler_UsesEmitFieldsAsOnlyBusinessPayloadSource(t *testing.T) {
+func VerifyExecuteNodeContractHandler_UsesEmitFieldsAsOnlyBusinessPayloadSourceForTest(t *testing.T, open func(*testing.T, semanticview.Source, bool) WorkflowHandlerNativeFixtureForTest) {
 	entityID := eventtest.UUID("ent-1")
-	pc, bus := newDeclarativeEmitContractCoordinator(t, "custom.emitted")
+	fixture, pc, ctx, bus := nativeHandlerEngineExistingEntityWithModuleForTest(t, func(t *testing.T, source semanticview.Source) WorkflowHandlerNativeFixtureForTest {
+		return open(t, source, false)
+	}, handlerTestWorkflowModuleWithBundle(declarativeEmitContractTestBundle(t), ".", "node-a"), entityID, map[string]any{"legacy_entity": "should-not-pass"})
 
-	_, err := executeNodeContractHandlerWithHandoff(t, pc, seedHandlerEngineExistingEntity(t, pc, entityID), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNativeHandlerEngineWithHandoffForTest(t, fixture, pc, ctx, bus, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{
 			Event: "custom.emitted",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -1942,7 +1499,7 @@ func TestExecuteNodeContractHandler_UsesEmitFieldsAsOnlyBusinessPayloadSource(t 
 		),
 
 		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{"legacy_entity": "should-not-pass"}},
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -1979,13 +1536,13 @@ func TestExecuteNodeContractHandler_UsesEmitFieldsAsOnlyBusinessPayloadSource(t 
 	}
 }
 
-func TestExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelope(t *testing.T) {
+func VerifyExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelopeForTest(t *testing.T, open func(*testing.T, semanticview.Source, bool) WorkflowHandlerNativeFixtureForTest) {
 	entityID := eventtest.UUID("ent-1")
-	pc, bus := newDeclarativeEmitContractCoordinatorWithBundle(declarativeEmitContractTestBundleWithEntry(t, "guard.failed", runtimecontracts.EventCatalogEntry{
-		Payload: runtimecontracts.EventPayloadSpec{},
-	}))
+	fixture, pc, ctx, bus := nativeHandlerEngineExistingEntityWithModuleForTest(t, func(t *testing.T, source semanticview.Source) WorkflowHandlerNativeFixtureForTest {
+		return open(t, source, false)
+	}, handlerTestWorkflowModuleWithBundle(declarativeEmitContractSourceForTest(t, "guard.failed:\n"), ".", "node-a"), entityID, map[string]any{"legacy_entity": "should-not-pass"})
 
-	_, err := executeNodeContractHandlerWithHandoff(t, pc, seedHandlerEngineExistingEntity(t, pc, entityID), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNativeHandlerEngineWithHandoffForTest(t, fixture, pc, ctx, bus, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
 			Check:  "payload.score >= 70.0",
 			OnFail: "escalate:guard.failed",
@@ -2005,7 +1562,7 @@ func TestExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelope(t 
 		),
 
 		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{"legacy_entity": "should-not-pass"}},
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -2039,19 +1596,13 @@ func TestExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelope(t 
 	}
 }
 
-func TestExecuteNodeContractHandler_GuardEscalateObjectFieldsUseExplicitPayloadOnly(t *testing.T) {
+func VerifyExecuteNodeContractHandler_GuardEscalateObjectFieldsUseExplicitPayloadOnlyForTest(t *testing.T, open func(*testing.T, semanticview.Source, bool) WorkflowHandlerNativeFixtureForTest) {
 	entityID := eventtest.UUID("ent-1")
-	pc, bus := newDeclarativeEmitContractCoordinatorWithBundle(declarativeEmitContractTestBundleWithEntry(t, "guard.failed", runtimecontracts.EventCatalogEntry{
-		Payload: runtimecontracts.EventPayloadSpec{
-			Properties: map[string]runtimecontracts.EventFieldSpec{
-				"score":  {Type: "number"},
-				"reason": {Type: "string"},
-			},
-			Required: []string{"score", "reason"},
-		},
-	}))
+	fixture, pc, ctx, bus := nativeHandlerEngineExistingEntityWithModuleForTest(t, func(t *testing.T, source semanticview.Source) WorkflowHandlerNativeFixtureForTest {
+		return open(t, source, false)
+	}, handlerTestWorkflowModuleWithBundle(declarativeEmitContractSourceForTest(t, "guard.failed:\n  score: float\n  reason: text\n"), ".", "node-a"), entityID, map[string]any{"legacy_entity": "should-not-pass"})
 
-	_, err := executeNodeContractHandlerWithHandoff(t, pc, seedHandlerEngineExistingEntity(t, pc, entityID), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNativeHandlerEngineWithHandoffForTest(t, fixture, pc, ctx, bus, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
 			Check: "payload.score >= 70.0",
 			OnFailSpec: runtimecontracts.GuardFailureSpec{
@@ -2079,7 +1630,7 @@ func TestExecuteNodeContractHandler_GuardEscalateObjectFieldsUseExplicitPayloadO
 			time.Time{},
 		),
 		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{"legacy_entity": "should-not-pass"}},
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -2107,7 +1658,7 @@ func TestExecuteNodeContractHandler_GuardEscalateObjectFieldsUseExplicitPayloadO
 	}
 }
 
-func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossImmediateEmitSites(t *testing.T) {
+func VerifyExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossImmediateEmitSitesForTest(t *testing.T, open func(*testing.T, semanticview.Source, bool) WorkflowHandlerNativeFixtureForTest) {
 	entityID := eventtest.UUID("ent-1")
 	tests := []struct {
 		name    string
@@ -2169,11 +1720,13 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossImmedi
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			pc, bus := newDeclarativeEmitContractCoordinator(t, "custom.emitted")
-			_, err := executeNodeContractHandlerWithHandoff(t, pc, seedHandlerEngineExistingEntity(t, pc, entityID), pipelineNode(t, ".", "node-a"), tc.handler, workflowTriggerContext{
+			fixture, pc, ctx, bus := nativeHandlerEngineExistingEntityWithModuleForTest(t, func(t *testing.T, source semanticview.Source) WorkflowHandlerNativeFixtureForTest {
+				return open(t, source, true)
+			}, handlerTestWorkflowModuleWithBundle(declarativeEmitContractTestBundle(t), ".", "node-a"), entityID, nil)
+			_, err := executeNativeHandlerEngineWithHandoffForTest(t, fixture, pc, ctx, bus, pipelineNode(t, ".", "node-a"), tc.handler, workflowTriggerContext{
 				Event: tc.event,
 				State: tc.state,
-			}, false)
+			})
 			if err == nil {
 				t.Fatal("expected undeclared business payload to fail closed")
 			}
@@ -2187,23 +1740,16 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossImmedi
 	}
 }
 
-func TestExecuteNodeContractHandlerDefersCommittedEmissions(t *testing.T) {
-	bus := &recordingPipelineBus{}
-	pc := &PipelineCoordinator{
-		bus:            bus,
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
-		module:         handlerEngineProjectNodeModule(t),
-	}
+func VerifyExecuteNodeContractHandlerDefersCommittedEmissionsForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	entityID := eventtest.UUID("ent-1")
-	ctx := seedHandlerEngineExistingEntity(t, pc, entityID)
+	fixture, pc, ctx, bus := nativeHandlerEngineExistingEntityForTest(t, open, entityID)
 
-	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNativeHandlerEngineWithHandoffForTest(t, fixture, pc, ctx, bus, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{}),
 		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
-	}, false, true)
+	}, true)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
@@ -2216,19 +1762,19 @@ func TestExecuteNodeContractHandlerDefersCommittedEmissions(t *testing.T) {
 	if got := bus.publishedCount(); got != 0 {
 		t.Fatalf("bus published count = %d, want 0 before deferred dispatch", got)
 	}
+	if err := dispatchNativeHandlerFollowUpForTest(pc, ctx, bus, result.FollowUp); err != nil {
+		t.Fatalf("dispatch committed follow-up: %v", err)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1 after deferred dispatch", got)
+	}
 }
 
-func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T) {
+func VerifyExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEventForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	entityID := eventtest.UUID("ent-1")
-	bus := &recordingPipelineBus{}
-	pc := &PipelineCoordinator{
-		bus:            bus,
-		expressionEval: newWorkflowExpressionEvaluator(),
-		entityLocks:    map[string]*sync.Mutex{},
-		module:         handlerEngineProjectNodeModule(t),
-	}
+	fixture, pc, ctx, bus := nativeHandlerEngineExistingEntityForTest(t, open, entityID)
 
-	_, err := executeNodeContractHandlerWithHandoff(t, pc, seedHandlerEngineExistingEntity(t, pc, entityID), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNativeHandlerEngineWithHandoffForTest(t, fixture, pc, ctx, bus, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{
 			Event: "custom.emitted",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -2253,7 +1799,7 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T)
 		),
 
 		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
-	}, false)
+	})
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}

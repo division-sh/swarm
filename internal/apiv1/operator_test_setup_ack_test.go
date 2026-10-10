@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -11,7 +10,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -48,25 +46,23 @@ func (s *scenarioSetupPostCommitFaultStore) SetupScenarioEntities(ctx context.Co
 func TestOperatorTestSetupAcknowledgedCleanupErrorCompletesIdempotencyBothStores(t *testing.T) {
 	for _, backend := range []struct {
 		name string
-		open func(*testing.T) (scenarioSetupAckSelectedStore, *sql.DB)
+		open func(*testing.T) scenarioSetupAckSelectedStore
 	}{
 		{
 			name: "sqlite",
-			open: func(t *testing.T) (scenarioSetupAckSelectedStore, *sql.DB) {
-				selected := storetest.StartSQLiteRuntimeStoreWithContext(t, context.Background())
-				return selected, storetest.DatabaseForTest(selected)
+			open: func(t *testing.T) scenarioSetupAckSelectedStore {
+				return storetest.StartSQLiteRuntimeStoreWithContext(t, context.Background())
 			},
 		},
 		{
 			name: "postgres",
-			open: func(t *testing.T) (scenarioSetupAckSelectedStore, *sql.DB) {
-				_, db, _ := testutil.StartPostgres(t)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			open: func(t *testing.T) scenarioSetupAckSelectedStore {
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			selected, db := backend.open(t)
+			selected := backend.open(t)
 			bundle := testSetupValidationBundle(t)
 			source := semanticview.Wrap(bundle)
 			fact := sourceartifactfixture.RequireArtifact(t, context.Background(), selected, bundle.SourceArtifact)
@@ -104,7 +100,7 @@ func TestOperatorTestSetupAcknowledgedCleanupErrorCompletesIdempotencyBothStores
 			if !ok || committed.RunID != runID || len(committed.Entities) != 1 || committed.Entities[0].EntityID != entityID {
 				t.Fatalf("acknowledged setup result = %#v, want committed run/entity", first)
 			}
-			assertScenarioSetupAckRows(t, db, runID, entityID)
+			assertScenarioSetupAckRows(t, selected, runID, entityID)
 			if setup.calls != 1 {
 				t.Fatalf("setup calls after acknowledged fault = %d, want 1", setup.calls)
 			}
@@ -120,38 +116,33 @@ func TestOperatorTestSetupAcknowledgedCleanupErrorCompletesIdempotencyBothStores
 			if setup.calls != 1 {
 				t.Fatalf("setup calls after replay = %d, want no duplicate domain write", setup.calls)
 			}
-			assertScenarioSetupAckRows(t, db, runID, entityID)
+			assertScenarioSetupAckRows(t, selected, runID, entityID)
 		})
 	}
 }
 
-func assertScenarioSetupAckRows(t *testing.T, db *sql.DB, runID, entityID string) {
+func assertScenarioSetupAckRows(t *testing.T, selected any, runID, entityID string) {
 	t.Helper()
-	for _, check := range []struct {
-		name  string
-		query string
-		args  []any
-		want  int
-	}{
-		{"run", `SELECT COUNT(*) FROM runs WHERE run_id = $1`, []any{runID}, 1},
-		{"entity", `SELECT COUNT(*) FROM entity_state WHERE run_id = $1 AND entity_id = $2`, []any{runID, entityID}, 1},
-		{"entity mutations", `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1 AND entity_id = $2 AND writer_id = 'test.setup_entities'`, []any{runID, entityID}, 3},
-		{"idempotency completion", `SELECT COUNT(*) FROM api_idempotency WHERE resource_id = $1`, []any{runID}, 1},
-	} {
-		var got int
-		if err := db.QueryRow(check.query, check.args...).Scan(&got); err != nil {
-			t.Fatalf("count %s: %v", check.name, err)
-		}
-		if got != check.want {
-			t.Fatalf("%s rows = %d, want %d", check.name, got, check.want)
-		}
+	observed, err := storetest.ReadScenarioSetupAckStorage(context.Background(), selected, runID, entityID)
+	if err != nil {
+		t.Fatalf("read exact scenario setup acknowledgment: %v", err)
 	}
-	var response string
-	if err := db.QueryRow(`SELECT response FROM api_idempotency WHERE resource_id = $1`, runID).Scan(&response); err != nil {
-		t.Fatalf("load idempotency completion: %v", err)
+	for _, check := range []struct {
+		name string
+		got  int
+		want int
+	}{
+		{"run", observed.Runs, 1},
+		{"entity", observed.Entities, 1},
+		{"entity mutations", observed.SetupMutations, 3},
+		{"idempotency completion", observed.Completions, 1},
+	} {
+		if check.got != check.want {
+			t.Fatalf("%s rows = %d, want %d", check.name, check.got, check.want)
+		}
 	}
 	var completed testSetupEntitiesResult
-	if err := json.Unmarshal([]byte(response), &completed); err != nil {
+	if err := json.Unmarshal(observed.Response, &completed); err != nil {
 		t.Fatalf("decode idempotency completion: %v", err)
 	}
 	if completed.RunID != runID || len(completed.Entities) != 1 || completed.Entities[0].EntityID != entityID {

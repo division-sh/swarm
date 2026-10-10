@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,24 +9,20 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
 
-func TestReceiverConfigAndRuntimeControlsRoundTripBothStores(t *testing.T) {
+func VerifyReceiverConfigAndRuntimeControlsRoundTripBothStoresForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			var store *workflowInstanceStore
-			if backend == "sqlite" {
-				db := newSQLiteWorkflowInstanceStoreTestDB(t)
-				store = newSQLiteWorkflowInstanceStoreForTest(t, db)
-			} else {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				store = newPostgresWorkflowInstanceStoreForTest(db)
+			fixture := open(t, backend)
+			store := fixture.Persistence.store
+			ctx := effects.WithExecutionMode(correlation.WithRunID(fixture.Context, testPipelineRunID), executionmode.Live)
+			if err := fixture.RequireRun(ctx, testPipelineRunID); err != nil {
+				t.Fatal(err)
 			}
-			ensurePipelineTestRun(t, store, testPipelineRunID)
-			ctx := correlation.WithRunID(testAuthorActivityContext(t, context.Background()), testPipelineRunID)
 			config := map[string]any{
 				"status": false, "flow_path": []any{"business", "path"},
 				"instance_id": int64(42), "workflow_version": "business-version",
@@ -45,7 +40,7 @@ func TestReceiverConfigAndRuntimeControlsRoundTripBothStores(t *testing.T) {
 				ParentFlowID: "parent", ParentFlowInstance: "parent/one", ParentEntityID: uuid.NewString(),
 				TransitionHistory: []WorkflowTransitionRecord{lifecycleTransitionRecordFixtureForTest(t, "review", "queued", "active", "evt-1", now)},
 			})
-			if err := store.create(ctx, instance); err != nil {
+			if err := fixture.Construct(ctx, instance); err != nil {
 				t.Fatal(err)
 			}
 			config["nested"].([]any)[0].(map[string]any)["integer"] = int64(99)

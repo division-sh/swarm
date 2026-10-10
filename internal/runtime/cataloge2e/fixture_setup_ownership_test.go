@@ -6,7 +6,6 @@ import (
 	"go/token"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 )
 
@@ -27,7 +26,10 @@ func TestCatalogScenarioRunFixturesPrecedeRuntimeConstruction(t *testing.T) {
 		for _, imp := range file.Imports {
 			value, err := strconv.Unquote(imp.Path.Value)
 			if err == nil && value == "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture" {
-				alias := "runlifecyclefixture"
+				t.Errorf("%s retains raw scenario fixture authority", filepath.Base(path))
+			}
+			if err == nil && value == "github.com/division-sh/swarm/internal/store/storetest" {
+				alias := "storetest"
 				if imp.Name != nil {
 					alias = imp.Name.Name
 				}
@@ -70,13 +72,17 @@ func TestCatalogScenarioRunFixturesPrecedeRuntimeConstruction(t *testing.T) {
 				if runtimeAliases[owner.Name] && selector.Sel.Name == "NewRuntime" {
 					construction = call.Pos()
 				}
-				if aliases[owner.Name] && (strings.HasPrefix(selector.Sel.Name, "Require") || selector.Sel.Name == "Materialize") {
+				if aliases[owner.Name] && (selector.Sel.Name == "RequireRun" || selector.Sel.Name == "MaterializeRun") {
 					fixtureCalls = append(fixtureCalls, call)
-					seen[selector.Sel.Name]++
 				}
 				return true
 			})
+			// Pure readback fixtures do not construct executable runtime work.
+			if !construction.IsValid() {
+				continue
+			}
 			for _, call := range fixtureCalls {
+				seen[call.Fun.(*ast.SelectorExpr).Sel.Name]++
 				if filepath.Base(path) != "runtime_harness_test.go" || fn.Name.Name != "newRuntimeHarnessWithTerminalProvider" ||
 					!construction.IsValid() || call.Pos() >= construction {
 					t.Errorf("%s:%s admits scenario fixtures outside pre-construction setup", filepath.Base(path), fn.Name.Name)
@@ -84,7 +90,7 @@ func TestCatalogScenarioRunFixturesPrecedeRuntimeConstruction(t *testing.T) {
 			}
 		}
 	}
-	if len(seen) != 2 || seen["RequirePostgres"] != 1 || seen["RequireSQLite"] != 1 {
-		t.Fatalf("scenario fixture writers=%v, want the two pre-construction backend calls", seen)
+	if len(seen) != 1 || seen["RequireRun"] != 1 {
+		t.Fatalf("scenario fixture writers=%v, want one pre-construction selected lifecycle owner call", seen)
 	}
 }

@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,8 +15,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
@@ -40,7 +37,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
@@ -294,18 +290,14 @@ func TestActivityExecutionContextRejectsCausalModeConflict(t *testing.T) {
 	}
 }
 
-func TestPipelineActivityIntentWriterDoesNotUseAmbientPostCommitAuthority(t *testing.T) {
+func TestPipelineActivityIntentWriterEmitsImmediateDiagnosticWithoutPublication(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	bus := &recordingPipelineBus{}
 	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	writer := pipelineActivityIntentWriter{coordinator: pc}
-	postCommit := []OwnerAction{}
-	rollbackActions := []OwnerAction{}
-	ctx := WithPipelinePostCommitActions(testAuthorActivityContext(t, context.Background()), &postCommit)
-	ctx = WithPipelineRollbackActions(ctx, &rollbackActions)
-	ctx = WithPipelineSQLTxContext(ctx, &sql.Tx{})
+	ctx := testAuthorActivityContext(t, context.Background())
 
 	if err := writer.WriteActivityIntents(ctx, []runtimeengine.ActivityIntent{testActivityIntent("https://example.com/source")}); err != nil {
 		t.Fatalf("WriteActivityIntents: %v", err)
@@ -313,8 +305,11 @@ func TestPipelineActivityIntentWriterDoesNotUseAmbientPostCommitAuthority(t *tes
 	if got := len(bus.runtimeLogEntries()); got != 1 {
 		t.Fatalf("runtime logs = %d, want immediate non-transactional diagnostic", got)
 	}
-	if got := len(postCommit); got != 0 {
-		t.Fatalf("post-commit actions = %d, want none", got)
+	if got := bus.outboxCount(); got != 0 {
+		t.Fatalf("outbox intents = %d, want no durable publication", got)
+	}
+	if got := bus.publishedCount(); got != 0 {
+		t.Fatalf("published events = %d, want no dispatch", got)
 	}
 	logs := bus.runtimeLogEntries()
 	if len(logs) != 1 || logs[0].Action != "intent_persisted" {
@@ -1387,39 +1382,23 @@ func VerifyGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplayForTes
 	}
 }
 
-func TestPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T) {
-	ctx := testAuthorActivityContext(t, context.Background())
-	for _, tc := range []struct {
-		name  string
-		setup func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool)
-	}{
-		{
-			name: "sqlite",
-			setup: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
-				db, store := newSQLiteActivityJournalStore(t, ctx)
-				return db, store, true
-			},
-		},
-		{
-			name: "postgres",
-			setup: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
-				_, db, _ := testutil.StartPostgres(t)
-				return db, newPostgresWorkflowInstanceStoreForTest(db), false
-			},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			db, store, sqlite := tc.setup(t, ctx)
-			runTelegramConnectorRoundTripThroughInboundDelivery(t, ctx, db, store, sqlite)
+func VerifyPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDeliveryForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runTelegramConnectorRoundTripThroughInboundDelivery(t, open(t, backend))
 		})
 	}
 }
 
-func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, ctx context.Context, db *sql.DB, store *workflowInstanceStore, sqlite bool) {
+func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, fixture WorkflowActivityNativeFixtureForTest) {
 	t.Helper()
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	seedActivityRun(t, db, sqlite, runID)
+	ctx := runtimecorrelation.WithRunID(fixture.Context, runID)
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
+	store := fixture.Persistence.store
 
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1464,11 +1443,8 @@ func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, ctx conte
 		},
 	})
 	bus := &recordingPipelineBus{}
-	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		Module:              staticSemanticWorkflowModule{source: source},
-		Persistence:         workflowPersistenceForTest(store),
-		PipelineObligations: unavailablePipelineTestObligationOwner{},
-		Credentials:         credentialStore,
+	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{
+		Module: staticSemanticWorkflowModule{source: source}, Credentials: credentialStore,
 	})
 	intent := testNonIdempotentActivityIntent(runID, inboundEvent.ID(), entityID)
 	intent.Tool = "telegram.send_message"
@@ -2103,116 +2079,3 @@ func (s *countingActivityCredentialStore) Get(context.Context, string) (string, 
 func (*countingActivityCredentialStore) Set(context.Context, string, string) error { return nil }
 func (*countingActivityCredentialStore) List(context.Context) ([]string, error)    { return nil, nil }
 func (*countingActivityCredentialStore) Delete(context.Context, string) error      { return nil }
-
-func newSQLiteActivityJournalStore(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore) {
-	t.Helper()
-	name := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
-	db, err := sql.Open("sqlite", "file:"+name+"?mode=memory&cache=shared")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	createActivityJournalSQLiteSchema(t, ctx, db)
-	return db, newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db})
-}
-
-func seedActivityRun(t *testing.T, db *sql.DB, sqlite bool, runID string) {
-	t.Helper()
-	if sqlite {
-		runlifecyclefixture.RequireSQLite(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-			RunID: runID, BundleHash: pipelineTestBundleHash,
-		})
-		return
-	}
-	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-		RunID: runID, BundleHash: pipelineTestBundleHash,
-	})
-}
-
-func createActivityJournalSQLiteSchema(t *testing.T, ctx context.Context, db *sql.DB) {
-	t.Helper()
-	for _, stmt := range []string{
-		`CREATE TABLE source_artifacts (
-			bundle_hash TEXT PRIMARY KEY,
-			source_blob BLOB NOT NULL,
-			member_count INTEGER NOT NULL,
-			total_bytes INTEGER NOT NULL,
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE runs (
-			run_id TEXT PRIMARY KEY,
-			status TEXT NOT NULL DEFAULT 'running',
-			bundle_hash TEXT NOT NULL,
-			origin_kind TEXT NOT NULL,
-			trigger_event_id TEXT,
-			trigger_event_type TEXT,
-			origin_service_id TEXT,
-			origin_generation INTEGER,
-			forked_from_run_id TEXT,
-			forked_from_event_id TEXT,
-			continued_as_run_id TEXT,
-			event_count INTEGER NOT NULL DEFAULT 0,
-			failure TEXT,
-			started_at TIMESTAMP NOT NULL,
-			ended_at TIMESTAMP
-		)`,
-		`CREATE TABLE activity_attempts (
-			request_event_id TEXT PRIMARY KEY,
-			run_id TEXT NOT NULL,
-			execution_mode TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
-			source_event_id TEXT,
-			parent_event_id TEXT,
-			entity_id TEXT,
-			flow_instance TEXT,
-			node_id TEXT NOT NULL,
-			handler_event_key TEXT NOT NULL,
-			activity_id TEXT NOT NULL,
-			tool TEXT NOT NULL,
-			effect_class TEXT NOT NULL,
-			attempt INTEGER NOT NULL DEFAULT 1,
-			status TEXT NOT NULL,
-			success_event TEXT NOT NULL,
-			failure_event TEXT NOT NULL,
-			result_event_id TEXT,
-			result_event_type TEXT,
-			result_payload TEXT,
-			failure TEXT,
-			input_hash TEXT NOT NULL,
-			loop_generation TEXT NOT NULL DEFAULT '{}',
-			loop_stage TEXT,
-			reply_context_id TEXT,
-			started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			completed_at TEXT,
-			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`CREATE TABLE author_activity_order (
-			singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
-			last_sequence BIGINT NOT NULL CHECK (last_sequence >= 0)
-		)`,
-		`CREATE TABLE author_activity_occurrences (
-			occurrence_id TEXT PRIMARY KEY,
-			sequence BIGINT NOT NULL UNIQUE CHECK (sequence > 0),
-			kind TEXT NOT NULL,
-			version INTEGER NOT NULL CHECK (version = 2),
-			transition TEXT NOT NULL,
-			source_owner TEXT NOT NULL,
-			source_identity TEXT NOT NULL,
-			dedup_key TEXT NOT NULL UNIQUE,
-			run_id TEXT,
-			entity_id TEXT,
-			agent_id TEXT,
-			flow_id TEXT,
-			scope_kind TEXT NOT NULL,
-			runtime_instance_id TEXT,
-			bundle_hash TEXT,
-			author_safe_summary TEXT,
-			projection TEXT NOT NULL DEFAULT '{}',
-			failure TEXT,
-			occurred_at TIMESTAMP NOT NULL
-		)`,
-	} {
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			t.Fatalf("create sqlite activity journal schema: %v", err)
-		}
-	}
-}

@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"sync"
@@ -24,7 +23,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
@@ -87,10 +85,11 @@ func (o *sourceMutationProbeOwner) ClaimPublication(ctx context.Context, eventID
 	return claim, err
 }
 
-func (o *sourceMutationProbeOwner) ClaimEvent(_ context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.ClaimedWork, error) {
+func (o *sourceMutationProbeOwner) ClaimEvent(ctx context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.ClaimedWork, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.claimEvent++
+	o.claimFact, _ = runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	claim, err := o.claimIssuer.Issue(eventID, purpose)
 	if err != nil {
 		return runtimepipelineobligation.ClaimedWork{}, err
@@ -528,19 +527,14 @@ func TestAdjacentDurableMutationRootsRejectForeignSourceBeforeMutation(t *testin
 		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("work", "instance-a")),
 	}
 
-	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
-	rollback := make([]runtimepipelinefixture.OwnerAction, 0, 1)
-	routeCtx := runtimepipelinefixture.WithSQLTx(foreignCtx, &sql.Tx{})
-	routeCtx = runtimepipelinefixture.WithPostCommitActions(routeCtx, &postCommit)
-	routeCtx = runtimepipelinefixture.WithRollbackActions(routeCtx, &rollback)
-	if err := bus.AddFlowInstanceRouteContextFixture(routeCtx, req); err == nil ||
+	if err := bus.AddFlowInstanceRouteContextFixture(foreignCtx, req); err == nil ||
 		!strings.Contains(err.Error(), "bundle source fact conflicts") {
 		t.Fatalf("foreign route add error = %v, want source conflict", err)
 	}
-	if store.upsertCalls != 0 || len(postCommit) != 0 || len(rollback) != 0 || bus.HasFlowInstanceRoute(req.Identity) {
+	if store.upsertCalls != 0 || bus.HasFlowInstanceRoute(req.Identity) {
 		t.Fatalf(
-			"route add mutations = upsert:%d post_commit:%d rollback:%d local:%v, want zero",
-			store.upsertCalls, len(postCommit), len(rollback), bus.HasFlowInstanceRoute(req.Identity),
+			"route add mutations = upsert:%d local:%v, want zero",
+			store.upsertCalls, bus.HasFlowInstanceRoute(req.Identity),
 		)
 	}
 
@@ -575,18 +569,18 @@ func TestAdjacentDurableMutationRootsRejectForeignSourceBeforeMutation(t *testin
 
 }
 
-func TestDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMutation(t *testing.T) {
-	owned := sourceMutationFact(t, "7")
+func VerifyDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMutationForTest(t *testing.T, open ExactHandoffNativeOpenerForTest) {
+	fixture := open(t, false)
+	owned := fixture.Authority.SourceArtifact()
 	foreign := sourceMutationFact(t, "8")
-	store := newExactHandoffProofStore(t, false)
+	store := newExactHandoffProofStore(fixture, false)
 	bus := newSourceMutationProbeBusWithStore(t, store, owned, newSourceMutationProbeOwner())
 	bus.durable.DeliveryLifecycle = store
 	eventID, runID := uuid.NewString(), uuid.NewString()
-	sessionID := uuid.NewString()
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: testAgentRouteIdentityForRun(t, runID, "agent-a", "")}
 	store.seed(t, eventID, runID, route)
 	claim := store.claim(t, eventID, runID, route)
-	store.seedSession(t, sessionID, runID, route.AgentIdentity)
+	sessionID := fixture.Session(t, route.AgentIdentity)
 
 	foreignCtx := runtimedelivery.WithClaim(context.Background(), claim)
 	foreignCtx = runtimecorrelation.WithSourceArtifactFact(foreignCtx, foreign)
@@ -796,28 +790,25 @@ func TestPostCommitAndDeferredDispatchRetainPendingWorkOnSourceRejection(t *test
 	}
 }
 
-func TestPostCommitDispatchIgnoresAmbientSQLContextAndPreservesBusOwnedSourceFact(t *testing.T) {
+func TestPostCommitDispatchPreservesBusOwnedSourceFactThroughClaimAndSettlement(t *testing.T) {
 	owned := sourceMutationFact(t, "4")
 	owner := newSourceMutationProbeOwner()
 	store := newTargetRouteMemoryStore()
 	bus := newSourceMutationProbeBusWithStore(t, store, owned, owner)
-	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
-	rollback := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 	ctx := context.Background()
-	ctx = runtimepipelinefixture.WithSQLTx(ctx, &sql.Tx{})
-	ctx = runtimepipelinefixture.WithPostCommitActions(ctx, &postCommit)
-	ctx = runtimepipelinefixture.WithRollbackActions(ctx, &rollback)
 	event := sourceMutationEvent()
 	seedCommittedNoDeliveryForTest(t, store, event)
 
 	if err := bus.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{{Event: event}}); err != nil {
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
-	if len(postCommit) != 0 || len(rollback) != 0 {
-		t.Fatalf("ambient transaction actions = commit:%d rollback:%d, want none", len(postCommit), len(rollback))
-	}
 	if got := owner.counts(); got.claimEvent != 1 || got.settle != 1 {
 		t.Fatalf("closed post-commit dispatch mutations = %#v, want one claim and settlement", got)
+	}
+	for _, action := range []string{"claim", "settle"} {
+		if !owned.Matches(owner.sourceFact(action)) {
+			t.Fatalf("post-commit %s lost the exact immutable bus source", action)
+		}
 	}
 }
 

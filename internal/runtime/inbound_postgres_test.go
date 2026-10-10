@@ -163,8 +163,8 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	if got := countInboundPipelineReceipts(t, ctx, pg, runID, eventID); got != 0 {
 		t.Fatalf("pipeline receipts while paused = %d, want 0", got)
 	}
-	if got := countInboundNonPlatformReceipts(t, ctx, pg, runID, eventID); got != 0 {
-		t.Fatalf("agent receipts while paused = %d, want 0", got)
+	if got := countPostgresAgentSettledAttemptsForEvent(t, ctx, pg, eventID, agentID); got != 0 {
+		t.Fatalf("agent settled attempts while paused = %d, want 0", got)
 	}
 
 	resumed, err := controller.Resume(context.Background(), runtimeingress.TransitionRequest{
@@ -265,8 +265,8 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	if got := countInboundPipelineReceipts(t, ctx, pg, runID, eventID); got != 0 {
 		t.Fatalf("pipeline receipts while paused = %d, want 0", got)
 	}
-	if got := countInboundNonPlatformReceipts(t, ctx, pg, runID, eventID); got != 0 {
-		t.Fatalf("agent receipts while paused = %d, want 0", got)
+	if got := countPostgresAgentSettledAttemptsForEvent(t, ctx, pg, eventID, agentID); got != 0 {
+		t.Fatalf("agent settled attempts while paused = %d, want 0", got)
 	}
 
 	resumed, err := controller.Resume(context.Background(), runtimeingress.TransitionRequest{
@@ -369,8 +369,8 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	if got := countInboundPipelineReceipts(t, ctx, pg, runID, eventID); got != 0 {
 		t.Fatalf("pipeline receipts while paused = %d, want 0", got)
 	}
-	if got := countInboundNonPlatformReceipts(t, ctx, pg, runID, eventID); got != 0 {
-		t.Fatalf("agent receipts while paused = %d, want 0", got)
+	if got := countPostgresAgentSettledAttemptsForEvent(t, ctx, pg, eventID, agentID); got != 0 {
+		t.Fatalf("agent settled attempts while paused = %d, want 0", got)
 	}
 
 	resumed, err := controller.Resume(context.Background(), runtimeingress.TransitionRequest{
@@ -1388,6 +1388,14 @@ func installInboundStandingRecoveryOwner(
 	})
 }
 
+func countPostgresAgentSettledAttemptsForEvent(t *testing.T, ctx context.Context, selected any, eventID string, agentID string) int {
+	t.Helper()
+	count, err := storetest.ReadAgentSettledAttemptCount(ctx, selected, eventID, agentID)
+	if err != nil {
+		t.Fatalf("count agent settled attempts for %s: %v", eventID, err)
+	}
+	return count
+}
 func requireInboundBusEvent(t testing.TB, ch <-chan *runtimebus.LocalDelivery, context string) events.Event {
 	t.Helper()
 	select {

@@ -48,7 +48,11 @@ func TestTier11Probe(t *testing.T) {
 			for _, step := range expected.triggerSequence() {
 				h.publishAndWait(step, catalogRuntimePublishTimeout)
 			}
-			rows, err := workflowStateDebugRows(h.db)
+			reader, err := h.catalogOperatorEventLister()
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows, err := workflowStateDebugRows(reader)
 			if err != nil {
 				t.Fatalf("debug rows: %v", err)
 			}

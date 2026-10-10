@@ -172,7 +172,7 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 				"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"work_id": "fork-recipient-authority"}, "idempotency_key": "recipient-seed",
 			})
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 			if selected == nil {
 				t.Fatal("served runtime did not expose its selected persistence owner")
@@ -211,7 +211,7 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ForkEventID != plan.ForkPoint.EventID || fork.ExecutedEventCount != 1 {
 				t.Fatalf("fork lost exact source/child work identity: %+v", fork)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 			childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, plan.ForkPoint.EventID)
 			t.Logf("checking fork child: source_run=%s fork_run=%s child_event=%s", seed.RunID, fork.ForkRunID, childEvent)
 			requireServedForkConsumerAuthority(t, rt, fork.ForkRunID, childEvent)

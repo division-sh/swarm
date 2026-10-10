@@ -43,8 +43,9 @@ func mustAuthorActivityTestSourceArtifactFactForHash(bundleHash string) runtimec
 }
 
 type pipelineExternalTestWorkFixture struct {
-	process *worklifetime.Process
-	runtime *worklifetime.RuntimeOccurrence
+	process  *worklifetime.Process
+	mu       sync.Mutex
+	runtimes map[worklifetime.RuntimeIdentity]*worklifetime.RuntimeOccurrence
 }
 
 var pipelineExternalTestWorkFixtures sync.Map
@@ -55,35 +56,82 @@ func pipelineExternalTestWorkOwner(t *testing.T) *worklifetime.RuntimeOccurrence
 
 func pipelineExternalTestWorkOwnerForSource(t *testing.T, fact runtimecorrelation.SourceArtifactFact) *worklifetime.RuntimeOccurrence {
 	t.Helper()
-	if existing, ok := pipelineExternalTestWorkFixtures.Load(t); ok {
-		return existing.(*pipelineExternalTestWorkFixture).runtime
+	if err := fact.Validate(); err != nil {
+		t.Fatalf("pipeline test work owner requires its exact source: %v", err)
 	}
-	fixture := &pipelineExternalTestWorkFixture{process: worklifetime.NewProcess()}
-	owner, err := fixture.process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+	actual, loaded := pipelineExternalTestWorkFixtures.LoadOrStore(t, &pipelineExternalTestWorkFixture{
+		process: worklifetime.NewProcess(), runtimes: make(map[worklifetime.RuntimeIdentity]*worklifetime.RuntimeOccurrence),
+	})
+	fixture := actual.(*pipelineExternalTestWorkFixture)
+	if !loaded {
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := fixture.retireAndWait(ctx); err != nil {
+				t.Errorf("join pipeline test work owners: %v", err)
+				return
+			}
+			pipelineExternalTestWorkFixtures.Delete(t)
+		})
+	}
+	identity := worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		BundleHash:        fact.BundleHash(),
-	})
+	}
+	fixture.mu.Lock()
+	defer fixture.mu.Unlock()
+	if owner := fixture.runtimes[identity]; owner != nil {
+		return owner
+	}
+	owner, err := fixture.process.NewRuntime(context.Background(), identity)
 	if err != nil {
 		t.Fatalf("create pipeline test work owner: %v", err)
 	}
-	fixture.runtime = owner
-	actual, loaded := pipelineExternalTestWorkFixtures.LoadOrStore(t, fixture)
-	if loaded {
-		return actual.(*pipelineExternalTestWorkFixture).runtime
-	}
-	t.Cleanup(func() {
-		defer pipelineExternalTestWorkFixtures.Delete(t)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := fixture.runtime.RetireAndWait(ctx); err != nil {
-			t.Errorf("retire pipeline test work owner: %v", err)
-			return
-		}
-		if _, err := fixture.process.Join(ctx); err != nil {
-			t.Errorf("join pipeline test process owner: %v", err)
-		}
-	})
+	fixture.runtimes[identity] = owner
 	return owner
+}
+
+func replacePipelineExternalWorkOccurrenceForSource(t *testing.T, fact runtimecorrelation.SourceArtifactFact, predecessor *worklifetime.RuntimeOccurrence) {
+	t.Helper()
+	actual, found := pipelineExternalTestWorkFixtures.Load(t)
+	if !found {
+		t.Fatal("native reopen requires its existing process work owner")
+	}
+	fixture := actual.(*pipelineExternalTestWorkFixture)
+	identity := worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: fact.BundleHash()}
+	join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := predecessor.RetireAndWait(join); err != nil {
+		t.Fatal(err)
+	}
+	fixture.mu.Lock()
+	defer fixture.mu.Unlock()
+	if fixture.runtimes[identity] != predecessor {
+		t.Fatal("native reopen cannot replace another runtime occurrence")
+	}
+	next, err := fixture.process.NewRuntime(context.Background(), identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.runtimes[identity] = next
+}
+
+func (f *pipelineExternalTestWorkFixture) retireAndWait(ctx context.Context) error {
+	f.mu.Lock()
+	f.process.Retire()
+	owners := make([]*worklifetime.RuntimeOccurrence, 0, len(f.runtimes))
+	for _, owner := range f.runtimes {
+		owner.Retire()
+		owners = append(owners, owner)
+	}
+	f.mu.Unlock()
+	for _, owner := range owners {
+		if _, err := owner.RetireAndWait(ctx); err != nil {
+			return err
+		}
+	}
+	_, err := f.process.Join(ctx)
+	return err
 }
 
 func testAuthorActivityContext(t *testing.T, ctx context.Context) context.Context {
@@ -139,7 +187,7 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
 	}
 	if opts.WorkOwner == nil {
-		opts.WorkOwner = pipelineExternalTestWorkOwner(t)
+		opts.WorkOwner = pipelineExternalTestWorkOwnerForSource(t, opts.SourceArtifactFact)
 	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()

@@ -28,8 +28,8 @@ func TestSelectedDownstreamPreparationFailsBeforeMaterializationBothStores(t *te
 			if err := h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "start.seeded", Payload: map[string]any{"token": "preparation"}}, 20*time.Second, true); err != nil {
 				t.Fatal(err)
 			}
-			var inputID string
-			if err := h.db.QueryRowContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name='start.seeded'`, catalogRuntimeRunID).Scan(&inputID); err != nil {
+			inputID, err := h.readRunNamedEventIdentity(ctx, catalogRuntimeRunID, "start.seeded")
+			if err != nil {
 				t.Fatal(err)
 			}
 			var sourceStore interface {

@@ -71,7 +71,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	module := newRuntimeTestWorkflowModule(t, source)
-	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
+	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              module,
 		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
@@ -138,7 +138,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
+	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner: runtimeTestEventBusWorkOwner(t, bus), Module: newRuntimeTestWorkflowModule(t, source),
 		Persistence: runtimepipeline.NewWorkflowPersistence(pg), RunLifecycle: pg,
 		PipelineObligations: pg.PipelineObligations(), DeliveryStore: pg, FlowRoutes: bus,
@@ -234,7 +234,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	module := newRuntimeTestWorkflowModule(t, source)
-	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
+	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              module,
 		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
@@ -356,7 +356,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	module := newRuntimeTestWorkflowModule(t, source)
-	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
+	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              module,
 		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
@@ -459,7 +459,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
+	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              newRuntimeTestWorkflowModule(t, source),
 		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
@@ -560,7 +560,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	module := newRuntimeTestWorkflowModule(t, source)
-	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
+	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              module,
 		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
@@ -692,7 +692,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	module := newRuntimeTestWorkflowModule(t, source)
-	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
+	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              module,
 		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),

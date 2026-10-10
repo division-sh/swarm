@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
@@ -20,28 +19,11 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
 func withLiveWorkflowInitialEntry(ctx context.Context) context.Context {
 	return runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
-}
-
-func workflowLifecycleEventForTest(t *testing.T, store *workflowInstanceStore, ctx context.Context, flowID, instanceID, entityID, eventType string, at time.Time) events.Event {
-	t.Helper()
-	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
-	if !ok {
-		mode = runtimeeffects.ExecutionModeLive
-	}
-	inbound := eventtest.RunCreatingRootIngressWithRoutingSourceAndMode(uuid.NewString(), events.EventType(eventType), "operator", "", []byte(`{}`), 0,
-		runtimecorrelation.RunIDFromContext(ctx), "", handlerTestWorkflowEnvelope(flowID, instanceID, entityID), testWorkflowRoutingSource(flowID, instanceID, entityID), at, mode)
-	dialect := authoractivityfixture.DialectPostgres
-	if store.isSQLite() {
-		dialect = authoractivityfixture.DialectSQLite
-	}
-	seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, inbound)
-	return inbound
 }
 
 func lifecycleStateFixtureForTest(t *testing.T, flowID, from, to string, eventTypes ...string) *runtimecontracts.WorkflowContractBundle {
@@ -74,6 +56,10 @@ func lifecycleTransitionRecordFixtureForTest(t *testing.T, flowID, from, to, eve
 }
 
 func (pc *PipelineCoordinator) persistWorkflowStateForTest(ctx context.Context, route runtimeflowidentity.Route, entityID, nextState, sourceEvent string) error {
+	return pc.persistWorkflowStateWithAdmissionForTest(ctx, route, entityID, nextState, sourceEvent, admitTestLifecycleDeliveryOccurrence)
+}
+
+func (pc *PipelineCoordinator) persistWorkflowStateWithAdmissionForTest(ctx context.Context, route runtimeflowidentity.Route, entityID, nextState, sourceEvent string, admit func(context.Context, *PipelineCoordinator, runtimeworkflowlifecycle.Effect) (runtimeworkflowlifecycle.Effect, error)) error {
 	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
 	if !ok {
 		return fmt.Errorf("test transition requires an inbound event")
@@ -102,7 +88,7 @@ func (pc *PipelineCoordinator) persistWorkflowStateForTest(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	effect, err = admitTestLifecycleDeliveryOccurrence(ctx, pc, effect)
+	effect, err = admit(ctx, pc, effect)
 	if err != nil {
 		return err
 	}
@@ -291,7 +277,7 @@ func admitTestLifecycleDeliveryOccurrence(ctx context.Context, pc *PipelineCoord
 			if err != nil || !exists {
 				return effect, fmt.Errorf("timer component owner: found=%v err=%v", exists, err)
 			}
-			activations, err := pc.workflowStore.listTestActiveWorkflowTimerActivationsForRoute(ctx, owner)
+			activations, err := pc.workflowStore.listActiveWorkflowTimerActivationsForRoute(ctx, owner)
 			if err != nil {
 				return effect, err
 			}
@@ -315,30 +301,16 @@ func admitTestLifecycleDeliveryOccurrence(ctx context.Context, pc *PipelineCoord
 	if !found || inbound.ID() != effect.EventID() {
 		return effect, fmt.Errorf("direct lifecycle component requires its persisted inbound event")
 	}
-	owner, ok := pc.deliveryStore.(*pipelineTestDeliveryOwner)
-	if !ok {
-		var err error
-		owner, err = openPipelineTestDeliveryOwner(pc.workflowStore.testDB(), pc.workflowStore.isSQLite())
-		if err != nil {
-			return effect, err
-		}
-		pc.deliveryStore, pc.workflowStore.deliveryStore = owner, owner
-	}
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{
-		FlowID: node.FlowPath(), FlowInstance: effect.Route().InstancePath, EntityID: effect.EntityID().String(),
-	})}
-	if err := owner.commitInitial(ctx, inbound, route); err != nil {
-		return effect, err
+	claim, claimed := runtimedelivery.ClaimFromContext(ctx)
+	route, routed := workflowNodeDeliveryRoute(ctx)
+	if !claimed || !routed || claim.Validate() != nil || claim.RunID() != inbound.RunID() || route.Recipient != events.MustNodeDeliveryRecipient(node) || route.Target.Route() != (events.RouteIdentity{FlowID: node.FlowPath(), FlowInstance: effect.Route().InstancePath, EntityID: effect.EntityID().String()}).Normalized() {
+		return effect, fmt.Errorf("direct lifecycle component requires its exact live native delivery claim and route")
 	}
 	id, err := runtimedelivery.DeliveryID(inbound.ID(), route)
-	if err != nil {
-		return effect, err
+	if err != nil || claim.DeliveryID() != id {
+		return effect, fmt.Errorf("direct lifecycle claim does not match its original publication")
 	}
-	snapshot, err := owner.Snapshot(ctx, id)
-	if err != nil || snapshot.Route.Target != route.Target || snapshot.Route.Recipient != route.Recipient || !snapshot.Route.Context.Empty() {
-		return effect, fmt.Errorf("direct lifecycle publication disagrees with occurrence: %w", err)
-	}
-	return effect.WithExecutionOccurrence("delivery", snapshot.DeliveryID)
+	return effect.WithExecutionOccurrence("delivery", claim.DeliveryID())
 }
 
 // Direct lifecycle tests must name a unique authored carrier in the selected flow.

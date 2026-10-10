@@ -115,7 +115,7 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 		time.Now().UTC(),
 	))
 
-	got := catalogCausalEntityIDs(t, db, startedAt, map[string]struct{}{rootEventID: {}}, rootID)
+	got := catalogCausalEntityIDs(t, pg, startedAt, map[string]struct{}{rootEventID: {}}, rootID)
 	if len(got) != 3 {
 		t.Fatalf("causal entity ids len = %d, want 3 (%v)", len(got), got)
 	}
@@ -226,10 +226,14 @@ func TestCatalogDeadLetterRelation_DiagnosticAloneGetsNoCredit(t *testing.T) {
 	entityID := uuid.NewString()
 	insertCatalogAssertionDeadLetterEvent(t, h, entityID)
 
-	if catalogHasDeadLetterRelation(t, h.db, h.startedAt, entityID) {
+	reader, err := h.catalogOperatorEventLister()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if catalogHasDeadLetterRelation(t, reader, h.startedAt, entityID) {
 		t.Fatal("platform.dead_letter diagnostic received persisted relation credit")
 	}
-	if assertEntityDeadLetterOutcome(t, h.db, h.startedAt, entityID) {
+	if assertEntityDeadLetterOutcome(t, reader, h.startedAt, entityID) {
 		t.Fatal("entity diagnostic received persisted relation credit")
 	}
 }
@@ -252,7 +256,11 @@ func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testin
 		time.Now().UTC(),
 	))
 
-	assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, []string{"score.requested"}, "", semanticview.Wrap(bundle))
+	reader, err := h.catalogOperatorEventLister()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEmittedEvents(t, reader, h.startedAt, h.publishedIDs, entityID, []string{"score.requested"}, "", semanticview.Wrap(bundle))
 }
 
 func newCatalogAssertionHarness(t *testing.T, initial string) *runtimeHarness {

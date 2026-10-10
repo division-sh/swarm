@@ -45,7 +45,7 @@ func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBo
 		t.Run(storeCase.name, func(t *testing.T) {
 			selected := storeCase.open(t)
 			runID := uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
+			insertGateRecoveryRun(t, selected.events, runID)
 			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			source := handlerRuleSelectionSupportedSource(t)
 			node := externalPipelineSourceNode(t, source, ".", "selection-node")

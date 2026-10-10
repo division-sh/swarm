@@ -1,8 +1,6 @@
 package pipeline
 
 import (
-	"context"
-	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -10,80 +8,52 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
-	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/google/uuid"
 )
 
-func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		setup func(t *testing.T) (*PipelineCoordinator, context.Context)
-	}{
-		{
-			name: "sqlite",
-			setup: func(t *testing.T) (*PipelineCoordinator, context.Context) {
-				db := newSQLiteWorkflowInstanceStoreTestDB(t)
-				ctx := sqliteExactOnceRunContext(t, db)
-				return newExactOnceCoordinator(t, db, newSQLiteWorkflowInstanceStoreForTest(t, db)), ctx
-			},
-		},
-		{
-			name: "postgres",
-			setup: func(t *testing.T) (*PipelineCoordinator, context.Context) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				pc := newExactOnceCoordinator(t, db, newPostgresWorkflowInstanceStoreForTest(db))
-				return pc, testPipelineCoordinatorRunContext(t, pc)
-			},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			pc, ctx := tc.setup(t)
-			bus := pc.bus.(*recordingPipelineBus)
+func VerifyNativeCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutationsForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture, pc, ctx := nativeExactOnceCoordinatorForTest(t, backend, open)
+			bus := observeNativePipelineDeliveryBusForTest(t, pc)
 			eventID := uuid.NewString()
-			evt := eventtest.RunCreatingRootIngress(eventID,
-				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, FlowInstanceEntityID("validation")), time.Now().UTC())
+			evt := eventtest.ExistingRunRootIngress(eventID,
+				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: FlowInstanceEntityID("validation")}), time.Now().UTC())
 
-			seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
-
+			initial := constructedScenarioInstanceForTest(t, pc.SemanticSource(), ctx, "validation")
+			ctx, _ = nativeExactOncePublicationForTest(t, fixture, pc, ctx, evt, initial)
+			initial = constructNativePipelineScenarioForTest(t, fixture, pc, ctx, "validation")
 			node := pipelineSourceNode(t, pc.SemanticSource(), "validation", "w-node")
-			route := seedExactOnceEventDelivery(t, pc, ctx, evt, node)
-			ctx = withClaimedWorkflowNodePublicationForTest(t, pc, ctx, evt, route)
-			initial := seedConstructorUnitInstance(t, pc, runtimecorrelation.WithInboundEvent(ctx, evt), "validation")
-			// Accept the event timer while the instance is still non-final. Final
-			// entry must preserve this work, not permit a new post-completion arm.
-			effect, err := (pipelineWorkflowLifecycleOwner{coordinator: pc}).AcceptedEventEffect(testWorkflowInstanceRoute(initial.StorageRef), runtimeidentity.NormalizeEntityID(initial.EntityID), evt, "new", "new", nil)
+			// Settle a real preliminary accepted-event occurrence while the
+			// instance is non-final. The component deliberately has no business
+			// mutation; the later full handler must preserve this timer identity.
+			arm := eventtest.ExistingRunRootIngress(uuid.NewString(), evt.Type(), "", "", evt.Payload(), 0, evt.RunID(), evt.Envelope(), time.Now().UTC())
+			armCtx, armRoute := nativeExactOncePublicationForTest(t, fixture, pc, ctx, arm, initial)
+			if _, err := executeNativeClaimedPipelineHandlerForTest(t, pc, armCtx, node, runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{Event: arm, HandlerEventKey: "thing.created", State: WorkflowState{Stage: WorkflowStateID(initial.CurrentState), Metadata: cloneMap(initial.Fields)}}); err != nil {
+				t.Fatalf("settle preliminary accepted timer occurrence: %v", err)
+			}
+			armID, err := runtimedelivery.DeliveryID(arm.ID(), armRoute)
 			if err != nil {
 				t.Fatal(err)
 			}
-			prepared, err := pc.prepareWorkflowLifecycleMutation(ctx, testRunScopedWorkflowInstanceFromContext(ctx, initial.StorageRef), &initial, []runtimeworkflowlifecycle.Effect{effect}, false)
-			if err != nil {
-				t.Fatal(err)
+			armSnapshot, err := fixture.Store.Snapshot(ctx, armID)
+			if err != nil || armSnapshot.Status != runtimedelivery.StatusDelivered {
+				t.Fatalf("preliminary accepted timer was not settled: %+v/%v", armSnapshot, err)
 			}
-			if err := pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-				_, err := commitPipelineTestWorkflowLifecycle(txctx, pc.workflowStore, prepared.Commit)
-				return err
-			}); err != nil {
-				t.Fatal(err)
+			accepted := listTimerCauseReplayActivationsForTest(t, pc.workflowStore.timerActivations, ctx, initial.EntityID)
+			if len(accepted) != 1 || accepted[0].Status != workflowTimerStatusActive {
+				t.Fatalf("pre-final accepted timers = %#v", accepted)
 			}
-			accepted, err := pc.workflowStore.listWorkflowTimerActivations(ctx, runtimecorrelation.RunIDFromContext(ctx), initial.EntityID, true)
-			if err != nil || len(accepted) != 1 {
-				t.Fatalf("pre-final accepted timers = %#v, err=%v", accepted, err)
-			}
-			result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, node, exactOnceCreateEntityHandler(), workflowTriggerContext{
+			result, err := executeNativeClaimedPipelineHandlerForTest(t, pc, ctx, node, exactOnceCreateEntityHandler(), workflowTriggerContext{
 				Event:           evt,
 				HandlerEventKey: "thing.created",
 				State: WorkflowState{
 					Stage:    WorkflowStateID("new"),
 					Metadata: map[string]any{},
 				},
-			}, false)
+			})
 			if err != nil {
 				t.Fatalf("executeNodeContractHandler: %v", err)
 			}
@@ -93,7 +63,7 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			if got := bus.publishedCount(); got != 1 {
 				t.Fatalf("published event count = %d, want 1", got)
 			}
-			if got := bus.outboxCount(); got != 1 {
+			if got := bus.committedCount(); got != 1 {
 				t.Fatalf("outbox intent count = %d, want 1", got)
 			}
 			entityID := bus.publishedEvent(0).EntityID()
@@ -107,10 +77,7 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			if !ok {
 				t.Fatal("created entity missing")
 			}
-			activations, err := pc.workflowStore.listWorkflowTimerActivations(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID, true)
-			if err != nil {
-				t.Fatalf("list canonical workflow timers: %v", err)
-			}
+			activations := listTimerCauseReplayActivationsForTest(t, pc.workflowStore.timerActivations, ctx, entityID)
 			if len(activations) != 1 || strings.TrimSpace(activations[0].EventType) != "validation/timer.check" {
 				t.Fatalf("canonical workflow timers = %#v, want one validation/timer.check activation", activations)
 			}
@@ -127,51 +94,27 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 				t.Fatalf("ready gate = false, want true (all=%v)", instance.Gates)
 			}
 
-			assertMutationCount(t, pc.workflowStore, ctx, eventID, "amount", "entity_initial_value", "create_entity", 1)
-			assertMutationCount(t, pc.workflowStore, ctx, eventID, "who", "entity_initial_value", "create_entity", 1)
-			assertMutationCount(t, pc.workflowStore, ctx, eventID, "counter", "entity_initial_value", "create_entity", 1)
-			assertMutationCount(t, pc.workflowStore, ctx, eventID, "amount", "workflow_instance_store", "upsert", 0)
-			assertMutationCount(t, pc.workflowStore, ctx, eventID, "who", "workflow_instance_store", "upsert", 0)
-			assertMutationCount(t, pc.workflowStore, ctx, eventID, "counter", "workflow_instance_store", "upsert", 0)
+			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "amount", "entity_initial_value", "create_entity", 1)
+			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "who", "entity_initial_value", "create_entity", 1)
+			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "counter", "entity_initial_value", "create_entity", 1)
+			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "amount", "workflow_instance_store", "upsert", 0)
+			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "who", "workflow_instance_store", "upsert", 0)
+			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "counter", "workflow_instance_store", "upsert", 0)
 		})
 	}
 }
 
-func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		setup func(t *testing.T) (*PipelineCoordinator, context.Context)
-	}{
-		{
-			name: "sqlite",
-			setup: func(t *testing.T) (*PipelineCoordinator, context.Context) {
-				db := newSQLiteWorkflowInstanceStoreTestDB(t)
-				pc := newExactOnceCoordinator(t, db, newSQLiteWorkflowInstanceStoreForTest(t, db))
-				return pc, sqliteExactOnceRunContext(t, db)
-			},
-		},
-		{
-			name: "postgres",
-			setup: func(t *testing.T) (*PipelineCoordinator, context.Context) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				pc := newExactOnceCoordinator(t, db, newPostgresWorkflowInstanceStoreForTest(db))
-				return pc, testPipelineCoordinatorRunContext(t, pc)
-			},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			pc, ctx := tc.setup(t)
-			bus := pc.bus.(*recordingPipelineBus)
+func VerifyNativeDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandlerForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture, pc, ctx := nativeExactOnceCoordinatorForTest(t, backend, open)
+			bus := observeNativePipelineDeliveryBusForTest(t, pc)
 			eventID := uuid.NewString()
-			evt := eventtest.RunCreatingRootIngress(eventID,
-				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, FlowInstanceEntityID("validation")), time.Now().UTC())
-			seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
-			seedConstructorUnitInstance(t, pc, runtimecorrelation.WithInboundEvent(ctx, evt), "validation")
-
-			node := pipelineSourceNode(t, pc.SemanticSource(), "validation", "w-node")
-			route := seedExactOnceEventDelivery(t, pc, ctx, evt, node)
-			deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, route)
+			evt := eventtest.ExistingRunRootIngress(eventID,
+				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "validation", FlowInstance: "validation", EntityID: FlowInstanceEntityID("validation")}), time.Now().UTC())
+			initial := constructedScenarioInstanceForTest(t, pc.SemanticSource(), ctx, "validation")
+			deliveryCtx, route := nativeExactOncePublicationForTest(t, fixture, pc, ctx, evt, initial)
+			constructNativePipelineScenarioForTest(t, fixture, pc, deliveryCtx, "validation")
 
 			handled, err := pc.dispatchWorkflowNodeEventResult(deliveryCtx, evt)
 			if err != nil {
@@ -191,46 +134,22 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 			if got := bus.publishedCount(); got != 1 {
 				t.Fatalf("published event count after duplicate dispatch = %d, want 1", got)
 			}
-			assertDeliveryOutcomeCount(t, pc.workflowStore, ctx, eventID, node.Key(), 1)
-			assertDeliveryStatusCount(t, pc.workflowStore, ctx, eventID, node.Key(), "delivered", 1)
-			assertMutationCount(t, pc.workflowStore, ctx, eventID, "amount", "entity_initial_value", "create_entity", 1)
-			assertMutationCount(t, pc.workflowStore, ctx, eventID, "amount", "workflow_instance_store", "upsert", 0)
+			id, err := runtimedelivery.DeliveryID(evt.ID(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			outcomes, err := fixture.Store.Outcomes(ctx, id)
+			if err != nil || len(outcomes) != 1 {
+				t.Fatalf("exact outcomes = %v/%v", outcomes, err)
+			}
+			snapshot, err := fixture.Store.Snapshot(ctx, id)
+			if err != nil || snapshot.Status != runtimedelivery.StatusDelivered {
+				t.Fatalf("exact delivered obligation = %+v/%v", snapshot, err)
+			}
+			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "amount", "entity_initial_value", "create_entity", 1)
+			assertNativePipelineMutationCountForTest(t, fixture, ctx, eventID, "amount", "workflow_instance_store", "upsert", 0)
 		})
 	}
-}
-
-func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *workflowInstanceStore) *PipelineCoordinator {
-	t.Helper()
-	root := canonicalrouting.CopyConstructedStaticHandler(t, true)
-	repoRoot := contractComplianceRepoRoot(t)
-	loadedBundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("load exact-once canonical fixture: %v", err)
-	}
-	source := semanticview.Wrap(loadedBundle)
-	bundle, ok := semanticview.Bundle(source)
-	if !ok {
-		t.Fatal("expected exact-once workflow bundle")
-	}
-	nodes, err := LoadWorkflowNodes(source)
-	if err != nil {
-		t.Fatalf("load workflow nodes: %v", err)
-	}
-	bus := &recordingPipelineBus{}
-	deliveryStore := newPipelineTestDeliveryOwner(t, db, store.isSQLite())
-	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		Persistence:         workflowPersistenceForTest(store),
-		DeliveryStore:       deliveryStore,
-		DeliveryRuntime:     bus,
-		PipelineObligations: unavailablePipelineTestObligationOwner{},
-		GenericSchedules:    &recordingGenericScheduleWakeupOwner{},
-		Module: &previewWorkflowModule{
-			bundle:        bundle,
-			workflowNodes: nodes,
-		},
-	})
-	configurePipelineTestDeliveryOwner(t, pc)
-	return pc
 }
 
 func exactOnceCreateEntityHandler() runtimecontracts.SystemNodeEventHandler {
@@ -252,166 +171,6 @@ func exactOnceCreateEntityHandler() runtimecontracts.SystemNodeEventHandler {
 				"who":    runtimecontracts.CELExpression("entity.who"),
 			},
 		},
-	}
-}
-
-func sqliteExactOnceRunContext(t *testing.T, db *sql.DB) context.Context {
-	t.Helper()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), testPipelineRunID)
-	runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-		RunID:  testPipelineRunID,
-	})
-	return ctx
-}
-
-func seedExactOnceEventDelivery(t *testing.T, pc *PipelineCoordinator, ctx context.Context, evt events.Event, node runtimeidentity.ExecutableNode) events.DeliveryRoute {
-	t.Helper()
-	store := pc.workflowStore
-	seedExactOnceEvent(t, store, ctx, evt)
-	owner, ok := store.deliveryStore.(*pipelineTestDeliveryOwner)
-	if !ok {
-		owner = newPipelineTestDeliveryOwner(t, store.testDB(), store.isSQLite())
-		store.deliveryStore = owner
-	}
-	flowID := node.FlowPath()
-	scope, ok := pc.SemanticSource().FlowScopeByID(flowID)
-	if !ok {
-		t.Fatalf("seed exact node delivery: no declared flow %q", flowID)
-	}
-	flowInstance := scope.Path
-	if flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(pc.SemanticSource())) && strings.TrimSpace(evt.RunID()) != "" {
-		flowInstance = strings.Trim(strings.TrimSpace(evt.RunID()), "/")
-	}
-	if concrete := evt.FlowInstance(); concrete != "" && (concrete == scope.Path || (scope.Mode == "template" && strings.HasPrefix(concrete, scope.Path+"/"))) {
-		flowInstance = concrete
-	}
-	if flowInstance == "" && strings.TrimSpace(flowID) == "" {
-		flowInstance = strings.Trim(strings.TrimSpace(evt.RunID()), "/")
-	}
-	if flowInstance == "" {
-		t.Fatal("seed exact node delivery requires a concrete flow instance")
-	}
-	target := events.RouteIdentity{
-		FlowID: flowID, FlowInstance: flowInstance, EntityID: evt.EntityID(),
-	}
-	var targetOwner events.DeliveryTargetOwnership
-	if strings.TrimSpace(target.EntityID) == "" {
-		target.EntityID = FlowInstanceEntityID(target.FlowInstance)
-		targetOwner = events.MustMaterializingEntityTarget(target)
-	} else {
-		targetOwner = events.MustExistingEntityTarget(target)
-	}
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: targetOwner}
-	if err := owner.commitInitial(ctx, evt, route); err != nil {
-		t.Fatalf("seed exact node delivery: %v", err)
-	}
-	return route
-}
-
-func seedExactOnceEvent(t *testing.T, store *workflowInstanceStore, ctx context.Context, evt events.Event) {
-	t.Helper()
-	if store.isSQLite() {
-		seedPipelineEventRecordForDialect(t, ctx, store.testDB(), "sqlite", evt)
-		return
-	}
-	seedPipelineEventRecord(t, ctx, store.testDB(), evt)
-}
-
-func assertMutationCount(t *testing.T, store *workflowInstanceStore, ctx context.Context, eventID, path, writerID, handlerStep string, want int) {
-	t.Helper()
-	var (
-		got int
-		err error
-	)
-	if store.isSQLite() {
-		err = store.testDB().QueryRowContext(ctx, `
-			SELECT COUNT(*)
-			FROM entity_mutations
-			WHERE caused_by_event = ?
-			  AND domain = 'authored_field'
-			  AND path = ?
-			  AND writer_id = ?
-			  AND handler_step = ?
-		`, eventID, path, writerID, handlerStep).Scan(&got)
-	} else {
-		err = store.testDB().QueryRowContext(ctx, `
-			SELECT COUNT(*)
-			FROM entity_mutations
-			WHERE caused_by_event = $1::uuid
-			  AND domain = 'authored_field'
-			  AND path = $2
-			  AND writer_id = $3
-			  AND handler_step = $4
-		`, eventID, path, writerID, handlerStep).Scan(&got)
-	}
-	if err != nil {
-		t.Fatalf("count mutation rows: %v", err)
-	}
-	if got != want {
-		t.Fatalf("mutation count event=%s path=%s writer=%s step=%s = %d, want %d", eventID, path, writerID, handlerStep, got, want)
-	}
-}
-
-func assertDeliveryOutcomeCount(t *testing.T, store *workflowInstanceStore, ctx context.Context, eventID, nodeID string, want int) {
-	t.Helper()
-	var got int
-	var err error
-	if store.isSQLite() {
-		err = store.testDB().QueryRowContext(ctx, `
-			SELECT COUNT(*)
-			FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
-			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
-			WHERE d.event_id = ?
-			  AND d.subscriber_type = 'node'
-			  AND d.subscriber_id = ?
-		`, eventID, nodeID).Scan(&got)
-	} else {
-		err = store.testDB().QueryRowContext(ctx, `
-			SELECT COUNT(*)
-			FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
-			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
-			WHERE d.event_id = $1::uuid
-			  AND d.subscriber_type = 'node'
-			  AND d.subscriber_id = $2
-		`, eventID, nodeID).Scan(&got)
-	}
-	if err != nil {
-		t.Fatalf("count event delivery outcomes: %v", err)
-	}
-	if got != want {
-		t.Fatalf("event delivery outcome count = %d, want %d", got, want)
-	}
-}
-
-func assertDeliveryStatusCount(t *testing.T, store *workflowInstanceStore, ctx context.Context, eventID, nodeID, status string, want int) {
-	t.Helper()
-	var got int
-	var err error
-	if store.isSQLite() {
-		err = store.testDB().QueryRowContext(ctx, `
-			SELECT COUNT(*)
-			FROM event_deliveries
-			WHERE event_id = ?
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = ?
-			  AND status = ?
-		`, eventID, nodeID, status).Scan(&got)
-	} else {
-		err = store.testDB().QueryRowContext(ctx, `
-			SELECT COUNT(*)
-			FROM event_deliveries
-			WHERE event_id = $1::uuid
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = $2
-			  AND status = $3
-		`, eventID, nodeID, status).Scan(&got)
-	}
-	if err != nil {
-		t.Fatalf("count event_deliveries: %v", err)
-	}
-	if got != want {
-		t.Fatalf("delivery status %s count = %d, want %d", status, got, want)
 	}
 }
 

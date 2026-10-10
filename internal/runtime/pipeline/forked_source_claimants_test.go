@@ -2,69 +2,50 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/testutil"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
 type forkedPipelineBackend struct {
-	db             *sql.DB
 	store          *workflowInstanceStore
-	runner         *recordingRuntimeMutationRunner
+	native         WorkflowActivityNativeFixtureForTest
 	ctx            context.Context
 	runID          string
 	continuedRunID string
-	sqlite         bool
 	frozenAt       time.Time
 }
 
-func newForkedPipelineBackend(t *testing.T, backend string) forkedPipelineBackend {
+func newForkedPipelineBackend(t *testing.T, backend string, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) forkedPipelineBackend {
 	t.Helper()
 	runID := uuid.NewString()
 	continuedRunID := uuid.NewString()
-	frozenAt := time.Now().UTC().Truncate(time.Microsecond)
-	if backend == "sqlite" {
-		db := newSQLiteWorkflowInstanceStoreTestDB(t)
-		store := newSQLiteWorkflowInstanceStoreForTest(t, db)
-		runlifecyclefixture.RequireSQLite(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-			RunID: runID, StartedAt: frozenAt.Add(-time.Hour),
-		})
-		runlifecyclefixture.RequireSQLite(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-			RunID: continuedRunID, StartedAt: frozenAt,
-		})
-		return forkedPipelineBackend{
-			db: db, store: store, ctx: runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID),
-			runner: &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite},
-			runID:  runID, continuedRunID: continuedRunID, sqlite: true, frozenAt: frozenAt,
+	native := open(t, backend)
+	ctx := effects.WithExecutionMode(runtimecorrelation.WithRunID(native.Context, runID), executionmode.Live)
+	for _, run := range []string{runID, continuedRunID} {
+		if err := native.RequireRun(ctx, run); err != nil {
+			t.Fatal(err)
 		}
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: frozenAt.Add(-time.Hour)})
-	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: continuedRunID, StartedAt: frozenAt})
+	frozenAt := time.Now().UTC().Truncate(time.Microsecond)
 	return forkedPipelineBackend{
-		db: db, store: newPostgresWorkflowInstanceStoreForTest(db), ctx: runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID),
-		runner: &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectPostgres},
-		runID:  runID, continuedRunID: continuedRunID, frozenAt: frozenAt,
+		store: native.Persistence.store, native: native, ctx: ctx,
+		runID: runID, continuedRunID: continuedRunID, frozenAt: frozenAt,
 	}
 }
 
 func (b forkedPipelineBackend) freeze(t *testing.T) {
 	t.Helper()
-	if err := b.runner.RunRuntimeMutationContext(b.ctx, func(txctx context.Context) error {
-		_, _, err := b.store.runLifecycle.ForkRunSource(txctx, storerunlifecycle.ForkSourceRequest{
-			RunID: b.runID, ContinuedAsRunID: b.continuedRunID, EndedAt: b.frozenAt,
-		})
-		return err
+	if _, _, err := b.native.Runs.ForkRunSource(b.ctx, storerunlifecycle.ForkSourceRequest{
+		RunID: b.runID, ContinuedAsRunID: b.continuedRunID, EndedAt: b.frozenAt,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -77,10 +58,10 @@ func requireForkedPipelineRefusal(t *testing.T, label string, err error) {
 	}
 }
 
-func TestForkedSourceWorkflowInstanceMutationsRefuseAndPreserveReadback(t *testing.T) {
+func VerifyForkedSourceWorkflowInstanceMutationsRefuseAndPreserveReadbackForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			fixture := newForkedPipelineBackend(t, backend)
+			fixture := newForkedPipelineBackend(t, backend, open)
 			instanceID := uuid.NewString()
 			storageRef := "freeze/" + instanceID
 			entityID := uuid.NewString()
@@ -90,18 +71,19 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndPreserveReadback(t *testi
 				Fields:     map[string]any{"marker": "source"},
 				EntityType: "test_entity",
 			}
-			if err := fixture.store.create(fixture.ctx, instance); err != nil {
+			instance = materializedWorkflowInstanceForTest(instance)
+			if err := fixture.native.Construct(fixture.ctx, instance); err != nil {
 				t.Fatal(err)
 			}
 			fixture.freeze(t)
 
 			late := instance
 			late.CurrentState = "changed"
-			requireForkedPipelineRefusal(t, "upsert workflow", fixture.store.upsert(fixture.ctx, late))
+			requireForkedPipelineRefusal(t, "replace existing workflow", fixture.native.Construct(fixture.ctx, late))
 			late.InstanceID = uuid.NewString()
 			late.StorageRef = "freeze/" + late.InstanceID
 			late.Fields = cloneStringAnyMap(late.Fields)
-			requireForkedPipelineRefusal(t, "create workflow", fixture.store.create(fixture.ctx, late))
+			requireForkedPipelineRefusal(t, "create workflow", fixture.native.Construct(fixture.ctx, late))
 			requireForkedPipelineRefusal(t, "mutate workflow", fixture.store.mutate(fixture.ctx, testRunScopedWorkflowInstanceForRun(fixture.runID, storageRef), func(item *WorkflowInstance) { item.CurrentState = "changed" }))
 			requireForkedPipelineRefusal(t, "mutate workflow with error", fixture.store.mutateE(fixture.ctx, testRunScopedWorkflowInstanceForRun(fixture.runID, storageRef), func(item *WorkflowInstance) error {
 				item.CurrentState = "changed"
@@ -118,10 +100,10 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndPreserveReadback(t *testi
 	}
 }
 
-func TestForkedSourceActivityAttemptMutationsRefuseAndPreserveJournal(t *testing.T) {
+func VerifyForkedSourceActivityAttemptMutationsRefuseAndPreserveJournalForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
-			fixture := newForkedPipelineBackend(t, backend)
+			fixture := newForkedPipelineBackend(t, backend, open)
 			intent := testNonIdempotentActivityIntent(fixture.runID, uuid.NewString(), uuid.NewString())
 			start := activityAttemptStartRecord(intent, activityInputHash(intent.Input))
 			started, inserted, err := fixture.store.StartActivityAttempt(fixture.ctx, start)

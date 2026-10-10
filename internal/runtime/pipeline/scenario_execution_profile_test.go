@@ -224,12 +224,13 @@ func TestScenarioExecutionProfilesRemainIsolatedAcrossConcurrentRuns(t *testing.
 	}
 }
 
-func TestScenarioExecutionProfileMismatchFencesTerminalReplay(t *testing.T) {
-	ctx := testAuthorActivityContext(t, context.Background())
+func VerifyScenarioExecutionProfileMismatchFencesTerminalReplayForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+	fixture := open(t)
+	ctx := fixture.Context
 	source, tool := scenarioExecutionProfileTestSource(t)
-	fact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("6", 64))
-	if err != nil {
-		t.Fatal(err)
+	fact, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("native profile replay has no admitted source fact")
 	}
 	identity, err := scenarioexecution.NewEffectiveSourceIdentity(fact, "sha256:"+strings.Repeat("7", 64))
 	if err != nil {
@@ -251,8 +252,10 @@ func TestScenarioExecutionProfileMismatchFencesTerminalReplay(t *testing.T) {
 	}
 
 	runID := uuid.NewString()
-	db, journal := newSQLiteActivityJournalStore(t, ctx)
-	seedActivityRun(t, db, true, runID)
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
 	intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
 	intent.Tool = "provider.send"
 	intent.ActivityID = "provider_send"
@@ -261,9 +264,8 @@ func TestScenarioExecutionProfileMismatchFencesTerminalReplay(t *testing.T) {
 	reader := scenarioProfileReaderStub{profile: profile}
 
 	firstBus := &recordingPipelineBus{}
-	first := newDurablePipelineCoordinatorForTest(firstBus, db, PipelineCoordinatorOptions{
-		Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(journal),
-		PipelineObligations: unavailablePipelineTestObligationOwner{}, MockConnectorResponses: base,
+	first := fixture.NewCoordinator(firstBus, PipelineCoordinatorOptions{
+		Module: staticSemanticWorkflowModule{source: source}, MockConnectorResponses: base,
 		ScenarioExecutionProfiles: reader, EffectiveSourceIdentity: identity, ExecutionPosture: executionposture.MockOnly,
 	})
 	if err := (pipelineActivityDispatcher{coordinator: first}).executeActivityIntent(ctx, intent); err != nil {
@@ -278,9 +280,8 @@ func TestScenarioExecutionProfileMismatchFencesTerminalReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	restartBus := &recordingPipelineBus{}
-	restarted := newDurablePipelineCoordinatorForTest(restartBus, db, PipelineCoordinatorOptions{
-		Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(journal),
-		PipelineObligations: unavailablePipelineTestObligationOwner{}, MockConnectorResponses: base,
+	restarted := fixture.NewCoordinator(restartBus, PipelineCoordinatorOptions{
+		Module: staticSemanticWorkflowModule{source: source}, MockConnectorResponses: base,
 		ScenarioExecutionProfiles: reader, EffectiveSourceIdentity: drifted, ExecutionPosture: executionposture.MockOnly,
 	})
 	if err := (pipelineActivityDispatcher{coordinator: restarted}).executeActivityIntent(ctx, intent); err != nil {

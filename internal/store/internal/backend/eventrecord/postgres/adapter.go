@@ -31,6 +31,14 @@ type Execer interface {
 
 func HydrationBatchSize() int { return hydrationBatchSize }
 
+func ReadFixtureLineageStorage(ctx context.Context, q RowQueryer, eventID string) (string, string, error) {
+	var source, payload string
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE(source_event_id::text,''),payload::text FROM events WHERE event_id=$1::uuid`, eventID).Scan(&source, &payload); err != nil {
+		return "", "", err
+	}
+	return source, payload, nil
+}
+
 func Load(ctx context.Context, q RowQueryer, eventID string) (eventrecord.Record, bool, error) {
 	record, found, err := loadRecord(ctx, q, eventID)
 	if err != nil || !found {

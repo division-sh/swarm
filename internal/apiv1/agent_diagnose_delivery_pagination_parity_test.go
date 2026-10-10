@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -19,41 +18,36 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
 type agentDiagnosePaginationStore interface {
 	AgentReadStore
 	storetest.AgentFixtureStore
+	storetest.RunFixtureStore
 }
 
 func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 	for _, backend := range []struct {
 		name string
-		open func(*testing.T, context.Context) (agentDiagnosePaginationStore, *sql.DB, bool)
+		open func(*testing.T, context.Context) agentDiagnosePaginationStore
 	}{
 		{
 			name: "sqlite",
-			open: func(t *testing.T, ctx context.Context) (agentDiagnosePaginationStore, *sql.DB, bool) {
-				selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return selected, storetest.Database(selected), true
+			open: func(t *testing.T, ctx context.Context) agentDiagnosePaginationStore {
+				return storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 			},
 		},
 		{
 			name: "postgres",
-			open: func(t *testing.T, _ context.Context) (agentDiagnosePaginationStore, *sql.DB, bool) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected := storetest.AdmitPostgresRuntimeStore(t, db)
-				return selected, db, false
+			open: func(t *testing.T, _ context.Context) agentDiagnosePaginationStore {
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
-			selected, db, sqlite := backend.open(t, ctx)
+			selected := backend.open(t, ctx)
 			registrar, ok := selected.(authorActivityTestCatalogRegistrar)
 			if !ok {
 				t.Fatalf("%T does not register author activity catalogs", selected)
@@ -62,15 +56,9 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 
 			now := time.Now().UTC().Add(-time.Minute)
 			runID := uuid.NewString()
-			if sqlite {
-				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-					RunID: runID, StartedAt: now.Add(-time.Minute),
-				})
-			} else {
-				runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-					RunID: runID, StartedAt: now.Add(-time.Minute),
-				})
-			}
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
+				RunID: runID, StartedAt: now.Add(-time.Minute),
+			})
 			agentID := "diagnose-agent"
 			identity := agentidentitytest.RuntimeForRun(t, runID, agentID, "diagnose-pagination-test", "diagnose", "one", "diagnose/one")
 			if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{

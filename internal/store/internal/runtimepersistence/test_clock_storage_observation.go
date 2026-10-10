@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -11,6 +12,26 @@ import (
 type ClockStorageObservation struct {
 	Rows                  int
 	Status, ImmutableHash string
+}
+
+// Catalog observations use PostgreSQL's transaction clock, not an application
+// timestamp. SQLite keeps its separately defined application-clock boundary.
+func ReadPostgresObservationTimeForTest(ctx context.Context, selected any) (time.Time, error) {
+	owner, ok := selected.(*PostgresStore)
+	if !ok || owner == nil {
+		return time.Time{}, fmt.Errorf("postgres observation time requires its original native owner")
+	}
+	if err := validateChannelObservationOwner(owner); err != nil {
+		return time.Time{}, err
+	}
+	var out time.Time
+	err := readServedDeliveryObservation(ctx, owner, func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT NOW()`).Scan(&out)
+	})
+	if err != nil {
+		return time.Time{}, err
+	}
+	return out.UTC(), nil
 }
 
 // Counts every instance clock, including terminal rows. An empty active list

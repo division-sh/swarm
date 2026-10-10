@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
-
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -25,12 +23,12 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
 
 type humanTaskToolStore interface {
+	storetest.RunFixtureStore
 	decisioncard.Store
 	decisioncard.HumanTaskStore
 	decisioncard.HumanTaskAcknowledgedCreationStore
@@ -83,12 +81,8 @@ accounts:
 			"priority": 3,
 		},
 	})
-	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
-		UPDATE entity_state
-		SET bookkeeping = '{"private_fact":"must-not-leak"}'
-		WHERE run_id = ? AND entity_id = ?
-	`, entityToolTestRunID, entityID); err != nil {
-		t.Fatalf("inject sqlite hostile bookkeeping: %v", err)
+	if changed, err := storetest.SetEntityProjectionPrivateBookkeeping(ctx, sqliteStore, entityToolTestRunID, entityID); err != nil || changed != 1 {
+		t.Fatalf("inject sqlite hostile bookkeeping: rows=%d err=%v", changed, err)
 	}
 	getOut, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
 	if err != nil {
@@ -152,14 +146,11 @@ accounts:
 	if got := testNumericValue(metricOut.(map[string]any)["value"]); got != 42.0 {
 		t.Fatalf("sqlite metric sum = %v, want 42", got)
 	}
-	var mutationCount int
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM entity_mutations
-		WHERE run_id = ? AND entity_id = ?
-	`, entityToolTestRunID, entityID).Scan(&mutationCount); err != nil {
+	projection, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, sqliteStore, entityToolTestRunID, entityID)
+	if err != nil {
 		t.Fatalf("count sqlite entity mutations: %v", err)
 	}
+	mutationCount := len(projection.Mutations)
 	if mutationCount < 2 {
 		t.Fatalf("sqlite entity mutation count = %d, want create and update mutations", mutationCount)
 	}
@@ -178,15 +169,12 @@ func TestEntityTools_ReadImportedCanonicalEntityContractOnBothStores(t *testing.
 		t.Run(backend, func(t *testing.T) {
 			bundle := loadWave1EntityToolBundle(t, actor, "review", "account_record", "", "account_record:\n  status: text\n")
 			var entityStore runtimetools.EntityPersistence
-			var query string
 			if backend == "sqlite" {
 				selected := newSQLiteRuntimeToolStoreForTest(t)
 				entityStore = selected
-				query = `SELECT entity_type FROM entity_state WHERE run_id = ? AND entity_id = ?`
 			} else {
 				selected := newPostgresHumanTaskToolStoreForTest(t)
 				entityStore = selected
-				query = `SELECT entity_type FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 			}
 			ctx := runtimetools.WithActor(seedEntityToolSourceRun(t, entityStore, bundle), actor)
 			exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
@@ -196,10 +184,11 @@ func TestEntityTools_ReadImportedCanonicalEntityContractOnBothStores(t *testing.
 				"flow_instance": "review/inst-1",
 				"fields":        map[string]any{"status": "open"},
 			})
-			var persistedType string
-			if err := storetest.DatabaseForTest(entityStore).QueryRowContext(ctx, query, entityToolTestRunID, entityID).Scan(&persistedType); err != nil {
+			persisted, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, entityStore, entityToolTestRunID, entityID)
+			if err != nil {
 				t.Fatalf("load persisted entity contract: %v", err)
 			}
+			persistedType := persisted.EntityType
 			if persistedType != "account_record" {
 				t.Fatalf("persisted entity type = %q, want account_record", persistedType)
 			}
@@ -249,12 +238,8 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 		"flow_instance": "validation/inst-1",
 		"fields":        map[string]any{"status": "open", "business_brief": map[string]any{"summary": "before", "confidence": int64(1)}},
 	})
-	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
-		UPDATE entity_state
-		SET bookkeeping = '{"private_fact":"must-not-leak"}'
-		WHERE run_id = ? AND entity_id = ?
-	`, entityToolTestRunID, entityID); err != nil {
-		t.Fatalf("inject sqlite role-scoped hostile bookkeeping: %v", err)
+	if changed, err := storetest.SetEntityProjectionPrivateBookkeeping(ctx, sqliteStore, entityToolTestRunID, entityID); err != nil || changed != 1 {
+		t.Fatalf("inject sqlite role-scoped hostile bookkeeping: rows=%d err=%v", changed, err)
 	}
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:       sqliteStore,
@@ -433,14 +418,7 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 	// Force precision that Postgres cannot retain so idempotent replay proves
 	// admission canonicalizes before snapshot and selected-store persistence.
 	now := time.Now().UTC().Truncate(time.Microsecond).Add(789 * time.Nanosecond)
-	switch typed := persistence.(type) {
-	case *store.PostgresStore:
-		runlifecyclefixture.RequirePostgres(t, unmanagedToolTestContext(), storetest.DatabaseForTest(typed), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash})
-	case *store.SQLiteRuntimeStore:
-		runlifecyclefixture.RequireSQLite(t, unmanagedToolTestContext(), storetest.DatabaseForTest(typed), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash})
-	default:
-		t.Fatalf("unsupported reply tool store %T", persistence)
-	}
+	storetest.RequireRun(t, unmanagedToolTestContext(), persistence, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: authorActivityTestBundleHash})
 	storetest.CommitSemanticEvent(t, unmanagedToolTestContext(), persistence, eventtest.PersistedChildForProducer(
 		requestEventID, events.EventType("provider.requested"),
 		eventtest.Producer(events.EventProducerNode, "requester"), "", []byte(`{}`), 0,
@@ -488,9 +466,8 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 
 func newPostgresHumanTaskToolStoreForTest(t *testing.T) *store.PostgresStore {
 	t.Helper()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	return storetest.AdmitPostgresRuntimeStore(t, db)
+	selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+	return selected
 }
 
 func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {

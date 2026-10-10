@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,29 +28,24 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
 func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		open func(*testing.T) (any, *sql.DB)
+		open func(*testing.T) any
 	}{
 		{
 			name: "sqlite",
-			open: func(t *testing.T) (any, *sql.DB) {
-				selected := storetest.StartSQLiteRuntimeStoreWithContext(t, context.Background())
-				return selected, storetest.DatabaseForTest(selected)
+			open: func(t *testing.T) any {
+				return storetest.StartSQLiteRuntimeStoreWithContext(t, context.Background())
 			},
 		},
 		{
 			name: "postgres",
-			open: func(t *testing.T) (any, *sql.DB) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			open: func(t *testing.T) any {
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 	} {
@@ -70,19 +64,21 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			}))
 			defer provider.Close()
 
-			persistence, db := tc.open(t)
+			persistence := tc.open(t)
 			bundle := proposedEffectSupportedSurfaceBundle(t, provider.URL)
 
 			source := semanticview.Wrap(bundle)
 			fact := sourceArtifactFactForTestBundle(t, bundle)
-			handler, bus := newProposedEffectMailboxHandler(t, persistence, db, source, fact)
+			handler, bus := newProposedEffectMailboxHandler(t, persistence, source, fact)
 
 			runID := uuid.NewString()
 			entityID := runID
 			cards := persistence.(decisioncard.Store)
 			card, continuation := proposedEffectAPICard(t, runID, entityID, fact, source.WorkflowVersion())
 			fixtureCtx := testAuthorActivityContextForSource(context.Background(), fact)
-			insertProposedEffectAPIRun(t, fixtureCtx, db, tc.name, runID, fact)
+			storetest.RequireRun(t, fixtureCtx, persistence.(storetest.RunFixtureStore), storetest.RunFixture{
+				Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: fact.BundleHash(), Artifact: bundle.SourceArtifact,
+			})
 			sourceEvent := eventtest.ExistingRunRootIngress(
 				continuation.SourceEventID, events.EventType("thing.created"), "operator", continuation.SourceTaskID,
 				[]byte(`{"text":"Exact operator-approved content"}`), 0, runID,
@@ -135,11 +131,11 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			if got := calls.Load(); got != 1 {
 				t.Fatalf("provider calls = %d, want 1", got)
 			}
-			decisionEvent := loadMailboxWritePersistedEvent(t, db, tc.name, decisionEventID)
+			decisionEvent := loadMailboxWritePersistedEvent(t, persistence, decisionEventID)
 			if decisionEvent.ID() != decisionEventID {
 				t.Fatalf("persisted decision event id = %q, want %q", decisionEvent.ID(), decisionEventID)
 			}
-			requestEvent := loadMailboxWritePersistedEvent(t, db, tc.name, continuation.RequestEventID)
+			requestEvent := loadMailboxWritePersistedEvent(t, persistence, continuation.RequestEventID)
 			if requestEvent.Type() != events.EventType("platform.activity_requested") {
 				t.Fatalf("persisted request event type = %q", requestEvent.Type())
 			}
@@ -147,7 +143,7 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			if err != nil || readback.ContinuationState != decisioncard.ProposedEffectRequestReleased || readback.DispatchState != "succeeded" {
 				t.Fatalf("proposed-effect readback = %#v, %v", readback, err)
 			}
-			assertProposedEffectAPIExecutionRows(t, db, tc.name, runID)
+			assertProposedEffectAPIExecutionRows(t, persistence, runID)
 		})
 	}
 }
@@ -155,7 +151,6 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 func newProposedEffectMailboxHandler(
 	t *testing.T,
 	persistence any,
-	db *sql.DB,
 	source semanticview.Source,
 	fact runtimecorrelation.SourceArtifactFact,
 ) (*Handler, *runtimebus.EventBus) {
@@ -351,38 +346,13 @@ pins:
 	return bundle
 }
 
-func insertProposedEffectAPIRun(
-	t *testing.T,
-	ctx context.Context,
-	db *sql.DB,
-	backend, runID string,
-	source runtimecorrelation.SourceArtifactFact,
-) {
+func assertProposedEffectAPIExecutionRows(t *testing.T, selected any, runID string) {
 	t.Helper()
-	if backend == "postgres" {
-		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: source})
-	} else {
-		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: source})
-	}
-}
-
-func assertProposedEffectAPIExecutionRows(t *testing.T, db *sql.DB, backend, runID string) {
-	t.Helper()
-	query := `SELECT
-		(SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = 'platform.activity_requested'),
-		(SELECT COUNT(*) FROM activity_attempts WHERE run_id = ? AND status = 'succeeded')`
-	args := []any{runID, runID}
-	if backend == "postgres" {
-		query = `SELECT
-			(SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = 'platform.activity_requested'),
-			(SELECT COUNT(*) FROM activity_attempts WHERE run_id = $1::uuid AND status = 'succeeded')`
-		args = []any{runID}
-	}
-	var requests, attempts int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&requests, &attempts); err != nil {
+	counts, err := storetest.ReadProposedEffectRunExecutionStorage(context.Background(), selected, runID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if requests != 1 || attempts != 1 {
-		t.Fatalf("approved effect execution rows = requests:%d attempts:%d, want 1/1", requests, attempts)
+	if counts.Requests != 1 || counts.SuccessfulAttempts != 1 {
+		t.Fatalf("approved effect execution rows = requests:%d attempts:%d, want 1/1", counts.Requests, counts.SuccessfulAttempts)
 	}
 }

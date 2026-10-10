@@ -290,13 +290,6 @@ func (s *workflowInstanceStore) listActiveWorkflowTimerActivationsForRoute(ctx c
 	return s.timerActivations.ListActiveWorkflowTimerActivationsForRoute(ctx, identity)
 }
 
-func workflowTimerIntervalString(activation WorkflowTimerActivation) string {
-	if !activation.Recurring || activation.RecurrenceInterval <= 0 {
-		return ""
-	}
-	return activation.RecurrenceInterval.String()
-}
-
 // ValidateCauseReplay compares current durable facts with the original cause,
 // not the authority to execute a current occurrence or cancel an activation.
 func (actual WorkflowTimerActivation) ValidateCauseReplay(expected WorkflowTimerActivation) error {

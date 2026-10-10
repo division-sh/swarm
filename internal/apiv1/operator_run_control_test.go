@@ -2,18 +2,14 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"testing"
 	"time"
 
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
-
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -72,9 +68,7 @@ func TestOperatorRunStopDoesNotReplayCommittedTransitionAfterReconciliationFailu
 }
 
 func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	bus, err := newScopedAPITestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -95,7 +89,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 	})
 	ctx := context.Background()
 	runID := uuid.NewString()
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
 		StartedAt: time.Date(2026, 5, 11, 11, 0, 0, 0, time.UTC),
 	})
@@ -108,13 +102,13 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 	if result := asMap(t, pause.Result); result["ok"] != true {
 		t.Fatalf("run.pause result = %#v", result)
 	}
-	assertRunControlState(t, db, runID, "paused", "paused")
+	assertRunControlState(t, pg, runID, "paused", "paused")
 
 	pauseReplay := rpcCall(t, handler, pauseBody)
 	if pauseReplay.Error != nil {
 		t.Fatalf("run.pause replay error = %#v", pauseReplay.Error)
 	}
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
+	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows after pause replay = %d, want 1", count)
 	}
 
@@ -131,7 +125,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 	if continued.Error != nil {
 		t.Fatalf("run.continue error = %#v", continued.Error)
 	}
-	assertRunControlState(t, db, runID, "running", "running")
+	assertRunControlState(t, pg, runID, "running", "running")
 
 	continueReplay := rpcCall(t, handler, continueBody)
 	if continueReplay.Error != nil {
@@ -153,7 +147,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 	if recovery := asMap(t, asMap(t, stopped.Result)["recovery"]); recovery["status"] != string(runtimeruncontrol.RecoveryComplete) {
 		t.Fatalf("run.stop recovery = %#v, want complete", recovery)
 	}
-	assertRunControlState(t, db, runID, "cancelled", "stopped")
+	assertRunControlState(t, pg, runID, "cancelled", "stopped")
 
 	stopReplay := rpcCall(t, handler, stopBody)
 	if stopReplay.Error != nil {
@@ -208,17 +202,13 @@ func runControlBody(method, runID, idempotencyKey string) string {
 	return fmt.Sprintf(`{"jsonrpc":"2.0","id":"control","method":%q,"params":{"run_id":%q,"idempotency_key":%q}}`, method, runID, idempotencyKey)
 }
 
-func assertRunControlState(t *testing.T, db *sql.DB, runID, wantRunStatus, wantControlStatus string) {
+func assertRunControlState(t *testing.T, selected any, runID, wantRunStatus, wantControlStatus string) {
 	t.Helper()
-	var runStatus, controlStatus string
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT r.status, COALESCE(rc.control_status, '')
-		FROM runs r
-		LEFT JOIN run_control_state rc ON rc.run_id = r.run_id
-		WHERE r.run_id = $1::uuid
-	`, runID).Scan(&runStatus, &controlStatus); err != nil {
+	observed, err := storetest.ReadRunStopStorage(context.Background(), selected, runID)
+	if err != nil {
 		t.Fatalf("load run control state: %v", err)
 	}
+	runStatus, controlStatus := observed.Status, observed.Control
 	if runStatus != wantRunStatus || controlStatus != wantControlStatus {
 		t.Fatalf("run/control status = %s/%s, want %s/%s", runStatus, controlStatus, wantRunStatus, wantControlStatus)
 	}

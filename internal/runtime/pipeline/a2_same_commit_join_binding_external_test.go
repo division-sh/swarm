@@ -91,7 +91,7 @@ func TestA2SameBusinessCommitTransitionArmAndPublicationOnBothStores(t *testing.
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			runID := uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
+			insertGateRecoveryRun(t, selected.events, runID)
 			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			owner := testRunScopedWorkflowInstanceForRun(runID, runID)
 			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, a2SameCommitJoinBindingFiles()))

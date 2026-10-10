@@ -27,8 +27,8 @@ func TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores(t *testing.T)
 					t.Fatalf("publish ordinary seed: %v", err)
 				}
 				ctx := catalogRunContext(h, catalogRuntimeRunID)
-				var eventID string
-				if err := h.db.QueryRowContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name='receiver.seeded'`, catalogRuntimeRunID).Scan(&eventID); err != nil {
+				eventID, err := h.readRunNamedEventIdentity(ctx, catalogRuntimeRunID, "receiver.seeded")
+				if err != nil {
 					t.Fatal(err)
 				}
 				var store interface {

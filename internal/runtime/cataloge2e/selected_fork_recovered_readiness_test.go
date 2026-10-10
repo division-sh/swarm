@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -382,41 +381,14 @@ func corruptSelectedForkRecoveredReadiness(t *testing.T, ctx context.Context, h 
 
 func selectedForkRecoveredPhysicalSnapshot(t *testing.T, ctx context.Context, h *runtimeHarness, runID string) string {
 	t.Helper()
-	var snapshot []string
-	for _, table := range []string{"entity_state", "flow_instances", "flow_instance_runtime_readiness", "events"} {
-		rows, err := h.db.QueryContext(ctx, "SELECT * FROM "+table+" WHERE run_id = $1", runID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		columns, err := rows.Columns()
-		if err != nil {
-			rows.Close()
-			t.Fatal(err)
-		}
-		for rows.Next() {
-			values := make([]any, len(columns))
-			pointers := make([]any, len(columns))
-			for i := range values {
-				pointers[i] = &values[i]
-			}
-			if err := rows.Scan(pointers...); err != nil {
-				rows.Close()
-				t.Fatal(err)
-			}
-			encoded, err := json.Marshal([]any{table, values})
-			if err != nil {
-				rows.Close()
-				t.Fatal(err)
-			}
-			snapshot = append(snapshot, string(encoded))
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
+	var selected any = h.sqlite
+	if h.pg != nil {
+		selected = h.pg
 	}
-	sort.Strings(snapshot)
+	snapshot, err := storetest.ReadSelectedForkRecoveredStorageSnapshot(ctx, selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	data, err := json.Marshal(snapshot)
 	if err != nil {
 		t.Fatal(err)

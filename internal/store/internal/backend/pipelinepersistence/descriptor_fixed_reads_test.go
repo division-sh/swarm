@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -51,7 +50,8 @@ const descriptorFixedReadTargetsBefore = `
 	`
 
 func TestDescriptorFixedReadsFreshFactsAndCanonicalErrors(t *testing.T) {
-	db, _ := sqliteRouteStatementFixture(t, 0)
+	runID := uuid.NewString()
+	db, _ := sqliteRouteStatementFixture(t, 0, runID)
 	b, err := sqlitebackend.New(db)
 	if err != nil {
 		t.Fatal(err)
@@ -59,8 +59,6 @@ func TestDescriptorFixedReadsFreshFactsAndCanonicalErrors(t *testing.T) {
 	t.Cleanup(func() { _ = b.Close() })
 	owner := &PipelineSQLiteOwner{backend: b}
 	ctx := context.Background()
-	runID := uuid.NewString()
-	runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin()})
 	for _, ddl := range []string{
 		`CREATE TABLE flow_instances (run_id TEXT, instance_path TEXT, flow_template TEXT, status TEXT, mode TEXT, terminated_at TIMESTAMP, entity_id TEXT, current_state TEXT)`,
 		`CREATE TABLE flow_instance_runtime_readiness (run_id TEXT, instance_path TEXT, plan TEXT, plan_hash TEXT, activation_attempt_id INTEGER, phase TEXT DEFAULT 'planned', activation_attempt_state TEXT DEFAULT 'planned')`,

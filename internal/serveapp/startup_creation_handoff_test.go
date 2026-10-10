@@ -31,7 +31,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -206,12 +205,7 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 				db, _, _ := selectedRuntimeStoreForTest(t, persistence)
 				runID := uuid.NewString()
 				fact := candidate.runtime.Options.SourceArtifactFact
-				seed := runlifecyclefixture.Fixture{RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Source: fact, Artifact: loaded.bundle.SourceArtifact}
-				if backend == "sqlite" {
-					runlifecyclefixture.RequireSQLite(t, ctx, db, seed)
-				} else {
-					runlifecyclefixture.RequirePostgres(t, ctx, db, seed)
-				}
+				storetest.RequireRun(t, ctx, persistence.deps.EventBusDurable.RunLifecycle.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: fact.BundleHash(), Artifact: loaded.bundle.SourceArtifact})
 				// Commit fixture setup before releasing autonomous runtime writers.
 				if err := startPredecessor(); err != nil {
 					t.Fatalf("start predecessor: %v", err)

@@ -31,6 +31,8 @@ func TestReceiverCompositionRestartBothStores(t *testing.T) {
 			stubServeRuntimeWorkspaceLifecycle(t)
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			var db *sql.DB
+			var deliveryReader servedRunDeliveryReader
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 			if backend == "sqlite" {
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "receiver.sqlite"))
 				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
@@ -105,7 +107,7 @@ func TestReceiverCompositionRestartBothStores(t *testing.T) {
 			})
 			second.waitForReadyLine()
 			endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString()) + "/v1/rpc"
-			waitServedRunDeliveryQuiescence(t, db, backend, published.RunID)
+			waitServedRunDeliveryQuiescence(t, deliveryReader, published.RunID)
 			var after, status string
 			if err := db.QueryRow(`SELECT CAST(delivery_target_route AS TEXT),status FROM event_deliveries WHERE delivery_id=$1`, claim.DeliveryID()).Scan(&after, &status); err != nil {
 				t.Fatal(err)
@@ -128,7 +130,7 @@ func TestReceiverCompositionRestartBothStores(t *testing.T) {
 			if duplicate.EventID != published.EventID {
 				t.Fatal("restart duplicate reminted source")
 			}
-			requireReceiverPublicReadback(t, servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: backend}, published.RunID)
+			requireReceiverPublicReadback(t, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: backend}, published.RunID)
 			if code := second.stop(); code != 0 {
 				t.Fatalf("second serve exit=%d\n%s", code, second.outputString())
 			}

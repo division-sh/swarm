@@ -3,7 +3,6 @@ package runtime
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -34,7 +33,6 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 type startupRecoveryPipelineOwner struct {
@@ -111,7 +109,7 @@ func (startupRecoveryWorkflowOwner) FanOutRunSummary(_ context.Context, runID st
 	return runtimefanout.RunSummary{RunID: runID}, nil
 }
 
-func startupRecoveryWorkflowPersistence(db *sql.DB, timers runtimetimerobligation.Reader) runtimepipeline.WorkflowPersistence {
+func startupRecoveryWorkflowPersistence(timers runtimetimerobligation.Reader) runtimepipeline.WorkflowPersistence {
 	return runtimepipeline.NewWorkflowPersistence(startupRecoveryWorkflowOwner{timers: timers})
 }
 
@@ -651,21 +649,13 @@ func testRecoveryDiagnosticsConfig(recoveryOnStartup bool) *config.Config {
 	}
 }
 
-func latestStartupRecoveryDecisionLog(t *testing.T, db *sql.DB) (level, message string, failure *runtimefailures.Envelope, detail map[string]any) {
+func latestStartupRecoveryDecisionLog(t *testing.T, fixture RuntimeLogNativeFixtureForTest, ctx context.Context) (level, message string, failure *runtimefailures.Envelope, detail map[string]any) {
 	t.Helper()
-	var payloadRaw []byte
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-		SELECT payload
-		FROM events
-		WHERE event_name = 'platform.runtime_log'
-		  AND payload->'details'->>'component' = 'runtime'
-		  AND payload->'details'->>'action' = 'startup_recovery_decision'
-		ORDER BY created_at DESC
-		LIMIT 1
-	`).Scan(&payloadRaw); err != nil {
+	event, err := fixture.StartupDecision(ctx)
+	if err != nil {
 		t.Fatalf("load startup recovery decision runtime log: %v", err)
 	}
-	payload, err := DecodeCanonicalRuntimeLogPayload(payloadRaw)
+	payload, err := DecodeCanonicalRuntimeLogPayload(event.Payload())
 	if err != nil {
 		t.Fatalf("DecodeCanonicalRuntimeLogPayload: %v", err)
 	}
@@ -862,19 +852,18 @@ func TestDeliveryRecoveryInventoryPartitionsEveryRunByStandingDisposition(t *tes
 	}
 }
 
-func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
+func VerifyRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedulesForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	fixture := nativeRuntimeRecoveryLogFixtureForTest(t, open, module.SemanticSource())
+	ctx := fixture.Context
 	scheduleStore := &recoveryDisabledScheduleStore{active: []runtimegenericschedule.Activation{recoveryGuardActivation(t, "recover-me")}}
 	eventStore := startupRecoveryMinimalEventStore{}
 	managerStore := &recoveryGuardManagerStore{}
-	deliveryStore := newRuntimeShutdownDeliveryStore(t)
+	deliveryStore := fixture.Deliveries
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
-		WorkflowPersistence: startupRecoveryWorkflowPersistence(db, scheduleStore),
-		RuntimeLogStore:     runtimeLogPersistenceStub{db: db},
+		WorkflowPersistence: startupRecoveryWorkflowPersistence(scheduleStore),
+		RuntimeLogStore:     fixture.Persistence,
 		EventStore:          eventStore,
 		EventBusDurable:     runtimeTestSyntheticDurableDependencies(deliveryStore),
 		PipelineObligations: eventStore.PipelineObligations(),
@@ -886,9 +875,10 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
 		Options: RuntimeOptions{
-			SelfCheck:      false,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
+			SourceArtifactFact: nativeRuntimeLogSourceFactForTest(t, fixture),
+			SelfCheck:          false,
+			WorkflowModule:     module,
+			LLMRuntime:         noopLLMRuntime{},
 		}})
 
 	if err != nil {
@@ -900,7 +890,7 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 		t.Fatalf("Start error = %v, want explicit startup denial", err)
 	}
 
-	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
+	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, fixture, ctx)
 	if level != "warn" {
 		t.Fatalf("log level = %q, want warn", level)
 	}
@@ -917,11 +907,10 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 	assertContainsClass(t, detailClasses(detail["recoverable_work_classes"]), "timer obligations")
 }
 
-func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
+func VerifyRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWorkForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	fixture := nativeRuntimeRecoveryLogFixtureForTest(t, open, module.SemanticSource())
+	ctx := fixture.Context
 	eventStore := &startupRecoveryEventStore{
 		missing: []events.PersistedReplayEvent{{
 			Event: eventtest.RunCreatingRootIngress(eventtest.UUID("startup-recovery-manager-work"), "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
@@ -950,11 +939,11 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 		Topology: managerTopology,
 	}}}
 	managerStore.session.admitRun(t, managerIdentity.RunID, testSourceArtifactFact(t, runtimeTestBundleHash))
-	deliveryStore := newRuntimeShutdownDeliveryStore(t)
+	deliveryStore := fixture.Deliveries
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
-		WorkflowPersistence: startupRecoveryWorkflowPersistence(db, nil),
-		RuntimeLogStore:     runtimeLogPersistenceStub{db: db},
+		WorkflowPersistence: startupRecoveryWorkflowPersistence(nil),
+		RuntimeLogStore:     fixture.Persistence,
 		EventStore:          eventStore,
 		EventBusDurable:     runtimeTestSyntheticDurableDependencies(deliveryStore),
 		PipelineObligations: eventStore.PipelineObligations(),
@@ -964,10 +953,11 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
 		},
 		Options: RuntimeOptions{
-			SelfCheck:      false,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
-		}}, startupRecoveryFanOutSessionForTest(t, db))
+			SourceArtifactFact: nativeRuntimeLogSourceFactForTest(t, fixture),
+			SelfCheck:          false,
+			WorkflowModule:     module,
+			LLMRuntime:         noopLLMRuntime{},
+		}}, startupRecoveryFanOutSessionForTest(t, fixture.FanOutCapacity))
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -982,7 +972,7 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 		}
 	}()
 
-	level, message, failure, detail := latestStartupRecoveryDecisionLog(t, db)
+	level, message, failure, detail := latestStartupRecoveryDecisionLog(t, fixture, ctx)
 	if level != "warn" {
 		t.Fatalf("log level = %q, want warn", level)
 	}
@@ -1019,20 +1009,19 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 	assertContainsClass(t, classes, "events missing pipeline receipts")
 }
 
-func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
+func VerifyRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummaryForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	fixture := nativeRuntimeRecoveryLogFixtureForTest(t, open, module.SemanticSource())
+	ctx := fixture.Context
 	scheduleStore := &recoveryDisabledScheduleStore{active: []runtimegenericschedule.Activation{recoveryGuardActivation(t, "recover-me")}}
 	eventStore := startupRecoveryMinimalEventStore{}
 	managerStore := &recoveryGuardManagerStore{}
-	deliveryStore := newRuntimeShutdownDeliveryStore(t)
+	deliveryStore := fixture.Deliveries
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence: startupRecoveryWorkflowPersistence(db, scheduleStore),
+		WorkflowPersistence: startupRecoveryWorkflowPersistence(scheduleStore),
 		DeliveryStore:       deliveryStore,
-		RuntimeLogStore:     runtimeLogPersistenceStub{db: db},
+		RuntimeLogStore:     fixture.Persistence,
 		EventStore:          eventStore,
 		EventBusDurable:     runtimeTestSyntheticDurableDependencies(deliveryStore),
 		PipelineObligations: eventStore.PipelineObligations(),
@@ -1043,10 +1032,11 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
 		Options: RuntimeOptions{
-			SelfCheck:      false,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
-		}}, startupRecoveryFanOutSessionForTest(t, db))
+			SourceArtifactFact: nativeRuntimeLogSourceFactForTest(t, fixture),
+			SelfCheck:          false,
+			WorkflowModule:     module,
+			LLMRuntime:         noopLLMRuntime{},
+		}}, startupRecoveryFanOutSessionForTest(t, fixture.FanOutCapacity))
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1060,7 +1050,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 		}
 	}()
 
-	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
+	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, fixture, ctx)
 	if level != "info" {
 		t.Fatalf("log level = %q, want info", level)
 	}
@@ -1088,11 +1078,10 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 	assertContainsClass(t, detailClasses(detail["recoverable_work_classes"]), "timer obligations")
 }
 
-func TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetail(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
+func VerifyRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetailForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	fixture := nativeRuntimeRecoveryLogFixtureForTest(t, open, module.SemanticSource())
+	ctx := fixture.Context
 	const runID = "31000000-0000-0000-0000-000000000001"
 	scheduleStore := &recoveryDisabledScheduleStore{
 		obligations: &runtimetimerobligation.Snapshot{
@@ -1108,12 +1097,12 @@ func TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetai
 	}
 	eventStore := startupRecoveryMinimalEventStore{}
 	managerStore := &recoveryGuardManagerStore{}
-	deliveryStore := newRuntimeShutdownDeliveryStore(t)
+	deliveryStore := fixture.Deliveries
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence: startupRecoveryWorkflowPersistence(db, scheduleStore),
+		WorkflowPersistence: startupRecoveryWorkflowPersistence(scheduleStore),
 		DeliveryStore:       deliveryStore,
-		RuntimeLogStore:     runtimeLogPersistenceStub{db: db},
+		RuntimeLogStore:     fixture.Persistence,
 		EventStore:          eventStore,
 		EventBusDurable:     runtimeTestSyntheticDurableDependencies(deliveryStore),
 		PipelineObligations: eventStore.PipelineObligations(),
@@ -1124,10 +1113,11 @@ func TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetai
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
 		Options: RuntimeOptions{
-			SelfCheck:      false,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
-		}}, startupRecoveryFanOutSessionForTest(t, db))
+			SourceArtifactFact: nativeRuntimeLogSourceFactForTest(t, fixture),
+			SelfCheck:          false,
+			WorkflowModule:     module,
+			LLMRuntime:         noopLLMRuntime{},
+		}}, startupRecoveryFanOutSessionForTest(t, fixture.FanOutCapacity))
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -1135,7 +1125,7 @@ func TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetai
 		t.Fatalf("Start: %v", err)
 	}
 
-	_, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
+	_, _, failure, detail := latestStartupRecoveryDecisionLog(t, fixture, ctx)
 	if failure != nil {
 		t.Fatalf("log failure = %#v, want nil", failure)
 	}
@@ -1192,11 +1182,10 @@ func TestStartupRecoveryDecisionBootPayloadOmitsNilCollections(t *testing.T) {
 	}
 }
 
-func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
+func VerifyRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummaryForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	fixture := nativeRuntimeRecoveryLogFixtureForTest(t, open, module.SemanticSource())
+	ctx := fixture.Context
 	eventStore := &startupRecoveryEventStore{
 		missing: []events.PersistedReplayEvent{{
 			Event: eventtest.RunCreatingRootIngress(eventtest.UUID("startup-recovery-claim-failure"), "support.item_created", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
@@ -1204,12 +1193,12 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 		claimErr: errors.New("claim failed"),
 	}
 	managerStore := &recoveryGuardManagerStore{}
-	deliveryStore := newRuntimeShutdownDeliveryStore(t)
+	deliveryStore := fixture.Deliveries
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence: startupRecoveryWorkflowPersistence(db, nil),
+		WorkflowPersistence: startupRecoveryWorkflowPersistence(nil),
 		DeliveryStore:       deliveryStore,
-		RuntimeLogStore:     runtimeLogPersistenceStub{db: db},
+		RuntimeLogStore:     fixture.Persistence,
 		EventStore:          eventStore,
 		EventBusDurable:     runtimeTestSyntheticDurableDependencies(deliveryStore),
 		PipelineObligations: eventStore.PipelineObligations(),
@@ -1218,9 +1207,10 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
 		},
 		Options: RuntimeOptions{
-			SelfCheck:      false,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
+			SourceArtifactFact: nativeRuntimeLogSourceFactForTest(t, fixture),
+			SelfCheck:          false,
+			WorkflowModule:     module,
+			LLMRuntime:         noopLLMRuntime{},
 		}})
 
 	if err != nil {
@@ -1235,7 +1225,7 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 		}
 	}()
 
-	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
+	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, fixture, ctx)
 	if level != "error" {
 		t.Fatalf("log level = %q, want error", level)
 	}
@@ -1255,23 +1245,22 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 	assertContainsClass(t, detailClasses(detail["recoverable_work_classes"]), "events missing pipeline receipts")
 }
 
-func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
+func VerifyRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatalForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	fixture := nativeRuntimeRecoveryLogFixtureForTest(t, open, module.SemanticSource())
+	ctx := fixture.Context
 	activeWorkflowVersion := strings.TrimSpace(module.SemanticSource().WorkflowVersion())
 	if activeWorkflowVersion == "" {
 		t.Fatal("startup readiness test requires an active workflow version")
 	}
-	deliveryStore := newRuntimeShutdownDeliveryStore(t)
+	deliveryStore := fixture.Deliveries
 	managerStore := &startupRecoveryManagerStore{session: newRuntimeTestRetainedSession(t)}
 	eventStore := startupRecoveryMinimalEventStore{}
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence: startupRecoveryWorkflowPersistence(db, nil),
+		WorkflowPersistence: startupRecoveryWorkflowPersistence(nil),
 		DeliveryStore:       deliveryStore,
-		RuntimeLogStore:     runtimeLogPersistenceStub{db: db},
+		RuntimeLogStore:     fixture.Persistence,
 		EventStore:          eventStore,
 		EventBusDurable:     runtimeTestSyntheticDurableDependencies(deliveryStore),
 		PipelineObligations: eventStore.PipelineObligations(),
@@ -1280,10 +1269,11 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
 		},
 		Options: RuntimeOptions{
-			SelfCheck:      false,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
-		}})
+			SourceArtifactFact: nativeRuntimeLogSourceFactForTest(t, fixture),
+			SelfCheck:          false,
+			WorkflowModule:     module,
+			LLMRuntime:         noopLLMRuntime{},
+		}}, startupRecoveryFanOutSessionForTest(t, fixture.FanOutCapacity))
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -1345,19 +1335,18 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 	}
 }
 
-func TestRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatal(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
+func VerifyRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatalForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	fixture := nativeRuntimeRecoveryLogFixtureForTest(t, open, module.SemanticSource())
+	ctx := fixture.Context
 	eventStore := startupRecoveryMinimalEventStore{}
 	managerStore := startupRecoveryManagerStore{loadErr: errors.New("load agents failed")}
-	deliveryStore := newRuntimeShutdownDeliveryStore(t)
+	deliveryStore := fixture.Deliveries
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence: startupRecoveryWorkflowPersistence(db, nil),
+		WorkflowPersistence: startupRecoveryWorkflowPersistence(nil),
 		DeliveryStore:       deliveryStore,
-		RuntimeLogStore:     runtimeLogPersistenceStub{db: db},
+		RuntimeLogStore:     fixture.Persistence,
 		EventStore:          eventStore,
 		EventBusDurable:     runtimeTestSyntheticDurableDependencies(deliveryStore),
 		PipelineObligations: eventStore.PipelineObligations(),
@@ -1366,9 +1355,10 @@ func TestRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatal(t 
 			LifecycleCensus: managerStore, StandingRestarts: startupRecoveryWorkflowOwner{},
 		},
 		Options: RuntimeOptions{
-			SelfCheck:      false,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
+			SourceArtifactFact: nativeRuntimeLogSourceFactForTest(t, fixture),
+			SelfCheck:          false,
+			WorkflowModule:     module,
+			LLMRuntime:         noopLLMRuntime{},
 		}})
 
 	if err != nil {

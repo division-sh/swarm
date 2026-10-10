@@ -52,7 +52,7 @@ func testRuntimeNukeLayeredPostgresCapacity(t *testing.T) {
 	if _, err := executeRuntimeNuke(ctx, req, RuntimeNukeHandlerOptions{Coordinator: coordinator, Idempotency: selected}, time.Now().UTC()); err != nil {
 		t.Fatalf("runtime.nuke replay: %v", err)
 	}
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
+	if count := countAPIIdempotencyRows(t, selected); count != 1 {
 		t.Fatalf("runtime.nuke idempotency rows = %d, want 1", count)
 	}
 	if err := capability.Release(ctx); err != nil {
@@ -198,7 +198,7 @@ func TestAdministrativeOperationCancellationReleasesLeaseAndCapacity(t *testing.
 		if err := <-result; !errors.Is(err, context.Canceled) {
 			t.Fatalf("runtime.nuke cancellation error = %v, want context canceled", err)
 		}
-		if count := countAPIIdempotencyRows(t, db); count != 0 {
+		if count := countAPIIdempotencyRows(t, selected); count != 0 {
 			t.Fatalf("runtime.nuke cancellation idempotency rows = %d, want 0", count)
 		}
 		if err := capability.Release(context.Background()); err != nil {

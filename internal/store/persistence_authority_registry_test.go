@@ -125,7 +125,7 @@ func compoundEventFixtureAuthorityViolations(findings []authorityFinding) []stri
 			continue
 		}
 		switch finding.Enclosing {
-		case "CommitSemanticEvent", "CommitSemanticEventWithRoutes", "CommitSemanticEventWithInitialFacts", "CommitSemanticForkFrontier", "commitSemanticEventWithInitialFacts":
+		case "LoadCanonicalEventRecord", "CommitSemanticEvent", "CommitSemanticEventWithRoutes", "CommitSemanticEventWithInitialFacts", "CommitSemanticForkFrontier", "commitSemanticEventWithInitialFacts":
 			violations = append(violations, finding.registryLine())
 		}
 	}
@@ -143,6 +143,10 @@ import ("context"; "database/sql")
 type Alias = sql.DB
 type Carrier struct { *Alias }
 func CommitSemanticEventWithInitialFacts(selected Carrier) { _, _ = selected.BeginTx(context.Background(), nil) }
+`,
+		`package fixture
+import "database/sql"
+func LoadCanonicalEventRecord(db *sql.DB) { _ = db }
 `,
 	} {
 		findings := authorityFindingsFromSource(t, "internal/store/storetest/event.go", source)
@@ -162,11 +166,14 @@ func retiredRunFixtureMutationBridges(file *ast.File) []string {
 		switch function.Name.Name {
 		case "RunPostgresMutation", "RunSQLiteMutation", "runMutationWithOwner",
 			"PostgresRequireActiveRunInMutation", "PostgresRequireActiveRunSourceInMutation",
+			"PostgresSyncCountersInMutation",
 			"PostgresRequestCompletionCandidateInMutation", "PostgresTransitionActiveRunInMutation",
-			"PostgresMarkTerminalRunInMutation", "RevisePostgresSource", "ReviseSQLiteSource", "reviseSource":
+			"PostgresMarkTerminalRunInMutation", "RevisePostgresSource", "ReviseSQLiteSource", "reviseSource",
+			"Materialize", "RequirePostgres", "RequireSQLite", "CreateSQLiteScenarioSchema", "CreatePostgresScenarioSchema",
+			"createScenarioSchema", "PostgresCreateRunInMutation", "TransitionActive", "runMutation", "ensureFixtureSourceArtifact":
 			retired = append(retired, function.Name.Name)
 		}
-		if function.Recv != nil && function.Name.Name == "ReviseSource" {
+		if function.Recv != nil {
 			retired = append(retired, function.Name.Name)
 		}
 		if function.Name.IsExported() && function.Type.Params != nil {
@@ -202,6 +209,23 @@ func ReviseSQLiteSource() {}
 		"sql-interpreter": `package fixture
 type sqlMutation struct{}
 func (sqlMutation) ReviseSource() {}
+`,
+		"counter-bridge": `package fixture
+func PostgresSyncCountersInMutation() {}
+`,
+		"counter-interpreter": `package fixture
+type sqlMutation struct{}
+func (sqlMutation) SyncCounters() {}
+`,
+		"run-construction": `package fixture
+func Materialize() {}
+`,
+		"schema": `package fixture
+func CreateSQLiteScenarioSchema() {}
+`,
+		"renamed-interpreter": `package fixture
+type localMutation struct{}
+func (localMutation) Create() {}
 `,
 		"renamed-callback": `package fixture
 func ApplyFixture(fn func()) {}

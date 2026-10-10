@@ -14,6 +14,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func catalogRuntimeContext() context.Context {
@@ -23,7 +24,11 @@ func catalogRuntimeContext() context.Context {
 func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catalogExpectedDocument) {
 	t.Helper()
 	if len(expected.Expected.FlowInstanceCreated) > 0 {
-		assertFlowInstanceCreated(t, h.db, h.startedAt, expected.Expected.FlowInstanceCreated)
+		reader, err := h.catalogOperatorEventLister()
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertFlowInstanceCreated(t, reader, h.startedAt, expected.Expected.FlowInstanceCreated)
 	}
 	flowPrefix := expected.triggerFlowPrefix()
 	if len(expected.Expected.Entities) > 0 {
@@ -39,7 +44,11 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 		if flowPrefix != "" {
 			assertFlowState(t, h, entityID, flowPrefix, expected.Expected.EntityState)
 		} else {
-			assertEntityState(t, h.db, h.workflow, entityID, expected.Expected.EntityState)
+			reader, err := h.catalogOperatorEventLister()
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertEntityState(t, reader, h.workflow, entityID, expected.Expected.EntityState)
 		}
 	}
 	if entityID != "" {
@@ -48,30 +57,33 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 		assertCausalFlowEntities(t, h, entityID, expected.Expected.FlowEntities)
 		assertEntityFields(t, h.workflow, entityID, expected.Expected.EntityFields)
 		assertGates(t, h, entityID, expected.Expected.Gates)
-		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, expected.Expected.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
+		reader, err := h.catalogOperatorEventLister()
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertEmittedEvents(t, reader, h.startedAt, h.publishedIDs, entityID, expected.Expected.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
 		assertCausalEvents(t, h, expected.Expected.CausalEvents, flowPrefix)
 		if !expected.Expected.ChainDepthExceeded {
-			assertPublishedEventDeadLetter(t, h.db, h.publishedIDs, expected.Expected.DeadLetter)
+			assertPublishedEventDeadLetter(t, reader, h.publishedIDs, expected.Expected.DeadLetter)
 		}
-		assertChainDepthExceeded(t, h.db, entityID, expected.Expected.ChainDepthExceeded)
+		assertChainDepthExceeded(t, reader, entityID, expected.Expected.ChainDepthExceeded)
 	}
-	assertAgentReceived(t, h.db, h.startedAt, expected.Expected.AgentReceived)
+	assertAgentReceived(t, h, h.startedAt, expected.Expected.AgentReceived)
 	if expected.Expected.TemplateInstances != nil {
-		assertFlowInstanceCount(t, h.db, h.startedAt, *expected.Expected.TemplateInstances)
+		reader, err := h.catalogOperatorEventLister()
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertFlowInstanceCount(t, reader, h.startedAt, *expected.Expected.TemplateInstances)
 	}
 }
 
-func assertPublishedEventDeadLetter(t testing.TB, db *sql.DB, publishedEventIDs map[string]struct{}, want bool) {
+func assertPublishedEventDeadLetter(t testing.TB, selected catalogOperatorEventLister, publishedEventIDs map[string]struct{}, want bool) {
 	t.Helper()
 	count := 0
 	for eventID := range publishedEventIDs {
-		var eventCount int
-		query := catalogDialectQuery(db, `
-			SELECT COUNT(*)
-			FROM dead_letters
-			WHERE original_event_id = $1::uuid
-		`, `SELECT COUNT(*) FROM dead_letters WHERE original_event_id = ?`)
-		if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), query, strings.TrimSpace(eventID)).Scan(&eventCount); err != nil {
+		eventCount, err := storetest.CountDeadLettersForOriginalEvent(testAuthorActivityContext(context.Background()), selected, strings.TrimSpace(eventID))
+		if err != nil {
 			t.Fatalf("query published-event dead letters for %s: %v", eventID, err)
 		}
 		count += eventCount
@@ -89,10 +101,14 @@ func assertCausalFlowEntities(t testing.TB, h *runtimeHarness, rootEntityID stri
 	if h == nil {
 		t.Fatal("runtime harness is required for flow entity assertions")
 	}
-	candidateEntityIDs := catalogCausalEntityIDs(t, h.db, h.startedAt, h.publishedIDs, rootEntityID)
+	reader, err := h.catalogOperatorEventLister()
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateEntityIDs := catalogCausalEntityIDs(t, reader, h.startedAt, h.publishedIDs, rootEntityID)
 	for flowID, expected := range want {
 		flowID = strings.TrimSpace(flowID)
-		got, found, err := catalogFlowInstanceForCausalFlow(h.db, h.workflow, semanticview.Wrap(h.bundle), candidateEntityIDs, flowID, true)
+		got, found, err := catalogFlowInstanceForCausalFlow(h.workflow, semanticview.Wrap(h.bundle), candidateEntityIDs, flowID, true)
 		if err != nil {
 			t.Fatalf("load causal flow instance %s: %v", flowID, err)
 		}
@@ -141,13 +157,21 @@ func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[
 			assertHandlerOutcomeForEntity(t, h, want.HandlerOutcome, entityID, false)
 		}
 		if strings.TrimSpace(want.EntityState) != "" {
-			assertEntityState(t, h.db, h.workflow, entityID, want.EntityState)
+			reader, err := h.catalogOperatorEventLister()
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertEntityState(t, reader, h.workflow, entityID, want.EntityState)
 		}
 		assertEntityFields(t, h.workflow, entityID, want.EntityFields)
 		assertGates(t, h, entityID, want.Gates)
-		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, want.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
+		reader, err := h.catalogOperatorEventLister()
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertEmittedEvents(t, reader, h.startedAt, h.publishedIDs, entityID, want.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
 		assertCausalEvents(t, h, want.CausalEvents, flowPrefix)
-		assertDeadLetter(t, h.db, h.startedAt, entityID, want.DeadLetter)
+		assertDeadLetter(t, reader, h.startedAt, entityID, want.DeadLetter)
 	}
 }
 
@@ -239,7 +263,7 @@ func assertEntityFields(t testing.TB, workflow catalogWorkflowPersistence, entit
 	}
 }
 
-func assertEntityState(t testing.TB, db *sql.DB, workflow catalogWorkflowPersistence, entityID, wantState string) {
+func assertEntityState(t testing.TB, selected catalogOperatorEventLister, workflow catalogWorkflowPersistence, entityID, wantState string) {
 	t.Helper()
 	if workflow == nil {
 		t.Fatal("workflow instance store is required")
@@ -249,7 +273,7 @@ func assertEntityState(t testing.TB, db *sql.DB, workflow catalogWorkflowPersist
 		t.Fatalf("load workflow instance %s: %v", entityID, err)
 	}
 	if !ok {
-		rows, dumpErr := workflowStateDebugRows(db)
+		rows, dumpErr := workflowStateDebugRows(selected)
 		if dumpErr != nil {
 			t.Fatalf("workflow instance %s not found (debug dump failed: %v)", entityID, dumpErr)
 		}
@@ -278,8 +302,12 @@ func assertFlowState(t testing.TB, h *runtimeHarness, entityID, flowID, wantStat
 	}
 	got := strings.TrimSpace(instance.CurrentState)
 	if flowID != "" {
-		candidateEntityIDs := catalogCausalEntityIDs(t, h.db, h.startedAt, h.publishedIDs, entityID)
-		matched, found, err := catalogFlowInstanceForCausalFlow(h.db, h.workflow, semanticview.Wrap(h.bundle), candidateEntityIDs, strings.TrimSpace(flowID), false)
+		reader, err := h.catalogOperatorEventLister()
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidateEntityIDs := catalogCausalEntityIDs(t, reader, h.startedAt, h.publishedIDs, entityID)
+		matched, found, err := catalogFlowInstanceForCausalFlow(h.workflow, semanticview.Wrap(h.bundle), candidateEntityIDs, strings.TrimSpace(flowID), false)
 		if err != nil {
 			t.Fatalf("load causal flow instance %s: %v", flowID, err)
 		}
@@ -320,7 +348,7 @@ func catalogWorkflowInstanceForEntity(workflow catalogWorkflowPersistence, entit
 	return match, found, nil
 }
 
-func catalogFlowInstanceForCausalFlow(db *sql.DB, workflow catalogWorkflowPersistence, source semanticview.Source, candidateEntityIDs map[string]struct{}, flowID string, requireCausal bool) (runtimepipeline.WorkflowInstance, bool, error) {
+func catalogFlowInstanceForCausalFlow(workflow catalogWorkflowPersistence, source semanticview.Source, candidateEntityIDs map[string]struct{}, flowID string, requireCausal bool) (runtimepipeline.WorkflowInstance, bool, error) {
 	if workflow == nil {
 		return runtimepipeline.WorkflowInstance{}, false, nil
 	}
@@ -395,29 +423,17 @@ func catalogFlowInstanceForCausalFlow(db *sql.DB, workflow catalogWorkflowPersis
 	return runtimepipeline.WorkflowInstance{}, false, nil
 }
 
-func workflowStateDebugRows(db *sql.DB) (string, error) {
-	if db == nil {
+func workflowStateDebugRows(selected catalogOperatorEventLister) (string, error) {
+	if selected == nil {
 		return "", nil
 	}
-	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), catalogDialectQuery(db, `
-		SELECT entity_id::text, COALESCE(flow_instance, ''), current_state
-		FROM entity_state
-		ORDER BY created_at ASC
-	`, `SELECT entity_id, COALESCE(flow_instance, ''), current_state FROM entity_state ORDER BY created_at ASC`))
+	rows, err := storetest.ReadWorkflowStateObservationRows(testAuthorActivityContext(context.Background()), selected)
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
 	out := []string{}
-	for rows.Next() {
-		var rowID, flowInstance, state string
-		if err := rows.Scan(&rowID, &flowInstance, &state); err != nil {
-			return "", err
-		}
-		out = append(out, fmt.Sprintf("{entity_id:%s flow_instance:%s state:%s}", rowID, flowInstance, state))
-	}
-	if err := rows.Err(); err != nil {
-		return "", err
+	for _, row := range rows {
+		out = append(out, fmt.Sprintf("{entity_id:%s flow_instance:%s state:%s}", row.EntityID, row.FlowInstance, row.CurrentState))
 	}
 	if len(out) == 0 {
 		return "[]", nil
@@ -425,14 +441,14 @@ func workflowStateDebugRows(db *sql.DB) (string, error) {
 	return "[" + strings.Join(out, ", ") + "]", nil
 }
 
-func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs map[string]struct{}, entityID string, want []string, flowPrefix string, source semanticview.Source) {
+func assertEmittedEvents(t testing.TB, selected catalogOperatorEventLister, since time.Time, publishedIDs map[string]struct{}, entityID string, want []string, flowPrefix string, source semanticview.Source) {
 	t.Helper()
 	if want == nil {
 		return
 	}
-	relevantEventIDs := catalogCausalEventIDs(t, db, since, publishedIDs)
-	relevantEntityIDs := catalogCausalEntityIDs(t, db, since, publishedIDs, entityID)
-	rows := catalogCausalOrder(t, catalogEventsSince(t, db, since))
+	relevantEventIDs := catalogCausalEventIDs(t, selected, since, publishedIDs)
+	relevantEntityIDs := catalogCausalEntityIDs(t, selected, since, publishedIDs, entityID)
+	rows := catalogCausalOrder(t, catalogEventsSince(t, selected, since))
 	got := make([]string, 0, 8)
 	dedup := !hasDuplicateStrings(want)
 	seen := make(map[string]struct{}, 8)
@@ -478,12 +494,7 @@ func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs
 	}
 }
 
-type catalogStoredEvent struct {
-	ID              string
-	Name            string
-	SourceEventID   string
-	PayloadEntityID string
-}
+type catalogStoredEvent = storetest.CausalEventStorageRow
 
 // Creation occurrences retain their trigger's logical timestamp. UUID ordering
 // therefore cannot establish parent-before-child execution order.
@@ -520,37 +531,17 @@ func catalogCausalOrder(t testing.TB, rows []catalogStoredEvent) []catalogStored
 	return out
 }
 
-func catalogEventsSince(t testing.TB, db *sql.DB, since time.Time) []catalogStoredEvent {
+func catalogEventsSince(t testing.TB, selected catalogOperatorEventLister, since time.Time) []catalogStoredEvent {
 	t.Helper()
-	if db == nil {
+	if selected == nil {
 		return nil
 	}
-	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), catalogDialectQuery(db, `
-		SELECT
-			event_id::text,
-			event_name,
-			COALESCE(source_event_id::text, ''),
-			COALESCE(NULLIF(payload->>'entity_id', ''), COALESCE(entity_id::text, ''))
-		FROM events
-		WHERE created_at >= $1
-		ORDER BY created_at ASC, event_id ASC
-	`, `
-		SELECT event_id, event_name, COALESCE(source_event_id, ''),
-		       COALESCE(NULLIF(json_extract(payload, '$.entity_id'), ''), COALESCE(entity_id, ''))
-		FROM events
-		WHERE created_at >= ?
-		ORDER BY created_at ASC, event_id ASC
-	`), since)
+	rows, err := storetest.ReadCausalEventStorageSince(testAuthorActivityContext(context.Background()), selected, since)
 	if err != nil {
 		t.Fatalf("query causal events: %v", err)
 	}
-	defer rows.Close()
 	out := []catalogStoredEvent{}
-	for rows.Next() {
-		var row catalogStoredEvent
-		if err := rows.Scan(&row.ID, &row.Name, &row.SourceEventID, &row.PayloadEntityID); err != nil {
-			t.Fatalf("scan causal event: %v", err)
-		}
+	for _, row := range rows {
 		row.ID = strings.TrimSpace(row.ID)
 		row.Name = strings.TrimSpace(row.Name)
 		row.SourceEventID = strings.TrimSpace(row.SourceEventID)
@@ -559,13 +550,10 @@ func catalogEventsSince(t testing.TB, db *sql.DB, since time.Time) []catalogStor
 			out = append(out, row)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate causal events: %v", err)
-	}
 	return out
 }
 
-func catalogCausalEventIDs(t testing.TB, db *sql.DB, since time.Time, publishedIDs map[string]struct{}) map[string]struct{} {
+func catalogCausalEventIDs(t testing.TB, selected catalogOperatorEventLister, since time.Time, publishedIDs map[string]struct{}) map[string]struct{} {
 	t.Helper()
 	out := map[string]struct{}{}
 	for eventID := range publishedIDs {
@@ -576,7 +564,7 @@ func catalogCausalEventIDs(t testing.TB, db *sql.DB, since time.Time, publishedI
 	if len(out) == 0 {
 		return out
 	}
-	rows := catalogEventsSince(t, db, since)
+	rows := catalogEventsSince(t, selected, since)
 	changed := true
 	for changed {
 		changed = false
@@ -593,9 +581,9 @@ func catalogCausalEventIDs(t testing.TB, db *sql.DB, since time.Time, publishedI
 	return out
 }
 
-func catalogCausalEntityIDs(t testing.TB, db *sql.DB, since time.Time, publishedIDs map[string]struct{}, fallbackEntityID string) map[string]struct{} {
+func catalogCausalEntityIDs(t testing.TB, selected catalogOperatorEventLister, since time.Time, publishedIDs map[string]struct{}, fallbackEntityID string) map[string]struct{} {
 	t.Helper()
-	eventIDs := catalogCausalEventIDs(t, db, since, publishedIDs)
+	eventIDs := catalogCausalEventIDs(t, selected, since, publishedIDs)
 	out := map[string]struct{}{}
 	if fallbackEntityID = strings.TrimSpace(fallbackEntityID); fallbackEntityID != "" {
 		out[fallbackEntityID] = struct{}{}
@@ -603,7 +591,7 @@ func catalogCausalEntityIDs(t testing.TB, db *sql.DB, since time.Time, published
 	if len(eventIDs) == 0 {
 		return out
 	}
-	for _, row := range catalogEventsSince(t, db, since) {
+	for _, row := range catalogEventsSince(t, selected, since) {
 		if _, ok := eventIDs[row.ID]; !ok {
 			continue
 		}
@@ -630,8 +618,12 @@ func assertCausalEvents(t testing.TB, h *runtimeHarness, want []string, flowPref
 	if len(want) == 0 {
 		return
 	}
-	if h == nil || h.db == nil {
-		t.Fatal("runtime harness database is required for causal_events assertions")
+	if h == nil {
+		t.Fatal("runtime harness is required for causal_events assertions")
+	}
+	reader, err := h.catalogOperatorEventLister()
+	if err != nil {
+		t.Fatal(err)
 	}
 	wantNames := make(map[string]struct{}, len(want))
 	for _, name := range want {
@@ -640,7 +632,7 @@ func assertCausalEvents(t testing.TB, h *runtimeHarness, want []string, flowPref
 			wantNames[name] = struct{}{}
 		}
 	}
-	rows := catalogEventsSince(t, h.db, h.startedAt)
+	rows := catalogEventsSince(t, reader, h.startedAt)
 	source := semanticview.Wrap(h.bundle)
 	parentIDs := map[string]struct{}{}
 	for eventID := range h.publishedIDs {
@@ -759,57 +751,29 @@ func shouldIgnoreCatalogE2EEvent(eventName string) bool {
 	}
 }
 
-func assertDeadLetter(t testing.TB, db *sql.DB, since time.Time, entityID string, want bool) {
+func assertDeadLetter(t testing.TB, selected catalogOperatorEventLister, since time.Time, entityID string, want bool) {
 	t.Helper()
-	got := catalogHasDeadLetterRelation(t, db, since, entityID)
+	got := catalogHasDeadLetterRelation(t, selected, since, entityID)
 	if got != want {
-		rows, _ := db.QueryContext(testAuthorActivityContext(context.Background()), catalogDialectQuery(db, `
-			SELECT dl.original_event_id::text, COALESCE(dl.entity_id::text, ''),
-			       COALESCE(dl.original_payload->>'entity_id', ''), COALESCE(dl.handler_node, '')
-			FROM dead_letters dl
-			ORDER BY dl.created_at, dl.dead_letter_id
-		`, `
-			SELECT dl.original_event_id, COALESCE(dl.entity_id, ''),
-			       COALESCE(json_extract(dl.original_payload, '$.entity_id'), ''), COALESCE(dl.handler_node, '')
-			FROM dead_letters dl
-			ORDER BY dl.created_at, dl.dead_letter_id
-		`))
+		rows, readErr := storetest.ReadDeadLetterObservationRows(testAuthorActivityContext(context.Background()), selected)
 		var evidence []string
-		if rows != nil {
-			for rows.Next() {
-				var eventID, storedEntityID, payloadEntityID, nodeID string
-				if err := rows.Scan(&eventID, &storedEntityID, &payloadEntityID, &nodeID); err == nil {
-					evidence = append(evidence, fmt.Sprintf("event=%s stored_entity=%q payload_entity=%q node=%q", eventID, storedEntityID, payloadEntityID, nodeID))
-				}
-			}
-			_ = rows.Close()
+		for _, row := range rows {
+			evidence = append(evidence, fmt.Sprintf("event=%s stored_entity=%q payload_entity=%q node=%q", row.OriginalEventID, row.StoredEntityID, row.PayloadEntityID, row.HandlerNode))
 		}
-		t.Fatalf("dead_letter = %v, want %v for entity %q; evidence=%v", got, want, entityID, evidence)
+		t.Fatalf("dead_letter = %v, want %v for entity %q; evidence=%v read_error=%v", got, want, entityID, evidence, readErr)
 	}
 }
 
-func catalogHasDeadLetterRelation(t testing.TB, db *sql.DB, since time.Time, entityID string) bool {
+func catalogHasDeadLetterRelation(t testing.TB, selected catalogOperatorEventLister, since time.Time, entityID string) bool {
 	t.Helper()
-	var count int
-	query := catalogDialectQuery(db, `
-		SELECT COUNT(*)
-		FROM dead_letters dl
-		WHERE COALESCE(NULLIF(dl.original_payload->>'entity_id', ''), COALESCE(dl.entity_id::text, '')) = $1
-		  AND dl.created_at >= $2
-	`, `
-		SELECT COUNT(*)
-		FROM dead_letters dl
-		WHERE COALESCE(NULLIF(json_extract(dl.original_payload, '$.entity_id'), ''), COALESCE(dl.entity_id, '')) = ?
-		  AND dl.created_at >= ?
-	`)
-	args := []any{strings.TrimSpace(entityID), since.UTC()}
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), query, args...).Scan(&count); err != nil {
+	count, err := storetest.CountDeadLetterEntityRelationsSince(testAuthorActivityContext(context.Background()), selected, since.UTC(), strings.TrimSpace(entityID))
+	if err != nil {
 		t.Fatalf("query dead_letters: %v", err)
 	}
 	return count > 0
 }
 
-func assertAgentReceived(t testing.TB, db *sql.DB, since time.Time, want map[string][]string) {
+func assertAgentReceived(t testing.TB, h *runtimeHarness, since time.Time, want map[string][]string) {
 	t.Helper()
 	if len(want) == 0 {
 		return
@@ -819,31 +783,18 @@ func assertAgentReceived(t testing.TB, db *sql.DB, since time.Time, want map[str
 		if agentID == "" {
 			continue
 		}
-		rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
-			SELECT e.event_name
-			FROM event_deliveries d
-			JOIN events e ON e.event_id = d.event_id
-			WHERE d.created_at >= $1
-			  AND d.subscriber_id = $2
-			ORDER BY d.created_at ASC, e.event_id ASC
-		`, since, agentID)
+		reader, err := h.catalogOperatorEventLister()
+		if err != nil {
+			t.Fatalf("query agent_received for %s: %v", agentID, err)
+		}
+		rows, err := storetest.ReadSubscriberEventNamesCreatedSince(testAuthorActivityContext(context.Background()), reader, since, agentID)
 		if err != nil {
 			t.Fatalf("query agent_received for %s: %v", agentID, err)
 		}
 		got := make([]string, 0, len(expectedEvents))
-		for rows.Next() {
-			var eventName string
-			if err := rows.Scan(&eventName); err != nil {
-				_ = rows.Close()
-				t.Fatalf("scan agent_received for %s: %v", agentID, err)
-			}
+		for _, eventName := range rows {
 			got = append(got, strings.TrimSpace(eventName))
 		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			t.Fatalf("read agent_received for %s: %v", agentID, err)
-		}
-		_ = rows.Close()
 		if fmt.Sprintf("%q", got) != fmt.Sprintf("%q", expectedEvents) {
 			t.Fatalf("agent_received[%s] = %v, want %v", agentID, got, expectedEvents)
 		}
@@ -885,23 +836,19 @@ func validateFlowInstanceCreatedExpectation(want map[string]any) error {
 	return nil
 }
 
-func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want map[string]any) {
+func assertFlowInstanceCreated(t testing.TB, selected catalogOperatorEventLister, since time.Time, want map[string]any) {
 	t.Helper()
 	if err := validateFlowInstanceCreatedExpectation(want); err != nil {
 		t.Fatal(err)
 	}
-	if db == nil {
-		t.Fatal("database is required for flow_instance_created assertions")
+	if selected == nil {
+		t.Fatal("selected reader is required for flow_instance_created assertions")
 	}
 	templateID := strings.TrimSpace(asString(want["template"]))
 	instanceID := strings.TrimSpace(asString(want["instance_id"]))
 	if templateID == "" || instanceID == "" {
-		var count int
-		if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-			SELECT COUNT(*)
-			FROM flow_instances
-			WHERE created_at >= $1
-		`, since).Scan(&count); err != nil {
+		count, err := storetest.CountWorkflowHeadersCreatedSince(testAuthorActivityContext(context.Background()), selected, since)
+		if err != nil {
 			t.Fatalf("query flow_instances: %v", err)
 		}
 		if count == 0 {
@@ -910,28 +857,16 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 		return
 	}
 	instancePath := strings.Trim(strings.TrimSpace(templateID+"/"+instanceID), "/")
-	var instanceCount int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-		SELECT COUNT(*)
-		FROM flow_instances
-		WHERE instance_path = $1
-		  AND created_at >= $2
-	`, instancePath, since).Scan(&instanceCount); err != nil {
+	instanceCount, err := storetest.CountWorkflowHeadersForPathCreatedSince(testAuthorActivityContext(context.Background()), selected, instancePath, since)
+	if err != nil {
 		t.Fatalf("query flow instance row: %v", err)
 	}
 	if instanceCount != 1 {
 		t.Fatalf("flow instance %q count = %d, want 1", instancePath, instanceCount)
 	}
 	if fields, ok := want["fields"].(map[string]any); ok && len(fields) > 0 {
-		var raw []byte
-		err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-			SELECT e.fields
-			FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.flow_instance=f.instance_path
-			WHERE f.instance_path = $1
-			ORDER BY f.created_at DESC
-			LIMIT 1
-		`, instancePath).Scan(&raw)
-		if err == sql.ErrNoRows {
+		raw, found, err := storetest.ReadLatestWorkflowFieldsForPath(testAuthorActivityContext(context.Background()), selected, instancePath)
+		if err == nil && !found {
 			t.Fatalf("expected flow instance fields for %s", instancePath)
 		}
 		if err != nil {
@@ -960,12 +895,8 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 		}
 	}
 	if autoEmitted := strings.TrimSpace(asString(want["auto_emitted"])); autoEmitted != "" {
-		var count int
-		if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-			SELECT COUNT(*)
-			FROM events
-			WHERE event_name = $1
-		`, autoEmitted).Scan(&count); err != nil {
+		count, err := storetest.CountEventNameStorage(testAuthorActivityContext(context.Background()), selected, autoEmitted)
+		if err != nil {
 			t.Fatalf("query flow auto-emitted event: %v", err)
 		}
 		if count != 1 {
@@ -974,14 +905,10 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 	}
 }
 
-func assertFlowInstanceCount(t testing.TB, db *sql.DB, since time.Time, want int) {
+func assertFlowInstanceCount(t testing.TB, selected catalogOperatorEventLister, since time.Time, want int) {
 	t.Helper()
-	var count int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-		SELECT COUNT(*)
-		FROM flow_instances
-		WHERE created_at >= $1
-	`, since).Scan(&count); err != nil {
+	count, err := storetest.CountWorkflowHeadersCreatedSince(testAuthorActivityContext(context.Background()), selected, since)
+	if err != nil {
 		t.Fatalf("query flow_instances count: %v", err)
 	}
 	if count != want {
@@ -1002,32 +929,24 @@ func (h *runtimeHarness) assertTriggerReceipt(step catalogTriggerStep) {
 		return
 	}
 	h.t.Helper()
-	if h == nil || h.db == nil {
-		h.t.Fatal("database is required for trigger receipt assertions")
+	if h == nil {
+		h.t.Fatal("runtime harness is required for trigger receipt assertions")
+	}
+	reader, err := h.catalogOperatorEventLister()
+	if err != nil {
+		h.t.Fatal(err)
 	}
 	eventIDs := h.publishedEventIDs(triggerPayloadEntityID(step.Payload))
 	for _, eventID := range eventIDs {
-		var subscriberID, outcome, sideEffects string
-		var rawFailure []byte
-		query := catalogDialectQuery(h.db, `
-			SELECT subscriber_id, outcome, COALESCE(side_effects::text, ''), COALESCE(failure, 'null'::jsonb)
-			FROM event_receipts
-			WHERE event_id = $1::uuid
-			  AND subscriber_type = 'platform'
-			  AND (
-				subscriber_id = 'pipeline'
-				OR subscriber_id LIKE 'pipeline:%'
-			  )
-			ORDER BY processed_at DESC
-			LIMIT 1
-		`, `
-			SELECT subscriber_id, outcome, COALESCE(side_effects, ''), COALESCE(failure, 'null')
-			FROM event_receipts
-			WHERE event_id = ? AND subscriber_type = 'platform'
-			  AND (subscriber_id = 'pipeline' OR subscriber_id LIKE 'pipeline:%')
-			ORDER BY processed_at DESC LIMIT 1
-		`)
-		err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), query, strings.TrimSpace(eventID)).Scan(&subscriberID, &outcome, &sideEffects, &rawFailure)
+		receipt, err := storetest.ReadLatestPlatformPipelineReceiptStorage(testAuthorActivityContext(context.Background()), reader, strings.TrimSpace(eventID))
+		if err == nil && !receipt.Found {
+			err = sql.ErrNoRows
+		}
+		subscriberID, outcome := receipt.SubscriberID, receipt.Outcome
+		rawFailure := []byte(receipt.Failure)
+		if rawFailure == nil {
+			rawFailure = []byte("null")
+		}
 		if err == sql.ErrNoRows {
 			continue
 		}
@@ -1061,8 +980,8 @@ func (h *runtimeHarness) assertTriggerReceipt(step catalogTriggerStep) {
 
 func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entityID string, chainDepthExceeded bool) {
 	t.Helper()
-	if h == nil || h.db == nil {
-		t.Fatal("database is required for handler_outcome assertions")
+	if h == nil {
+		t.Fatal("runtime harness is required for handler_outcome assertions")
 	}
 	_ = chainDepthExceeded
 	want = strings.TrimSpace(strings.ToLower(want))
@@ -1073,28 +992,21 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 	if !catalogAssertsAuthoritativeHandlerOutcome(want) {
 		t.Fatalf("cataloge2e does not authoritatively assert handler_outcome %q; assert runtime/store evidence instead", want)
 	}
+	reader, err := h.catalogOperatorEventLister()
+	if err != nil {
+		t.Fatal(err)
+	}
 	eventIDs := h.publishedEventIDs(entityID)
 	for _, eventID := range eventIDs {
-		var outcome string
-		var failure []byte
-		query := catalogDialectQuery(h.db, `
-			SELECT outcome, COALESCE(failure, '{}'::jsonb)
-			FROM event_receipts
-			WHERE event_id = $1::uuid
-			  AND subscriber_type = 'platform'
-			  AND (
-				subscriber_id = 'pipeline'
-				OR subscriber_id LIKE 'pipeline:%'
-			  )
-			ORDER BY processed_at DESC
-			LIMIT 1
-		`, `
-			SELECT outcome, COALESCE(failure, '{}') FROM event_receipts
-			WHERE event_id = ? AND subscriber_type = 'platform'
-			  AND (subscriber_id = 'pipeline' OR subscriber_id LIKE 'pipeline:%')
-			ORDER BY processed_at DESC LIMIT 1
-		`)
-		err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), query, strings.TrimSpace(eventID)).Scan(&outcome, &failure)
+		receipt, err := storetest.ReadLatestPlatformPipelineReceiptStorage(testAuthorActivityContext(context.Background()), reader, strings.TrimSpace(eventID))
+		if err == nil && !receipt.Found {
+			err = sql.ErrNoRows
+		}
+		outcome := receipt.Outcome
+		failure := []byte(receipt.Failure)
+		if failure == nil {
+			failure = []byte("{}")
+		}
 		if err == sql.ErrNoRows {
 			continue
 		}
@@ -1103,21 +1015,8 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 		}
 		got := strings.TrimSpace(strings.ToLower(outcome))
 		if got != "success" {
-			var diagnostic []byte
-			_ = h.db.QueryRowContext(testAuthorActivityContext(context.Background()), catalogDialectQuery(h.db, `
-				SELECT payload
-				FROM events
-				WHERE event_name = 'platform.runtime_log'
-				  AND payload->'details'->>'action' = 'handler_error'
-				ORDER BY created_at DESC
-				LIMIT 1
-			`, `
-				SELECT payload FROM events
-				WHERE event_name = 'platform.runtime_log'
-				  AND json_extract(payload, '$.details.action') = 'handler_error'
-				ORDER BY created_at DESC LIMIT 1
-			`)).Scan(&diagnostic)
-			t.Fatalf("handler_outcome = %q, want %q; failure=%s; diagnostic=%s", got, want, failure, diagnostic)
+			diagnostic, readErr := storetest.ReadLatestHandlerErrorLog(testAuthorActivityContext(context.Background()), reader)
+			t.Fatalf("handler_outcome = %q, want %q; failure=%s; diagnostic=%s; diagnostic_read_error=%v", got, want, failure, diagnostic, readErr)
 		}
 		return
 	}
@@ -1144,12 +1043,12 @@ func catalogRecognizesHandlerOutcome(raw string) bool {
 	}
 }
 
-func assertEntityDeadLetterOutcome(t testing.TB, db *sql.DB, since time.Time, entityID string) bool {
+func assertEntityDeadLetterOutcome(t testing.TB, selected catalogOperatorEventLister, since time.Time, entityID string) bool {
 	t.Helper()
-	return catalogHasDeadLetterRelation(t, db, since, entityID)
+	return catalogHasDeadLetterRelation(t, selected, since, entityID)
 }
 
-func assertChainDepthExceeded(t testing.TB, db *sql.DB, entityID string, want bool) {
+func assertChainDepthExceeded(t testing.TB, selected catalogOperatorEventLister, entityID string, want bool) {
 	t.Helper()
 	entityID = strings.TrimSpace(entityID)
 	if entityID == "" {
@@ -1159,78 +1058,20 @@ func assertChainDepthExceeded(t testing.TB, db *sql.DB, entityID string, want bo
 		return
 	}
 	handlerNodeID := identitytest.RootNode(t, "node-6").Key()
-	query := catalogDialectQuery(db, `
-		SELECT COUNT(*), COALESCE(MAX(dl.chain_depth), 0), COALESCE(MAX(dl.handler_node), ''),
-		       COALESCE(MAX(dl.failure->>'class'), ''), COALESCE(MAX(dl.original_event), '')
-		FROM dead_letters dl
-		JOIN events source ON source.event_id = dl.original_event_id
-		WHERE source.run_id = $1::uuid
-		  AND COALESCE(NULLIF(dl.original_payload->>'entity_id', ''), COALESCE(dl.entity_id::text, '')) = $2
-		  AND dl.failure->>'class' = 'platform.chain_depth_exceeded'
-	`, `
-		SELECT COUNT(*), COALESCE(MAX(dl.chain_depth), 0), COALESCE(MAX(dl.handler_node), ''),
-		       COALESCE(MAX(json_extract(dl.failure, '$.class')), ''), COALESCE(MAX(dl.original_event), '')
-		FROM dead_letters dl
-		JOIN events source ON source.event_id = dl.original_event_id
-		WHERE source.run_id = ?
-		  AND COALESCE(NULLIF(json_extract(dl.original_payload, '$.entity_id'), ''), COALESCE(dl.entity_id, '')) = ?
-		  AND json_extract(dl.failure, '$.class') = 'platform.chain_depth_exceeded'
-	`)
-	args := []any{catalogRuntimeRunID, entityID}
-	var relationCount, chainDepth int
-	var handlerNode, failureClass, originalEvent string
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), query, args...).Scan(&relationCount, &chainDepth, &handlerNode, &failureClass, &originalEvent); err != nil {
+	relation, err := storetest.ReadChainDepthDeadLetterStorage(testAuthorActivityContext(context.Background()), selected, catalogRuntimeRunID, entityID)
+	if err != nil {
 		t.Fatalf("query chain_depth_exceeded dead-letter relation: %v", err)
 	}
+	relationCount, chainDepth := relation.Count, relation.Depth
+	handlerNode, failureClass, originalEvent := relation.HandlerNode, relation.FailureClass, relation.OriginalEvent
 
-	diagnosticQuery := catalogDialectQuery(db, `
-		SELECT COUNT(*)
-		FROM events e
-		WHERE e.run_id = $1::uuid
-		  AND e.event_name = 'platform.dead_letter'
-		  AND e.payload->>'entity_id' = $2
-		  AND e.payload->'failure'->>'class' = 'platform.chain_depth_exceeded'
-		  AND (e.payload->>'chain_depth')::integer = 6
-		  AND e.payload->>'handler_node' = $3
-	`, `
-		SELECT COUNT(*)
-		FROM events e
-		WHERE e.run_id = ?
-		  AND e.event_name = 'platform.dead_letter'
-		  AND json_extract(e.payload, '$.entity_id') = ?
-		  AND json_extract(e.payload, '$.failure.class') = 'platform.chain_depth_exceeded'
-		  AND CAST(json_extract(e.payload, '$.chain_depth') AS INTEGER) = 6
-		  AND json_extract(e.payload, '$.handler_node') = ?
-	`)
-	diagnosticArgs := []any{catalogRuntimeRunID, entityID, handlerNodeID}
-	var diagnosticCount int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), diagnosticQuery, diagnosticArgs...).Scan(&diagnosticCount); err != nil {
+	diagnosticCount, err := storetest.CountChainDepthDiagnosticStorage(testAuthorActivityContext(context.Background()), selected, catalogRuntimeRunID, entityID, handlerNodeID)
+	if err != nil {
 		t.Fatalf("query chain_depth_exceeded diagnostic: %v", err)
 	}
 
-	activityQuery := catalogDialectQuery(db, `
-		SELECT COUNT(*)
-		FROM author_activity_occurrences aa
-		JOIN dead_letters dl ON aa.source_identity = dl.dead_letter_id::text
-		WHERE aa.run_id = $1::uuid
-		  AND aa.kind = 'dead_letter.recorded'
-		  AND aa.version = 2
-		  AND aa.transition = 'recorded'
-		  AND aa.source_owner = 'dead_letters'
-		  AND aa.projection->>'subject_id' = dl.original_event_id::text
-	`, `
-		SELECT COUNT(*)
-		FROM author_activity_occurrences aa
-		JOIN dead_letters dl ON aa.source_identity = CAST(dl.dead_letter_id AS TEXT)
-		WHERE aa.run_id = ?
-		  AND aa.kind = 'dead_letter.recorded'
-		  AND aa.version = 2
-		  AND aa.transition = 'recorded'
-		  AND aa.source_owner = 'dead_letters'
-		  AND json_extract(aa.projection, '$.subject_id') = CAST(dl.original_event_id AS TEXT)
-	`)
-	var activityCount int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), activityQuery, catalogRuntimeRunID).Scan(&activityCount); err != nil {
+	activityCount, err := storetest.CountRecordedDeadLetterStorage(testAuthorActivityContext(context.Background()), selected, catalogRuntimeRunID)
+	if err != nil {
 		t.Fatalf("query chain_depth_exceeded author activity: %v", err)
 	}
 
@@ -1238,17 +1079,6 @@ func assertChainDepthExceeded(t testing.TB, db *sql.DB, entityID string, want bo
 	if got != want {
 		t.Fatalf("chain_depth_exceeded facts = relation:%d diagnostic:%d activity:%d depth:%d handler:%q class:%q original:%q, want exact=%v", relationCount, diagnosticCount, activityCount, chainDepth, handlerNode, failureClass, originalEvent, want)
 	}
-}
-
-func catalogDialectQuery(db *sql.DB, postgres, sqlite string) string {
-	if catalogIsSQLiteDB(db) {
-		return sqlite
-	}
-	return postgres
-}
-
-func catalogIsSQLiteDB(db *sql.DB) bool {
-	return db != nil && strings.Contains(strings.ToLower(fmt.Sprintf("%T", db.Driver())), "sqlite")
 }
 
 func (h *runtimeHarness) publishedEventIDs(entityID string) []string {

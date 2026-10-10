@@ -13,13 +13,235 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
+
+type SelectedCausalDiagnosticStorage struct {
+	Events     []eventrecord.LifecycleDiagnosticEventLineage
+	Projection []byte
+}
+
+func ReadAgentSettledAttemptCountForTest(ctx context.Context, selected any, eventID, agentID string) (int, error) {
+	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
+		return 0, err
+	}
+	_, postgres := selected.(*PostgresStore)
+	var count int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		count, err = deliveryadapter.ReadAgentSettledAttemptCountTx(ctx, tx, postgres, eventID, agentID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func SetEventChainDepthForTest(ctx context.Context, selected any, eventID string, depth int) error {
+	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
+		return err
+	}
+	_, postgres := selected.(*PostgresStore)
+	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return eventrecord.SetFixtureEventChainDepthTx(ctx, tx, postgres, eventID, depth)
+	})
+}
+
+type SelectedCausalDiagnosticConservation struct {
+	Events, Pending int
+}
+
+func ReadSelectedCausalDiagnosticStorageForTest(ctx context.Context, selected any, outboxID string) (SelectedCausalDiagnosticStorage, error) {
+	if err := validateSelectedForkStorageIdentity(outboxID); err != nil {
+		return SelectedCausalDiagnosticStorage{}, err
+	}
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return SelectedCausalDiagnosticStorage{}, err
+	}
+	var out SelectedCausalDiagnosticStorage
+	_, postgres := selected.(*PostgresStore)
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out.Events, err = eventrecord.ReadLifecycleDiagnosticEventLineage(ctx, tx, postgres, outboxID)
+		if err != nil {
+			return err
+		}
+		out.Projection, err = eventpersistence.ReadLifecycleDiagnosticProjection(ctx, tx, outboxID)
+		return err
+	})
+	if err != nil {
+		return SelectedCausalDiagnosticStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadSelectedCausalDiagnosticConservationForTest(ctx context.Context, selected any, outboxID string) (SelectedCausalDiagnosticConservation, error) {
+	if err := validateSelectedForkStorageIdentity(outboxID); err != nil {
+		return SelectedCausalDiagnosticConservation{}, err
+	}
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return SelectedCausalDiagnosticConservation{}, err
+	}
+	var out SelectedCausalDiagnosticConservation
+	_, postgres := selected.(*PostgresStore)
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out.Events, err = eventrecord.CountLifecycleDiagnosticEvents(ctx, tx, postgres, outboxID)
+		if err != nil {
+			return err
+		}
+		out.Pending, err = eventpersistence.CountPendingLifecycleDiagnostic(ctx, tx, outboxID)
+		return err
+	})
+	if err != nil {
+		return SelectedCausalDiagnosticConservation{}, err
+	}
+	return out, nil
+}
+
+type CausalEventStorageRow = eventrecord.CausalObservationRow
+
+type GlobalEventChronologyRow = eventrecord.GlobalEventChronologyRow
+
+func ReadGlobalEventChronologyForTest(ctx context.Context, selected any) ([]GlobalEventChronologyRow, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	_, postgres := selected.(*PostgresStore)
+	var out []GlobalEventChronologyRow
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadGlobalEventChronologyTx(ctx, tx, postgres)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+type ScatterGatherPhysicalCounts struct {
+	Entities, Timers, FanOutIntents, DomainEvents int
+}
+
+func ReadScatterGatherPhysicalCountsForTest(ctx context.Context, selected any, runID string) (ScatterGatherPhysicalCounts, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return ScatterGatherPhysicalCounts{}, err
+	}
+	var out ScatterGatherPhysicalCounts
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		if out.Entities, err = pipelinepersistence.CountWorkflowFieldRowsForRun(ctx, tx, runID); err != nil {
+			return err
+		}
+		if out.Timers, err = genericschedule.CountTimerRowsForRun(ctx, tx, runID); err != nil {
+			return err
+		}
+		if out.FanOutIntents, err = pipelinepersistence.CountFanOutIntentsForRun(ctx, tx, runID); err != nil {
+			return err
+		}
+		out.DomainEvents, err = eventrecord.CountScatterGatherDomainEvents(ctx, tx, runID)
+		return err
+	})
+	if err != nil {
+		return ScatterGatherPhysicalCounts{}, err
+	}
+	return out, nil
+}
+
+func CountRunEventNameStorageForTest(ctx context.Context, selected any, run, name string) (int, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return 0, err
+	}
+	var count int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		count, err = eventrecord.CountRunEventNameStorage(ctx, tx, run, name)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+type SourceRouteSettlementStorage = eventrecord.SourceRouteSettlementStorage
+
+func ReadSourceRouteSettlementStorageForTest(ctx context.Context, selected any, runID, eventID string) (SourceRouteSettlementStorage, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return SourceRouteSettlementStorage{}, err
+	}
+	var out SourceRouteSettlementStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadSourceRouteSettlementStorage(ctx, tx, runID, eventID)
+		return err
+	})
+	if err != nil {
+		return SourceRouteSettlementStorage{}, err
+	}
+	return out, nil
+}
+
+func CountChainDepthDiagnosticStorageForTest(ctx context.Context, selected any, runID, entityID, handlerNode string) (int, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return 0, err
+	}
+	var count int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		_, postgres := selected.(*PostgresStore)
+		var err error
+		count, err = eventrecord.CountChainDepthDiagnosticStorage(ctx, tx, postgres, runID, entityID, handlerNode)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func ReadLatestHandlerErrorLogForTest(ctx context.Context, selected any) (json.RawMessage, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out json.RawMessage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		_, postgres := selected.(*PostgresStore)
+		var err error
+		out, err = eventrecord.ReadLatestHandlerErrorLog(ctx, tx, postgres)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadCausalEventStorageSinceForTest(ctx context.Context, selected any, since time.Time) ([]CausalEventStorageRow, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out []CausalEventStorageRow
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		_, postgres := selected.(*PostgresStore)
+		var err error
+		out, err = eventrecord.ReadCausalObservationSince(ctx, tx, postgres, since)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
 
 // Record-bearing fixture evidence uses the publication fixture's closed codec.
 // Callers receive detached facts, never another record interpreter.
@@ -48,52 +270,100 @@ func loadCanonicalFixtureRecordTx(ctx context.Context, tx *sql.Tx, postgres bool
 	return eventrecordsqlite.Load(ctx, tx, eventID)
 }
 
+// LoadCanonicalEventRecordForTest requires presence; storage reading and
+// complete decoding belong only to ReadCanonicalEventRecordForTest.
 func LoadCanonicalEventRecordForTest(ctx context.Context, selected any, eventID string) (events.Event, error) {
-	var empty events.Event
-	var record eventrecord.Record
-	var found bool
-	var err error
-	switch owner := selected.(type) {
-	case *PostgresStore:
-		if owner == nil || owner.backend == nil {
-			return empty, fmt.Errorf("canonical event readback requires the original selected store")
-		}
-		if err = owner.requireCurrentSchema(); err == nil {
-			err = owner.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-				record, found, err = loadCanonicalFixtureRecordTx(ctx, tx, true, eventID)
-				return err
-			})
-		}
-	case *SQLiteRuntimeStore:
-		if owner == nil || owner.backend == nil {
-			return empty, fmt.Errorf("canonical event readback requires the original selected store")
-		}
-		if err = owner.requireCurrentSchema(); err == nil {
-			err = owner.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-				record, found, err = loadCanonicalFixtureRecordTx(ctx, tx, false, eventID)
-				return err
-			})
-		}
-	default:
-		return empty, fmt.Errorf("canonical event readback store %T is unsupported", selected)
-	}
+	event, found, err := ReadCanonicalEventRecordForTest(ctx, selected, eventID)
 	if err != nil {
-		return empty, err
+		return events.Event{}, err
 	}
 	if !found {
-		return empty, fmt.Errorf("canonical event record %s is missing", eventID)
+		return events.Event{}, fmt.Errorf("canonical event record %s is missing", eventID)
+	}
+	return event, nil
+}
+func CommitSemanticEventFixtureForTest(ctx context.Context, selected any, admitted events.AdmittedEvent, settlement events.RouteSettlement, routes []events.DeliveryRoute, scope runtimepipelineobligation.CommittedScope, disposition *runtimepipelineobligation.Disposition) (bool, error) {
+	return commitSelectedSemanticEventFixtureForTest(ctx, selected, admitted, settlement, routes, scope, disposition, false, false)
+}
+
+func ReadLatestRuntimeLogRecordForTest(ctx context.Context, selected any) (events.Event, error) {
+	return readLatestRuntimeLogRecordForTest(ctx, selected, false)
+}
+
+func ReadLatestStartupRecoveryDecisionRecordForTest(ctx context.Context, selected any) (events.Event, error) {
+	return readLatestRuntimeLogRecordForTest(ctx, selected, true)
+}
+
+func readLatestRuntimeLogRecordForTest(ctx context.Context, selected any, startupDecision bool) (events.Event, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return events.Event{}, err
+	}
+	_, postgres := selected.(*PostgresStore)
+	query := `SELECT CAST(event_id AS TEXT) FROM events WHERE event_name='platform.runtime_log' ORDER BY created_at DESC LIMIT 1`
+	if startupDecision {
+		query = `SELECT CAST(event_id AS TEXT) FROM events WHERE event_name='platform.runtime_log' AND json_extract(payload,'$.details.component')='runtime' AND json_extract(payload,'$.details.action')='startup_recovery_decision' ORDER BY created_at DESC LIMIT 1`
+		if postgres {
+			query = `SELECT CAST(event_id AS TEXT) FROM events WHERE event_name='platform.runtime_log' AND payload->'details'->>'component'='runtime' AND payload->'details'->>'action'='startup_recovery_decision' ORDER BY created_at DESC LIMIT 1`
+		}
+	}
+	var record eventrecord.Record
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var id string
+		if err := tx.QueryRowContext(ctx, query).Scan(&id); err != nil {
+			return err
+		}
+		var found bool
+		var err error
+		record, found, err = loadCanonicalFixtureRecordTx(ctx, tx, postgres, id)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("selected runtime log %s is absent from its original read snapshot", id)
+		}
+		return nil
+	})
+	if err != nil {
+		return events.Event{}, err
 	}
 	admitted, err := record.Decode()
 	if err != nil {
-		return empty, err
+		return events.Event{}, err
 	}
 	return admitted.Event(), nil
 }
 
-// CommitSemanticEventFixtureForTest persists the exact fixture facts without
-// adding a fork revision. Writer admission still belongs to the selected store.
-func CommitSemanticEventFixtureForTest(ctx context.Context, selected any, admitted events.AdmittedEvent, settlement events.RouteSettlement, routes []events.DeliveryRoute, scope runtimepipelineobligation.CommittedScope, disposition *runtimepipelineobligation.Disposition) (bool, error) {
-	return commitSelectedSemanticEventFixtureForTest(ctx, selected, admitted, settlement, routes, scope, disposition, false, false)
+func readFixtureEventLineageStorage(ctx context.Context, selected any, tx *sql.Tx, eventID string) (string, string, error) {
+	switch selected.(type) {
+	case *PostgresStore:
+		return eventrecordpostgres.ReadFixtureLineageStorage(ctx, tx, eventID)
+	case *SQLiteRuntimeStore:
+		return eventrecordsqlite.ReadFixtureLineageStorage(ctx, tx, eventID)
+	default:
+		return "", "", fmt.Errorf("event lineage observation requires the original selected read owner")
+	}
+}
+
+func ReadCanonicalEventRecordForTest(ctx context.Context, selected any, eventID string) (events.Event, bool, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return events.Event{}, false, err
+	}
+	var record eventrecord.Record
+	var found bool
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		_, postgres := selected.(*PostgresStore)
+		record, found, err = loadCanonicalFixtureRecordTx(ctx, tx, postgres, eventID)
+		return err
+	})
+	if err != nil || !found {
+		return events.Event{}, false, err
+	}
+	admitted, err := record.Decode()
+	if err != nil {
+		return events.Event{}, false, fmt.Errorf("decode canonical event record %s: %w", eventID, err)
+	}
+	return admitted.Event(), true, nil
 }
 
 func insertCanonicalFixtureRecordForTest(ctx context.Context, attempt *mutationprotocol.Attempt, dialect authoractivityfixture.Dialect, record eventrecord.Record) (bool, error) {

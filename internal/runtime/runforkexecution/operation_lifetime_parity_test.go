@@ -26,12 +26,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -336,20 +334,7 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 func seedSelectedOperationSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected any, loaded LoadedSelectedContractSource, runID, eventID string, input ...events.Event) {
 	t.Helper()
 	at := time.Unix(1700002200, 0).UTC()
-	fixture := runlifecyclefixture.Fixture{RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Source: loaded.SourceArtifactFact, Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute)}
-	if backend == "sqlite" {
-		s := selected.(*store.SQLiteRuntimeStore)
-		if _, err := s.EnsureSourceArtifact(ctx, fixture.Artifact); err != nil {
-			t.Fatal(err)
-		}
-		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
-	} else {
-		s := selected.(*store.PostgresStore)
-		if _, err := s.EnsureSourceArtifact(ctx, fixture.Artifact); err != nil {
-			t.Fatal(err)
-		}
-		runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
-	}
+	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute)})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, runID,
 		events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 	if len(input) == 1 {

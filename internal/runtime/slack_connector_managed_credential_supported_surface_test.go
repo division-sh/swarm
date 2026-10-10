@@ -497,7 +497,7 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 		nodes:  nodes,
 		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
-	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, backend.db, backend.eventStore, runtimepipeline.PipelineCoordinatorOptions{
+	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, backend.eventStore, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              module,
 		Persistence:         backend.persistence,

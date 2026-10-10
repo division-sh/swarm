@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -19,7 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -85,11 +86,10 @@ func TestCommittedLifecycleAttemptsCancellationAndActivationAfterPanic(t *testin
 	}
 }
 
-func TestCommittedLifecycleGenericFailureStillReconcilesWorkflowTimerBothStores(t *testing.T) {
+func VerifyNativeCommittedLifecycleGenericFailureStillReconcilesWorkflowTimerBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, backend := range workflowJoinStoreCases() {
 		t.Run(backend.name, func(t *testing.T) {
-			store, ctx := backend.open(t)
-			pc, _, timer := seedWorkflowTimerOwnerActivationWithDelay(t, store, ctx, &recordingPipelineBus{}, false, "1h")
+			_, pc, ctx, _, _, timer := nativeWorkflowTimerOwnerActivationForTest(t, backend.name, false, "1h", time.Now(), true, executionmode.Live, open)
 			var timerReads atomic.Int32
 			pc.workflowTimers.testAfterWakeupLoad = func() { timerReads.Add(1) }
 			pc.genericSchedules = &review2460ScheduleOwner{panicAt: 1}
@@ -134,16 +134,25 @@ func (review2460HandlerCompletedProbe) NotifyLifecycle(_ context.Context, signal
 
 type review2460FailedStatusProbe struct{}
 
+type review2460NativeRetentionObserver struct {
+	WorkflowDeliveryRuntime
+	calls atomic.Int32
+}
+
+func (o *review2460NativeRetentionObserver) RetainDeliveryContinuation(snapshot deliverylifecycle.Snapshot) error {
+	o.calls.Add(1)
+	return o.WorkflowDeliveryRuntime.RetainDeliveryContinuation(snapshot)
+}
+
 func (review2460FailedStatusProbe) NotifyLifecycle(_ context.Context, signal lifecycleprobe.Signal) {
 	if signal.Kind == lifecycleprobe.DeliveryStatusChanged && signal.Status == string(deliverylifecycle.StatusFailed) {
 		panic("failed status notification interrupted retry retention")
 	}
 }
 
-func TestCommittedAttemptFailureNotificationKeepsRetryContinuationBothStores(t *testing.T) {
-	for _, backend := range workflowJoinStoreCases() {
-		t.Run(backend.name, func(t *testing.T) {
-			store, ctx := backend.open(t)
+func VerifyNativeCommittedAttemptFailureNotificationKeepsRetryContinuationBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
 			bundle := loadWorkflowTempBundle(t, map[string]string{
 				"schema.yaml":   "name: retry-cleanup\nstages:\n  queued: {}\n  done: {final: true}\n",
 				"entities.yaml": "test_entity: {}\n",
@@ -153,32 +162,31 @@ func TestCommittedAttemptFailureNotificationKeepsRetryContinuationBothStores(t *
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 			module.workflowNodes = []WorkflowNode{{Node: pipelineNode(t, ".", "node-a"),
 				Subscriptions: []events.EventType{"source.evt"}}}
-			bus := &recordingPipelineBus{}
-			pc := newPostgresPipelineCoordinatorForTest(bus, store.testDB(), PipelineCoordinatorOptions{
-				Module: module, DeliveryStore: newPipelineTestDeliveryOwnerForDB(t, store.testDB()), TestLifecycleProbe: review2460FailedStatusProbe{},
-			})
-			pc.workflowStore = store
+			fixture := open(t, backend, semanticview.Wrap(bundle))
+			pc, ctx := nativePipelineDeliveryCoordinatorForTest(t, fixture, module)
+			pc.testLifecycleProbe = review2460FailedStatusProbe{}
+			retention := &review2460NativeRetentionObserver{WorkflowDeliveryRuntime: pc.deliveryRuntime}
+			pc.deliveryRuntime = retention
 			pc.testWorkflowNodeHandlerStartHook = func(context.Context, string, events.Event) error {
 				return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "retry_owner_unavailable", "test", "prepare_handler", nil)
 			}
-			owner := configurePipelineTestDeliveryOwner(t, pc)
-			runID := correlation.RunIDFromContext(ctx)
-			entityID := runID
-			evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
-			dialect := authoractivityfixture.DialectPostgres
-			if store.isSQLite() {
-				dialect = authoractivityfixture.DialectSQLite
+			owner := fixture.Store
+			runID := uuid.NewString()
+			ctx = correlation.WithRunID(ctx, runID)
+			if err := fixture.RequireRun(ctx, runID); err != nil {
+				t.Fatal(err)
 			}
-			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
-			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "v-test",
+			entityID := runID
+			evt := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, events.EnvelopeForTargetRoute(handlerTestWorkflowEnvelope(".", runID, entityID), events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
+			if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
 				CurrentState: "queued", EntityType: "test_entity", Fields: map[string]any{},
 			})); err != nil {
 				t.Fatal(err)
 			}
 			node := pipelineNode(t, ".", "node-a")
 			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID})}
-			if err := owner.commitInitial(ctx, evt, route); err != nil {
+			if err := fixture.PublishNode(ctx, evt, route); err != nil {
 				t.Fatal(err)
 			}
 			deliveryID, err := deliverylifecycle.DeliveryID(evt.ID(), route)
@@ -193,20 +201,17 @@ func TestCommittedAttemptFailureNotificationKeepsRetryContinuationBothStores(t *
 			if err != nil || snapshot.Status != deliverylifecycle.StatusFailed {
 				t.Fatalf("failed delivery snapshot=%+v error=%v", snapshot, err)
 			}
-			bus.deliveryContinuations.mu.Lock()
-			held, exists := bus.deliveryContinuations.held[deliveryID]
-			bus.deliveryContinuations.mu.Unlock()
-			if !exists || !held {
-				t.Fatalf("retry continuation not retained after diagnostic: exists=%t held=%t", exists, held)
+			acquisition, err := fixture.Continuations.Acquire(deliveryID)
+			if retention.calls.Load() != 1 || err != nil || acquisition.Validate(deliveryID) != nil || acquisition.Disposition() != worklifetime.DeliveryAlreadyOwned {
+				t.Fatalf("native retry retention lost after diagnostic: calls=%d ownership=%v error=%v", retention.calls.Load(), acquisition.Disposition(), err)
 			}
 		})
 	}
 }
 
-func TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores(t *testing.T) {
-	for _, backend := range workflowJoinStoreCases() {
-		t.Run(backend.name, func(t *testing.T) {
-			store, ctx := backend.open(t)
+func VerifyNativeReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
 			bundle := loadWorkflowTempBundle(t, map[string]string{
 				"schema.yaml":   "name: committed-cleanup\nstages:\n  queued: {}\n  done: {final: true}\n",
 				"entities.yaml": "test_entity: {}\n",
@@ -216,29 +221,26 @@ func TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores(
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 			module.workflowNodes = []WorkflowNode{{Node: pipelineNode(t, ".", "node-a"),
 				Subscriptions: []events.EventType{"source.evt"}}}
-			bus := &recordingPipelineBus{}
-			pc := newPostgresPipelineCoordinatorForTest(bus, store.testDB(), PipelineCoordinatorOptions{
-				Module: module, DeliveryStore: newPipelineTestDeliveryOwnerForDB(t, store.testDB()), TestLifecycleProbe: review2460HandlerCompletedProbe{},
-			})
-			pc.workflowStore = store
-			owner := configurePipelineTestDeliveryOwner(t, pc)
-			runID := correlation.RunIDFromContext(ctx)
-			entityID := runID
-			evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
-			dialect := authoractivityfixture.DialectPostgres
-			if store.isSQLite() {
-				dialect = authoractivityfixture.DialectSQLite
+			fixture := open(t, backend, semanticview.Wrap(bundle))
+			pc, ctx := nativePipelineDeliveryCoordinatorForTest(t, fixture, module)
+			pc.testLifecycleProbe = review2460HandlerCompletedProbe{}
+			bus := observeNativePipelineDeliveryBusForTest(t, pc)
+			runID := uuid.NewString()
+			ctx = correlation.WithRunID(ctx, runID)
+			if err := fixture.RequireRun(ctx, runID); err != nil {
+				t.Fatal(err)
 			}
-			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
-			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "v-test",
+			entityID := runID
+			evt := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, events.EnvelopeForTargetRoute(handlerTestWorkflowEnvelope(".", runID, entityID), events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
+			if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
 				CurrentState: "queued", EntityType: "test_entity", Fields: map[string]any{},
 			})); err != nil {
 				t.Fatal(err)
 			}
 			node := pipelineNode(t, ".", "node-a")
 			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID})}
-			if err := owner.commitInitial(ctx, evt, route); err != nil {
+			if err := fixture.PublishNode(ctx, evt, route); err != nil {
 				t.Fatal(err)
 			}
 			deliveryID, err := deliverylifecycle.DeliveryID(evt.ID(), route)
@@ -257,13 +259,8 @@ func TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores(
 			if callErr == nil {
 				t.Fatal("missing fault")
 			}
-			assertCommittedHandlerCleanupRows(t, ctx, store, owner, bus, runID, entityID, deliveryID)
-			bus.deliveryContinuations.mu.Lock()
-			held, exists := bus.deliveryContinuations.held[deliveryID]
-			bus.deliveryContinuations.mu.Unlock()
-			if exists {
-				t.Fatalf("committed continuation still exists (held=%t); missing and consumed=false are not equivalent", held)
-			}
+			assertNativeCommittedHandlerCleanupRows(t, ctx, fixture, bus, runID, entityID, deliveryID)
+			// The native terminal fence is distinct from a live consumed attempt.
 		})
 	}
 }
