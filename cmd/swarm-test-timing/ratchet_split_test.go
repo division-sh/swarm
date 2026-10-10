@@ -135,6 +135,13 @@ func ratchetCLIConfig(t *testing.T, profile string, growth float64, newRoot bool
 		jobsPath: filepath.Join(dir, "jobs.json"), resultJSONPath: filepath.Join(dir, "result.json"),
 		markdownPath: filepath.Join(dir, "result.md"),
 	}
+	writeRatchetCLIInputs(t, cfg, plan, policy, model)
+	writeRatchetCLIProof(t, cfg, plan, cell.Package, name, cell.Seconds+growth)
+	return cfg
+}
+
+func writeRatchetCLIInputs(t *testing.T, cfg config, plan testplanning.RunPlan, policy testplanning.Policy, model testplanning.WeightModel) {
+	t.Helper()
 	if err := writeJSON(cfg.planPath, plan); err != nil {
 		t.Fatal(err)
 	}
@@ -152,14 +159,18 @@ func ratchetCLIConfig(t *testing.T, profile string, growth float64, newRoot bool
 	if err := os.WriteFile(cfg.budgetPath, []byte(budget), 0600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func writeRatchetCLIProof(t *testing.T, cfg config, plan testplanning.RunPlan, pkg, name string, seconds float64) {
+	t.Helper()
+	unit := plan.Units[0]
 	if err := os.Mkdir(cfg.evidenceRoot, 0700); err != nil {
 		t.Fatal(err)
 	}
-	seconds := cell.Seconds + growth
 	report := testtiming.Report{
-		Tests: []testtiming.TestTiming{{Package: cell.Package, Test: name, Result: "pass", Elapsed: seconds}},
-		Packages: []testtiming.PackageTiming{{Package: cell.Package, Result: "pass", Elapsed: seconds}},
-		Summary: testtiming.Summary{Events: 2, Tests: 1, Packages: 1, PackageElapsedSec: seconds},
+		Tests:    []testtiming.TestTiming{{Package: pkg, Test: name, Result: "pass", Elapsed: seconds}},
+		Packages: []testtiming.PackageTiming{{Package: pkg, Result: "pass", Elapsed: seconds}},
+		Summary:  testtiming.Summary{Events: 2, Tests: 1, Packages: 1, PackageElapsedSec: seconds},
 	}
 	evidence := testtiming.CommandEvidence{
 		Version: testtiming.CommandEvidenceVersion, WorkflowRunID: 42, WorkflowAttempt: 1,
@@ -184,5 +195,66 @@ func ratchetCLIConfig(t *testing.T, profile string, growth float64, newRoot bool
 	if err := writeJSON(cfg.jobsPath, []any{map[string]any{"jobs": []testtiming.ActionJob{job}}}); err != nil {
 		t.Fatal(err)
 	}
-	return cfg
+}
+
+func TestEvaluateBudgetTrustedEventAndReportContract(t *testing.T) {
+	for _, event := range []string{"pull_request", "schedule", "workflow_dispatch", "push", "", "PULL_REQUEST", "pull_request "} {
+		t.Run(event, func(t *testing.T) {
+			cfg := ratchetCLIConfig(t, "full", 2000, false)
+			cfg.event = event
+			err := run(cfg)
+			result := readRatchetCLIResult(t, cfg)
+			want, mode := testtiming.BudgetFail, testtiming.TestTimeStrict
+			if event == "pull_request" {
+				want, mode = testtiming.BudgetWarn, testtiming.TestTimePR
+			}
+			if result.Status != want || result.TestTime.Mode != mode || (err == nil) != (want == testtiming.BudgetWarn) {
+				t.Fatalf("event %q: %v %+v", event, err, result)
+			}
+			markdown, err := os.ReadFile(cfg.markdownPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, text := range []string{string(mode), "Strict counterfactual", "tiers[].retained_cells"} {
+				if !strings.Contains(string(markdown), text) {
+					t.Fatalf("CLI report lost %q", text)
+				}
+			}
+			for _, tier := range result.TestTime.Tiers {
+				if tier.AddedSeconds != 0 || tier.Retained != len(tier.RetainedCells) || tier.RetainedDelta != 2000 || tier.StrictStatus != testtiming.BudgetFail {
+					t.Fatalf("CLI JSON lost exact decomposition: %+v", tier)
+				}
+			}
+		})
+	}
+}
+
+func TestEvaluateBudgetFailedJobCannotBecomeAdvisory(t *testing.T) {
+	for _, event := range []string{"pull_request", "schedule"} {
+		t.Run(event, func(t *testing.T) {
+			cfg := ratchetCLIConfig(t, "full", 2000, false)
+			cfg.event = event
+			raw, err := os.ReadFile(cfg.jobsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var pages []struct {
+				Jobs []testtiming.ActionJob `json:"jobs"`
+			}
+			if err := json.Unmarshal(raw, &pages); err != nil {
+				t.Fatal(err)
+			}
+			pages[0].Jobs[0].Conclusion = "cancelled"
+			if err := writeJSON(cfg.jobsPath, pages); err != nil {
+				t.Fatal(err)
+			}
+			if err := run(cfg); err == nil {
+				t.Fatal("cancelled job earned success")
+			}
+			result := readRatchetCLIResult(t, cfg)
+			if result.Status != testtiming.BudgetIncomplete || result.ExitCode() == 0 {
+				t.Fatalf("cancelled proof became advisory: %+v", result)
+			}
+		})
+	}
 }

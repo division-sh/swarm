@@ -57,22 +57,52 @@ type TestTimeReference struct {
 	Roots        []ReferenceRootTime       `json:"roots"`
 }
 
+type TestTimeMode string
+
+const (
+	TestTimePR     TestTimeMode = "pr_added_cost"
+	TestTimeStrict TestTimeMode = "strict_aggregate"
+)
+
+func TestTimeModeForEvent(event string) TestTimeMode {
+	if event == "pull_request" {
+		return TestTimePR
+	}
+	return TestTimeStrict
+}
+
+type RetainedRootTime struct {
+	TimingCell
+	Baseline  float64 `json:"baseline_seconds"`
+	Candidate float64 `json:"candidate_seconds"`
+	Delta     float64 `json:"delta_seconds"`
+}
+
 type TestTimeTier struct {
-	Tier      string     `json:"tier"`
-	Baseline  float64    `json:"baseline_seconds"`
-	Candidate float64    `json:"candidate_seconds"`
-	Growth    float64    `json:"growth_seconds"`
-	Allowance float64    `json:"allowance_seconds"`
-	Retained  int        `json:"retained"`
-	Added     []RootTime `json:"added,omitempty"`
-	Removed   []RootTime `json:"removed_or_renamed,omitempty"`
+	Tier              string             `json:"tier"`
+	Baseline          float64            `json:"baseline_seconds"`
+	Candidate         float64            `json:"candidate_seconds"`
+	Growth            float64            `json:"growth_seconds"`
+	Allowance         float64            `json:"allowance_seconds"`
+	AddedSeconds      float64            `json:"added_seconds"`
+	RetainedBaseline  float64            `json:"retained_baseline_seconds"`
+	RetainedCandidate float64            `json:"retained_candidate_seconds"`
+	RetainedDelta     float64            `json:"retained_delta_seconds"`
+	StrictStatus      BudgetStatus       `json:"strict_aggregate_status"`
+	Warnings          []string           `json:"warnings,omitempty"`
+	Retained          int                `json:"retained"`
+	RetainedCells     []RetainedRootTime `json:"retained_cells,omitempty"`
+	Added             []RootTime         `json:"added,omitempty"`
+	Removed           []RootTime         `json:"removed_or_renamed,omitempty"`
 }
 
 type TestTimeResult struct {
 	ReferenceRunID  int64          `json:"reference_run_id"`
 	ReferenceSource string         `json:"reference_source"`
+	Mode            TestTimeMode   `json:"comparison_mode"`
 	Status          BudgetStatus   `json:"status"`
 	Tiers           []TestTimeTier `json:"tiers"`
+	Warnings        []string       `json:"warnings,omitempty"`
 	Problems        []string       `json:"problems,omitempty"`
 }
 
@@ -222,12 +252,17 @@ func timingCellKey(cell TimingCell) string {
 	return cell.Package + "\x00" + cell.Root + "\x00" + cell.Backend + "\x00" + cell.Environment + "\x00" + cell.Count
 }
 
-func EvaluateTestTime(reference TestTimeReference, policy testplanning.Policy, plan testplanning.RunPlan, runID int64, attempt int, evidence []CommandEvidence) TestTimeResult {
-	result := TestTimeResult{ReferenceRunID: reference.RunID, ReferenceSource: reference.Source, Status: BudgetPass}
+func EvaluateTestTime(reference TestTimeReference, policy testplanning.Policy, plan testplanning.RunPlan, runID int64, attempt int, evidence []CommandEvidence, mode TestTimeMode) TestTimeResult {
+	result := TestTimeResult{ReferenceRunID: reference.RunID, ReferenceSource: reference.Source, Mode: mode, Status: BudgetPass}
 	roots, err := observedRootTimes(plan, runID, attempt, evidence)
 	if err != nil || plan.Venue != testplanning.VenueCI || plan.BuildContext != reference.BuildContext {
 		result.Status = BudgetIncomplete
 		result.Problems = append(result.Problems, fmt.Sprintf("test-time proof scope mismatch or incomplete: %v", err))
+		return result
+	}
+	if mode != TestTimePR && mode != TestTimeStrict || mode == TestTimeStrict && plan.Profile != testplanning.ProfileFull {
+		result.Status = BudgetIncomplete
+		result.Problems = append(result.Problems, "test-time comparison requires an explicit PR mode or a strict full cadence plan")
 		return result
 	}
 	scopes := map[string]bool{}
@@ -242,9 +277,13 @@ func EvaluateTestTime(reference TestTimeReference, policy testplanning.Policy, p
 		}
 	}
 	for _, tier := range testTimeComparisonTiers(plan) {
-		row, problems := compareTimingTier(reference.Roots, roots, policy, tier)
+		row, problems := compareTimingTier(reference.Roots, roots, policy, tier, mode)
 		result.Tiers = append(result.Tiers, row)
 		result.Problems = append(result.Problems, problems...)
+		result.Warnings = append(result.Warnings, row.Warnings...)
+	}
+	if len(result.Warnings) != 0 {
+		result.Status = BudgetWarn
 	}
 	if len(result.Problems) != 0 {
 		result.Status = BudgetFail
@@ -261,7 +300,7 @@ func testTimeComparisonTiers(plan testplanning.RunPlan) []string {
 	return selected
 }
 
-func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, policy testplanning.Policy, tier string) (TestTimeTier, []string) {
+func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, policy testplanning.Policy, tier string, mode TestTimeMode) (TestTimeTier, []string) {
 	row := TestTimeTier{Tier: tier}
 	baseline, problems := projectReferenceTimingRoots(reference, tier)
 	candidate, candidateProblems := projectTimingRoots(candidate, policy, tier)
@@ -273,11 +312,15 @@ func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, poli
 	}
 	for _, root := range candidate {
 		row.Candidate += root.Seconds
-		if _, exists := base[root.TimingCell]; exists {
+		if prior, exists := base[root.TimingCell]; exists {
 			row.Retained++
+			row.RetainedBaseline += prior.Seconds
+			row.RetainedCandidate += root.Seconds
+			row.RetainedCells = append(row.RetainedCells, RetainedRootTime{TimingCell: root.TimingCell, Baseline: prior.Seconds, Candidate: root.Seconds, Delta: root.Seconds - prior.Seconds})
 			delete(base, root.TimingCell)
 		} else {
 			row.Added = append(row.Added, root)
+			row.AddedSeconds += root.Seconds
 			if root.Seconds > 30 {
 				problems = append(problems, fmt.Sprintf("%s: new or promoted root %s.%s/%s is %.3fs (>30s): Test-Time rationale AND independent placement approval require a reviewed versioned policy adjustment", tier, root.Package, root.Root, root.Backend, root.Seconds))
 			}
@@ -292,12 +335,37 @@ func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, poli
 	sort.Slice(row.Removed, func(i, j int) bool {
 		return timingCellKey(row.Removed[i].TimingCell) < timingCellKey(row.Removed[j].TimingCell)
 	})
+	sort.Slice(row.RetainedCells, func(i, j int) bool {
+		return timingCellKey(row.RetainedCells[i].TimingCell) < timingCellKey(row.RetainedCells[j].TimingCell)
+	})
+	row.RetainedDelta = row.RetainedCandidate - row.RetainedBaseline
 	row.Growth = row.Candidate - row.Baseline
 	row.Allowance = math.Min(row.Baseline*0.05, 600)
-	if row.Baseline == 0 || row.Growth > row.Allowance+1e-9 {
-		problems = append(problems, fmt.Sprintf("%s: unreviewed test-time growth %.3fs exceeds min(5%% of %.3fs, 600s) = %.3fs", tier, row.Growth, row.Baseline, row.Allowance))
+	row.StrictStatus = BudgetPass
+	if len(problems) != 0 || row.Baseline == 0 || row.Growth > row.Allowance+1e-9 {
+		row.StrictStatus = BudgetFail
 	}
+	problems = append(problems, row.costProblems(mode)...)
 	return row, problems
+}
+
+func (row *TestTimeTier) costProblems(mode TestTimeMode) []string {
+	if row.Baseline == 0 {
+		return []string{row.Tier + ": test-time reference tier baseline is zero"}
+	}
+	if mode == TestTimeStrict {
+		if row.Growth > row.Allowance+1e-9 {
+			return []string{fmt.Sprintf("%s: unreviewed test-time growth %.3fs exceeds min(5%% of %.3fs, 600s) = %.3fs", row.Tier, row.Growth, row.Baseline, row.Allowance)}
+		}
+		return nil
+	}
+	if row.Growth > row.Allowance+1e-9 {
+		row.Warnings = append(row.Warnings, fmt.Sprintf("%s: retained-cell drift is advisory on PRs: %.3fs retained delta, %.3fs added cost, %.3fs strict aggregate growth vs %.3fs allowance", row.Tier, row.RetainedDelta, row.AddedSeconds, row.Growth, row.Allowance))
+	}
+	if row.AddedSeconds > row.Allowance+1e-9 {
+		return []string{fmt.Sprintf("%s: added/promoted test-time cost %.3fs exceeds min(5%% of %.3fs, 600s) = %.3fs; retained speedups and removals grant no savings", row.Tier, row.AddedSeconds, row.Baseline, row.Allowance)}
+	}
+	return nil
 }
 
 func projectReferenceTimingRoots(roots []ReferenceRootTime, tier string) ([]RootTime, []string) {
@@ -337,16 +405,46 @@ func projectTimingRoots(roots []RootTime, policy testplanning.Policy, tier strin
 }
 
 func WriteTestTimeMarkdown(w io.Writer, result TestTimeResult) error {
-	if _, err := fmt.Fprintf(w, "\n## Pinned Test-Time Ratchet\n\n%s against full run %d (`%s`). Parent/direct-child elapsed is counted once; separate soak cells count separately. Removed/renamed roots grant no timing credit. A Test-Time line alone never approves an exception.\n\n| Tier | Baseline | Comparable + new (removed neutral) | Growth | min(5%%, 600s) | Retained | Added | Removed/renamed |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n", result.Status, result.ReferenceRunID, result.ReferenceSource); err != nil {
+	if _, err := fmt.Fprintf(w, "\n## Pinned Test-Time Ratchet\n\n%s, mode `%s`, against full run %d (`%s`). PRs enforce independent added/promoted cost; strict cadence enforces the complete aggregate. Parent/direct-child elapsed is counted once; separate soak cells count separately. Removed/renamed roots grant no timing credit. A Test-Time line alone never approves an exception.\n\n| Tier | Baseline | Comparable + new (removed neutral) | Aggregate growth | min(5%%, 600s) | Added cost | Retained delta | Strict counterfactual | Retained | Added | Removed/renamed |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |\n", result.Status, result.Mode, result.ReferenceRunID, result.ReferenceSource); err != nil {
 		return err
 	}
 	for _, tier := range result.Tiers {
-		if _, err := fmt.Fprintf(w, "| %s | %.3fs | %.3fs | %.3fs | %.3fs | %d | %d | %d |\n", tier.Tier, tier.Baseline, tier.Candidate, tier.Growth, tier.Allowance, tier.Retained, len(tier.Added), len(tier.Removed)); err != nil {
+		if _, err := fmt.Fprintf(w, "| %s | %.3fs | %.3fs | %.3fs | %.3fs | %.3fs | %+.3fs | %s | %d | %d | %d |\n", tier.Tier, tier.Baseline, tier.Candidate, tier.Growth, tier.Allowance, tier.AddedSeconds, tier.RetainedDelta, tier.StrictStatus, tier.Retained, len(tier.Added), len(tier.Removed)); err != nil {
+			return err
+		}
+	}
+	for _, tier := range result.Tiers {
+		if err := writeRetainedTimeMarkdown(w, tier); err != nil {
+			return err
+		}
+	}
+	for _, warning := range result.Warnings {
+		if _, err := fmt.Fprintf(w, "- Advisory: %s\n", warning); err != nil {
 			return err
 		}
 	}
 	for _, problem := range result.Problems {
 		if _, err := fmt.Fprintf(w, "- %s\n", problem); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeRetainedTimeMarkdown(w io.Writer, row TestTimeTier) error {
+	cells := slices.Clone(row.RetainedCells)
+	sort.Slice(cells, func(i, j int) bool {
+		if math.Abs(cells[i].Delta) != math.Abs(cells[j].Delta) {
+			return math.Abs(cells[i].Delta) > math.Abs(cells[j].Delta)
+		}
+		return timingCellKey(cells[i].TimingCell) < timingCellKey(cells[j].TimingCell)
+	})
+	shown := min(20, len(cells))
+	if _, err := fmt.Fprintf(w, "\n### %s Retained Cells\n\nLargest absolute deltas: %d of %d cells. JSON `tiers[].retained_cells` retains every exact identity and baseline/candidate/delta.\n\n| Package/root | Backend | Environment/count | Before | After | Delta |\n| --- | --- | --- | ---: | ---: | ---: |\n", row.Tier, shown, len(cells)); err != nil {
+		return err
+	}
+	for _, cell := range cells[:shown] {
+		if _, err := fmt.Fprintf(w, "| `%s.%s` | `%s` | `%s/%s` | %.3fs | %.3fs | %+.3fs |\n", cell.Package, cell.Root, cell.Backend, cell.Environment, cell.Count, cell.Baseline, cell.Candidate, cell.Delta); err != nil {
 			return err
 		}
 	}

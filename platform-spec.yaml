@@ -23974,7 +23974,9 @@ test_specification:
         unselected-plan diagnostics, not proof that full coverage was removed or timing savings were earned.
         A supplemented lower-tier plan adds the frozen full projection as a cost-accounting row, without reprojecting the frozen lower-tier
         reference membership or changing the timing anchor/thresholds. Absent full cells remain removal-neutral and earn no execution credit;
-        new/promoted roots and retained-root growth are charged under the unchanged full growth/placement rules.
+        new/promoted roots retain the unchanged placement rule. The trusted workflow event selects cost enforcement:
+        PRs hard-charge independent added/promoted cost and report retained drift as advisory; fresh full master cadence
+        enforces the complete retained-plus-added aggregate. Named extras cannot evade either comparison or change the reference epoch.
         Logical commands retain their own processes, stores, workspaces, deadlines, backend children and receipts.
         Only explicitly eligible short units with valid measured weights may share a physical runner. Each physical
         job is matched to its exact planned logical units and counted once, while every logical budget and failure
@@ -24046,9 +24048,23 @@ test_specification:
         source. Current selectors project candidate cells only; they must never reclassify the baseline. A promotion
         into a tier counts as added cost, while a demotion remains reported removed work without granting savings.
         Count a root and its direct children once and separately executed original soak backend cells separately.
-        Compare retained roots plus measured new cost; report removed/renamed roots separately without granting savings.
-        Unreviewed growth must satisfy both five percent of the pinned tier cost and 600 test-seconds, never a compounded
-        automatically refreshed merge-base anchor. A new or promoted top-level root above 30 seconds requires a Test-Time rationale
+        Complete source/plan/run/attempt/root/child/build/environment/count evidence is admitted before either timing decision.
+        Only the exact trusted pull_request event selects PR cost enforcement; tier names, body text or plan reasons do not.
+        Missing or unknown events never grant advisory treatment. Non-PR evaluation requires a full hosted cadence plan;
+        a supplied core/lifecycle cadence plan is refused even if ordinary planning would never produce it.
+        PRs hard-charge the independent sum of added/promoted-cell seconds under both five percent of the pinned tier cost
+        and 600 test-seconds. Retained speedups and removed/renamed cells cannot subsidize that new-work charge.
+        Retained-cell drift is reported with exhaustive exact cell identities and baseline/candidate/signed-delta attribution;
+        when the original aggregate would exceed its allowance, valid PR proof receives an explicit advisory warning.
+        Fresh full schedule/manual/master cadence retains hard enforcement of the complete retained-plus-added aggregate.
+        Removed/renamed roots are reported separately and remain cost-neutral in that comparison, never credited as savings.
+        JSON retains the decision mode, independent added cost, retained totals/cells, unchanged allowance and strict aggregate
+        counterfactual. Human summaries label any bounded drift display and point to the exhaustive JSON.
+        Command, ratchet and actual-job statuses compose monotonically: PASS < WARN < FAIL < INCOMPLETE. Advisory timing
+        cannot downgrade missing, failed, cancelled, corrupt, duplicate or foreign proof or actual-job evidence.
+        This split accepts that a real slowdown in retained work may first be detected by the next full nightly;
+        it grants no runtime waiver, workload reduction or compounded automatically refreshed merge-base anchor.
+        A new or promoted top-level root above 30 seconds requires a Test-Time rationale
         and an explicit independent reviewer or lead placement decision even below the aggregate limit.
         A rationale alone grants no exception. A reviewed versioned anchor/policy adjustment must name the explicit
         approval and exact source evidence; moving correctness coverage also requires the lead's coverage ruling.
