@@ -1061,6 +1061,20 @@ seam_families:
     notes: >
       The finite fan-out handoff checks typed RoutePlanLiveRecipient evidence
       against persisted delivery routes. It does not derive a new route.
+  - id: compiled_subscription_admission_proof
+    layer: route_plan_consumers
+    classification: valid_consumer
+    paths:
+      - internal/runtime/bus/harness_source_test.go
+      - internal/runtime/bus/route_template_admission_test.go
+    search_dimensions: [flow_owned_subscription_pattern_authority]
+    notes: >
+      Test-only freshness and private-input proofs consume the original typed
+      authored subscription admission and compiled pattern projection. They
+      do not use a fixture-only production recompilation API or duplicate
+      cached input lists. The compiled local-event set remains necessary for
+      wildcard declaration filtering; neither declaration admission nor this
+      proof grants native existence, readiness, or inter-flow delivery.
   - id: durable_delivery_authority_writers
     layer: durable_delivery_authority
     classification: canonical_owner

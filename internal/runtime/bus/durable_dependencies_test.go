@@ -37,6 +37,9 @@ func TestEventBusHasNoPersistedTopologyOwner(t *testing.T) {
 }
 
 func TestCompiledRoutesCannotExportMaterializedMembership(t *testing.T) {
+	if _, present := reflect.TypeOf(routeFlowTemplate{}).FieldByName("InputEvents"); present {
+		t.Error("compiled subscription template retains redundant reconstruction field InputEvents")
+	}
 	for _, name := range []string{"MaterializedRoutes", "Resolve", "ResolveForRun", "HasFlowInstanceRoute", "RemoveFlowInstanceRoute", "AddFlowInstanceRoute"} {
 		if _, present := reflect.TypeOf((*RouteTable)(nil)).MethodByName(name); present {
 			t.Errorf("compiled source table still exports retired membership API %s", name)

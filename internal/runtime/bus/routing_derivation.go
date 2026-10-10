@@ -88,7 +88,6 @@ type RouteTable struct {
 
 type routeFlowTemplate struct {
 	FlowID      string
-	InputEvents []string
 	LocalEvents map[string]struct{}
 	Subscribers []routeSubscriberTemplate
 }
@@ -161,7 +160,6 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 		}
 		rt.templates[runtimeflowidentity.ScopeKey(source, scope.ID)] = routeFlowTemplate{
 			FlowID:      scope.ID,
-			InputEvents: append([]string{}, scope.InputEvents...),
 			LocalEvents: cloneStringSet(localEvents),
 			Subscribers: subscribers,
 		}
@@ -505,20 +503,6 @@ func routeExecutableNodeDeclarations(source semanticview.Source, flowPath string
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Node.Key() < out[j].Node.Key() })
 	return out, nil
-}
-
-func routeResolveSubscriberPatternsWithInputProducers(source semanticview.Source, kind subscriberKind, flowID string, inputEvents []string, authorityPath, routePath string, localEvents map[string]struct{}, raw string, inputProducers runtimepinrouting.FlowInputProducerResolver) ([]routeResolvedPattern, error) {
-	raw = eventidentity.Normalize(raw)
-	flowID = strings.TrimSpace(flowID)
-	if raw == "" {
-		return nil, nil
-	}
-	admission := routeClassifyAuthoredSubscription(source, kind, flowID, inputEvents, authorityPath, localEvents, raw)
-	if !admission.Admitted() {
-		return nil, fmt.Errorf("route subscriber in flow %s: %s", flowID, admission.Message())
-	}
-	inputEvent := !admission.Pattern() && flowID != "" && source != nil && source.FlowHasInputEvent(flowID, admission.LocalEvent())
-	return routeProjectAdmittedSubscriberPatterns(admission, flowID, routePath, inputEvent, inputProducers), nil
 }
 
 func routeProjectAdmittedSubscriberPatterns(admission semanticview.AuthoredSubscriptionAdmission, flowID, routePath string, inputEvent bool, inputProducers runtimepinrouting.FlowInputProducerResolver) []routeResolvedPattern {
