@@ -26,6 +26,8 @@ func TestConnectSelectionPreservesJoinedLookupFailure(t *testing.T) {
 	foreign := &pipeline.TerminalReceiverError{FlowID: "foreign", Stage: "completed"}
 	corrupt := &pipeline.FlowInstanceConstructionCorruption{RunID: busInternalTestRunID, FlowID: "account", Cause: terminal}
 	terminated := &pipeline.TerminatedReceiverError{FlowID: "account"}
+	unknownTerminated := pipeline.NewDeliveryTargetAvailability("active", "failed", true).Validate(source, "account")
+	missingTerminated := pipeline.NewDeliveryTargetAvailability("active", "", true).Validate(source, "account")
 	for _, test := range []struct {
 		name   string
 		err    error
@@ -45,6 +47,8 @@ func TestConnectSelectionPreservesJoinedLookupFailure(t *testing.T) {
 		{"wrapped terminated", fmt.Errorf("lookup: %w", terminated), true, nil},
 		{"joined terminated failure", errors.Join(terminated, independent), false, []error{terminated, independent}},
 		{"unknown lifecycle failure", independent, false, []error{independent}},
+		{"unknown lifecycle with termination timestamp", unknownTerminated, false, []error{unknownTerminated}},
+		{"missing lifecycle with termination timestamp", missingTerminated, false, []error{missingTerminated}},
 		{"canceled lookup", context.Canceled, false, []error{context.Canceled}},
 		{"joined terminal cancellation", errors.Join(terminal, context.Canceled), false, []error{terminal, context.Canceled}},
 		{"joined terminated cancellation", errors.Join(terminated, context.Canceled), false, []error{terminated, context.Canceled}},

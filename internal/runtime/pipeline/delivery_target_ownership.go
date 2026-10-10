@@ -54,7 +54,7 @@ func (e *TerminatedReceiverError) Error() string {
 func NewDeliveryTargetAvailability(stage, status string, terminated bool) DeliveryTargetAvailability {
 	return DeliveryTargetAvailability{
 		stage: strings.TrimSpace(stage), inactive: terminated || !strings.EqualFold(strings.TrimSpace(status), "active"),
-		terminated: terminated || status == "terminated",
+		terminated: status == "terminated" || status == "active" && terminated,
 	}
 }
 
