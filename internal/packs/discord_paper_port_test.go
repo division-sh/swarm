@@ -50,8 +50,9 @@ func discordPaperPort(t *testing.T) (packs.SatisfactionPlan, packs.TriggerPackDe
 		}, "reference")},
 	}
 	trigger := packs.TriggerPackDescriptor{
-		Identity: packs.MustPackIdentity("provider.discord", "0.1.0", "sha256:"+strings.Repeat("e", 64), packs.TypeTrigger, packs.MustPackSource("test", "discord-paper-port")),
-		Provider: "discord", Generation: triggergeneration.FromCanonicalBytes([]byte("discord-paper-port-normalized-catalog")),
+		Transport: packs.ChannelTransportSession,
+		Identity:  packs.MustPackIdentity("provider.discord", "0.1.0", "sha256:"+strings.Repeat("e", 64), packs.TypeTrigger, packs.MustPackSource("test", "discord-paper-port")),
+		Provider:  "discord", Generation: triggergeneration.FromCanonicalBytes([]byte("discord-paper-port-normalized-catalog")),
 		Events: map[string]packs.TriggerEvent{"inbound.discord.text_message": {Name: "inbound.discord.text_message", Fields: fields}},
 	}
 	connector := packs.ConnectorPackDescriptor{

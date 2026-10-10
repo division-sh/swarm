@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -18,10 +19,66 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/google/uuid"
 )
+
+func TestProposedEffectNativeSelectionPersistenceBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			cards, runID := decisionCardTestStore(t, backend)
+			store := cards.(decisioncard.ProposedEffectStore)
+			now := time.Date(2026, 10, 10, 18, 0, 0, 0, time.UTC)
+			card, continuation := newProposedEffectTestCard(t, runID, now, attemptgeneration.Generation{})
+			// These are frozen metadata, deliberately not an executable session.
+			publication, err := channelonboarding.NewChannelActivationPublication(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			continuation.NativeSessionTarget = "platform.channel_activity.fixture.deliver"
+			continuation.PlanGeneration, err = plangeneration.FromCanonicalValue(map[string]any{"fixture": "native-plan"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			continuation.ChannelActivationGeneration = publication.Generation()
+			effect, err := continuation.EffectValue()
+			if err != nil {
+				t.Fatal(err)
+			}
+			continuation.EffectContentHash, err = canonicaljson.HashValue(effect)
+			if err != nil {
+				t.Fatal(err)
+			}
+			card.EffectContentHash, card.CardContentHash = continuation.EffectContentHash, ""
+			card, err = decisioncard.New(card)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := testAuthorActivityContext()
+			for range 2 {
+				if err := store.CreateProposedEffectCard(ctx, card, continuation); err != nil {
+					t.Fatal(err)
+				}
+			}
+			loaded, err := store.LoadProposedEffectContinuation(ctx, card.CardID)
+			if err != nil || loaded.NativeSessionTarget != continuation.NativeSessionTarget ||
+				!loaded.PlanGeneration.Equal(continuation.PlanGeneration) || !loaded.ChannelActivationGeneration.Equal(continuation.ChannelActivationGeneration) {
+				t.Fatal("selected store lost frozen native approval selection", err)
+			}
+			loadedEffect, err := loaded.EffectValue()
+			if err != nil || !loadedEffect.Equal(effect) {
+				t.Fatal("readback reconstructed a different native effect", err)
+			}
+			incomplete := continuation
+			incomplete.PlanGeneration = plangeneration.Generation{}
+			if _, err := incomplete.EffectValue(); err == nil {
+				t.Fatal("incomplete native approval selection was admitted")
+			}
+		})
+	}
+}
 
 func TestProposedEffectCardLifecycleParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
