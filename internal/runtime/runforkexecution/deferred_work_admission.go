@@ -18,11 +18,9 @@ import (
 const selectedContractDeferredWorkOwnerUnavailable = "selected_contract_deferred_work_owner_unavailable"
 
 const (
-	selectedContractDeferredWorkRevisionTimerHistory = "revision_timer_history"
-	selectedContractDeferredWorkWorkflowTimer        = "workflow_timer"
-	selectedContractDeferredWorkWorkflowJoinTimeout  = "workflow_join_timeout"
-	selectedContractDeferredWorkFanOutBarrier        = "fan_out_delivery_barrier"
-	selectedContractDeferredWorkDynamicFlowCreation  = "dynamic_flow_instance_creation"
+	selectedContractDeferredWorkWorkflowJoinTimeout = "workflow_join_timeout"
+	selectedContractDeferredWorkFanOutBarrier       = "fan_out_delivery_barrier"
+	selectedContractDeferredWorkDynamicFlowCreation = "dynamic_flow_instance_creation"
 )
 
 type selectedContractDeferredWorkAdmission struct {
@@ -49,15 +47,11 @@ func admitSelectedContractDeferredWork(plan runfork.RunForkPlan, source semantic
 		return selectedContractDeferredWorkAdmission{}, err
 	}
 
-	capabilities, revisionTimerHistory := selectedContractDeferredWorkCapabilities(plan, source)
+	capabilities := selectedContractDeferredWorkCapabilities(source)
 	if len(capabilities) > 0 {
-		detailCode := selectedContractDeferredWorkOwnerUnavailable
-		if revisionTimerHistory {
-			detailCode = runfork.RunForkBlockerTimerHistoryUnproven
-		}
 		return selectedContractDeferredWorkAdmission{}, runtimefailures.New(
 			runtimefailures.ClassDependencyUnavailable,
-			detailCode,
+			selectedContractDeferredWorkOwnerUnavailable,
 			"selected-contract-run-fork",
 			"admit-deferred-work-ownership",
 			map[string]any{"capabilities": capabilities},
@@ -98,7 +92,7 @@ func (a selectedContractDeferredWorkAdmission) validate(sourceRunID string, poin
 			}
 		}
 	}
-	if capabilities, _ := selectedContractDeferredWorkCapabilities(runfork.RunForkPlan{}, source); len(capabilities) > 0 {
+	if capabilities := selectedContractDeferredWorkCapabilities(source); len(capabilities) > 0 {
 		return fmt.Errorf("selected-contract deferred-work admission source now declares unsupported capabilities: %s", strings.Join(capabilities, ","))
 	}
 	return nil
@@ -194,19 +188,10 @@ func fanOutElementLabel(ref runtimecontracts.FanOutElementRef) string {
 	return identity.Key()
 }
 
-func selectedContractDeferredWorkCapabilities(plan runfork.RunForkPlan, source semanticview.Source) ([]string, bool) {
+func selectedContractDeferredWorkCapabilities(source semanticview.Source) []string {
 	capabilities := make([]string, 0, 4)
-	revisionTimerHistory := false
-	for _, blocker := range plan.UnsupportedBlockers {
-		if strings.TrimSpace(blocker.Code) == runfork.RunForkBlockerTimerHistoryUnproven {
-			revisionTimerHistory = true
-			capabilities = append(capabilities, selectedContractDeferredWorkRevisionTimerHistory)
-			break
-		}
-	}
-	if source != nil && len(source.WorkflowTimers()) > 0 {
-		capabilities = append(capabilities, selectedContractDeferredWorkWorkflowTimer)
-	}
+	// Ordinary workflow timers have a retained execution owner. Fixed-cut
+	// timer evidence remains blocked until native materialization/readback.
 	if source != nil {
 		hasTimedJoin, hasFanOutBarrier := false, false
 		for _, join := range source.WorkflowJoins() {
@@ -228,7 +213,7 @@ func selectedContractDeferredWorkCapabilities(plan runfork.RunForkPlan, source s
 		}
 	}
 	sort.Strings(capabilities)
-	return capabilities, revisionTimerHistory
+	return capabilities
 }
 
 func selectedContractSourceCanCreateDynamicFlow(source semanticview.Source) bool {

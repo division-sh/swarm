@@ -13,12 +13,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	"github.com/google/uuid"
 )
 
@@ -114,7 +116,7 @@ func newSelectedAttachmentFixture(t *testing.T, kind runfork.RunForkPointKind) s
 				ActorCensusFingerprint: execution.ActorCensusFingerprint, EffectiveConfigFingerprint: execution.EffectiveConfigFingerprint,
 			},
 		},
-		snapshot:  runlifecycle.Snapshot{RunID: child, State: runlifecycle.StatePaused, BundleHash: bundle, Origin: origin},
+		snapshot:  runlifecycle.Snapshot{RunID: child, State: runlifecycle.StatePaused, BundleHash: bundle, Origin: origin, StartedAt: now},
 		execution: execution, declarations: declarations,
 	}
 }
@@ -329,19 +331,38 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 	for _, attachmentErr := range []error{nil, errors.New("attachment refused")} {
 		t.Run(map[bool]string{true: "acknowledged", false: "refused"}[attachmentErr == nil], func(t *testing.T) {
 			f := newSelectedAttachmentFixture(t, runfork.RunForkPointEvent)
-			tx, mock := startSnapshotTransaction(t)
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			backend, err := postgresbackend.New(db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mock.ExpectBegin()
 			expectSelectedAttachmentBinding(mock, f.evidence.binding)
 			mock.ExpectQuery(`SELECT DISTINCT family`).WithArgs(f.evidence.lineage.SourceRunID, int64(1)).WillReturnRows(sqlmock.NewRows([]string{"family"}))
 			mock.ExpectQuery(`SELECT clock_timestamp\(\)`).WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(time.Unix(200, 0).UTC()))
 			mock.ExpectQuery(`FROM event_deliveries d`).WithArgs(f.evidence.lineage.SourceRunID).WillReturnRows(sqlmock.NewRows([]string{"delivery_id"}))
-			mock.ExpectQuery(`family = 'committed_replay_scopes'`).WithArgs(f.evidence.lineage.SourceRunID, int64(1)).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+			if attachmentErr == nil {
+				mock.ExpectCommit()
+			} else {
+				mock.ExpectRollback()
+			}
 			steps := []string{}
 			cleanup := errors.New("post-commit cleanup")
 			port := runForkSelectedContractActivationPort{
 				requireCurrent: func() error { return nil },
 				runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error) {
-					if err := operation(ctx, tx, nil); err != nil {
-						return false, err
+					outcome := mutationprotocol.RunPostgres(ctx, backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil,
+						func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+							return struct{}{}, attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+								return operation(ctx, tx, attempt)
+							})
+						})
+					if !outcome.Acknowledged() {
+						return false, outcome.Err()
 					}
 					return true, cleanup
 				},
@@ -357,7 +378,12 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 					steps = append(steps, "plan")
 					return f.evidence.plan, nil
 				},
-				deliveries: postgresDeliveryAdapter,
+				loadSnapshot: func(context.Context, *sql.Tx, string) (runlifecycle.Snapshot, error) {
+					steps = append(steps, "timer_readback")
+					return f.snapshot, nil
+				},
+				workflowTimers: &workflowTimerMaterializerOwner{},
+				deliveries:     postgresDeliveryAdapter,
 				attachment: func(context.Context, *sql.Tx, runForkSelectedContractActivationEvidence) error {
 					steps = append(steps, "attachment")
 					return attachmentErr
@@ -376,8 +402,9 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 				},
 				now: func() time.Time { return time.Unix(200, 0).UTC() },
 			}
-			result, err := activateRunForkForSelectedContractExecution(context.Background(), f.evidence.request, port)
-			wantSteps := []string{"lineage", "heads", "plan", "attachment"}
+			ctx := correlation.WithRunID(context.Background(), f.evidence.lineage.ForkRunID)
+			result, err := activateRunForkForSelectedContractExecution(ctx, f.evidence.request, port)
+			wantSteps := []string{"lineage", "heads", "plan", "timer_readback", "attachment"}
 			if attachmentErr == nil {
 				wantSteps = append(wantSteps, "activate")
 				if !result.Activated || !result.SourceFrozen || !errors.Is(err, cleanup) {
@@ -388,6 +415,9 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 			}
 			if !reflect.DeepEqual(steps, wantSteps) {
 				t.Fatalf("ordering=%v want=%v", steps, wantSteps)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
