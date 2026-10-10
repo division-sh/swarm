@@ -32,6 +32,7 @@ type runForkSelectedContractActivationPort struct {
 	plan                  func(context.Context, *sql.Tx, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	loadSnapshot          runForkLifecycleSnapshotLoader
 	workflowTimers        runForkWorkflowTimerMaterializationOwner
+	arrivalSchedules      runForkArrivalJoinMaterializationOwner
 	deliveries            *storedelivery.Adapter
 	attachment            func(context.Context, *sql.Tx, runForkSelectedContractActivationEvidence) error
 	transition            func(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.ActiveTransitionRequest) error
@@ -58,7 +59,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 	}
 	if port.requireCurrent == nil || port.runMutation == nil || port.loadLineage == nil || port.lockFrontier == nil ||
 		port.plan == nil || port.deliveries == nil || port.attachment == nil || port.transition == nil || port.diverge == nil ||
-		port.freeze == nil || port.now == nil || port.loadSnapshot == nil || port.workflowTimers == nil {
+		port.freeze == nil || port.now == nil || port.loadSnapshot == nil || port.workflowTimers == nil || port.arrivalSchedules == nil {
 		return runfork.RunForkActivation{}, fmt.Errorf("selected-contract fork activation operations are incomplete")
 	}
 	if err := port.requireCurrent(); err != nil {
@@ -145,6 +146,10 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		result.ReplayResumeAdmission, err = requireMaterializedRunForkWorkflowTimers(runtimecorrelation.WithRunID(txctx, lineage.ForkRunID), attempt,
 			plan, lineage.ForkRunID, req.InheritedWorkflowTimers, port.workflowTimers, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), result.ReplayResumeAdmission)
 		if err != nil {
+			return err
+		}
+		if err := requireMaterializedRunForkArrivalJoinSchedules(runtimecorrelation.WithRunID(txctx, lineage.ForkRunID), attempt,
+			plan, lineage.ForkRunID, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), port.arrivalSchedules); err != nil {
 			return err
 		}
 		if blockers := runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, result.ReplayResumeAdmission, req.AllowedSourceEventIDs); len(blockers) > 0 {
@@ -391,7 +396,7 @@ func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runF
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {
 			return s.RunLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, runID, true)
 		},
-		workflowTimers: s.PipelinePostgresOwner,
+		workflowTimers: s.PipelinePostgresOwner, arrivalSchedules: s.PipelinePostgresOwner,
 		attachment: func(ctx context.Context, tx *sql.Tx, evidence runForkSelectedContractActivationEvidence) error {
 			snapshot, err := s.LoadSnapshotTx(ctx, tx, evidence.lineage.ForkRunID, true)
 			if err != nil {
@@ -439,7 +444,7 @@ func sqliteRunForkSelectedContractActivationPort(s *RunForkSQLiteOwner) runForkS
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {
 			return s.RunLifecycleSQLiteOwner.LoadSnapshotTx(ctx, tx, runID)
 		},
-		workflowTimers: s.PipelineSQLiteOwner,
+		workflowTimers: s.PipelineSQLiteOwner, arrivalSchedules: s.PipelineSQLiteOwner,
 		attachment: func(ctx context.Context, tx *sql.Tx, evidence runForkSelectedContractActivationEvidence) error {
 			snapshot, err := s.LoadSnapshotTx(ctx, tx, evidence.lineage.ForkRunID)
 			if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
@@ -138,24 +139,51 @@ func RestoreForkJoinTx(ctx context.Context, attempt *mutationprotocol.Attempt, p
 	return child, attempt.RequireExistingSQLFrame(ctx)
 }
 
-// RequireForkJoinTx never admits or repairs a missing/ordinary schedule.
-func RequireForkJoinTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, request ForkJoinRequest) (runtimegenericschedule.Activation, error) {
-	if err := requireForkJoinFrame(ctx, attempt, request.Child.RunID); err != nil {
-		return runtimegenericschedule.Activation{}, err
+// ReadForkJoinInventoryTx includes every inherited generic row, including
+// partial lineage. The shared decoder rejects corrupt or foreign variants.
+func ReadForkJoinInventoryTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, childRunID string) ([]runtimegenericschedule.Activation, error) {
+	if err := requireForkJoinFrame(ctx, attempt, childRunID); err != nil {
+		return nil, err
 	}
-	if err := request.Validate(); err != nil {
-		return runtimegenericschedule.Activation{}, err
+	id, err := uuid.Parse(childRunID)
+	if err != nil || id == uuid.Nil || id.String() != childRunID {
+		return nil, fmt.Errorf("fork join inventory requires the canonical child run")
 	}
-	var child runtimegenericschedule.Activation
-	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		child, err = requireForkJoinTx(ctx, tx, postgres, request)
-		return err
+	var inventory []runtimegenericschedule.Activation
+	err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		query := activationSelectColumns + ` FROM timers WHERE run_id = ?
+			AND task_type IN ('timer','scheduled_task','global_recurring')
+			AND (source_timer_id IS NOT NULL OR forked_from_run_id IS NOT NULL
+			 OR forked_from_point_kind IS NOT NULL OR forked_from_point_revision IS NOT NULL
+			 OR forked_from_event_id IS NOT NULL OR source_armed_at IS NOT NULL OR reconstruction_owner IS NOT NULL)
+			ORDER BY timer_id`
+		if postgres {
+			query = strings.Replace(query, "run_id = ?", "run_id = $1::uuid", 1) + " FOR UPDATE"
+		}
+		rows, err := tx.QueryContext(ctx, query, childRunID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			actual, err := scanActivationRow(rows, dialectFor(postgres))
+			if err != nil {
+				return err
+			}
+			if actual.Command.RunID != childRunID || actual.ForkJoinOrigin == nil {
+				return fmt.Errorf("fork join inventory lacks exact inherited child ownership")
+			}
+			inventory = append(inventory, actual)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return rows.Close()
 	})
 	if err != nil {
-		return runtimegenericschedule.Activation{}, err
+		return nil, err
 	}
-	return child, attempt.RequireExistingSQLFrame(ctx)
+	return inventory, attempt.RequireExistingSQLFrame(ctx)
 }
 
 func requireForkJoinTx(ctx context.Context, tx *sql.Tx, postgres bool, request ForkJoinRequest) (runtimegenericschedule.Activation, error) {

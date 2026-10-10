@@ -330,8 +330,16 @@ func TestSelectedActivationSettlementAllowsTerminalChildWithExactFence(t *testin
 }
 
 func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T) {
-	for _, attachmentErr := range []error{nil, errors.New("attachment refused")} {
-		t.Run(map[bool]string{true: "acknowledged", false: "refused"}[attachmentErr == nil], func(t *testing.T) {
+	for _, test := range []struct {
+		name                      string
+		attachmentErr, arrivalErr error
+	}{
+		{name: "acknowledged"},
+		{name: "refused", attachmentErr: errors.New("attachment refused")},
+		{name: "arrival_refused", arrivalErr: errors.New("arrival inventory refused")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			attachmentErr := test.attachmentErr
 			f := newSelectedAttachmentFixture(t, runfork.RunForkPointEvent)
 			db, mock, err := sqlmock.New()
 			if err != nil {
@@ -344,15 +352,18 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 			}
 			mock.ExpectBegin()
 			expectSelectedAttachmentBinding(mock, f.evidence.binding)
-			mock.ExpectQuery(`SELECT DISTINCT family`).WithArgs(f.evidence.lineage.SourceRunID, int64(1)).WillReturnRows(sqlmock.NewRows([]string{"family"}))
-			mock.ExpectQuery(`SELECT clock_timestamp\(\)`).WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(time.Unix(200, 0).UTC()))
-			mock.ExpectQuery(`FROM event_deliveries d`).WithArgs(f.evidence.lineage.SourceRunID).WillReturnRows(sqlmock.NewRows([]string{"delivery_id"}))
-			if attachmentErr == nil {
+			if test.arrivalErr == nil {
+				mock.ExpectQuery(`SELECT DISTINCT family`).WithArgs(f.evidence.lineage.SourceRunID, int64(1)).WillReturnRows(sqlmock.NewRows([]string{"family"}))
+				mock.ExpectQuery(`SELECT clock_timestamp\(\)`).WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(time.Unix(200, 0).UTC()))
+				mock.ExpectQuery(`FROM event_deliveries d`).WithArgs(f.evidence.lineage.SourceRunID).WillReturnRows(sqlmock.NewRows([]string{"delivery_id"}))
+			}
+			if attachmentErr == nil && test.arrivalErr == nil {
 				mock.ExpectCommit()
 			} else {
 				mock.ExpectRollback()
 			}
 			steps := []string{}
+			arrivals := &arrivalJoinInventoryOwner{err: test.arrivalErr}
 			cleanup := errors.New("post-commit cleanup")
 			port := runForkSelectedContractActivationPort{
 				requireCurrent: func() error { return nil },
@@ -384,8 +395,9 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 					steps = append(steps, "timer_readback")
 					return f.snapshot, nil
 				},
-				workflowTimers: &workflowTimerMaterializerOwner{},
-				deliveries:     postgresDeliveryAdapter,
+				workflowTimers:   &workflowTimerMaterializerOwner{},
+				arrivalSchedules: arrivals,
+				deliveries:       postgresDeliveryAdapter,
 				attachment: func(context.Context, *sql.Tx, runForkSelectedContractActivationEvidence) error {
 					steps = append(steps, "attachment")
 					return attachmentErr
@@ -407,7 +419,12 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 			ctx := correlation.WithRunID(context.Background(), f.evidence.lineage.ForkRunID)
 			result, err := activateRunForkForSelectedContractExecution(ctx, f.evidence.request, port)
 			wantSteps := []string{"lineage", "heads", "plan", "timer_readback", "attachment"}
-			if attachmentErr == nil {
+			if test.arrivalErr != nil {
+				wantSteps = wantSteps[:4]
+				if result.Activated || !errors.Is(err, test.arrivalErr) {
+					t.Fatalf("arrival refusal did not stop activation: result=%+v err=%v", result, err)
+				}
+			} else if attachmentErr == nil {
 				wantSteps = append(wantSteps, "activate")
 				if !result.Activated || !result.SourceFrozen || !errors.Is(err, cleanup) {
 					t.Fatalf("durable acknowledgment lost: result=%+v err=%v", result, err)
@@ -417,6 +434,9 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 			}
 			if !reflect.DeepEqual(steps, wantSteps) {
 				t.Fatalf("ordering=%v want=%v", steps, wantSteps)
+			}
+			if arrivals.reads != 1 {
+				t.Fatal("activation bypassed complete arrival inventory")
 			}
 			if err := mock.ExpectationsWereMet(); err != nil {
 				t.Fatal(err)
