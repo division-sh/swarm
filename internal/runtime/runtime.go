@@ -2218,6 +2218,11 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 			_, _ = rt.workOccurrence.RetireAndWait(context.Background())
 		}
 	}
+	if rt.runLifecycleExecutor != nil {
+		if err := rt.runLifecycleExecutor.Wait(context.Background()); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("run lifecycle executor joined diagnostics: %w", err))
+		}
+	}
 	if rt.runLifecycleRegistration != nil {
 		rt.runLifecycleRegistration.Release()
 		rt.runLifecycleRegistration = nil

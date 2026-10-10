@@ -25,7 +25,12 @@ func (c selectedContractForkLocalRuntimeContainer) prepareCompletionOwner(ctx co
 	attachment.completionDiagnostics = c.diagnostics
 	registration, err := c.ports.candidates.RegisterCompletionCandidateSink(ctx, scope, executor)
 	if err != nil {
-		return errors.Join(err, executor.Retire(context.WithoutCancel(ctx)), executor.Wait(context.WithoutCancel(ctx)))
+		retireErr := executor.Retire(context.WithoutCancel(ctx))
+		joined := executor.Wait(context.WithoutCancel(ctx))
+		if runlifecycle.CompletionJoinSucceeded(joined) {
+			return errors.Join(err, joined)
+		}
+		return errors.Join(err, retireErr, joined)
 	}
 	attachment.completionRegistration = registration
 	return nil

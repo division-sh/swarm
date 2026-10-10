@@ -123,8 +123,8 @@ func TestExecutorStaleAuthorityDoesNotRetry(t *testing.T) {
 	if err := executor.Retire(context.Background()); !errors.Is(err, ErrCompletionAuthority) {
 		t.Fatalf("stale authority diagnostic lost: %v", err)
 	}
-	if err := executor.Wait(context.Background()); err != nil {
-		t.Fatal(err)
+	if err := executor.Wait(context.Background()); !CompletionJoinSucceeded(err) || !errors.Is(err, ErrCompletionAuthority) {
+		t.Fatalf("joined stale authority diagnostic lost: %v", err)
 	}
 	if err := occurrence.RetireAndWait(context.Background()); err != nil {
 		t.Fatal(err)
