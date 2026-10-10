@@ -69,10 +69,10 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 			"TestOrdinaryHandlerRequiresCanonicalConstructionBothStores",
 			"TestOrdinaryWorkflowMutationCannotConstructOrRepairBothStores",
 		},
-		"store-runtime-full-03": {"TestGenericConstructedGateForkPreservesRouteHistoryRefusalBothStores"},
-		"store-runtime-full-05": {"TestReceiverConfigActivationRaceAndRollbackBothStores"},
-		"store-runtime-full-06": {
-			"TestSelectedRunTargetOwnersUseConstructedHeadersBothStores",
+		"store-runtime-full-03":  {"TestGenericConstructedGateForkPreservesRouteHistoryRefusalBothStores"},
+		"store-runtime-full-05":  {"TestReceiverConfigActivationRaceAndRollbackBothStores"},
+		"store-runtime-selected": {"TestSelectedRunTargetOwnersUseConstructedHeadersBothStores"},
+		"store-runtime-s-z-rest": {
 			"TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores",
 			"TestWorkflowGateConsumesCommittedErrorWithoutRouteReplayOnBothStores",
 		},
@@ -97,9 +97,11 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 		"store-runtime-full-02": {
 			"TestDeploymentConstructionNativeCommitBothStores": {"sqlite/rollback_before_ack", "sqlite/commit_before_lost_ack", "postgres/rollback_before_ack", "postgres/commit_before_lost_ack"},
 		},
-		"store-runtime-full-06": {
+		"store-runtime-s-z-rest": {
 			"TestScenarioConstructionNativeCommitBothStores":   {"sqlite/rollback_before_ack", "sqlite/commit_before_lost_ack", "postgres/rollback_before_ack", "postgres/commit_before_lost_ack"},
 			"TestScenarioConstructionFieldlessStateBothStores": {"sqlite", "postgres"},
+		},
+		"store-runtime-selected": {
 			"TestSelectedContractOrdinarySourceStatePresenceBothStores": {
 				"sqlite/absent", "sqlite/zero", "sqlite/fieldless", "sqlite/missing", "sqlite/corrupt", "sqlite/wrong-header-flow", "sqlite/wrong-header-type", "sqlite/loop",
 				"postgres/absent", "postgres/zero", "postgres/fieldless", "postgres/missing", "postgres/corrupt", "postgres/wrong-header-flow", "postgres/wrong-header-type", "postgres/loop",

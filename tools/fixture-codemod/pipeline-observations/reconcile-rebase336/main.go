@@ -11,7 +11,7 @@ import (
 	"os/exec"
 )
 
-const frozen = "1df1e21aa6c64842ed9aafd38f8086948ce1fb0e"
+const frozen = "69c80dc98dc7418880fa0d05d33921c2c09f2b4d"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const targetDigest = "1690ca4675c7189489cf78faba03e913b1e4ac2fa3bf8953d1b8d1919e180c7c"
 

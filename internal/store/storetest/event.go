@@ -12,7 +12,6 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
@@ -24,6 +23,24 @@ import (
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
+
+// AdmitNativeDeliveryEvent keeps fixture payload admission separate from the
+// publication writer's admitted-only boundary.
+func AdmitNativeDeliveryEvent(t *testing.T, event events.Event) events.AdmittedEvent {
+	t.Helper()
+	var err error
+	if _, bound := event.PayloadAdmission(); !bound {
+		event, err = eventfixture.BindPayload(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return admitted
+}
 
 func AcknowledgedPipelineDisposition() *runtimepipelineobligation.Disposition {
 	disposition := runtimepipelineobligation.Acknowledged("pipeline_persisted")
@@ -295,7 +312,7 @@ func InsertDiagnosticDirectEventRecord(
 		t.Fatalf("diagnostic-direct fixture requires the original selected owner, got %T", selected)
 	}
 	if err := writer.PersistRuntimeLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{
-		EventID: eventID, Payload: payload, PayloadAdmission: admission, CreatedAt: createdAt, ExecutionMode: executionmode.Live,
+		EventID: eventID, Payload: payload, PayloadAdmission: admission, CreatedAt: createdAt, ExecutionMode: bound.ExecutionMode(),
 	}); err != nil {
 		t.Fatalf("persist diagnostic-direct fixture through named owner: %v", err)
 	}

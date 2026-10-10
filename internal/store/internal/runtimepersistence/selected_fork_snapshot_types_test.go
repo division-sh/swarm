@@ -77,3 +77,64 @@ func TestSelectedForkSnapshotEncodingRefusesIncompleteOrUnencodableRows(t *testi
 		}
 	}
 }
+
+func TestSelectedForkSnapshotDecodingKeepsPhysicalTypesAndExactText(t *testing.T) {
+	columns := []string{"null", "bytes", "text", "integer", "decimal", "bool", "at"}
+	values := []any{nil, []byte(`{"name":"original"}`), "YQ==", int64(1), float64(1), true, time.Now().UTC()}
+	encoded, err := encodeSelectedForkSnapshotValues(columns, values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := DecodeSelectedForkSnapshotRowsForTest(SelectedForkStorageTableSnapshot{Columns: columns, Rows: []string{encoded}})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("decode original physical row: %v/%v", rows, err)
+	}
+	for index, typ := range []string{"<nil>", "[]uint8", "string", "int64", "float64", "bool", "time.Time"} {
+		cell := rows[0][columns[index]]
+		if cell.Column != columns[index] || cell.Type != typ {
+			t.Fatalf("physical column/type changed: %+v", cell)
+		}
+	}
+	for column, want := range map[string]string{"null": "", "bytes": `{"name":"original"}`, "text": "YQ=="} {
+		got, err := rows[0][column].Text()
+		if err != nil || got != want {
+			t.Fatalf("physical text %s=%q, want %q: %v", column, got, want, err)
+		}
+	}
+	if _, err := rows[0]["integer"].Text(); err == nil {
+		t.Fatal("integer evidence was interpreted as text")
+	}
+}
+
+func TestSelectedForkSnapshotDecodingRefusesMalformedRowsWithoutPartialEvidence(t *testing.T) {
+	valid, err := encodeSelectedForkSnapshotValues([]string{"value"}, []any{"original"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, encoded := range map[string]string{
+		"plain_values":     `["original"]`,
+		"missing_cell":     `[]`,
+		"missing_type":     `[{"Column":"value","Value":"original"}]`,
+		"missing_value":    `[{"Column":"value","Type":"string"}]`,
+		"foreign_column":   strings.Replace(valid, `"Column":"value"`, `"Column":"foreign"`, 1),
+		"unknown_field":    strings.Replace(valid, `"Column":`, `"Unknown":true,"Column":`, 1),
+		"unsupported_type": strings.Replace(valid, `"Type":"string"`, `"Type":"custom"`, 1),
+		"wrong_value_type": strings.Replace(valid, `"Type":"string"`, `"Type":"int64"`, 1),
+		"untyped_null":     strings.Replace(valid, `"Value":"original"`, `"Value":null`, 1),
+		"false_null":       strings.Replace(valid, `"Type":"string"`, `"Type":"<nil>"`, 1),
+		"malformed_bytes":  `[{"Column":"value","Type":"[]uint8","Value":"!"}]`,
+		"trailing_row":     valid + valid,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rows, err := DecodeSelectedForkSnapshotRowsForTest(SelectedForkStorageTableSnapshot{Columns: []string{"value"}, Rows: []string{valid, encoded}})
+			if err == nil || rows != nil {
+				t.Fatalf("malformed row exposed partial evidence: %+v/%v", rows, err)
+			}
+		})
+	}
+	for _, columns := range [][]string{nil, {""}, {"value", "value"}} {
+		if rows, err := DecodeSelectedForkSnapshotRowsForTest(SelectedForkStorageTableSnapshot{Columns: columns}); err == nil || rows != nil {
+			t.Fatalf("incomplete column inventory accepted: %+v/%v", rows, err)
+		}
+	}
+}

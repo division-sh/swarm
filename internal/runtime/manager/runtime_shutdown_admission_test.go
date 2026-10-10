@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -184,7 +185,8 @@ func TestRestartAgent_DeniesWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
 	}
 }
 
-func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown(t *testing.T) {
+func ProveNativeResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+	nativeDelivery := newNativeDelivery(t)
 	bus, err := newTestManagerEventBus(t)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -192,6 +194,9 @@ func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown
 	store := &shutdownAdmissionManagerStore{}
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
 
 	agent := shutdownTestAgent{
 		id:            "agent-1",
@@ -210,6 +215,7 @@ func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown
 	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
 	}, AgentManagerOptions{
+		DeliveryStore:                  nativeDelivery,
 		RuntimeShutdownAdmissionClosed: func() bool { return false },
 	}, store)
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
@@ -218,10 +224,13 @@ func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
 	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
 		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	nativeDelivery.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
 	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -239,7 +248,12 @@ func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown
 
 	waitForManagerShuttingDown(t, am)
 
-	close(release)
+	select {
+	case err := <-resetErrCh:
+		t.Fatalf("ResetRuntimeState finished while accepted work was blocked: %v", err)
+	default:
+	}
+	unblock()
 
 	select {
 	case err := <-resetErrCh:
@@ -251,7 +265,8 @@ func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown
 	}
 }
 
-func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdown(t *testing.T) {
+func ProveNativeAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdown(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+	nativeDelivery := newNativeDelivery(t)
 	runtimebus.ResumeRuntimeIngress()
 	defer runtimebus.ResumeRuntimeIngress()
 
@@ -262,6 +277,9 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 	store := &shutdownAdmissionManagerStore{}
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
 
 	agent := shutdownTestAgent{
 		id:            "agent-1",
@@ -280,6 +298,7 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
 	}, AgentManagerOptions{
+		DeliveryStore:                  nativeDelivery,
 		RuntimeShutdownAdmissionClosed: func() bool { return false },
 	}, store)
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
@@ -288,10 +307,13 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 
-	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
 	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
 		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	nativeDelivery.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
 	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -312,7 +334,7 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 
 	waitForManagerShuttingDown(t, am)
 
-	close(release)
+	unblock()
 
 	select {
 	case <-breakerDone:

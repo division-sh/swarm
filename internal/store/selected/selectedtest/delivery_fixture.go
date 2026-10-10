@@ -5,7 +5,6 @@ import (
 	"errors"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
@@ -18,7 +17,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -102,7 +100,7 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 			t.Error(err)
 		}
 	})
-	input := eventtest.RunCreatingRootIngressWithMode(uuid.NewString(), "task.assigned", "manager-proof", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(), executionmode.Live)
+	input := selectedDeliverySourceEvent(t)
 	payload, err := runtimepkg.NewRuntimePayloadAdmitter(nil, semanticview.Wrap(bundle), source)(ctx, input, ".")
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +115,7 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 	}
 	identity := agentidentitytest.RootDeclaredForRun(t, input.RunID(), "test-agent", ".")
 	root := selectedDeliverySourceRoot(t, ctx, semanticview.Wrap(bundle), source, input)
-	storetest.CommitNativeDeliveryPublication(t, ctx, owner, input, []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}}, normal, &root)
+	storetest.CommitNativeDeliveryPublication(t, ctx, owner, storetest.AdmitNativeDeliveryEvent(t, input), []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}}, normal, &root)
 	finished := make(chan error, 1)
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: owner}
 	go func() {
@@ -173,7 +171,7 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 		t.Fatal(err)
 	}
 	fixture.Context = managedexecution.WithAdmission(ctx, admission)
-	fixture.SelectedEvent = eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "task.assigned", "manager-proof", "", []byte(`{}`), 0, claimed.Issued.ForkRunID, events.EventEnvelope{}, eventtest.RootRoutingSource(claimed.Issued.ForkRunID), time.Now().UTC(), executionmode.Live)
+	fixture.SelectedEvent = selectedDeliveryIssuedEvent(t, claimed.Issued.ForkRunID)
 	payload, err = runtimepkg.NewRuntimePayloadAdmitter(nil, semanticview.Wrap(bundle), source)(fixture.Context, fixture.SelectedEvent, ".")
 	if err != nil {
 		t.Fatal(err)
@@ -183,6 +181,39 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 		t.Fatal(err)
 	}
 	return fixture
+}
+
+func selectedDeliveryRootFacts(t *testing.T, runID string) events.EventFacts {
+	t.Helper()
+	source, err := events.NewRootRoutingSource(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return events.EventFacts{
+		ID: uuid.NewString(), Type: "task.assigned",
+		Producer: events.ProducerClaim{Type: events.EventProducerExternal, ID: "manager-proof"},
+		Payload:  []byte(`{}`), RoutingSource: source,
+		CreatedAt: time.Now().UTC(), ExecutionMode: executionposture.Live.RootMode(),
+	}
+}
+
+func selectedDeliverySourceEvent(t *testing.T) events.Event {
+	t.Helper()
+	run := uuid.NewString()
+	event, err := events.NewRunCreatingRootIngressEvent(events.RunCreatingRootIngressEventInput{RunID: run, Facts: selectedDeliveryRootFacts(t, run)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return event
+}
+
+func selectedDeliveryIssuedEvent(t *testing.T, run string) events.Event {
+	t.Helper()
+	event, err := events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{RunID: run, Facts: selectedDeliveryRootFacts(t, run)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return event
 }
 
 func selectedDeliverySourceRoot(t *testing.T, ctx context.Context, source semanticview.Source, fact correlation.SourceArtifactFact, event events.Event) bus.FlowInstanceActivationCommand {
@@ -197,11 +228,7 @@ func selectedDeliverySourceRoot(t *testing.T, ctx context.Context, source semant
 	if err != nil {
 		t.Fatal(err)
 	}
-	graph, ok := semanticview.WorkflowStageTopology(source, flow)
-	if !ok {
-		t.Fatal("selected source root has no compiled stage owner")
-	}
-	stage, err := graph.InitialStoredStage()
+	stage, err := constructor.InitialStoredStage()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +238,7 @@ func selectedDeliverySourceRoot(t *testing.T, ctx context.Context, source semant
 		t.Fatal("selected source lost its root flow schema")
 	}
 	readiness := pipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: event.RunID(), BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: event.ExecutionMode()}
-	instance := pipeline.WorkflowInstance{InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID, EntityType: contract.EntityType, WorkflowName: identity.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: schema.EffectiveMode(), CurrentState: stage.ID(), StageDefined: graph.StageCount() != 0, Fields: fields, RuntimeReadiness: &readiness, CreatedAt: event.CreatedAt(), EnteredStageAt: event.CreatedAt()}
+	instance := pipeline.WorkflowInstance{InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID, EntityType: contract.EntityType, WorkflowName: identity.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: schema.EffectiveMode(), CurrentState: stage.ID(), StageDefined: !stage.IsStatelessPosture(), Fields: fields, RuntimeReadiness: &readiness, CreatedAt: event.CreatedAt(), EnteredStageAt: event.CreatedAt()}
 	ctx = effects.WithExecutionMode(correlation.WithRunID(ctx, event.RunID()), event.ExecutionMode())
 	command, err := flowactivationfixture.Command(ctx, instance, pipeline.WorkflowLifecycleMutationPlan{}, event.CreatedAt())
 	if err != nil {

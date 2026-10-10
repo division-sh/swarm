@@ -955,37 +955,43 @@ func issue2564H2CounterEvidence(t *testing.T, rt issue2564H2Fixture, run string,
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := issue2564H2ValidateCounters(rows, accepted, snapshot, int64(len(accepted)/6)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func issue2564H2ValidateCounters(rows []storetest.H2CounterMutationsEvidence, accepted map[string]string, snapshot issue2564H2Snapshot, expected int64) error {
 	chains, effects := map[string]map[int64]int64{}, map[string]map[string]int{}
 	for _, row := range rows {
 		entity, path, cause, old, next := row.Entity, row.Path, row.Cause, row.Before, row.After
 		var before, after int64
 		if !next.Valid || json.Unmarshal([]byte(next.String), &after) != nil {
-			t.Fatalf("H2 counter became absent/noninteger: %s %s -> %s", path, old.String, next.String)
+			return fmt.Errorf("H2 counter became absent/noninteger: %s %s -> %s", path, old.String, next.String)
 		}
 		if !old.Valid || old.String == "null" {
 			if after != 0 {
-				t.Fatalf("H2 uninitialized counter skipped zero: %s/%s -> %d", entity, path, after)
+				return fmt.Errorf("H2 uninitialized counter skipped zero: %s/%s -> %d", entity, path, after)
 			}
 			continue
 		}
 		if err := json.Unmarshal([]byte(old.String), &before); err != nil || after < before {
-			t.Fatalf("H2 counter reversion: entity=%s path=%s before=%s after=%s cause=%s", entity, path, old.String, next.String, cause)
+			return fmt.Errorf("H2 counter reversion: entity=%s path=%s before=%s after=%s cause=%s", entity, path, old.String, next.String, cause)
 		}
 		if before == after {
 			continue
 		}
 		if accepted[cause] == "" || after != before+1 {
-			t.Fatalf("H2 counter change lacks one real bump: entity=%s path=%s %d->%d cause=%s", entity, path, before, after, cause)
+			return fmt.Errorf("H2 counter change lacks one real bump: entity=%s path=%s %d->%d cause=%s", entity, path, before, after, cause)
 		}
 		if snapshot.Hubs[accepted[cause]].Entity != entity {
-			t.Fatalf("H2 mutation escaped exact keyed receiver: event=%s hub=%s entity=%s", cause, accepted[cause], entity)
+			return fmt.Errorf("H2 mutation escaped exact keyed receiver: event=%s hub=%s entity=%s", cause, accepted[cause], entity)
 		}
 		key := entity + ":" + path
 		if chains[key] == nil {
 			chains[key] = map[int64]int64{}
 		}
 		if _, duplicate := chains[key][before]; duplicate {
-			t.Fatalf("H2 repeated stale counter evaluation: %s before=%d", key, before)
+			return fmt.Errorf("H2 repeated stale counter evaluation: %s before=%d", key, before)
 		}
 		chains[key][before] = after
 		if effects[cause] == nil {
@@ -995,25 +1001,26 @@ func issue2564H2CounterEvidence(t *testing.T, rt issue2564H2Fixture, run string,
 	}
 	for event, hubID := range accepted {
 		if effects[event]["count"] != 1 || effects[event]["c1"]+effects[event]["c2"] != 1 {
-			t.Fatalf("H2 bump %s hub=%s does not have exact coupled count/stage evidence: %v", event, hubID, effects[event])
+			return fmt.Errorf("H2 bump %s hub=%s does not have exact coupled count/stage evidence: %v", event, hubID, effects[event])
 		}
 	}
 	for _, hub := range snapshot.Hubs {
-		if hub.Count != int64(len(accepted)/6) || hub.C1 == 0 || hub.C2 == 0 {
-			t.Fatalf("H2 exact per-hub bump/stage counts: %+v expected=%d", hub, len(accepted)/6)
+		if hub.Count != expected || hub.C1 < 0 || hub.C2 < 0 || hub.C1+hub.C2 != hub.Count {
+			return fmt.Errorf("H2 exact per-hub bump/stage counts: %+v expected=%d", hub, expected)
 		}
 		for path, final := range map[string]int64{"count": hub.Count, "c1": hub.C1, "c2": hub.C2} {
 			chain := chains[hub.Entity+":"+path]
 			if int64(len(chain)) != final {
-				t.Fatalf("H2 counter mutation evidence lost: %s/%s chain=%d final=%d", hub.ID, path, len(chain), final)
+				return fmt.Errorf("H2 counter mutation evidence lost: %s/%s chain=%d final=%d", hub.ID, path, len(chain), final)
 			}
 			for before := int64(0); before < final; before++ {
 				if chain[before] != before+1 {
-					t.Fatalf("H2 nonmonotonic/disconnected acknowledged history: %s/%s at %d", hub.ID, path, before)
+					return fmt.Errorf("H2 nonmonotonic/disconnected acknowledged history: %s/%s at %d", hub.ID, path, before)
 				}
 			}
 		}
 	}
+	return nil
 }
 
 func issue2564H2Deliveries(t *testing.T, rt issue2564H2Fixture, run string, accepted map[string]string, userEvents int) {
@@ -1115,6 +1122,7 @@ func TestIssue2564ReconstructedEquivalentH2BothStores(t *testing.T) {
 				rt.waitDeliveries(t, seed.RunID)
 				before := issue2564H2WaitAccounting(t, rt, seed.RunID, false, keys)
 				issue2564H2Deliveries(t, rt, seed.RunID, accepted, workload.bumps+6)
+				issue2564H2CommittedStageEvidence(t, rt, seed.RunID, accepted)
 				issue2564H2CounterEvidence(t, rt, seed.RunID, accepted, before)
 				if _, err := arm.Write([]byte{1}); err != nil {
 					t.Fatal(err)

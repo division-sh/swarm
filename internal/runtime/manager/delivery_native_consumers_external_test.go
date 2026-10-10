@@ -6,6 +6,66 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 )
 
+func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			manager.ProveNativeResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeDelivery(t, backend)
+			})
+		})
+	}
+}
+
+func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdown(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			manager.ProveNativeAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdown(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeDelivery(t, backend)
+			})
+		})
+	}
+}
+
+func TestPersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			manager.ProveNativePersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeDelivery(t, backend)
+			})
+		})
+	}
+}
+
+func TestExecutionProjectionRecoveryStartsPersistedRunningCell(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			manager.ProveNativeExecutionProjectionRecoveryStartsPersistedRunningCell(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeDelivery(t, backend)
+			})
+		})
+	}
+}
+
+func TestExecutionProjectionSpawnDuringRunActivatesRegisteredProjection(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			manager.ProveNativeExecutionProjectionSpawnDuringRunActivatesRegisteredProjection(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeDelivery(t, backend)
+			})
+		})
+	}
+}
+
+func TestAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBufferedDelivery(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			manager.ProveNativeAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBufferedDelivery(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeDelivery(t, backend)
+			})
+		})
+	}
+}
+
 func TestRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T) {
 	t.Run("unit", func(t *testing.T) {
 		manager.ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t, nil, nil)

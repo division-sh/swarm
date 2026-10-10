@@ -381,45 +381,16 @@ func readWorkspaceProofReceiverFields(t *testing.T, reader pipeline.WorkflowEnti
 
 // These are detached physical snapshot rows, not a second SQL reader or a
 // decoder for construction receipts. Field values retain their stored JSON text.
-func workspaceProofPhysicalRows(table storetest.SelectedForkStorageTableSnapshot) ([]map[string]json.RawMessage, error) {
-	if len(table.Columns) == 0 {
-		return nil, fmt.Errorf("physical snapshot is missing its column inventory")
-	}
-	seen := map[string]bool{}
-	for _, column := range table.Columns {
-		if seen[column] {
-			return nil, fmt.Errorf("physical snapshot repeats column %s", column)
-		}
-		seen[column] = true
-	}
-	var out []map[string]json.RawMessage
-	for _, encoded := range table.Rows {
-		var values []json.RawMessage
-		if err := json.Unmarshal([]byte(encoded), &values); err != nil {
-			return nil, err
-		}
-		if len(values) != len(table.Columns) {
-			return nil, fmt.Errorf("physical snapshot row width=%d, want %d", len(values), len(table.Columns))
-		}
-		row := make(map[string]json.RawMessage, len(values))
-		for index, column := range table.Columns {
-			row[column] = values[index]
-		}
-		out = append(out, row)
-	}
-	return out, nil
+func workspaceProofPhysicalRows(table storetest.SelectedForkStorageTableSnapshot) ([]map[string]storetest.SelectedForkSnapshotCell, error) {
+	return storetest.DecodeSelectedForkSnapshotRows(table)
 }
 
-func workspaceProofPhysicalText(row map[string]json.RawMessage, column string) (string, error) {
-	raw, found := row[column]
+func workspaceProofPhysicalText(row map[string]storetest.SelectedForkSnapshotCell, column string) (string, error) {
+	cell, found := row[column]
 	if !found {
 		return "", fmt.Errorf("physical snapshot is missing column %s", column)
 	}
-	var value string
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return "", err
-	}
-	return value, nil
+	return cell.Text()
 }
 
 func workspaceProofClaimAttemptCounts(table storetest.SelectedForkStorageTableSnapshot, deliveryID string, claimVersion int64, outcome string) (int, int, error) {
@@ -440,15 +411,15 @@ func workspaceProofClaimAttemptCounts(table storetest.SelectedForkStorageTableSn
 		if !found {
 			return 0, 0, fmt.Errorf("physical attempt is missing open_marker")
 		}
-		switch string(marker) {
+		switch string(marker.Value) {
 		case "true", "1":
 			open++
 		case "false", "0", "null":
 		default:
-			return 0, 0, fmt.Errorf("physical attempt has invalid open_marker: %s", marker)
+			return 0, 0, fmt.Errorf("physical attempt has invalid open_marker: %s", marker.Value)
 		}
 		var version int64
-		if err := json.Unmarshal(row["claim_version"], &version); err != nil {
+		if err := json.Unmarshal(row["claim_version"].Value, &version); err != nil {
 			return 0, 0, err
 		}
 		closure, err := workspaceProofPhysicalText(row, "closure_kind")
@@ -466,15 +437,25 @@ func workspaceProofClaimAttemptCounts(table storetest.SelectedForkStorageTableSn
 	return settled, open, nil
 }
 
+func workspaceProofPhysicalRow(t *testing.T, columns []string, values ...any) string {
+	t.Helper()
+	row, err := storetest.EncodeSelectedForkSnapshotValues(columns, values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return row
+}
+
 func TestWorkspaceProofPhysicalCountsKeepExactClaimAndChildPredicates(t *testing.T) {
+	columns := []string{"delivery_id", "claim_version", "closure_kind", "outcome", "open_marker"}
 	attempts := storetest.SelectedForkStorageTableSnapshot{
-		Columns: []string{"delivery_id", "claim_version", "closure_kind", "outcome", "open_marker"},
+		Columns: columns,
 		Rows: []string{
-			`["exact",1,"settled","delivered",false]`,
-			`["exact",2,"settled","delivered",0]`,
-			`["exact",1,"claimed",null,true]`,
-			`["other",1,"settled","delivered",1]`,
-			`["exact",1,"settled","dead_letter",false]`,
+			workspaceProofPhysicalRow(t, columns, "exact", int64(1), "settled", "delivered", false),
+			workspaceProofPhysicalRow(t, columns, "exact", int64(2), "settled", "delivered", int64(0)),
+			workspaceProofPhysicalRow(t, columns, "exact", int64(1), "claimed", nil, true),
+			workspaceProofPhysicalRow(t, columns, "other", int64(1), "settled", "delivered", int64(1)),
+			workspaceProofPhysicalRow(t, columns, "exact", int64(1), "settled", "dead_letter", false),
 		},
 	}
 	settled, open, err := workspaceProofClaimAttemptCounts(attempts, "exact", 1, "delivered")
@@ -485,7 +466,7 @@ func TestWorkspaceProofPhysicalCountsKeepExactClaimAndChildPredicates(t *testing
 	if settled, open, err := workspaceProofClaimAttemptCounts(attempts, "exact", 1, "delivered"); err != nil || settled != 2 || open != 1 {
 		t.Fatalf("attempt multiplicity was lost: settled=%d open=%d err=%v", settled, open, err)
 	}
-	for _, bad := range []string{`["exact",1,"claimed",null,"invalid"]`, `[]`, `{`} {
+	for _, bad := range []string{workspaceProofPhysicalRow(t, columns, "exact", int64(1), "claimed", nil, "invalid"), `[]`, `{`} {
 		failed := attempts
 		failed.Rows = append(append([]string(nil), attempts.Rows...), bad)
 		if settled, open, err := workspaceProofClaimAttemptCounts(failed, "exact", 1, "delivered"); err == nil || settled != 0 || open != 0 {
@@ -493,11 +474,7 @@ func TestWorkspaceProofPhysicalCountsKeepExactClaimAndChildPredicates(t *testing
 		}
 	}
 	row := func(id, parent, name, class string) string {
-		encoded, err := json.Marshal([]string{id, parent, name, class})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(encoded)
+		return workspaceProofPhysicalRow(t, []string{"event_id", "source_event_id", "event_name", "event_class"}, id, parent, name, class)
 	}
 	eventsTable := storetest.SelectedForkStorageTableSnapshot{
 		Columns: []string{"event_id", "source_event_id", "event_name", "event_class"},

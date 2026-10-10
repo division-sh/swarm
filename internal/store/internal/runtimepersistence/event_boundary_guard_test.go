@@ -45,6 +45,7 @@ var admittedEventCallsites = map[eventBoundaryCallsite]int{
 	{path: "internal/store/internal/backend/eventpersistence/runtime_log_persistence.go", scope: "EventSQLiteOwner.admitRuntimeLogRecord", name: "AdmitForPersistence"}:   1,
 	{path: "internal/store/storetest/event.go", scope: "InsertCanonicalEventRecord", name: "AdmitForPersistence"}:                                                         1,
 	{path: "internal/store/storetest/event.go", scope: "commitSemanticEventWithInitialFacts", name: "AdmitForPublish"}:                                                    1,
+	{path: "internal/store/storetest/event.go", scope: "AdmitNativeDeliveryEvent", name: "AdmitForPublish"}:                                                               1,
 }
 
 var eventRecordImportFiles = map[string]struct{}{
@@ -310,7 +311,7 @@ func TestUnrevisionedEventFixtureHasOnlyStoretestConsumers(t *testing.T) {
 				return err
 			}
 			for _, imported := range file.Imports {
-				if strings.Trim(imported.Path.Value, `"`) == "github.com/division-sh/swarm/internal/store/storetest" {
+				if strings.Trim(imported.Path.Value, `"`) == "github.com/division-sh/swarm/internal/store/storetest" && !checkoutsource.IsTestFixturePackage(filepath.Dir(relative)) {
 					t.Errorf("%s imports test-only storetest fixtures from production code", relative)
 				}
 			}

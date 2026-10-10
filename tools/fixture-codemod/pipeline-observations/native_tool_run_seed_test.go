@@ -133,7 +133,7 @@ func TestNativeToolRunSeedCallerInventoryIsComplete(t *testing.T) {
 		"TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence":                     1,
 		"TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStores": 2,
 		"newEntityToolTestHarnessWithBundleAndLegacyAccess":                            1,
-		"TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores":                   1,
+		"TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores":                    1,
 	} {
 		if counts[name] != want {
 			t.Fatalf("run setup caller %s=%d, want%d", name, counts[name], want)
