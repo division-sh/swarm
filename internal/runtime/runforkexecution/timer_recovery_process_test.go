@@ -1,6 +1,7 @@
 package runforkexecution
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -265,7 +266,7 @@ func TestIssue642TimerForkCrashRestartBothStores(t *testing.T) {
 				event := storetest.LoadCanonicalEventRecord(t, wait, selected, occurrenceID)
 				occurrence, valid := timeridentity.ParseWorkflowTimerOccurrenceTaskID(event.TaskID())
 				if !valid || occurrence != actual.Occurrence() || event.RunID() != checkpoint.ForkRun || event.Type() != "timer.check" ||
-					event.SourceAgent() != "runtime.workflow_timer" || !reflect.DeepEqual(event.Payload(), actual.Payload) || event.RoutingSource() != actual.RoutingSource {
+					event.SourceAgent() != "runtime.workflow_timer" || !bytes.Equal(event.Payload(), actual.Payload) || event.RoutingSource() != actual.RoutingSource {
 					t.Fatalf("recovered publication lost exact timer cause: event=%+v timer=%+v", event, actual)
 				}
 				if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, checkpoint.ForkRun, "timer.check"); err != nil || count != 1 {
