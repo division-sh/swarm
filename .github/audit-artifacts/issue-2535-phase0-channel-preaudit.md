@@ -1526,3 +1526,89 @@ historical evidence, not new-head CI credit. The timing job's failure must be
 read directly rather than assumed independent growth or an assertion waiver.
 Its actual log reports INCOMPLETE, after the failed overlay receipt and
 fail-fast missing/canceled units; no independent elapsed-growth red is reported.
+
+## Speculative #2604 integration preparation, 2026-10-10
+
+The orchestrator authorizes LOCAL preparation on B's exact unmerged source
+bc8c918e41b779f7553c9a34978cbb015e87ba4c, without pushing #2599. Retain
+agent-g/2599-before-bc8-integration at the public head88c18247a. The signed
+22-commit replay ends at e67015410 before the artifact correction below.
+Range-diff preserves20 patches exactly; the other two retain B's venue-bound
+proof-plan context and sourceartifact import. This is preparation, not a
+merge-base assertion, source approval transfer, or new-head qualification.
+
+Seven overlaps are integrated without replacing either lane's owner:
+
+| File | Integrated disposition | Affected proof owner |
+| --- | --- | --- |
+| .github/test-proof-plan.yaml | Retain B's nine mandatory census children and venue recipes; retain G's three channel-worker roots. | planner census, serveapp-channel-delivery, persistence-authority-debt-census |
+| runlifecycle/run_lifecycle_candidates.go | Keep B's exact standalone candidate read and G's borrowed change facts/outer commit notification. | store-runtime-full-01, store-runtime-full-03 |
+| runtimepersistence/run_admission_native_test.go | Keep B's missing-run/warm-artifact-loss refusals and G's ChannelCardChanges signatures; retain both imports. | store-runtime-full-01, store-runtime-full-04 |
+| runtimepersistence/run_fork_revision_writer_census_test.go | Retain the exact frozen activation writer, including its channel-change publisher. | store-runtime-full-04, store-runtime-full-07-fork |
+| store/testdata/persistence_authority_findings.tsv | Preserve both classified owner sets; no debt allowance, TSV format, or exemption change. Final canonical generation/validation remains pending. | store-admission-full, persistence-authority-debt-census |
+| platform-spec.yaml | Preserve B's fixture retirement/census contracts and G's acknowledged-change scheduling contract. | API-spec and owner/census guards |
+| scripts/rewrite-stages-2566/entries.json | Regenerate from the independently reviewed historical ledger; preserve historical selectors and add two exact current coordinates. | permanent stage entry/correspondence/regeneration guards |
+
+Entry regeneration exposed an integration defect in G's earlier artifact:
+the helper rename had replaced two historical tuples. The existing current
+selector model now maps those unchanged pending/order/finals decisions from
+selectedActivityProducerSourceWithRootFields literals2/10 to the corresponding
+selectedActivityProducerSourceOptions literals2/10. No fixture bytes, stage
+decision or selector validation rule changes. Exact remap cardinality is38,
+not36; the original566 goldens remain. Regeneration is stable and the existing
+historical/current-source, changed-decision, ambiguity and typed-corpus controls
+pass. This is consumption of B's owner, not a new oracle or reader fallback.
+
+Carry invalidation is not an instruction to repeat a local tier. Every old
+SHA/plan-bound whole-unit receipt remains historical and cannot qualify this
+integrated head. Comparing B's changed test files with the carried core and
+supplement selectors directly invalidates these source-bearing groups:
+
+- broad-01; catalog-required-verify; catalog-oracle-guards;
+  core-structural-owner-guards; local-api-routing-canaries;
+  local-serveapp-canaries; local-runtime-bus-full;
+  catalog-runtime-scatter-safety; store-admission-full;
+  persistence-authority-debt-census; local-release-golden-smoke.
+- serveapp-channel; serveapp-channel-lifecycle;
+  store-publication-reset-terminal; catalog-selected-root-regression.
+- serveapp-channel-delivery also requires the integrated selector identity;
+  the permanent stage-oracle roots require the new current-coordinate proof.
+
+The unchanged pressure/starvation/FIFO and pure signal counterexamples retain
+historical source-level evidence, not an automatic integrated receipt. Shared
+fixture/owner changes must be checked before claiming any other root unaffected;
+an unchanged root declaration alone is not a dependency proof. The fresh hosted
+selection is CI-Tier lifecycle plus conformance-soak-sqlite and
+conformance-soak-postgres, as enabled by merged #2602. LOCAL stays focused-only;
+no old core/supplement pass is relabeled as current qualification.
+
+Local preparation controls (Go1.25.0, PG16, no failures/skips) pass10 selected
+runtimepersistence roots/52 cells, including both-store missing-run, warm
+artifact loss, admission invalidation, unbound terminal loan, acknowledged
+completion and channel terminal hints. Three fork-registry/capture/writer
+guards also pass in that command. Planner/venue/extra-unit controls pass11
+roots/157 cells; permanent entry controls8 roots/619 cells; API-spec83 roots/511
+cells; regenerated startup predicate census1 root. The predicate snapshot
+does not change. These are pre-commit integration controls, not timing-pair
+or tier qualification. The registry generator was withdrawn while queued for
+the occupied heavy slot, before executing; it has no passing receipt.
+
+The last public full run38021952199 passed all82 logical proof units but its
+timing gate remains RED. Its core growth183.110s splits into new/promoted
+60.450s (master's24.230s promoted and36.220s new cells) and retained122.660s.
+Four G-new pure signal roots report0.000s at the receipt's precision. New cost
+alone is below128.4945s; retained drift dominates the threshold crossing.
+The retained debt cell contributes+224.230s, pressure+2.390s, other retained
+cells-103.960s. The separate matched pair proves real candidate compilation
+cost; this is not an inherited-runtime-cost or noise claim.
+
+Pending #2608 would make that retained drift advisory for admitted PR proof
+while still charging new work and keeping strict cadence aggregate checks.
+Do not apply its unmerged policy, retroactively turn the old red green, or
+transfer the old reference population to this new source. After #2604 actually
+merges, rebase on its real master landing, regenerate/validate the registry,
+run the affected focused debt root and one quiet matched new-base/head pair
+under the recorded identical compiler/cache protocol. Report real base-cache
+HIT separately. No collector flag, scope reduction or blind CI retry is
+authorized. If timing remains blocking, obtain the recorded named/versioned
+policy disposition before qualification. No source push occurs in this prep.
