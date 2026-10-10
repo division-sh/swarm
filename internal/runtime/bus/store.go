@@ -581,22 +581,6 @@ func (d ActiveFlowInstanceDescriptor) Normalized() ActiveFlowInstanceDescriptor 
 	}
 }
 
-func (d ActiveFlowInstanceDescriptor) HasSemanticSource() bool {
-	d = d.Normalized()
-	return d.BundleHash != "" && d.WorkflowVersion != ""
-}
-
-func (d ActiveFlowInstanceDescriptor) TargetDescriptor() ActiveTargetDescriptor {
-	d = d.Normalized()
-	return ActiveTargetDescriptor{
-		FlowID:        d.FlowTemplate,
-		ID:            d.InstanceID,
-		EntityID:      d.EntityID,
-		FlowInstance:  d.FlowInstance,
-		AddressFields: normalizeDescriptorAddressFields(d.AddressFields),
-	}.Normalized()
-}
-
 // ActiveFlowInstanceDescriptorLister exposes active dynamic flow instances as
 // routable target descriptors. Stores implement this from persisted flow
 // instance state, not from live subscriptions or readback.

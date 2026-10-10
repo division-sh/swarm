@@ -173,9 +173,9 @@ func TestActiveTargetDescriptorsRequireExactEntityOwner(t *testing.T) {
 		descriptor ActiveTargetDescriptor
 	}{
 		{name: "selected target descriptor", descriptor: ActiveTargetDescriptor{ID: "portfolio", FlowInstance: "portfolio"}},
-		{name: "active flow descriptor", descriptor: ActiveFlowInstanceDescriptor{
-			InstanceID: "one", FlowInstance: "operating/one",
-		}.TargetDescriptor()},
+		{name: "keyed target descriptor", descriptor: ActiveTargetDescriptor{
+			FlowID: "operating", ID: "one", FlowInstance: "operating/one",
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
