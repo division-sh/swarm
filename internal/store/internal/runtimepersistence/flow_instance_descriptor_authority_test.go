@@ -457,7 +457,7 @@ func seedStaticFlowInstanceRouteWithoutReadiness(t *testing.T, db *sql.DB, sqlit
 		if _, err := db.Exec(`INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision) VALUES (?, ?, ?, 'standing', 'standing', 'static', '{}', 'active', TRUE, 'active', ?, ?, ?, '{}', '{}', '{}', 1)`, runID, instancePath, entityID, now, now, now); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.Exec(`INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES (?, ?, ?, 'standing', 'active', '{}', ?, ?)`, entityID, runID, instancePath, now, now); err != nil {
+		if _, err := db.Exec(`INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES (?, ?, ?, 'standing', '{}', ?, ?)`, entityID, runID, instancePath, now, now); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := db.Exec(`INSERT INTO routing_rules (run_id, event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at) VALUES (?, ?, 'node', 'receiver', ?, 'standing', TRUE, 'active', ?)`, runID, instancePath+"/event", instancePath, now); err != nil {
@@ -468,7 +468,7 @@ func seedStaticFlowInstanceRouteWithoutReadiness(t *testing.T, db *sql.DB, sqlit
 	if _, err := db.Exec(`INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision) VALUES ($1::uuid, $2, $4::uuid, 'standing', 'standing', 'static', '{}'::jsonb, 'active', TRUE, 'active', $3, $3, $3, '{}', '{}', '{}', 1)`, runID, instancePath, now, entityID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'standing', 'active', '{}'::jsonb, $4, $4)`, entityID, runID, instancePath, now); err != nil {
+	if _, err := db.Exec(`INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'standing', '{}'::jsonb, $4, $4)`, entityID, runID, instancePath, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO routing_rules (run_id, event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at) VALUES ($1::uuid, $2, 'node', 'receiver', $3, 'standing', TRUE, 'active', $4)`, runID, instancePath+"/event", instancePath, now); err != nil {
@@ -572,8 +572,8 @@ func seedExactFlowInstanceDescriptorOwner(
 			t.Fatalf("seed sqlite flow instance %s: %v", instancePath, err)
 		}
 		if _, err := db.Exec(`
-			INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
-			VALUES (?, ?, ?, 'account', 'active', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+			INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, fields, created_at, updated_at)
+			VALUES (?, ?, ?, 'account', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		`, entityID, runID, instancePath); err != nil {
 			t.Fatalf("seed sqlite entity state %s: %v", instancePath, err)
 		}
@@ -594,8 +594,8 @@ func seedExactFlowInstanceDescriptorOwner(
 		t.Fatalf("seed postgres flow instance %s: %v", instancePath, err)
 	}
 	if _, err := db.Exec(`
-		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
-		VALUES ($1::uuid, $2::uuid, $3, 'account', 'active', '{}'::jsonb, NOW(), NOW())
+		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, fields, created_at, updated_at)
+		VALUES ($1::uuid, $2::uuid, $3, 'account', '{}'::jsonb, NOW(), NOW())
 	`, entityID, runID, instancePath); err != nil {
 		t.Fatalf("seed postgres entity state %s: %v", instancePath, err)
 	}
@@ -960,10 +960,10 @@ func seedFlowInstanceDescriptorAuthorityCase(
 			}
 		}
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
+			INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, fields, created_at, updated_at)
 			VALUES
-				(?, ?, ?, 'account', 'active', '{"account_id":"existing"}', ?, ?),
-				(?, ?, ?, 'account', 'active', '{"account_id":"current"}', ?, ?)
+				(?, ?, ?, 'account', '{"account_id":"existing"}', ?, ?),
+				(?, ?, ?, 'account', '{"account_id":"current"}', ?, ?)
 		`, entityID, runID, instancePath, now, now, stagedEntityID, runID, stagedInstancePath, now, now); err != nil {
 			t.Fatalf("seed sqlite entity state: %v", err)
 		}
@@ -1011,10 +1011,10 @@ func seedFlowInstanceDescriptorAuthorityCase(
 		}
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
+		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, fields, created_at, updated_at)
 		VALUES
-			($1::uuid, $2::uuid, $3, 'account', 'active', '{"account_id":"existing"}'::jsonb, now(), now()),
-			($4::uuid, $2::uuid, $5, 'account', 'active', '{"account_id":"current"}'::jsonb, now(), now())
+			($1::uuid, $2::uuid, $3, 'account', '{"account_id":"existing"}'::jsonb, now(), now()),
+			($4::uuid, $2::uuid, $5, 'account', '{"account_id":"current"}'::jsonb, now(), now())
 	`, entityID, runID, instancePath, stagedEntityID, stagedInstancePath); err != nil {
 		t.Fatalf("seed postgres entity state: %v", err)
 	}

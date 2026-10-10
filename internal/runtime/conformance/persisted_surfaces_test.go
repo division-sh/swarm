@@ -2016,7 +2016,7 @@ func trackedMutationStateMatchesEntityState(selected any, runID, entityID string
 	}
 	currentState, fieldsRaw, bookRaw, gatesRaw, accRaw := evidence.CurrentState, evidence.Fields, evidence.Bookkeeping, evidence.Gates, evidence.Accumulator
 	want := runtimemutationlog.EntityStateProjection{
-		CurrentState: strings.TrimSpace(currentState),
+		CurrentState: runtimemutationlog.PresentLifecycleState(currentState),
 		Fields:       map[string]any{},
 		Bookkeeping:  map[string]any{},
 		Gates:        map[string]any{},
