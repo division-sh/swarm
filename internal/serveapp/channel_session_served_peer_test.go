@@ -52,6 +52,7 @@ type serveNativeProtocolPeer struct {
 	malformedAck  string
 	withholdAck   string
 	clientTrust   servedNativeClientTrust
+	onACKTimeout  func(string)
 }
 
 type servedNativeMessage struct {
@@ -339,6 +340,13 @@ func (p *serveNativeProtocolPeer) receiver(jid types.JID) (servedNativeReceiver,
 
 func (p *serveNativeProtocolPeer) customer(text, id string) (types.JID, types.JID) {
 	p.t.Helper()
+	message, from, lid := p.customerMessage(text, id)
+	p.sendEncrypted(message, id)
+	return from, lid
+}
+
+func (p *serveNativeProtocolPeer) customerMessage(text, id string) (waBinary.Node, types.JID, types.JID) {
+	p.t.Helper()
 	p.mu.Lock()
 	registration := p.registration
 	p.mu.Unlock()
@@ -351,8 +359,7 @@ func (p *serveNativeProtocolPeer) customer(text, id string) (types.JID, types.JI
 	p.receivers[lid.ToNonAD()] = servedNativeReceiver{sender: sender, lid: lid.ToNonAD()}
 	p.ownedSenders = append(p.ownedSenders, sender)
 	p.mu.Unlock()
-	p.sendEncrypted(sender.EncryptText(p.t, text, id), id)
-	return from.ToNonAD(), lid.ToNonAD()
+	return sender.EncryptText(p.t, text, id), from.ToNonAD(), lid.ToNonAD()
 }
 
 func (p *serveNativeProtocolPeer) text(text, id string) {
@@ -380,6 +387,12 @@ func (p *serveNativeProtocolPeer) reply(text, id string, original servedNativeMe
 
 func (p *serveNativeProtocolPeer) sendEncrypted(message waBinary.Node, id string) {
 	p.t.Helper()
+	p.sendEncryptedFrame(message)
+	p.awaitEncryptedReceipt(id)
+}
+
+func (p *serveNativeProtocolPeer) sendEncryptedFrame(message waBinary.Node) {
+	p.t.Helper()
 	p.mu.Lock()
 	wire := p.wire
 	p.mu.Unlock()
@@ -389,12 +402,19 @@ func (p *serveNativeProtocolPeer) sendEncrypted(message waBinary.Node, id string
 	if err := wire.Send(p.ctx, message); err != nil {
 		p.t.Fatal(err)
 	}
+}
+
+func (p *serveNativeProtocolPeer) awaitEncryptedReceipt(id string) {
+	p.t.Helper()
 	select {
 	case receipt := <-p.receipts:
 		if receipt.Attrs["id"] != id || receipt.Attrs["type"] == "retry" {
 			p.t.Fatal("SDK acknowledged a different durable input", receipt)
 		}
 	case <-time.After(5 * time.Second):
+		if p.onACKTimeout != nil {
+			p.onACKTimeout(id)
+		}
 		p.t.Fatal("SDK did not acknowledge the durable encrypted input", id)
 	}
 }
