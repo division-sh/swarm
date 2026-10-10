@@ -4579,7 +4579,10 @@ handler_specification:
           the same compiled plan. Fork projection retains the original source witness and immutable item order,
           multiplicity and cardinality while admitting the exact selected plan for future ordinal evaluation.
           A changed selected emit digest does not invalidate the original source. Neither reference is inferred or
-          replaced on read. The selected compiled plan must validate its own digest, accept the frozen item type
+          replaced on read. References to the same artifact and declaration must have the same semantic digest,
+          including a return to the original artifact after an intermediate selection. A selection also cannot
+          change its previous interpretation under an unchanged execution artifact.
+          The selected compiled plan must validate its own digest, accept the frozen item type
           through the catalog assignment owner, and admit the retained cardinality within its bound. Historical
           ordinal facts are never reissued because the selected plan changed.
           The semantic-view owner supplies detached compiled evidence from the exact selected artifact to every
