@@ -59,6 +59,15 @@ func TestWhatsAppStandingResponsibilityRequiresRealConfirmationBothStores(t *tes
 				native.CloseExecution()
 				t.Fatal("held native authority adopted another parent revision", err)
 			}
+			f.occurrence.fence()
+			if err := channelonboarding.RequireSessionStandingAdmission(f.operation, native); !errors.Is(err, channelonboarding.ErrRevisionConflict) {
+				native.CloseExecution()
+				t.Fatal("fenced occurrence retained fresh promotion authority through an unreleased handle", err)
+			}
+			if current, err := f.selected.SessionStandingBindingCurrent(context.Background(), f.operation); err != nil || !current {
+				native.CloseExecution()
+				t.Fatal("execution fencing erased confirmed retention", current, err)
+			}
 			native.CloseExecution()
 			if err := channelonboarding.RequireSessionStandingAdmission(f.operation, native); !errors.Is(err, channelonboarding.ErrRevisionConflict) {
 				t.Fatal("released SDK admission still promoted a native target", err)
