@@ -80,7 +80,8 @@ func TestMaterializedTargetProjectionUsesExactIndexScope(t *testing.T) {
 	bus := &EventBus{semanticSource: source, durable: DurableDependencies{Instances: reader}}
 	bus.rebuildRoutePlanners()
 	plan := newRoutePlan(event)
-	plan.DeliveryIntents = []RoutePlanDeliveryIntent{{TargetBlueprint: events.RouteIdentity{
+	node := testFlowNode(t, "account", "account-node")
+	plan.DeliveryIntents = []RoutePlanDeliveryIntent{{Recipient: events.MustNodeDeliveryRecipient(node), Handler: pipeline.MustDeliveryTargetHandler(node).ForEvent("account.ready"), TargetBlueprint: events.RouteIdentity{
 		FlowID: identity.TemplateID, FlowInstance: identity.InstancePath, EntityID: identity.EntityID,
 	}}}
 	projection, err := bus.deliveryPlanner.materializedTargetOwnerProjection(ctx, event, plan)

@@ -261,6 +261,35 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	return events.DeliveryTargetOwnership{}, fmt.Errorf("receiver target owner is missing for flow instance %q; construct it before handler delivery", blueprint.FlowInstance)
 }
 
+// AdmitDeliveryTargetLookupCoordinate supplies lookup identity, not execution
+// permission. A declaration comes from the admitted handler, never a stored path.
+func AdmitDeliveryTargetLookupCoordinate(req DeliveryTargetOwnershipRequest) (events.RouteIdentity, error) {
+	handler, admitted := req.Handler.resolve(req.Source, req.Event.Type())
+	if !req.Recipient.IsNode() || !admitted {
+		return events.RouteIdentity{}, fmt.Errorf("node target lookup requires its admitted handler")
+	}
+	node, _ := req.Recipient.Node()
+	if !node.Equal(req.Handler.Node()) {
+		return events.RouteIdentity{}, fmt.Errorf("node target lookup disagrees with its handler recipient")
+	}
+	if err := ValidateExecutionHandlerDeclaration(req.Source, req.Handler.Node(), handler); err != nil {
+		return events.RouteIdentity{}, err
+	}
+	flowID := req.Handler.ExecutionFlowID(req.Source)
+	blueprint := req.Blueprint.Normalized()
+	if blueprint.FlowID != "" && blueprint.FlowID != flowID {
+		return events.RouteIdentity{}, fmt.Errorf("target lookup declaration %q disagrees with handler declaration %q", blueprint.FlowID, flowID)
+	}
+	if flowID == semanticview.RootExecutionFlowID(req.Source) {
+		return selectedRunRootTargetBlueprint(req.Source, req.Event, blueprint, true)
+	}
+	if blueprint.FlowInstance == "" {
+		return events.RouteIdentity{}, fmt.Errorf("non-root target lookup requires an exact instance coordinate")
+	}
+	blueprint.FlowID = flowID
+	return blueprint, nil
+}
+
 func selectedRunRootTargetBlueprint(source semanticview.Source, evt events.Event, blueprint events.RouteIdentity, exactTarget bool) (events.RouteIdentity, error) {
 	coordinate, err := semanticview.AdmitRootExecutionCoordinate(source, evt.RunID())
 	if err != nil {
