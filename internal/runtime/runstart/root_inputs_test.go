@@ -37,6 +37,19 @@ func TestParentLocalReturnProjectionDoesNotGrantRootInput(t *testing.T) {
 	}
 }
 
+func TestKeyedRootInputAdmissionConsumesDeclarationsBeforeConstruction(t *testing.T) {
+	root := canonicalrouting.CopyKeyedRootRawIngress(t)
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := ValidateInputEvents(semanticview.Wrap(bundle), []string{"account.opened"})
+	if err != nil || !reflect.DeepEqual(set.Declared, []string{"account.opened"}) || !reflect.DeepEqual(set.Routable, set.Declared) {
+		t.Fatalf("keyed root declaration requires mutable instance membership: %+v %v", set, err)
+	}
+}
+
 func TestDeriveRootInputSetRequiresDeclaredAndRoutableRootInput(t *testing.T) {
 	bundle := rootInputTestBundle(t, "scan.corpus_file_requested")
 	set, err := DeriveRootInputSet(semanticview.Wrap(bundle))
@@ -180,6 +193,9 @@ func rootInputTestBundle(t testing.TB, eventName string) *runtimecontracts.Workf
 			},
 		},
 	}
+	root.Schema = *bundle.RootSchema
+	bundle.FlowSchemas["."] = root.Schema
+	bundle.FlowTree.ByID["."] = &root
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatalf("compile root-input test semantics: %v", err)
 	}

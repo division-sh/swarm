@@ -735,9 +735,6 @@ func installConnectionSourceConstructionForRun(t testing.TB, eb *EventBus, sourc
 			t.Fatalf("source construction %s: %v", declaringFlow, err)
 		}
 		owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: instance.Route()}
-		if err := eb.RouteTable().AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: instance}); err != nil {
-			t.Fatalf("install exact source construction %s: %v", declaringFlow, err)
-		}
 		if reader, ok := eb.durable.ConstructionPublications.(interface {
 			installConstructionReceipt(runtimeflowidentity.RunScopedFlowInstance, runtimepipeline.FlowConstructionPublicationEvidence)
 		}); ok {
@@ -1611,7 +1608,7 @@ func TestRouteTableCompiledConnectRootInputExcludesFlattenedChildObserver(t *tes
 		t.Fatalf("connect recipients = %#v, want only exact root parent-listener", recipients)
 	}
 
-	local := routeTable.ResolveForRun(busInternalTestRunID, "worker/work.completed")
+	local := routeTable.PubsubDeclarationDefinitionsFixture(t, "worker", "worker/work.completed")
 	if len(local) != 1 || local[0].Recipient.LocalID() != "worker-output-observer" || local[0].handlerNode.FlowPath() != "worker" {
 		t.Fatalf("same-flow recipients = %#v, want only exact child observer", local)
 	}
@@ -2442,6 +2439,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:          source,
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
+		Durable:                 DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2466,8 +2464,12 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 		t.Fatalf("preview target = %#v, want deterministic consumer flow instance", previewTarget)
 	}
 	previewIdentity := testRunScopedFlowRouteForRun(evt.RunID(), runtimeflowidentity.StoredRoute("consumer", runtimeflowidentity.LogicalInstanceID(previewTarget.FlowInstance), previewTarget.FlowInstance))
-	if routes := eb.RouteTable().MaterializedRoutes(previewIdentity); len(routes) != 0 {
-		t.Fatalf("preview route table state leaked after preflight: %#v", routes)
+	lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, eb.sourceArtifactFact, previewIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed, found, err := store.LookupFlowInstance(constructionIndexContext(t, source), lookup); err != nil || found || observed.Valid() {
+		t.Fatalf("preview published a native receiver: observed=%+v found=%v err=%v", observed, found, err)
 	}
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
@@ -3516,6 +3518,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionDoesNotReuseUnr
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:          source,
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
+		Durable:                 DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -3539,8 +3542,9 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionDoesNotReuseUnr
 	if got := len(store.flowInstances); got != 1 {
 		t.Fatalf("flow instance descriptors = %d, want descriptor visible from failed activation", got)
 	}
-	if routes := eb.RouteTable().MaterializedRoutes(testRunScopedFlowRoute(store.activations[0].Instance.Route())); len(routes) != 0 {
-		t.Fatalf("materialized routes after failed activation = %#v, want none", routes)
+	failed := store.activations[0].Instance
+	if evidence, err := store.LoadFlowConstructionPublication(context.Background(), testRunScopedFlowRoute(failed.Route()), failed.EntityID); err != nil || evidence.Identity != failed || evidence.InstanceKey != "acct-partial" || evidence.CreatingInput.EventID != eventID || evidence.CreatingInput.Input != "account.ready" {
+		t.Fatalf("attachment failure lost the exact acknowledged construction: evidence=%+v err=%v", evidence, err)
 	}
 	if routes := store.routes[eventID]; len(routes) != 1 {
 		t.Fatalf("persisted delivery routes = %#v, want the durable route to survive process-local activation failure", routes)
@@ -4138,15 +4142,14 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
 	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1")), "v-1"))
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
-	}
 	consumerOne := subscribeInternalDeliveriesForTest(t, eb, testFlowNode(t, "consumer", "consumer-node").Key(), events.EventType("producer/deploy.done"))
 	consumerTwo := subscribeInternalDeliveriesForTest(t, eb, "consumer-node-two")
 	eventID := uuid.NewString()
@@ -4172,10 +4175,6 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 		FlowInstance:  "consumer/two",
 		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 	}}
-	store.flowInstanceDescriptorCalls = 0
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "two")), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "two", busInternalTestRunID, eventtest.UUID("ent-2"))}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute(two): %v", err)
-	}
 	store.flowInstanceDescriptorCalls = 0
 
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{

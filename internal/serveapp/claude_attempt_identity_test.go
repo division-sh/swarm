@@ -85,11 +85,8 @@ type claudeAttemptProofStore interface {
 	runtimebus.CommitPublicationOwner
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
-	runtimebus.FlowInstanceRoutePersistence
 	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteSetPersistence
 	runtimebus.FlowInstanceRouteTopologyPersistence
-	runtimebus.FlowInstanceRouteRollbackPersistence
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.SelectedRunTargetOwnerLister
@@ -195,6 +192,7 @@ type claudeAttemptProofBackend struct {
 	db       *sql.DB
 	sessions runtimesessions.Registry
 	source   runtimecorrelation.SourceArtifactFact
+	workflow runtimepipeline.WorkflowPersistence
 }
 
 func (b claudeAttemptProofBackend) context() context.Context {
@@ -599,12 +597,14 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 		}
 		t.Cleanup(func() { _ = sqliteStore.Close() })
 		bootstrapSQLiteSchemaForTest(t, context.Background(), sqliteStore, plans)
-		backend = claudeAttemptProofBackend{name: name, store: sqliteStore, db: storetest.DatabaseForTest(sqliteStore), sessions: sqliteStore}
+		backend = claudeAttemptProofBackend{name: name, store: sqliteStore, db: storetest.DatabaseForTest(sqliteStore), sessions: sqliteStore,
+			workflow: runtimepipeline.NewWorkflowPersistence(sqliteStore)}
 	case "postgres":
 		_, db, _ := testutil.StartPostgres(t)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		pg.SetSessionLockTTL(time.Minute)
-		backend = claudeAttemptProofBackend{name: name, store: pg, db: db, sessions: pg}
+		backend = claudeAttemptProofBackend{name: name, store: pg, db: db, sessions: pg,
+			workflow: runtimepipeline.NewWorkflowPersistence(pg)}
 	default:
 		t.Fatalf("unknown Claude proof backend %q", name)
 		return claudeAttemptProofBackend{}
@@ -763,10 +763,11 @@ func newClaudeAttemptProofEventBus(
 		},
 		Durable: runtimebus.DurableDependencies{
 			ReplyContext: backend.store, RunLifecycle: backend.store,
-			DeliveryLifecycle: backend.store, FlowRoutes: backend.store, FlowRouteRecords: backend.store,
-			FlowRouteSets: backend.store, FlowRouteTopology: backend.store, FlowRouteRollback: backend.store, ActiveAgents: backend.store,
-			ActiveFlows: backend.store, TargetOwners: backend.store, PreparedEvents: backend.store,
-			TargetFailureRecorder: backend.store, RunOrigins: backend.store, StandingRestarts: backend.store, ConstructionPublications: backend.store,
+			DeliveryLifecycle: backend.store,
+			ActiveAgents:      backend.store,
+			ActiveFlows:       backend.store, TargetOwners: backend.store, PreparedEvents: backend.store,
+			TargetFailureRecorder: backend.store, RunOrigins: backend.store, StandingRestarts: backend.store,
+			Instances: backend.workflow, ConstructionPublications: backend.workflow,
 		},
 	})
 	if err != nil {

@@ -32,6 +32,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -75,23 +76,51 @@ func seedBoundedInboundFlow(t *testing.T, ctx context.Context, selected interfac
 	if err != nil || child.InstancePath != path {
 		t.Fatalf("prepare bounded component parent: child=%+v path=%s err=%v", child, path, err)
 	}
+	schema, found := source.FlowSchemaByID(child.TemplateID)
+	if !found {
+		t.Fatal("inbound fixture requires its exact constructor declaration")
+	}
 	// The bounded gateway control uses a prepared component aggregate, not
 	// public standing construction or process attachment qualification. Its
 	// parent coordinate still comes from the canonical keyless identity owner.
 	// The header and bus consume the same admitted constructor source.
-	command, err := flowactivationfixture.Command(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID: path, StorageRef: path, EntityID: entityID, EntityType: "bounded_entity",
-		ParentFlowID: child.ParentRoute.FlowID, ParentFlowInstance: child.ParentRoute.FlowInstance, ParentEntityID: child.ParentEntityID,
-		WorkflowName: boundedProviderFlowID, WorkflowVersion: source.WorkflowVersion(),
-		Slug: slug, Name: "Customer A", CurrentState: "active", StageDefined: true,
-		CreatedAt: now, EnteredStageAt: now, Fields: map[string]any{},
-	}, runtimepipeline.WorkflowLifecycleMutationPlan{}, now)
+	rootSchema, found := source.FlowSchemaByID(".")
+	if !found {
+		t.Fatal("inbound fixture requires its structural root declaration")
+	}
+	rootStages, found := semanticview.WorkflowStageTopology(source, ".")
+	if !found {
+		t.Fatal("inbound fixture requires its compiled root stage catalog")
+	}
+	rootInitial, err := rootStages.InitialStoredStage()
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := selected.CommitFlowInstanceActivation(ctx, command)
-	if err != nil || !result.Acknowledged || !result.Created {
-		t.Fatalf("commit inbound fixture aggregate: acknowledged=%t created=%t err=%v", result.Acknowledged, result.Created, err)
+	var entityType, rootEntityType string
+	if entity, declared := entityruntime.ResolveForFlow(source, boundedProviderFlowID); declared {
+		entityType = entity.EntityType
+	}
+	if entity, declared := entityruntime.ResolveForFlow(source, "."); declared {
+		rootEntityType = entity.EntityType
+	}
+	for _, instance := range []runtimepipeline.WorkflowInstance{
+		{InstanceID: runID, StorageRef: runID, EntityID: runID, EntityType: rootEntityType, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: rootSchema.EffectiveMode(), CurrentState: rootInitial.ID(), StageDefined: rootStages.StageCount() != 0, CreatedAt: now, EnteredStageAt: now},
+		{
+			InstanceID: path, StorageRef: path, EntityID: entityID, EntityType: entityType,
+			ParentFlowID: child.ParentRoute.FlowID, ParentFlowInstance: child.ParentRoute.FlowInstance, ParentEntityID: child.ParentEntityID,
+			WorkflowName: boundedProviderFlowID, WorkflowVersion: source.WorkflowVersion(), Mode: schema.EffectiveMode(),
+			Slug: slug, Name: "Customer A", CurrentState: "active", StageDefined: true,
+			CreatedAt: now, EnteredStageAt: now, Fields: map[string]any{},
+		},
+	} {
+		command, err := flowactivationfixture.Command(ctx, instance, runtimepipeline.WorkflowLifecycleMutationPlan{}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := selected.CommitFlowInstanceActivation(ctx, command)
+		if err != nil || !result.Acknowledged || !result.Created {
+			t.Fatalf("commit inbound fixture aggregate %s: acknowledged=%t created=%t err=%v", instance.StorageRef, result.Acknowledged, result.Created, err)
+		}
 	}
 }
 

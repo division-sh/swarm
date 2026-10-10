@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -32,6 +33,12 @@ func (r connectRoutePlanResolver) resolvePubsubSubscribers(ctx context.Context, 
 	}
 	if len(scope.FlowIDs()) == 0 && len(scope.Coordinates()) == 0 {
 		return nil, nil
+	}
+	if event.RoutingSource().Kind() == events.RoutingSourceDeploymentFeed {
+		keys = append([]string(nil), keys...)
+		for _, coordinate := range scope.Coordinates() {
+			keys = append(keys, coordinate.Route.InstancePath+"/"+string(event.Type()))
+		}
 	}
 	if r.lifecycle.index == nil {
 		return nil, fmt.Errorf("pubsub planning requires its compiled source and native instance index")
@@ -59,14 +66,20 @@ func (r connectRoutePlanResolver) resolvePubsubSubscribers(ctx context.Context, 
 }
 
 func (r connectRoutePlanResolver) pubsubInstanceData(ctx context.Context, scope pipeline.FlowInstanceLookupScope) (map[string]flowidentity.Instance, error) {
-	observations, err := r.indexedInstances(ctx, scope)
-	if err != nil {
-		return nil, err
-	}
-	instances := make(map[string]flowidentity.Instance, len(observations))
-	for _, instance := range observations {
-		owner := flowidentity.RunScopedFlowInstance{RunID: scope.RunID(), Route: instance.Route()}
-		instances[owner.Key()] = instance
+	instances := make(map[string]flowidentity.Instance)
+	if r.lifecycle.runProposal.Present() {
+		if err := r.lifecycle.runProposal.Validate(scope.RunID(), scope.SourceFact()); err != nil {
+			return nil, err
+		}
+	} else {
+		observations, err := r.indexedInstances(ctx, scope)
+		if err != nil {
+			return nil, err
+		}
+		for _, instance := range observations {
+			owner := flowidentity.RunScopedFlowInstance{RunID: scope.RunID(), Route: instance.Route()}
+			instances[owner.Key()] = instance
+		}
 	}
 	proposals, err := r.prospectiveConnectInstances(ctx, scope.RunID(), scope.SourceFact())
 	if err != nil {
@@ -93,8 +106,15 @@ func (r connectRoutePlanResolver) pubsubLookupScope(event events.Event, publicat
 	if event.RoutingSource().Kind() == events.RoutingSourceRoot {
 		route = events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(r.source), FlowInstance: event.RunID()}
 	}
+	if event.RoutingSource().Kind() == events.RoutingSourceDeploymentFeed {
+		if _, err := pinrouting.AdmitDeploymentFeedDeclaration(r.source, event.Type(), event.RoutingSource()); err != nil {
+			return pipeline.FlowInstanceLookupScope{}, err
+		}
+		if route.FlowID == semanticview.RootExecutionFlowID(r.source) {
+			route.FlowInstance = event.RunID()
+		}
+	}
 	var exact []flowidentity.RunScopedFlowInstance
-	var flows []string
 	if !publication.declarationOnly && route.FlowID != "" && route.FlowInstance != "" {
 		owner, err := flowidentity.NewRunScopedFlowInstance(event.RunID(), flowidentity.StoredRoute(flowidentity.ScopeKey(r.source, route.FlowID), "", route.FlowInstance))
 		if err != nil {
@@ -103,27 +123,8 @@ func (r connectRoutePlanResolver) pubsubLookupScope(event events.Event, publicat
 		if len(r.routeTable.templates[owner.Route.ScopeKey].Subscribers) > 0 {
 			exact = append(exact, owner)
 		}
-		flows, err = r.pubsubObserverDeclarations(owner)
-		if err != nil {
-			return pipeline.FlowInstanceLookupScope{}, err
-		}
 	}
-	return pipeline.NewFlowInstanceLookupScope(r.source, fact, event.RunID(), flows, exact)
-}
-
-func (r connectRoutePlanResolver) pubsubObserverDeclarations(owner flowidentity.RunScopedFlowInstance) ([]string, error) {
-	var flows []string
-	for _, dependency := range r.routeTable.compiledRouteOwnerDependencies(r.routeTable.inputProducers) {
-		if dependency.SourceFlowPath != owner.Route.ScopeKey {
-			continue
-		}
-		ids := r.routeTable.activeTemplateIDsForFlowPaths([]string{dependency.ReceiverFlowPath})
-		if len(ids) == 0 {
-			return nil, fmt.Errorf("pubsub observer dependency is outside its compiled source")
-		}
-		flows = append(flows, ids...)
-	}
-	return flows, nil
+	return pipeline.NewFlowInstanceLookupScope(r.source, fact, event.RunID(), nil, exact)
 }
 
 func pubsubScopeIncludes(scope pipeline.FlowInstanceLookupScope, owner flowidentity.RunScopedFlowInstance, flowID string) bool {
@@ -187,7 +188,7 @@ func validatePubsubExactCoordinates(scope pipeline.FlowInstanceLookupScope, obse
 // PubsubReceiverDefinitions binds source-owned subscription definitions to an
 // identity admitted by the caller. It grants neither existence nor readiness.
 func (rt *RouteTable) PubsubReceiverDefinitions(runID string, instance flowidentity.Instance, keys []string) ([]Subscriber, error) {
-	if rt == nil || !rt.compiledSourceReady {
+	if rt == nil || rt.source == nil || !rt.compiledSourceReady {
 		return nil, fmt.Errorf("pubsub binding requires its compiled source")
 	}
 	if err := instance.ValidateConstruction(rt.source, runID); err != nil {
@@ -207,7 +208,7 @@ func (rt *RouteTable) PubsubReceiverDefinitions(runID string, instance flowident
 // PubsubDeclarationDefinitions is non-executing descriptive data. Like its
 // connection counterpart it cannot establish an instance or attach resources.
 func (rt *RouteTable) PubsubDeclarationDefinitions(flowID string, keys []string) ([]Subscriber, error) {
-	if rt == nil || !rt.compiledSourceReady {
+	if rt == nil || rt.source == nil || !rt.compiledSourceReady {
 		return nil, fmt.Errorf("pubsub declaration requires its compiled source")
 	}
 	scope, found := rt.source.FlowScopeByID(flowID)
