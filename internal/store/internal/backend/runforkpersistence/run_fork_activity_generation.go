@@ -214,6 +214,9 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		}
 	}
 	if strings.TrimSpace(event.EventName) != runForkActivityRequestEvent {
+		if event.EventName == "platform.join_complete" || event.EventName == "platform.join_timeout" {
+			return admission.publishedArrival(event, state)
+		}
 		role, found, err := admission.eventRole(sourceEvent.SourceEventID)
 		if err != nil {
 			return event, err

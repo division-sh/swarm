@@ -292,6 +292,7 @@ type RunForkPlan struct {
 	historicalRevision        int64
 	historicalEventIDs        []string
 	historicalInputs          map[string]InputPublication
+	historicalArrivals        map[string]PublishedArrival
 }
 
 // RunForkFanOutObligation is the exact semantic fan-out progress visible at a
@@ -1233,13 +1234,15 @@ type RunForkSelectedContractExecutionActivateRequest struct {
 }
 
 type RunForkSelectedContractSourceEvent struct {
-	InputPublication InputPublication     `json:"-"`
-	SourceEventID    string               `json:"source_event_id"`
-	EventName        string               `json:"event_name"`
-	ExecutionMode    executionmode.Mode   `json:"execution_mode"`
-	Scope            string               `json:"scope,omitempty"`
-	RoutingSource    events.RoutingSource `json:"routing_source"`
-	Payload          json.RawMessage      `json:"payload,omitempty"`
+	InputPublication      InputPublication                          `json:"-"`
+	PublishedArrival      genericschedule.PublishedJoinContinuation `json:"-"`
+	PublishedArrivalRoute events.DeliveryRoute                      `json:"-"`
+	SourceEventID         string                                    `json:"source_event_id"`
+	EventName             string                                    `json:"event_name"`
+	ExecutionMode         executionmode.Mode                        `json:"execution_mode"`
+	Scope                 string                                    `json:"scope,omitempty"`
+	RoutingSource         events.RoutingSource                      `json:"routing_source"`
+	Payload               json.RawMessage                           `json:"payload,omitempty"`
 }
 
 type RunForkSelectedContractExecutionLineage struct {

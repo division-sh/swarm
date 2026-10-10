@@ -669,6 +669,11 @@ func (c selectedContractForkLocalRuntimeContainer) publishCommittedInputs() erro
 			return err
 		}
 		attachment.guard.ExpectForkEvent(forkEventID, sourceEvent.SourceEventID)
+		if sourceEvent.PublishedArrival.Present() {
+			if err := attachment.guard.ExpectPublishedArrivalDelivery(evt, sourceEvent.PublishedArrivalRoute); err != nil {
+				return err
+			}
+		}
 		eventCtx := runtimecorrelation.WithRuntimeLineageSubject(runCtx, forkEventID, sourceEvent.EventName)
 		if req.Prepared.recoveryChildRunID != "" {
 			admittedCtx, admitted, err := bus.AdmitSelectedForkPublishInput(eventCtx, evt, input)

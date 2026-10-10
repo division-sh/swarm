@@ -46,6 +46,8 @@ func recipientBoundaryAllowances() map[string]recipientBoundaryAllowance {
 		"runtime/runforkexecution::selectedContractWorkflowProjection.BindRecipient/evidence_field:Path":                 {3, "bind root execution copy through admitted root coordinate and source-event membership; no producer-state transfer"},
 		"runtime/runforkexecution::selectedContractNodeDeliveryRoutes/evidence_field:Recipient":                          {2, "typed node materialization, not recipient-set identity"},
 		"runtime/runforkexecution::selectedContractNodeDeliveryRoutes/evidence_field:Path":                               {1, "exact node target blueprint"},
+		"runtime/runforkexecution::selectedPublishedArrivalDeliveryRoute/evidence_field:Recipient":                       {1, "corroborate the retained typed lifecycle receiver against its exact selected declaration"},
+		"runtime/runforkexecution::selectedPublishedArrivalDeliveryRoute/evidence_field:Path":                            {1, "corroborate the projected original delivery target, not rederive recipient-set identity"},
 		"runtime/runfork::RunForkSelectedContractRecipientPlanning.SelectedAgentPlans/evidence_field:Recipient":          {1, "shared admitted agent subset classification"},
 		"runtime/runfork::RunForkSelectedContractRecipientPlanning.SelectedAgentPlans/evidence_field:AgentPlan":          {1, "shared full canonical runless agent plan selection"},
 		"runtime/runforkreadiness::Project/evidence_field:Recipient":                                                     {2, "node/agent workflow-state projection"},
