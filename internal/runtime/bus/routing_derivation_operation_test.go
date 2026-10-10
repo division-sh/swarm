@@ -4,7 +4,6 @@ import (
 	"context"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,7 +14,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type topologyOperationSource struct {
@@ -26,33 +24,6 @@ type topologyOperationSource struct {
 func (s *topologyOperationSource) AuthoredEventEntries() map[string]runtimecontracts.EventCatalogEntry {
 	s.censuses.Add(1)
 	return s.Source.AuthoredEventEntries()
-}
-
-type topologyOperationDescriptors struct {
-	source        semanticview.Source
-	rows          []ActiveFlowInstanceDescriptor
-	calls         int
-	scopedCalls   int
-	templateScope [][]string
-	instanceScope [][]string
-}
-
-func (s *topologyOperationDescriptors) ListActiveFlowInstanceDescriptors(_ context.Context, runID string) ([]ActiveFlowInstanceDescriptor, error) {
-	s.calls++
-	return exactTestFlowInstanceDescriptors(s.rows, s.source.WorkflowVersion(), sourceartifactfixture.Fact(), runID, s.source), nil
-}
-
-func (s *topologyOperationDescriptors) ListActiveFlowInstanceDescriptorsForScope(_ context.Context, runID string, templateIDs, instancePaths []string) ([]ActiveFlowInstanceDescriptor, error) {
-	s.scopedCalls++
-	s.templateScope = append(s.templateScope, append([]string(nil), templateIDs...))
-	s.instanceScope = append(s.instanceScope, append([]string(nil), instancePaths...))
-	var out []ActiveFlowInstanceDescriptor
-	for _, row := range s.rows {
-		if slices.Contains(templateIDs, row.FlowTemplate) || slices.Contains(instancePaths, row.FlowInstance) {
-			out = append(out, row)
-		}
-	}
-	return exactTestFlowInstanceDescriptors(out, s.source.WorkflowVersion(), sourceartifactfixture.Fact(), runID, s.source), nil
 }
 
 func topologyOperationFixture(t testing.TB) (*topologyOperationSource, *EventBus) {
