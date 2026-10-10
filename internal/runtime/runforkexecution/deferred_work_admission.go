@@ -11,6 +11,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -29,6 +30,7 @@ type selectedContractDeferredWorkAdmission struct {
 	workflowName    string
 	workflowVersion string
 	fanOutPlanRefs  []runtimecontracts.FanOutPlanRef
+	fanOutPlans     semanticview.FanOutPlanCarriage
 }
 
 func admitSelectedContractDeferredWork(plan runfork.RunForkPlan, source semanticview.Source) (selectedContractDeferredWorkAdmission, error) {
@@ -44,6 +46,13 @@ func admitSelectedContractDeferredWork(plan runfork.RunForkPlan, source semantic
 	fanOutPlanRefs, err := admitSelectedContractFanOutPlans(plan, source)
 	if err != nil {
 		return selectedContractDeferredWorkAdmission{}, err
+	}
+	var fanOutPlans semanticview.FanOutPlanCarriage
+	if len(fanOutPlanRefs) != 0 {
+		fanOutPlans, err = semanticview.CompileFanOutPlanCarriage(source)
+		if err != nil {
+			return selectedContractDeferredWorkAdmission{}, err
+		}
 	}
 
 	capabilities := selectedContractDeferredWorkCapabilities(source)
@@ -63,6 +72,7 @@ func admitSelectedContractDeferredWork(plan runfork.RunForkPlan, source semantic
 		workflowName:    workflowName,
 		workflowVersion: workflowVersion,
 		fanOutPlanRefs:  fanOutPlanRefs,
+		fanOutPlans:     fanOutPlans,
 	}, nil
 }
 
@@ -125,8 +135,8 @@ func admitSelectedContractFanOutPlans(plan runfork.RunForkPlan, source semanticv
 		if !ok {
 			return nil, fmt.Errorf("selected contract is missing pending fan_out declaration %s", fanOutElementLabel(sourceRef.ElementRef))
 		}
-		if selectedRef.SemanticDigest != sourceRef.SemanticDigest {
-			return nil, fmt.Errorf("selected contract fan_out declaration %s changed semantic digest", fanOutElementLabel(sourceRef.ElementRef))
+		if err := requireSelectedFanOutCorrespondence(obligation.Intent.Request, selectedRef, source); err != nil {
+			return nil, fmt.Errorf("selected contract fan_out correspondence: %w", err)
 		}
 		if obligation.Barrier != nil {
 			if err := obligation.Barrier.Validate(); err != nil {
@@ -163,6 +173,14 @@ func admitSelectedContractFanOutPlans(plan runfork.RunForkPlan, source semanticv
 		refs = append(refs, selectedRef)
 	}
 	return refs, nil
+}
+
+func requireSelectedFanOutCorrespondence(request fanoutobligation.IntentRequest, selectedRef runtimecontracts.FanOutPlanRef, source semanticview.Source) error {
+	selectedPlan, ok := source.FanOutPlanForElement(selectedRef.ElementRef)
+	if !ok || selectedPlan.Ref != selectedRef {
+		return fmt.Errorf("selected contract fan_out declaration %s has contradictory compiled evidence", fanOutElementLabel(selectedRef.ElementRef))
+	}
+	return request.AdmitSelectedPlan(selectedRef, selectedPlan.SemanticEvidence())
 }
 
 func selectedContractCompiledFanOutPlans(source semanticview.Source) (map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, error) {

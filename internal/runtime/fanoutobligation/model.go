@@ -111,6 +111,7 @@ func ProjectExecutionReceiver(route events.DeliveryRoute) (ExecutionReceiver, er
 }
 
 type Capsule struct {
+	SourcePlanRef    runtimecontracts.FanOutPlanRef       `json:"source_plan_ref"`
 	SourceProjection runtimecontracts.FanOutPlanSemantics `json:"source_projection"`
 	NodeKey          string                               `json:"node_key"`
 	ExecutionFlowID  string                               `json:"execution_flow_id"`

@@ -663,12 +663,12 @@ func seedRunForkRevisionMatrixFacts(t *testing.T, ctx context.Context, tx *sql.T
 			t.Fatalf("admit revision matrix fan-out source evidence: %v", err)
 		}
 		capsuleJSON, err := json.Marshal(fanoutobligation.Capsule{
-			SourceProjection: plan.SemanticEvidence(),
-			NodeKey:          "root.matrix-node",
-			ExecutionFlowID:  "root",
-			Route:            runtimeflowidentity.StoredRoute("root", "root", "root"),
-			HandlerEventKey:  "matrix.event",
-			ProducerSource:   producer,
+			SourcePlanRef: plan.Ref, SourceProjection: plan.SemanticEvidence(),
+			NodeKey:         "root.matrix-node",
+			ExecutionFlowID: "root",
+			Route:           runtimeflowidentity.StoredRoute("root", "root", "root"),
+			HandlerEventKey: "matrix.event",
+			ProducerSource:  producer,
 			Lineage: events.EventLineage{
 				RunID:         f.runID,
 				ParentEventID: f.eventID,

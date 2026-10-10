@@ -105,6 +105,7 @@ func a2CollectionRequest(t *testing.T, kind fanoutobligation.SourceKind, ref rc.
 		PlanRef: rc.FanOutPlanRef{BundleHash: "bundle-v2:sha256:" + strings.Repeat("1", 64), ElementRef: element, SemanticDigest: digest}, Source: source, Cardinality: cardinality,
 		Capsule: fanoutobligation.Capsule{SourceProjection: s, NodeKey: "root.scatter", ExecutionFlowID: ".", EntityID: run, HandlerEventKey: "batch.ready", Route: flowidentity.StoredRoute(".", run, run), ProducerSource: producer, Lineage: events.EventLineage{RunID: run, ParentEventID: event, ExecutionMode: executionmode.Live}},
 	}
+	request.Capsule.SourcePlanRef = request.PlanRef
 	if err := request.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -204,6 +205,7 @@ func TestA2PersistedCollectionProjectionOnBothStores(t *testing.T) {
 							if err != nil {
 								t.Fatal(err)
 							}
+							r.Capsule.SourcePlanRef = r.PlanRef
 						}
 						field := []byte(`{"items":` + tc.raw + `}`)
 						a2CollectionTrigger(t, db, r, field)

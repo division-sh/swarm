@@ -16,7 +16,6 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -360,8 +359,8 @@ func (p *PreparedSelectedFork) MaterializationRequest() (runforkreadiness.Materi
 		ContractSelection: p.loadedSource.Selection, SourceArtifactFact: p.loadedSource.SourceArtifactFact,
 		EffectiveSourceIdentity: p.loadedSource.EffectiveSourceIdentity, FrontierAdmission: detached.Frontier,
 		RouteTopology: detached.Routes, RecipientPlanning: detached.Recipients, Readiness: p.readiness,
-		DataPinOverrides: append([]durabledata.ExplicitPin(nil), p.dataPinOverrides...),
-		FanOutPlanRefs:   append([]runtimecontracts.FanOutPlanRef(nil), p.deferredWorkAdmission.fanOutPlanRefs...),
+		DataPinOverrides:    append([]durabledata.ExplicitPin(nil), p.dataPinOverrides...),
+		SelectedFanOutPlans: p.deferredWorkAdmission.fanOutPlans,
 	}, nil
 }
 

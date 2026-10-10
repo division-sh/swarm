@@ -236,20 +236,12 @@ func equalOptionalJSON(left, right []byte) bool {
 	return json.Unmarshal(left, &leftValue) == nil && json.Unmarshal(right, &rightValue) == nil && reflect.DeepEqual(leftValue, rightValue)
 }
 
-func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash string, proofs []runtimecontracts.FanOutPlanRef) (map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, error) {
+func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash string, proofs semanticview.FanOutPlanCarriage) (map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, error) {
 	targetBundleHash = strings.TrimSpace(targetBundleHash)
-	proofByElement := make(map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, len(proofs))
-	for _, proof := range proofs {
-		if _, err := proof.ElementRef.DeclarationIdentity(); err != nil {
-			return nil, fmt.Errorf("selected fan-out plan proof: %w", err)
+	if !proofs.IsZero() {
+		if err := proofs.RequireSource(targetBundleHash); err != nil {
+			return nil, err
 		}
-		if strings.TrimSpace(proof.BundleHash) != targetBundleHash || strings.TrimSpace(proof.SemanticDigest) == "" {
-			return nil, fmt.Errorf("selected fan-out plan proof must belong to target bundle %s", targetBundleHash)
-		}
-		if prior, duplicate := proofByElement[proof.ElementRef]; duplicate && prior != proof {
-			return nil, fmt.Errorf("selected fan-out plan proof is contradictory for %s", fanOutElementLabel(proof.ElementRef))
-		}
-		proofByElement[proof.ElementRef] = proof
 	}
 	resolved := make(map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, len(plan.FanOutObligations))
 	for _, obligation := range plan.FanOutObligations {
@@ -263,28 +255,21 @@ func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash str
 			continue
 		}
 		source := obligation.Intent.Request.PlanRef
-		if source.BundleHash == targetBundleHash {
-			if proof, present := proofByElement[source.ElementRef]; present {
-				if proof.SemanticDigest != source.SemanticDigest {
-					return nil, fmt.Errorf("selected bundle changed pending fan_out declaration %s semantic digest", fanOutElementLabel(source.ElementRef))
-				}
-				resolved[source.ElementRef] = proof
-			} else {
-				resolved[source.ElementRef] = source
+		if proofs.IsZero() {
+			if source.BundleHash != targetBundleHash {
+				return nil, fmt.Errorf("selected bundle %s has no proof for pending fan_out declaration %s", targetBundleHash, fanOutElementLabel(source.ElementRef))
 			}
+			resolved[source.ElementRef] = source
 			continue
 		}
-		proof, ok := proofByElement[source.ElementRef]
-		if !ok {
-			return nil, fmt.Errorf("selected bundle %s has no proof for pending fan_out declaration %s", targetBundleHash, fanOutElementLabel(source.ElementRef))
+		proof, semantics, err := proofs.Resolve(source.ElementRef)
+		if err != nil {
+			return nil, err
 		}
-		if proof.SemanticDigest != source.SemanticDigest {
-			return nil, fmt.Errorf("selected bundle changed pending fan_out declaration %s semantic digest", fanOutElementLabel(source.ElementRef))
+		if err := obligation.Intent.Request.AdmitSelectedPlan(proof, semantics); err != nil {
+			return nil, err
 		}
 		resolved[source.ElementRef] = proof
-	}
-	if len(proofByElement) != 0 && len(proofByElement) != len(resolved) {
-		return nil, fmt.Errorf("selected fan-out plan proof contains elements outside the fixed fork plan")
 	}
 	return resolved, nil
 }

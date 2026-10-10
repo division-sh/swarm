@@ -11,7 +11,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
@@ -226,7 +225,7 @@ type RunForkMaterializeRequest struct {
 	SourceArtifactFact      runtimecorrelation.SourceArtifactFact
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
 	DataPinOverrides        []durabledata.ExplicitPin
-	FanOutPlanRefs          []runtimecontracts.FanOutPlanRef
+	SelectedFanOutPlans     semanticview.FanOutPlanCarriage
 }
 
 type RunForkMaterialization struct {

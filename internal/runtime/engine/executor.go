@@ -1996,6 +1996,7 @@ func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontract
 		Source:      source,
 		Cardinality: cardinality,
 		Capsule: fanoutobligation.Capsule{
+			SourcePlanRef:    plan.Ref,
 			SourceProjection: plan.SemanticEvidence(),
 			NodeKey:          frame.req.Node.Key(), ExecutionFlowID: frame.req.ExecutionFlowID.String(), Route: frame.req.Route,
 			EntityID: frame.req.EntityID.String(), HandlerEventKey: frame.req.HandlerEventKey,

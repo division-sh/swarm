@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -146,8 +147,23 @@ func TestSelectedContractFanOutAdmissionRequiresExactElementAndSemanticDigest(t 
 	}
 	sourceRef := selected
 	sourceRef.BundleHash = "bundle-v2:sha256:" + strings.Repeat("0", 64)
+	selectedPlan, ok := source.FanOutPlanForElement(selected.ElementRef)
+	if !ok {
+		t.Fatal("selected fan-out declaration has no compiled plan")
+	}
+	frozenSource := selectedPlan.SemanticEvidence()
+	frozenSource.Emit.Event = "previous.output"
+	sourceRef.SemanticDigest, err = canonicaljson.Hash(frozenSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fieldSource := fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, Field: strings.TrimPrefix(frozenSource.ItemsFrom, "payload.")}
+	if strings.HasPrefix(frozenSource.ItemsFrom, "entity.") {
+		fieldSource.Kind, fieldSource.Field = fanoutobligation.SourceEntityField, strings.TrimPrefix(frozenSource.ItemsFrom, "entity.")
+	}
 	plan := runfork.RunForkPlan{FanOutObligations: []runfork.RunForkFanOutObligation{{
-		Intent: fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{PlanRef: sourceRef}},
+		Intent: fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{PlanRef: sourceRef, Source: fieldSource,
+			Capsule: fanoutobligation.Capsule{SourcePlanRef: sourceRef, SourceProjection: frozenSource}}},
 	}}}
 	refs, err := admitSelectedContractFanOutPlans(plan, source)
 	if err != nil {
@@ -159,14 +175,22 @@ func TestSelectedContractFanOutAdmissionRequiresExactElementAndSemanticDigest(t 
 
 	changed := plan
 	changed.FanOutObligations = append([]runfork.RunForkFanOutObligation(nil), plan.FanOutObligations...)
-	changed.FanOutObligations[0].Intent.Request.PlanRef.SemanticDigest = "sha256:" + strings.Repeat("f", 64)
-	if _, err := admitSelectedContractFanOutPlans(changed, source); err == nil || !strings.Contains(err.Error(), "changed semantic digest") {
+	changed.FanOutObligations[0].Intent.Request.Capsule.SourcePlanRef.SemanticDigest = "sha256:" + strings.Repeat("f", 64)
+	if _, err := admitSelectedContractFanOutPlans(changed, source); err == nil || !strings.Contains(err.Error(), "semantic digest disagrees") {
 		t.Fatalf("changed semantic digest error = %v", err)
 	}
 
 	missing := plan
 	missing.FanOutObligations = append([]runfork.RunForkFanOutObligation(nil), plan.FanOutObligations...)
 	missing.FanOutObligations[0].Intent.Request.PlanRef.ElementRef.SemanticPath = "missing." + uuid.NewString()
+	missingRequest := &missing.FanOutObligations[0].Intent.Request
+	missingRequest.Capsule.SourceProjection = frozenSource.Clone()
+	missingRequest.Capsule.SourceProjection.ElementRef = missingRequest.PlanRef.ElementRef
+	missingRequest.PlanRef.SemanticDigest, err = canonicaljson.Hash(missingRequest.Capsule.SourceProjection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingRequest.Capsule.SourcePlanRef = missingRequest.PlanRef
 	if _, err := admitSelectedContractFanOutPlans(missing, source); err == nil || !strings.Contains(err.Error(), "missing pending fan_out declaration") {
 		t.Fatalf("missing element error = %v", err)
 	}

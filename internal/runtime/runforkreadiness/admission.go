@@ -40,7 +40,7 @@ type MaterializeRequest struct {
 	RecipientPlanning       runfork.RunForkSelectedContractRecipientPlanning
 	Readiness               Admission
 	DataPinOverrides        []durabledata.ExplicitPin
-	FanOutPlanRefs          []contracts.FanOutPlanRef
+	SelectedFanOutPlans     semanticview.FanOutPlanCarriage
 }
 
 // Binding is checked again against the transaction's fixed plan and event rows.
