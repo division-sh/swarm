@@ -237,6 +237,7 @@ func seedFanOutReadbackClaim(t *testing.T, db *sql.DB) runtimepipeline.FanOutChu
 		t.Fatal(err)
 	}
 	capsule, err := fanoutobligation.MarshalCapsule(fanoutobligation.Capsule{
+		SourcePlanRef:    runtimecontracts.FanOutPlanRef{ElementRef: elementRef, BundleHash: "bundle-v2:sha256:" + strings.Repeat("1", 64), SemanticDigest: digest},
 		SourceProjection: evidence,
 		NodeKey:          "root.fan-out", ExecutionFlowID: "root", Route: runtimeflowidentity.StoredRoute("root", "root", "root"),
 		HandlerEventKey: "items.ready", ProducerSource: producer,

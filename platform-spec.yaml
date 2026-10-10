@@ -4568,9 +4568,18 @@ handler_specification:
             rereads mutable current entity state or the process-current contract. Same-handler source mutation binds the
             post-write immutable revision. Source/count cycles fail strict load and boot verification.
         evaluation_capsule: >-
-          Carries the exact bundle-qualified compiled plan reference, trigger/run/delivery/route lineage, and only mutable
-          or turn-local expression values needed after the handler returns. The retained bundle and semantic digest must
-          still prove the same element before any ordinal is evaluated.
+          Carries source_plan_ref and its digest-validated source_projection separately from the intent's exact
+          bundle-qualified executable plan reference, plus trigger/run/delivery/route lineage and only mutable or
+          turn-local expression values needed after the handler returns. Ordinary creation binds both references to
+          the same compiled plan. Fork projection retains the original source witness and immutable item order,
+          multiplicity and cardinality while admitting the exact selected plan for future ordinal evaluation.
+          A changed selected emit digest does not invalidate the original source. Neither reference is inferred or
+          replaced on read. The selected compiled plan must validate its own digest, accept the frozen item type
+          through the catalog assignment owner, and admit the retained cardinality within its bound. Historical
+          ordinal facts are never reissued because the selected plan changed.
+          The semantic-view owner supplies detached compiled evidence from the exact selected artifact to every
+          native materialization path. Caller-authored plan references or decoded JSON cannot mint that evidence;
+          native writers recheck artifact identity, declaration, source integrity and selected interpretation.
           Its receiver projection carries only the exact executable node and typed target ownership, validated against
           the capsule execution coordinates. It is not a delivery route or publication obligation: initialization
           suppliers and dependency plans remain with their original publication and are never copied into a capsule.

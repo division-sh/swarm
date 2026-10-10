@@ -112,6 +112,40 @@ func TestPreparedFanOutEvaluatesAuthoredR2MixedValue(t *testing.T) {
 	}
 }
 
+func TestFanOutSelectedEmitUsesFrozenSourceAndExactCompiledPlan(t *testing.T) {
+	_, original, trigger, _ := preparedFanOutFixture(t)
+	selectedExecutor, selected, _, _ := preparedFanOutFixture(t, true)
+	if original.Request.PlanRef.SemanticDigest == selected.Request.PlanRef.SemanticDigest {
+		t.Fatal("fixture did not change the compiled emit semantics")
+	}
+	request := original.Request
+	request.PlanRef = selected.Request.PlanRef
+	original.Request = request
+	prepared, err := selectedExecutor.PrepareFanOutEvaluation(context.Background(), original, trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emit, err := prepared.EvaluateOrdinal(context.Background(), int64(1), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(emit.Event.Payload(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["value"] != float64(6) || payload["note"] != `row=1,meta={"missing":null}` || payload["index"] != float64(1) || payload["count"] != float64(33) {
+		t.Fatalf("selected emit did not use the retained source frame and ordinal: %#v", payload)
+	}
+	if original.Request.Capsule.SourcePlanRef == original.Request.PlanRef || original.Request.Capsule.SourceProjection.Emit.Fields["note"].CEL != "" {
+		t.Fatal("selected plan replaced the immutable original witness")
+	}
+	wrong := original
+	wrong.Request.PlanRef = wrong.Request.Capsule.SourcePlanRef
+	if _, err := selectedExecutor.PrepareFanOutEvaluation(context.Background(), wrong, trigger); err == nil {
+		t.Fatal("loaded selected source accepted an unselected executable reference")
+	}
+}
+
 func TestFanOutPreparationBoundsCensusAndPreservesOrdinals(t *testing.T) {
 	exec, intent, trigger, source := preparedFanOutFixture(t)
 	source.calls = 0
