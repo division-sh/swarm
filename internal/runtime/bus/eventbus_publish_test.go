@@ -2741,7 +2741,7 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 		t.Fatalf("live decoy recipients=%v", got)
 	}
 	publication := func(target events.RouteIdentity) events.Event {
-		return eventtest.ExistingRunRootIngress(uuid.NewString(), "root.ready", "test", "", []byte(`{}`), 0, runID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), at)
+		return eventtest.ExistingRunRootIngress(uuid.NewString(), "root.ready", "test", "", []byte(`{"entity_id":"consumer-one"}`), 0, runID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), at)
 	}
 	localControl := publication(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: runtimeflowidentity.EntityID(runID)})
 	if plan, err := eb.CheckPublishRecipientPlan(ctx, localControl); err != nil || !slices.Contains(plan.Recipients, "live-other") {

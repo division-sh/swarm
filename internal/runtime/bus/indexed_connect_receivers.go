@@ -44,7 +44,7 @@ func (r connectRoutePlanResolver) explicitReceiverTerminated(ctx context.Context
 		return false, fmt.Errorf("explicit receiver contradicts its stored entity identity")
 	}
 	if instance.Status == "terminated" || !instance.TerminatedAt.IsZero() {
-		return true, nil
+		return pipeline.StandingConstructionIsKeyless(r.source, instance.WorkflowName)
 	}
 	stage := ""
 	if instance.StageDefined {
@@ -53,7 +53,7 @@ func (r connectRoutePlanResolver) explicitReceiverTerminated(ctx context.Context
 	err = pipeline.NewDeliveryTargetAvailability(stage, instance.Status, false).Validate(r.source, instance.WorkflowName)
 	var terminal *pipeline.TerminalReceiverError
 	if errors.As(err, &terminal) {
-		return true, nil
+		return pipeline.StandingConstructionIsKeyless(r.source, instance.WorkflowName)
 	}
 	return false, err
 }
