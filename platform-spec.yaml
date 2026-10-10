@@ -20902,6 +20902,13 @@ run_model:
         revision/fact order. A reconstructed entity is materializable only after
         runtime.run_fork.materialized_entity_snapshot_metadata authorizes flow_instance/entity_type metadata present
         in the same fixed projection or produces a named fail-closed blocker. No created_at predicate participates.'
+      1a_original_start_membership: 'The original start projection selects the exact initial fact membership
+        committed with canonical run creation, excluding its creating ingress. Initial writers contribute typed
+        fact coordinates through the existing revision owner. Composite fan-out keys are opaque selection bytes,
+        never scalar fact constructors or delimiter-based SQL coordinates. Reconstruction requires every selected
+        fact at the exact original creation revision and validates its owning run, canonical body/key relation
+        and family semantics through the historical admission owner; a missing or mismatched body fails closed.
+        Wire membership alone grants no historical mutation or execution authority.'
       2_detect_pending: 'Classify event_deliveries and event_receipts present in the same fixed revision R together
         with their revisioned source-event lineage, dead letters, sessions, turns, audits, timers, and reply contexts.
         Only owner-admitted delivery_event_replay_ready work may be redelivered; incomplete, ambiguous, unrevisioned,
