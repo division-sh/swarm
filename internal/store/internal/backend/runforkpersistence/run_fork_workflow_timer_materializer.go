@@ -34,98 +34,37 @@ const (
 	runForkWorkflowTimerContinuing
 )
 
-// Require-only readback is also used on reuse/recovery. It cannot create a
-// missing timer or settle an unrelated dependent obligation.
-func requireMaterializedRunForkWorkflowTimers(
-	ctx context.Context,
-	attempt *mutationprotocol.Attempt,
-	plan runfork.RunForkPlan,
-	forkRunID string,
-	selection runForkWorkflowTimerSelectionOwner,
-	owner runForkWorkflowTimerMaterializationOwner,
-	bornAt time.Time,
-	admission runfork.RunForkReplayResumeAdmission,
-) (runfork.RunForkReplayResumeAdmission, error) {
-	return requireRunForkWorkflowTimerInventory(ctx, attempt, plan, forkRunID, selection, owner, bornAt, admission, runForkWorkflowTimerAtCut)
-}
-
-func requireContinuingRunForkWorkflowTimers(
+// This family readback cannot discharge the combined source-history blocker.
+func readRunForkWorkflowTimerInventory(
 	ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan,
 	forkRunID string, selection runForkWorkflowTimerSelectionOwner,
 	owner runForkWorkflowTimerMaterializationOwner, bornAt time.Time,
-	admission runfork.RunForkReplayResumeAdmission,
-) (runfork.RunForkReplayResumeAdmission, error) {
-	return requireRunForkWorkflowTimerInventory(ctx, attempt, plan, forkRunID, selection, owner, bornAt, admission, runForkWorkflowTimerContinuing)
-}
-
-func requireRunForkWorkflowTimerInventory(
-	ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan,
-	forkRunID string, selection runForkWorkflowTimerSelectionOwner,
-	owner runForkWorkflowTimerMaterializationOwner, bornAt time.Time,
-	admission runfork.RunForkReplayResumeAdmission, phase runForkWorkflowTimerReadbackPhase,
-) (runfork.RunForkReplayResumeAdmission, error) {
+	phase runForkWorkflowTimerReadbackPhase,
+) ([]runForkWorkflowTimerProjection, error) {
 	if phase != runForkWorkflowTimerAtCut && phase != runForkWorkflowTimerContinuing {
-		return admission, fmt.Errorf("workflow timer readback requires an exact lifecycle phase")
-	}
-	materializable, err := runForkWorkflowTimerHistoryMaterializable(plan)
-	if err != nil {
-		return admission, err
-	}
-	if !materializable && len(plan.WorkflowTimers) != 0 {
-		return admission, fmt.Errorf("workflow timer readback requires complete exact source inventory admission")
-	}
-	if !materializable {
-		for _, blocker := range admission.UnsupportedBlockers {
-			if blocker.Code == runfork.RunForkBlockerTimerHistoryUnproven {
-				return admission, fmt.Errorf("workflow timer readback cannot omit blocked source history")
-			}
-		}
-		for _, fact := range admission.Dispositions {
-			if fact.Fact == runfork.RunForkReplayResumeFactTimerHistory {
-				return admission, fmt.Errorf("workflow timer readback cannot omit relevant source history")
-			}
-		}
+		return nil, fmt.Errorf("workflow timer readback requires an exact lifecycle phase")
 	}
 	if err := requireRunForkWorkflowTimerReadbackFrame(ctx, attempt, plan, forkRunID, bornAt); err != nil {
-		return admission, err
+		return nil, err
 	}
 	if owner == nil {
-		return admission, fmt.Errorf("workflow timer readback requires its canonical timer owner")
+		return nil, fmt.Errorf("workflow timer readback requires its canonical timer owner")
 	}
 	actual, err := owner.ReadRunForkWorkflowTimerInventoryTx(ctx, attempt, forkRunID)
 	if err != nil {
-		return admission, err
+		return nil, err
 	}
 	projected, err := prepareRunForkWorkflowTimers(plan, forkRunID, selection, bornAt)
 	if err != nil {
-		return admission, err
+		return nil, err
 	}
 	if err := requireExactRunForkWorkflowTimerInventory(projected, actual, phase); err != nil {
-		return admission, err
+		return nil, err
 	}
 	if err := attempt.RequireExistingSQLFrame(ctx); err != nil {
-		return admission, err
+		return nil, err
 	}
-	if !materializable {
-		return admission, nil
-	}
-	inventory, err := runForkWorkflowTimerRecordInventory(plan.SourceRunID, plan.WorkflowTimers)
-	if err != nil {
-		return admission, err
-	}
-	inventory.Complete, inventory.Point = true, plan.ForkPoint
-	pending, err := inventory.pendingCertificate()
-	if err != nil {
-		return admission, err
-	}
-	if len(projected) != len(inventory.ActiveTimerIDs) {
-		return admission, fmt.Errorf("workflow timer readback does not cover the complete active source inventory")
-	}
-	applied, err := runForkWorkflowTimerAppliedCertificate(pending, forkRunID, bornAt, projected)
-	if err != nil {
-		return admission, err
-	}
-	return dischargeMaterializedRunForkWorkflowTimerAdmission(admission, pending, applied, len(projected))
+	return projected, nil
 }
 
 func requireExactRunForkWorkflowTimerInventory(expected []runForkWorkflowTimerProjection, actual []pipeline.WorkflowTimerActivation, phase runForkWorkflowTimerReadbackPhase) error {
