@@ -581,13 +581,6 @@ func (d ActiveFlowInstanceDescriptor) Normalized() ActiveFlowInstanceDescriptor 
 	}
 }
 
-// ActiveFlowInstanceDescriptorLister exposes active dynamic flow instances as
-// routable target descriptors. Stores implement this from persisted flow
-// instance state, not from live subscriptions or readback.
-type ActiveFlowInstanceDescriptorLister interface {
-	ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]ActiveFlowInstanceDescriptor, error)
-}
-
 type ActiveTargetDescriptor struct {
 	FlowID        string
 	Availability  runtimepipeline.DeliveryTargetAvailability

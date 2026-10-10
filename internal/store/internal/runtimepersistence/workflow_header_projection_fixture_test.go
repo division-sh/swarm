@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
@@ -13,6 +14,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 )
+
+type flowRouteTestExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
 
 // Prepared component aggregates use the canonical commit, not handler creation.
 // This does not qualify public constructor eligibility or installed topology.

@@ -432,8 +432,10 @@ rows:
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps}
       - {kind: go_test, name: TestCompiledRoutesCannotExportMaterializedMembership}
       - {kind: go_test, name: TestParentLocalReturnPersistsExactNativeReceiverBothStores}
-      - {kind: go_test, name: TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates}
-      - {kind: go_test, name: TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates}
+      - {kind: go_test, name: TestR7DirectoryScalarSelectorsBothStores}
+      - {kind: go_test, name: TestR7DirectoryScopedInventoryIgnoresAmbientRunBothStores}
+      - {kind: go_test, name: TestR7DirectoryReadsOwnSnapshotAndFreshCommittedHeadersBothStores}
+      - {kind: go_test, name: TestIndexedFlowInstanceAuthorityRefusesInvalidProvenanceBothStores}
       - {kind: go_test, name: TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres}
     notes: >
       Native instance selection consumes the receiver's declared scalar business

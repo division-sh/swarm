@@ -91,6 +91,29 @@ func corruptFlowConstructionEvidence(owner flowidentity.RunScopedFlowInstance, e
 	return &pipeline.FlowInstanceConstructionCorruption{RunID: owner.RunID, FlowID: owner.Route.ScopeKey, InstancePath: owner.Route.InstancePath, Cause: err}
 }
 
+// ReadStoredFlowConstructionReceiptTx observes recorded construction without
+// requiring a fresh attachment. Provenance is selected by the history owner,
+// never by this reader's found result.
+func ReadStoredFlowConstructionReceiptTx(ctx context.Context, tx *sql.Tx, runID string, instance pipeline.WorkflowInstance) (pipeline.FlowConstructionReceipt, bool, error) {
+	if tx == nil {
+		return pipeline.FlowConstructionReceipt{}, false, fmt.Errorf("captured construction requires its selected read transaction")
+	}
+	var raw []byte
+	err := tx.QueryRowContext(ctx, `SELECT projection FROM workflow_instance_initial_materializations
+		WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, runID, instance.EntityID, instance.StorageRef).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return pipeline.FlowConstructionReceipt{}, false, nil
+	}
+	if err != nil {
+		return pipeline.FlowConstructionReceipt{}, false, fmt.Errorf("read captured construction: %w", err)
+	}
+	receipt, err := pipeline.DecodeStoredFlowConstructionReceipt(raw, runID, instance.EntityID, instance.StorageRef, instance.WorkflowName)
+	if err != nil {
+		return pipeline.FlowConstructionReceipt{}, false, &pipeline.FlowInstanceConstructionCorruption{RunID: runID, FlowID: instance.WorkflowName, InstancePath: instance.StorageRef, Cause: err}
+	}
+	return receipt, true, nil
+}
+
 func ReadFlowConstructionPublicationFieldsTx(ctx context.Context, tx *sql.Tx, owner flowidentity.RunScopedFlowInstance, entityID, eventID string) (map[string]any, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("construction evidence requires the selected read transaction")

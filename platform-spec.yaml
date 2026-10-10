@@ -18051,6 +18051,15 @@ platform_tables:
         changing immutable construction identity. Fresh normal construction without this receipt is invalid; historical
         import/selected projection retains its separately named fixed-revision authority and cannot acquire ordinary
         construction permission. No migration, fallback, inference or compatibility reader is supported.
+        The version-three receipt captures exact run, entity, declaration, path, parent and immutable key together with
+        initialization and creation-publication facts. Operational readiness, actor census and attachment progress are
+        separate projections, not the immutable receipt's identity source. Fixed-cut readers consume the captured
+        identity and key through the same strict receipt decoder; current source/path cannot reconstruct absent facts.
+        Readiness diagnostics enumerate in-scope native headers without routing-rule membership and consume native
+        or positively admitted fixed-cut evidence in one repeatable-read snapshot. Native receipt/readiness absence is
+        typed corruption even when no route exists or an old route is inactive. A valid projected fixed-cut header may
+        lack fresh native rows but never receives a synthetic readiness phase. Older valid plans remain source-transition
+        diagnostics without acquiring current-source execution or attachment authority. Present crossed evidence fails.
       ddl: |
         CREATE TABLE workflow_instance_initial_materializations (
             run_id             UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
