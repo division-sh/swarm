@@ -51,6 +51,7 @@ type forkJoinNativeScheduleOwner interface {
 	AdmitGenericScheduleOutcome(context.Context, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionCommit, error)
 	CancelGenericScheduleOutcome(context.Context, runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelCommit, error)
 	LoadGenericScheduleActivation(context.Context, string) (runtimegenericschedule.Activation, bool, error)
+	PrepareGenericScheduleOccurrence(context.Context, runtimegenericschedule.Wakeup) (runtimegenericschedule.PreparationCommit, error)
 	ListActiveGenericScheduleActivations(context.Context) ([]runtimegenericschedule.Activation, error)
 }
 
@@ -74,6 +75,7 @@ func TestForkJoinNativeRestoreReadbackBothStores(t *testing.T) {
 					timeout   bool
 					cancelled bool
 					removed   bool
+					prepared  bool
 				}{
 					{name: "active_completion"},
 					{name: "cancelled_completion", cancelled: true},
@@ -81,9 +83,14 @@ func TestForkJoinNativeRestoreReadbackBothStores(t *testing.T) {
 					{name: "cancelled_timeout", timeout: true, cancelled: true},
 					{name: "removed_completion", removed: true},
 					{name: "removed_timeout", timeout: true, removed: true},
+					{name: "cancelled_prepared_completion", cancelled: true, prepared: true},
+					{name: "cancelled_prepared_timeout", timeout: true, cancelled: true, prepared: true},
 				} {
 					t.Run(flow+"/"+shape.name, func(t *testing.T) {
-						ctx, request := forkJoinNativeRequest(t, f, flow, shape.timeout, shape.cancelled)
+						ctx, request := forkJoinNativeRequest(t, f, flow, shape.timeout, shape.cancelled && !shape.prepared)
+						if shape.prepared {
+							request = forkJoinNativePrepareCanceledSource(t, f, ctx, request)
+						}
 						if shape.removed {
 							request.Disposition = runtimegenericschedule.ForkJoinRuleRemoved
 						}
@@ -356,6 +363,42 @@ func forkJoinNativeRestore(t *testing.T, f *forkJoinNativeFixture, ctx context.C
 		return read, err
 	})
 	return forkJoinNativeAcknowledged(t, result)
+}
+
+func forkJoinNativePrepareCanceledSource(t *testing.T, f *forkJoinNativeFixture, ctx context.Context, request storegenericschedule.ForkJoinRequest) storegenericschedule.ForkJoinRequest {
+	t.Helper()
+	ctx = correlation.WithRunID(ctx, request.Source.Command.RunID)
+	wakeup, err := runtimegenericschedule.NewWakeup(request.Source.ID, request.Source.CurrentDueAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := f.generic.PrepareGenericScheduleOccurrence(ctx, wakeup)
+	if err != nil || !prepared.Acknowledged {
+		t.Fatalf("real source reservation: %+v err=%v", prepared, err)
+	}
+	actual, found, err := f.generic.LoadGenericScheduleActivation(ctx, request.Source.ID)
+	if err != nil || !found || actual.CurrentEventID != runtimegenericschedule.OccurrenceEventID(actual.ID, actual.CurrentDueAt) || actual.CurrentEventAdmittedAt.IsZero() {
+		t.Fatalf("real source lacks exact reservation: %+v found=%v err=%v", actual, found, err)
+	}
+	before := actual.Canonical()
+	canceled, err := f.generic.CancelGenericScheduleOutcome(ctx, runtimegenericschedule.CancelCommand{
+		ActivationID: actual.ID, Cause: "join_stage_exit", CancelledAt: runtimerunlifecycle.CanonicalTimestamp(time.Now().UTC()),
+	})
+	if err != nil || !canceled.Acknowledged || canceled.Result.Outcome != runtimegenericschedule.CancelChanged {
+		t.Fatalf("real prepared source cancellation: %+v err=%v", canceled, err)
+	}
+	request.Source = canceled.Result.Activation
+	request.BornAt = runtimerunlifecycle.CanonicalTimestamp(time.Now().UTC())
+	if request.BornAt.Before(request.Source.CancelledAt) {
+		request.BornAt = request.Source.CancelledAt
+	}
+	if request.Source.CurrentEventID != before.CurrentEventID || !request.Source.CurrentEventAdmittedAt.Equal(before.CurrentEventAdmittedAt) {
+		t.Fatal("source cancellation erased its lawful unpublished reservation")
+	}
+	if err := request.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return request
 }
 
 func forkJoinNativeRequireMissing(t *testing.T, f *forkJoinNativeFixture, ctx context.Context, request storegenericschedule.ForkJoinRequest) {
