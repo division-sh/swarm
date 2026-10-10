@@ -77,6 +77,7 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool) {
 				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
 			}
 			peer.pair(result.Pairing.Code)
+			_, initialPrekeyUploads := peer.awaitPostLogin()
 			result = channelonboarding.Result{}
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id}, &result)
 			if result.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity || result.IdentityOperation == nil ||
@@ -92,6 +93,10 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool) {
 			process = startServeRuntimeTestProcess(t, opts)
 			process.waitForReadyLine()
 			endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+			postLogins, uploads := peer.awaitPostLogin()
+			if postLogins < 2 || uploads != initialPrekeyUploads {
+				t.Fatal("normal restart lost provider prekey state or skipped post-login", postLogins, uploads, initialPrekeyUploads)
+			}
 			result = channelonboarding.Result{}
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id}, &result)
 			if result.Operation.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation || result.IdentityOperation == nil ||
