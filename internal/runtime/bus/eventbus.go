@@ -776,7 +776,7 @@ func (eb *EventBus) selectFlowInstanceRouteContext(
 		return selectedFlowInstanceRouteContext{}, errors.New("route topology requires a paired compiled source")
 	}
 	graph, inputProducers := table.connectGraph, table.inputProducers
-	selection := graph.SelectRouteDependencies(changedPaths, nil)
+	selection := graph.SelectRouteDependencies(changedPaths)
 	context := selectedFlowInstanceRouteContext{graph: graph, inputProducers: inputProducers, selection: selection}
 	templateIDs := table.activeTemplateIDsForFlowPaths(selection.ContextFlowPaths)
 	if len(templateIDs) == 0 {

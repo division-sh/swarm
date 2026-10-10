@@ -46,7 +46,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"github.com/google/uuid"
 )
 
@@ -1184,11 +1183,13 @@ func TestOperatorEventPublishPrivateTargetCannotAuthorizePublication(t *testing.
 	`, runID, targetEntityID); err != nil {
 		t.Fatalf("seed hostile entity value-map identity lookalikes: %v", err)
 	}
-	if err := flowroutefixture.StageAndPublish(runtimecorrelation.WithRunID(ctx, runID), bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
-		RunID: runID,
-		Route: runtimeflowidentity.DeriveRoute("operating", targetKey),
-	}, Instance: construction.Identity}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, mustAPITestSourceArtifactFact(bundleHash), targetOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, found, err := pg.LookupFlowInstance(testAuthorActivityContextForSource(ctx, mustAPITestSourceArtifactFact(bundleHash)), lookup)
+	if err != nil || !found || observed.Identity() != construction.Identity {
+		t.Fatalf("target index must retain exact construction despite field lookalikes: found=%t err=%v identity=%+v", found, err, observed.Identity())
 	}
 
 	targeted := rpcCall(t, handler, eventPublishBodyWithTarget(runID, "", bundleHash, "operating/opco.product_initialization_requested", `{"topic":"targeted"}`, "operator-test", "idem-target-route-positive", targetFlowInstance, targetEntityID))
@@ -1420,11 +1421,13 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := flowroutefixture.StageAndPublish(runtimecorrelation.WithRunID(ctx, runID), bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
-		RunID: runID,
-		Route: runtimeflowidentity.DeriveRoute("operating", targetKey),
-	}, Instance: construction.Identity}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, mustAPITestSourceArtifactFact(bundleHash), targetOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, found, err := pg.LookupFlowInstance(testAuthorActivityContextForSource(ctx, mustAPITestSourceArtifactFact(bundleHash)), lookup)
+	if err != nil || !found || observed.Identity() != construction.Identity {
+		t.Fatalf("target index = %+v, found=%t err=%v, want %+v", observed.Identity(), found, err, construction.Identity)
 	}
 	mismatchEntityID := seedEventPublishConstructedFlow(t, pg, bus, source, runID, "operating/"+uuid.NewString(), stringValue(t, asMap(t, initial.Result)["event_id"], "event_id"))
 	unroutableEntityID := uuid.NewString()
