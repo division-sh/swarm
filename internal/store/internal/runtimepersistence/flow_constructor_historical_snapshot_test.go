@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/google/uuid"
 )
 
@@ -25,7 +26,7 @@ func TestFlowConstructorHistoricalFieldlessSnapshotBothStores(t *testing.T) {
 				shape = "staged"
 			}
 			t.Run(backend+"/"+shape, func(t *testing.T) {
-				proveFlowConstructorHistoricalSnapshot(t, backend, staged, false, false)
+				proveFlowConstructorHistoricalSnapshot(t, backend, staged, false, false, false)
 			})
 		}
 	}
@@ -43,14 +44,22 @@ func TestFlowConstructorHistoricalFieldedAndTerminalSnapshotBothStores(t *testin
 					stage = "staged"
 				}
 				t.Run(backend+"/"+shape.name+"/"+stage, func(t *testing.T) {
-					proveFlowConstructorHistoricalSnapshot(t, backend, staged, shape.fielded, shape.terminal)
+					proveFlowConstructorHistoricalSnapshot(t, backend, staged, shape.fielded, shape.terminal, false)
 				})
 			}
 		}
 	}
 }
 
-func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged, fielded, terminal bool) {
+func TestR7HistoricalImmutableKeyBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			proveFlowConstructorHistoricalSnapshot(t, backend, false, true, false, true)
+		})
+	}
+}
+
+func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged, fielded, terminal, keyed bool) {
 	stages := ""
 	if staged {
 		stages = "stages:\n  pending: {}\n"
@@ -63,16 +72,39 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 	if fielded {
 		files["entities.yaml"] = "record:\n  marker: {type: text, initial: original}\n"
 	}
+	if keyed {
+		files["schema.yaml"] += "instance: item_id\npins:\n  inputs:\n    - item.created\n"
+		files["entities.yaml"] += "  item_id: text\n"
+		files["events.yaml"] += "item.created:\n  item_id: text\n"
+	}
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 	runID := correlation.RunIDFromContext(f.ctx)
 	req := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
 	req.Instance = flowidentity.Stored(req.ContractBundle, ".", runID, runID, runID, "")
+	if keyed {
+		req.ConstructorInput, req.ResolvedKey = "item.created", "original-key"
+		req.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "item.created", "constructor-fixture", "", []byte(`{"item_id":"original-key"}`), 0, runID, events.EventEnvelope{}, req.OccurredAt)
+	}
 	plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, plan); err != nil {
 		t.Fatal(err)
+	}
+	if keyed {
+		record, err := plan.PersistenceRecord()
+		if err != nil {
+			t.Fatal(err)
+		}
+		mutation := record.State
+		mutation.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+		mutation.ExpectedState, mutation.ExpectedRevision = mutation.CurrentState, 1
+		mutation.UpdatedAt = mutation.CreatedAt.Add(time.Second)
+		mutation.Fields = []byte(`{"marker":"original","item_id":"changed-business-field"}`)
+		if result, err := f.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(f.ctx, pipeline.WorkflowEngineMutationCommand{State: mutation}); err != nil || !result.Committed {
+			t.Fatalf("ordinary key field update: committed=%t err=%v", result.Committed, err)
+		}
 	}
 	originals := make(map[string]pipeline.WorkflowInstance)
 	for _, construction := range plan.ConstructionPlans() {
@@ -135,8 +167,30 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 			stored.CurrentState != original.CurrentState || !stored.EnteredStageAt.Equal(original.EnteredStageAt) ||
 			stored.Status != original.Status || stored.Mode != original.Mode || stored.InstanceKind != original.InstanceKind ||
 			!stored.CreatedAt.Equal(original.CreatedAt) || !stored.UpdatedAt.Equal(original.UpdatedAt) || !stored.TerminatedAt.Equal(original.TerminatedAt) ||
-			stored.ParentFlowID != original.ParentFlowID || stored.ParentEntityID != parentEntity || stored.ParentFlowInstance != parentPath {
+			stored.ParentFlowID != original.ParentFlowID || stored.ParentEntityID != parentEntity || stored.ParentFlowInstance != parentPath || stored.InstanceKey != original.InstanceKey {
 			t.Fatalf("historical header lost construction: stored=%+v original=%+v found=%t err=%v", stored, original, found, err)
+		}
+		fact, present := correlation.SourceArtifactFactFromContext(f.ctx)
+		if !present {
+			t.Fatal("historical lookup requires the admitted artifact")
+		}
+		lookup, err := pipeline.NewExactFlowInstanceLookup(req.ContractBundle, fact, identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observation, found, err := f.store.(pipeline.FlowInstanceIndexReader).LookupFlowInstance(f.ctx, lookup)
+		if err != nil || !found || observation.Identity().EntityID != stored.EntityID || observation.InstanceKey() != original.InstanceKey {
+			t.Fatalf("historical index discarded actual fixed construction: %+v found=%t err=%v", observation, found, err)
+		}
+		fixed, historical := observation.HistoricalConstruction()
+		if !historical || fixed.SourceOwner.RunID != runID || fixed.SourceOwner.Route.InstancePath != path || fixed.SourceRevision != history.ForkPoint.Revision {
+			t.Fatalf("index did not consume the exact admitted fork cut: %+v", fixed)
+		}
+		if _, ready := observation.Readiness(); ready {
+			t.Fatal("materialize-only lookup invented desired attachment")
+		}
+		if _, native, err := observation.NativeConstruction(); err != nil || native {
+			t.Fatalf("materialize-only lookup invented a fresh receipt: native=%t err=%v", native, err)
 		}
 	}
 	listed, err := f.workflows.ListWorkflowInstances(f.ctx, fork.ForkRunID)
@@ -175,11 +229,9 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 			{"accumulator", "accumulator", `{"foreign":true}`}, {"slug", "slug", "foreign"}, {"name", "name", "foreign"},
 		} {
 			t.Run("reuse_rejects/"+fault.name, func(t *testing.T) {
-				var original any
-				if err := f.db.QueryRowContext(f.ctx, "SELECT "+fault.column+" FROM flow_instances WHERE run_id=$1 AND instance_path='detail'", fork.ForkRunID).Scan(&original); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := f.db.ExecContext(f.ctx, "UPDATE flow_instances SET "+fault.column+"=$1 WHERE run_id=$2 AND instance_path='detail'", fault.value, fork.ForkRunID); err != nil {
+				coordinate := flowidentity.RunScopedFlowInstance{RunID: fork.ForkRunID, Route: flowidentity.StoredRoute("detail", "detail", "detail")}
+				restore, err := FaultFlowConstructorHeaderForTest(f.ctx, f.store, coordinate, pipelinepersistence.FlowConstructorHeaderFaultField(fault.column), fault.value)
+				if err != nil {
 					t.Fatal(err)
 				}
 				before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
@@ -189,7 +241,7 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
 					t.Fatal("historical evidence refusal repaired or changed state")
 				}
-				if _, err := f.db.ExecContext(f.ctx, "UPDATE flow_instances SET "+fault.column+"=$1 WHERE run_id=$2 AND instance_path='detail'", original, fork.ForkRunID); err != nil {
+				if err := restore(f.ctx); err != nil {
 					t.Fatal(err)
 				}
 			})

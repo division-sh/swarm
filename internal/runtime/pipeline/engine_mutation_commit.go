@@ -89,6 +89,8 @@ func WorkflowEngineStateTransitionForPresence(presence WorkflowTargetPersistence
 type WorkflowEngineStateRecord struct {
 	Identity         runtimeflowidentity.RunScopedFlowInstance
 	EntityID         string
+	ParentInstance   string
+	InstanceKey      string
 	WorkflowName     string
 	WorkflowVersion  string
 	Mode             string
@@ -114,9 +116,8 @@ type WorkflowEngineStateRecord struct {
 }
 
 func (r WorkflowEngineStateRecord) Validate() error {
-	r.Identity = r.Identity.Normalize()
-	if err := r.Identity.Validate(); err != nil || strings.TrimSpace(r.EntityID) == "" {
-		return fmt.Errorf("workflow engine state record requires exact run, route, and entity identity")
+	if err := r.validateConstructionIdentity(); err != nil {
+		return err
 	}
 	if strings.TrimSpace(r.WorkflowName) == "" || strings.TrimSpace(r.CurrentState) == "" {
 		return fmt.Errorf("workflow engine state record requires workflow and current state")
@@ -162,6 +163,24 @@ func (r WorkflowEngineStateRecord) Validate() error {
 		}
 	} else if r.ExpectedRevision <= 0 || strings.TrimSpace(r.ExpectedState) == "" {
 		return fmt.Errorf("workflow engine state mutation requires exact expected revision and state")
+	}
+	return nil
+}
+
+func (r WorkflowEngineStateRecord) validateConstructionIdentity() error {
+	r.Identity = r.Identity.Normalize()
+	if err := r.Identity.Validate(); err != nil || strings.TrimSpace(r.EntityID) == "" {
+		return fmt.Errorf("workflow engine state record requires exact run, route, and entity identity")
+	}
+	construction, err := DecodeWorkflowInstanceRecordedHeader(r.Identity.Route, r.Config)
+	if err != nil {
+		return err
+	}
+	if construction.ParentRoute().FlowInstance != r.ParentInstance {
+		return fmt.Errorf("workflow engine state parent disagrees with exact construction identity")
+	}
+	if (r.Mode == "template") != (r.InstanceKey != "") {
+		return fmt.Errorf("workflow engine state key presence disagrees with its declaration mode")
 	}
 	return nil
 }
@@ -432,6 +451,7 @@ func workflowEngineStateRecord(
 	}
 	record := WorkflowEngineStateRecord{
 		Identity: owner, EntityID: identity.RowID(),
+		ParentInstance: instance.ParentFlowInstance, InstanceKey: instance.InstanceKey,
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
 		Mode: workflowInstanceMode(instance), Status: status, CurrentState: instance.CurrentState, StageDefined: instance.StageDefined,
 		EntityType: projection.Control.EntityType, Slug: projection.Control.Slug, Name: projection.Control.Name,
