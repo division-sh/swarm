@@ -773,7 +773,7 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 					if testedDescriptor == nil {
 						t.Fatalf("active descriptors = %#v, want account/existing", descriptors)
 					}
-					if !testedDescriptor.HasSemanticSource() {
+					if testedDescriptor.BundleHash != bundle.SourceArtifact.BundleHash() || testedDescriptor.WorkflowVersion != source.WorkflowVersion() {
 						t.Fatalf("descriptor semantic source = %#v, want exact source", *testedDescriptor)
 					}
 
