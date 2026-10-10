@@ -1276,3 +1276,44 @@ attribution remains open. No core/full retry, pressure fixture edit, automatic
 receipt carry or class closure is authorized by the E2E-13 ruling. Server2
 was released after joined cleanup with no process and admission0active0waiting.
 CI full / Local core plus the12 named complete supplements remains the gate.
+
+## Bounded Pressure Peer-Order Fixture Repair
+
+Reviewer-G6091676660 and review5476628909 authorize a TEST-ONLY correction,
+not a stale-claim relaxation or attribution waiver. The prior b47 core and
+historical2542 peer-expiry receipts remain failed; identical source and shape
+do not establish matched-load PR innocence. Runtime fan-out code is untouched.
+
+The artificial reservation queue now records all four real worker tickets.
+Only sequence1 may be bypassed during the negative control's finite pressure
+window; every other peer is FIFO. Drain restores the complete queue order.
+Each return/cancellation removes only its own ticket. The negative-control
+probe reports actual peer grants (not intermediate ordered-peer denials),
+while the FIFO companion still observes its first competing denial. This
+changes the injected fault's scope, not candidate selection, claims or commits.
+Four worker concurrency, actual30s leases,31s pressure,15s progress,90s drain,
+old-waiter repeated retries, expired exact-claim cleanup/generation2 recovery
+and every original effect/receipt/accounting assertion remain unchanged.
+
+The existing starvation root adds a small `peer_order` subtest and retains its
+complete native work proof under `lease_and_recovery`; no root, unit, profile,
+deadline, timing budget or baseline is removed/retiered. Six controlled cells
+use the actual fixture reserve method and observe its attempt before canceling
+and joining: later peer ordering, oldest peer progress, intended first-waiter
+starvation, drain release, drain order and the ordinary FIFO control. No sleeps,
+retries, fabricated database lease or extra serving worker. A bounded four-ticket
+snapshot isolates queue policy; actual durable claims remain proved by the full
+native pressure roots, not credited to this small control.
+
+Before patch, three cells FAIL deterministically: later peer4 passes queued
+1/2/3, sequence1 acquires during the negative window, and draining peer3 passes
+queued1/2. The before aggregate remains RED0.028s. After patch all six cells
+PASS race50,400 passing records/zero failure or skip,1.194s. This is fixture-
+policy proof, not elapsed-lease or qualification credit. Complete clean-head
+starvation/FIFO and nearby both-store accounting/finite/startup controls with
+native PG16 precede push. If any unexpected peer expiry or production error
+persists, stop for the authorized paired base/head four-slot diagnostic; no
+blind core/full rerun. On focused success, batch with the approved E2E-13 flag
+once, then fresh core+12 supplements and hosted full; no b47 red receipt carry.
+Existing2353/2394/harness watchlist records own the defect and proof refinement;
+no new issue, production/spec semantics, framework, driver or vendor change.
