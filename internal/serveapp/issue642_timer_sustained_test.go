@@ -215,7 +215,7 @@ func issue642RequireSustainedEffects(t *testing.T, rt issue2564ServedFixture, co
 	if count < 2 || count > len(occurrences) {
 		t.Fatalf("sustained serving requires at least two executed effects, not just publications: effects=%d occurrences=%d", count, len(occurrences))
 	}
-	report, err := rt.selected.LoadRunDebugReport(t.Context(), completed.RunID, operatorread.RunDebugQueryOptions{MutationLimit: 1000})
+	report, err := rt.selected.LoadRunDebugReport(t.Context(), completed.RunID, operatorread.RunDebugQueryOptions{})
 	if err != nil || !report.TestQuiescence.Ready || report.TestQuiescence.ActiveSessionLeases != 0 {
 		t.Fatalf("completed sustained run retains unsettled native work: quiescence=%+v err=%v", report.TestQuiescence, err)
 	}
@@ -224,7 +224,8 @@ func issue642RequireSustainedEffects(t *testing.T, rt issue2564ServedFixture, co
 		tickIDs[timeridentity.WorkflowTimerOccurrenceEventID(occurrence)] = true
 	}
 	mutatedEvents, values := map[string]bool{}, map[int]string{}
-	for _, mutation := range report.Mutations {
+	// SQLite's debug report omits mutations; use the existing both-store history owner.
+	for _, mutation := range storetest.ObserveEntityMutationHistory(t, t.Context(), rt.selected, completed.RunID) {
 		if mutation.Domain != "authored_field" || mutation.Path != "tick_count" || !tickIDs[mutation.CausedByEvent] {
 			continue
 		}
