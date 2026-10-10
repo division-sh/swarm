@@ -664,14 +664,14 @@ func TestEventBusFlowInstanceRouteIdentityOwnerRejectsMismatchedExplicitPath(t *
 	if err := eb.RemoveFlowInstanceRouteFixture(normalizedRemoval); err != nil {
 		t.Fatalf("RemoveFlowInstanceRoute owner: %v", err)
 	}
-	if len(store.replaceCalls) != replaceCalls+1 || store.replaceCalls[len(store.replaceCalls)-1] != installed {
-		t.Fatalf("persistence replacement calls = %#v, want one canonical owner removal after setup", store.replaceCalls)
+	if len(store.replaceCalls) != replaceCalls || eb.RouteTable().HasFlowInstanceRoute(installed) {
+		t.Fatalf("isolated removal retained its owner or wrote a retired mirror: owner=%v calls=%#v", eb.RouteTable().HasFlowInstanceRoute(installed), store.replaceCalls)
 	}
 	if err := eb.RemoveFlowInstanceRouteFixture(normalizedRemoval); err != nil {
 		t.Fatalf("exact RemoveFlowInstanceRoute replay: %v", err)
 	}
-	if len(store.replaceCalls) != replaceCalls+2 {
-		t.Fatalf("persistence replacement calls after absent replay = %#v, want exact replay reconciliation", store.replaceCalls)
+	if len(store.replaceCalls) != replaceCalls || eb.RouteTable().HasFlowInstanceRoute(installed) {
+		t.Fatalf("absent replay restored its owner or wrote a retired mirror: owner=%v calls=%#v", eb.RouteTable().HasFlowInstanceRoute(installed), store.replaceCalls)
 	}
 }
 
