@@ -15,13 +15,14 @@ import (
 // Schedule one old waiter after each competing admission, not after a fixed
 // 30-second sleep. Every refill round includes its retry and a real peer commit.
 type pressureReservationGate struct {
-	target  chan pressureSoakTurnTiming
-	peer    chan pressureSoakTurnTiming
-	resume  chan struct{}
-	recover chan struct{}
-	done    chan struct{}
-	once    sync.Once
-	cleanup chan pressureReservationCleanup
+	target         chan pressureSoakTurnTiming
+	peer           chan pressureSoakTurnTiming
+	resume         chan struct{}
+	recover        chan struct{}
+	done           chan struct{}
+	once           sync.Once
+	cleanup        chan pressureReservationCleanup
+	peerGrantsOnly bool
 }
 
 type pressureReservationCleanup struct {
@@ -42,7 +43,7 @@ func (g *pressureReservationGate) close() { g.once.Do(func() { close(g.done) }) 
 
 func (g *pressureReservationGate) afterAttempt(ctx context.Context, timing pressureSoakTurnTiming, granted, available bool) {
 	if timing.ReserveSequence != 1 {
-		if available {
+		if available && (granted || !g.peerGrantsOnly) {
 			select {
 			case g.peer <- timing:
 			default:
@@ -88,7 +89,77 @@ func resumePressureReservation(t *testing.T, g *pressureReservationGate) {
 }
 
 func TestIssue2394PressureReservationStarvationPostgres(t *testing.T) {
-	provePressureReservationSchedule(t, true)
+	if !t.Run("peer_order", provePressureReservationPeerOrder) {
+		return
+	}
+	t.Run("lease_and_recovery", func(t *testing.T) {
+		provePressureReservationSchedule(t, true)
+	})
+}
+
+func provePressureReservationPeerOrder(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		waiting   []uint64
+		entries   uint64
+		barging   bool
+		draining  bool
+		wantGrant bool
+	}{
+		{"later_peer_waits", []uint64{1, 2, 3}, 3, true, false, false},
+		{"oldest_peer_proceeds", []uint64{1}, 1, true, false, true},
+		{"old_waiter_stays_blocked", nil, 0, true, false, false},
+		{"drain_releases_old_waiter", nil, 0, true, true, true},
+		{"drain_preserves_peer_order", []uint64{1, 2}, 2, true, true, false},
+		{"fifo_control_protects_first", []uint64{1}, 1, false, false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			c := newPressureSoakControl(1, 0)
+			c.allowReservationBarging = test.barging
+			c.state.Produced, c.state.Draining = 2, test.draining
+			c.reservationEntries = test.entries
+			copy(c.waiting[:], test.waiting)
+			c.waitingCount = len(test.waiting)
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			var timing pressureSoakTurnTiming
+			var err error
+			if test.wantGrant {
+				err = c.reserve(ctx, &timing)
+			} else {
+				g := newPressureReservationGate()
+				defer g.close()
+				c.reservationGate = g
+				finished := make(chan error, 1)
+				go func() { finished <- c.reserve(ctx, &timing) }()
+				select {
+				case <-g.target:
+					cancel()
+					err = <-finished
+				case <-g.peer:
+					cancel()
+					err = <-finished
+				case err = <-finished:
+					cancel()
+				}
+			}
+			if test.wantGrant {
+				if err != nil || timing.ReserveGranted.IsZero() || c.state.Reserved != 1 {
+					t.Fatalf("eligible reservation did not proceed: timing=%+v state=%+v err=%v", timing, c.state, err)
+				}
+			} else if !errors.Is(err, context.Canceled) || !timing.ReserveGranted.IsZero() || c.state.Reserved != 0 {
+				t.Fatalf("reservation %d bypassed its intended order: waiting=%v timing=%+v state=%+v err=%v", timing.ReserveSequence, test.waiting, timing, c.state, err)
+			}
+			if timing.ReserveSequence != test.entries+1 || c.waitingCount != len(test.waiting) {
+				t.Fatalf("reservation did not remove only its own ticket: timing=%+v waiting=%v count=%d", timing, c.waiting, c.waitingCount)
+			}
+			for index, sequence := range test.waiting {
+				if c.waiting[index] != sequence {
+					t.Fatalf("reservation changed another waiter's order: waiting=%v want=%v", c.waiting, test.waiting)
+				}
+			}
+		})
+	}
 }
 
 func TestIssue2394PressureReservationFIFOControlPostgres(t *testing.T) {
@@ -101,6 +172,7 @@ func provePressureReservationSchedule(t *testing.T, barging bool) {
 	c := newPressureSoakControl(floor, time.Second)
 	c.allowReservationBarging = barging
 	g := newPressureReservationGate()
+	g.peerGrantsOnly = barging
 	c.reservationGate = g
 	defer c.logTiming(t)
 	p := newSupplementalServingProbe(0)
