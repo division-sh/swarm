@@ -336,6 +336,12 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 		{"runlifecycle/active_run_quiescence.go", "sqliteTerminateActiveRunSessionsTx", []string{"attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, sessionID)"}},
 		{"genericschedule/owner.go", "AdmitTx", []string{"admitTx(ctx, tx, attempt, postgres, command, now)"}},
 		{"genericschedule/owner.go", "admitTx", []string{"insertActivationTx(ctx, tx, dialectFor(postgres), scope, activation)", "attempt.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, activation.ID)"}},
+		{"genericschedule/fork_join.go", "RestoreForkJoinTx", []string{
+			"admitTx(ctx, tx, attempt, postgres, request.Child, func() time.Time { return request.BornAt })",
+			"stampForkJoinOrigin(ctx, tx, postgres, child.ID, request)",
+			"cancelLoadedTx(ctx, tx, dialectFor(postgres), child, request.Source.CancelCause, request.BornAt)",
+			"requireForkJoinTx(ctx, tx, postgres, request)",
+		}},
 		{"genericschedule/owner.go", "addTimerEffect", []string{"attempt.AddFact(runID, privaterunforkrevision.FamilyTimers, activationID)"}},
 		{"genericschedule/owner.go", "PostgresOwner.failMalformed", []string{"failMalformedAttempt(ctx, attempt, true, activationID, malformed, o.now())"}},
 		{"genericschedule/owner.go", "SQLiteOwner.failMalformed", []string{"failMalformedAttempt(ctx, attempt, false, activationID, malformed, o.now())"}},
@@ -357,7 +363,7 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 		{"workflowtimer/cancellation.go", "cancelRunsSQL", []string{"facts.AddFact(ref.RunID, privaterunforkrevision.FamilyTimers, ref.ActivationID)"}},
 		{"pipelinepersistence/workflow_engine_timer_commit.go", "commitWorkflowEngineTimerMutation", []string{
 			"insertWorkflowEngineTimerActivation(ctx, tx, postgres, attempt, activation)",
-			"cancelWorkflowEngineTimerActivation(ctx, tx, postgres, attempt, activation)",
+			"cancelWorkflowEngineTimerActivation(ctx, tx, postgres, attempt, activation, mutation.CancelCause, mutation.CancelledAt)",
 		}},
 		{"pipelinepersistence/workflow_engine_timer_commit.go", "insertWorkflowEngineTimerActivation", []string{"facts.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID)"}},
 		{"pipelinepersistence/workflow_engine_timer_commit.go", "cancelWorkflowEngineTimerActivation", []string{"facts.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID)"}},

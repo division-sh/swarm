@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -61,6 +62,26 @@ func TestWorkflowJoinScheduleUsesRetainedArm(t *testing.T) {
 				t.Run(edit.name, func(t *testing.T) {
 					changed := command
 					edit.apply(&changed)
+					if edit.name == "foreign_run" || edit.name == "foreign_entity" {
+						entry := ref.StageEntry()
+						entry.RunID, entry.EntityID = changed.RunID, changed.EntityID
+						if flow == "" {
+							entry.InstanceID, entry.InstancePath = changed.RunID, changed.RunID
+						}
+						changedRef, err := ref.Declaration().BindStageEntry(entry, ref.Generation())
+						if err != nil {
+							t.Fatal(err)
+						}
+						handle, err := timeridentity.JoinTimeoutHandle(changedRef)
+						if err != nil {
+							t.Fatal(err)
+						}
+						changed.Payload, err = canonicaljson.FromGo(handle.PayloadMetadata())
+						if err != nil {
+							t.Fatal(err)
+						}
+						changed.ScheduleKey, changed.TaskID = handle.TaskID(), handle.TaskID()
+					}
 					// Re-hash a lawful schedule: self-consistency is not arm correspondence.
 					candidate := exactWorkflowJoinSchedule(t, changed)
 					if err := ValidateWorkflowJoinScheduleRelation(join, candidate); err == nil {
@@ -85,6 +106,46 @@ func TestWorkflowJoinScheduleUsesRetainedArm(t *testing.T) {
 				t.Fatal("validation changed the frozen join")
 			}
 		})
+	}
+}
+
+func TestArrivalScheduleAdmissionRejectsMismatchedStageEntry(t *testing.T) {
+	for _, flow := range []string{"", "orders"} {
+		for _, field := range []string{"run", "entity", "instance_path"} {
+			t.Run(flow+"/"+field, func(t *testing.T) {
+				path := ""
+				if flow != "" {
+					path = "orders/order-1"
+				}
+				command := testJoinScheduleCommand(t, flow, path, attemptgeneration.Generation{})
+				_, ref, _ := timeridentity.ParseJoinHandle(command.Payload.Interface().(map[string]any))
+				entry := ref.StageEntry()
+				switch field {
+				case "run":
+					entry.RunID = uuid.NewString()
+				case "entity":
+					entry.EntityID = uuid.NewString()
+				case "instance_path":
+					entry.InstancePath += "/foreign"
+				}
+				ref, err := ref.Declaration().BindStageEntry(entry, ref.Generation())
+				if err != nil {
+					t.Fatal(err)
+				}
+				handle, err := timeridentity.JoinTimeoutHandle(ref)
+				if err != nil {
+					t.Fatal(err)
+				}
+				command.Payload, err = canonicaljson.FromGo(handle.PayloadMetadata())
+				if err != nil {
+					t.Fatal(err)
+				}
+				command.ScheduleKey, command.TaskID = handle.TaskID(), handle.TaskID()
+				if err := command.Validate(); err == nil {
+					t.Fatal("different stage-entry owner admitted by the shared generic schedule command")
+				}
+			})
+		}
 	}
 }
 

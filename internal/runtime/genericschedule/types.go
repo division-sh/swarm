@@ -282,6 +282,16 @@ func validateSystemJoinSchedule(c AdmissionCommand) error {
 		return errors.New("join generic schedule task does not match its typed handle")
 	}
 	route := c.RoutingSource.Route().Normalized()
+	if ref.Mode() == timeridentity.JoinRefModeArrival {
+		entry := ref.StageEntry()
+		path := c.FlowInstance
+		if ref.FlowPath() == "." {
+			path = c.RunID
+		}
+		if err := entry.RequireOwner(c.RunID, ref.FlowPath(), entry.InstanceID, path, c.EntityID, ref.Stage()); err != nil {
+			return fmt.Errorf("join generic schedule contradicts its retained stage-entry owner: %w", err)
+		}
+	}
 	if ref.FlowPath() == "." {
 		if c.RoutingSource.Kind() != events.RoutingSourceRoot || route.FlowID != "" || c.FlowInstance != "" {
 			return errors.New("root join generic schedule source contradicts its explicit root declaration")
@@ -426,6 +436,7 @@ type Activation struct {
 	FailedAt               time.Time
 	Failure                Failure
 	ClockSuspension        *ClockSuspension
+	ForkJoinOrigin         *ForkJoinOrigin
 }
 
 func (a Activation) Canonical() Activation {
@@ -446,6 +457,11 @@ func (a Activation) Canonical() Activation {
 	a.Failure.Code = strings.TrimSpace(a.Failure.Code)
 	a.Failure.Message = strings.TrimSpace(a.Failure.Message)
 	a.ClockSuspension = a.ClockSuspension.Canonical()
+	if a.ForkJoinOrigin != nil {
+		origin := *a.ForkJoinOrigin
+		origin.SourceAdmittedAt = canonicalTime(origin.SourceAdmittedAt)
+		a.ForkJoinOrigin = &origin
+	}
 	return a
 }
 
@@ -532,7 +548,7 @@ func (a Activation) Validate() error {
 	if a.CurrentEventID != "" && a.CurrentEventID != OccurrenceEventID(a.ID, a.CurrentDueAt) {
 		return errors.New("generic schedule occurrence event identity is not deterministic")
 	}
-	return nil
+	return validateForkJoinOrigin(a)
 }
 
 // EvidenceDigest binds a decoded row without sending a semantic payload through
@@ -552,8 +568,9 @@ func (a Activation) EvidenceDigest() (string, error) {
 		CancelledAt, FiredAt, AcceptedAt, FailedAt time.Time
 		Failure                                    Failure
 		ClockSuspension                            *ClockSuspension
+		ForkJoinOrigin                             *ForkJoinOrigin `json:",omitempty"`
 	}{a.ID, a.ImmutableHash, a.AdmittedAt, a.InitialDueAt, a.CurrentDueAt, a.CurrentEventID, a.CurrentEventAdmittedAt,
-		a.Status, a.CancelCause, a.CancelledAt, a.FiredAt, a.AcceptedAt, a.FailedAt, a.Failure, a.ClockSuspension})
+		a.Status, a.CancelCause, a.CancelledAt, a.FiredAt, a.AcceptedAt, a.FailedAt, a.Failure, a.ClockSuspension, a.ForkJoinOrigin})
 }
 
 func (a Activation) validateCurrentDue() error {

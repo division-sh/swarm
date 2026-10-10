@@ -30,7 +30,8 @@ var admittedEventCallsites = map[eventBoundaryCallsite]int{
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.admitPublicationEventFacts", name: "AdmitForPersistence"}:                                                 1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "admitEventForPublish", name: "AdmitForPublish"}:                                                                    1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.publishClaimedPipeline", name: "RevalidatePersistedEvent"}:                                                1,
-	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.PrepareSelectedForkPublish", name: "AdmitForPersistence"}:                                                 2,
+	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.PrepareSelectedForkPublish", name: "AdmitForPersistence"}:                                                 1,
+	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.AdmitSelectedForkPublishInput", name: "AdmitForPersistence"}:                                              1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.prepareClosedPublication", name: "AdmitForPersistence"}:                                                   1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "reuseDurableSubscribedEventRouteFacts", name: "AdmitForPersistence"}:                                               1,
 	{path: "internal/runtime/manager/runtime.go", scope: "AgentManager.SendDirective", name: "AdmitForPersistence"}:                                                               1,
@@ -83,6 +84,10 @@ var eventRecordImportFiles = map[string]struct{}{
 	// Fixed-revision input facts consume the same complete Record decoder;
 	// this owner does not gain event SQL or admission-constructor authority.
 	"internal/store/internal/backend/runforkpersistence/run_fork_input_publication.go": {},
+	// Current selected-input replay and timer-root settlement read canonical
+	// admitted records; neither is an event SQL writer or alternate decoder.
+	"internal/store/internal/backend/runforkpersistence/selected_input_recovery.go": {},
+	"internal/store/internal/backend/runforkpersistence/selected_timer_lineage.go":  {},
 	// selectedContractWorkflowSourceModes decodes complete records before checking
 	// exact source-run ownership; it does not reconstruct identity with raw SQL.
 	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_materialization_owner.go": {},
