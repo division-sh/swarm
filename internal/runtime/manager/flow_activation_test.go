@@ -3745,6 +3745,7 @@ func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing
 		uuid.NewString(): runtimestanding.StandingRestartSuspended,
 		uuid.NewString(): runtimestanding.StandingRestartOrphaned,
 		uuid.NewString(): runtimestanding.StandingRestartCredentialDormant,
+		uuid.NewString(): runtimestanding.StandingRestartSessionDormant,
 		uuid.NewString(): runtimestanding.StandingRestartRecoveryRequired,
 	}
 	instances := &flowActivationTestInstanceStore{readiness: map[string]runtimepipeline.DynamicFlowRuntimeReadiness{}}

@@ -147,6 +147,27 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 	}
 }
 
+func TestSelectedRawSQLBoundaryRejectsRetiredSessionProviderProducers(t *testing.T) {
+	for _, path := range []string{"internal/sessionprovider/capture.go", "internal/sessionprovider/publication.go", "internal/sessionprovider/claim_recovery.go", "internal/sessionprovider/session_state_unix.go"} {
+		t.Run(path, func(t *testing.T) {
+			matches, err := rawSQLBoundaryMatchesFromSources(map[string]string{path: `package sessionprovider
+import ("context"; "database/sql")
+func forbidden(ctx context.Context, db *sql.DB) error {
+ _, err := db.ExecContext(ctx, "DELETE FROM whatsapp_incoming_capture")
+ return err
+}
+`})
+			if err != nil {
+				t.Fatal(err)
+			}
+			failures := classifyRawSQLBoundaryMatches(matches, selectedRawSQLBoundaryLedger())
+			if len(failures) == 0 || !strings.Contains(strings.Join(failures, "\n"), path) {
+				t.Fatalf("retired public SQL producer regained an allowance: %v", failures)
+			}
+		})
+	}
+}
+
 func repoRootForRawSQLBoundaryGuard(t *testing.T) string {
 	t.Helper()
 	wd, err := os.Getwd()
