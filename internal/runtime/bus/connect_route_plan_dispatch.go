@@ -829,6 +829,13 @@ func (r connectRoutePlanResolver) evaluateSelectedReceiverCarriers(ctx context.C
 	})
 	var registrations []runtimepinrouting.ConnectRecipientRegistration
 	for _, target := range orderedTargets {
+		available, err := r.replyOriginAvailable(ctx, runID, plan, target)
+		if err != nil {
+			return runtimepinrouting.ConnectRecipientEvaluation{}, err
+		}
+		if !available {
+			continue
+		}
 		instance, err := r.indexedConnectIdentity(ctx, runID, target)
 		if err != nil {
 			return runtimepinrouting.ConnectRecipientEvaluation{}, err

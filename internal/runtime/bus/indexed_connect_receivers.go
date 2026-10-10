@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -11,6 +12,66 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
+
+func (r connectRoutePlanResolver) replyOriginAvailable(ctx context.Context, runID string, plan pinrouting.ConnectRoutePlan, target events.RouteIdentity) (bool, error) {
+	if plan.ReplyRole() != pinrouting.ConnectReplyRoleResponse {
+		return true, nil
+	}
+	fact, present := correlation.SourceArtifactFactFromContext(ctx)
+	if !present || r.lifecycle.index == nil {
+		return false, fmt.Errorf("reply origin requires its admitted source and native index")
+	}
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flowidentity.ScopeKey(r.source, target.FlowID), "", target.FlowInstance))
+	if err != nil {
+		return false, err
+	}
+	request, err := pipeline.NewExactFlowInstanceLookup(r.source, fact, owner)
+	if err != nil {
+		return false, err
+	}
+	instance, found, err := r.replyOriginWorkflowInstance(ctx, request)
+	if err != nil || !found {
+		return false, err
+	}
+	if target.EntityID != "" && instance.EntityID != target.EntityID {
+		return false, fmt.Errorf("reply origin crosses its target entity")
+	}
+	if instance.Status == "terminated" {
+		return false, nil
+	}
+	stage := ""
+	if instance.StageDefined {
+		stage = instance.CurrentState
+	}
+	err = pipeline.NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(r.source, instance.WorkflowName)
+	var terminal *pipeline.TerminalReceiverError
+	if errors.As(err, &terminal) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (r connectRoutePlanResolver) replyOriginWorkflowInstance(ctx context.Context, request pipeline.FlowInstanceLookupRequest) (pipeline.WorkflowInstance, bool, error) {
+	if _, err := r.prospectiveConnectInstances(ctx, request.RunID(), request.SourceFact()); err != nil {
+		return pipeline.WorkflowInstance{}, false, err
+	}
+	for _, tree := range preparedConnectPlans(ctx) {
+		for _, plan := range tree.ConstructionPlans() {
+			if plan.Identity.InstancePath == request.ExactPath() && plan.Identity.TemplateID == request.FlowID() {
+				return plan.Instance, true, nil
+			}
+		}
+	}
+	observed, found, err := r.lifecycle.index.LookupFlowInstance(ctx, request)
+	if err != nil || !found {
+		return pipeline.WorkflowInstance{}, false, err
+	}
+	if err := observed.ValidateSelection(request); err != nil {
+		return pipeline.WorkflowInstance{}, false, err
+	}
+	instance, err := observed.WorkflowInstance()
+	return instance, err == nil, err
+}
 
 func (r connectRoutePlanResolver) addIndexedLookupPaths(ctx context.Context, runID string, flows map[string]struct{}, paths map[string]struct{}) error {
 	fact, present := correlation.SourceArtifactFactFromContext(ctx)

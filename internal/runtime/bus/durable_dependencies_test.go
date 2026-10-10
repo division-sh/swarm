@@ -25,6 +25,10 @@ type unexpectedDurableTestRoles struct {
 	runtimerunlifecycle.OperationOwner
 }
 
+func (unexpectedDurableTestRoles) RequireActiveRun(context.Context, string) error {
+	return errUnexpectedDurableTestRole
+}
+
 func (unexpectedDurableTestRoles) LookupFlowInstance(context.Context, runtimepipeline.FlowInstanceLookupRequest) (runtimepipeline.FlowInstanceObservation, bool, error) {
 	return runtimepipeline.FlowInstanceObservation{}, false, errUnexpectedDurableTestRole
 }
