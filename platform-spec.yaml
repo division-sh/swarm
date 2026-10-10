@@ -18356,6 +18356,7 @@ platform_tables:
         A selected receiver with proven terminal stage or terminated construction produces the existing target-unreachable
         publication outcome without creating a replacement. Unknown lifecycle, corruption, foreign-owner and independent
         joined failures remain errors; they cannot be converted to absence or a benign target refusal.
+        A termination timestamp does not legitimize an unknown or missing lifecycle status.
         Receiver observations consume exact admitted coordinates or compiled declaration scopes, including actual
         structural parents and typed keys; source-entity scans cannot substitute for that selection.
         A non-executable receiver remains occupied and historically readable; availability is not instance absence.

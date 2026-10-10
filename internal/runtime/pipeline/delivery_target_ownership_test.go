@@ -500,6 +500,8 @@ func TestDeliveryTargetWorkflowInstanceAvailabilityIsActiveOnly(t *testing.T) {
 		{name: "unknown fails closed", status: "failed", state: "active", unavailable: true},
 		{name: "missing fails closed", state: "active", unavailable: true},
 		{name: "termination timestamp", status: "active", state: "active", terminated: time.Now().UTC(), unavailable: true},
+		{name: "unknown status with timestamp", status: "failed", state: "active", terminated: time.Now().UTC(), unavailable: true},
+		{name: "missing status with timestamp", state: "active", terminated: time.Now().UTC(), unavailable: true},
 		{name: "terminal entity stage", status: "active", state: "killed", unavailable: true},
 	}
 	for _, testCase := range tests {
@@ -515,7 +517,7 @@ func TestDeliveryTargetWorkflowInstanceAvailabilityIsActiveOnly(t *testing.T) {
 				t.Fatalf("terminal receiver classification=%#v err=%v", terminal, err)
 			}
 			var terminated *TerminatedReceiverError
-			if errors.As(err, &terminated) != (testCase.status == "terminated" || !testCase.terminated.IsZero()) {
+			if errors.As(err, &terminated) != (testCase.status == "terminated" || testCase.status == "active" && !testCase.terminated.IsZero()) {
 				t.Fatalf("terminated receiver classification=%#v err=%v", terminated, err)
 			}
 		})
