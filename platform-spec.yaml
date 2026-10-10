@@ -41136,6 +41136,13 @@ managed_agent_capability_surface:
         before the exact current execution fence atomically records execution failure and the canonical run-lifecycle
         terminal disposition. An already-terminal child keeps its committed disposition. The permanent activated
         fork-operation response is immutable; later failure never becomes failed creation or child deletion.
+      selected_prepared_source_publication: >-
+        Non-executing attachment preparation validates every immutable selected source-publication frame through
+        the same selected input/schema admission consumed by serving. Missing or substituted original input,
+        changed source identity/type/mode/payload/schema and malformed retained occurrence projections refuse
+        before activation acknowledgment or source freezing. This step performs no route planning, publication
+        claim, SQL event/delivery mutation or receiver execution. Serving revalidates the same original input and
+        store-projected payload; a successful activation response is not a synchronous returned-event receipt.
         An accepted operator stop owns the child's canceled disposition, while process retirement preserves a fenced
         predecessor for startup recovery. Serving completion is joined without self-join or holding the runtime
         resource mutex across that join. Business failure is diagnostic evidence, not resource-release failure.
