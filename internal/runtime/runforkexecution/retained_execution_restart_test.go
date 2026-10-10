@@ -53,6 +53,7 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 				if err := owner.BindSelectedProcess(ctx, process, capability); err != nil {
 					t.Fatal(err)
 				}
+				baselineLeases := process.ActiveCount()
 				t.Cleanup(func() {
 					if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 						t.Error(err)
@@ -103,12 +104,13 @@ func TestIssue642RetainedForkCrashRestartBothStores(t *testing.T) {
 					owner.ports.contexts.mu.Lock()
 					retained := len(owner.ports.contexts.entries)
 					owner.ports.contexts.mu.Unlock()
-					if cardinality == 1 && outputs == 1 && pending == 0 && settlement.Total == 1 && settlement.Delivered == 1 && found && header.CurrentState == "done" && availability.Status == "completed" && retained == 0 {
+					leases := process.ActiveCount()
+					if cardinality == 1 && outputs == 1 && pending == 0 && settlement.Total == 1 && settlement.Delivered == 1 && found && header.CurrentState == "done" && availability.Status == "completed" && retained == 0 && leases == baselineLeases {
 						break
 					}
 					select {
 					case <-wait.Done():
-						t.Fatalf("recovery did not finish the original receiver: input=%d output=%d pipeline=%d deliveries=%+v header=%+v run=%s retained=%d", cardinality, outputs, pending, settlement, header, availability.Status, retained)
+						t.Fatalf("recovery did not finish the original receiver: input=%d output=%d pipeline=%d deliveries=%+v header=%+v run=%s retained=%d leases=%d baseline=%d", cardinality, outputs, pending, settlement, header, availability.Status, retained, leases, baselineLeases)
 					case <-time.After(10 * time.Millisecond):
 					}
 				}
