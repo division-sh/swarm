@@ -84,7 +84,7 @@ func requireForkResourceSourcePinAgreement(plan runfork.RunForkPlan, pins []runt
 	return nil
 }
 
-func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, plan runfork.RunForkPlan, planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, original semanticview.OriginalLoopCarriage, targetBundleHash string, data *storedurabledata.Owner, pins []runtimedata.Pin) error {
+func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, plan runfork.RunForkPlan, planRefs map[fanoutobligation.IntentKey]runtimecontracts.FanOutPlanRef, original semanticview.OriginalLoopCarriage, targetBundleHash string, data *storedurabledata.Owner, pins []runtimedata.Pin) error {
 	var intentCount int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='handler'`, forkRunID).Scan(&intentCount); err != nil {
 		return fmt.Errorf("count materialized fork fan-out intents: %w", err)
@@ -105,7 +105,10 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 		if err != nil {
 			return err
 		}
-		planRef := planRefs[sourceIntent.Request.PlanRef.ElementRef]
+		planRef, ok := planRefs[sourceIntent.Request.Key]
+		if !ok {
+			return fmt.Errorf("fork fan-out plan proof missing for %s", sourceIntent.Request.Key.String())
+		}
 		var (
 			bundleHash, semanticDigest, sourceKind, sourceField, status, blockedReason string
 			sourceEvent, sourceRun, sourceEntity, sourceMutation                       sql.NullString
@@ -236,14 +239,18 @@ func equalOptionalJSON(left, right []byte) bool {
 	return json.Unmarshal(left, &leftValue) == nil && json.Unmarshal(right, &rightValue) == nil && reflect.DeepEqual(leftValue, rightValue)
 }
 
-func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash string, proofs semanticview.FanOutPlanCarriage) (map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, error) {
+func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash string, proofs semanticview.FanOutPlanCarriage) (map[fanoutobligation.IntentKey]runtimecontracts.FanOutPlanRef, error) {
+	requirements, err := runfork.FanOutContinuationRequirements(plan)
+	if err != nil {
+		return nil, err
+	}
 	targetBundleHash = strings.TrimSpace(targetBundleHash)
 	if !proofs.IsZero() {
 		if err := proofs.RequireSource(targetBundleHash); err != nil {
 			return nil, err
 		}
 	}
-	resolved := make(map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, len(plan.FanOutObligations))
+	resolved := make(map[fanoutobligation.IntentKey]runtimecontracts.FanOutPlanRef, len(plan.FanOutObligations))
 	for _, obligation := range plan.FanOutObligations {
 		if err := obligation.Intent.Request.ValidateSourceProjection(); err != nil {
 			return nil, fmt.Errorf("pending fan-out source/plan agreement: %w", err)
@@ -255,11 +262,15 @@ func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash str
 			continue
 		}
 		source := obligation.Intent.Request.PlanRef
+		if !requirements[obligation.Intent.Request.Key] {
+			resolved[obligation.Intent.Request.Key] = source
+			continue
+		}
 		if proofs.IsZero() {
 			if source.BundleHash != targetBundleHash {
 				return nil, fmt.Errorf("selected bundle %s has no proof for pending fan_out declaration %s", targetBundleHash, fanOutElementLabel(source.ElementRef))
 			}
-			resolved[source.ElementRef] = source
+			resolved[obligation.Intent.Request.Key] = source
 			continue
 		}
 		proof, semantics, err := proofs.Resolve(source.ElementRef)
@@ -269,7 +280,7 @@ func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash str
 		if err := obligation.Intent.Request.AdmitSelectedPlan(proof, semantics); err != nil {
 			return nil, err
 		}
-		resolved[source.ElementRef] = proof
+		resolved[obligation.Intent.Request.Key] = proof
 	}
 	return resolved, nil
 }
@@ -282,7 +293,7 @@ func materializeRunForkFanOutObligations(
 	barriers runForkFanOutBarrierOwner,
 	forkRunID string,
 	plan runfork.RunForkPlan,
-	planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef,
+	planRefs map[fanoutobligation.IntentKey]runtimecontracts.FanOutPlanRef,
 	original semanticview.OriginalLoopCarriage,
 	targetBundleHash string,
 	data *storedurabledata.Owner,
@@ -306,7 +317,7 @@ func materializeRunForkFanOutObligations(
 			return 0, err
 		}
 		intent.Request.Capsule = capsuleProjection
-		planRef, ok := planRefs[intent.Request.PlanRef.ElementRef]
+		planRef, ok := planRefs[intent.Request.Key]
 		if !ok {
 			return 0, fmt.Errorf("fork fan-out plan proof missing for %s", intent.Request.Key.String())
 		}
