@@ -32,10 +32,8 @@ type forkedDomainConsumerSurface interface {
 	SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)
 	RecordSpend(context.Context, budgetspend.SpendRecord) error
 	ListBudgetProjectionTargets(context.Context) ([]budgetspend.ProjectionTarget, error)
-	UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error
-	DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
 	ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) (runtimebus.FlowInstanceRouteTopologyResult, error)
-	ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error)
+	pipeline.FlowInstanceIndexReader
 	RecordDeadLetter(context.Context, runtimedeadletters.Record) error
 }
 
@@ -106,9 +104,6 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 				Identity: runtimeflowidentity.RunScopedFlowInstance{RunID: fixture.sourceRun, Route: runtimeflowidentity.DeriveRoute("freeze", "domain")}, EventPattern: "freeze/domain/input",
 				SubscriberType: "node", SubscriberID: "freeze-node", SourceFlow: "freeze",
 			}
-			if err := surface.UpsertFlowInstanceRoute(ctx, route); err != nil {
-				t.Fatal(err)
-			}
 			eventID := uuid.NewString()
 			insertForkedConsumerEvent(t, fixture, eventID, "freeze.domain", fixture.forkedAt.Add(-time.Minute))
 
@@ -143,20 +138,18 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 				}
 			}
 
-			requireForkedSourceRefusal(t, "upsert flow route", surface.UpsertFlowInstanceRoute(ctx, route))
-			requireForkedSourceRefusal(t, "delete flow route", surface.DeleteFlowInstanceRoute(ctx, route.Identity))
 			_, err = surface.ReplaceFlowInstanceRouteTopology(ctx, []runtimebus.FlowInstanceRouteRecordSet{{Identity: route.Identity}})
 			requireForkedSourceRefusal(t, "replace flow topology", err)
-			routes, err := surface.ListFlowInstanceRoutes(ctx)
+			lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, route.Identity)
 			if err != nil {
 				t.Fatal(err)
 			}
-			foundRoute := false
-			for _, listed := range routes {
-				foundRoute = foundRoute || listed == route.Identity
+			observed, found, err := surface.LookupFlowInstance(ctx, lookup)
+			if err != nil || !found || observed.Identity() != child {
+				t.Fatalf("native construction disappeared after source freeze: %+v found=%t err=%v", observed, found, err)
 			}
-			if !foundRoute {
-				t.Fatalf("run-independent structural route disappeared after source freeze: %#v", routes)
+			if err := observed.ValidateSelection(lookup); err != nil {
+				t.Fatal(err)
 			}
 
 			requireForkedSourceRefusal(t, "record dead letter", surface.RecordDeadLetter(ctx, runtimedeadletters.Record{

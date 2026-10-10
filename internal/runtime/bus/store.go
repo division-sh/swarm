@@ -515,12 +515,6 @@ type FlowInstanceRouteRecord struct {
 	SourceFlow     string
 }
 
-type FlowInstanceRoutePersistence interface {
-	UpsertFlowInstanceRoute(ctx context.Context, route FlowInstanceRouteRecord) error
-	DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error
-	ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error)
-}
-
 // FlowInstanceRouteRecordSet is one exact route owner's complete materialized
 // record set within a topology replacement.
 type FlowInstanceRouteRecordSet struct {

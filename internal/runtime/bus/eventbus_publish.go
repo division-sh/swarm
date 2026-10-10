@@ -537,7 +537,7 @@ func (eb *EventBus) requireExistingRunActive(ctx context.Context, admitted event
 	if runID == "" {
 		return false, nil
 	}
-	if reader, ok := eb.store.(PreparedPublishEventReader); ok {
+	if reader := eb.durable.PreparedEvents; reader != nil {
 		_, found, err := loadValidatedPreparedPublishEvent(ctx, reader, event.ID())
 		if err != nil {
 			return false, fmt.Errorf("load publication event before run preflight: %w", err)
@@ -546,13 +546,11 @@ func (eb *EventBus) requireExistingRunActive(ctx context.Context, admitted event
 			return false, nil
 		}
 	}
-	owner, ok := eb.store.(interface {
-		RequirePublicationRunActive(context.Context, string) error
-	})
-	if !ok {
+	owner := eb.durable.RunLifecycle
+	if owner == nil {
 		return false, nil
 	}
-	err := owner.RequirePublicationRunActive(ctx, runID)
+	err := owner.RequireActiveRun(ctx, runID)
 	if admitted.RunDisposition() == events.AdmittedRunCreateAuthorized && isolatedPublicationRunMissing(err, runID) {
 		return true, nil
 	}
@@ -679,7 +677,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		return releaseFailure(descriptorErr)
 	}
 	authorScope, hasAuthorScope := runtimeauthoractivity.ScopeFromContext(ctx)
-	if reader, ok := eb.store.(PreparedPublishEventReader); ok {
+	if reader := eb.durable.PreparedEvents; reader != nil {
 		durable, found, err := loadValidatedPreparedPublishEvent(ctx, reader, admitted.ID())
 		if err != nil {
 			return releaseFailure(fmt.Errorf("load durable event identity: %w", err))

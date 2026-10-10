@@ -85,7 +85,6 @@ type claudeAttemptProofStore interface {
 	runtimebus.CommitPublicationOwner
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
-	runtimebus.FlowInstanceRoutePersistence
 	runtimebus.FlowInstanceRouteRecordReader
 	runtimebus.FlowInstanceRouteTopologyPersistence
 	runtimebus.ActiveAgentDescriptorLister
