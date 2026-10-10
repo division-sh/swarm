@@ -1434,3 +1434,13 @@ activation fields. Fresh committed-head focused controls follow. Upon the new
 qualification ruling, two queued duplicate sweeps and one begun whole-unit run
 are interrupted and joined; their incomplete receipts earn no credit. No fresh
 core, server2 qualification or hosted rerun has started.
+
+The affected debt ratchet at9ed then FAILS: duplicated receipt-helper call and
+an explicit new raw local variable increased site multiplicities. No baseline,
+classifier or guard exception is authorized. Consolidate the actual shared
+E2E-13/14 predecessor setup and receipt gate into the original observer/call
+site, retaining both exact chat IDs and all boundary-specific actions. No raw
+helper is renamed, moved, wrapped or hidden; one common real prerequisite
+serves both cuts, and the explicit raw local declaration is removed. Rerun
+both complete roots and affected guards/debt at the corrected frozen head;
+9ed focused passes do not erase that failed ratchet or qualify the next head.
