@@ -21023,7 +21023,12 @@ run_model:
         expected-key lookup or an empty expected set. Ordinary newly admitted child schedules are not inherited rows.
         Unactivated rows must exactly match their cut projection. Continuing readback retains the original child
         admission, due, command and source/cut identity while accepting canonically validated chronological child
-        progress; a canceled companion remains the exact canceled disposition. Readback never repairs missing work,
+        progress. When an occurrence is retained, cancellation and failure cannot precede its admission; one-shot
+        firing and acceptance cannot precede it either. Equal canonical timestamps are lawful. Without a retained
+        occurrence, cancellation and failure may precede due. A recurring schedule''s preceding accepted occurrence
+        remains historical evidence, not the current occurrence''s terminal disposition. The shared generic lifecycle
+        validator enforces these relationships before continuing readback normalizes progress for comparison;
+        a canceled companion remains the exact canceled disposition. Readback never repairs missing work,
         grants execution or discharges source-history admission by itself. Preactivation authority and
         published-occurrence continuation remain independent requirements. Pending fan-out barrier materialization
         validates its exact captured source schedule before writes and retains the admitted absolute due rather
