@@ -109,7 +109,8 @@ profiles:
     - store-runtime-full-04
     - store-runtime-full-05
     - store-runtime-full-07-fork
-    - store-runtime-full-06
+    - store-runtime-selected
+    - store-runtime-s-z-rest
     - catalog-required-smoke
   full:
     count_mode: count-1
@@ -184,7 +185,8 @@ profiles:
     - store-runtime-full-04
     - store-runtime-full-05
     - store-runtime-full-07-fork
-    - store-runtime-full-06
+    - store-runtime-selected
+    - store-runtime-s-z-rest
 units:
   core-structural-owner-guards:
     packages:
@@ -1097,13 +1099,11 @@ units:
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
-  store-runtime-full-06:
+  store-runtime-selected:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    run: ^Test[S-Z].*$
+    run: ^TestSelected.*$
     required_children:
-      TestUnstartedClaimedTurnTerminationBothStores: [waiting/sqlite, waiting/postgres, waiting_restart/sqlite, waiting_restart/postgres, rollback/sqlite, rollback/postgres, authorization_wins/sqlite, authorization_wins/postgres]
-      TestUnstartedDirectiveTurnRecoveryBothStores: [root/restart/sqlite, root/restart/postgres, root/rollback/sqlite, root/rollback/postgres, completion/restart/sqlite, completion/restart/postgres, completion/rollback/sqlite, completion/rollback/postgres]
       TestSelectedProviderTurnRetainsActualBusinessOriginBothStores: [sqlite, postgres]
       TestSelectedTurnTerminationPreservesExactOriginBothStores: [sqlite, postgres]
       TestSelectedRetriedTurnCancellationBothStores: [unstarted/sqlite, unstarted/postgres, authorized/sqlite, authorized/postgres, launched/sqlite, launched/postgres, timeout_recovery/sqlite, timeout_recovery/postgres]
@@ -1125,18 +1125,8 @@ units:
          postgres/retained_success/healthy, postgres/retained_success/lost_ack, postgres/retained_success/auxiliary_error,
          postgres/retained_uncertain/healthy, postgres/retained_uncertain/lost_ack, postgres/retained_uncertain/auxiliary_error,
          postgres/two_open_rounds/healthy, postgres/two_open_rounds/lost_ack, postgres/two_open_rounds/auxiliary_error]
-      TestWorkflowPublicationAcceptanceStageBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
-      TestWorkflowEmitFeedbackBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
-      TestWorkflowEmitBusReadbackBothStores: [sqlite, postgres]
-      TestWorkflowEmitFeedbackConcurrentBothStores: [sqlite, postgres]
-      TestWorkflowEmitEntitylessSourceBothStores: [sqlite, postgres]
-      TestWorkflowEmitHandlerFeedbackBothStores: [sqlite/healthy, sqlite/post_commit_error, postgres/healthy, postgres/post_commit_error]
-      TestScenarioConstructionNativeCommitBothStores: [sqlite/rollback_before_ack, sqlite/commit_before_lost_ack, postgres/rollback_before_ack, postgres/commit_before_lost_ack]
       TestSelectedBranchPointActivationAtomicityBothStores: [sqlite/event/running, sqlite/event/cancelled, sqlite/deployment_revision/running, sqlite/deployment_revision/cancelled, postgres/event/running, postgres/event/cancelled, postgres/deployment_revision/running, postgres/deployment_revision/cancelled]
       TestSelectedBranchPointCleanupIsolationBothStores: [sqlite/event/discard, sqlite/event/reset, sqlite/deployment_revision/discard, sqlite/deployment_revision/reset, postgres/event/discard, postgres/event/reset, postgres/deployment_revision/discard, postgres/deployment_revision/reset]
-      TestScenarioConstructionFieldlessStateBothStores: [sqlite, postgres]
-      TestStandingPreparationVerifiesCompleteRootTreeBothStores: [sqlite/intact, sqlite/missing_sibling, sqlite/missing_fields, sqlite/foreign_parent, postgres/intact, postgres/missing_sibling, postgres/missing_fields, postgres/foreign_parent]
-      TestStandingTreeConstructionFailureDoesNotPublishPartialSetBothStores: [sqlite, postgres]
       TestSelectedContractOrdinarySourceStatePresenceBothStores:
         - sqlite/absent
         - sqlite/zero
@@ -1155,15 +1145,36 @@ units:
         - postgres/wrong-header-type
         - postgres/loop
       TestSelectedRunTargetOwnersUseConstructedHeadersBothStores: [postgres/fielded, postgres/fieldless, sqlite/fielded, sqlite/fieldless]
+      TestSelectedWorkflowNodeNoopSettlementBothStores: [sqlite/healthy, sqlite/expired_execution, sqlite/quiesced_execution, sqlite/stale_generation, postgres/healthy, postgres/expired_execution, postgres/quiesced_execution, postgres/stale_generation]
+      TestSelectedRunForkActivationFrontierContentionBothStores: [postgres/activation/cancel_loser, postgres/activation/cancel_winner, postgres/activation/commit, postgres/activation/rollback, postgres/writer/cancel_loser, postgres/writer/cancel_winner, postgres/writer/commit, postgres/writer/rollback, sqlite/activation/cancel_loser, sqlite/activation/cancel_winner, sqlite/activation/commit, sqlite/activation/rollback, sqlite/writer/cancel_loser, sqlite/writer/cancel_winner, sqlite/writer/commit, sqlite/writer/rollback]
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  store-runtime-s-z-rest:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    # Positive complement of TestSelected within the original S-Z territory.
+    run: '^Test(S($|[^e].*|e($|[^l].*|l($|[^e].*|e($|[^c].*|c($|[^t].*|t($|[^e].*|e($|[^d].*)))))))|[T-Z].*)$'
+    required_children:
+      TestUnstartedClaimedTurnTerminationBothStores: [waiting/sqlite, waiting/postgres, waiting_restart/sqlite, waiting_restart/postgres, rollback/sqlite, rollback/postgres, authorization_wins/sqlite, authorization_wins/postgres]
+      TestUnstartedDirectiveTurnRecoveryBothStores: [root/restart/sqlite, root/restart/postgres, root/rollback/sqlite, root/rollback/postgres, completion/restart/sqlite, completion/restart/postgres, completion/rollback/sqlite, completion/rollback/postgres]
+      TestWorkflowPublicationAcceptanceStageBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
+      TestWorkflowEmitFeedbackBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]
+      TestWorkflowEmitBusReadbackBothStores: [sqlite, postgres]
+      TestWorkflowEmitFeedbackConcurrentBothStores: [sqlite, postgres]
+      TestWorkflowEmitEntitylessSourceBothStores: [sqlite, postgres]
+      TestWorkflowEmitHandlerFeedbackBothStores: [sqlite/healthy, sqlite/post_commit_error, postgres/healthy, postgres/post_commit_error]
+      TestScenarioConstructionNativeCommitBothStores: [sqlite/rollback_before_ack, sqlite/commit_before_lost_ack, postgres/rollback_before_ack, postgres/commit_before_lost_ack]
+      TestScenarioConstructionFieldlessStateBothStores: [sqlite, postgres]
+      TestStandingPreparationVerifiesCompleteRootTreeBothStores: [sqlite/intact, sqlite/missing_sibling, sqlite/missing_fields, sqlite/foreign_parent, postgres/intact, postgres/missing_sibling, postgres/missing_fields, postgres/foreign_parent]
+      TestStandingTreeConstructionFailureDoesNotPublishPartialSetBothStores: [sqlite, postgres]
       TestWorkflowEngineConstructedTransitionAtomicOnBothStores: [postgres/contenders, postgres/exact, postgres/foreign_header_owner, postgres/invalid_transition, postgres/paired_reload, postgres/stale_revision, sqlite/contenders, sqlite/exact, sqlite/foreign_header_owner, sqlite/invalid_transition, sqlite/paired_reload, sqlite/stale_revision]
       TestWorkflowTargetPersistenceReadNeverFabricatesMixedSnapshotOnBothStores: [sqlite, postgres]
       TestWorkflowNodeNoopSettlementAtomicBothStores: [sqlite/healthy, sqlite/renewal, sqlite/selection, sqlite/completion, sqlite/expired, sqlite/foreign_token, sqlite/stale_version, sqlite/agent, sqlite/cancelled, sqlite/terminal_run, sqlite/replaced_authority, postgres/healthy, postgres/renewal, postgres/selection, postgres/completion, postgres/expired, postgres/foreign_token, postgres/stale_version, postgres/agent, postgres/cancelled, postgres/terminal_run, postgres/replaced_authority]
       TestWorkflowNodeNoopSettlementAcknowledgementBothStores: [sqlite/healthy, sqlite/commit_refused, sqlite/commit_ack_lost, sqlite/handoff_failed, postgres/healthy, postgres/commit_refused, postgres/commit_ack_lost, postgres/handoff_failed]
-      TestSelectedWorkflowNodeNoopSettlementBothStores: [sqlite/healthy, sqlite/expired_execution, sqlite/quiesced_execution, sqlite/stale_generation, postgres/healthy, postgres/expired_execution, postgres/quiesced_execution, postgres/stale_generation]
       TestSupportedStateOnlyProducersCannotAcquireWorkflowConstructionOnBothStores: [sqlite, postgres]
       TestWorkflowTimerSchedulerConsumesCommittedErrorOnBothStores: [postgres/healthy, postgres/postcommit_error, sqlite/healthy, sqlite/postcommit_error]
       TestWorkflowGateConsumesCommittedErrorWithoutRouteReplayOnBothStores: [postgres/healthy, postgres/postcommit_error, sqlite/healthy, sqlite/postcommit_error]
-      TestSelectedRunForkActivationFrontierContentionBothStores: [postgres/activation/cancel_loser, postgres/activation/cancel_winner, postgres/activation/commit, postgres/activation/rollback, postgres/writer/cancel_loser, postgres/writer/cancel_winner, postgres/writer/commit, postgres/writer/rollback, sqlite/activation/cancel_loser, sqlite/activation/cancel_winner, sqlite/activation/commit, sqlite/activation/rollback, sqlite/writer/cancel_loser, sqlite/writer/cancel_winner, sqlite/writer/commit, sqlite/writer/rollback]
       TestTerminalDecisionCardSupersessionStateChangeOnlyProducerParity: [postgres/active_run_quiescence/fields=false, postgres/active_run_quiescence/fields=true, postgres/mark_cancelled/fields=false, postgres/mark_cancelled/fields=true, postgres/mark_failed/fields=false, postgres/mark_failed/fields=true, postgres/run_stop/fields=false, postgres/run_stop/fields=true, sqlite/active_run_quiescence/fields=false, sqlite/active_run_quiescence/fields=true, sqlite/mark_cancelled/fields=false, sqlite/mark_cancelled/fields=true, sqlite/mark_failed/fields=false, sqlite/mark_failed/fields=true, sqlite/run_stop/fields=false, sqlite/run_stop/fields=true]
       TestWorkflowTimerCauseReplayFlowActivationGateBothStores: [postgres/active, postgres/advanced, postgres/advanced_cancelled, postgres/cancelled, postgres/fired, sqlite/active, sqlite/advanced, sqlite/advanced_cancelled, sqlite/cancelled, sqlite/fired]
     count_mode: count-1
