@@ -48,6 +48,7 @@ type serveBootstrapTestFixture struct {
 	adapter    *serveSessionBootstrap
 	op         channelonboarding.Operation
 	candidate  channelonboarding.Candidate
+	principal  operatorchannel.Principal
 	selections atomic.Int64
 }
 
@@ -127,7 +128,7 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 	if err := os.Chmod(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	f := &serveBootstrapTestFixture{ctx: ctx, owned: owned, owner: owner, op: op, candidate: candidate}
+	f := &serveBootstrapTestFixture{ctx: ctx, owned: owned, owner: owner, op: op, candidate: candidate, principal: principal}
 	f.adapter = &serveSessionBootstrap{connections: make(map[string]*serveSessionBootstrapAttempt),
 		store: selected, credentials: current, directory: directory,
 		selectRuntime: func(context.Context, channelonboarding.ChannelRuntimeContextCoordinate) (context.Context, func() error, error) {
@@ -195,6 +196,9 @@ func serveBootstrapWireFixture(t *testing.T, mode string, owner *worklifetime.Ru
 		for {
 			node, err := wire.Read(ctx)
 			if err != nil {
+				if errors.Is(err, whatsappfixture.ErrMalformedNode) {
+					t.Error(err)
+				}
 				return
 			}
 			if node.Tag == "iq" {
@@ -256,10 +260,19 @@ func TestServeSessionBootstrapCanceledAttemptCacheBothStores(t *testing.T) {
 			if f.adapter.connection(f.op.OperationID) != nil {
 				t.Fatal("pre-construction cancellation stranded a concrete owner")
 			}
+			if entries, err := os.ReadDir(f.adapter.directory); err != nil || len(entries) != 0 {
+				t.Fatal("canceled construction opened provider files", entries, err)
+			}
 			for index := 0; index < 2; index++ {
 				if err := f.adapter.BootstrapSession(f.ctx, f.op, f.candidate); !errors.Is(err, context.Canceled) {
 					t.Fatal("failed cached attempt became success or a retry", err)
 				}
+			}
+			if _, paired, err := f.adapter.CheckpointSessionPairing(f.ctx, f.op); err == nil || paired {
+				t.Fatal("failed attempt supplied a paired checkpoint", err)
+			}
+			if view, err := f.adapter.ReadSessionPairing(f.ctx, f.op, f.principal); err == nil || view.Code != "" {
+				t.Fatal("failed attempt was read back as successful bootstrap", view, err)
 			}
 			if f.selections.Load() != 1 {
 				t.Fatal("failed bootstrap automatically selected another attempt")
@@ -307,6 +320,12 @@ func TestServeSessionBootstrapAttemptOutcomesBothStores(t *testing.T) {
 				}
 				if f.selections.Load() != 1 || connection.ConnectionID() != f.op.SessionConnectionID {
 					t.Fatal("cache reuse retried Connect or replaced the reserved identity")
+				}
+				if _, paired, err := f.adapter.CheckpointSessionPairing(f.ctx, f.op); err == nil || paired {
+					t.Fatal("failed or retired attempt supplied pairing authority", err)
+				}
+				if view, err := f.adapter.ReadSessionPairing(f.ctx, f.op, f.principal); err == nil || view.Code != "" {
+					t.Fatal("failed or retired attempt supplied QR readback", view, err)
 				}
 			})
 		}

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -72,6 +73,8 @@ type Transport struct {
 	mu    sync.Mutex
 }
 
+var ErrMalformedNode = errors.New("SDK test peer received malformed encrypted node")
+
 type noiseCipher struct {
 	key     cipher.AEAD
 	counter uint32
@@ -91,13 +94,17 @@ func (p *Transport) Read(ctx context.Context) (*waBinary.Node, error) {
 	}
 	plain, err := p.read.key.Open(nil, p.read.nonce(), frame, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrMalformedNode, err)
 	}
 	unpacked, err := waBinary.Unpack(plain)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrMalformedNode, err)
 	}
-	return waBinary.Unmarshal(unpacked)
+	node, err := waBinary.Unmarshal(unpacked)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrMalformedNode, err)
+	}
+	return node, nil
 }
 
 func ReadFrame(ctx context.Context, conn *websocket.Conn, header []byte) ([]byte, error) {
