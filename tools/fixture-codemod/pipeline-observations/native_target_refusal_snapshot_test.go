@@ -26,7 +26,37 @@ func TestNativeTargetRefusalSnapshotsPreserveExactReadersAndAssertions(t *testin
 				t.Fatal("exact no-mutation comparison cut is missing or ambiguous")
 			}
 			original, err := canonicalFunction(row.After)
-			restored, restoreErr := canonicalFunction(strings.Replace(row.Successor, cut.after, cut.before, 1))
+			restoredSource := strings.Replace(row.Successor, cut.after, cut.before, 1)
+			if cut.family == "native-missing-header-target" {
+				ancestry := `root := constructorUnitIdentity(t, source, testPipelineRunID, ".")
+	if err := fixture.Construct(ctx, constructedScenarioInstanceForTest(t, source, ctx, ".")); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := runtimeflowidentity.KeyedChild(source, root, "review", "chosen-parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
+		InstanceID: parent.InstanceID, StorageRef: parent.InstancePath, EntityID: parent.EntityID,
+		WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), CurrentState: "active",
+		EntityType: "review_entity", Fields: map[string]any{"instance_key": "chosen-parent"},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	child, err := runtimeflowidentity.KeylessChild(source, parent, "review/child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	instancePath := child.InstancePath`
+				fields := `WorkflowName: "review/child", WorkflowVersion: source.WorkflowVersion(), Mode: "static",
+		ParentFlowID: child.ParentRoute.FlowID, ParentFlowInstance: child.ParentRoute.FlowInstance, ParentEntityID: child.ParentEntityID,`
+				if strings.Count(restoredSource, ancestry) != 1 || strings.Count(restoredSource, fields) != 1 {
+					t.Fatal("reviewed exact root/parent construction or captured ancestry is missing")
+				}
+				restoredSource = strings.Replace(restoredSource, ancestry, `instancePath := "review/child/instance"`, 1)
+				restoredSource = strings.Replace(restoredSource, fields, `WorkflowName: "review/child", WorkflowVersion: source.WorkflowVersion(),`, 1)
+			}
+			restored, restoreErr := canonicalFunction(restoredSource)
 			if err != nil || restoreErr != nil || original != restored {
 				t.Fatal("snapshot repair changed original construction, refusal, field assertions or counts")
 			}
