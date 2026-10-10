@@ -16,6 +16,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/division-sh/swarm/internal/testutil/whatsappfixture"
+	"go.mau.fi/whatsmeow"
 	waBinary "go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waWa6"
@@ -48,6 +49,7 @@ type serveNativeProtocolPeer struct {
 	fromLID       types.JID
 	sent          chan servedNativeMessage
 	malformedAck  string
+	clientTrust   servedNativeClientTrust
 }
 
 type servedNativeMessage struct {
@@ -103,6 +105,8 @@ func newServeNativeProtocolPeer(t *testing.T) *serveNativeProtocolPeer {
 		}
 		peer.serve(wire)
 	}))
+	peer.clientTrust = servedNativeClientTrust{Address: server.Listener.Addr().String(),
+		Certificate: append([]byte(nil), server.Certificate().Raw...), NoiseRoot: whatsmeow.WACertPubKey}
 	base := http.DefaultTransport
 	transport := server.Client().Transport.(*http.Transport).Clone()
 	transport.Proxy = nil
