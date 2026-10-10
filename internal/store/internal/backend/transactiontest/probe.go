@@ -174,14 +174,16 @@ func (s *Slot) Begin(readOnly, retained bool) *Attempt {
 		return nil
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	c := s.collector
-	s.mu.Unlock()
 	if c == nil {
 		return nil
 	}
 	a := &Attempt{collector: c, readOnly: readOnly, retained: retained}
 	a.operation.Store(Other)
 	a.activeClass = ActiveClass{Operation: Other, Phase: PhaseBeginning, ReadOnly: readOnly, Retained: retained}
+	// Slot -> collector is the only nested lock order: detachment cannot
+	// overtake a captured attempt before its Active registration is visible.
 	c.mu.Lock()
 	c.snapshot.Active++
 	c.snapshot.ActiveByClass[a.activeClass]++
