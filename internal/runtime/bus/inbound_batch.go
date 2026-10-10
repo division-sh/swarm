@@ -88,10 +88,13 @@ func (a providerRawSettlementAdmission) authorizes(projected, inbound events.Eve
 // publication operation. The selected store receives only CommitCommands;
 // PreparedPublications remain EventBus-owned for post-commit dispatch.
 type InboundDeliveryPlan struct {
-	events   []InboundDeliveryEvent
-	prepared []PreparedPublish
-	commands []PublicationCommand
+	admission providertriggers.PublicationAdmission
+	events    []InboundDeliveryEvent
+	prepared  []PreparedPublish
+	commands  []PublicationCommand
 }
+
+func (p InboundDeliveryPlan) Admission() providertriggers.PublicationAdmission { return p.admission }
 
 func (p InboundDeliveryPlan) PreparedPublications() []PreparedPublish {
 	return append([]PreparedPublish(nil), p.prepared...)
@@ -213,7 +216,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 			return InboundDeliveryPlan{}, err
 		}
 	}
-	plan := InboundDeliveryPlan{events: append([]InboundDeliveryEvent(nil), validated.Events...)}
+	plan := InboundDeliveryPlan{admission: validated.Admission, events: append([]InboundDeliveryEvent(nil), validated.Events...)}
 	activationOwners := make(map[runtimeflowidentity.Route]int)
 	release := func(cause error) (InboundDeliveryPlan, error) {
 		for _, prepared := range plan.prepared {
@@ -221,7 +224,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		}
 		return InboundDeliveryPlan{}, cause
 	}
-	for _, item := range validated.Events {
+	for index, item := range validated.Events {
 		itemCtx := context.WithValue(ctx, authenticatedProviderPublicationKey{}, authenticatedProviderPublication{
 			eventID: item.Event.ID(), source: item.Event.RoutingSource().Route(), kind: item.Kind,
 		})
@@ -257,7 +260,12 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		if len(command.Activations) == 0 {
 			command.RouteTopology = nil
 		}
-		if err := command.Validate(); err != nil {
+		command.Commit.inbound = &preparedInboundPublication{
+			admission: validated.Admission, eventID: command.Commit.Event.ID(),
+			bundleHash: eb.sourceArtifactFact.BundleHash(), provider: validated.Provider,
+			ordinal: index, count: len(validated.Events), kind: item.Kind, authorization: item.Authorization,
+		}
+		if err := command.ValidateInbound(validated.Admission); err != nil {
 			return release(fmt.Errorf("canonicalize inbound activation ownership: %w", err))
 		}
 		plan.prepared = append(plan.prepared, prepared)
