@@ -377,6 +377,7 @@ type ActivityIntent struct {
 	RoutingSource               events.RoutingSource
 	ActivityID                  string
 	Tool                        string
+	NativeSessionTarget         string
 	PlanGeneration              plangeneration.Generation
 	ChannelActivationGeneration channelonboarding.ChannelActivationGeneration
 	BundleHash                  string
@@ -411,6 +412,7 @@ func (i ActivityIntent) Normalized() ActivityIntent {
 	i.Context = i.Context.Normalized()
 	i.ActivityID = strings.TrimSpace(i.ActivityID)
 	i.Tool = strings.TrimSpace(i.Tool)
+	i.NativeSessionTarget = strings.TrimSpace(i.NativeSessionTarget)
 	i.BundleHash = strings.TrimSpace(i.BundleHash)
 	i.WorkflowVersion = strings.TrimSpace(i.WorkflowVersion)
 	i.SuccessEvent = strings.TrimSpace(i.SuccessEvent)
