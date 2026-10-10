@@ -3,9 +3,11 @@ package channelonboarding
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	domain "github.com/division-sh/swarm/internal/channelonboarding"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 )
 
 func (s *PostgresOwner) SetChannelClientLocale(ctx context.Context, req domain.SetClientLocaleRequest) (domain.Operation, error) {
@@ -40,7 +42,9 @@ func setClientLocale(ctx context.Context, r runner, req domain.SetClientLocaleRe
 		return domain.Operation{}, fmt.Errorf("%w: exact principal, operation, locale revision, language and time are required", domain.ErrInvalidRequest)
 	}
 	var op domain.Operation
-	err := r.mutate(ctx, "set channel client locale", func(txctx context.Context, tx *sql.Tx) error {
+	var changed render.ReconcileDemand
+	acknowledged, err := r.mutateOutcome(ctx, "set channel client locale", func(txctx context.Context, tx *sql.Tx) error {
+		changed = 0
 		var found bool
 		var err error
 		op, found, err = loadOperation(txctx, tx, r.dialect(), req.OperationID, true)
@@ -69,7 +73,8 @@ func setClientLocale(ctx context.Context, r runner, req domain.SetClientLocaleRe
 			return domain.ErrRevisionConflict
 		}
 		op.ClientLanguage, op.ClientLocaleRevision, op.UpdatedAt = req.Language, op.ClientLocaleRevision+1, req.Now
+		changed = render.ReconcileOrdinary | render.ReconcileNative
 		return nil
 	})
-	return op, err
+	return op, errors.Join(err, r.publishChannelChange(acknowledged, changed))
 }

@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -328,6 +330,9 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 				completeProposedEffectRouteInTestMutation(t, ctx, cards, card.CardID, decisionEventID, now.Add(2*time.Minute))
 
 				journal := proposedEffectTestJournal(t, cards)
+				hints := observeChannelHints(t, cards.(interface {
+					SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
+				}))
 				started, inserted, err := journal.StartActivityAttempt(ctx, runtimepipeline.ActivityAttemptRecord{
 					RequestEventID: continuation.RequestEventID, RunID: runID, ExecutionMode: continuation.ExecutionMode, SourceEventID: continuation.SourceEventID,
 					EntityID: continuation.EntityID, FlowInstance: continuation.FlowInstance, NodeID: continuation.NodeID,
@@ -337,6 +342,15 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 				})
 				if err != nil || !inserted {
 					t.Fatalf("start attempt = %#v, %v, inserted=%v", started, err, inserted)
+				}
+				if demand, _ := hints.subscription.BeginPass(); demand != render.ReconcileOrdinary {
+					t.Errorf("actual linked activity start changed the card dispatch axis without a wake: got %d", demand)
+				}
+				if replay, inserted, err := journal.StartActivityAttempt(ctx, started); err != nil || inserted || !reflect.DeepEqual(replay, started) {
+					t.Fatalf("exact start replay changed evidence: %+v inserted=%t error=%v", replay, inserted, err)
+				}
+				if demand, _ := hints.subscription.BeginPass(); demand != 0 {
+					t.Fatalf("exact start replay emitted demand %d", demand)
 				}
 				if status != runtimepipeline.ActivityAttemptStatusStarted {
 					terminal := started
@@ -355,8 +369,22 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 						terminal.Failure = &failure
 						terminal.ResultEventType = continuation.FailureEvent
 					}
-					if _, _, err := journal.CompleteActivityAttempt(ctx, terminal); err != nil {
+					complete := journal.CompleteActivityAttempt
+					if status == runtimepipeline.ActivityAttemptStatusUncertain {
+						complete = journal.MarkActivityAttemptUncertain
+					}
+					committed, acknowledged, err := complete(ctx, terminal)
+					if err != nil || !acknowledged {
 						t.Fatal(err)
+					}
+					if demand, _ := hints.subscription.BeginPass(); demand != render.ReconcileOrdinary {
+						t.Errorf("actual linked activity completion changed the card dispatch axis without a wake: got %d", demand)
+					}
+					if replay, acknowledged, err := complete(ctx, terminal); err != nil || !acknowledged || !reflect.DeepEqual(replay, committed) {
+						t.Fatalf("exact terminal replay lost acknowledged receipt: %+v acknowledged=%t error=%v", replay, acknowledged, err)
+					}
+					if demand, _ := hints.subscription.BeginPass(); demand != 0 {
+						t.Fatalf("acknowledged terminal no-op emitted demand %d", demand)
 					}
 				}
 				readback, err := store.ProposedEffectReadback(ctx, card.CardID)

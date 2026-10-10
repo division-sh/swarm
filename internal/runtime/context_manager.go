@@ -1419,34 +1419,36 @@ func (m *RuntimeContextManager) AcquireChannelActivationPublication(bundleHash s
 // ReplaceChannelActivations publishes an exact executable activation snapshot
 // only to the still-current runtime-context publication that owns it.
 func (m *RuntimeContextManager) ReplaceChannelActivations(bundleHash string, publicationGeneration uint64, publication channelonboarding.ChannelActivationPublication) error {
-	return m.ReplaceChannelActivationsContext(context.Background(), bundleHash, publicationGeneration, publication)
+	_, err := m.ReplaceChannelActivationsContext(context.Background(), bundleHash, publicationGeneration, publication)
+	return err
 }
 
-func (m *RuntimeContextManager) ReplaceChannelActivationsContext(ctx context.Context, bundleHash string, publicationGeneration uint64, publication channelonboarding.ChannelActivationPublication) error {
+func (m *RuntimeContextManager) ReplaceChannelActivationsContext(ctx context.Context, bundleHash string, publicationGeneration uint64, publication channelonboarding.ChannelActivationPublication) (bool, error) {
 	if m == nil || strings.TrimSpace(bundleHash) == "" || publicationGeneration == 0 {
-		return fmt.Errorf("runtime context channel activation coordinate is required")
+		return false, fmt.Errorf("runtime context channel activation coordinate is required")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry := m.contexts[strings.TrimSpace(bundleHash)]
 	if entry == nil || entry.context == nil || entry.runtime == nil || entry.state != RuntimeContextStateLoaded {
-		return fmt.Errorf("runtime context %s is not loaded for channel activation replacement", bundleHash)
+		return false, fmt.Errorf("runtime context %s is not loaded for channel activation replacement", bundleHash)
 	}
 	if entry.context.PublicationGeneration != publicationGeneration {
-		return fmt.Errorf("runtime context %s publication changed before channel activation replacement", bundleHash)
+		return false, fmt.Errorf("runtime context %s publication changed before channel activation replacement", bundleHash)
 	}
 	for _, activation := range publication.Activations() {
 		if activation.Coordinate.BundleHash != entry.context.BundleHash() ||
 			activation.Coordinate.RuntimeInstanceID != entry.context.RuntimeInstanceID ||
 			activation.Coordinate.ContextPublicationGeneration != entry.context.PublicationGeneration {
-			return fmt.Errorf("runtime context %s channel activation occurrence contradicts current publication", bundleHash)
+			return false, fmt.Errorf("runtime context %s channel activation occurrence contradicts current publication", bundleHash)
 		}
 	}
 	if err := entry.runtime.ReplaceChannelActivationsContext(ctx, publication); err != nil {
-		return err
+		return false, err
 	}
+	changed := !entry.context.ChannelActivationGeneration.Equal(publication.Generation())
 	entry.context.ChannelActivationGeneration = publication.Generation()
-	return nil
+	return changed, nil
 }
 
 func (m *RuntimeContextManager) acquireEntryLocked(ctx context.Context, entry *runtimeContextEntry) (*RuntimeContextUse, error) {

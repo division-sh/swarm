@@ -19,18 +19,19 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 )
 
 type runForkDecisionMaterializer interface {
 	LoadTx(context.Context, *mutationprotocol.Attempt, string, bool) (decisioncard.Card, error)
-	InsertTx(context.Context, *mutationprotocol.Attempt, decisioncard.Card) error
+	InsertTx(context.Context, *mutationprotocol.Attempt, decisioncard.Card) (bool, error)
 	DecideTx(context.Context, *mutationprotocol.Attempt, decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error)
 	SupersedeStageTx(context.Context, *mutationprotocol.Attempt, string, string, string, string, time.Time) (bool, error)
 	LoadProposedEffectTx(context.Context, *mutationprotocol.Attempt, string, bool) (decisioncard.ProposedEffectContinuation, error)
-	InsertProposedEffectTx(context.Context, *mutationprotocol.Attempt, decisioncard.Card, decisioncard.ProposedEffectContinuation) error
+	InsertProposedEffectTx(context.Context, *mutationprotocol.Attempt, decisioncard.Card, decisioncard.ProposedEffectContinuation) (bool, error)
 }
 
-func materializeRunForkDecisionCards(ctx context.Context, decisions runForkDecisionMaterializer, attempt *mutationprotocol.Attempt, forkRunID string, target contracts.BundleIdentity, projection runfork.EntityProjection, bindings []runForkGateActivationBinding, now time.Time) error {
+func materializeRunForkDecisionCards(ctx context.Context, decisions runForkDecisionMaterializer, attempt *mutationprotocol.Attempt, forkRunID string, target contracts.BundleIdentity, projection runfork.EntityProjection, bindings []runForkGateActivationBinding, now time.Time, changes *privaterunlifecycle.ChannelCardChanges) error {
 	if attempt == nil {
 		return fmt.Errorf("fork decision-card materialization requires private story ownership")
 	}
@@ -101,8 +102,12 @@ func materializeRunForkDecisionCards(ctx context.Context, decisions runForkDecis
 		if err != nil {
 			return fmt.Errorf("construct fork decision card: %w", err)
 		}
-		if err := decisions.InsertTx(ctx, attempt, forkCard); err != nil {
+		created, err := decisions.InsertTx(ctx, attempt, forkCard)
+		if err != nil {
 			return fmt.Errorf("insert fork decision card: %w", err)
+		}
+		if changes != nil {
+			changes.Changed = changes.Changed || created
 		}
 		persisted, err := decisions.LoadTx(ctx, attempt, forkCard.CardID, false)
 		if err != nil {
@@ -153,15 +158,15 @@ func restoreForkDecisionCardDisposition(ctx context.Context, decisions runForkDe
 	return nil
 }
 
-func (s *RunForkPostgresOwner) MaterializeRunForkDecisionCardsTx(ctx context.Context, attempt *mutationprotocol.Attempt, forkRunID string, target contracts.BundleIdentity, projection runfork.EntityProjection, bindings []RunForkGateActivationBinding, now time.Time) error {
-	return materializeRunForkDecisionCards(ctx, s.DecisionPostgresOwner, attempt, forkRunID, target, projection, bindings, now)
+func (s *RunForkPostgresOwner) MaterializeRunForkDecisionCardsTx(ctx context.Context, attempt *mutationprotocol.Attempt, forkRunID string, target contracts.BundleIdentity, projection runfork.EntityProjection, bindings []RunForkGateActivationBinding, now time.Time, changes *privaterunlifecycle.ChannelCardChanges) error {
+	return materializeRunForkDecisionCards(ctx, s.DecisionPostgresOwner, attempt, forkRunID, target, projection, bindings, now, changes)
 }
 
-func (s *RunForkSQLiteOwner) MaterializeRunForkDecisionCardsTx(ctx context.Context, attempt *mutationprotocol.Attempt, forkRunID string, target contracts.BundleIdentity, projection runfork.EntityProjection, bindings []RunForkGateActivationBinding, now time.Time) error {
-	return materializeRunForkDecisionCards(ctx, s.DecisionSQLiteOwner, attempt, forkRunID, target, projection, bindings, now)
+func (s *RunForkSQLiteOwner) MaterializeRunForkDecisionCardsTx(ctx context.Context, attempt *mutationprotocol.Attempt, forkRunID string, target contracts.BundleIdentity, projection runfork.EntityProjection, bindings []RunForkGateActivationBinding, now time.Time, changes *privaterunlifecycle.ChannelCardChanges) error {
+	return materializeRunForkDecisionCards(ctx, s.DecisionSQLiteOwner, attempt, forkRunID, target, projection, bindings, now, changes)
 }
 
-type runForkProposedEffectMaterializer func(context.Context, *mutationprotocol.Attempt, string, string, contracts.BundleIdentity, runfork.EntityProjection, runfork.RunForkPoint, *loopruntime.ForkCorrespondence, time.Time) error
+type runForkProposedEffectMaterializer func(context.Context, *mutationprotocol.Attempt, string, string, contracts.BundleIdentity, runfork.EntityProjection, runfork.RunForkPoint, *loopruntime.ForkCorrespondence, time.Time, *privaterunlifecycle.ChannelCardChanges) error
 
 const postgresRunForkProposedEffectCardIDsQuery = `
 	SELECT p.card_id
@@ -184,7 +189,7 @@ const sqliteRunForkProposedEffectCardIDsQuery = `
 	ORDER BY c.created_at, p.card_id
 `
 
-func materializeRunForkProposedEffectCards(ctx context.Context, decisions runForkDecisionMaterializer, cardIDsQuery string, postgres bool, attempt *mutationprotocol.Attempt, sourceRunID, forkRunID string, target contracts.BundleIdentity, projection runfork.EntityProjection, forkPoint runfork.RunForkPoint, correspondence *loopruntime.ForkCorrespondence, now time.Time) error {
+func materializeRunForkProposedEffectCards(ctx context.Context, decisions runForkDecisionMaterializer, cardIDsQuery string, postgres bool, attempt *mutationprotocol.Attempt, sourceRunID, forkRunID string, target contracts.BundleIdentity, projection runfork.EntityProjection, forkPoint runfork.RunForkPoint, correspondence *loopruntime.ForkCorrespondence, now time.Time, changes *privaterunlifecycle.ChannelCardChanges) error {
 	if attempt == nil {
 		return fmt.Errorf("fork proposed-effect materialization requires private story ownership")
 	}
@@ -254,19 +259,23 @@ func materializeRunForkProposedEffectCards(ctx context.Context, decisions runFor
 		if err != nil {
 			return err
 		}
-		if err := decisions.InsertProposedEffectTx(ctx, attempt, forkCard, forkContinuation); err != nil {
+		created, err := decisions.InsertProposedEffectTx(ctx, attempt, forkCard, forkContinuation)
+		if err != nil {
 			return fmt.Errorf("insert fork-local proposed effect: %w", err)
+		}
+		if changes != nil {
+			changes.Changed = changes.Changed || created
 		}
 	}
 	return nil
 }
 
-func (s *RunForkPostgresOwner) MaterializeRunForkProposedEffectCardsTx(ctx context.Context, attempt *mutationprotocol.Attempt, sourceRunID, forkRunID string, target contracts.BundleIdentity, projection runfork.EntityProjection, forkPoint runfork.RunForkPoint, correspondence *loopruntime.ForkCorrespondence, now time.Time) error {
-	return materializeRunForkProposedEffectCards(ctx, s.DecisionPostgresOwner, postgresRunForkProposedEffectCardIDsQuery, true, attempt, sourceRunID, forkRunID, target, projection, forkPoint, correspondence, now)
+func (s *RunForkPostgresOwner) MaterializeRunForkProposedEffectCardsTx(ctx context.Context, attempt *mutationprotocol.Attempt, sourceRunID, forkRunID string, target contracts.BundleIdentity, projection runfork.EntityProjection, forkPoint runfork.RunForkPoint, correspondence *loopruntime.ForkCorrespondence, now time.Time, changes *privaterunlifecycle.ChannelCardChanges) error {
+	return materializeRunForkProposedEffectCards(ctx, s.DecisionPostgresOwner, postgresRunForkProposedEffectCardIDsQuery, true, attempt, sourceRunID, forkRunID, target, projection, forkPoint, correspondence, now, changes)
 }
 
-func (s *RunForkSQLiteOwner) MaterializeRunForkProposedEffectCardsTx(ctx context.Context, attempt *mutationprotocol.Attempt, sourceRunID, forkRunID string, target contracts.BundleIdentity, projection runfork.EntityProjection, forkPoint runfork.RunForkPoint, correspondence *loopruntime.ForkCorrespondence, now time.Time) error {
-	return materializeRunForkProposedEffectCards(ctx, s.DecisionSQLiteOwner, sqliteRunForkProposedEffectCardIDsQuery, false, attempt, sourceRunID, forkRunID, target, projection, forkPoint, correspondence, now)
+func (s *RunForkSQLiteOwner) MaterializeRunForkProposedEffectCardsTx(ctx context.Context, attempt *mutationprotocol.Attempt, sourceRunID, forkRunID string, target contracts.BundleIdentity, projection runfork.EntityProjection, forkPoint runfork.RunForkPoint, correspondence *loopruntime.ForkCorrespondence, now time.Time, changes *privaterunlifecycle.ChannelCardChanges) error {
+	return materializeRunForkProposedEffectCards(ctx, s.DecisionSQLiteOwner, sqliteRunForkProposedEffectCardIDsQuery, false, attempt, sourceRunID, forkRunID, target, projection, forkPoint, correspondence, now, changes)
 }
 
 func forkPendingProposedEffect(sourceCard decisioncard.Card, source decisioncard.ProposedEffectContinuation, forkRunID string, target contracts.BundleIdentity, projection runfork.EntityProjection, correspondence *loopruntime.ForkCorrespondence, forkActivations []loopruntime.Activation, now time.Time) (decisioncard.Card, decisioncard.ProposedEffectContinuation, error) {

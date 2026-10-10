@@ -292,7 +292,7 @@ func (s *EventPostgresOwner) CommitDeploymentRunCreation(ctx context.Context, in
 		return result, outcome.Err()
 	}
 	result = acknowledgeDeploymentRunCreation(result)
-	return result, errors.Join(outcome.Err(), runtimedata.ValidateRunCreationReceiptForCommand(result.Record, command))
+	return result, errors.Join(outcome.Err(), runtimedata.ValidateRunCreationReceiptForCommand(result.Record, command), s.publishChannelChanges(acknowledged, runtimepipeline.ChannelCardsChanged(result.Activations)))
 }
 
 func (s *EventSQLiteOwner) CommitDeploymentRunCreation(ctx context.Context, input runtimebus.DeploymentRunCreationCommand) (result runtimebus.CommittedDeploymentRunCreation, err error) {
@@ -333,5 +333,5 @@ func (s *EventSQLiteOwner) CommitDeploymentRunCreation(ctx context.Context, inpu
 		return result, outcome.Err()
 	}
 	result = acknowledgeDeploymentRunCreation(result)
-	return result, errors.Join(outcome.Err(), runtimedata.ValidateRunCreationReceiptForCommand(result.Record, command))
+	return result, errors.Join(outcome.Err(), runtimedata.ValidateRunCreationReceiptForCommand(result.Record, command), s.publishChannelChanges(acknowledged, runtimepipeline.ChannelCardsChanged(result.Activations)))
 }

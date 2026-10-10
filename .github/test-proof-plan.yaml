@@ -715,7 +715,7 @@ units:
   serveapp-channel-delivery:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^TestChannel(ActionWorker.*|Delivery(Backlog.*|Bare.*|Budget.*|Cancel.*|Change.*|Chooser.*|Compiled.*|Inbound.*|Invalid.*|Manual.*|Native.*|Notice.*|Ordered.*|Paged.*|Quoted.*|Real.*|Reconciliation.*|Recovery.*|Required.*|Resend.*|Shared.*|Skip.*|UncertainNotice.*|Verdict.*|View.*|WorkerRechecksResponsibilityBeforeRender)|Notice.*)$'
+    run: '^TestChannel(ActionWorker.*|Delivery(Backlog.*|Bare.*|Budget.*|Cancel.*|Change.*|Chooser.*|Compiled.*|Inbound.*|Invalid.*|Manual.*|Native.*|Notice.*|Ordered.*|Paged.*|Quoted.*|Real.*|Reconciliation.*|Recovery.*|Required.*|Resend.*|Shared.*|Skip.*|UncertainNotice.*|Verdict.*|View.*|WorkerRechecksResponsibilityBeforeRender)|Notice.*|OnboardingSucceededWakeWithoutBackstopBothStores|Worker(KeepsInPassHintAndJoinsExactProcess|DoesNotCreditFailedPass))$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full

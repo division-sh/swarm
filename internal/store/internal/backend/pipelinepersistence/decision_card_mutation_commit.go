@@ -135,6 +135,7 @@ func commitDecisionCardOperation(
 				return err
 			}
 			result.Completion = completion
+			result.ChannelCardsChanged = true
 			return nil
 		})
 		return result, err
@@ -147,7 +148,7 @@ func commitDecisionCardOperation(
 	if result.HasPublication {
 		result.Publication = result.Publication.(runtimebus.CommittedEnginePublication).WithCommitAcknowledgment()
 	}
-	return result, errors.Join(outcome.Err(), result.Validate())
+	return result, errors.Join(outcome.Err(), result.Validate(), store.publishCardChanges(acknowledged, result.ChannelCardsChanged))
 }
 
 func admitDecisionCardAnchorTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, decisions decisionCardMutationTxOwner, mutation runtimepipeline.DecisionCardMutation, postgres bool) error {

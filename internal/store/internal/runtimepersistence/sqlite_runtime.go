@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -52,6 +53,7 @@ import (
 // file possession owner serializes process startup while persisted rows remain
 // the canonical state consumed by the runtime.
 type SQLiteRuntimeStore struct {
+	channelChanges               runtimechanneldelivery.ReconcileSignal
 	destructiveResetSQLiteOwner  *storeadmin.DestructiveResetSQLiteOwner
 	agentSQLiteOwner             *storeagent.AgentSQLiteOwner
 	activitySQLiteOwner          *storeactivityjournal.ActivitySQLiteOwner

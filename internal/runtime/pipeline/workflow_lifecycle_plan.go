@@ -237,6 +237,8 @@ type CommittedWorkflowLifecycleMutation struct {
 	TurnCancellations            []runtimeeffects.TurnCancellation
 	QueuedCancellations          []runtimedelivery.Snapshot
 	QueuedDirectiveCancellations []agentcontrol.DirectiveOperation
+	// ChannelCardsChanged is a borrowed write fact, never execution authority.
+	ChannelCardsChanged bool `json:"-"`
 	// Committed distinguishes an acknowledged empty mutation from refusal.
 	Committed                    bool
 	Wakeups                      []timeridentity.WorkflowTimerActivationRef

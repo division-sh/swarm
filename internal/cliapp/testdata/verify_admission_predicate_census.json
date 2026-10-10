@@ -2595,7 +2595,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.publishChannelActivations",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "62ec2e01a2995016fbb1a06f0258cbd508f2fb6bc46c795e73fc215be388a85b"
+    "body_sha256": "2beec32ab08647b64a3e9756be5a3a5b571e09dcdb5988e415b0969de069636a"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.reconcileChannelRegistrations",
@@ -2715,7 +2715,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::publishServeChannelActivationSnapshot",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "5950584293771ca00284937c233aff5d66393467535811e6e9af32503763568d"
+    "body_sha256": "968b40de4a639a9f0ac437d5f49d3e9916a20a4de79cf12415b58a157385b3e8"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::reconcileRetiredConnectedChannelContexts",
@@ -2727,7 +2727,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::reconcileServeProviderRegistrations",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "0946f643b38c54e236eb731fd21428633f30ec942a89291607184ef37b8b4c27"
+    "body_sha256": "ab3a277fa39eafd6cf8243f1413b5ef7392dd0d6ceedac94fd511d2c7f05188d"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::rejectWebhookPrebindingWithoutPublicIngress",
@@ -2865,7 +2865,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "a68c32b45b66149bca152b6b73529c74cc3dc6352dd68f63029b3810c6031d27"
+    "body_sha256": "c8a05a98c016d1e9b3b31471ee4a5d16481162bcc3b5f3bdb163dba97bea1598"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
@@ -3579,7 +3579,7 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkPostgresOwner.RecoverSelectedFork",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "b490146d1c8aa25fc7221004ff0d43d8176e6e7fcd8acf104b8ced1b095f86f2"
+    "body_sha256": "6e7717ec8dbdccd98141bf60a87ccc0073ea9468a58a40fadb7bdeb50d5b26d9"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkSQLiteOwner.ListSelectedForkRecoveryEntries",
@@ -3591,7 +3591,7 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkSQLiteOwner.RecoverSelectedFork",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "510c3601b624b2b4a945d0a1dafe05a7abd83403bb0fa3d0877f3791ed39c93c"
+    "body_sha256": "2dc5a1314d39d41d91c140b72ea5987ec3123c8fa520a3a72d7f9293fb4bf2ee"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::admitSelectedRecoveryTx",
@@ -3621,13 +3621,13 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::recoverFailedSelectedForkTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "b53ad36779a3b0805953739d9b03c30c21901dc07064bada3a06a87e682947a3"
+    "body_sha256": "5d4948bb005aac873f47e0c808fa6c5f542101057d17d96a78bb8d51224e5d6c"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::recoverSelectedForkTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "24451aee6bf51dabe3bbace3cf787528fa8e09d36938a3438ee7ef1d0198884c"
+    "body_sha256": "5e12947b543d43a8a6470aed426c8685c34e0edad902d749cc8f579b17d16e57"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::sameSelectedForkPointIdentity",

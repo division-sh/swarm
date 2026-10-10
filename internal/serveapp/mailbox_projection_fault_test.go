@@ -25,9 +25,9 @@ func TestMailboxResponseProjectionRollbackBothStores(t *testing.T) {
 	root := repoRootForTest()
 	dir := t.TempDir()
 	replacements := map[string]string{}
-	for _, site := range []struct{ path, anchor, identity string }{
-		{"internal/runtime/pipeline/decision_card_mutation.go", "\traw, err := canonicaljson.Bytes(result)\n", "cardID"},
-		{"internal/store/internal/mailboxpersistence/acknowledgment.go", "\traw, err := canonicaljson.Bytes(map[string]any{\"ok\": true, \"mailbox_id\": id, \"kind\": decisioncard.KindNotice})\n", "id"},
+	for _, site := range []struct{ path, anchor, identity, failureValues string }{
+		{"internal/runtime/pipeline/decision_card_mutation.go", "\traw, err := canonicaljson.Bytes(result)\n", "cardID", "apiidempotency.Completion{}"},
+		{"internal/store/internal/mailboxpersistence/acknowledgment.go", "\traw, err := canonicaljson.Bytes(map[string]any{\"ok\": true, \"mailbox_id\": id, \"kind\": decisioncard.KindNotice})\n", "id", "apiidempotency.Completion{}, false"},
 	} {
 		path := filepath.Join(root, site.path)
 		raw, err := os.ReadFile(path)
@@ -38,11 +38,12 @@ func TestMailboxResponseProjectionRollbackBothStores(t *testing.T) {
 		if strings.Count(source, site.anchor) != 1 || strings.Count(source, "import (\n") != 1 {
 			t.Fatalf("projection injection no longer uniquely identifies %s", site.path)
 		}
+		// The notice owner also returns its changed fact; a projection cut has none.
 		injection := "\tif os.Getenv(\"SWARM_TEST_MAILBOX_PROJECTION_RESOURCE\") == " + site.identity + ` {
         if err := os.WriteFile(os.Getenv("SWARM_TEST_MAILBOX_PROJECTION_WITNESS"), []byte(` + site.identity + `), 0600); err != nil {
-            return apiidempotency.Completion{}, err
+            return ` + site.failureValues + `, err
         }
-        return apiidempotency.Completion{}, fmt.Errorf("mailbox_exact_response_projection_cut")
+        return ` + site.failureValues + `, fmt.Errorf("mailbox_exact_response_projection_cut")
     }
 `
 		source = strings.Replace(source, "import (\n", "import (\n\t\"os\"\n", 1)

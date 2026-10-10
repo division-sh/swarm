@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -20,12 +21,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeeffects "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storestartup "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	"github.com/google/uuid"
 )
 
 type selectedRecoveryTxOwner interface {
-	MarkTerminalTx(context.Context, *mutationprotocol.Attempt, runlifecycle.TerminalRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error)
+	MarkTerminalTx(context.Context, *mutationprotocol.Attempt, runlifecycle.TerminalRequest, *privaterunlifecycle.ChannelCardChanges) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error)
 	RecoverSelectedForkEffectsTx(context.Context, *mutationprotocol.Attempt, string, runtimeeffects.RecoveryRequest) (runtimeeffects.RecoverySummary, error)
 	HasSelectedCanceledOriginsTx(context.Context, *mutationprotocol.Attempt, string) (bool, error)
 	ListSelectedCanceledTurnRecoveriesTx(context.Context, *mutationprotocol.Attempt, string, runtimeeffects.RecoveryRequest) ([]runtimeeffects.TurnExecutionResult, error)
@@ -91,7 +93,9 @@ func (s *RunForkPostgresOwner) RecoverSelectedFork(ctx context.Context, req runc
 	if err := req.Validate(); err != nil {
 		return runfork.SelectedForkRecoveryResult{}, err
 	}
+	var changes privaterunlifecycle.ChannelCardChanges
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runfork.SelectedForkRecoveryResult, error) {
+		changes = privaterunlifecycle.ChannelCardChanges{}
 		var recovered runfork.SelectedForkRecoveryResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := admitSelectedRecoveryTx(txctx, tx, req, false); err != nil {
@@ -101,7 +105,7 @@ func (s *RunForkPostgresOwner) RecoverSelectedFork(ctx context.Context, req runc
 			if err != nil {
 				return err
 			}
-			recovered, err = recoverSelectedForkTx(txctx, tx, s, attempt, snapshot, req, false)
+			recovered, err = recoverSelectedForkTx(txctx, tx, s, attempt, snapshot, req, false, &changes)
 			return err
 		})
 		return recovered, err
@@ -113,7 +117,7 @@ func (s *RunForkPostgresOwner) RecoverSelectedFork(ctx context.Context, req runc
 	for index := range recovered.CanceledTurns {
 		recovered.CanceledTurns[index] = storeeffects.AcknowledgeCanceledTurn(recovered.CanceledTurns[index], true)
 	}
-	return recovered, result.Err()
+	return recovered, errors.Join(result.Err(), s.publishChannelChanges(result.Acknowledged(), changes.Changed || recovered.Effects.ChannelSourcesChanged))
 }
 
 func (s *RunForkSQLiteOwner) RecoverSelectedFork(ctx context.Context, req runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error) {
@@ -123,7 +127,9 @@ func (s *RunForkSQLiteOwner) RecoverSelectedFork(ctx context.Context, req runcon
 	if err := s.requireCurrentSchema(); err != nil {
 		return runfork.SelectedForkRecoveryResult{}, err
 	}
+	var changes privaterunlifecycle.ChannelCardChanges
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "recover selected fork", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runfork.SelectedForkRecoveryResult, error) {
+		changes = privaterunlifecycle.ChannelCardChanges{}
 		var recovered runfork.SelectedForkRecoveryResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := admitSelectedRecoveryTx(txctx, tx, req, true); err != nil {
@@ -133,7 +139,7 @@ func (s *RunForkSQLiteOwner) RecoverSelectedFork(ctx context.Context, req runcon
 			if err != nil {
 				return err
 			}
-			recovered, err = recoverSelectedForkTx(txctx, tx, s, attempt, snapshot, req, true)
+			recovered, err = recoverSelectedForkTx(txctx, tx, s, attempt, snapshot, req, true, &changes)
 			return err
 		})
 		return recovered, err
@@ -145,7 +151,7 @@ func (s *RunForkSQLiteOwner) RecoverSelectedFork(ctx context.Context, req runcon
 	for index := range recovered.CanceledTurns {
 		recovered.CanceledTurns[index] = storeeffects.AcknowledgeCanceledTurn(recovered.CanceledTurns[index], true)
 	}
-	return recovered, result.Err()
+	return recovered, errors.Join(result.Err(), s.publishChannelChanges(result.Acknowledged(), changes.Changed || recovered.Effects.ChannelSourcesChanged))
 }
 
 func admitSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, req runcontrol.SelectedForkRecoveryRequest, sqlite bool) error {
@@ -278,7 +284,7 @@ func loadSelectedRecoveryRecordTx(ctx context.Context, tx *sql.Tx, snapshot runl
 	return result, nil
 }
 
-func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool) (runfork.SelectedForkRecoveryResult, error) {
+func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool, changes *privaterunlifecycle.ChannelCardChanges) (runfork.SelectedForkRecoveryResult, error) {
 	record, err := loadSelectedRecoveryRecordTx(ctx, tx, snapshot, req.Entry, sqlite, true)
 	result := record.SelectedForkRecoveryResult
 	if err != nil {
@@ -349,10 +355,10 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 		}
 		return result, err
 	}
-	return recoverFailedSelectedForkTx(ctx, tx, owner, attempt, snapshot, req, sqlite, record, plan, result)
+	return recoverFailedSelectedForkTx(ctx, tx, owner, attempt, snapshot, req, sqlite, record, plan, result, changes)
 }
 
-func recoverFailedSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool, record, plan selectedRecoveryRecord, result runfork.SelectedForkRecoveryResult) (runfork.SelectedForkRecoveryResult, error) {
+func recoverFailedSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool, record, plan selectedRecoveryRecord, result runfork.SelectedForkRecoveryResult, changes *privaterunlifecycle.ChannelCardChanges) (runfork.SelectedForkRecoveryResult, error) {
 	runID, binding, state := result.RunID, record.binding, record.state
 	failure := plan.failure
 	failureRaw, err := json.Marshal(failure)
@@ -379,7 +385,7 @@ func recoverFailedSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selected
 		}
 	}
 	if !snapshot.State.Terminal() {
-		if _, _, err := owner.MarkTerminalTx(ctx, attempt, runlifecycle.TerminalRequest{RunID: runID, State: runlifecycle.StateFailed, Failure: failure, EndedAt: req.Effects.Now()}); err != nil {
+		if _, _, err := owner.MarkTerminalTx(ctx, attempt, runlifecycle.TerminalRequest{RunID: runID, State: runlifecycle.StateFailed, Failure: failure, EndedAt: req.Effects.Now()}, changes); err != nil {
 			return result, err
 		}
 	}

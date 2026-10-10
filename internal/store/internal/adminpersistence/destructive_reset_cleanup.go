@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/lib/pq"
@@ -31,7 +32,11 @@ func (s *DestructiveResetPostgresOwner) ApplyDestructiveResetCleanup(ctx context
 	if !committed {
 		return destructivereset.CleanupResult{}, err
 	}
-	return out, err
+	var notifyErr error
+	if out.ChannelSourcesChanged && s.channelChanges != nil {
+		notifyErr = s.channelChanges.PublishAcknowledged(committed, runtimechanneldelivery.ReconcileOrdinary|runtimechanneldelivery.ReconcileNative)
+	}
+	return out, errors.Join(err, notifyErr)
 }
 
 // ApplyDestructiveResetCleanupInRetainedTransaction lets the startup owner
@@ -112,10 +117,20 @@ func applyDestructiveResetCleanupTx(ctx context.Context, tx *sql.Tx, req destruc
 			return destructivereset.CleanupResult{}, err
 		}
 		rows[i].DeletedRows = deleted
+		if deleted > 0 {
+			switch rows[i].Table {
+			case "mailbox", "decision_cards", "decision_card_changes", "decision_card_input_drafts",
+				"channel_delivery_plans", "channel_delivery_renders", "channel_delivery_receipts",
+				"operator_channel_action_intents", "operator_channel_text_intents":
+				out.ChannelSourcesChanged = true
+			}
+		}
 	}
-	if err := channeldelivery.RetireStaleNativeInboxConsumersTx(ctx, tx, !sqlite); err != nil {
+	nativeChanged, err := channeldelivery.RetireStaleNativeInboxConsumersTx(ctx, tx, !sqlite)
+	if err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
+	out.ChannelSourcesChanged = out.ChannelSourcesChanged || nativeChanged
 	out.Tables = rows
 	return out, nil
 }

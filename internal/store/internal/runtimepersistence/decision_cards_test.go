@@ -815,9 +815,11 @@ func freezeDecisionCardRunInTestMutation(ctx context.Context, cards decisioncard
 	return runSelectedFixtureMutation(ctx, cards, "test decision-card run freeze", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 		switch selected := cards.(type) {
 		case *PostgresStore:
-			return selected.decisionPostgresOwner.SupersedeRunTx(txctx, attempt, runID, "run_forked", at, true)
+			_, err := selected.decisionPostgresOwner.SupersedeRunTx(txctx, attempt, runID, "run_forked", at, true)
+			return err
 		case *SQLiteRuntimeStore:
-			return selected.decisionSQLiteOwner.SupersedeRunTx(txctx, attempt, runID, "run_forked", at, true)
+			_, err := selected.decisionSQLiteOwner.SupersedeRunTx(txctx, attempt, runID, "run_forked", at, true)
+			return err
 		default:
 			return fmt.Errorf("unexpected decision card store %T", cards)
 		}

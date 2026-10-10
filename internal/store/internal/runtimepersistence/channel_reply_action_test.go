@@ -69,7 +69,7 @@ func proveChannelReplyTransfer(t *testing.T, selected selectedChannelDeliveryTes
 	}
 	rollback := errors.New("rollback reply transfer")
 	if err := runTx(func(ctx context.Context, tx *sql.Tx) error {
-		if _, found, err := channeldelivery.AdmitReplyActionTx(ctx, tx, text, postgres); err != nil || !found {
+		if _, found, _, err := channeldelivery.AdmitReplyActionTx(ctx, tx, text, postgres); err != nil || !found {
 			return fmt.Errorf("reply transfer before rollback: %t, %w", found, err)
 		}
 		return rollback

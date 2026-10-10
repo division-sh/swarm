@@ -505,11 +505,12 @@ func (s *RunLifecyclePostgresOwner) ExecuteCompletionCandidate(
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
+	var changes ChannelCardChanges
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimerunlifecycle.CompletionResult, error) {
 		transactiontest.Mark(txctx, transactiontest.RunCompletionCandidate)
 		var outcome runtimerunlifecycle.CompletionResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) (err error) {
-			outcome, err = s.executeCompletionCandidateTx(txctx, tx, attempt, candidate, catalog)
+			outcome, err = s.executeCompletionCandidateTx(txctx, tx, attempt, candidate, catalog, &changes)
 			return err
 		})
 		return outcome, err
@@ -519,7 +520,7 @@ func (s *RunLifecyclePostgresOwner) ExecuteCompletionCandidate(
 		return runtimerunlifecycle.CompletionResult{}, result.Err()
 	}
 	outcome.Committed = true
-	return outcome, result.Err()
+	return outcome, errors.Join(result.Err(), s.publishChannelChanges(committed, changes))
 }
 
 func (s *RunLifecycleSQLiteOwner) ExecuteCompletionCandidate(
@@ -533,11 +534,12 @@ func (s *RunLifecycleSQLiteOwner) ExecuteCompletionCandidate(
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
+	var changes ChannelCardChanges
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite execute run completion candidate", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimerunlifecycle.CompletionResult, error) {
 		transactiontest.Mark(txctx, transactiontest.RunCompletionCandidate)
 		var outcome runtimerunlifecycle.CompletionResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) (err error) {
-			outcome, err = s.executeCompletionCandidateTx(txctx, tx, attempt, candidate, catalog)
+			outcome, err = s.executeCompletionCandidateTx(txctx, tx, attempt, candidate, catalog, &changes)
 			return err
 		})
 		return outcome, err
@@ -547,7 +549,7 @@ func (s *RunLifecycleSQLiteOwner) ExecuteCompletionCandidate(
 		return runtimerunlifecycle.CompletionResult{}, result.Err()
 	}
 	outcome.Committed = true
-	return outcome, result.Err()
+	return outcome, errors.Join(result.Err(), s.publishChannelChanges(committed, changes))
 }
 
 func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
@@ -556,6 +558,7 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 	attempt *mutationprotocol.Attempt,
 	candidate runtimerunlifecycle.Candidate,
 	catalog runtimerunlifecycle.FinalCatalog,
+	changes *ChannelCardChanges,
 ) (runtimerunlifecycle.CompletionResult, error) {
 	var (
 		state       string
@@ -667,7 +670,7 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 			return runtimerunlifecycle.CompletionResult{}, errors.New("new fan-out barrier completion did not block run completion")
 		}
 	}
-	if _, _, err := s.completeRunTx(ctx, tx, attempt, candidate.RunID, selectedNow); err != nil {
+	if _, _, err := s.completeRunTx(ctx, tx, attempt, candidate.RunID, selectedNow, changes); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeTerminallyEligible}, nil
@@ -701,6 +704,7 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 	attempt *mutationprotocol.Attempt,
 	candidate runtimerunlifecycle.Candidate,
 	catalog runtimerunlifecycle.FinalCatalog,
+	changes *ChannelCardChanges,
 ) (runtimerunlifecycle.CompletionResult, error) {
 	var (
 		state      string
@@ -813,7 +817,7 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 			return runtimerunlifecycle.CompletionResult{}, errors.New("new sqlite fan-out barrier completion did not block run completion")
 		}
 	}
-	if _, _, err := s.completeRunTx(ctx, tx, attempt, candidate.RunID, selectedNow); err != nil {
+	if _, _, err := s.completeRunTx(ctx, tx, attempt, candidate.RunID, selectedNow, changes); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeTerminallyEligible}, nil

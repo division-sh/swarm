@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -122,7 +123,7 @@ func (s *PipelinePostgresOwner) CommitScenarioSetup(ctx context.Context, command
 	if !acknowledged {
 		return runtimepipeline.ScenarioSetupResult{}, outcome.Err()
 	}
-	return acknowledgeScenarioSetup(result), outcome.Err()
+	return acknowledgeScenarioSetup(result), errors.Join(outcome.Err(), s.publishCardChanges(acknowledged, runtimepipeline.ChannelCardsChanged(result.Activations)))
 }
 
 func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error) {
@@ -225,7 +226,7 @@ func (s *PipelineSQLiteOwner) CommitScenarioSetup(ctx context.Context, command r
 	if !acknowledged {
 		return runtimepipeline.ScenarioSetupResult{}, outcome.Err()
 	}
-	return acknowledgeScenarioSetup(result), outcome.Err()
+	return acknowledgeScenarioSetup(result), errors.Join(outcome.Err(), s.publishCardChanges(acknowledged, runtimepipeline.ChannelCardsChanged(result.Activations)))
 }
 
 func acknowledgeScenarioSetup(result runtimepipeline.ScenarioSetupResult) runtimepipeline.ScenarioSetupResult {

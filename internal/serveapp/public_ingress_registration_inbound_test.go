@@ -415,7 +415,7 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.ReplaceChannelActivationsContext(context.Background(), bundleHash, contextDef.PublicationGeneration, publication); err != nil {
+	if _, err := manager.ReplaceChannelActivationsContext(context.Background(), bundleHash, contextDef.PublicationGeneration, publication); err != nil {
 		t.Fatal(err)
 	}
 	snapshot := serveChannelActivationSnapshot{}

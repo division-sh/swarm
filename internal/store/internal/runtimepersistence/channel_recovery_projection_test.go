@@ -67,7 +67,7 @@ func proveChannelRecoveryProjection(t *testing.T, mode string, selected selected
 				return err
 			}
 			var err error
-			id, err = channeldelivery.PlanTextResponseTx(ctx, tx, text, "Exact recovery response", "teaching", postgres)
+			id, _, err = channeldelivery.PlanTextResponseTx(ctx, tx, text, "Exact recovery response", "teaching", postgres)
 			if err != nil {
 				return err
 			}

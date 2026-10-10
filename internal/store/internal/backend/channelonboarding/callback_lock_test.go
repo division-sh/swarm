@@ -230,16 +230,16 @@ func TestNeutralChannelMutationPrincipalFirstBothStores(t *testing.T) {
 				if err := f.run(ctx, func(ctx context.Context, tx *sql.Tx) error {
 					switch path {
 					case "quoted_control":
-						action, found, err := channeldelivery.AdmitReplyActionTx(ctx, tx, text, f.postgres)
+						action, found, _, err := channeldelivery.AdmitReplyActionTx(ctx, tx, text, f.postgres)
 						if err == nil && (!found || action.Fact.Kind != operatorchannel.ActionSourceReply || action.Fact.TextSource != text.TextFact) {
 							return fmt.Errorf("fixture did not transfer its exact reply control")
 						}
 						return err
 					case "inbox":
-						_, err := channeldelivery.PlanInboxResponseTx(ctx, tx, text, entry, "Inbox", f.postgres)
+						_, _, err := channeldelivery.PlanInboxResponseTx(ctx, tx, text, entry, "Inbox", f.postgres)
 						return err
 					default:
-						_, err := channeldelivery.PlanTextResponseTx(ctx, tx, text, "Inbox", "teaching", f.postgres)
+						_, _, err := channeldelivery.PlanTextResponseTx(ctx, tx, text, "Inbox", "teaching", f.postgres)
 						return err
 					}
 				}); err != nil {
@@ -306,7 +306,7 @@ func TestNativeInboxAttachmentPublicationLockOrderBothStores(t *testing.T) {
 				go func() {
 					defer workers.Done()
 					attachmentDone <- f.run(context.WithValue(ctx, callbackLockRole{}, "callback"), func(ctx context.Context, tx *sql.Tx) error {
-						_, err := channeldelivery.AttachNativeInboxSettingTx(ctx, tx, admission, f.postgres)
+						_, _, err := channeldelivery.AttachNativeInboxSettingTx(ctx, tx, admission, f.postgres)
 						return err
 					})
 				}()

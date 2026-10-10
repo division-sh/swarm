@@ -84,18 +84,26 @@ func (s *DecisionPostgresOwner) CreateHumanTaskCard(ctx context.Context, card de
 	return err
 }
 
+type humanTaskCreationChange struct {
+	cardID  string
+	changed bool
+}
+
 func (s *DecisionPostgresOwner) CreateHumanTaskCardOutcome(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) (decisioncard.HumanTaskCreationResult, error) {
-	result := postgresDecisionMutation(ctx, s, false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (string, error) {
+	result := postgresDecisionMutation(ctx, s, false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (humanTaskCreationChange, error) {
+		var changed bool
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := requireActiveDecisionRunTx(txctx, tx, card.RunID, true); err != nil {
 				return err
 			}
-			return insertHumanTaskCardWithStory(txctx, attempt, tx, card, continuation, true)
+			var err error
+			changed, err = insertHumanTaskCardWithStory(txctx, attempt, tx, card, continuation, true)
+			return err
 		})
-		return card.CardID, err
+		return humanTaskCreationChange{card.CardID, changed}, err
 	})
-	cardID, acknowledged := result.Value()
-	return decisioncard.HumanTaskCreationResult{CardID: cardID, Acknowledged: acknowledged}, result.Err()
+	value, acknowledged := result.Value()
+	return decisioncard.HumanTaskCreationResult{CardID: value.cardID, Acknowledged: acknowledged}, errors.Join(result.Err(), s.publishChannelChange(acknowledged, value.changed))
 }
 
 func (s *DecisionSQLiteOwner) CreateHumanTaskCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) error {
@@ -104,26 +112,30 @@ func (s *DecisionSQLiteOwner) CreateHumanTaskCard(ctx context.Context, card deci
 }
 
 func (s *DecisionSQLiteOwner) CreateHumanTaskCardOutcome(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) (decisioncard.HumanTaskCreationResult, error) {
-	result := sqliteDecisionMutation(ctx, s, "sqlite create human-task card", false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (string, error) {
+	result := sqliteDecisionMutation(ctx, s, "sqlite create human-task card", false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (humanTaskCreationChange, error) {
+		var changed bool
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := requireActiveDecisionRunTx(txctx, tx, card.RunID, false); err != nil {
 				return err
 			}
-			return insertHumanTaskCardWithStory(txctx, attempt, tx, card, continuation, false)
+			var err error
+			changed, err = insertHumanTaskCardWithStory(txctx, attempt, tx, card, continuation, false)
+			return err
 		})
-		return card.CardID, err
+		return humanTaskCreationChange{card.CardID, changed}, err
 	})
-	cardID, acknowledged := result.Value()
-	return decisioncard.HumanTaskCreationResult{CardID: cardID, Acknowledged: acknowledged}, result.Err()
+	value, acknowledged := result.Value()
+	return decisioncard.HumanTaskCreationResult{CardID: value.cardID, Acknowledged: acknowledged}, errors.Join(result.Err(), s.publishChannelChange(acknowledged, value.changed))
 }
 
-func insertHumanTaskCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation, postgres bool) error {
+func insertHumanTaskCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation, postgres bool) (bool, error) {
 	continuation = continuation.Canonical()
 	if err := continuation.Validate(card); err != nil {
-		return err
+		return false, err
 	}
-	if err := insertDecisionCardWithStory(ctx, story, tx, card, postgres); err != nil {
-		return err
+	cardChanged, err := insertDecisionCardWithStory(ctx, story, tx, card, postgres)
+	if err != nil {
+		return false, err
 	}
 	query := `INSERT INTO human_task_continuations (
 		card_id, run_id, requester_flow_id, requester_flow_instance, requester_entity_id, reply_context_id, source_event_id, deadline_at,
@@ -148,18 +160,22 @@ func insertHumanTaskCardWithStory(ctx context.Context, story runtimeauthoractivi
 		continuation.OutcomeEventID, continuation.CreatedAt.UTC(), continuation.UpdatedAt.UTC(),
 	)
 	if err != nil {
-		return fmt.Errorf("create human-task continuation: %w", err)
+		return false, fmt.Errorf("create human-task continuation: %w", err)
 	}
-	if rows, _ := res.RowsAffected(); rows == 0 {
+	rows, rowsErr := res.RowsAffected()
+	if rowsErr != nil {
+		return false, rowsErr
+	}
+	if rows == 0 {
 		existing, loadErr := loadHumanTaskContinuation(ctx, tx, card.CardID, postgres, false)
 		if loadErr != nil {
-			return loadErr
+			return false, loadErr
 		}
 		if !sameHumanTaskCreationIdentity(existing, continuation) {
-			return fmt.Errorf("human-task continuation identity collision: %s", card.CardID)
+			return false, fmt.Errorf("human-task continuation identity collision: %s", card.CardID)
 		}
 	}
-	return nil
+	return cardChanged || rows > 0, nil
 }
 
 func sameHumanTaskCreationIdentity(existing, requested decisioncard.HumanTaskContinuation) bool {

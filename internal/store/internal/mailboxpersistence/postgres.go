@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
@@ -166,7 +167,9 @@ func (s *MailboxPostgresOwner) insertMailboxItemSpec(ctx context.Context, item r
 	if !item.TimeoutAt.IsZero() {
 		expiresAt = item.TimeoutAt
 	}
+	var changed bool
 	committed, err := s.backend.RunTransactionOutcome(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
+		changed = false
 		_, err := tx.ExecContext(sqlCtx, `
 		INSERT INTO mailbox (
 			item_id, entity_id, flow_instance, scope, item_type, source_event_id,
@@ -182,9 +185,10 @@ func (s *MailboxPostgresOwner) insertMailboxItemSpec(ctx context.Context, item r
 		if err != nil {
 			return err
 		}
-		_, err = channeldelivery.PlanNoticeTx(sqlCtx, tx, item.ID, true)
+		changed, err = channeldelivery.PlanNoticeTx(sqlCtx, tx, item.ID, true)
 		return err
 	})
+	err = errors.Join(err, s.channelChanges.PublishAcknowledged(committed && changed, render.ReconcileOrdinary))
 	if err != nil {
 		return committed, fmt.Errorf("insert mailbox item: %w", err)
 	}
@@ -309,6 +313,7 @@ func (s *MailboxPostgresOwner) expireMailboxItemsSpec(ctx context.Context, limit
 		items, err = scanSpecMailboxItems(rows)
 		return errors.Join(err, rows.Close())
 	})
+	err = errors.Join(err, s.channelChanges.PublishAcknowledged(committed && len(items) > 0, render.ReconcileOrdinary))
 	if !committed {
 		return nil, err
 	}

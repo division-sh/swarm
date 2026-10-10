@@ -360,12 +360,16 @@ func serveDeclaredRegistrationEnabled(ctx context.Context, manager *runtime.Runt
 	return err == nil, err
 }
 
-func reconcileServeProviderRegistrations(ctx context.Context, generation runtimepublicingress.Generation, manager *runtime.RuntimeContextManager, store channelonboarding.Store, identities *operatorchannel.Service, credentials *runtimecredentials.SnapshotOwner, controller *runtimepublicingress.ProviderRegistrationController) error {
+func reconcileServeProviderRegistrations(ctx context.Context, generation runtimepublicingress.Generation, manager *runtime.RuntimeContextManager, store channelonboarding.Store, identities *operatorchannel.Service, credentials *runtimecredentials.SnapshotOwner, controller *runtimepublicingress.ProviderRegistrationController, published func() error) error {
 	snapshot, err := compileServeChannelActivationSnapshot(ctx, manager, store, identities, credentials)
 	if err != nil {
 		return err
 	}
-	if err := publishServeChannelActivationSnapshot(ctx, manager, snapshot); err != nil {
+	changed, err := publishServeChannelActivationSnapshot(ctx, manager, snapshot)
+	if changed && published != nil {
+		err = errors.Join(err, published())
+	}
+	if err != nil {
 		return err
 	}
 	selection, err := resolveServeRegistrationPairs(snapshot, manager)
@@ -454,6 +458,7 @@ type serveChannelActivationRefresher struct {
 	preflight   func(context.Context, servePrebindingActivation) error
 	reconcile   func(context.Context) error
 	testBarrier channelonboarding.TestLifecycleBarrier
+	published   func() error
 }
 
 type serveConnectedChannelRecovery interface {
@@ -1047,10 +1052,14 @@ func (r *serveChannelActivationRefresher) publishChannelActivations(ctx context.
 	if err != nil {
 		return err
 	}
-	return publishServeChannelActivationSnapshot(ctx, r.manager, snapshot)
+	changed, err := publishServeChannelActivationSnapshot(ctx, r.manager, snapshot)
+	if changed && r.published != nil {
+		err = errors.Join(err, r.published())
+	}
+	return err
 }
 
-func publishServeChannelActivationSnapshot(ctx context.Context, manager *runtime.RuntimeContextManager, snapshot serveChannelActivationSnapshot) error {
+func publishServeChannelActivationSnapshot(ctx context.Context, manager *runtime.RuntimeContextManager, snapshot serveChannelActivationSnapshot) (bool, error) {
 	byContext := map[string][]channelonboarding.CompiledActivation{}
 	coordinates := map[string]channelonboarding.ChannelRuntimeContextCoordinate{}
 	for _, activation := range snapshot.Activations {
@@ -1058,19 +1067,22 @@ func publishServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 		byContext[key] = append(byContext[key], activation)
 		coordinates[key] = activation.Coordinate
 	}
+	changed := false
 	for _, contextDef := range manager.LoadedContexts() {
 		bundleHash := contextDef.SourceArtifactFact.BundleHash()
 		key := bundleHash + "\x00" + contextDef.RuntimeInstanceID + "\x00" + fmt.Sprint(contextDef.PublicationGeneration)
 		if coordinate, found := coordinates[key]; found && !coordinate.MatchesContextOccurrence(contextDef.RuntimeInstanceID, contextDef.PublicationGeneration) {
-			return fmt.Errorf("channel activation runtime publication changed during refresh")
+			return changed, fmt.Errorf("channel activation runtime publication changed during refresh")
 		}
 		publication, err := channelonboarding.NewChannelActivationPublication(byContext[key])
 		if err != nil {
-			return err
+			return changed, err
 		}
-		if err := manager.ReplaceChannelActivationsContext(ctx, bundleHash, contextDef.PublicationGeneration, publication); err != nil {
-			return err
+		replaced, err := manager.ReplaceChannelActivationsContext(ctx, bundleHash, contextDef.PublicationGeneration, publication)
+		changed = changed || replaced
+		if err != nil {
+			return changed, err
 		}
 	}
-	return nil
+	return changed, nil
 }

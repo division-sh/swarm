@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -24,9 +25,9 @@ type admissionLifecycleWriter interface {
 	RequireActiveSourceTx(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error)
 	TransitionActiveTx(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error)
 	ReviseSourceTx(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error)
-	MarkTerminalTx(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
-	CompleteRunTx(context.Context, *mutationprotocol.Attempt, string, time.Time) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
-	ForkSourceTx(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.ForkSourceRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
+	MarkTerminalTx(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.TerminalRequest, *privaterunlifecycle.ChannelCardChanges) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
+	CompleteRunTx(context.Context, *mutationprotocol.Attempt, string, time.Time, *privaterunlifecycle.ChannelCardChanges) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
+	ForkSourceTx(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.ForkSourceRequest, *privaterunlifecycle.ChannelCardChanges) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
 }
 
 func selectedAdmissionLifecycleWriter(selected any) admissionLifecycleWriter {
@@ -72,6 +73,7 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 							writeID = strings.ToUpper(strings.ReplaceAll(runID, "-", ""))
 						}
 						var err error
+						var cardChanges privaterunlifecycle.ChannelCardChanges
 						writeCtx := txctx
 						if change == "terminal-unbound-caller" {
 							writeCtx = ctx
@@ -82,11 +84,11 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 						case "source-revision":
 							_, err = writer.ReviseSourceTx(txctx, attempt, runtimerunlifecycle.SourceRevisionRequest{RunID: writeID, Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityReplacementHash)})
 						case "terminal", "terminal-uuid-alias", "terminal-unbound-caller":
-							_, _, err = writer.MarkTerminalTx(writeCtx, attempt, runtimerunlifecycle.TerminalRequest{RunID: writeID, State: runtimerunlifecycle.StateCancelled, EndedAt: started.Add(time.Minute)})
+							_, _, err = writer.MarkTerminalTx(writeCtx, attempt, runtimerunlifecycle.TerminalRequest{RunID: writeID, State: runtimerunlifecycle.StateCancelled, EndedAt: started.Add(time.Minute)}, &cardChanges)
 						case "complete":
-							_, _, err = writer.CompleteRunTx(txctx, attempt, writeID, started.Add(time.Minute))
+							_, _, err = writer.CompleteRunTx(txctx, attempt, writeID, started.Add(time.Minute), &cardChanges)
 						case "fork-source":
-							_, _, err = writer.ForkSourceTx(txctx, attempt, runtimerunlifecycle.ForkSourceRequest{RunID: writeID, ContinuedAsRunID: childID, EndedAt: started.Add(time.Minute)})
+							_, _, err = writer.ForkSourceTx(txctx, attempt, runtimerunlifecycle.ForkSourceRequest{RunID: writeID, ContinuedAsRunID: childID, EndedAt: started.Add(time.Minute)}, &cardChanges)
 						}
 						if err != nil {
 							return err
@@ -215,7 +217,8 @@ func TestPendingEventDeltaVisibleThroughUnboundTerminalLoanBothStores(t *testing
 					return errors.Join(errors.New("event was not physically inserted"), err)
 				}
 				// The original caller has no native attempt key; WithSQL must lend it.
-				snapshot, _, err := writer.MarkTerminalTx(ctx, attempt, runtimerunlifecycle.TerminalRequest{RunID: runID, State: runtimerunlifecycle.StateCancelled, EndedAt: started.Add(time.Second)})
+				var cardChanges privaterunlifecycle.ChannelCardChanges
+				snapshot, _, err := writer.MarkTerminalTx(ctx, attempt, runtimerunlifecycle.TerminalRequest{RunID: runID, State: runtimerunlifecycle.StateCancelled, EndedAt: started.Add(time.Second)}, &cardChanges)
 				if err != nil {
 					return err
 				}

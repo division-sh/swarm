@@ -186,7 +186,7 @@ func postgresRunForkSelectedContractDiscardPort(s *RunForkPostgresOwner) runFork
 			return err
 		},
 		markTerminal: func(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimerunlifecycle.TerminalRequest) error {
-			_, _, err := s.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, attempt, req)
+			_, _, err := s.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, attempt, req, nil)
 			return err
 		},
 		deleteEvents: func(ctx context.Context, tx *sql.Tx, runID string) (int64, error) {
@@ -215,7 +215,7 @@ func sqliteRunForkSelectedContractDiscardPort(s *RunForkSQLiteOwner) runForkSele
 			return err
 		},
 		markTerminal: func(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimerunlifecycle.TerminalRequest) error {
-			_, _, err := s.RunLifecycleSQLiteOwner.MarkTerminalTx(ctx, attempt, req)
+			_, _, err := s.RunLifecycleSQLiteOwner.MarkTerminalTx(ctx, attempt, req, nil)
 			return err
 		},
 		deleteEvents: func(ctx context.Context, tx *sql.Tx, runID string) (int64, error) {

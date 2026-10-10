@@ -479,9 +479,11 @@ func commitWorkflowEngineMutation(
 				return err
 			}
 			for index, proposed := range command.ProposedEffects {
-				if err := store.workflowDecisionLifecycleOwner().InsertProposedEffectTx(txctx, attempt, proposed.Card, proposed.Continuation); err != nil {
+				changed, err := store.workflowDecisionLifecycleOwner().InsertProposedEffectTx(txctx, attempt, proposed.Card, proposed.Continuation)
+				if err != nil {
 					return fmt.Errorf("commit workflow engine proposed effect %d: %w", index, err)
 				}
+				result.Lifecycle.ChannelCardsChanged = result.Lifecycle.ChannelCardsChanged || changed
 			}
 			if command.FanOutIntent != nil {
 				runID := command.State.Identity.RunID
@@ -510,6 +512,7 @@ func commitWorkflowEngineMutation(
 				if err != nil {
 					return fmt.Errorf("commit workflow engine publication %d: %w", index, err)
 				}
+				result.Lifecycle.ChannelCardsChanged = result.Lifecycle.ChannelCardsChanged || committed.ChannelCardsChanged()
 				evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
 				if err != nil {
 					return err
@@ -579,18 +582,20 @@ func (s *PipelinePostgresOwner) CommitWorkflowEngineMutation(ctx context.Context
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimepipeline.CommittedWorkflowEngineMutation{}, err
 	}
-	return commitWorkflowEngineMutation(ctx, s, true, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowEngineMutation, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowEngineMutation] {
+	result, err := commitWorkflowEngineMutation(ctx, s, true, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowEngineMutation, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowEngineMutation] {
 		return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, write)
 	}, s.RunLifecyclePostgresOwner, command)
+	return result, errors.Join(err, s.publishCardChanges(result.Committed, result.Lifecycle.ChannelCardsChanged))
 }
 
 func (s *PipelineSQLiteOwner) CommitWorkflowEngineMutation(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimepipeline.CommittedWorkflowEngineMutation{}, err
 	}
-	return commitWorkflowEngineMutation(ctx, s, false, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowEngineMutation, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowEngineMutation] {
+	result, err := commitWorkflowEngineMutation(ctx, s, false, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowEngineMutation, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowEngineMutation] {
 		return mutationprotocol.RunSQLite(ctx, s.backend, "sqlite workflow engine mutation", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, write)
 	}, s.RunLifecycleSQLiteOwner, command)
+	return result, errors.Join(err, s.publishCardChanges(result.Committed, result.Lifecycle.ChannelCardsChanged))
 }
 
 var _ runtimepipeline.WorkflowEngineMutationOwner = (*PipelinePostgresOwner)(nil)

@@ -153,7 +153,7 @@ func (s *EffectPostgresOwner) ReconcileExternalEffectAttempts(ctx context.Contex
 	if !acknowledged {
 		return runtimeeffects.RecoverySummary{}, result.Err()
 	}
-	return summary, result.Err()
+	return summary, errors.Join(result.Err(), s.publishChannelChanges(acknowledged, summary.ChannelSourcesChanged))
 }
 
 func (s *EffectSQLiteOwner) ReconcileExternalEffectAttempts(ctx context.Context, request runtimeeffects.RecoveryRequest) (runtimeeffects.RecoverySummary, error) {
@@ -195,7 +195,7 @@ func (s *EffectSQLiteOwner) ReconcileExternalEffectAttempts(ctx context.Context,
 	if !acknowledged {
 		return runtimeeffects.RecoverySummary{}, result.Err()
 	}
-	return summary, result.Err()
+	return summary, errors.Join(result.Err(), s.publishChannelChanges(acknowledged, summary.ChannelSourcesChanged))
 }
 
 func (s *EffectPostgresOwner) IsExternalEffectAuthorityCurrent(ctx context.Context, authority runtimeeffects.Authority) (bool, error) {
@@ -2060,7 +2060,8 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 	if err := s.requireCurrent(); err != nil {
 		return err
 	}
-	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
+	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (bool, error) {
+		var channelChanged bool
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := requireChannelSourceSettlementTx(txctx, tx, settlement, true); err != nil {
 				return err
@@ -2074,7 +2075,8 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 			if err != nil {
 				return err
 			}
-			if err := projectChannelSourceSettlementTx(txctx, tx, settlement, true); err != nil {
+			channelChanged, err = projectChannelSourceSettlementTx(txctx, tx, settlement, true)
+			if err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=$1::uuid`, settlement.AttemptID); err != nil {
@@ -2102,16 +2104,18 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 			}
 			return nil
 		})
-		return struct{}{}, err
+		return channelChanged, err
 	})
-	return effectMutationError(result.Acknowledged(), result.Err(), runtimeeffects.MutationSettlement, runtimeeffects.Attempt{OperationID: settlement.OperationID, AttemptID: settlement.AttemptID})
+	channelChanged, acknowledged := result.Value()
+	return effectMutationError(acknowledged, errors.Join(result.Err(), s.publishChannelChanges(acknowledged, channelChanged)), runtimeeffects.MutationSettlement, runtimeeffects.Attempt{OperationID: settlement.OperationID, AttemptID: settlement.AttemptID})
 }
 
 func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlement runtimeeffects.Settlement) error {
 	if err := s.requireCurrent(); err != nil {
 		return err
 	}
-	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite settle external attempt", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
+	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite settle external attempt", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (bool, error) {
+		var channelChanged bool
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := requireChannelSourceSettlementTx(txctx, tx, settlement, false); err != nil {
 				return err
@@ -2125,7 +2129,8 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 			if err != nil {
 				return err
 			}
-			if err := projectChannelSourceSettlementTx(txctx, tx, settlement, false); err != nil {
+			channelChanged, err = projectChannelSourceSettlementTx(txctx, tx, settlement, false)
+			if err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=?`, settlement.AttemptID); err != nil {
@@ -2153,9 +2158,10 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 			}
 			return nil
 		})
-		return struct{}{}, err
+		return channelChanged, err
 	})
-	return effectMutationError(result.Acknowledged(), result.Err(), runtimeeffects.MutationSettlement, runtimeeffects.Attempt{OperationID: settlement.OperationID, AttemptID: settlement.AttemptID})
+	channelChanged, acknowledged := result.Value()
+	return effectMutationError(acknowledged, errors.Join(result.Err(), s.publishChannelChanges(acknowledged, channelChanged)), runtimeeffects.MutationSettlement, runtimeeffects.Attempt{OperationID: settlement.OperationID, AttemptID: settlement.AttemptID})
 }
 
 func requireProviderHeadLifecyclePostgres(ctx context.Context, tx *sql.Tx, req completionProviderHeadRequest) error {
@@ -2545,13 +2551,14 @@ func reconcileGenericExternalEffectCandidates(ctx context.Context, tx *sql.Tx, p
 			targetState = string(runtimeeffects.StateOutcomeUncertain)
 			failure = uncertainFailure
 		}
-		changed, err := recoverGenericExternalEffectCandidateTx(ctx, tx, candidate, targetState, failure, now, postgres)
+		changed, projectionChanged, err := recoverGenericExternalEffectCandidateTx(ctx, tx, candidate, targetState, failure, now, postgres)
 		if err != nil {
 			return runtimeeffects.RecoverySummary{}, err
 		}
 		if !changed {
 			continue
 		}
+		summary.ChannelSourcesChanged = summary.ChannelSourcesChanged || projectionChanged
 		if targetState == string(runtimeeffects.StateTerminalFailure) {
 			summary.PrelaunchTerminal++
 		} else {
@@ -2562,15 +2569,15 @@ func reconcileGenericExternalEffectCandidates(ctx context.Context, tx *sql.Tx, p
 }
 
 func recoverGenericExternalEffectCandidateTx(ctx context.Context, tx *sql.Tx, candidate externalEffectRecoveryCandidate,
-	targetState string, failure []byte, now time.Time, postgres bool) (bool, error) {
+	targetState string, failure []byte, now time.Time, postgres bool) (bool, bool, error) {
 	if candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelDelivery) || candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelNativeSetting) {
-		changed, err := recoverChannelSourceSettlementTx(ctx, tx, candidate, runtimeeffects.State(targetState), failure, now, postgres)
+		changed, projectionChanged, err := recoverChannelSourceSettlementTx(ctx, tx, candidate, runtimeeffects.State(targetState), failure, now, postgres)
 		if err != nil {
-			return false, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict,
+			return false, false, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict,
 				"channel_source_recovery_settlement_conflict", "external-effects", "startup_reconcile",
 				map[string]any{"attempt_id": candidate.AttemptID}, err)
 		}
-		return changed, nil
+		return changed, projectionChanged, nil
 	}
 	var result sql.Result
 	var err error
@@ -2580,16 +2587,16 @@ func recoverGenericExternalEffectCandidateTx(ctx context.Context, tx *sql.Tx, ca
 		result, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_attempts SET state=?,failure=?,completed_at=?,updated_at=? WHERE attempt_id=? AND state=?`, targetState, string(failure), now, now, candidate.AttemptID, candidate.State)
 	}
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	changed, err := result.RowsAffected()
 	if err != nil || changed == 0 {
-		return false, err
+		return false, false, err
 	}
 	if postgres {
 		_, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_operations SET state=$1,completed_at=$2,updated_at=$2 WHERE operation_id=$3::uuid`, targetState, now, candidate.OperationID)
 	} else {
 		_, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_operations SET state=?,completed_at=?,updated_at=? WHERE operation_id=?`, targetState, now, now, candidate.OperationID)
 	}
-	return true, err
+	return true, false, err
 }

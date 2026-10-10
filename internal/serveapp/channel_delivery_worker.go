@@ -507,44 +507,97 @@ func channelInboxProjectionEntry(item any) (runtimechanneldelivery.InboxEntry, e
 	return entry, nil
 }
 
-func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process, dispatcher *serveChannelDeliveryDispatcher) error {
-	if owner == nil || dispatcher == nil {
+type channelDeliveryWorkerOptions struct {
+	cadence runtimechanneldelivery.ReconcileCadence
+	passed  func(runtimechanneldelivery.ReconcilePass)
+	started func(runtimechanneldelivery.Store, func() (runtimechanneldelivery.ReconcileMark, bool))
+}
+
+func (options channelDeliveryWorkerOptions) observePass(ctx context.Context, scope runtimechanneldelivery.ReconcileDemand, start runtimechanneldelivery.ReconcileMark, err error) {
+	if err == nil && ctx.Err() == nil && options.passed != nil {
+		options.passed(runtimechanneldelivery.ReconcilePass{Scope: scope, Start: start})
+	}
+}
+
+func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process, dispatcher *serveChannelDeliveryDispatcher, options channelDeliveryWorkerOptions) error {
+	if owner == nil || dispatcher == nil || dispatcher.store == nil {
 		return fmt.Errorf("channel delivery worker requires process and dispatcher")
+	}
+	ordinary := options.cadence.Ordinary
+	native := options.cadence.Native
+	if ordinary < 0 || native < 0 {
+		return fmt.Errorf("channel delivery observation cadence must be positive")
+	}
+	if ordinary == 0 {
+		ordinary = time.Second
+	}
+	if native == 0 {
+		native = 5 * time.Second
 	}
 	lease, err := owner.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("admit channel delivery worker: %w", err)
 	}
+	subscription, err := dispatcher.store.SubscribeChannelReconciliation(lease.Context())
+	if err != nil {
+		// Check before Done cancels the lease: only its own stop is graceful.
+		if err == context.Canceled && lease.Context().Err() == context.Canceled {
+			return lease.Done()
+		}
+		return errors.Join(fmt.Errorf("subscribe channel delivery worker: %w", err), lease.Done())
+	}
+	if options.started != nil {
+		options.started(dispatcher.store, subscription.Mark)
+	}
 	go func() {
 		defer func() { _ = lease.Done() }()
+		defer subscription.Close()
 		workCtx := lease.Context()
-		ticker := time.NewTicker(time.Second)
-		nativeTicker := time.NewTicker(5 * time.Second)
+		ticker := time.NewTicker(ordinary)
+		nativeTicker := time.NewTicker(native)
 		defer ticker.Stop()
 		defer nativeTicker.Stop()
-		if err := dispatcher.reconcileNativeInboxSettings(workCtx); err != nil && workCtx.Err() == nil {
-			log.Printf("native inbox setting reconciliation: %v", err)
-		}
+		nativeDue := true
 		for {
-			if err := dispatcher.reconcileNativeInboxEntries(workCtx); err != nil && workCtx.Err() == nil {
-				log.Printf("channel inbox entry reconciliation: %v", err)
+			demand, start := subscription.BeginPass()
+			if start.Subscription == 0 {
+				return
 			}
-			if err := dispatcher.reconcileDeliveries(workCtx); err != nil && workCtx.Err() == nil {
-				log.Printf("channel delivery reconciliation: %v", err)
+			if nativeDue || demand.Includes(runtimechanneldelivery.ReconcileNative) {
+				err := dispatcher.reconcileNativeInboxSettings(workCtx)
+				if err != nil && workCtx.Err() == nil {
+					log.Printf("native inbox setting reconciliation: %v", err)
+				}
+				options.observePass(workCtx, runtimechanneldelivery.ReconcileNative, start, err)
 			}
-			if err := dispatcher.reconcileCardActions(workCtx); err != nil && workCtx.Err() == nil {
-				log.Printf("channel action reconciliation: %v", err)
-			}
+			err := dispatcher.reconcileOrdinaryChannelWork(workCtx)
+			options.observePass(workCtx, runtimechanneldelivery.ReconcileOrdinary, start, err)
+			nativeDue = false
 			select {
 			case <-workCtx.Done():
 				return
 			case <-nativeTicker.C:
-				if err := dispatcher.reconcileNativeInboxSettings(workCtx); err != nil && workCtx.Err() == nil {
-					log.Printf("native inbox setting reconciliation: %v", err)
-				}
+				nativeDue = true
 			case <-ticker.C:
+			case <-subscription.Wake():
 			}
 		}
 	}()
 	return nil
+}
+
+func (d *serveChannelDeliveryDispatcher) reconcileOrdinaryChannelWork(ctx context.Context) error {
+	entries := d.reconcileNativeInboxEntries(ctx)
+	if entries != nil && ctx.Err() == nil {
+		log.Printf("channel inbox entry reconciliation: %v", entries)
+	}
+	deliveries := d.reconcileDeliveries(ctx)
+	if deliveries != nil && ctx.Err() == nil {
+		log.Printf("channel delivery reconciliation: %v", deliveries)
+	}
+	actions := d.reconcileCardActions(ctx)
+	if actions != nil && ctx.Err() == nil {
+		log.Printf("channel action reconciliation: %v", actions)
+	}
+	return errors.Join(entries, deliveries, actions)
 }

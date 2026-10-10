@@ -856,9 +856,9 @@ func completeRunLifecycleCandidateParity(
 		var inner error
 		switch store := fixture.store.(type) {
 		case *PostgresStore:
-			snapshot, disposition, inner = store.runLifecyclePostgresOwner.CompleteRunTx(txctx, attempt, runID, endedAt)
+			snapshot, disposition, inner = store.runLifecyclePostgresOwner.CompleteRunTx(txctx, attempt, runID, endedAt, nil)
 		case *SQLiteRuntimeStore:
-			snapshot, disposition, inner = store.runLifecycleSQLiteOwner.CompleteRunTx(txctx, attempt, runID, endedAt)
+			snapshot, disposition, inner = store.runLifecycleSQLiteOwner.CompleteRunTx(txctx, attempt, runID, endedAt, nil)
 		default:
 			inner = errors.New("unsupported run lifecycle candidate parity store")
 		}

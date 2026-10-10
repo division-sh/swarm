@@ -88,16 +88,24 @@ func TestComposedDecisionWritersRefuseInactiveAttempt(t *testing.T) {
 		name  string
 		write func() error
 	}{
-		{"postgres/card", func() error { return postgres.InsertTx(ctx, attempt, decisioncard.Card{}) }},
-		{"sqlite/card", func() error { return sqlite.InsertTx(ctx, attempt, decisioncard.Card{}) }},
+		{"postgres/card", func() error { _, err := postgres.InsertTx(ctx, attempt, decisioncard.Card{}); return err }},
+		{"sqlite/card", func() error { _, err := sqlite.InsertTx(ctx, attempt, decisioncard.Card{}); return err }},
 		{"postgres/proposed", func() error {
-			return postgres.InsertProposedEffectTx(ctx, attempt, decisioncard.Card{}, decisioncard.ProposedEffectContinuation{})
+			_, err := postgres.InsertProposedEffectTx(ctx, attempt, decisioncard.Card{}, decisioncard.ProposedEffectContinuation{})
+			return err
 		}},
 		{"sqlite/proposed", func() error {
-			return sqlite.InsertProposedEffectTx(ctx, attempt, decisioncard.Card{}, decisioncard.ProposedEffectContinuation{})
+			_, err := sqlite.InsertProposedEffectTx(ctx, attempt, decisioncard.Card{}, decisioncard.ProposedEffectContinuation{})
+			return err
 		}},
-		{"postgres/run", func() error { return postgres.SupersedeRunTx(ctx, attempt, "run", "stop", time.Now(), false) }},
-		{"sqlite/run", func() error { return sqlite.SupersedeRunTx(ctx, attempt, "run", "stop", time.Now(), false) }},
+		{"postgres/run", func() error {
+			_, err := postgres.SupersedeRunTx(ctx, attempt, "run", "stop", time.Now(), false)
+			return err
+		}},
+		{"sqlite/run", func() error {
+			_, err := sqlite.SupersedeRunTx(ctx, attempt, "run", "stop", time.Now(), false)
+			return err
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if err := test.write(); err == nil {

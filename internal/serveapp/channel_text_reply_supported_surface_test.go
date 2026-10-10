@@ -298,6 +298,11 @@ func waitTextReplyCardCopies(t *testing.T, reader render.Observer, cardID string
 
 func waitTextReplyPublicCard(t *testing.T, h *channelOnboardingE2EHarness, runID string) string {
 	t.Helper()
+	return waitChannelPublicCard(t, h, runID, decisioncard.AnchorKindStageGate, "reviews")
+}
+
+func waitChannelPublicCard(t *testing.T, h *channelOnboardingE2EHarness, runID string, kind decisioncard.AnchorKind, flowInstance string) string {
+	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		var matches []string
@@ -311,9 +316,9 @@ func waitTextReplyPublicCard(t *testing.T, h *channelOnboardingE2EHarness, runID
 				Next string `json:"next_cursor"`
 			}
 			requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.list", map[string]any{
-				"run_id": runID, "anchor_kind": string(decisioncard.AnchorKindStageGate), "status": "pending", "cursor": cursor, "limit": 200}, &page)
+				"run_id": runID, "anchor_kind": string(kind), "status": "pending", "cursor": cursor, "limit": 200}, &page)
 			for _, item := range page.Items {
-				if item.Kind == "decision_card" && item.Card.RunID == runID && item.Card.Scope.FlowInstance == "reviews" {
+				if item.Kind == "decision_card" && item.Card.RunID == runID && item.Card.Scope.FlowInstance == flowInstance {
 					matches = append(matches, item.Card.CardID)
 				}
 			}
