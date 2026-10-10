@@ -938,7 +938,7 @@ func VerifyRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWorkForTest(
 		}),
 		Topology: managerTopology,
 	}}}
-	managerStore.session.admitRun(t, managerIdentity.RunID, testSourceArtifactFact(t, runtimeTestBundleHash))
+	managerStore.session.admitRun(t, managerIdentity.RunID, nativeRuntimeLogSourceFactForTest(t, fixture))
 	deliveryStore := fixture.Deliveries
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),

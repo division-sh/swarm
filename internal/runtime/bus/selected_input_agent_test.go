@@ -47,7 +47,10 @@ func TestSelectedInputValidationAgentDeclarationOwnership(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			subscribers := routes.ResolveIndependentPubsubForRun(runID, tc.event)
+			subscribers, err := routes.PubsubDeclarationDefinitions(".", []string{tc.event})
+			if err != nil {
+				t.Fatal(err)
+			}
 			got := validation.FilterSubscribers(subscribers)
 			if len(got) != 1 || !got[0].Recipient.IsAgent() {
 				t.Fatalf("exact agent input recipients: %+v", got)
@@ -108,7 +111,11 @@ func TestSelectedInputValidationAgentDeclarationOwnership(t *testing.T) {
 			if wantFlow == "child" {
 				otherEvent = "work.ready"
 			}
-			for _, other := range routes.ResolveIndependentPubsubForRun(runID, otherEvent) {
+			otherSubscribers, err := routes.PubsubDeclarationDefinitions(otherFlow, []string{otherEvent})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, other := range otherSubscribers {
 				if validation.AllowsSubscriber(other) {
 					t.Fatalf("same-name other flow admitted: %+v", other)
 				}

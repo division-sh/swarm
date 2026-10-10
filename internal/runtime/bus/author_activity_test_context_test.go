@@ -117,19 +117,33 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(ctx cont
 	if readiness.RunID == "" {
 		readiness.RunID = runtimecorrelation.RunIDFromContext(ctx)
 	}
+	if bundle, found := semanticview.Bundle(req.ContractBundle); found && bundle.SourceArtifact != nil {
+		readiness.BundleHash = bundle.SourceArtifact.BundleHash()
+	}
+	var key string
+	if schema, found := req.ContractBundle.FlowSchemaByID(req.Instance.TemplateID); found && !schema.Instance.Empty() {
+		key, err = runtimepipeline.AdmitFlowInstanceKey(req.ContractBundle, req.Instance.TemplateID, req.ResolvedKey)
+		if err != nil {
+			return runtimepipeline.FlowInstanceActivationPlan{}, err
+		}
+	}
 	instance := runtimepipeline.WorkflowInstance{
-		InstanceID:       req.Instance.InstanceID,
-		StorageRef:       req.Instance.InstancePath,
-		EntityID:         req.Instance.EntityID,
-		WorkflowName:     req.Instance.TemplateID,
-		WorkflowVersion:  req.ContractBundle.WorkflowVersion(),
-		CurrentState:     req.InitialState,
-		Fields:           fields,
-		Bookkeeping:      req.Bookkeeping,
-		EnteredStageAt:   req.OccurredAt,
-		CreatedAt:        req.OccurredAt,
-		RuntimeReadiness: &readiness,
-		EntityType:       "test_entity",
+		InstanceKey:        key,
+		ParentFlowID:       req.Instance.ParentRoute.FlowID,
+		ParentFlowInstance: req.Instance.ParentRoute.FlowInstance,
+		ParentEntityID:     req.Instance.ParentEntityID,
+		InstanceID:         req.Instance.InstanceID,
+		StorageRef:         req.Instance.InstancePath,
+		EntityID:           req.Instance.EntityID,
+		WorkflowName:       req.Instance.TemplateID,
+		WorkflowVersion:    req.ContractBundle.WorkflowVersion(),
+		CurrentState:       req.InitialState,
+		Fields:             fields,
+		Bookkeeping:        req.Bookkeeping,
+		EnteredStageAt:     req.OccurredAt,
+		CreatedAt:          req.OccurredAt,
+		RuntimeReadiness:   &readiness,
+		EntityType:         "test_entity",
 	}
 	plan := runtimepipeline.FlowInstanceActivationPlan{
 		Instance: instance, Identity: req.Instance, Readiness: readiness,

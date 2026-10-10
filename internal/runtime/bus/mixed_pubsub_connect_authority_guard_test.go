@@ -25,7 +25,7 @@ func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
 		"dedupeSubscribers": {
 			"resolvedSubscriberRoleKey": false,
 		},
-		"deliveryPlanner.planAtGeneration": {
+		"deliveryPlanner.planRecipients": {
 			"planIndependentPubsubBranch":    false,
 			"composeIndependentPubsubBranch": false,
 		},

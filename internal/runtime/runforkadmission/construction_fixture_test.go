@@ -34,6 +34,7 @@ func withConstructedHeader(t testing.TB, plan runfork.RunForkPlan, source semant
 	metadata := &runfork.RunForkMaterializedEntitySnapshotMetadata{
 		Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 		Mode: "template", FlowTemplate: flowID, FlowInstance: instance.InstancePath, EntityType: contract.EntityType, FlowConfig: config,
+		ParentInstance: instance.ParentRoute.FlowInstance, InstanceKey: "fixture-key",
 	}
 	entered := plan.ForkPoint.Timestamp
 	plan.Entities = append(append([]runfork.RunForkEntityState(nil), plan.Entities...), runfork.RunForkEntityState{

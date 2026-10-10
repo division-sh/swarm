@@ -25,6 +25,14 @@ type unexpectedDurableTestRoles struct {
 	runtimerunlifecycle.OperationOwner
 }
 
+func (unexpectedDurableTestRoles) LookupFlowInstance(context.Context, runtimepipeline.FlowInstanceLookupRequest) (runtimepipeline.FlowInstanceObservation, bool, error) {
+	return runtimepipeline.FlowInstanceObservation{}, false, errUnexpectedDurableTestRole
+}
+
+func (unexpectedDurableTestRoles) ListFlowInstances(context.Context, runtimepipeline.FlowInstanceLookupScope) ([]runtimepipeline.FlowInstanceObservation, error) {
+	return nil, errUnexpectedDurableTestRole
+}
+
 func (unexpectedDurableTestRoles) LoadFlowConstructionPublication(context.Context, runtimeflowidentity.RunScopedFlowInstance, string) (runtimepipeline.FlowConstructionPublicationEvidence, error) {
 	return runtimepipeline.FlowConstructionPublicationEvidence{}, errUnexpectedDurableTestRole
 }
@@ -168,6 +176,9 @@ func (unexpectedDurableTestRoles) StandingRunRestartDisposition(context.Context,
 func ExactDurableTestDependencies(selected any) DurableDependencies {
 	defaults := unexpectedDurableTestRoles{}
 	deps := DurableTestDependencyProjection(selected)
+	if deps.Instances == nil {
+		deps.Instances = defaults
+	}
 	if deps.ConstructionPublications == nil {
 		deps.ConstructionPublications = defaults
 	}
@@ -223,6 +234,9 @@ func ExactDurableTestDependencies(selected any) DurableDependencies {
 // a synthetic store. Ephemeral fixtures use it without installing defaults.
 func DurableTestDependencyProjection(selected any) DurableDependencies {
 	var deps DurableDependencies
+	if role, ok := selected.(runtimepipeline.FlowInstanceIndexReader); ok {
+		deps.Instances = role
+	}
 	if role, ok := selected.(runtimepipeline.FlowConstructionPublicationReader); ok {
 		deps.ConstructionPublications = role
 	}
@@ -281,6 +295,7 @@ func TestDurableDependenciesDoNotRequireReceiverElectionReader(t *testing.T) {
 	roles := unexpectedDurableTestRoles{}
 	store := newTargetRouteMemoryStore()
 	deps := DurableDependencies{
+		Instances:    roles,
 		RunLifecycle: roles, DeliveryLifecycle: roles, FlowRoutes: roles, FlowRouteRecords: roles,
 		FlowRouteSets: roles, FlowRouteTopology: roles, FlowRouteRollback: roles,
 		ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,

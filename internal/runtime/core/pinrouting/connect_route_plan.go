@@ -642,6 +642,37 @@ type ConnectRecipientRegistration struct {
 	recipient   ConnectRecipient
 }
 
+// BindReceiverInstance projects an already compiled receiver declaration onto
+// selected construction data. It grants neither construction nor execution.
+func (g CompiledConnectGraph) BindReceiverInstance(registration ConnectRecipientRegistration, instance runtimeflowidentity.Instance) (ConnectRecipientRegistration, error) {
+	if registration.receiverPin.Empty() || instance.InstancePath == "" || instance.EntityID == "" {
+		return ConnectRecipientRegistration{}, fmt.Errorf("receiver binding requires compiled permission and exact construction data")
+	}
+	declared := false
+	for _, plan := range append(append([]ConnectRoutePlan(nil), g.plans...), g.receiverPlans...) {
+		if plan.ReceiverPinIdentity().Equal(registration.receiverPin) && plan.receiver.flowID.value == instance.TemplateID {
+			declared = true
+			break
+		}
+	}
+	if !declared {
+		return ConnectRecipientRegistration{}, fmt.Errorf("receiver binding crosses its compiled declaration")
+	}
+	registration.recipient.path = instance.InstancePath
+	if registration.recipient.kind == ConnectRecipientAgent {
+		route, err := instance.Route().AgentIdentityRoute()
+		if err != nil {
+			return ConnectRecipientRegistration{}, err
+		}
+		plan, err := agentidentity.NewPlan(registration.recipient.agentPlan.Name, route)
+		if err != nil {
+			return ConnectRecipientRegistration{}, err
+		}
+		registration.recipient.agentPlan = plan
+	}
+	return registration, nil
+}
+
 // ConnectRecipientAssociation retains the compiled plan and receiver pin that
 // admitted a recipient, before recipients are flattened across plans.
 type ConnectRecipientAssociation struct {

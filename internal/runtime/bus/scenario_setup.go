@@ -69,11 +69,7 @@ func (eb *EventBus) SetupScenarioEntities(ctx context.Context, request pipeline.
 		if err != nil {
 			return pipeline.ScenarioSetupResult{}, fmt.Errorf("prepare scenario construction: %w", err)
 		}
-		topology, err := eb.prepareFlowInstanceActivationRouteTopology(ctx, []pipeline.FlowInstanceActivationPlan{plan})
-		if err != nil {
-			return pipeline.ScenarioSetupResult{}, err
-		}
-		command.Activations = append(command.Activations, FlowInstanceActivationCommand{Plan: plan, RouteTopology: topology})
+		command.Activations = append(command.Activations, FlowInstanceActivationCommand{Plan: plan})
 	}
 	result, commitErr := owner.CommitScenarioSetup(ctx, command)
 	if !result.Acknowledged {

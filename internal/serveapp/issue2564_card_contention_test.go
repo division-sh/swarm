@@ -105,7 +105,7 @@ func TestIssue2564DecisionCardReevaluatesSameLeaseAfterRealCASLossBothStores(t *
 			deps := rt.persistence.deps
 			coordinator := pipeline.NewPipelineCoordinatorWithOptions(bus, pipeline.PipelineCoordinatorOptions{
 				Module: rt.Runtime.Options.WorkflowModule, ExecutionPosture: rt.Runtime.ExecutionPosture,
-				ReceiverExecution: eventreceiver.NormalExecution(), DeliveryRuntime: bus, FlowRoutes: bus,
+				ReceiverExecution: eventreceiver.NormalExecution(), DeliveryRuntime: bus,
 				SourceArtifactFact: fact, WorkOwner: rt.Runtime.WorkOccurrence(),
 				Persistence:   pipeline.NewWorkflowPersistence(&mailboxFaultPersistence{WorkflowPersistenceOwner: rt.selected, fault: fault}),
 				DeliveryStore: deps.DeliveryStore, DeadLetters: rt.selected.(deadletters.AcknowledgedRecorder), PipelineObligations: deps.PipelineObligations,
