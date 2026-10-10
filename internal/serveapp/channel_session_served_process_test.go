@@ -121,7 +121,7 @@ func TestServedWhatsAppUnpairedSDKProcessRestartBothStores(t *testing.T) {
 				opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, testutil.StartEmptyPostgresDSN(t))
 			}
 			process := startServedNativeSDKProcess(t, opts, peer)
-			endpoint := process.endpoint(t)
+			endpoint := process.endpoint(t) + "/v1/rpc"
 			var result channelonboarding.Result
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_start", map[string]any{
 				"provider": "whatsapp", "verb": "connect", "save_proof": false, "idempotency_key": "native-process-pairing"}, &result)
@@ -143,7 +143,7 @@ func TestServedWhatsAppUnpairedSDKProcessRestartBothStores(t *testing.T) {
 				}
 				if iteration == 0 {
 					process = startServedNativeSDKProcess(t, opts, peer)
-					endpoint = process.endpoint(t)
+					endpoint = process.endpoint(t) + "/v1/rpc"
 					requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": operationID}, &result)
 				}
 			}
