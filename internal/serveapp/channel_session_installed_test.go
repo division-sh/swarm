@@ -113,7 +113,7 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 	service, err := channelonboarding.NewService(channelonboarding.ServiceOptions{Store: selected, SourceArtifacts: selected, Identities: identities,
 		Credentials: writer, Sessions: sessions, Catalog: func() (*channelonboarding.CandidateCatalog, error) { return serveChannelOnboardingCatalog(manager) },
 		Activations: &serveChannelActivationRefresher{manager: manager, store: selected, identities: identities, credentials: current}, Confirmation: confirmation,
-		Readiness: &serveConnectedChannelReadiness{manager: manager, store: selected, identities: identities, credentials: current, effects: effects, ingress: &publicingress.ReadinessOwner{}}})
+		Readiness: &serveConnectedChannelReadiness{manager: manager, store: selected, identities: identities, credentials: current, effects: effects, ingress: &publicingress.ReadinessOwner{}, sessions: sessions}})
 	if err != nil {
 		t.Fatal(err)
 	}

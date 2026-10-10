@@ -281,6 +281,10 @@ func (f *activeInputFixture) receiveSDK(t *testing.T, text, id string, at time.T
 }
 
 func (f *activeInputFixture) receiveCaptureSDK(t *testing.T, text, id string, at time.Time) capturedEvent {
+	return f.receiveCaptureMessageSDK(t, &waE2E.Message{Conversation: proto.String(text)}, id, at)
+}
+
+func (f *activeInputFixture) receiveCaptureMessageSDK(t *testing.T, content *waE2E.Message, id string, at time.Time) capturedEvent {
 	t.Helper()
 	device, err := f.state.device(f.peer.ctx)
 	if err != nil {
@@ -291,7 +295,7 @@ func (f *activeInputFixture) receiveCaptureSDK(t *testing.T, text, id string, at
 		from = f.senderJID
 	}
 	from.Device = 1
-	message := encryptedMessageFromFixture(t, device, f.sender, from, &waE2E.Message{Conversation: proto.String(text)})
+	message := encryptedMessageFromFixture(t, device, f.sender, from, content)
 	message.Attrs["id"], message.Attrs["t"] = id, at.Unix()
 	f.peer.mu.Lock()
 	socket := f.peer.peers[0]

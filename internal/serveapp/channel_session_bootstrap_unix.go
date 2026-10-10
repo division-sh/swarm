@@ -180,16 +180,8 @@ func (s *serveSessionBootstrap) validateResumeSession(ctx context.Context, op ch
 		op.SessionAccount == (operatorchannel.SessionAccountAdmission{}) && op.Phase != channelonboarding.PhaseActivatingProvider {
 		return channelonboarding.ErrRevisionConflict
 	}
-	current, err := s.store.GetChannelOnboarding(ctx, op.OperationID)
-	if err != nil {
+	if err := s.validateRetainedSessionOperation(ctx, op); err != nil {
 		return err
-	}
-	if current.Revision != op.Revision || current.Phase != op.Phase || current.RequestHash != op.RequestHash ||
-		current.Provider != op.Provider || current.Posture != op.Posture ||
-		current.PrincipalID != op.PrincipalID || current.SessionAccount != op.SessionAccount || current.SessionConnectionID != op.SessionConnectionID ||
-		current.TargetSelector != op.TargetSelector || current.Interface.Normalized() != op.Interface.Normalized() ||
-		!current.Coordinate.MatchesDeclaration(op.Coordinate) {
-		return channelonboarding.ErrRevisionConflict
 	}
 	if op.Phase == channelonboarding.PhaseSucceeded {
 		eligible, err := channelonboarding.RetainedSessionCurrent(ctx, s.store, op)
@@ -201,6 +193,78 @@ func (s *serveSessionBootstrap) validateResumeSession(ctx context.Context, op ch
 		}
 	}
 	return nil
+}
+
+func (s *serveSessionBootstrap) validateRetainedSessionOperation(ctx context.Context, op channelonboarding.Operation) error {
+	if s == nil || s.store == nil || ctx == nil {
+		return channelonboarding.ErrInvalidRequest
+	}
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
+	if op.Posture != channelonboarding.ActivationSessionConnection || op.Phase == channelonboarding.PhaseFailed ||
+		op.Phase == channelonboarding.PhaseRetired || op.ValidateSessionAccount() != nil {
+		return channelonboarding.ErrRevisionConflict
+	}
+	current, err := s.store.GetChannelOnboarding(ctx, op.OperationID)
+	if err != nil {
+		return err
+	}
+	if current.Revision != op.Revision || current.Phase != op.Phase || current.RequestHash != op.RequestHash ||
+		current.Provider != op.Provider || current.Posture != op.Posture ||
+		current.SlotKey != op.SlotKey || current.BindingRevision != op.BindingRevision || current.ActivationRevision != op.ActivationRevision ||
+		current.PrincipalID != op.PrincipalID || current.SessionAccount != op.SessionAccount || current.SessionConnectionID != op.SessionConnectionID ||
+		current.TargetSelector != op.TargetSelector || current.Interface.Normalized() != op.Interface.Normalized() ||
+		current.Coordinate.TargetGeneration != op.Coordinate.TargetGeneration || !current.Coordinate.MatchesDeclaration(op.Coordinate) {
+		return channelonboarding.ErrRevisionConflict
+	}
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
+	return nil
+}
+
+// Observation neither opens a connection nor adopts a later selected parent.
+// Cached ownership is distinct from a successfully connected SDK occurrence.
+func (s *serveSessionBootstrap) ObserveSession(ctx context.Context, op channelonboarding.Operation) (operatorchannel.ProviderAuthority, operatorchannel.SessionConnectionObservation, bool, error) {
+	var empty operatorchannel.SessionConnectionObservation
+	if err := s.validateRetainedSessionOperation(ctx, op); err != nil {
+		return operatorchannel.ProviderAuthority{}, empty, false, err
+	}
+	if op.SessionAccount == (operatorchannel.SessionAccountAdmission{}) {
+		return operatorchannel.ProviderAuthority{}, empty, false, nil
+	}
+	s.mu.Lock()
+	attempt := s.connections[op.OperationID]
+	s.mu.Unlock()
+	if attempt == nil {
+		return operatorchannel.ProviderAuthority{}, empty, false, nil
+	}
+	select {
+	case <-attempt.done:
+	case <-ctx.Done():
+		return operatorchannel.ProviderAuthority{}, empty, false, context.Cause(ctx)
+	}
+	if attempt.err != nil {
+		return operatorchannel.ProviderAuthority{}, empty, false, attempt.err
+	}
+	if attempt.connection == nil {
+		return operatorchannel.ProviderAuthority{}, empty, false, channelonboarding.ErrRevisionConflict
+	}
+	current, err := attempt.connection.CheckSessionReuse(ctx, op)
+	if err != nil || !current {
+		return operatorchannel.ProviderAuthority{}, empty, false, err
+	}
+	provider, observed, err := attempt.connection.ObserveSession(ctx)
+	if err != nil {
+		return operatorchannel.ProviderAuthority{}, empty, false, err
+	}
+	parentID, parentRevision := provider.SessionParent()
+	if parentID != op.OperationID || parentRevision != op.Revision || observed.Admission != op.SessionAccount || ctx.Err() != nil {
+		provider.CloseExecution()
+		return operatorchannel.ProviderAuthority{}, empty, false, errors.Join(channelonboarding.ErrRevisionConflict, context.Cause(ctx))
+	}
+	return provider, observed, true, nil
 }
 
 func (s *serveSessionBootstrap) openSessionAttempt(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, attempt *serveSessionBootstrapAttempt, bootstrap bool) (err error) {
