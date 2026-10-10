@@ -111,6 +111,11 @@ func registryProofCopyReceipt(t *testing.T, collector *storetest.TransactionColl
 	for {
 		snapshot := collector.Snapshot()
 		if snapshot.Active == 0 {
+			operations, err := json.Marshal(snapshot.ByOperation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("Q6_REGISTRY_OPERATION_RECEIPT counts=%s", operations)
 			raw, err := json.Marshal(snapshot.Total)
 			if err != nil {
 				t.Fatal(err)
