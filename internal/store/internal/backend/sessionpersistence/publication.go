@@ -15,6 +15,7 @@ type pendingCapture struct {
 	event        capturedEvent
 	request      *runtimeinbound.Request
 	requestBytes []byte
+	nonClaim     bool
 }
 
 func (s *CaptureStore) StagePublication(ctx context.Context, event capturedEvent, request runtimeinbound.Request) error {

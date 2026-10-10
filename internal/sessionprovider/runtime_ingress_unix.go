@@ -118,7 +118,8 @@ func (i *runtimeIncoming) receiveScope(ctx context.Context) (captureScope, captu
 	if err != nil {
 		return captureScope{}, captureSource{}, err
 	}
-	if op.Phase != channelonboarding.PhaseAwaitingExternalIdentity || op.IdentityOperationID == "" || op.ActivationRevision != 0 {
+	if (op.Phase != channelonboarding.PhaseAwaitingExternalIdentity && op.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation) ||
+		op.IdentityOperationID == "" || op.ActivationRevision != 0 {
 		return i.businessScope(ctx)
 	}
 	scope := captureScope{Kind: channelonboarding.SessionInputOnboarding, Session: op.SessionAccount,

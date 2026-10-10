@@ -30,6 +30,10 @@ func sendRuntimeIncomingFixture(t *testing.T, f *activeInputFixture, c *RuntimeC
 }
 
 func sendRuntimeIncomingAtFixture(t *testing.T, f *activeInputFixture, c *RuntimeConnection, id, text string, at time.Time) {
+	sendRuntimeIncomingContentFixture(t, f, c, id, &waE2E.Message{Conversation: proto.String(text)}, at)
+}
+
+func sendRuntimeIncomingContentFixture(t *testing.T, f *activeInputFixture, c *RuntimeConnection, id string, content *waE2E.Message, at time.Time) {
 	t.Helper()
 	device, err := c.state.device(f.ctx)
 	if err != nil {
@@ -37,7 +41,7 @@ func sendRuntimeIncomingAtFixture(t *testing.T, f *activeInputFixture, c *Runtim
 	}
 	from := types.NewJID("100000000003", types.DefaultUserServer)
 	from.Device = 1
-	message := encryptedMessageFromFixture(t, device, f.sender, from, &waE2E.Message{Conversation: proto.String(text)})
+	message := encryptedMessageFromFixture(t, device, f.sender, from, content)
 	message.Attrs["id"], message.Attrs["t"] = id, at.Unix()
 	f.peer.mu.Lock()
 	socket := f.peer.peers[len(f.peer.peers)-1]

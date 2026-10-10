@@ -1,12 +1,14 @@
 package sessionpersistence
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	capturedata "github.com/division-sh/swarm/internal/sessioncapture"
 
 	"github.com/google/uuid"
@@ -34,11 +36,22 @@ func newCaptureStore(ctx context.Context, db *sql.DB, connectionID string) (*Cap
 		digest BLOB NOT NULL,
 		publication_request BLOB,
 		publication_digest BLOB,
+		setup_disposition TEXT CHECK(setup_disposition IS NULL OR setup_disposition = 'non_claim'),
+		setup_disposition_digest BLOB,
+		CHECK((setup_disposition IS NULL AND setup_disposition_digest IS NULL) OR
+		      (setup_disposition IS NOT NULL AND setup_disposition = 'non_claim' AND setup_disposition_digest IS NOT NULL AND length(setup_disposition_digest) = 32 AND publication_request IS NULL)),
 		CHECK((publication_request IS NULL AND publication_digest IS NULL) OR
 		      (publication_request IS NOT NULL AND publication_digest IS NOT NULL AND length(publication_digest) = 32)),
 		UNIQUE(connection_id, account_ref, conversation_ref, event_id, event_kind)
 	)`)
 	if err != nil {
+		return nil, err
+	}
+	columns, err := db.QueryContext(ctx, `SELECT setup_disposition,setup_disposition_digest FROM whatsapp_incoming_capture LIMIT 0`)
+	if err != nil {
+		return nil, fmt.Errorf("WhatsApp private capture schema is unsupported: %w", err)
+	}
+	if err := columns.Close(); err != nil {
 		return nil, err
 	}
 	_, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS whatsapp_callback_failures (
@@ -70,25 +83,30 @@ func (s *CaptureStore) Capture(ctx context.Context, event capturedEvent) error {
 		return err
 	}
 	defer tx.Rollback()
-	stored, err := s.readCapturedRows(ctx, tx)
+	stored, err := s.readAllRows(ctx, tx)
 	if err != nil {
 		return err
 	}
 	var totalBytes int
-	for _, prior := range stored {
-		totalBytes += len(prior.Body)
+	var pending int
+	for _, row := range stored {
+		prior := row.event
+		if !row.nonClaim {
+			pending++
+			totalBytes += len(prior.Body)
+		}
 		if prior.Scope.Session.AccountRef != event.Scope.Session.AccountRef || prior.Conversation != event.Conversation ||
 			prior.EventID != event.EventID || prior.Kind != event.Kind {
 			continue
 		}
 		// A recovered occurrence may see the same provider delivery again. All
 		// stored routing and quota evidence was validated before this success.
-		if !prior.SameDelivery(event) {
+		if !prior.SameDelivery(event) && !(row.nonClaim && prior.SameNonClaimDelivery(event)) {
 			return errCaptureConflict
 		}
 		return tx.Commit()
 	}
-	if len(stored) >= maxPendingCaptureCount || totalBytes+len(event.Body) > maxPendingCaptureBytes {
+	if pending >= maxPendingCaptureCount || totalBytes+len(event.Body) > maxPendingCaptureBytes {
 		return errCaptureCapacity
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO whatsapp_incoming_capture
@@ -124,8 +142,22 @@ func (s *CaptureStore) readCapturedRows(ctx context.Context, query captureRowQue
 }
 
 func (s *CaptureStore) readPendingRows(ctx context.Context, query captureRowQuery) ([]pendingCapture, error) {
+	rows, err := s.readAllRows(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]pendingCapture, 0, len(rows))
+	for _, row := range rows {
+		if !row.nonClaim {
+			result = append(result, row)
+		}
+	}
+	return result, nil
+}
+
+func (s *CaptureStore) readAllRows(ctx context.Context, query captureRowQuery) ([]pendingCapture, error) {
 	rows, err := query.QueryContext(ctx, `SELECT sequence,envelope,digest,connection_id,body_bytes,
-		account_ref,conversation_ref,event_id,event_kind,publication_request,publication_digest
+		account_ref,conversation_ref,event_id,event_kind,publication_request,publication_digest,setup_disposition,setup_disposition_digest
 		FROM whatsapp_incoming_capture ORDER BY sequence`)
 	if err != nil {
 		return nil, err
@@ -133,11 +165,13 @@ func (s *CaptureStore) readPendingRows(ctx context.Context, query captureRowQuer
 	defer rows.Close()
 	var result []pendingCapture
 	var totalBytes int64
+	var pendingCount int
 	for rows.Next() {
-		var raw, digest, request, requestDigest []byte
+		var raw, digest, request, requestDigest, dispositionDigest []byte
+		var disposition sql.NullString
 		var connectionID, account, conversation, eventID, kind string
 		var sequence, bodyBytes int64
-		if err := rows.Scan(&sequence, &raw, &digest, &connectionID, &bodyBytes, &account, &conversation, &eventID, &kind, &request, &requestDigest); err != nil {
+		if err := rows.Scan(&sequence, &raw, &digest, &connectionID, &bodyBytes, &account, &conversation, &eventID, &kind, &request, &requestDigest, &disposition, &dispositionDigest); err != nil {
 			return nil, err
 		}
 		event, err := capturedata.DecodeCapture(raw, digest)
@@ -148,11 +182,18 @@ func (s *CaptureStore) readPendingRows(ctx context.Context, query captureRowQuer
 			event.Scope.Session.AccountRef != account || event.Conversation != conversation || event.EventID != eventID || event.Kind != kind {
 			return nil, fmt.Errorf("WhatsApp incoming Capture scope or byte accounting mismatch")
 		}
-		totalBytes += bodyBytes
-		if len(result) >= maxPendingCaptureCount || totalBytes > maxPendingCaptureBytes {
-			return nil, errCaptureCapacity
+		nonClaim := disposition.Valid
+		if err := validateNonClaimReceipt(event, raw, disposition, dispositionDigest, request); err != nil {
+			return nil, err
 		}
-		pending := pendingCapture{sequence: sequence, event: event, requestBytes: request}
+		if !nonClaim {
+			totalBytes += bodyBytes
+			pendingCount++
+			if pendingCount > maxPendingCaptureCount || totalBytes > maxPendingCaptureBytes {
+				return nil, errCaptureCapacity
+			}
+		}
+		pending := pendingCapture{sequence: sequence, event: event, requestBytes: request, nonClaim: nonClaim}
 		if request != nil || requestDigest != nil {
 			admitted, err := capturedata.DecodePublicationRequest(event, request, requestDigest)
 			if err != nil {
@@ -163,6 +204,22 @@ func (s *CaptureStore) readPendingRows(ctx context.Context, query captureRowQuer
 		result = append(result, pending)
 	}
 	return result, rows.Err()
+}
+
+func nonClaimDigest(raw []byte) [32]byte {
+	return sha256.Sum256(append([]byte("whatsapp-setup-nonclaim-v1\x00"), raw...))
+}
+
+func validateNonClaimReceipt(event capturedEvent, raw []byte, disposition sql.NullString, digest, request []byte) error {
+	if !disposition.Valid && digest == nil {
+		return nil
+	}
+	expected := nonClaimDigest(raw)
+	if !disposition.Valid || disposition.String != "non_claim" || request != nil ||
+		event.Scope.Kind != channelonboarding.SessionInputOnboarding || !bytes.Equal(digest, expected[:]) {
+		return fmt.Errorf("WhatsApp non-claim disposition contradicts its original capture")
+	}
+	return nil
 }
 
 func (s *CaptureStore) RecordFailure(ctx context.Context, failure callbackFailure) error {

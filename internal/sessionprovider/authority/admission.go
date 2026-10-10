@@ -5,3 +5,4 @@ import "github.com/division-sh/swarm/internal/sessionprovider/internal/authority
 type Account = authorityfact.Account
 type Admission = authorityfact.Admission
 type Claim = authorityfact.Claim
+type NonClaim = authorityfact.NonClaim

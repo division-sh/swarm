@@ -145,6 +145,7 @@ func TestWhatsAppIncomingMalformedUnsupportedAndIdentityConflicts(t *testing.T) 
 		{"dual_text", func(e *events.Message) {
 			e.Message.ExtendedTextMessage = &waE2E.ExtendedTextMessage{Text: proto.String("other")}
 		}, errIncomingMalformed},
+		{"empty_text", func(e *events.Message) { e.Message.Conversation = proto.String("") }, errIncomingMalformed},
 		{"media", func(e *events.Message) { e.Message.ImageMessage = &waE2E.ImageMessage{} }, errIncomingUnsupported},
 		{"outgoing_echo", func(e *events.Message) { e.Info.IsFromMe = true }, errIncomingUnsupported},
 		{"view_once", func(e *events.Message) { e.IsViewOnce = true }, errIncomingUnsupported},
