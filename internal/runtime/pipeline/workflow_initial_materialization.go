@@ -19,6 +19,17 @@ const FlowConstructionReceiptVersion = 3
 
 const workflowInitialMaterializationProjectionVersion = FlowConstructionReceiptVersion
 
+// ValidateStoredMode checks captured key presence without consulting today's source.
+func (r FlowConstructionReceipt) ValidateStoredMode(mode string) error {
+	if mode != "static" && mode != "template" {
+		return fmt.Errorf("captured construction requires a finite stored mode")
+	}
+	if (mode == "template") != (r.InstanceKey != "") {
+		return fmt.Errorf("stored mode contradicts captured construction key presence")
+	}
+	return nil
+}
+
 func validateWorkflowInitialEntry(source semanticview.Source, instance WorkflowInstance, initialStage string) error {
 	graph, found := semanticview.WorkflowStageTopology(source, instance.WorkflowName)
 	if !found || graph.FlowID != instance.WorkflowName {

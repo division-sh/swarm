@@ -179,6 +179,9 @@ func (inspection dynamicFlowReadinessInspection) construction(ctx context.Contex
 		if projected && (receipt.Identity != history.Identity || receipt.InstanceKey != history.InstanceKey) {
 			return corrupt(fmt.Errorf("present native receipt crosses fixed historical construction"))
 		}
+		if err := receipt.ValidateStoredMode(header.Mode); err != nil {
+			return corrupt(err)
+		}
 		identity, key = receipt.Identity, receipt.InstanceKey
 	}
 	owner := flowidentity.RunScopedFlowInstance{RunID: run.RunID, Route: identity.Route()}

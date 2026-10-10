@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -89,5 +91,57 @@ func TestR7ReadinessDiagnosticsPreserveOlderPlanClassesBothStores(t *testing.T) 
 				})
 			}
 		})
+	}
+}
+
+func TestR7ReadinessDiagnosticsRejectModeKeyCorruptionBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, target := range []struct {
+			name, mode string
+			index      int
+		}{{"keyless_as_template", "template", 1}, {"keyed_as_static", "static", 0}} {
+			t.Run(backend+"/"+target.name, func(t *testing.T) {
+				f := newEagerFlowConstructorFixture(t, backend)
+				plan := eagerFlowConstructorPlan(t, f)
+				committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, plan)
+				if err != nil || !committed.Acknowledged || !committed.Created {
+					t.Fatalf("canonical construction: %+v %v", committed, err)
+				}
+				instance := plan.ConstructionPlans()[target.index]
+				fact, found := correlation.SourceArtifactFactFromContext(f.ctx)
+				if !found {
+					t.Fatal("native mode proof lost its admitted source")
+				}
+				reader := f.store.(pipeline.DynamicFlowRuntimeReadinessPersistence)
+				for _, surface := range []string{"source", "run"} {
+					if err := inspectConstructedRouteReadiness(f, reader, fact, instance.Readiness.RunID, surface); err != nil {
+						t.Fatalf("healthy %s diagnostic: %v", surface, err)
+					}
+				}
+				owner := flowidentity.RunScopedFlowInstance{RunID: instance.Readiness.RunID, Route: instance.Identity.Route()}
+				restore, err := FaultFlowConstructorHeaderForTest(f.ctx, f.store, owner, pipelinepersistence.FlowConstructorHeaderFaultField("mode"), target.mode)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					if err := restore(f.ctx); err != nil {
+						t.Error(err)
+					}
+				}()
+				before, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, surface := range []string{"source", "run"} {
+					var corruption *pipeline.FlowInstanceConstructionCorruption
+					if err := inspectConstructedRouteReadiness(f, reader, fact, owner.RunID, surface); !errors.As(err, &corruption) || corruption.RunID != owner.RunID || corruption.InstancePath != owner.Route.InstancePath {
+						t.Errorf("%s accepted contradictory native mode/key: %v", surface, err)
+					}
+				}
+				if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatalf("mode/key refusal repaired durable evidence: %v", err)
+				}
+			})
+		}
 	}
 }
