@@ -76,13 +76,14 @@ func newTimerReplayCoordinator(t *testing.T, bus *runtimebus.EventBus, selected 
 func newTimerCauseReplayNativeFixture(t *testing.T, backend string, bundle *contracts.WorkflowContractBundle) pipeline.WorkflowTimerCauseReplayFixtureForTest {
 	t.Helper()
 	selected, _, _ := openTimerReplayNativeStore(t, backend)
-	ctx := testAuthorActivityContext(t, context.Background())
 	runID := uuid.NewString()
-	storetest.RequireRunningRun(t, ctx, selected, runID, time.Now().UTC())
-	ctx = withLiveGateExecution(correlation.WithRunID(ctx, runID))
-	admitAttachment, _ := newTimerReplayAttachmentOwner(t, ctx, selected)
 	source := semanticview.Wrap(bundle)
-	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source}, "platform.stage_timer")
+	ctx, fact := nativeConstructionContextFixture(t, selected.(storetest.RunFixtureStore), source, runID)
+	admitAttachment, _ := newTimerReplayAttachmentOwner(t, ctx, selected)
+	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
+		ContractBundle: source, SourceArtifactFact: fact,
+		WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact),
+	}, "platform.stage_timer")
 	if err != nil {
 		t.Fatal(err)
 	}
