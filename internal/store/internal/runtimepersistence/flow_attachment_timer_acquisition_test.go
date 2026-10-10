@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 type attachmentTimerAcquisitionWorkflow struct {
@@ -104,6 +106,14 @@ func TestFlowAttachmentTimerAcquisitionFailureCannotBecomeReadyBothStores(t *tes
 	}
 }
 
+func TestFlowAttachmentPendingRetryCompletesBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runFlowAttachmentTimerAcquisition(t, backend, "before_second", "automatic_retry")
+		})
+	}
+}
+
 func TestFlowAttachmentTimerAcquisitionCutsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -134,8 +144,16 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 	}, func(options *manager.AgentManagerOptions) {
 		workflow.PipelineCoordinator = options.WorkflowInstances.(*pipeline.PipelineCoordinator)
 		options.WorkflowInstances = workflow
+		if disposition == "automatic_retry" {
+			reader, ok := options.DeliveryStore.(runlifecycle.StandingRestartDispositionReader)
+			if !ok {
+				t.Fatal("automatic retry fixture requires the real standing restart reader")
+			}
+			options.PersistenceRoles.StandingRestarts = reader
+		}
 	})
-	t.Cleanup(func() { close(workflow.retryRelease) })
+	releaseRetry := sync.OnceFunc(func() { close(workflow.retryRelease) })
+	t.Cleanup(releaseRetry)
 	binding, err := f.grant.ProcessExecutionBinding()
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +237,9 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 			t.Fatalf("physical acquisition cut was not reached: acquired=%d want=%d", workflow.acquired.Load(), wantAcquired)
 		}
 		if cut != "stopped" {
-			if created, err := f.manager.EnsureFlowInstance(f.ctx, req); created || err != nil {
+			if disposition == "automatic_retry" {
+				releaseRetry()
+			} else if created, err := f.manager.EnsureFlowInstance(f.ctx, req); created || err != nil {
 				t.Fatalf("timer retry repeated construction: created=%t err=%v", created, err)
 			}
 		}
