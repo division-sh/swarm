@@ -2142,10 +2142,12 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 		}
 	}
 	if rt.runLifecycleExecutor != nil {
-		if err := rt.runLifecycleExecutor.Retire(drainCtx); err != nil {
+		// Retire may return an early settlement diagnostic; only the final
+		// join below reports it. The drain deadline remains a separate failure.
+		if err := rt.runLifecycleExecutor.Retire(drainCtx); err != nil && drainCtx.Err() != nil {
 			shutdownErr = errors.Join(
 				shutdownErr,
-				fmt.Errorf("run lifecycle executor retirement timed out after %s: %w", grace, err),
+				fmt.Errorf("run lifecycle executor retirement timed out after %s: %w", grace, context.Cause(drainCtx)),
 			)
 		}
 	}
