@@ -44,6 +44,17 @@ func TestCompiledRoutesCannotExportMaterializedMembership(t *testing.T) {
 	}
 }
 
+func TestCompiledPubsubBindingsRejectMissingSource(t *testing.T) {
+	for _, table := range []*RouteTable{nil, {}, newRouteTable(nil)} {
+		if got, err := table.PubsubDeclarationDefinitions("scoring", []string{"scoring/result.direct"}); err == nil || len(got) != 0 {
+			t.Fatalf("missing source produced declaration bindings: got=%+v err=%v", got, err)
+		}
+		if got, err := table.PubsubReceiverDefinitions("", runtimeflowidentity.Instance{}, []string{"result.direct"}); err == nil || len(got) != 0 {
+			t.Fatalf("missing source produced receiver bindings: got=%+v err=%v", got, err)
+		}
+	}
+}
+
 type unexpectedDurableTestRoles struct {
 	runtimerunlifecycle.OperationOwner
 }
