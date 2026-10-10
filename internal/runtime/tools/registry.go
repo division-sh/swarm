@@ -8,6 +8,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -34,6 +35,7 @@ type executionToolValue struct {
 	hasManagedCredential bool
 	ratePolicy           runtimecontracts.ToolRatePolicy
 	mcp                  runtimecontracts.ToolMCPBinding
+	inProcess            runtimecontracts.ToolInProcessTarget
 }
 
 // ExecutionTool is an immutable runtime view derived from one admitted owner.
@@ -105,6 +107,13 @@ func (t ExecutionTool) HTTPExecution() (runtimecontracts.ToolHTTPExecution, bool
 		return runtimecontracts.ToolHTTPExecution{}, false
 	}
 	return t.value.http, true
+}
+
+func (t ExecutionTool) InProcess() (runtimecontracts.ToolInProcessTarget, bool) {
+	if t.value == nil || t.value.inProcess == runtimecontracts.ToolInProcessUnspecified {
+		return runtimecontracts.ToolInProcessUnspecified, false
+	}
+	return t.value.inProcess, true
 }
 func (t ExecutionTool) ResponseMapping() map[string]any {
 	if t.value == nil || !t.value.hasResponseMapping {
@@ -268,6 +277,9 @@ func mergeExecutionTool(entries map[string]ExecutionTool, name string, execution
 }
 
 func executionToolsForRuntime(source semanticview.Source, discovered map[string]runtimemcp.DiscoveredTool) (map[string]ExecutionTool, error) {
+	if err := semanticview.ValidateToolDeclarationNames(source); err != nil {
+		return nil, err
+	}
 	authoredErrors := append(ValidateRetiredDynamicAgentToolReferences(source), ValidateHITLIdentityLifecycleReferences(source)...)
 	if len(authoredErrors) > 0 {
 		return nil, errors.Join(authoredErrors...)
@@ -312,7 +324,7 @@ func executionToolsForRuntime(source semanticview.Source, discovered map[string]
 			continue
 		}
 		if declaration, ok := declarations[name]; ok && !declaration.AgentExposable() {
-			return nil, fmt.Errorf("module tool %s cannot acquire a discovered agent binding", name)
+			return nil, fmt.Errorf("private tool %s cannot acquire a discovered agent binding", name)
 		}
 		execution, include := executionToolFromAdmitted(name, tool.Contract)
 		if err := mergeExecutionTool(entries, name, execution, include, executionToolOwnerDiscovered); err != nil {
@@ -326,6 +338,11 @@ func executionToolsForRuntime(source semanticview.Source, discovered map[string]
 }
 
 func executionToolsForActor(source semanticview.Source, actor models.AgentConfig, discovered map[string]runtimemcp.DiscoveredTool) (map[string]ExecutionTool, error) {
+	for _, name := range actor.Tools {
+		if err := privateToolRoutingError(source, actor, name); err != nil {
+			return nil, fmt.Errorf("private tool %s cannot be granted to an agent: %w", name, err)
+		}
+	}
 	entries, err := executionToolsForRuntime(source, discovered)
 	if err != nil {
 		return nil, err
@@ -395,7 +412,7 @@ func mergeScopedActorTools(source semanticview.Source, actor models.AgentConfig,
 			delete(entries, name)
 			blocked[name] = struct{}{}
 			if _, granted := allowed[name]; granted {
-				return nil, fmt.Errorf("module tool %s cannot be granted to an agent", name)
+				return nil, fmt.Errorf("private tool %s cannot be granted to an agent", name)
 			}
 			continue
 		}
@@ -415,6 +432,9 @@ func resolveExecutionToolForActor(source semanticview.Source, actor models.Agent
 	if toolName == "" {
 		return ExecutionTool{}, false, nil
 	}
+	if err := privateToolRoutingError(source, actor, toolName); err != nil {
+		return ExecutionTool{}, false, err
+	}
 	entries, err := executionToolsForActor(source, actor, discovered)
 	if err != nil {
 		return ExecutionTool{}, false, err
@@ -426,9 +446,27 @@ func resolveExecutionToolForActor(source semanticview.Source, actor models.Agent
 	return tool, true, nil
 }
 
+func privateToolRoutingError(source semanticview.Source, actor models.AgentConfig, name string) error {
+	if source == nil {
+		return nil
+	}
+	projection, projected := semanticview.ResolveAgentContractProjection(source, actor)
+	declarations := source.ToolEntries()
+	for _, candidate := range toolidentity.DeclarationNames(name) {
+		entry, found := declarations[candidate]
+		if projected {
+			entry, found = projection.ToolEntry(candidate)
+		}
+		if found && !entry.AgentExposable() {
+			return fmt.Errorf("private tool %s cannot route to an agent handler", candidate)
+		}
+	}
+	return nil
+}
+
 func executionToolFromAdmitted(name string, entry runtimecontracts.ToolSchemaEntry) (ExecutionTool, bool) {
 	handlerType := entry.Handler()
-	if handlerType == runtimecontracts.ToolHandlerUnspecified || !entry.AgentExposable() {
+	if handlerType == runtimecontracts.ToolHandlerUnspecified || !entry.AgentExposable() && handlerType != runtimecontracts.ToolHandlerInProcess {
 		return ExecutionTool{}, false
 	}
 	mcpBinding, hasMCPBinding := entry.MCP()
@@ -439,6 +477,7 @@ func executionToolFromAdmitted(name string, entry runtimecontracts.ToolSchemaEnt
 	responseMapping, hasResponseMapping := entry.CompiledResponseMapping()
 	responseSuccess, hasResponseSuccess := entry.ResponseSuccessPolicy()
 	managed, hasManaged := entry.ManagedCredentialExecution()
+	inProcess, _ := entry.InProcess()
 	value := executionToolValue{
 		name: name, category: entry.Category(), description: entry.Description(),
 		usage: runtimeOwnedToolUsage(name), requiredPermission: entry.Permission(),
@@ -450,8 +489,9 @@ func executionToolFromAdmitted(name string, entry runtimecontracts.ToolSchemaEnt
 		credentials: entry.Credentials(), managedCredential: managed, hasManagedCredential: hasManaged,
 		ratePolicy: entry.RatePolicy(),
 		mcp:        mcpBinding,
+		inProcess:  inProcess,
 	}
-	return ExecutionTool{value: &value}, true
+	return ExecutionTool{value: &value}, entry.AgentExposable()
 }
 
 func deepCloneMap(in map[string]any) map[string]any {
