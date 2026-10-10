@@ -29,6 +29,7 @@ type serveSessionBootstrap struct {
 }
 
 type serveSessionBootstrapAttempt struct {
+	operation  channelonboarding.Operation
 	connection *sessionprovider.RuntimeConnection
 	done       chan struct{}
 	err        error
@@ -115,7 +116,7 @@ func (s *serveSessionBootstrap) BootstrapSession(ctx context.Context, op channel
 	s.mu.Lock()
 	attempt, reused := s.connections[op.OperationID]
 	if !reused {
-		attempt = &serveSessionBootstrapAttempt{done: make(chan struct{})}
+		attempt = &serveSessionBootstrapAttempt{operation: op, done: make(chan struct{})}
 		s.connections[op.OperationID] = attempt
 	}
 	s.mu.Unlock()
@@ -160,7 +161,7 @@ func (s *serveSessionBootstrap) ResumeSession(ctx context.Context, op channelonb
 		_, err := current.current(ctx)
 		return err
 	}
-	attempt := &serveSessionBootstrapAttempt{done: make(chan struct{})}
+	attempt := &serveSessionBootstrapAttempt{operation: op, done: make(chan struct{})}
 	s.connections[op.OperationID] = attempt
 	s.mu.Unlock()
 	return s.openSessionAttempt(ctx, op, candidate, attempt, op.SessionAccount == (operatorchannel.SessionAccountAdmission{}))
@@ -311,11 +312,22 @@ func (s *serveSessionBootstrap) RetireInactiveSessions(ctx context.Context) erro
 			return errors.Join(result, context.Cause(ctx))
 		}
 		op, err := s.store.GetChannelOnboarding(ctx, entry.id)
-		if err != nil {
+		if ctx.Err() != nil {
+			return errors.Join(result, context.Cause(ctx))
+		}
+		removed := errors.Is(err, channelonboarding.ErrNotFound)
+		if err != nil && !removed {
 			result = errors.Join(result, fmt.Errorf("observe retained session %s: %w", entry.id, err))
 			continue
 		}
-		retired, err := serveSessionRetirementRequired(ctx, s.store, op)
+		retired := removed
+		if removed {
+			// Construction evidence identifies cleanup, not executable authority.
+			op = entry.attempt.operation
+			err = nil
+		} else {
+			retired, err = serveSessionRetirementRequired(ctx, s.store, op)
+		}
 		if err != nil {
 			result = errors.Join(result, fmt.Errorf("observe session retirement %s: %w", entry.id, err))
 			continue

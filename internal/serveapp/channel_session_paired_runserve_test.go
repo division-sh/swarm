@@ -13,25 +13,52 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestRunServeWhatsAppSignedPairingBothStores(t *testing.T) {
-	testRunServeWhatsAppSignedPairing(t, false)
+	testRunServeWhatsAppSignedPairing(t, false, nil, false)
 }
 
 func TestRunServeWhatsAppQuotedCardDecisionBothStores(t *testing.T) {
-	testRunServeWhatsAppSignedPairing(t, true)
+	testRunServeWhatsAppSignedPairing(t, true, nil, false)
 }
 
-func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool) {
+func TestRunServeWhatsAppAuthoredCustomerReplyBothStores(t *testing.T) {
+	testRunServeWhatsAppSignedPairing(t, false, nil, true)
+}
+
+func TestRunServeWhatsAppPublicResetRetainsPairingBothStores(t *testing.T) {
+	for _, clearSource := range []bool{false, true} {
+		name := "retained_source"
+		if clearSource {
+			name = "cleared_source"
+		}
+		t.Run(name, func(t *testing.T) { testRunServeWhatsAppSignedPairing(t, false, &clearSource, false) })
+	}
+}
+
+func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool, resetSources *bool, authoredReply bool) {
 	t.Helper()
+	if resetSources != nil {
+		prior := buildSelectedAPICapabilities
+		buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+			caps, err := prior(owner, req)
+			if err == nil && caps.ResetCoordinator != nil {
+				caps.ResetCoordinator = observedNativeReset{DestructiveResetCoordinator: caps.ResetCoordinator, t: t}
+			}
+			return caps, err
+		}
+		t.Cleanup(func() { buildSelectedAPICapabilities = prior })
+	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
@@ -41,6 +68,9 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool) {
 				PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 				SwarmDir: t.TempDir(), SwarmDirSet: true, SelfCheck: true,
 				WorkspaceBackend: "host", WorkspaceBackendSet: true, StoreMode: backend, StoreModeSet: true}
+			if authoredReply {
+				opts.SourceRoot = filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session-reply")
+			}
 			if err := os.Chmod(opts.SwarmDir, 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -183,6 +213,9 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool) {
 					t.Error(err)
 				}
 			})
+			if authoredReply {
+				requireServedNativeAuthoredCustomerReply(t, peer)
+			}
 			if quotedRetirement {
 				peer.text("Please review the service", "SERVED_RETIRE_TRIGGER")
 				waitServedNativePendingCard(t, endpoint)
@@ -209,22 +242,28 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var unbound struct {
-				Binding operatorchannel.Binding `json:"binding"`
-			}
-			for range 2 {
-				requireServedJSONRPCResult(t, endpoint, "channel.unbind", map[string]any{
-					"interface": result.Operation.Interface.Selector, "expected_revision": confirmed.Binding.Revision,
-					"idempotency_key": "served-native-unbind"}, &unbound)
-				if unbound.Binding.Status == operatorchannel.BindingCurrent || unbound.Binding.Revision <= confirmed.Binding.Revision {
-					t.Fatal("public unbind retained executable principal authority", unbound.Binding)
+			if resetSources != nil {
+				requireServedJSONRPCResult(t, endpoint, "runtime.nuke", map[string]any{
+					"include_source_artifacts": *resetSources, "idempotency_key": "served-native-reset"}, &struct{}{})
+				requireServedNativeOperationWithdrawn(t, endpoint, id)
+			} else {
+				var unbound struct {
+					Binding operatorchannel.Binding `json:"binding"`
 				}
-			}
-			result = channelonboarding.Result{}
-			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
-			if result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Operation.ConfirmationOperationID != completed.ConfirmationOperationID ||
-				result.Readiness == nil || result.Readiness.Ready || result.Pairing != nil {
-				t.Fatal("public native unbind lost historical success or retained execution/pairing disclosure", result)
+				for range 2 {
+					requireServedJSONRPCResult(t, endpoint, "channel.unbind", map[string]any{
+						"interface": result.Operation.Interface.Selector, "expected_revision": confirmed.Binding.Revision,
+						"idempotency_key": "served-native-unbind"}, &unbound)
+					if unbound.Binding.Status == operatorchannel.BindingCurrent || unbound.Binding.Revision <= confirmed.Binding.Revision {
+						t.Fatal("public unbind retained executable principal authority", unbound.Binding)
+					}
+				}
+				result = channelonboarding.Result{}
+				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
+				if result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Operation.ConfirmationOperationID != completed.ConfirmationOperationID ||
+					result.Readiness == nil || result.Readiness.Ready || result.Pairing != nil {
+					t.Fatal("public native unbind lost historical success or retained execution/pairing disclosure", result)
+				}
 			}
 			connected := requireServedNativeDisconnect(t, peer)
 			if code := process.stop(); code != 0 {
@@ -233,11 +272,15 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool) {
 			process = startServeRuntimeTestProcess(t, opts)
 			process.waitForReadyLine()
 			endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-			result = channelonboarding.Result{}
-			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
-			if result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Operation.ConfirmationOperationID != completed.ConfirmationOperationID ||
-				result.Readiness == nil || result.Readiness.Ready {
-				t.Fatal("ordinary restart lost history or adopted the unbound native responsibility", result)
+			if resetSources != nil {
+				requireServedNativeOperationWithdrawn(t, endpoint, id)
+			} else {
+				result = channelonboarding.Result{}
+				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
+				if result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Operation.ConfirmationOperationID != completed.ConfirmationOperationID ||
+					result.Readiness == nil || result.Readiness.Ready {
+					t.Fatal("ordinary restart lost history or adopted the unbound native responsibility", result)
+				}
 			}
 			peer.mu.Lock()
 			unchanged := peer.connections == connected
@@ -268,6 +311,27 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool) {
 			default:
 			}
 		})
+	}
+}
+
+type observedNativeReset struct {
+	apiv1.DestructiveResetCoordinator
+	t *testing.T
+}
+
+func (p observedNativeReset) Execute(ctx context.Context, request destructivereset.Request) (destructivereset.ExecutionResult, error) {
+	result, err := p.DestructiveResetCoordinator.Execute(ctx, request)
+	if err != nil {
+		p.t.Logf("selected native reset cause: %v", err)
+	}
+	return result, err
+}
+
+func requireServedNativeOperationWithdrawn(t *testing.T, endpoint, operationID string) {
+	t.Helper()
+	response := requestServedJSONRPC(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": operationID})
+	if response.Error == nil || response.Error.Data["code"] != apiv1.ChannelOperationNotFoundCode {
+		t.Fatal("reset did not withdraw the exact old channel operation", response.Error)
 	}
 }
 

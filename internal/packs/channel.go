@@ -1048,6 +1048,10 @@ func (p OutboundBindingPlan) RegistrationTarget() string {
 	return strings.TrimSpace(p.registrationTarget)
 }
 
+func (p OutboundBindingPlan) TriggerIdentity() PackIdentity {
+	return p.structural.trigger
+}
+
 func NewOutboundBindingPlan(id string, structural SatisfactionPlan, destination any, requirements []Requirement) (OutboundBindingPlan, error) {
 	return NewOutboundBindingPlanWithCredentials(id, structural, destination, requirements, nil)
 }
