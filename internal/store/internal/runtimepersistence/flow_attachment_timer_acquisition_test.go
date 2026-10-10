@@ -28,6 +28,7 @@ type attachmentTimerAcquisitionWorkflow struct {
 	cancel           context.CancelFunc
 	fault            error
 	ready            chan pipeline.DynamicFlowRuntimeActivationAttempt
+	readyOwner       atomic.Pointer[flowidentity.RunScopedFlowInstance]
 }
 
 type attachmentTimerAcquisitionOccurrence struct {
@@ -83,7 +84,8 @@ func (w *attachmentTimerAcquisitionWorkflow) ReconcileInitialEntryTimersForAttem
 
 func (w *attachmentTimerAcquisitionWorkflow) AdvanceFlowAttachment(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt, previous pipeline.FlowAttachmentPhase, at time.Time) (pipeline.FlowAttachmentAdvanceResult, error) {
 	result, err := w.PipelineCoordinator.AdvanceFlowAttachment(ctx, attempt, previous, at)
-	if err == nil && result.Admitted() && result.Phase == pipeline.FlowAttachmentReady {
+	owner := w.readyOwner.Load()
+	if err == nil && result.Admitted() && result.Phase == pipeline.FlowAttachmentReady && owner != nil && attempt.RunID() == owner.RunID && attempt.InstancePath() == owner.Route.InstancePath {
 		w.ready <- attempt
 	}
 	return result, err
@@ -180,6 +182,7 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 	if err != nil {
 		t.Fatal(err)
 	}
+	workflow.readyOwner.Store(&owner)
 	initial, found, err := f.workflows.Load(f.ctx, owner)
 	if err != nil || !found {
 		t.Fatalf("initial header: %+v %t %v", initial, found, err)
@@ -257,7 +260,7 @@ func runFlowAttachmentTimerAcquisition(t *testing.T, backend, cut, disposition s
 			if disposition == "caller_cancel" {
 				wantOrdinal = 1
 			}
-			if attempt.Ordinal() != wantOrdinal || workflow.enabled.Load() {
+			if attempt.Ordinal() != wantOrdinal || attempt.RunID() != owner.RunID || attempt.InstancePath() != owner.Route.InstancePath || workflow.enabled.Load() {
 				t.Fatalf("wrong ready attempt or unreached cut: %+v enabled=%t", attempt, workflow.enabled.Load())
 			}
 		case <-time.After(readyWait):
