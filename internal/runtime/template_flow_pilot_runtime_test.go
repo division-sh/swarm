@@ -37,10 +37,11 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := seedRuntimeTestRun(t, pg)
+	ctx := seedRuntimeTestRunForSource(t, pg, source)
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
-		ContractBundle: source,
+		ContractBundle:     source,
+		SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 			if manager == nil {
 				return runtimepipeline.FlowInstanceActivationPlan{}, errors.New("agent manager not initialized")
@@ -68,7 +69,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   executionposture.Live,
-		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		SemanticSource:     source,
 		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances:  pc,

@@ -381,7 +381,11 @@ func installExternalManagerTestGeneration(
 
 func admitExternalManagerTestGeneration(t testing.TB, ctx context.Context, selected agentfixture.Store, manager *runtimemanager.AgentManager, source semanticview.Source) {
 	t.Helper()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}
+	fact, present := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !present || fact.Validate() != nil {
+		t.Fatal("external manager fixture requires its admitted source context")
+	}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)
 	if err != nil {
 		t.Fatal(err)
