@@ -148,7 +148,7 @@ func terminalDiagnosticPlans(plans []runtimepinrouting.ConnectRoutePlan) bool {
 	for _, plan := range plans {
 		// These owners must still admit correlation or report an exact create
 		// conflict; terminal existence cannot replace either decision.
-		if plan.ReplyResolution() != nil || plan.InstanceKey() != nil && plan.InstanceKey().Mode() == runtimecontracts.FlowInputResolutionModeCreate {
+		if plan.ReplyResolution() != nil || plan.InstanceKey() != nil {
 			return false
 		}
 	}

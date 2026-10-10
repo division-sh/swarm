@@ -83,6 +83,14 @@ func TestTerminalTargetDiagnosticPreservesCreateAndReplyAdmission(t *testing.T) 
 			plans, _ := compiledConnectPlans(connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteCreate, false))
 			return plans
 		}, false},
+		{"select", func(t *testing.T) []pinrouting.ConnectRoutePlan {
+			plans, _ := compiledConnectPlans(connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false))
+			return plans
+		}, false},
+		{"select or create", func(t *testing.T) []pinrouting.ConnectRoutePlan {
+			plans, _ := compiledConnectPlans(connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, false))
+			return plans
+		}, false},
 		{"reply", func(t *testing.T) []pinrouting.ConnectRoutePlan {
 			plans, _ := compiledConnectPlans(loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyRootReplyBoundary(t, true, true)))
 			return plans
