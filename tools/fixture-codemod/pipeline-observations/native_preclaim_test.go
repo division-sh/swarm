@@ -2,12 +2,13 @@ package main
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func nativePreclaimBody(t *testing.T, source string) *ast.BlockStmt {
@@ -84,28 +85,33 @@ func TestNativePreclaimSourceProducerRetainsOriginalAuthoredBytesAfterConstructo
 	row := nativeMissingHeaderRecipe(t, "native-preclaim-source-producer")
 	before := projectionShapeFunction(t, row.Before).Body
 	load := before.List[2].(*ast.AssignStmt).Rhs[0]
-	path := filepath.Join("..", "..", "..", row.File)
-	source, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	file, err := parser.ParseFile(token.NewFileSet(), path, source, parser.AllErrors)
-	if err != nil {
-		t.Fatal(err)
-	}
-	helper, err := uniqueFunction(file, "deliveryAuthoritySourceForTest")
-	if err != nil || len(helper.Body.List) != 2 {
-		t.Fatalf("finite source helper: err=%v", err)
-	}
+	helper := projectionShapeFunction(t, row.After)
 	if formattedNativeReadNode(helper.Body.List[1].(*ast.ReturnStmt).Results[0]) != formattedNativeReadNode(load) {
 		t.Fatal("authored source bytes changed during producer extraction")
 	}
+	root := canonicalrouting.CopyPipelineDeliveryAuthority(t)
+	files := load.(*ast.CallExpr).Args[1].(*ast.CompositeLit)
+	for _, element := range files.Elts {
+		pair := element.(*ast.KeyValueExpr)
+		name, err := strconv.Unquote(pair.Key.(*ast.BasicLit).Value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := strconv.Unquote(pair.Value.(*ast.BasicLit).Value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil || string(actual) != want {
+			t.Fatalf("closed source %s differs from immutable authored bytes: %v", name, err)
+		}
+	}
 	actual, err := canonicalFunction(selectedCausalObservationBody(t, row.File, "deliveryAuthoritySourceForTest"))
-	want, afterErr := canonicalFunction(row.After)
+	want, afterErr := canonicalFunction(row.Successor)
 	if err != nil || afterErr != nil || actual != want {
 		t.Fatalf("native source producer differs from its finite snapshot: %v/%v", err, afterErr)
 	}
-	if strings.Contains(row.After, "newPipelineTestDeliveryOwner") || strings.Contains(row.After, "newPostgresPipelineCoordinatorForTest") {
+	if strings.Contains(row.Successor, "newPipelineTestDeliveryOwner") || strings.Contains(row.Successor, "newPostgresPipelineCoordinatorForTest") || !strings.Contains(row.Successor, "canonicalrouting.CopyPipelineDeliveryAuthority(t)") {
 		t.Fatal("source producer restored raw-store construction")
 	}
 }

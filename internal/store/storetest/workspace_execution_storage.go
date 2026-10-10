@@ -7,6 +7,16 @@ import (
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
 
+type SelectedForkSnapshotCell = private.SelectedForkSnapshotCell
+
+func EncodeSelectedForkSnapshotValues(columns []string, values []any) (string, error) {
+	return private.EncodeSelectedForkSnapshotValuesForTest(columns, values)
+}
+
+func DecodeSelectedForkSnapshotRows(table SelectedForkStorageTableSnapshot) ([]map[string]SelectedForkSnapshotCell, error) {
+	return private.DecodeSelectedForkSnapshotRowsForTest(table)
+}
+
 type ManagedAgentTurnStorageRow = private.ManagedAgentTurnStorageRow
 type ManagedTurnEffectStorage = private.ManagedTurnEffectStorage
 type ManagedDeliveryStorage = private.ManagedDeliveryStorage

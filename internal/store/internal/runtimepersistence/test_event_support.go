@@ -273,12 +273,13 @@ func loadCanonicalFixtureRecordTx(ctx context.Context, tx *sql.Tx, postgres bool
 // LoadCanonicalEventRecordForTest requires presence; storage reading and
 // complete decoding belong only to ReadCanonicalEventRecordForTest.
 func LoadCanonicalEventRecordForTest(ctx context.Context, selected any, eventID string) (events.Event, error) {
+	var empty events.Event
 	event, found, err := ReadCanonicalEventRecordForTest(ctx, selected, eventID)
 	if err != nil {
-		return events.Event{}, err
+		return empty, err
 	}
 	if !found {
-		return events.Event{}, fmt.Errorf("canonical event record %s is missing", eventID)
+		return empty, fmt.Errorf("canonical event record %s is missing", eventID)
 	}
 	return event, nil
 }
@@ -295,8 +296,9 @@ func ReadLatestStartupRecoveryDecisionRecordForTest(ctx context.Context, selecte
 }
 
 func readLatestRuntimeLogRecordForTest(ctx context.Context, selected any, startupDecision bool) (events.Event, error) {
+	var empty events.Event
 	if err := validateChannelObservationOwner(selected); err != nil {
-		return events.Event{}, err
+		return empty, err
 	}
 	_, postgres := selected.(*PostgresStore)
 	query := `SELECT CAST(event_id AS TEXT) FROM events WHERE event_name='platform.runtime_log' ORDER BY created_at DESC LIMIT 1`
@@ -324,11 +326,11 @@ func readLatestRuntimeLogRecordForTest(ctx context.Context, selected any, startu
 		return nil
 	})
 	if err != nil {
-		return events.Event{}, err
+		return empty, err
 	}
 	admitted, err := record.Decode()
 	if err != nil {
-		return events.Event{}, err
+		return empty, err
 	}
 	return admitted.Event(), nil
 }
@@ -345,8 +347,9 @@ func readFixtureEventLineageStorage(ctx context.Context, selected any, tx *sql.T
 }
 
 func ReadCanonicalEventRecordForTest(ctx context.Context, selected any, eventID string) (events.Event, bool, error) {
+	var empty events.Event
 	if err := validateChannelObservationOwner(selected); err != nil {
-		return events.Event{}, false, err
+		return empty, false, err
 	}
 	var record eventrecord.Record
 	var found bool
@@ -357,11 +360,11 @@ func ReadCanonicalEventRecordForTest(ctx context.Context, selected any, eventID 
 		return err
 	})
 	if err != nil || !found {
-		return events.Event{}, false, err
+		return empty, false, err
 	}
 	admitted, err := record.Decode()
 	if err != nil {
-		return events.Event{}, false, fmt.Errorf("decode canonical event record %s: %w", eventID, err)
+		return empty, false, fmt.Errorf("decode canonical event record %s: %w", eventID, err)
 	}
 	return admitted.Event(), true, nil
 }

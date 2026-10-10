@@ -50,6 +50,9 @@ func TestRewrite2566EntryGoldenInventoryCoversEveryReviewedSite(t *testing.T) {
 	}
 	selectors := map[string]bool{}
 	for _, entry := range entries {
+		if err := validateCurrentEntrySelector(entry); err != nil {
+			t.Fatal(err)
+		}
 		key := entry.File + "/" + entry.Flow
 		if selectors[key] {
 			t.Fatalf("duplicate reviewed source selector %s", key)
@@ -270,32 +273,44 @@ func assertSpecEntryGolden(t *testing.T, expected entryGolden) {
 
 func assertEmbeddedEntryGolden(t *testing.T, expected entryGolden) {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join("../..", expected.File))
+	if err := validateCurrentEntrySelector(expected); err != nil {
+		t.Fatal(err)
+	}
+	file, function, ordinal := expected.File, expected.Function, expected.Literal
+	if current := expected.Current; current != nil {
+		file, function, ordinal = current.File, current.Function, current.Literal
+	}
+	site, err := readEntryLiteral("../..", file, function, ordinal)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sites, err := goLiteralSites(expected.File, body)
+	body := []byte(site.Body)
+	if expected.Current != nil && expected.Current.Materialize {
+		var root string
+		switch function {
+		case "CopyPipelineDeliveryAuthority":
+			root = canonicalrouting.CopyPipelineDeliveryAuthority(t)
+		case "CopyPipelineDeliveryRetry":
+			root = canonicalrouting.CopyPipelineDeliveryRetry(t)
+		default:
+			t.Fatalf("unsupported closed entry source %s", function)
+		}
+		body, err = os.ReadFile(filepath.Join(root, "schema.yaml"))
+		if err != nil || !bytes.Equal(body, []byte(site.Body)) {
+			t.Fatalf("actual closed source differs from its selected schema: %v", err)
+		}
+	}
+	snapshot, err := yamlsource.Load(body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, site := range sites {
-		if site.Function != expected.Function || site.Ordinal != expected.Literal {
-			continue
-		}
-		snapshot, err := yamlsource.Load([]byte(site.Body))
-		if err != nil {
-			t.Fatal(err)
-		}
-		schema, err := contracts.AdmitFlowSchemaValue(snapshot.Document(expected.File).Root())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := assertEntryGolden(expected, schema); err != nil {
-			t.Fatal(err)
-		}
-		return
+	schema, err := contracts.AdmitFlowSchemaValue(snapshot.Document(file).Root())
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Fatalf("reviewed embedded source disappeared: %+v", expected)
+	if err := assertEntryGolden(expected, schema); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestRewrite2566EntryGoldenRejectsSortedDumpWithoutStranding(t *testing.T) {

@@ -1045,7 +1045,7 @@ seam_families:
       - internal/runtime/pipeline/workflow_nodes.go
       - internal/runtime/pipeline/coordinator.go
       - internal/runtime/deliverylifecycle/model.go
-      - internal/runtime/pipeline/delivery_lifecycle_test_owner_test.go
+      - internal/runtime/pipeline/delivery_native_fixture_bridge_test.go
       - internal/runtime/pipeline/workflow_node_delivery_authority_test.go
     search_dimensions: [event_deliveries, execution_admission_settlement, pending_agent_subscription_recovery_authority]
     notes: >
@@ -1151,7 +1151,7 @@ seam_families:
       - internal/runtime/manager/delivery_lifecycle_test_helpers_test.go
       - internal/runtime/manager/failure_test.go
       - internal/runtime/runtime_managed_native_lifecycle_test.go
-      - internal/runtime/pipeline/delivery_lifecycle_test_owner_test.go
+      - internal/runtime/pipeline/delivery_native_fixture_bridge_test.go
       - internal/store/internal/runtimepersistence/agent_lifecycle_read_surface_test.go
       - internal/store/internal/runtimepersistence/author_activity_receipt_parity_test.go
       - internal/store/internal/runtimepersistence/operator_dead_letter_evidence_parity_test.go
@@ -1536,6 +1536,42 @@ seam_families:
       are historical measurement coordinates, not runtime route producers,
       readers, interpreters, or assertions of semantic proof. The timing owner
       admits exact canonical bytes; no routing consumer reads this artifact.
+  - id: retained_fixture_migration_source_references
+    layer: conformance_guardrails
+    classification: separate_semantic_concept
+    paths:
+      - tools/fixture-codemod/pipeline-observations/recipes.json
+      - tools/fixture-codemod/pipeline-observations/family144-transitions.json
+      - tools/fixture-codemod/pipeline-observations/native_unstamped_delivery_test.go
+    search_dimensions: [descriptor_evidence, direct_delivery_path, flow_owned_subscription_pattern_authority, live_agent_subscription_route_authority, route_plan_source_reason]
+    notes: >
+      Immutable before/after recipes and the nine exact family144 signature
+      transitions retain historical route spellings as reviewed proof inputs,
+      not executable route interpretation. The unstamped-delivery control
+      rejects weakening missing-authority refusals or restoring implicit
+      publication. TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact
+      preserves every original occurrence; finite codemod source/hostility
+      controls preserve workloads and current original-owner consumption.
+      No classified source string grants runtime routing or storage permission.
+  - id: native_selected_pipeline_route_proof_consumers
+    layer: test_fixture_semantics
+    classification: valid_consumer
+    paths:
+      - internal/runtime/pipeline/human_task_native_routing_test.go
+      - internal/runtime/pipeline/workflow_gate_lifecycle_test.go
+      - internal/runtime/pipeline/workflow_guard_cause_hostility_test.go
+      - internal/runtime/pipeline/workflow_node_delivery_authority_test.go
+    search_dimensions: [direct_delivery_path]
+    notes: >
+      Native fixtures publish and settle through the original selected owners.
+      Human-task direct requester delivery preserves exact route/reply context
+      and foreign-FlowInstance/EntityID refusals. Gate, guard and node witnesses
+      preserve atomic publication, missing authority, blocked transition,
+      replay and deferred-handoff exclusions on both stores. Their observation
+      buses record actual dispatch windows; they do not infer route authority
+      or implement a transaction/claim interpreter. The old pipeline fake owner
+      is retired; delivery_native_fixture_bridge_test.go is its explicit
+      original-owner consumer, not a new route producer.
 guardrail_proposals:
   - id: drift_inventory_search_dimension_guard
     implementation_state: implemented_in_this_pr

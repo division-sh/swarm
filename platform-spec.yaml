@@ -600,6 +600,11 @@ contract_formats:
         authored membership for initial creation, receiver availability,
         execution guards, completion and budget recovery. Other stored names
         in a stateless flow remain malformed.
+        The opaque flow constructor exposes the compiled InitialStoredStage
+        reference through the same pipeline initial-stage owner used by
+        runtime construction. Native selected fixtures consume its exact ID
+        and stateless-posture fact; a nonempty pending storage name must not
+        be reinterpreted as authored-stage membership.
       lifecycle: >
         Loop cap escape admits the compiled escape carrier, not the suppressed
         ordinary repeat target. A stage timer retains its own timer/stage
@@ -7060,6 +7065,7 @@ engine:
               The exact source-owned census and selected-boundary scan include test/support/excluded source and non-SQL construction/carrier/alias/callback/context escapes. Typed site identities retain resolved evidence; excluded uncertainty identities retain normalized source evidence. Both preserve multiplicity without line numbers or unstable occurrence ordinals. Actual head debt must be contained in the head snapshot, the head snapshot in the trusted snapshot, and actual head debt in actual trusted integration-base source debt. Counts are derived from those rows and can only decrease; deleting a site never pays for a different or changed site or increased multiplicity. Bootstrap occurs once from the reviewed original extraction base and never moves on rebase; its ancestry and exact source evidence are checked independently of the current integration base. Active load/type errors, owned-source read/parse errors, incomplete enumeration, collector/role changes, corrupt evidence, reseeding and stale-site resurrection fail closed. New or changed unresolved excluded-source entries fail the same subset checks; resolve them through the canonical owner or narrow reviewed source-evidenced classification, not a file exemption or baseline increase. Normal CI is read-only; explicit local refresh removes only eliminated sites. Existing registry and production/completed-family guards remain independent and authoritative. Final closure requires zero debt, explicit classification of any remaining uncertainty, both expanded strict completion guards and the unchanged SQLite fork proof; the temporary snapshot cannot excuse a violation or prove semantic safety.
           rules:
             - The registry resolves named aliases, embedded fields, effective method sets after promotion, interface methods, function-valued fields, function parameters/results, and context reads/writes.
+            - The census and selected-import boundary guard share the pure fixture-package role predicate in internal/checkoutsource. Fixture sources remain enumerated and subject to every other boundary and authority check; the role does not permit ordinary production to consume fixture authority or grant construction, raw-handle, callback or mutation capabilities.
             - Public PostgresStore and SQLiteRuntimeStore effective method sets, and every exported non-backend semantic-owner method set, must contain zero raw SQL/query/dialect/transaction-callback parameters or results.
             - Unknown or stale findings fail. Regeneration preserves reviewed dispositions and marks new findings unclassified; no file or enclosing-type allowlist exists.
             - Raw findings are valid only for an exact private backend/adapter, construction, or fixture disposition. The adjacent-2149 disposition is retired and its production finding count is zero.
@@ -40447,7 +40453,7 @@ durable_pipeline_processing_obligation_authority:
       owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.decision_route_contract
       rule: Acknowledgement and decision-route disposition require the current claim and commit atomically.
       executable_proofs:
-        - {path: internal/runtime/pipeline/workflow_gate_lifecycle_test.go, test: TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBothStores}
+        - {path: internal/runtime/pipeline/delivery_native_consumers_external_test.go, test: TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBothStores}
     PPO-REL-001:
       owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.claim_contract
       rule: Cancellation, cursor abandonment, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; one bounded recovery sweep retains retry-release claims through its current examination window and terminally releases them before returning, preventing concurrent duplicate recovery without a runtime retry registry; SQLite mutation and retirement serialize through one per-claim operation lock; PostgreSQL serializes all sibling claim transactions and detached releases on one retained physical session through transaction unwind, while an exact active mutation may release inside its already-owned session boundary; every PostgreSQL release is terminal, false/error unlock poisons and force-discards the exact session, verified unlock retires the exact reference and closes the session only after all lease and publication-group root references retire, and session-owned group terminalization retires every attached registry claim, cursor membership, wrapper, and capacity reservation exactly once while cleanup evidence is propagated; the group transition snapshots under session state, releases the triggering lease and separately acquired operation boundary, and drains sibling callbacks outside every lease, operation, and transaction boundary, while exact active-mutation release may retire only the trigger before unwind and ambiguous acquisition during a borrowed transaction queues the sibling drain until unwind releases that boundary; EventBus reset preserves pending operations until prior retirement succeeds and then attempts every terminal release; startup, ingress resume, and run continue stop normally only on explicit exhaustion or blockage.
@@ -41318,7 +41324,7 @@ managed_external_effect_authority:
         - {path: internal/store/internal/runtimepersistence/provider_directive_origin_test.go, test: TestProviderDirectiveOriginSupersessionParity}
         - {path: internal/runtime/llm/completion_authority_test.go, test: TestClaudeMemoryDrainedCompletionStopsBeforeProviderHeadProjection}
         - {path: internal/runtime/llm/completion_authority_test.go, test: TestAnthropicDrainedCompletionStopsBeforeMutableProjection}
-        - {path: internal/runtime/manager/receipts_test.go, test: TestProcessEventConsumesDrainedCompletionObservationWithoutSecondReceiptOrOutput}
+        - {path: internal/runtime/manager/delivery_native_consumers_external_test.go, test: TestProcessEventConsumesDrainedCompletionObservationWithoutSecondReceiptOrOutput}
         - {path: internal/runtime/agents/agent_llm_test.go, test: TestBoardStep_DrainedDirectiveStopsBeforeRemediation}
     runtime.provider_attempt.recovery_no_redispatch:
       owner_ref: platform-spec.yaml#managed_external_effect_authority

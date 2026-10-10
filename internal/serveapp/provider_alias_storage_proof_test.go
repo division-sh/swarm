@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -53,13 +52,13 @@ func providerAliasActionIntentStorage(table storetest.SelectedForkStorageTableSn
 		if out.State, err = workspaceProofPhysicalText(row, "state"); err != nil {
 			return providerAliasActionStorage{}, err
 		}
-		if string(row["interface_key"]) == "null" || string(row["state"]) == "null" {
+		if string(row["interface_key"].Value) == "null" || string(row["state"].Value) == "null" {
 			return providerAliasActionStorage{}, fmt.Errorf("action intent has NULL interface or state")
 		}
 		if out.Disposition, err = workspaceProofPhysicalText(row, "disposition"); err != nil {
 			return providerAliasActionStorage{}, err
 		}
-		out.DispositionPresent = string(row["disposition"]) != "null"
+		out.DispositionPresent = string(row["disposition"].Value) != "null"
 		exact = append(exact, out)
 	}
 	if len(exact) != 1 {
@@ -98,11 +97,11 @@ func providerAliasConstructedHeaderStorage(table storetest.SelectedForkStorageTa
 			if *target, err = workspaceProofPhysicalText(row, column); err != nil {
 				return providerAliasHeaderStorage{}, err
 			}
-			if column != "entity_type" && string(row[column]) == "null" {
+			if column != "entity_type" && string(row[column].Value) == "null" {
 				return providerAliasHeaderStorage{}, fmt.Errorf("constructed header has NULL %s", column)
 			}
 		}
-		out.EntityTypePresent = string(row["entity_type"]) != "null"
+		out.EntityTypePresent = string(row["entity_type"].Value) != "null"
 		exact = append(exact, out)
 	}
 	if len(exact) != 1 {
@@ -168,15 +167,16 @@ func providerAliasReplayCompletionCount(table storetest.SelectedForkStorageTable
 }
 
 func TestProviderAliasPhysicalTupleProofPreservesScopeNullsAndMultiplicity(t *testing.T) {
+	actionColumns := []string{"publication_id", "interface_key", "state", "disposition"}
 	actions := storetest.SelectedForkStorageTableSnapshot{
-		Columns: []string{"publication_id", "interface_key", "state", "disposition"},
-		Rows:    []string{`["foreign","other","settled","applied"]`, `["exact","bound-interface","pending",null]`},
+		Columns: actionColumns,
+		Rows:    []string{workspaceProofPhysicalRow(t, actionColumns, "foreign", "other", "settled", "applied"), workspaceProofPhysicalRow(t, actionColumns, "exact", "bound-interface", "pending", nil)},
 	}
 	got, err := providerAliasActionIntentStorage(actions, "exact")
 	if err != nil || got.InterfaceKey != "bound-interface" || got.State != "pending" || got.DispositionPresent {
 		t.Fatalf("exact publication or nullable disposition changed: %+v %v", got, err)
 	}
-	actions.Rows[1] = `["exact","bound-interface","settled","rejected"]`
+	actions.Rows[1] = workspaceProofPhysicalRow(t, actionColumns, "exact", "bound-interface", "settled", "rejected")
 	if got, err := providerAliasActionIntentStorage(actions, "exact"); err != nil || !got.DispositionPresent || got.Disposition != "rejected" {
 		t.Fatalf("settled disposition lost evidence: %+v %v", got, err)
 	}
@@ -184,43 +184,53 @@ func TestProviderAliasPhysicalTupleProofPreservesScopeNullsAndMultiplicity(t *te
 	if got, err := providerAliasActionIntentStorage(actions, "exact"); err == nil || got != (providerAliasActionStorage{}) {
 		t.Fatalf("duplicate publication leaked partial evidence: %+v %v", got, err)
 	}
+	headerColumns := []string{"run_id", "instance_path", "entity_id", "entity_type", "flow_template", "mode"}
 	headers := storetest.SelectedForkStorageTableSnapshot{
-		Columns: []string{"run_id", "instance_path", "entity_id", "entity_type", "flow_template", "mode"},
-		Rows:    []string{`["exact-run","node","entity",null,"node","static"]`},
+		Columns: headerColumns,
+		Rows:    []string{workspaceProofPhysicalRow(t, headerColumns, "exact-run", "node", "entity", nil, "node", "static")},
 	}
 	if got, err := providerAliasConstructedHeaderStorage(headers, "exact-run", "node"); err != nil || got.EntityTypePresent || got.EntityID != "entity" || got.Template != "node" || got.Mode != "static" {
 		t.Fatalf("physical fieldless header changed: %+v %v", got, err)
 	}
-	headers.Rows[0] = `["exact-run","node","entity","","node","static"]`
+	headers.Rows[0] = workspaceProofPhysicalRow(t, headerColumns, "exact-run", "node", "entity", "", "node", "static")
 	if got, err := providerAliasConstructedHeaderStorage(headers, "exact-run", "node"); err != nil || !got.EntityTypePresent || got.EntityType != "" {
 		t.Fatalf("NULL type was conflated with present empty type: %+v %v", got, err)
 	}
+	fieldColumns := []string{"run_id", "flow_instance", "entity_id", "entity_type"}
 	fields := storetest.SelectedForkStorageTableSnapshot{
-		Columns: []string{"run_id", "flow_instance", "entity_id", "entity_type"},
-		Rows:    []string{`["exact-run","node","entity","receipt"]`, `["exact-run","node","orphan","other"]`, `["foreign","node","entity","receipt"]`, `["exact-run","other","entity","receipt"]`},
+		Columns: fieldColumns,
+		Rows: []string{
+			workspaceProofPhysicalRow(t, fieldColumns, "exact-run", "node", "entity", "receipt"),
+			workspaceProofPhysicalRow(t, fieldColumns, "exact-run", "node", "orphan", "other"),
+			workspaceProofPhysicalRow(t, fieldColumns, "foreign", "node", "entity", "receipt"),
+			workspaceProofPhysicalRow(t, fieldColumns, "exact-run", "other", "entity", "receipt"),
+		},
 	}
 	if all, exact, err := providerAliasFieldRowCounts(fields, "exact-run", "node", "entity", "receipt"); err != nil || all != 2 || exact != 1 {
 		t.Fatalf("orphan rows or exact companion scope hidden: all=%d exact=%d err=%v", all, exact, err)
 	}
+	apiColumns := []string{"method", "idempotency_key", "actor"}
 	api := storetest.SelectedForkStorageTableSnapshot{
-		Columns: []string{"method", "idempotency_key", "actor"},
-		Rows:    []string{`["event.replay","key","a"]`, `["event.replay","key","b"]`, `["event.replay","other","a"]`, `["agent.replay","key","a"]`},
+		Columns: apiColumns,
+		Rows: []string{
+			workspaceProofPhysicalRow(t, apiColumns, "event.replay", "key", "a"),
+			workspaceProofPhysicalRow(t, apiColumns, "event.replay", "key", "b"),
+			workspaceProofPhysicalRow(t, apiColumns, "event.replay", "other", "a"),
+			workspaceProofPhysicalRow(t, apiColumns, "agent.replay", "key", "a"),
+		},
 	}
 	if count, err := providerAliasReplayCompletionCount(api, "key"); err != nil || count != 2 {
 		t.Fatalf("API method/key/actor multiplicity changed: %d %v", count, err)
 	}
-	for _, raw := range []string{`["exact",null,"pending",null]`, `["exact","bound-interface",null,null]`, `{`} {
+	for _, raw := range []string{workspaceProofPhysicalRow(t, actionColumns, "exact", nil, "pending", nil), workspaceProofPhysicalRow(t, actionColumns, "exact", "bound-interface", nil, nil), `{`} {
 		actions.Rows = []string{raw}
 		if got, err := providerAliasActionIntentStorage(actions, "exact"); err == nil || got != (providerAliasActionStorage{}) {
 			t.Fatalf("malformed action intent became successful evidence: %+v %v", got, err)
 		}
 	}
 	// Ensure the physical parser keeps nested field text, not a re-encoded value.
-	encoded, err := json.Marshal([]any{`{"decimal":7.0,"nested":[null,true]}`})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rows, err := workspaceProofPhysicalRows(storetest.SelectedForkStorageTableSnapshot{Columns: []string{"fields"}, Rows: []string{string(encoded)}})
+	encoded := workspaceProofPhysicalRow(t, []string{"fields"}, `{"decimal":7.0,"nested":[null,true]}`)
+	rows, err := workspaceProofPhysicalRows(storetest.SelectedForkStorageTableSnapshot{Columns: []string{"fields"}, Rows: []string{encoded}})
 	if err != nil {
 		t.Fatal(err)
 	}

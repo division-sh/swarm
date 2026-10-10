@@ -15,8 +15,10 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -279,7 +281,7 @@ func TestCommittedRouteLaunchHasLivePublicationOwner(t *testing.T) {
 	}
 }
 
-func TestPersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *testing.T) {
+func ProveNativePersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
 	for _, mode := range []struct {
 		name string
 		run  func(*AgentManager, context.Context) error
@@ -289,12 +291,15 @@ func TestPersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *testing.
 		{name: "authoritative_delivery_only", run: (*AgentManager).RunAuthoritativeDeliveryOnly, want: AgentRunModeAuthoritativeDeliveryOnly},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
+			native := newNativeDelivery(t)
 			bus := newProjectionTestBus()
 			handled := make(chan int, 1)
 			factory := &projectionTestFactory{handled: handled}
-			am := newProjectionTestManager(t, bus, factory.Build)
-			runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
-			if err := mode.run(am, managedExecutionTestContext(t, runCtx)); err != nil {
+			am, executionCtx := newNativeProjectionTestManager(t, bus, factory.Build, native)
+			probe := runtimelifecycleprobe.New()
+			am.testLifecycleProbe = probe
+			runCtx, cancelRun := context.WithCancel(executionCtx)
+			if err := mode.run(am, runCtx); err != nil {
 				t.Fatalf("start manager: %v", err)
 			}
 			t.Cleanup(func() {
@@ -349,7 +354,14 @@ func TestPersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *testing.
 				t.Fatalf("readiness replay = %#v err=%v routes=%d, want generation %d and one route", replayed, err, len(bus.routeHistory(agentID)), generation)
 			}
 
-			if err := bus.send(agentID, projectionRuntimeEvent("persisted-adoption-"+mode.name, events.EventType("test.old"))); err != nil {
+			event := projectionRuntimeEvent("persisted-adoption-"+mode.name, events.EventType("test.old"))
+			deliveryRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: route.token.Identity}
+			before, err := native.ClaimDelivery(native.Context, native.Authority, event, deliveryRoute)
+			if err != nil || before.Disposition != runtimedelivery.ClaimAbsent {
+				t.Fatalf("unpublished adoption delivery was claimable: %+v,error=%v", before, err)
+			}
+			native.Publish(t, native.Context, event, []events.DeliveryRoute{deliveryRoute}, native.Authority)
+			if err := bus.send(agentID, event); err != nil {
 				t.Fatalf("send exact receiver turn: %v", err)
 			}
 			select {
@@ -359,6 +371,27 @@ func TestPersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *testing.
 				}
 			case <-time.After(time.Second):
 				t.Fatal("adopted exact route did not execute a receiver turn")
+			}
+			settlementCtx, cancelSettlement := context.WithTimeout(context.Background(), time.Second)
+			_, settleErr := probe.WaitForDeliveryStatus(settlementCtx, event.ID(), string(runtimedelivery.SubscriberAgent), agentID, string(runtimedelivery.StatusDelivered))
+			cancelSettlement()
+			if settleErr != nil {
+				bus.mu.Lock()
+				logs := append([]runtimepipeline.RuntimeLogEntry(nil), bus.runtimeLogs...)
+				bus.mu.Unlock()
+				t.Fatalf("adopted receiver did not finish its accepted delivery: %v; logs=%+v", settleErr, logs)
+			}
+			if err := am.ShutdownWithOptions(ShutdownOptions{Grace: time.Second}); err != nil {
+				t.Fatalf("join adopted receiver settlement: %v", err)
+			}
+			cancelRun()
+			deliveryID, err := runtimedelivery.DeliveryID(event.ID(), deliveryRoute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			settled, err := native.Snapshot(native.Context, deliveryID)
+			if err != nil || settled.Status != runtimedelivery.StatusDelivered {
+				t.Fatalf("adopted receiver did not persist exact delivery settlement: %+v,error=%v", settled, err)
 			}
 		})
 	}

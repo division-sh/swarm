@@ -12,14 +12,16 @@ import (
 )
 
 const canonicalRequiredEventReadShape = `func LoadCanonicalEventRecordForTest(ctx context.Context, selected any, eventID string) (events.Event, error) {
+	var empty events.Event
 	event, found, err := ReadCanonicalEventRecordForTest(ctx, selected, eventID)
-	if err != nil { return events.Event{}, err }
-	if !found { return events.Event{}, fmt.Errorf("canonical event record %s is missing", eventID) }
+	if err != nil { return empty, err }
+	if !found { return empty, fmt.Errorf("canonical event record %s is missing", eventID) }
 	return event, nil
 }`
 
 const canonicalOptionalEventReadShape = `func ReadCanonicalEventRecordForTest(ctx context.Context, selected any, eventID string) (events.Event, bool, error) {
-	if err := validateChannelObservationOwner(selected); err != nil { return events.Event{}, false, err }
+	var empty events.Event
+	if err := validateChannelObservationOwner(selected); err != nil { return empty, false, err }
 	var record eventrecord.Record
 	var found bool
 	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
@@ -28,9 +30,9 @@ const canonicalOptionalEventReadShape = `func ReadCanonicalEventRecordForTest(ct
 		record, found, err = loadCanonicalFixtureRecordTx(ctx, tx, postgres, eventID)
 		return err
 	})
-	if err != nil || !found { return events.Event{}, false, err }
+	if err != nil || !found { return empty, false, err }
 	admitted, err := record.Decode()
-	if err != nil { return events.Event{}, false, fmt.Errorf("decode canonical event record %s: %w", eventID, err) }
+	if err != nil { return empty, false, fmt.Errorf("decode canonical event record %s: %w", eventID, err) }
 	return admitted.Event(), true, nil
 }`
 
@@ -97,7 +99,7 @@ func TestCanonicalEventFixtureReadOwnerGuardRejectsIndependentReadsAndLostRefusa
 		{canonicalOptionalEventReadShape, "loadCanonicalFixtureRecordTx(ctx, tx, postgres, eventID)", "loadCanonicalFixtureRecordTx(ctx, tx, postgres, otherEventID)"},
 		{canonicalOptionalEventReadShape, "readServedDeliveryObservation(ctx, selected,", "readServedDeliveryObservation(otherContext, selected,"},
 		{canonicalOptionalEventReadShape, "record.Decode()", "alternateDecoder(record)"},
-		{canonicalOptionalEventReadShape, "return events.Event{}, false, err", "return events.Event{}, true, nil"},
+		{canonicalOptionalEventReadShape, "return empty, false, err", "return empty, true, nil"},
 	} {
 		broken := strings.Replace(probe.source, probe.from, probe.to, 1)
 		if broken == probe.source {

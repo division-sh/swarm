@@ -35,7 +35,10 @@ func validateIssue2564WorkloadPartition(p Policy) error {
 		}
 		want := map[string][]string{"TestIssue2564ServedH1ReconstructedEquivalentBothStores": {"sqlite/overlap", "sqlite/no_overlap", "postgres/overlap", "postgres/no_overlap"}}
 		if id == "serveapp-2564-h2" {
-			want = map[string][]string{"TestIssue2564ReconstructedEquivalentH2BothStores": {"sqlite/dense", "sqlite/paced", "postgres/dense", "postgres/paced"}}
+			want = map[string][]string{
+				"TestIssue2564ReconstructedEquivalentH2BothStores": {"sqlite/dense", "sqlite/paced", "postgres/dense", "postgres/paced"},
+				"TestIssue2564H2SynchronizedBranchesBothStores":    {"sqlite", "postgres"},
+			}
 		}
 		if !reflect.DeepEqual(u.RequiredChildren, want) {
 			return fmt.Errorf("%s lost a required workload/backend: %+v", id, u.RequiredChildren)

@@ -126,6 +126,43 @@ func (o *Owner) BundleWriter() any { return nil }
 	}
 }
 
+func TestSelectedStoreFixtureRoleOnlyChangesProductionImportDecision(t *testing.T) {
+	path := "internal/store/selected/selectedtest/manager_delivery.go"
+	body, err := os.ReadFile(filepath.Join(selectedStoreRepoRoot(t), path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failures := selectedStoreBoundaryViolations(path, string(body)); len(failures) != 0 {
+		t.Fatal("original selected fixture rejected:", failures)
+	}
+	for _, ordinary := range []string{
+		"internal/runtime/manager_delivery.go",
+		"internal/store/selected/selectedtesting/manager_delivery.go",
+		"internal/store/internal/selectedtest/manager_delivery.go",
+		"external/selectedtest/manager_delivery.go",
+	} {
+		if failures := selectedStoreBoundaryViolations(ordinary, string(body)); len(failures) == 0 {
+			t.Errorf("same selected import accepted outside fixture role: %s", ordinary)
+		}
+	}
+	for _, forbidden := range []string{`import "reflect"`, "func BundleWriter() {}"} {
+		if failures := selectedStoreBoundaryViolations(path, string(body)+"\n"+forbidden); len(failures) == 0 {
+			t.Errorf("fixture role exempted other boundary: %s", forbidden)
+		}
+	}
+	root := t.TempDir()
+	full := filepath.Join(root, path)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, append(body, []byte("\nfunc BundleWriter() {}\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if failures, err := selectedStoreBoundaryFailures(root); err != nil || len(failures) == 0 {
+		t.Fatalf("fixture source escaped canonical enumeration: %v, %v", failures, err)
+	}
+}
+
 func selectedStoreBoundaryViolations(path, body string) []string {
 	allowedSelectedImports := map[string]bool{
 		// The approved reset supervisor retains the exact selected family and
@@ -177,7 +214,7 @@ func selectedStoreBoundaryViolations(path, body string) []string {
 		if strings.Contains(line, `"github.com/division-sh/swarm/internal/store/construction"`) && !insideSelected && path != "internal/store/store.go" {
 			failures = append(failures, selectedStoreBoundaryFailure(path, lineIndex, "direct construction import"))
 		}
-		if strings.Contains(line, `"github.com/division-sh/swarm/internal/store/selected"`) && !allowedSelectedImports[path] {
+		if strings.Contains(line, `"github.com/division-sh/swarm/internal/store/selected"`) && !allowedSelectedImports[path] && !checkoutsource.IsTestFixturePackage(filepath.ToSlash(filepath.Dir(path))) {
 			failures = append(failures, selectedStoreBoundaryFailure(path, lineIndex, "unapproved selected owner consumer"))
 		}
 	}

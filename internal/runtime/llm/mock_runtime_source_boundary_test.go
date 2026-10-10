@@ -29,6 +29,35 @@ func TestProductionDoesNotImportCatalogOrFixtureRuntimeOwners(t *testing.T) {
 	}
 }
 
+func TestMockRuntimeImportCensusUsesFixtureRoleWithoutAuthorizingProduction(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, "cmd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"internal/store/selected/selectedtest/fixture.go",
+		"internal/runtime/ordinary.go",
+		"internal/store/internal/selectedtest/ordinary.go",
+	} {
+		full := filepath.Join(repo, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("package probe; import _ \"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting\""), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	violations, err := mockRuntimeImportViolations(repo)
+	if err != nil || len(violations) != 2 {
+		t.Fatalf("fixture/production import accounting changed: %v %v", violations, err)
+	}
+	for _, violation := range violations {
+		if strings.Contains(violation, "selected/selectedtest/fixture.go") {
+			t.Fatalf("original fixture role was treated as production: %s", violation)
+		}
+	}
+}
+
 func TestMockRuntimeImportCensusExcludesNestedCheckout(t *testing.T) {
 	repo := t.TempDir()
 	var locals []string
@@ -77,7 +106,7 @@ func mockRuntimeImportViolations(repo string) ([]string, error) {
 					return err
 				}
 				rel = filepath.ToSlash(rel)
-				if rel == "internal/runtime/cataloge2e" || rel == "internal/runtime/testfixtures" {
+				if rel == "internal/runtime/cataloge2e" || checkoutsource.IsTestFixturePackage(rel) {
 					return filepath.SkipDir
 				}
 				return nil

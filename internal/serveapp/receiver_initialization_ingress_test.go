@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // R18: public admission of a provider-imported creating input through the
@@ -208,34 +210,50 @@ func requireReceiverIngressRejectionDiagnostic(t *testing.T, before, after map[s
 			continue
 		}
 		added++
-		var values []any
-		if err := json.Unmarshal([]byte(row), &values); err != nil || len(values) != len(columns) {
-			t.Fatalf("invalid diagnostic row: %s err=%v", row, err)
-		}
-		fields := make(map[string]any, len(columns))
-		for i, column := range columns {
-			fields[column] = values[i]
-		}
-		if fields["event_class"] != "diagnostic_direct" || fields["event_name"] != "platform.runtime_log" || fields["run_id"] != nil || fields["entity_id"] != nil || fields["flow_instance"] != nil || fields["source_event_id"] != nil {
-			t.Fatalf("rejection created a non-diagnostic event: %s", row)
-		}
-		var payload struct {
-			Level   string `json:"log_level"`
-			Details struct {
-				Action, Component string
-				Event             string `json:"event_type"`
-			}
-		}
-		raw, ok := fields["payload"].(string)
-		if !ok {
-			t.Fatalf("diagnostic payload is not JSON text: %s", row)
-		}
-		if err := json.Unmarshal([]byte(raw), &payload); err != nil || payload.Level != "warn" || payload.Details.Action != "payload_validation_rejected" || payload.Details.Component != "event-bus" || payload.Details.Event != event {
-			t.Fatalf("unexpected rejection diagnostic: %s err=%v", raw, err)
+		if err := validateReceiverIngressRejectionDiagnosticRow(columns, row, event); err != nil {
+			t.Fatalf("invalid rejection diagnostic: %s err=%v", row, err)
 		}
 	}
 	if added != 1 {
 		t.Fatalf("rejection diagnostics=%d, want exactly one", added)
 	}
 	after["events"] = retained
+}
+
+func validateReceiverIngressRejectionDiagnosticRow(columns []string, encoded, event string) error {
+	rows, err := storetest.DecodeSelectedForkSnapshotRows(storetest.SelectedForkStorageTableSnapshot{Columns: columns, Rows: []string{encoded}})
+	if err != nil {
+		return err
+	}
+	row := rows[0]
+	for column, want := range map[string]string{"event_class": "diagnostic_direct", "event_name": "platform.runtime_log"} {
+		value, err := workspaceProofPhysicalText(row, column)
+		if err != nil || value != want {
+			return fmt.Errorf("diagnostic %s=%q, want %q: %v", column, value, want, err)
+		}
+	}
+	for _, column := range []string{"run_id", "entity_id", "flow_instance", "source_event_id"} {
+		cell, found := row[column]
+		if !found || cell.Type != "<nil>" || string(cell.Value) != "null" {
+			return fmt.Errorf("rejection diagnostic requires physical NULL %s", column)
+		}
+	}
+	raw, err := workspaceProofPhysicalText(row, "payload")
+	if err != nil {
+		return err
+	}
+	var payload struct {
+		Level   string `json:"log_level"`
+		Details struct {
+			Action, Component string
+			Event             string `json:"event_type"`
+		}
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return err
+	}
+	if payload.Level != "warn" || payload.Details.Action != "payload_validation_rejected" || payload.Details.Component != "event-bus" || payload.Details.Event != event {
+		return fmt.Errorf("unexpected rejection diagnostic: %s", raw)
+	}
+	return nil
 }

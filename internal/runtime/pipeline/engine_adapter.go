@@ -1339,22 +1339,23 @@ func workflowScopedGateKey(source semanticview.Source, flowID, gate string) stri
 }
 
 func workflowInitialStateForFlow(source semanticview.Source, flowID string) (string, error) {
+	ref, err := workflowInitialStoredStageForFlow(source, flowID)
+	return ref.ID(), err
+}
+
+func workflowInitialStoredStageForFlow(source semanticview.Source, flowID string) (runtimecontracts.StoredStageRef, error) {
 	flowID = strings.TrimSpace(flowID)
 	if source == nil {
-		return "", fmt.Errorf("initial stage requires selected semantic source")
+		return runtimecontracts.StoredStageRef{}, fmt.Errorf("initial stage requires selected semantic source")
 	}
 	if flowID == "" {
 		flowID = "."
 	}
 	graph, found := semanticview.WorkflowStageTopology(source, flowID)
 	if !found || graph.FlowID != flowID || !graph.ValidStageCatalog() {
-		return "", fmt.Errorf("initial stage requires exact compiled flow %q", flowID)
+		return runtimecontracts.StoredStageRef{}, fmt.Errorf("initial stage requires exact compiled flow %q", flowID)
 	}
-	ref, err := graph.InitialStoredStage()
-	if err != nil {
-		return "", err
-	}
-	return ref.ID(), nil
+	return graph.InitialStoredStage()
 }
 
 func workflowScopeKey(source semanticview.Source, flowID string) string {

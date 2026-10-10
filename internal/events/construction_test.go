@@ -74,6 +74,9 @@ var productionRootConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	{Path: "internal/runtime/inbound.go", Scope: "projectInboundPublication", Constructor: "NewExistingRunRootIngressEvent"}:                          1,
 	{Path: "internal/runtime/fanoutobligation/ordinal_emission.go", Scope: "OrdinalEmission.NewEvent", Constructor: "NewExistingRunRootIngressEvent"}: 1,
 	{Path: "internal/store/eventfixture/event.go", Scope: "ExistingRunRoot", Constructor: "NewExistingRunRootIngressEvent"}:                           1,
+	// Native selected fixtures publish one source root and one genuinely issued fork root.
+	{Path: "internal/store/selected/selectedtest/delivery_fixture.go", Scope: "selectedDeliverySourceEvent", Constructor: "NewRunCreatingRootIngressEvent"}: 1,
+	{Path: "internal/store/selected/selectedtest/delivery_fixture.go", Scope: "selectedDeliveryIssuedEvent", Constructor: "NewExistingRunRootIngressEvent"}: 1,
 }
 
 func TestProductionEventConstructionUsesPublicAPI(t *testing.T) {

@@ -999,16 +999,7 @@ func debtRunFixtureConstructsSelectedStore(result types.Type) bool {
 }
 
 func debtTestFixturePackage(path string) bool {
-	const module = "github.com/division-sh/swarm/internal/"
-	internal := strings.HasPrefix(path, module) || strings.HasPrefix(path, "internal/")
-	path = strings.TrimPrefix(path, module)
-	path = strings.TrimPrefix(path, "internal/")
-	publicTestSupport := !strings.HasPrefix(path, "store/internal/") && strings.HasSuffix(filepath.Base(path), "test")
-	return internal && (publicTestSupport ||
-		strings.Contains("/"+path+"/", "/testfixtures/") ||
-		path == "store/storetest" || path == "store/testsql" ||
-		path == "store/eventfixture" || strings.HasPrefix(path, "store/testutil/") ||
-		strings.HasPrefix(path, "testutil/"))
+	return checkoutsource.IsTestFixturePackage(path)
 }
 
 func debtTestAuthorityConsumer(path, enclosing string) bool {

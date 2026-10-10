@@ -120,6 +120,50 @@ type publicSurfaceStoreParityValidationContext struct {
 
 const selectedPackageImportPath = "github.com/division-sh/swarm/internal/store/selected"
 
+func TestPublicSurfaceStoreParitySourceRolesShareFixtureClassification(t *testing.T) {
+	root := t.TempDir()
+	for path, source := range map[string]string{
+		"internal/store/selected/runtime.go":                  "package selected; func OpenRuntime() {}",
+		"internal/store/selected/selectedtest/fixture.go":     "package selectedtest; func OpenFixture() {}",
+		"internal/store/selected/selectedtesting/ordinary.go": "package selectedtesting; func OpenOrdinary() {}",
+		"internal/cliapp/production.go":                       "package cliapp; import selected \"" + selectedPackageImportPath + "\"; var _ = selected.OpenRuntime",
+		"internal/testutil/fixturetest/consumer.go":           "package fixturetest; import selected \"" + selectedPackageImportPath + "\"; var _ = selected.OpenRuntime",
+		"internal/store/internal/selectedtest/ordinary.go":    "package selectedtest; import selected \"" + selectedPackageImportPath + "\"; var _ = selected.OpenRuntime",
+	} {
+		full := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	constructors, err := sourceExportedOpenFunctions(root, filepath.Join(root, "internal/store/selected"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(constructors) != 2 {
+		t.Fatalf("fixture role changed production constructor accounting: %v", constructors)
+	}
+	for _, name := range []string{"OpenRuntime", "OpenOrdinary"} {
+		if _, found := constructors[name]; !found {
+			t.Errorf("ordinary production constructor was excluded: %s", name)
+		}
+	}
+	consumers, err := sourceSelectedPurposeConsumers(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(consumers) != 2 {
+		t.Fatalf("fixture role changed production consumer accounting: %v", consumers)
+	}
+	for _, name := range []string{"runtime@internal/cliapp/production.go", "runtime@internal/store/internal/selectedtest/ordinary.go"} {
+		if _, found := consumers[name]; !found {
+			t.Errorf("ordinary production consumer was excluded: %s", name)
+		}
+	}
+}
+
 func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 	root := repoRoot(t)
 	ctx := newPublicSurfaceValidationContext(t, root)
@@ -1612,6 +1656,13 @@ func sourceExportedOpenFunctions(root, dir string) (map[string]struct{}, error) 
 		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
+		relative, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		if checkoutsource.IsTestFixturePackage(filepath.ToSlash(filepath.Dir(relative))) {
+			return nil
+		}
 		file, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 		if parseErr != nil {
 			return parseErr
@@ -1645,6 +1696,13 @@ func sourceSelectedPurposeConsumers(root string) (map[string]struct{}, error) {
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || strings.Contains(filepath.ToSlash(path), "/internal/store/selected/") {
 			return nil
 		}
+		relative, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		if checkoutsource.IsTestFixturePackage(filepath.ToSlash(filepath.Dir(relative))) {
+			return nil
+		}
 		set := token.NewFileSet()
 		file, parseErr := parser.ParseFile(set, path, nil, 0)
 		if parseErr != nil {
@@ -1664,10 +1722,6 @@ func sourceSelectedPurposeConsumers(root string) (map[string]struct{}, error) {
 		}
 		if len(aliases) == 0 {
 			return nil
-		}
-		relative, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			return relErr
 		}
 		purposes := map[string]struct{}{}
 		ast.Inspect(file, func(node ast.Node) bool {
