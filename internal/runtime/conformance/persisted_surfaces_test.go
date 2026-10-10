@@ -1725,7 +1725,13 @@ func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProj
 }
 
 func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrites(t *testing.T) {
-	selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) { testTrackedEntityWorkflowWrites(t, backend) })
+	}
+}
+
+func testTrackedEntityWorkflowWrites(t *testing.T, backend string) {
+	selected := newMutationSurfaceConformanceStore(t, backend)
 
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
@@ -1807,7 +1813,13 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 }
 
 func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t *testing.T) {
-	ctx, exec, selected, runID := newEntityToolConformanceHarness(t)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) { testTrackedEntityToolWrites(t, backend) })
+	}
+}
+
+func testTrackedEntityToolWrites(t *testing.T, backend string) {
+	ctx, exec, selected, runID := newEntityToolConformanceHarness(t, backend)
 
 	requireMutationSurface(t, selected)
 
@@ -1862,10 +1874,10 @@ func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *test
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator
+			run_id, entity_id, flow_instance, entity_type, fields
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'mutation-flow/inst-1', 'default', 'queued', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb
+			$1::uuid, $2::uuid, 'mutation-flow/inst-1', 'default', '{}'::jsonb
 		)
 	`, runID, entityID); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
@@ -2009,24 +2021,24 @@ func trackedMutationStateMatchesEntityState(selected any, runID, entityID string
 	}
 	currentState, fieldsRaw, bookRaw, gatesRaw, accRaw := evidence.CurrentState, evidence.Fields, evidence.Bookkeeping, evidence.Gates, evidence.Accumulator
 	want := runtimemutationlog.EntityStateProjection{
-		CurrentState: runtimemutationlog.PresentLifecycleState(currentState),
+		CurrentState: currentState,
 		Fields:       map[string]any{},
-		Bookkeeping:  map[string]any{},
-		Gates:        map[string]any{},
-		Accumulator:  map[string]any{},
 	}
 	var err error
 	if want.Fields, err = decodeJSONMapErr(fieldsRaw); err != nil {
 		return fmt.Errorf("decode entity_state fields: %w", err)
 	}
-	if want.Bookkeeping, err = decodeJSONMapErr(bookRaw); err != nil {
-		return fmt.Errorf("decode entity_state bookkeeping: %w", err)
-	}
-	if want.Gates, err = decodeJSONMapErr(gatesRaw); err != nil {
-		return fmt.Errorf("decode entity_state gates: %w", err)
-	}
-	if want.Accumulator, err = decodeJSONMapErr(accRaw); err != nil {
-		return fmt.Errorf("decode entity_state accumulator: %w", err)
+	for _, bucket := range []struct {
+		name string
+		raw  []byte
+		dst  *map[string]any
+	}{{"bookkeeping", bookRaw, &want.Bookkeeping}, {"gates", gatesRaw, &want.Gates}, {"accumulator", accRaw, &want.Accumulator}} {
+		if bucket.raw == nil {
+			continue
+		}
+		if *bucket.dst, err = decodeJSONMapErr(bucket.raw); err != nil {
+			return fmt.Errorf("decode flow_instances %s: %w", bucket.name, err)
+		}
 	}
 
 	records := make([]runtimemutationlog.ProjectionMutation, 0, 8)
@@ -2091,7 +2103,30 @@ func mustCanonicalJSON(t *testing.T, value any) string {
 	return string(raw)
 }
 
-func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetools.Executor, operatorread.EntityReader, string) {
+type mutationSurfaceConformanceStore interface {
+	fanInBarrierConformanceStore
+	storetest.RunFixtureStore
+	operatorread.EntityReader
+	runtimetools.EntityPersistence
+	runtimetools.HumanTaskCardStore
+	runtimebus.FlowInstanceActivationCommitOwner
+}
+
+func newMutationSurfaceConformanceStore(t *testing.T, backend string) mutationSurfaceConformanceStore {
+	t.Helper()
+	switch backend {
+	case "sqlite":
+		return storetest.StartSQLiteRuntimeStore(t)
+	case "postgres":
+		selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+		return selected
+	default:
+		t.Fatalf("unsupported mutation conformance backend %q", backend)
+		return nil
+	}
+}
+
+func newEntityToolConformanceHarness(t *testing.T, backend string) (context.Context, *runtimetools.Executor, operatorread.EntityReader, string) {
 	t.Helper()
 	repoRoot := canonicalrouting.RepoRoot(t)
 	fixtureRoot := t.TempDir()
@@ -2106,11 +2141,11 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	source := runtimesemanticview.Wrap(bundle)
 	fact := conformanceSourceArtifactFact(t, source)
 	ctx := testAuthorActivityContextForBundle(context.Background(), fact)
-	pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+	selected := newMutationSurfaceConformanceStore(t, backend)
 	runID := uuid.NewString()
 
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
-	construction := newFanInBarrierRuntimeForSource(t, pg, source, fact, 1)
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
+	construction := newFanInBarrierRuntimeForSource(t, selected, source, fact, 1)
 	constructionCtx := runtimecorrelation.WithRunID(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runID)
 	at := time.Now().UTC()
 	plan, err := construction.manager.PrepareFlowInstanceActivation(constructionCtx, runtimepipeline.FlowInstanceActivationRequest{
@@ -2143,18 +2178,18 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 		t.Fatalf("resolve constructed tool mutation actor: %v", err)
 	}
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
-		EntityStore:                    pg,
+		EntityStore:                    selected,
 		EntityWriter:                   construction.pipeline,
-		HumanTaskStore:                 pg,
+		HumanTaskStore:                 selected,
 		WorkflowSource:                 source,
 		AllowInternalLegacyEntityTools: true,
 	})
 	ctx = runtimetools.WithActor(runtimecorrelation.WithRunID(ctx, runID), frame.Config)
 	inbound := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("accounts.updated"), "", "", nil, 0, runID,
 		events.EnvelopeForEntityID(events.EventEnvelope{}, runID), time.Now().UTC())
-	storetest.CommitSemanticEvent(t, ctx, pg, inbound)
+	storetest.CommitSemanticEvent(t, ctx, selected, inbound)
 	ctx = runtimebus.WithInboundEvent(ctx, inbound)
-	return ctx, exec, pg, runID
+	return ctx, exec, selected, runID
 }
 
 func readString(value any) string {

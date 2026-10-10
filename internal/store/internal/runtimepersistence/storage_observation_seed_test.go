@@ -12,14 +12,24 @@ import (
 	"time"
 )
 
-func seedEntityToolStorageWitness(t *testing.T, fixture authorActivityReceiptFixture, runID, entityID string) {
+func seedEntityToolStorageWitness(t *testing.T, fixture authorActivityReceiptFixture, runID, entityID string, constructed, fielded bool) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_state
-		(run_id, entity_id, flow_instance, entity_type, current_state, fields, bookkeeping, revision)
-		VALUES ($1, $2, 'storage-witness/one', 'storage_witness', 'queued', '{}', '{}', 7)`, runID, entityID); err != nil {
-		t.Fatal(err)
+	path := "storage-witness/" + entityID
+	if constructed {
+		entityType := ""
+		if fielded {
+			entityType = "storage_witness"
+		}
+		seedWorkflowHeaderProjectionFixture(t, ctx, fixture.db, runID, entityID, path, "storage-witness", entityType, "queued", `{"handler_loops":{},"evidence":{"score":2}}`, time.Unix(1700000000, 0).UTC())
+	}
+	if fielded {
+		if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_state
+			(run_id, entity_id, flow_instance, entity_type, fields)
+			VALUES ($1, $2, $3, 'storage_witness', '{}')`, runID, entityID, path); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for index, value := range []any{nil, `""`, `7`, `{"name":"second"}`} {
 		if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_mutations
