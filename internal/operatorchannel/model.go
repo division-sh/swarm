@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"github.com/google/uuid"
 )
 
@@ -355,12 +356,13 @@ type BeginReplayRequest struct {
 }
 
 type ConfirmRequest struct {
-	OperationID              string    `json:"operation_id"`
-	PrincipalID              string    `json:"principal_id"`
-	ExpectedRevision         int64     `json:"expected_revision"`
-	Approve                  bool      `json:"approve"`
-	ProviderAuthorityCurrent bool      `json:"-"`
-	ConfirmedAt              time.Time `json:"confirmed_at"`
+	OperationID                string            `json:"operation_id"`
+	PrincipalID                string            `json:"principal_id"`
+	ExpectedRevision           int64             `json:"expected_revision"`
+	Approve                    bool              `json:"approve"`
+	ProviderAuthorityCurrent   bool              `json:"-"`
+	ProviderAuthorityAdmission ProviderAuthority `json:"-"`
+	ConfirmedAt                time.Time         `json:"confirmed_at"`
 }
 
 type ExpireRequest struct {
@@ -509,6 +511,23 @@ type ClaimSettlement struct {
 	Operation   Operation `json:"operation"`
 }
 
+type ClaimReceipt struct {
+	PublicationID, Provider, ProviderEventID, InterfaceKey, Challenge string
+	OperationID, Disposition, Reason, ProviderAuthorization           string
+	NativeCaptureFingerprint                                          string
+	RecordedAt                                                        time.Time
+}
+
+func (r ClaimReceipt) Matches(claim InboundClaim) bool {
+	return r.PublicationID == claim.PublicationID && r.Provider == claim.Provider &&
+		r.ProviderEventID == claim.ProviderEventID && r.InterfaceKey == claim.Interface.Key() &&
+		r.Challenge == claim.Challenge && r.ProviderAuthorization == claim.ProviderAuthorization
+}
+
+func SessionClaimReceiptID(parentID, providerEventID string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(Hash("session-operator-claim-v1", parentID, providerEventID))).String()
+}
+
 type ProofResponsibility struct {
 	Operation Operation     `json:"operation"`
 	Binding   Binding       `json:"binding"`
@@ -516,6 +535,8 @@ type ProofResponsibility struct {
 }
 
 type Store interface {
+	SettleSessionChannelClaim(context.Context, authority.Claim) (ClaimSettlement, error)
+	LoadOperatorChannelClaimReceipt(context.Context, string) (ClaimReceipt, bool, error)
 	EnsureOperatorPrincipal(context.Context, time.Time) (Principal, error)
 	FindChannelBindingBeginReplay(context.Context, BeginReplayRequest) (Operation, bool, error)
 	BeginChannelBinding(context.Context, BeginRequest) (Operation, error)
