@@ -56,6 +56,7 @@ import (
 	timerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	tools "github.com/division-sh/swarm/internal/runtime/tools"
 	workflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
+	authority "github.com/division-sh/swarm/internal/sessionprovider/authority"
 	runhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	time "time"
 )
@@ -740,6 +741,10 @@ func (s *PostgresStore) LoadOperatorAgentUsage(ctx context.Context, identity age
 	return s.operatorAgentPostgres.LoadOperatorAgentUsage(ctx, identity, opts)
 }
 
+func (s *PostgresStore) LoadOperatorChannelClaimReceipt(ctx context.Context, id string) (operatorchannel.ClaimReceipt, bool, error) {
+	return s.operatorChannelPostgresOwner.LoadOperatorChannelClaimReceipt(ctx, id)
+}
+
 func (s *PostgresStore) LoadOperatorConversationFork(ctx context.Context, forkID string) (runfork.OperatorConversationForkSession, error) {
 	return s.runForkPostgresOwner.LoadOperatorConversationFork(ctx, forkID)
 }
@@ -1196,6 +1201,10 @@ func (s *PostgresStore) ScanDeliveryContinuations(ctx context.Context, authority
 	return s.deliveryPostgresOwner.ScanDeliveryContinuations(ctx, authority, cursor, limit)
 }
 
+func (s *PostgresStore) SessionStandingBindingCurrent(ctx context.Context, expected channelonboarding.Operation) (bool, error) {
+	return s.channelOnboardingPostgresOwner.SessionStandingBindingCurrent(ctx, expected)
+}
+
 func (s *PostgresStore) SetChannelClientLocale(ctx context.Context, req channelonboarding.SetClientLocaleRequest) (channelonboarding.Operation, error) {
 	return s.channelOnboardingPostgresOwner.SetChannelClientLocale(ctx, req)
 }
@@ -1218,6 +1227,10 @@ func (s *PostgresStore) SettleExternalAttempt(ctx context.Context, settlement ef
 
 func (s *PostgresStore) SettleFailure(ctx context.Context, claim deliverylifecycle.Claim, settlement deliverylifecycle.Settlement) (deliverylifecycle.Snapshot, error) {
 	return s.deliveryPostgresOwner.SettleFailure(ctx, claim, settlement)
+}
+
+func (s *PostgresStore) SettleSessionChannelClaim(ctx context.Context, fact authority.Claim) (operatorchannel.ClaimSettlement, error) {
+	return s.operatorChannelPostgresOwner.SettleSessionChannelClaim(ctx, fact)
 }
 
 func (s *PostgresStore) SettleSuccess(ctx context.Context, claim deliverylifecycle.Claim, sideEffects []string, duration time.Duration, selection deliverylifecycle.HandlerRuleSelectionFact) (deliverylifecycle.Snapshot, error) {
@@ -1968,6 +1981,10 @@ func (s *SQLiteRuntimeStore) LoadOperatorAgentUsage(ctx context.Context, identit
 	return s.operatorAgentSQLite.LoadOperatorAgentUsage(ctx, identity, opts)
 }
 
+func (s *SQLiteRuntimeStore) LoadOperatorChannelClaimReceipt(ctx context.Context, id string) (operatorchannel.ClaimReceipt, bool, error) {
+	return s.operatorChannelSQLiteOwner.LoadOperatorChannelClaimReceipt(ctx, id)
+}
+
 func (s *SQLiteRuntimeStore) LoadOperatorConversationFork(ctx context.Context, forkID string) (runfork.OperatorConversationForkSession, error) {
 	return s.runForkSQLiteOwner.LoadOperatorConversationFork(ctx, forkID)
 }
@@ -2420,6 +2437,10 @@ func (s *SQLiteRuntimeStore) ServeAbandonDeliveryQuiesced(ctx context.Context, e
 	return s.runLifecycleSQLiteOwner.ServeAbandonDeliveryQuiesced(ctx, eventID, subscriberType, subscriberID)
 }
 
+func (s *SQLiteRuntimeStore) SessionStandingBindingCurrent(ctx context.Context, expected channelonboarding.Operation) (bool, error) {
+	return s.channelOnboardingSQLiteOwner.SessionStandingBindingCurrent(ctx, expected)
+}
+
 func (s *SQLiteRuntimeStore) SetChannelClientLocale(ctx context.Context, req channelonboarding.SetClientLocaleRequest) (channelonboarding.Operation, error) {
 	return s.channelOnboardingSQLiteOwner.SetChannelClientLocale(ctx, req)
 }
@@ -2442,6 +2463,10 @@ func (s *SQLiteRuntimeStore) SettleExternalAttempt(ctx context.Context, settleme
 
 func (s *SQLiteRuntimeStore) SettleFailure(ctx context.Context, claim deliverylifecycle.Claim, settlement deliverylifecycle.Settlement) (deliverylifecycle.Snapshot, error) {
 	return s.deliverySQLiteOwner.SettleFailure(ctx, claim, settlement)
+}
+
+func (s *SQLiteRuntimeStore) SettleSessionChannelClaim(ctx context.Context, fact authority.Claim) (operatorchannel.ClaimSettlement, error) {
+	return s.operatorChannelSQLiteOwner.SettleSessionChannelClaim(ctx, fact)
 }
 
 func (s *SQLiteRuntimeStore) SettleSuccess(ctx context.Context, claim deliverylifecycle.Claim, sideEffects []string, duration time.Duration, selection deliverylifecycle.HandlerRuleSelectionFact) (deliverylifecycle.Snapshot, error) {

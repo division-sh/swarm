@@ -54,6 +54,7 @@ type Capabilities struct {
 
 type CanCapabilities struct {
 	ReceiveHTTPSRoute       string   `yaml:"receive_https_route,omitempty" json:"receive_https_route,omitempty"`
+	ReceiveSessionEvents    string   `yaml:"receive_session_events,omitempty" json:"receive_session_events,omitempty"`
 	VerifySecret            string   `yaml:"verify_secret,omitempty" json:"verify_secret,omitempty"`
 	EmitEvents              []string `yaml:"emit_events,omitempty" json:"emit_events,omitempty"`
 	PersistDedupeMarkers    bool     `yaml:"persist_dedupe_markers,omitempty" json:"persist_dedupe_markers,omitempty"`
@@ -211,7 +212,7 @@ func (c Capabilities) ValidateForType(packID, packType string) error {
 }
 
 func (c Capabilities) validateChannel(packID string) error {
-	if strings.TrimSpace(c.Can.ReceiveHTTPSRoute) != "" || strings.TrimSpace(c.Can.VerifySecret) != "" || len(c.Can.EmitEvents) != 0 || c.Can.PersistDedupeMarkers || len(c.Can.CallProviderActions) != 0 || c.Can.LowerThroughActivity || c.Can.JournalActivityAttempts {
+	if strings.TrimSpace(c.Can.ReceiveHTTPSRoute) != "" || strings.TrimSpace(c.Can.ReceiveSessionEvents) != "" || strings.TrimSpace(c.Can.VerifySecret) != "" || len(c.Can.EmitEvents) != 0 || c.Can.PersistDedupeMarkers || len(c.Can.CallProviderActions) != 0 || c.Can.LowerThroughActivity || c.Can.JournalActivityAttempts {
 		return fmt.Errorf("pack %q channel capabilities are derived from its satisfied trigger and connector dependencies", packID)
 	}
 	if len(c.Cannot) == 0 {
@@ -226,8 +227,11 @@ func (c Capabilities) validateChannel(packID string) error {
 }
 
 func (c Capabilities) validateTrigger(packID string) error {
-	if strings.TrimSpace(c.Can.ReceiveHTTPSRoute) == "" {
-		return fmt.Errorf("pack %q capabilities.can.receive_https_route is required", packID)
+	if (strings.TrimSpace(c.Can.ReceiveHTTPSRoute) == "") == (strings.TrimSpace(c.Can.ReceiveSessionEvents) == "") {
+		return fmt.Errorf("pack %q requires exactly one of capabilities.can.receive_https_route or receive_session_events", packID)
+	}
+	if c.Can.ReceiveSessionEvents != "" && c.Can.VerifySecret != "" {
+		return fmt.Errorf("pack %q session capability forbids webhook verify_secret", packID)
 	}
 	if len(c.Can.CallProviderActions) > 0 || c.Can.LowerThroughActivity || c.Can.JournalActivityAttempts {
 		return fmt.Errorf("pack %q trigger capabilities must not declare connector capability fields", packID)
@@ -269,7 +273,7 @@ func (c Capabilities) validateConnector(packID string) error {
 		}
 		seenActions[action] = struct{}{}
 	}
-	if strings.TrimSpace(c.Can.ReceiveHTTPSRoute) != "" || strings.TrimSpace(c.Can.VerifySecret) != "" || len(c.Can.EmitEvents) > 0 || c.Can.PersistDedupeMarkers {
+	if strings.TrimSpace(c.Can.ReceiveHTTPSRoute) != "" || strings.TrimSpace(c.Can.ReceiveSessionEvents) != "" || strings.TrimSpace(c.Can.VerifySecret) != "" || len(c.Can.EmitEvents) > 0 || c.Can.PersistDedupeMarkers {
 		return fmt.Errorf("pack %q connector capabilities must not declare trigger capability fields", packID)
 	}
 	if !c.Can.LowerThroughActivity {

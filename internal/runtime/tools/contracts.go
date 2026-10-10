@@ -33,6 +33,9 @@ var supportedRuntimeToolNames = map[string]struct{}{
 // verify, boot-warning, and operator-diagnostic surfaces. Authored ToolEntries
 // alone are not the full runtime-available tool truth.
 func RuntimeAvailableToolNamesForSource(source semanticview.Source) []string {
+	if semanticview.ValidateToolDeclarationNames(source) != nil {
+		return nil
+	}
 	names := make(map[string]struct{})
 	for name := range supportedRuntimeToolNames {
 		name = strings.TrimSpace(name)
@@ -47,6 +50,10 @@ func RuntimeAvailableToolNamesForSource(source semanticview.Source) []string {
 	if source != nil {
 		for name, entry := range source.ToolEntries() {
 			name = strings.TrimSpace(name)
+			if !entry.AgentExposable() {
+				delete(names, name)
+				continue
+			}
 			if name == "" || runtimeToolHiddenFromAgents(name) || !entry.AgentExposable() {
 				continue
 			}
