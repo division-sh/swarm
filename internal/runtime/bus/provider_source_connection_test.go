@@ -54,7 +54,9 @@ func TestExternalIngressConnectionOnlyChangesAuthorizedBranch(t *testing.T) {
 					owners = append(owners, ActiveTargetDescriptor{ID: flow, FlowInstance: instance.InstancePath, EntityID: instance.EntityID})
 				}
 				store.setTargetOwners(owners...)
-				eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, ProviderOutputVerifier: catalog})
+				eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, ProviderOutputVerifier: catalog,
+					Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
