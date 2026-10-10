@@ -156,15 +156,15 @@ func commitWorkflowHeaderAndFields(ctx context.Context, tx *sql.Tx, postgres boo
 		if err != nil {
 			return workflowEngineStateFact{}, fmt.Errorf("invalid declared data creation clock: %w", err)
 		}
-		if !created {
-			return workflowEngineStateFact{}, fmt.Errorf("declared data creation clock is missing")
+		if !created || createdAt.IsZero() {
+			return workflowEngineStateFact{}, fmt.Errorf("declared data creation clock is missing or zero")
 		}
 		updatedAt, updated, err := sqliteTimeValue(updatedRaw)
 		if err != nil {
 			return workflowEngineStateFact{}, fmt.Errorf("invalid declared data update clock: %w", err)
 		}
-		if !updated || updatedAt.Before(createdAt) {
-			return workflowEngineStateFact{}, fmt.Errorf("declared data update clock is missing or predates creation")
+		if !updated || updatedAt.IsZero() || updatedAt.Before(createdAt) {
+			return workflowEngineStateFact{}, fmt.Errorf("declared data update clock is missing, zero or predates creation")
 		}
 		before, err := storeentity.DecodeJSONMap(header.Fields)
 		if err != nil {

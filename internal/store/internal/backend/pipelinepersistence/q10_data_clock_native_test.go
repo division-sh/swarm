@@ -29,11 +29,15 @@ func TestQ10DataClockWriteTriggersBothStores(t *testing.T) {
 			db := q10FreshDatabase(t, postgres)
 			ctx := context.Background()
 			at := time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
-			runID, entityID := uuid.NewString(), uuid.NewString()
+			runID, entityID, foreignRunID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			seed := runlifecyclefixture.Fixture{RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), StartedAt: at}
 			if postgres {
 				runlifecyclefixture.RequirePostgres(t, ctx, db, seed)
+				seed.RunID = foreignRunID
+				runlifecyclefixture.RequirePostgres(t, ctx, db, seed)
 			} else {
+				runlifecyclefixture.RequireSQLite(t, ctx, db, seed)
+				seed.RunID = foreignRunID
 				runlifecyclefixture.RequireSQLite(t, ctx, db, seed)
 			}
 			record := pipeline.WorkflowEngineStateRecord{
@@ -98,7 +102,7 @@ func TestQ10DataClockWriteTriggersBothStores(t *testing.T) {
 					}
 				})
 			}
-			for _, hostile := range []string{"missing", "foreign_type"} {
+			for _, hostile := range []string{"missing", "foreign_type", "foreign_run", "foreign_entity", "foreign_path", "null_fields", "array_fields", "zero_creation_clock", "zero_update_clock", "reversed_data_clocks"} {
 				t.Run(hostile+"_unchanged", func(t *testing.T) {
 					before := read()
 					original := record
@@ -107,10 +111,34 @@ func TestQ10DataClockWriteTriggersBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					query := `DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2`
-					if hostile == "foreign_type" {
-						query = `UPDATE entity_state SET entity_type='foreign' WHERE run_id=$1 AND entity_id=$2`
+					args := []any{runID, entityID}
+					column := ""
+					var value any
+					switch hostile {
+					case "foreign_type":
+						column, value = "entity_type", "foreign"
+					case "foreign_run":
+						column, value = "run_id", foreignRunID
+					case "foreign_entity":
+						column, value = "entity_id", uuid.NewString()
+					case "foreign_path":
+						column, value = "flow_instance", "foreign/path"
+					case "null_fields":
+						column, value = "fields", "null"
+					case "array_fields":
+						column, value = "fields", "[]"
+					case "zero_creation_clock":
+						column, value = "created_at", time.Time{}
+					case "zero_update_clock":
+						column, value = "updated_at", time.Time{}
+					case "reversed_data_clocks":
+						column, value = "updated_at", at.Add(-time.Second)
 					}
-					if _, err := tx.ExecContext(ctx, query, runID, entityID); err != nil {
+					if column != "" {
+						query = `UPDATE entity_state SET ` + column + `=$3 WHERE run_id=$1 AND entity_id=$2`
+						args = append(args, value)
+					}
+					if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 						_ = tx.Rollback()
 						t.Fatal(err)
 					}
@@ -120,7 +148,10 @@ func TestQ10DataClockWriteTriggersBothStores(t *testing.T) {
 					if err := tx.Rollback(); err != nil {
 						t.Fatal(err)
 					}
-					if mutationErr == nil || !reflect.DeepEqual(before, read()) {
+					if mutationErr == nil {
+						t.Fatal("unchanged data bypassed required-companion admission")
+					}
+					if !reflect.DeepEqual(before, read()) {
 						t.Fatalf("unchanged-data refusal leaked header or data effects: %v", mutationErr)
 					}
 					record = original
