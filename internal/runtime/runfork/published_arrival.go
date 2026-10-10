@@ -82,7 +82,7 @@ func (p RunForkPlan) WithHistoricalArrivalPublications(revision int64, publicati
 		p.historicalArrivals[event.ID()] = publication
 	}
 	for _, source := range p.TransferredJoins {
-		if err := requireTransferredArrivalPublication(source, byActivation, members); err != nil {
+		if err := requireTransferredArrivalPublication(p.SourceRunID, source, byActivation, members); err != nil {
 			return RunForkPlan{}, err
 		}
 		delete(byActivation, source.Publication.EventID)
@@ -119,7 +119,10 @@ func (p PublishedArrival) validatedIdentity() (string, error) {
 	return p.activation.ID, err
 }
 
-func requireTransferredArrivalPublication(source genericschedule.TransferredJoinOccurrence, publications map[string]PublishedArrival, members map[string]bool) error {
+func requireTransferredArrivalPublication(sourceRunID string, source genericschedule.TransferredJoinOccurrence, publications map[string]PublishedArrival, members map[string]bool) error {
+	if source.Command.RunID != sourceRunID {
+		return fmt.Errorf("transferred arrival belongs to another source run")
+	}
 	publication, found := publications[source.Publication.EventID]
 	if !found {
 		if members[source.Publication.EventID] {
