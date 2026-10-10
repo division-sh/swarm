@@ -1041,26 +1041,43 @@ func (l *WorkflowTimerLifecycle) AuthorizeAcceptedEvent(ctx context.Context, evt
 			"accepted workflow timer declaration revision is stale",
 		)
 	}
+	if _, err := activation.ValidatePublishedOccurrence(evt); err != nil {
+		return WorkflowTimerActivation{}, occurrence, true, err
+	}
+	return activation, occurrence, true, nil
+}
+
+// ValidatePublishedOccurrence proves immutable publication evidence, not fresh
+// execution authority or a current declaration. Settlement shares this owner
+// with admission rather than treating a timer producer name as lineage proof.
+func (activation WorkflowTimerActivation) ValidatePublishedOccurrence(evt events.Event) (timeridentity.WorkflowTimerOccurrenceRef, error) {
+	if err := activation.validate(); err != nil {
+		return timeridentity.WorkflowTimerOccurrenceRef{}, err
+	}
+	occurrence, valid := timeridentity.ParseWorkflowTimerOccurrenceTaskID(evt.TaskID())
+	if !valid || occurrence.Activation != activation.Ref || evt.ProducerType() != events.EventProducerPlatform || evt.SourceAgent() != "runtime.workflow_timer" {
+		return timeridentity.WorkflowTimerOccurrenceRef{}, fmt.Errorf("workflow timer publication requires its exact producer and typed occurrence")
+	}
 	if evt.ID() != timeridentity.WorkflowTimerOccurrenceEventID(occurrence) ||
 		evt.RunID() != activation.RunID ||
 		strings.TrimSpace(string(evt.Type())) != activation.EventType ||
 		!workflowTimerJSONEqual(evt.Payload(), activation.Payload) {
-		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf(
+		return occurrence, fmt.Errorf(
 			"accepted workflow timer event does not match canonical activation: event_id=%q/%q run_id=%q/%q type=%q/%q payload_equal=%t",
 			evt.ID(), timeridentity.WorkflowTimerOccurrenceEventID(occurrence), evt.RunID(), activation.RunID,
 			strings.TrimSpace(string(evt.Type())), activation.EventType, workflowTimerJSONEqual(evt.Payload(), activation.Payload),
 		)
 	}
 	if source := evt.RoutingSource(); source != activation.RoutingSource {
-		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf(
+		return occurrence, fmt.Errorf(
 			"accepted workflow timer routing source %s/%#v does not match canonical activation %s/%#v",
 			source.Kind().StorageCode(), source.Route(), activation.RoutingSource.Kind().StorageCode(), activation.RoutingSource.Route(),
 		)
 	}
 	if !workflowTimerOccurrenceAccepted(activation, occurrence) {
-		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("workflow timer occurrence was not durably accepted")
+		return occurrence, fmt.Errorf("workflow timer occurrence was not durably accepted")
 	}
-	return activation, occurrence, true, nil
+	return occurrence, nil
 }
 
 func (l *WorkflowTimerLifecycle) workflowTimerActivationDeclarationCurrent(
