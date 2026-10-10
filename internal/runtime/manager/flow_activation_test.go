@@ -504,16 +504,6 @@ func (s *flowActivationTestRouteStore) ListFlowInstanceRoutes(context.Context) (
 	return routes, nil
 }
 
-func (s *flowActivationTestRouteStore) ListFlowInstanceRouteRecords(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error) {
-	if s.statusByPath[identity.Key()] != "active" {
-		return nil, nil
-	}
-	return []runtimebus.FlowInstanceRouteRecord{{
-		Identity: identity, EventPattern: identity.Route.InstancePath + "/task.started",
-		SubscriberType: "agent", SubscriberID: "reviewer-" + identity.Route.InstanceID, SourceFlow: identity.Route.ScopeKey,
-	}}, nil
-}
-
 func (s *flowActivationTestInstanceStore) Upsert(_ context.Context, instance runtimepipeline.WorkflowInstance) error {
 	s.upserts = append(s.upserts, instance)
 	s.storeInstance(instance)

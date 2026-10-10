@@ -422,18 +422,6 @@ func (s *routePersistenceTestStore) ListActiveFlowInstanceDescriptors(_ context.
 	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID, s.constructionSource), nil
 }
 
-func (s *routePersistenceTestStore) ListActiveFlowInstanceDescriptorsForScope(_ context.Context, runID string, templateIDs, instancePaths []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	return scalarTemplateScopedDescriptors(
-		exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID, s.constructionSource), templateIDs, instancePaths,
-	), nil
-}
-
-func (s *routePersistenceTestStore) ListActiveFlowInstanceDescriptorsForKey(_ context.Context, runID, templateID, keyField, keyValue string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	return scalarTemplateKeyedDescriptors(
-		exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID, s.constructionSource), templateID, keyField, keyValue,
-	), nil
-}
-
 func (s *routePersistenceTestStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
 	if err := command.Validate(); err != nil {
 		return runtimebus.CommittedPublication{}, err

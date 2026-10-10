@@ -18351,6 +18351,8 @@ platform_tables:
         ListActiveFlowInstanceDescriptorsForScope and ListActiveFlowInstanceDescriptorsForKey are unsupported;
         normalized entity-field descriptor matching cannot elect an instance. Bounded compiled declaration or exact
         coordinate lookup consumes immutable construction keys and stored identities, including terminal occupancy.
+        ListFlowInstanceRouteRecords is unsupported; persisted per-instance route membership cannot elect or validate
+        an executable receiver. Instance observation and delivery planning consume their separate canonical owners.
         A selected receiver with proven terminal stage or terminated construction produces the existing target-unreachable
         publication outcome without creating a replacement. Unknown lifecycle, corruption, foreign-owner and independent
         joined failures remain errors; they cannot be converted to absence or a benign target refusal.

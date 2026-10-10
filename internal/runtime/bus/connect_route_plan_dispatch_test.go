@@ -887,55 +887,6 @@ func (s *connectRoutePlanDescriptorStore) ListActiveFlowInstanceDescriptors(_ co
 	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID, s.constructionSource), nil
 }
 
-func (s *connectRoutePlanDescriptorStore) ListActiveFlowInstanceDescriptorsForScope(_ context.Context, runID string, templateIDs, instancePaths []string) ([]ActiveFlowInstanceDescriptor, error) {
-	s.flowInstanceDescriptorCalls++
-	if s.flowInstanceDescriptorErr != nil {
-		return nil, s.flowInstanceDescriptorErr
-	}
-	return connectRoutePlanScopedDescriptors(
-		exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID, s.constructionSource),
-		templateIDs, instancePaths,
-	), nil
-}
-
-func (s *connectRoutePlanDescriptorStore) ListActiveFlowInstanceDescriptorsForKey(_ context.Context, runID, templateID, keyField, keyValue string) ([]ActiveFlowInstanceDescriptor, error) {
-	s.flowInstanceDescriptorCalls++
-	if s.flowInstanceDescriptorErr != nil {
-		return nil, s.flowInstanceDescriptorErr
-	}
-	return connectRoutePlanKeyedDescriptors(
-		exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID, s.constructionSource),
-		templateID, keyField, keyValue,
-	), nil
-}
-
-func connectRoutePlanKeyedDescriptors(descriptors []ActiveFlowInstanceDescriptor, templateID, keyField, keyValue string) []ActiveFlowInstanceDescriptor {
-	field, err := runtimecontracts.ParseTemplateInstanceField(strings.TrimPrefix(keyField, "entity."))
-	if err != nil || keyField != "entity."+field.Path() {
-		return nil
-	}
-	key := []runtimecontracts.TemplateInstanceKeyValue{{Field: field, Value: keyValue}}
-	var selected []ActiveFlowInstanceDescriptor
-	for _, descriptor := range descriptors {
-		if descriptor.FlowTemplate == templateID && runtimepinrouting.ConnectInstanceKeyDescriptorMatches(key, runtimepinrouting.Descriptor{
-			AddressFields: descriptor.AddressFields,
-		}) {
-			selected = append(selected, descriptor)
-		}
-	}
-	return selected
-}
-
-func connectRoutePlanScopedDescriptors(descriptors []ActiveFlowInstanceDescriptor, templateIDs, instancePaths []string) []ActiveFlowInstanceDescriptor {
-	var selected []ActiveFlowInstanceDescriptor
-	for _, descriptor := range descriptors {
-		if slices.Contains(templateIDs, descriptor.FlowTemplate) || slices.Contains(instancePaths, descriptor.FlowInstance) {
-			selected = append(selected, descriptor)
-		}
-	}
-	return selected
-}
-
 func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 	fields, err := testFlowActivationConstructorFields(req)
 	if err != nil {
@@ -970,39 +921,9 @@ func (s *connectRoutePlanConcurrentLifecycleStore) ListActiveFlowInstanceDescrip
 	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID, s.constructionSource), nil
 }
 
-func (s *connectRoutePlanConcurrentLifecycleStore) ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs, instancePaths []string) ([]ActiveFlowInstanceDescriptor, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.flowInstanceDescriptorCalls++
-	return connectRoutePlanScopedDescriptors(
-		exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID, s.constructionSource),
-		templateIDs, instancePaths,
-	), nil
-}
-
-func (s *connectRoutePlanConcurrentLifecycleStore) ListActiveFlowInstanceDescriptorsForKey(_ context.Context, runID, templateID, keyField, keyValue string) ([]ActiveFlowInstanceDescriptor, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.flowInstanceDescriptorCalls++
-	return connectRoutePlanKeyedDescriptors(
-		exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID, s.constructionSource),
-		templateID, keyField, keyValue,
-	), nil
-}
-
 func (s *connectRoutePlanForbiddenDescriptorStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]ActiveFlowInstanceDescriptor, error) {
 	s.descriptorReads++
 	return nil, errors.New("retired descriptor membership read")
-}
-
-func (s *connectRoutePlanForbiddenDescriptorStore) ListActiveFlowInstanceDescriptorsForScope(context.Context, string, []string, []string) ([]ActiveFlowInstanceDescriptor, error) {
-	s.descriptorReads++
-	return nil, errors.New("retired scoped descriptor membership read")
-}
-
-func (s *connectRoutePlanForbiddenDescriptorStore) ListActiveFlowInstanceDescriptorsForKey(context.Context, string, string, string, string) ([]ActiveFlowInstanceDescriptor, error) {
-	s.descriptorReads++
-	return nil, errors.New("retired keyed descriptor membership read")
 }
 
 func (s *connectRoutePlanConcurrentLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {

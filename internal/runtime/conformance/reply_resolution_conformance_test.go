@@ -1137,14 +1137,6 @@ func (s *replyConformanceStore) ListActiveFlowInstanceDescriptors(context.Contex
 	return nil, nil
 }
 
-func (s *replyConformanceStore) ListActiveFlowInstanceDescriptorsForScope(context.Context, string, []string, []string) ([]bus.ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-
-func (s *replyConformanceStore) ListActiveFlowInstanceDescriptorsForKey(context.Context, string, string, string, string) ([]bus.ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-
 func replyConformanceTargetOwners() []bus.ActiveTargetDescriptor {
 	out := make([]bus.ActiveTargetDescriptor, 0, 2)
 	for _, accountID := range []string{"account-a", "account-b"} {
