@@ -93,7 +93,6 @@ type routeFlowTemplate struct {
 }
 
 type routeSubscriberTemplate struct {
-	IDTemplate    string
 	Kind          subscriberKind
 	Patterns      []routeSubscriberTemplatePattern
 	AgentNamePlan semanticview.AgentNamePlan
@@ -127,10 +126,8 @@ func subscriberRecipient(kind subscriberKind, id string, node runtimeidentity.Ex
 type routeResolvedPattern struct {
 	subscription   semanticview.AuthoredSubscriptionAdmission
 	EventPattern   string
-	MatchPattern   string
 	routeSource    subscriberRouteSource
 	LocalizedEvent string
-	RoutePath      string
 }
 
 func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
@@ -345,14 +342,6 @@ func routeApplyResolvedPattern(subscriber Subscriber, resolved routeResolvedPatt
 	subscriber.subscription = resolved.subscription
 	subscriber.routeSource = resolved.routeSource
 	subscriber.LocalizedEvent = eventidentity.Normalize(resolved.LocalizedEvent)
-	if matchPattern := eventidentity.Normalize(resolved.MatchPattern); matchPattern != "" {
-		subscriber.MatchPattern = matchPattern
-	}
-	if subscriber.Path == "" {
-		if routePath := eventidentity.Normalize(resolved.RoutePath); routePath != "" {
-			subscriber.Path = routePath
-		}
-	}
 	return subscriber
 }
 
@@ -435,13 +424,9 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 		return nil, err
 	}
 	for _, declaration := range nodes {
-		entry := declaration.Entry
 		handlerNode := declaration.Node
 		semanticNodeID := handlerNode.NodeID()
-		patterns := runtimecontracts.EffectiveSystemNodeSubscriptions(entry)
-		if source != nil {
-			patterns = source.ExecutableNodeRuntimeSubscriptions(handlerNode)
-		}
+		patterns := source.ExecutableNodeRuntimeSubscriptions(handlerNode)
 		if len(patterns) == 0 {
 			continue
 		}
@@ -471,8 +456,7 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 }
 
 type routeExecutableNodeDeclaration struct {
-	Node  runtimeidentity.ExecutableNode
-	Entry runtimecontracts.SystemNodeContract
+	Node runtimeidentity.ExecutableNode
 }
 
 func routeExecutableNodeDeclarations(source semanticview.Source, flowPath string, expected map[string]runtimecontracts.SystemNodeContract) ([]routeExecutableNodeDeclaration, error) {
@@ -494,7 +478,7 @@ func routeExecutableNodeDeclarations(source semanticview.Source, flowPath string
 			return nil, fmt.Errorf("route subscriber node %q has multiple exact declaration owners in flow %q", record.LogicalID, flowPath)
 		}
 		found[record.LogicalID] = struct{}{}
-		out = append(out, routeExecutableNodeDeclaration{Node: node, Entry: record.Entry})
+		out = append(out, routeExecutableNodeDeclaration{Node: node})
 	}
 	for nodeID := range expected {
 		if _, ok := found[nodeID]; !ok {
