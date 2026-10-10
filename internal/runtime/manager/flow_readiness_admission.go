@@ -122,7 +122,6 @@ func (am *AgentManager) reconcileCommittedDynamicFlowRuntimeReadinessPlan(
 	}
 	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(dynamicFlowRuntimeReadinessAdmission{
 		ctx: ctx, key: key, plan: normalized, attemptOrdinal: attemptOrdinal, source: admittedSource,
-		topologyDurable: true,
 	})
 }
 

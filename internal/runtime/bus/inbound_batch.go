@@ -255,7 +255,6 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		}
 		command.Activations = ownedActivations
 		if len(command.Activations) == 0 {
-			command.RouteTopology = nil
 		}
 		if err := command.Validate(); err != nil {
 			return release(fmt.Errorf("canonicalize inbound activation ownership: %w", err))

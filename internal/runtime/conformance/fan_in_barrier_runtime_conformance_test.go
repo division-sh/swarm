@@ -869,7 +869,6 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 		DecisionCardDraftExpiry: backend,
 		HumanTaskExpiry:         backend,
 		DeliveryRuntime:         eventBus,
-		FlowRoutes:              eventBus,
 		GenericSchedules:        schedules, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 

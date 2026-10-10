@@ -302,7 +302,14 @@ func assertActualMutationLedger(t *testing.T, ctx context.Context, s exactFactSt
 			}
 		}
 		for _, row := range ledger {
-			if row.Family == string(runforkrevision.FamilyEntityMutations) && !actual[row.Key] {
+			if row.Family != string(runforkrevision.FamilyEntityMutations) {
+				continue
+			}
+			body, ok := row.Body.(map[string]any)
+			if !ok || body["entity_id"] == nil {
+				t.Fatalf("generated mutation lacks entity coordinate: %#v", row)
+			}
+			if body["entity_id"] == entityID && !actual[row.Key] {
 				t.Fatalf("phantom generated mutation key=%s", row.Key)
 			}
 		}

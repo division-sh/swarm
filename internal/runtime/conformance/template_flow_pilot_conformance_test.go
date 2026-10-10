@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"strings"
@@ -386,8 +387,8 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		t.Fatal(err)
 	}
 	receipts := conformanceConstructionReceipts{}
-	receipts.add(t, source, parent.RunID(), root)
-	receipts.add(t, source, parent.RunID(), portfolio)
+	receipts.add(t, source, parent.RunID(), root, "")
+	receipts.add(t, source, parent.RunID(), portfolio, "")
 	accounts := map[string]runtimeflowidentity.Instance{}
 	for _, key := range []string{"acct-a", "acct-b"} {
 		instance, err := runtimeflowidentity.KeyedChild(source, root, "account", key)
@@ -395,7 +396,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 			t.Fatal(err)
 		}
 		accounts[key] = instance
-		receipts.add(t, source, parent.RunID(), instance)
+		receipts.add(t, source, parent.RunID(), instance, key)
 	}
 	store := &fanOutPinRouteMemoryStore{
 		sourceArtifactFact: sourceFact,
@@ -413,6 +414,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		ContractBundle:     source,
 		SourceArtifactFact: sourceFact,
 		Durable: runtimebus.DurableDependencies{
+			Instances:                receipts,
 			ConstructionPublications: receipts,
 			ActiveAgents:             store,
 			ActiveFlows:              store,
@@ -549,21 +551,20 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 		t.Fatal(err)
 	}
 	receipts := conformanceConstructionReceipts{}
-	receipts.add(t, source, runID, root)
-	receipts.add(t, source, runID, portfolio)
+	receipts.add(t, source, runID, root, "")
+	receipts.add(t, source, runID, portfolio, "")
 	for index, key := range []string{"acct-a-one", "acct-a-two"} {
 		instance, err := runtimeflowidentity.KeyedChild(source, root, "account", key)
 		if err != nil {
 			t.Fatal(err)
 		}
 		instance.EntityID = runtimeflowidentity.EntityID(fmt.Sprintf("ent-a%d", index+1))
-		receipts.add(t, source, runID, instance)
+		receipts.add(t, source, runID, instance, "acct-a")
 	}
 	tests := []struct {
 		name               string
 		payload            json.RawMessage
 		flowInstances      []runtimebus.ActiveFlowInstanceDescriptor
-		wantFailure        string
 		wantAdmissionError string
 	}{
 		{
@@ -578,7 +579,6 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 				{RunID: eventtest.UUID("run-notify-all-children"), InstanceID: "acct-a-one", EntityID: runtimeflowidentity.EntityID("ent-a1"), FlowInstance: "account/acct-a-one", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
 				{RunID: eventtest.UUID("run-notify-all-children"), InstanceID: "acct-a-two", EntityID: runtimeflowidentity.EntityID("ent-a2"), FlowInstance: "account/acct-a-two", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
 			},
-			wantFailure: runtimepinrouting.ConnectFailureTargetAmbiguous.Code(),
 		},
 	}
 	for _, tc := range tests {
@@ -593,6 +593,7 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 				ContractBundle:     source,
 				SourceArtifactFact: sourceFact,
 				Durable: runtimebus.DurableDependencies{
+					Instances:                receipts,
 					ConstructionPublications: receipts,
 					ActiveAgents:             store,
 					ActiveFlows:              store,
@@ -629,11 +630,9 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 				}
 				return
 			}
-			if err != nil {
-				t.Fatalf("CheckPublishRecipientPlan: %v", err)
-			}
-			if preflight.TargetFailure != tc.wantFailure {
-				t.Fatalf("target failure = %q, want %q", preflight.TargetFailure, tc.wantFailure)
+			var corruption *runtimepipeline.FlowInstanceConstructionCorruption
+			if !errors.As(err, &corruption) {
+				t.Fatalf("duplicate native selector was not construction corruption: %v", err)
 			}
 			if len(preflight.DeliveryRoutes) != 0 || len(preflight.Recipients) != 0 ||
 				len(preflight.RoutedRecipients) != 0 || len(preflight.SubscriptionRecipients) != 0 {

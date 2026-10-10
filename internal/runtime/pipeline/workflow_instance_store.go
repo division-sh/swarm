@@ -670,6 +670,7 @@ type workflowInstanceStore struct {
 	standingServices       StandingServicePersistence
 	decisionRoutes         WorkflowDecisionRouteOwner
 	instanceReader         WorkflowInstancePersistenceReader
+	instanceIndex          FlowInstanceIndexReader
 	entityStateReader      WorkflowEntityStatePersistenceReader
 	entityCollectionReader WorkflowEntityCollectionPersistenceReader
 	targetReader           WorkflowTargetPersistenceReader
@@ -715,6 +716,7 @@ type WorkflowPersistence struct {
 // surface. It exposes semantic operations only; transaction, backend, and SQL
 // capabilities remain private to the selected store.
 type WorkflowPersistenceOwner interface {
+	FlowInstanceIndexReader
 	entityquery.Reader
 	runtimeworkflowroute.RecoveryReader
 	runtimeactivityresult.Reader
@@ -745,7 +747,7 @@ func NewWorkflowPersistence(owner WorkflowPersistenceOwner) WorkflowPersistence 
 		engineMutations: owner, cardMutations: owner, timerOccurrences: owner,
 		fanOutObligations: owner,
 		timerActivations:  owner, readiness: owner, standingServices: owner,
-		decisionRoutes: owner, instanceReader: owner,
+		decisionRoutes: owner, instanceReader: owner, instanceIndex: owner,
 		entityStateReader: owner, entityCollectionReader: owner, targetReader: owner,
 	}}
 }
@@ -770,7 +772,21 @@ func (p WorkflowPersistence) Valid() bool {
 		p.store.fanOutObligations != nil &&
 		p.store.timerOccurrences != nil && p.store.timerActivations != nil && p.store.readiness != nil &&
 		p.store.standingServices != nil && p.store.decisionRoutes != nil && p.store.instanceReader != nil &&
-		p.store.entityStateReader != nil && p.store.entityCollectionReader != nil && p.store.targetReader != nil
+		p.store.entityStateReader != nil && p.store.entityCollectionReader != nil && p.store.targetReader != nil && p.store.instanceIndex != nil
+}
+
+func (p WorkflowPersistence) LookupFlowInstance(ctx context.Context, request FlowInstanceLookupRequest) (FlowInstanceObservation, bool, error) {
+	if p.empty() || p.store.instanceIndex == nil {
+		return FlowInstanceObservation{}, false, errors.New("workflow persistence has no instance index owner")
+	}
+	return p.store.instanceIndex.LookupFlowInstance(ctx, request)
+}
+
+func (p WorkflowPersistence) ListFlowInstances(ctx context.Context, scope FlowInstanceLookupScope) ([]FlowInstanceObservation, error) {
+	if p.empty() || p.store.instanceIndex == nil {
+		return nil, errors.New("workflow persistence has no instance index owner")
+	}
+	return p.store.instanceIndex.ListFlowInstances(ctx, scope)
 }
 
 // LoadDynamicFlowRuntimeReadiness returns the exact durable readiness owner for

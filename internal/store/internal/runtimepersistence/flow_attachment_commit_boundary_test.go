@@ -27,6 +27,7 @@ func TestFlowAttachmentNativeLostAckAfterRebindBothStores(t *testing.T) {
 				"review/entities.yaml": "review_item:\n  request_id: text\n",
 				"review/events.yaml":   "task.started:\n",
 			}, nil, ownStoreTestAgentManager, nil)
+			f.constructKeylessRoot(t)
 			request := f.request("business-key", "rebind-ack", "unused")
 			plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, request)
 			if err != nil {
@@ -142,6 +143,7 @@ func TestFlowAttachmentNativeCommitAcknowledgmentBothStores(t *testing.T) {
 						"review/entities.yaml": "review_item:\n  request_id: text\n",
 						"review/events.yaml":   "task.started:\n",
 					}, nil, ownStoreTestAgentManager, nil)
+					f.constructKeylessRoot(t)
 					ctx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
 					defer cancel()
 					req := f.request("business-key", "commit-boundary", "unused")

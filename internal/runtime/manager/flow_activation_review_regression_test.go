@@ -109,8 +109,8 @@ func TestFlowReadinessPassUsesAtMostTwoPublicLoads(t *testing.T) {
 			if loads != 2 {
 				t.Fatalf("%s used %d public readiness loads, want two bounded observations", path, loads)
 			}
-			if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-				t.Fatal("bounded pass did not retain the exact route")
+			if !flowActivationAttemptReadyForTest(am, ctx, req) {
+				t.Fatal("bounded pass did not retain the exact activation")
 			}
 		})
 	}
@@ -196,8 +196,8 @@ func TestStartupFinalizationConsumesRetainedPreparationAttempt(t *testing.T) {
 			if err != nil || !found || row.Pending() || row.AttemptOrdinal != prepared.Ordinal() || row.AttemptState != "accepted" {
 				t.Fatalf("finalized exact preparation: found=%v row=%#v err=%v", found, row, err)
 			}
-			if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) || len(instances.creates) != 1 {
-				t.Fatalf("handoff repeated construction or lost route: constructions=%d", len(instances.creates))
+			if !flowActivationAttemptReadyForTest(restarted, ctx, req) || len(instances.creates) != 1 {
+				t.Fatalf("handoff repeated construction or lost activation: constructions=%d", len(instances.creates))
 			}
 		})
 	}
@@ -252,13 +252,13 @@ func TestFlowActivationPostMarkFailureReturnsToPendingRetry(t *testing.T) {
 				}
 			}
 			instances.readyAcknowledgementErr = nil
-			if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-				t.Fatal("failed attempt retained a route")
+			if flowActivationAttemptReadyForTest(am, ctx, req) {
+				t.Fatal("failed attempt retained executable authority")
 			}
 			if err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
+			if !flowActivationAttemptReadyForTest(am, ctx, req) {
 				t.Fatal("retry omitted the abandoned topology")
 			}
 		})
@@ -557,7 +557,7 @@ func TestStartupTopologyRefusesUnfinalizedPostSnapshotConstruction(t *testing.T)
 		t.Fatalf("post-snapshot construction bypassed its exact finalizer: %v", err)
 	}
 	after, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, plan.Readiness.RunID, unfinalized.Instance.Route())
-	if err != nil || !found || !reflect.DeepEqual(before, after) || bus.HasFlowInstanceRoute(testActivationFlowIdentity(unfinalized)) {
+	if err != nil || !found || !reflect.DeepEqual(before, after) || flowActivationAttemptReadyForTest(am, ctx, unfinalized) {
 		t.Fatalf("refusal changed unfinalized topology: before=%+v after=%+v found=%v err=%v", before, after, found, err)
 	}
 	if err := am.Shutdown(); err != nil {

@@ -31,7 +31,6 @@ import (
 	storeingress "github.com/division-sh/swarm/internal/store/internal/ingresspersistence"
 	storemailbox "github.com/division-sh/swarm/internal/store/internal/mailboxpersistence"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
-	storeroutingrules "github.com/division-sh/swarm/internal/store/internal/routingrules"
 	storerunbundle "github.com/division-sh/swarm/internal/store/internal/runbundle"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
@@ -117,11 +116,6 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.operatorEntityPostgres = operatorEntity
-	routingRules, err := storeroutingrules.NewPostgres(backend)
-	if err != nil {
-		return nil, err
-	}
-	store.routingPostgresOwner = routingRules
 	replyContexts, err := storereplycontext.NewPostgres(backend)
 	if err != nil {
 		return nil, err

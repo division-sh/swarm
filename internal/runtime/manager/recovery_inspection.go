@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -14,7 +13,6 @@ import (
 type RecoverableStateReader interface {
 	InspectDynamicFlowRuntimeReadinessForSource(context.Context, correlation.SourceArtifactFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error)
 	LoadAgents(context.Context) ([]PersistedAgent, error)
-	ListFlowInstanceRoutes(context.Context) ([]flowidentity.RunScopedFlowInstance, error)
 	ListSelectedContractRouteRecoveryRecords(context.Context) ([]SelectedContractRouteRecoveryRecord, error)
 	GlobalWorkPresence(context.Context) (pipelineobligation.GlobalWorkPresence, error)
 }
@@ -33,7 +31,10 @@ func InspectRecoverableStateSnapshot(ctx context.Context, source correlation.Sou
 	if err != nil {
 		return RecoverableStateSnapshot{}, fmt.Errorf("inspect source-scoped dynamic flow runtime readiness: %w", err)
 	}
-	snapshot := RecoverableStateSnapshot{PendingDynamicFlowRuntimeReadinessCount: len(projection.CurrentPending)}
+	snapshot := RecoverableStateSnapshot{
+		PendingDynamicFlowRuntimeReadinessCount: len(projection.CurrentPending),
+		PersistedFlowAttachmentCount:            len(projection.CurrentPending) + len(projection.CurrentCompleted) + len(projection.SourceTransitionRequired),
+	}
 	for _, item := range projection.SourceTransitionRequired {
 		if item.Pending() {
 			snapshot.PendingDynamicFlowRuntimeReadinessCount++
@@ -44,11 +45,6 @@ func InspectRecoverableStateSnapshot(ctx context.Context, source correlation.Sou
 		return RecoverableStateSnapshot{}, fmt.Errorf("load persisted agents: %w", err)
 	}
 	snapshot.PersistedAgentCount = len(agents)
-	routes, err := reader.ListFlowInstanceRoutes(ctx)
-	if err != nil {
-		return RecoverableStateSnapshot{}, fmt.Errorf("list persisted flow instance routes: %w", err)
-	}
-	snapshot.PersistedFlowInstanceRouteCount = len(routes)
 	recoveries, err := reader.ListSelectedContractRouteRecoveryRecords(ctx)
 	if err != nil {
 		return RecoverableStateSnapshot{}, fmt.Errorf("list selected-contract route recoveries: %w", err)
@@ -79,19 +75,6 @@ func (r managerRecoveryReads) LoadAgents(ctx context.Context) ([]PersistedAgent,
 		return nil, errors.New("persisted agent reader is required")
 	}
 	return r.am.store.LoadAgents(ctx)
-}
-
-func (r managerRecoveryReads) ListFlowInstanceRoutes(ctx context.Context) ([]flowidentity.RunScopedFlowInstance, error) {
-	if r.am.bus == nil {
-		return nil, errors.New("flow instance route reader is required")
-	}
-	reader, ok := r.am.bus.Store().(interface {
-		ListFlowInstanceRoutes(context.Context) ([]flowidentity.RunScopedFlowInstance, error)
-	})
-	if !ok || reader == nil {
-		return nil, errors.New("flow instance route reader is required")
-	}
-	return reader.ListFlowInstanceRoutes(ctx)
 }
 
 func (r managerRecoveryReads) ListSelectedContractRouteRecoveryRecords(ctx context.Context) ([]SelectedContractRouteRecoveryRecord, error) {

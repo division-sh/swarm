@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"go/types"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -27,14 +29,18 @@ import (
 func TestTemplateInstanceSemanticOwnersRemainTypedAndOpaque(t *testing.T) {
 	templateFieldType := reflect.TypeOf(runtimecontracts.TemplateInstanceField{})
 	modeType := reflect.TypeOf(runtimecontracts.FlowInputResolutionMode(0))
-	actionType := reflect.TypeOf(runtimebus.TemplateInstanceLifecycleAction(0))
 
 	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimecontracts.FlowSchemaDocument{}), "Instance", templateFieldType)
 	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimecontracts.TemplateInstanceContract{}), "Field", templateFieldType)
 	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimecontracts.FlowConnect{}), "Resolution", modeType)
 	assertSemanticOwnerMethodResult(t, reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKey{}), "Field", templateFieldType)
 	assertSemanticOwnerMethodResult(t, reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKey{}), "Mode", modeType)
-	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimebus.TemplateInstanceLifecycleDecision{}), "Action", actionType)
+	observationType := reflect.TypeOf(pipeline.FlowInstanceObservation{})
+	for i := 0; i < observationType.NumField(); i++ {
+		if observationType.Field(i).IsExported() {
+			t.Fatalf("index observation exposes mutable authority: %s", observationType.Field(i).Name)
+		}
+	}
 
 	if templateFieldType.Kind() != reflect.Struct || templateFieldType.NumField() != 1 {
 		t.Fatalf("TemplateInstanceField shape = %s/%d fields, want one-field opaque struct", templateFieldType.Kind(), templateFieldType.NumField())
@@ -42,7 +48,7 @@ func TestTemplateInstanceSemanticOwnersRemainTypedAndOpaque(t *testing.T) {
 	if field := templateFieldType.Field(0); field.IsExported() || field.Type.Kind() != reflect.String {
 		t.Fatalf("TemplateInstanceField storage = %#v, want unexported string admitted only by parser", field)
 	}
-	for name, semanticType := range map[string]reflect.Type{"FlowInputResolutionMode": modeType, "TemplateInstanceLifecycleAction": actionType} {
+	for name, semanticType := range map[string]reflect.Type{"FlowInputResolutionMode": modeType} {
 		if semanticType.Kind() == reflect.String {
 			t.Fatalf("%s regressed to free string", name)
 		}
@@ -79,7 +85,7 @@ func TestCompiledRoutingTypesDoNotImplementStringer(t *testing.T) {
 		runtimecontracts.TemplateInstanceField{},
 		runtimecontracts.FlowInputResolutionMode(0),
 		semanticview.ConnectorImportSource{},
-		runtimebus.TemplateInstanceLifecycleAction(0),
+		pipeline.FlowInstanceObservation{},
 		events.DeliveryRouteIdentity{},
 		events.RoutingSourceKind(0),
 		events.RoutingSourceAuthority(0),
@@ -350,6 +356,9 @@ func TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority(t *testing.
 	}
 
 	repoRoot := canonicalrouting.RepoRoot(t)
+	if _, err := os.Stat(filepath.Join(repoRoot, "internal/runtime/bus/template_instance_lifecycle.go")); !os.IsNotExist(err) {
+		t.Fatalf("retired template lifecycle interpreter survived or could not be checked: %v", err)
+	}
 	retiredFunctions := map[string]struct{}{
 		"connectReceiverPinCollisionIssues":       {},
 		"connectReceiverPinFact":                  {},
@@ -361,6 +370,18 @@ func TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority(t *testing.
 		"eventReferencesMatch":                    {},
 		"eventReferencesOverlap":                  {},
 		"routeFromEvent":                          {},
+		"constructedChildConnectTarget":           {},
+		"descriptorsForPlans":                     {},
+		"resolveInstanceContract":                 {},
+		"addProviderSourceLookupPaths":            {},
+		"addConnectRecipientLocked":               {},
+		"connectRecipientAdmissionsForRunLocked":  {},
+		"connectRecipientAdmissionsForRun":        {},
+		"connectRecipientAdmissionsForTargets":    {},
+		"resolveRoutedSubscribersForEvent":        {},
+		"installConstructionIdentityPreview":      {},
+		"planAtGeneration":                        {},
+		"exhaustedConnectRoutePlanSnapshotError":  {},
 	}
 	guardedFiles := []string{
 		"internal/events/types.go",
@@ -368,7 +389,9 @@ func TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority(t *testing.
 		"internal/runtime/core/pinrouting/pinrouting.go",
 		"internal/runtime/core/pinrouting/flow_input_producer.go",
 		"internal/runtime/bus/connect_route_plan_dispatch.go",
-		"internal/runtime/bus/template_instance_lifecycle.go",
+		"internal/runtime/bus/connect_instance_selection.go",
+		"internal/runtime/bus/indexed_connect_receivers.go",
+		"internal/runtime/bus/indexed_pubsub_receivers.go",
 		"internal/runtime/bus/routing_derivation.go",
 		"internal/runtime/bus/eventbus.go",
 		"internal/runtime/bus/eventbus_routing.go",

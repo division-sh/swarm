@@ -419,7 +419,34 @@ func TestAdmitContractFrontier_SelectedDeadLetterRemainsExecutableFrontier(t *te
 	}
 }
 
-func TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes(t *testing.T) {
+func TestSelectedContractPubsubDeclarationRoleRespectsKeyedAncestry(t *testing.T) {
+	initial := testContractFrontierTemplateSource(t)
+	bundle, found := semanticview.Bundle(initial)
+	if !found {
+		t.Fatal("fixture requires its admitted flow tree")
+	}
+	parent := bundle.FlowTree.ByID["review"]
+	parent.Children = append(parent.Children, runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review/local"}, Path: "review/local", Parent: parent,
+		Schema: runtimecontracts.FlowSchemaDocument{Name: "local"},
+	})
+	child := &parent.Children[len(parent.Children)-1]
+	bundle.FlowTree.ByID["review/local"] = child
+	bundle.FlowTree.ByPath["review/local"] = child
+	bundle.FlowSchemas["review/local"] = child.Schema
+	source := semanticview.Wrap(mustCompileContractFrontierBundle(bundle))
+	for _, test := range []struct {
+		flow string
+		role bool
+	}{{".", true}, {"review", false}, {"review/local", false}} {
+		role, err := selectedContractPubsubDeclarationRole(source, test.flow)
+		if err != nil || role != test.role {
+			t.Fatalf("flow=%s declaration role=%t want=%t err=%v", test.flow, role, test.role, err)
+		}
+	}
+}
+
+func TestAdmitContractFrontier_BindsFixedSourceFlowInstanceDefinitions(t *testing.T) {
 	plan := testRunForkPlan("review/inst-1/task.started", runfork.RunForkPendingClassificationPending, "node", "source-node")
 	plan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "review", "review/inst-1")
 	source := testContractFrontierTemplateSource(t)
@@ -642,6 +669,9 @@ func testContractFrontierSource(nodeID string) semanticview.Source {
 		Schema:   runtimecontracts.FlowSchemaDocument{Connect: []runtimecontracts.FlowConnect{{SourceLine: 1, Event: "scan.requested", From: "producer", To: "consumer"}}},
 		Children: []runtimecontracts.FlowContractView{producer, consumer},
 	}
+	for i := range root.Children {
+		root.Children[i].Parent = &root
+	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics:   runtimecontracts.WorkflowSemanticView{Name: "test-workflow", Version: "v-test"},
 		Events:      map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
@@ -800,6 +830,15 @@ func testContractFrontierConnectSource(t testing.TB, producerMode string) semant
 }
 
 func mustCompileContractFrontierBundle(bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
+	if root := bundle.FlowTree.Root; root != nil {
+		if bundle.FlowTree.ByID == nil {
+			bundle.FlowTree.ByID = make(map[string]*runtimecontracts.FlowContractView)
+		}
+		bundle.FlowTree.ByID[root.Paths.FlowPath] = root
+		for i := range root.Children {
+			root.Children[i].Parent = root
+		}
+	}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		panic(err)
 	}

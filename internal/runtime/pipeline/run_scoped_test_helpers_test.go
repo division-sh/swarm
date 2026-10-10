@@ -105,6 +105,7 @@ func newWorkflowPersistenceFixtureStore(runner *recordingRuntimeMutationRunner) 
 	store := &workflowInstanceStore{
 		runLifecycle:      runner,
 		fanOutObligations: unavailablePipelineTestFanOutOwner{},
+		instanceIndex:     unavailablePipelineTestInstanceIndex{},
 	}
 	if owner, ok := any(runner).(entityquery.Reader); ok {
 		store.entityQuery = owner
@@ -146,6 +147,16 @@ func newWorkflowPersistenceFixtureStore(runner *recordingRuntimeMutationRunner) 
 	}
 	store.standingServices = pipelineTestStandingServices{store: store}
 	return store
+}
+
+type unavailablePipelineTestInstanceIndex struct{}
+
+func (unavailablePipelineTestInstanceIndex) LookupFlowInstance(context.Context, FlowInstanceLookupRequest) (FlowInstanceObservation, bool, error) {
+	return FlowInstanceObservation{}, false, errors.New("component fixture requires a native instance-index owner")
+}
+
+func (unavailablePipelineTestInstanceIndex) ListFlowInstances(context.Context, FlowInstanceLookupScope) ([]FlowInstanceObservation, error) {
+	return nil, errors.New("component fixture requires a native instance-index owner")
 }
 
 type pipelineTestStandingServices struct {

@@ -583,7 +583,7 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 	}, manager.AgentManagerOptions{
 		SourceArtifactFact: fact, SemanticSource: source, DeliveryStore: selected, ExecutionPosture: executionposture.Live,
 		WorkflowInstances: coordinator,
-		PersistenceRoles:  manager.PersistenceRoles{AgentRoutes: f.bus, RouteInstaller: f.bus, RouteVerifier: f.bus, RouteRestorer: f.bus, CreationPublisher: f.bus, DeliveryRuntime: f.bus, LifecycleState: f.raw.(manager.AgentLifecycleStateReader)},
+		PersistenceRoles:  manager.PersistenceRoles{AgentRoutes: f.bus, CreationPublisher: f.bus, DeliveryRuntime: f.bus, LifecycleState: f.raw.(manager.AgentLifecycleStateReader)},
 		WorkOwner:         f.occurrence, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, f.raw.(manager.ManagerPersistence))
 	f.bus.SetCommittedAgentReadinessFinalizer(bus.CommittedAgentReadinessFinalizerFunc(am.FinalizeCommittedAgentReadiness))

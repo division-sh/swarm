@@ -799,10 +799,6 @@ func (s *PostgresStore) LoadReplyContext(ctx context.Context, id string) (replyc
 	return s.replyPostgresOwner.LoadReplyContext(ctx, id)
 }
 
-func (s *PostgresStore) LoadRoutingRules(ctx context.Context) ([]manager.PersistedRoutingRule, error) {
-	return s.routingPostgresOwner.LoadRoutingRules(ctx)
-}
-
 func (s *PostgresStore) LoadRunClockSchedules(ctx context.Context, runID string) ([]genericschedule.ClockReadback, error) {
 	return s.operatorRunPostgres.LoadRunClockSchedules(ctx, runID)
 }
@@ -1329,10 +1325,6 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, lease *sessions.
 
 func (s *PostgresStore) UpsertFlowInstanceRoute(ctx context.Context, route bus.FlowInstanceRouteRecord) error {
 	return s.pipelinePostgresOwner.UpsertFlowInstanceRoute(ctx, route)
-}
-
-func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule manager.PersistedRoutingRule) error {
-	return s.routingPostgresOwner.UpsertRoutingRule(ctx, rule)
 }
 
 func (s *PostgresStore) ValidateInboundPublicationIntegrity(ctx context.Context) error {
