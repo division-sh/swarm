@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -49,6 +50,7 @@ type serveNativeProtocolPeer struct {
 	fromLID       types.JID
 	sent          chan servedNativeMessage
 	malformedAck  string
+	withholdAck   string
 	clientTrust   servedNativeClientTrust
 }
 
@@ -444,7 +446,11 @@ func (p *serveNativeProtocolPeer) acceptMessage(wire *whatsappfixture.Transport,
 	}
 	p.mu.Lock()
 	malformed := message.GetConversation() == p.malformedAck && p.malformedAck != ""
+	withheld := p.withholdAck != "" && strings.HasPrefix(message.GetConversation(), p.withholdAck)
 	p.mu.Unlock()
+	if withheld {
+		return nil
+	}
 	timestamp := time.Now().Unix()
 	if malformed {
 		timestamp = 0
