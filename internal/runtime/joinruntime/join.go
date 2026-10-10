@@ -315,10 +315,11 @@ func (a Activation) HasMember(member string) bool {
 
 func (a Activation) Completed() int { return len(a.Outputs) }
 
-// ImmediateEmptyCompletion has no original timeout: the lifecycle writer closes
-// an empty arm and creates only its completion schedule in the same mutation.
-func (a Activation) ImmediateEmptyCompletion() bool {
-	return a.Expected() == 0 && a.Status == StatusClosed && a.CloseReason == CloseReasonComplete &&
+// EmptyCompletionWasArmed identifies the original schedule membership, not its
+// current outcome. Stage exit can cancel this completion without ever admitting
+// a timeout; Validate checks the current lifecycle independently.
+func (a Activation) EmptyCompletionWasArmed() bool {
+	return a.Expected() == 0 &&
 		a.TimerHandle().Kind() == timeridentity.TimerHandleJoinComplete && a.FireAt.Equal(a.ArmedAt)
 }
 

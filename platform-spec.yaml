@@ -21002,8 +21002,10 @@ run_model:
         preparation fingerprint binds the exact retained join schedule records. Generic schedule identity is the
         canonical scoped key, never the schedule key alone; unrelated owners may lawfully use the same key.
         A pending nonempty completion retains its completion schedule and the original canceled timeout separately.
-        An empty arm proven closed-complete at its arming coordinate has only its completion schedule, even with a
-        declared deadline; reconstruction neither demands nor invents a timeout that was never created.
+        An empty membership with a completion handle firing at its retained arming coordinate has only its original
+        completion schedule, even with a declared deadline. Historical membership is independent of later legal
+        outcome changes, including stage-exit cancellation; current lifecycle evidence is validated separately.
+        Reconstruction neither demands nor invents a timeout that was never created.
         Child commands project through the existing exact construction, stage-entry and generation correspondence,
         preserving due and execution mode. Source lifecycle evidence stays separate: projection cannot turn a
         published occurrence or canceled companion into fresh executable work. Immutable arm correspondence alone is
