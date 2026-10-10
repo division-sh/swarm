@@ -2742,6 +2742,12 @@
     "body_sha256": "3aac4f75f11f583948f0803716fe6b59529b3ef0eb4a911095f79db6e9bb0439"
   },
   {
+    "owner": "internal/serveapp/channel_onboarding.go::serveChannelContextCandidates",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21",
+    "body_sha256": "366c52ef3dcba92f5906f22c05a0d533aa3174d9a536d2db9931b86559812c30"
+  },
+  {
     "owner": "internal/serveapp/channel_onboarding.go::serveChannelDeclarationTarget",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
@@ -2751,7 +2757,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::serveChannelOnboardingCatalog",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "e1cd6dbd1a500026eea6df735d2217de7f1f81ca417892a90051f73f7848edb4"
+    "body_sha256": "f02ea7b0b9392dd2a443f597fe02f2e17c703cd5824271b334a576457eec27a1"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::serveDeclaredRegistrationEnabled",
@@ -2764,6 +2770,18 @@
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
     "body_sha256": "3f88247333a34e264493f5f6b49d4ce532ea7164067ca21c634d50f9b1ad5bd9"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_startup.go::newServeChannelProviderOwners",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-startup",
+    "body_sha256": "af0767b14ccbdc669e6c94c42c8bc2334c7dddde01081af8ecaa50b44d62a111"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_startup.go::restoreServeChannelStartup",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-startup",
+    "body_sha256": "e2d604d0686701d3ce8472197f6082297799e94e865b95554c21561d62f3e125"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.ResetStandingService",
@@ -2865,7 +2883,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "279255818e14b3dd93dcdbd950156f0692d962c238ec7ee405c1b54d9131131e"
+    "body_sha256": "6ae759b17adf2f3b4625c53e6fb1b95965abdf21f77bf5d09f308d804d61ae5c"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
