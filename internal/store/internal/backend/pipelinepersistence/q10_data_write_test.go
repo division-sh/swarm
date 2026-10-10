@@ -16,7 +16,7 @@ import (
 // receipts. Unexpected data UPDATEs fail the original sqlmock expectation.
 func TestQ10RequiredCompanionOnUnchangedData(t *testing.T) {
 	for _, postgres := range []bool{false, true} {
-		for _, caseName := range []string{"unchanged", "missing", "foreign_type", "foreign_identity", "foreign_path", "duplicate", "bad_fields", "zero_creation_clock", "zero_update_clock", "reversed_data_clocks", "changed", "integer_to_double", "absent_to_null"} {
+		for _, caseName := range []string{"unchanged", "missing", "foreign_type", "foreign_identity", "foreign_path", "duplicate", "bad_fields", "zero_creation_clock", "zero_update_clock", "reversed_data_clocks", "changed", "integer_to_double", "absent_to_null", "representation_only", "slug_only", "name_only", "backwards_data_clock"} {
 			t.Run(q10Dialect(postgres)+"/"+caseName, func(t *testing.T) {
 				db, mock, err := sqlmock.New()
 				if err != nil {
@@ -61,19 +61,30 @@ func TestQ10RequiredCompanionOnUnchangedData(t *testing.T) {
 				case "absent_to_null":
 					fieldsValue = `{}`
 					record.Fields = []byte(`{"count":null}`)
+				case "representation_only":
+					fieldsValue = `{"count":1.0}`
+					record.Fields = []byte(`{ "count": 1.000 }`)
+				case "slug_only":
+					record.Slug = "renamed-task"
+				case "name_only":
+					record.Name = "Renamed task"
+				case "backwards_data_clock":
+					record.Fields = []byte(`{"count":2}`)
+					record.UpdatedAt = at.Add(-time.Second)
 				}
 				rows := sqlmock.NewRows(columns).AddRow(entity, "work", "task", "work", "done", int64(2), `{}`, `{}`, `{}`, fieldID, fieldPath, fieldTypeValue, fieldsValue)
 				if caseName == "duplicate" {
 					rows.AddRow(entity, "work", "task", "work", "done", int64(2), `{}`, `{}`, `{}`, "3c333333-3333-4333-8333-333333333333", "work", "task", fields)
 				}
 				mock.ExpectQuery(`(?s)^SELECT fi.entity_id, fi.instance_path`).WithArgs(run, entity, "work").WillReturnRows(rows)
-				valid := caseName == "unchanged" || caseName == "changed" || caseName == "integer_to_double" || caseName == "absent_to_null"
+				valid := caseName == "unchanged" || caseName == "changed" || caseName == "integer_to_double" || caseName == "absent_to_null" || caseName == "representation_only" || caseName == "slug_only" || caseName == "name_only"
 				badClock := caseName == "zero_creation_clock" || caseName == "zero_update_clock" || caseName == "reversed_data_clocks"
+				admittedPair := valid || badClock || caseName == "backwards_data_clock"
 				// Bad JSON is diagnosed after the exact PostgreSQL field lock.
-				if postgres && (valid || badClock || caseName == "bad_fields") {
+				if postgres && (admittedPair || caseName == "bad_fields") {
 					mock.ExpectQuery(`(?s)^SELECT entity_id FROM entity_state .* FOR UPDATE$`).WithArgs(run, entity, "work", "task").WillReturnRows(sqlmock.NewRows([]string{"entity_id"}).AddRow(entity))
 				}
-				if valid || badClock {
+				if admittedPair {
 					createdAt, updatedAt := at.Format(time.RFC3339Nano), at.Format(time.RFC3339Nano)
 					switch caseName {
 					case "zero_creation_clock":
@@ -86,8 +97,8 @@ func TestQ10RequiredCompanionOnUnchangedData(t *testing.T) {
 					mock.ExpectQuery(`(?s)^SELECT COALESCE\(slug,''\), COALESCE\(name,''\), created_at, updated_at`).WithArgs(run, entity, "work", "task").WillReturnRows(sqlmock.NewRows([]string{"slug", "name", "created_at", "updated_at"}).AddRow("", "", createdAt, updatedAt))
 				}
 				if valid {
-					if caseName != "unchanged" {
-						mock.ExpectExec(`(?s)^UPDATE entity_state SET slug = .* fields = .* updated_at = .*WHERE`).WithArgs("", "", string(record.Fields), record.UpdatedAt, run, entity, "work", "task").WillReturnResult(sqlmock.NewResult(0, 1))
+					if caseName != "unchanged" && caseName != "representation_only" {
+						mock.ExpectExec(`(?s)^UPDATE entity_state SET slug = .* fields = .* updated_at = .*WHERE`).WithArgs(record.Slug, record.Name, string(record.Fields), record.UpdatedAt, run, entity, "work", "task").WillReturnResult(sqlmock.NewResult(0, 1))
 					}
 					mock.ExpectCommit()
 				} else {
