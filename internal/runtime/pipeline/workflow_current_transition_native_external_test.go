@@ -12,7 +12,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -39,13 +38,14 @@ func TestWorkflowCurrentTransitionNativeBytesAndHistoricalCutsBothStores(t *test
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected, _, reopen := openTimerReplayNativeStore(t, backend)
-			ctx := testAuthorActivityContext(t, context.Background())
 			runID := uuid.NewString()
 			at := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
-			storetest.RequireRunningRun(t, ctx, selected, runID, at)
-			ctx = withLiveGateExecution(correlation.WithRunID(ctx, runID))
 			source := semanticview.Wrap(bundle)
-			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
+			ctx, fact := nativeConstructionContextFixture(t, selected.(storetest.RunFixtureStore), source, runID)
+			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
+				ContractBundle: source, SourceArtifactFact: fact,
+				WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact),
+			})
 			if err != nil {
 				t.Fatal(err)
 			}

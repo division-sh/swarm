@@ -46,7 +46,15 @@ func newTimerReplayCoordinator(t *testing.T, bus *runtimebus.EventBus, selected 
 	t.Helper()
 	options.ExecutionPosture = executionposture.Live
 	options.ReceiverExecution = eventreceiver.NormalExecution()
-	options.SourceArtifactFact = authorActivityTestSourceArtifactFact
+	admitted, err := bus.AdmitSourceArtifactFact(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact, found := correlation.SourceArtifactFactFromContext(admitted)
+	if !found {
+		t.Fatal("native timer coordinator requires its admitted bus source")
+	}
+	options.SourceArtifactFact = fact
 	options.Persistence = pipeline.NewWorkflowPersistence(selected)
 	options.DeliveryStore = selected
 	options.DeadLetters = selected

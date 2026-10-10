@@ -40,13 +40,13 @@ func TestWorkflowHeaderSubmittedJSONBothDialects(t *testing.T) {
 					// not another JSON serialization or PostgreSQL's JSONB output.
 					config := []byte(`{ "name" : "exact argument" }`)
 					record := pipeline.WorkflowEngineStateRecord{Config: config}
-					args := make([]driver.Value, 19)
+					args := make([]driver.Value, 21)
 					for index := range args {
 						args[index] = sqlmock.AnyArg()
 					}
 					query, position := `(?s)^UPDATE flow_instances`, 2
 					if create {
-						query, position = `(?s)^INSERT INTO flow_instances`, 8
+						query, position = `(?s)^INSERT INTO flow_instances`, 10
 					}
 					args[position] = string(config)
 					expect := mock.ExpectQuery(query).WithArgs(args...)
