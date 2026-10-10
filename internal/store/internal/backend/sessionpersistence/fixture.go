@@ -13,17 +13,18 @@ type CaptureCorruption string
 type CaptureFault string
 
 const (
-	CorruptConnection      CaptureCorruption = "connection"
-	CorruptAccount         CaptureCorruption = "account"
-	CorruptConversation    CaptureCorruption = "conversation"
-	CorruptEvent           CaptureCorruption = "event"
-	CorruptKind            CaptureCorruption = "kind"
-	CorruptByteCount       CaptureCorruption = "byte_count"
-	CorruptEnvelope        CaptureCorruption = "envelope"
-	CorruptDigest          CaptureCorruption = "digest"
-	CaptureInsertFault     CaptureFault      = "insert"
-	CaptureStageFault      CaptureFault      = "stage"
-	CaptureRetirementFault CaptureFault      = "retirement"
+	CorruptConnection       CaptureCorruption = "connection"
+	CorruptAccount          CaptureCorruption = "account"
+	CorruptConversation     CaptureCorruption = "conversation"
+	CorruptEvent            CaptureCorruption = "event"
+	CorruptKind             CaptureCorruption = "kind"
+	CorruptByteCount        CaptureCorruption = "byte_count"
+	CorruptEnvelope         CaptureCorruption = "envelope"
+	CorruptDigest           CaptureCorruption = "digest"
+	CorruptSetupDisposition CaptureCorruption = "setup_disposition"
+	CaptureInsertFault      CaptureFault      = "insert"
+	CaptureStageFault       CaptureFault      = "stage"
+	CaptureRetirementFault  CaptureFault      = "retirement"
 )
 
 func (o *Owner) CorruptCaptureIndex(ctx context.Context, dimension CaptureCorruption) error {
@@ -45,6 +46,8 @@ func (o *Owner) CorruptCaptureIndex(ctx context.Context, dimension CaptureCorrup
 		query = `UPDATE whatsapp_incoming_capture SET envelope='{}'`
 	case CorruptDigest:
 		query = `UPDATE whatsapp_incoming_capture SET digest=x'00'`
+	case CorruptSetupDisposition:
+		query = `UPDATE whatsapp_incoming_capture SET setup_disposition_digest=zeroblob(32) WHERE setup_disposition='non_claim'`
 	default:
 		return fmt.Errorf("unknown capture corruption %q", dimension)
 	}

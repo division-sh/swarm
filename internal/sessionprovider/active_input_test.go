@@ -319,12 +319,13 @@ func (f *activeInputFixture) activate(t *testing.T) {
 	f.setScope(channelonboarding.SessionInputOnboarding)
 	event, admitted := f.receive(t, identity.Challenge)
 	f.claimEvent = event
-	sealed, claim, err := prepareSessionClaim(ctx, admitted, f.trigger, f.channel)
+	prepared, err := prepareSessionSetup(ctx, admitted, f.trigger, f.channel)
 	if err != nil {
 		t.Fatal(err)
 	}
+	claim := prepared.inbound
 	f.claim = claim
-	settlement, err := f.selected.SettleSessionChannelClaim(ctx, sealed)
+	settlement, err := f.selected.SettleSessionChannelClaim(ctx, prepared.claim)
 	if err != nil || !settlement.Consumed || settlement.Disposition != operatorchannel.DispositionConsumedBinding {
 		t.Fatalf("native claim: %+v %v", settlement, err)
 	}

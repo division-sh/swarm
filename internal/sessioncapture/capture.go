@@ -189,6 +189,17 @@ func (e Event) SameDelivery(other Event) bool {
 		e.EventID == other.EventID && e.Kind == other.Kind && e.Source.CatalogGeneration.Equal(other.Source.CatalogGeneration) && bytes.Equal(e.Body, other.Body)
 }
 
+// A committed non-claim receipt grants no execution. Transport redelivery may
+// reconcile its original bytes across process/binding revisions, not reinterpret
+// that setup message as new business input or adopt a different account/source.
+func (e Event) SameNonClaimDelivery(other Event) bool {
+	return e.Scope.Kind == channelonboarding.SessionInputOnboarding &&
+		e.Scope.Session == other.Scope.Session && e.Scope.Source.Matches(other.Scope.Source) &&
+		e.Scope.OnboardingOperation == other.Scope.OnboardingOperation && e.Scope.TargetSelector == other.Scope.TargetSelector &&
+		e.Scope.PrincipalID == other.Scope.PrincipalID && e.Conversation == other.Conversation && e.EventID == other.EventID &&
+		e.Kind == other.Kind && e.Source.CatalogGeneration.Equal(other.Source.CatalogGeneration) && bytes.Equal(e.Body, other.Body)
+}
+
 const CaptureProvenanceKey = "whatsapp_capture"
 
 // The selected-store request retains original occurrence provenance; only the

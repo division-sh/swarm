@@ -42,11 +42,15 @@ func (i *runtimeIncoming) settleClaim(ctx context.Context, event capturedEvent) 
 		return err
 	}
 	defer admitted.Close()
-	seal, claim, err := prepareSessionClaim(ctx, admitted, i.handoff.trigger, i.connection.plan)
+	prepared, err := prepareSessionSetup(ctx, admitted, i.handoff.trigger, i.connection.plan)
 	if err != nil {
 		return err
 	}
-	if _, err := i.store.SettleSessionChannelClaim(ctx, seal); err != nil {
+	if !prepared.nonClaim.Empty() {
+		return spool.settleNonClaim(ctx, prepared.nonClaim)
+	}
+	claim := prepared.inbound
+	if _, err := i.store.SettleSessionChannelClaim(ctx, prepared.claim); err != nil {
 		return err
 	}
 	receipt, found, err := i.store.LoadOperatorChannelClaimReceipt(ctx, claim.PublicationID)

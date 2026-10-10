@@ -20,6 +20,23 @@ func nativeInputIssuerViolations(path string, source []byte) ([]string, error) {
 	}
 	var violations []string
 	aliases := map[string]bool{}
+	readOnlyAliases := map[*ast.SelectorExpr]bool{}
+	for _, declaration := range file.Decls {
+		general, ok := declaration.(*ast.GenDecl)
+		if !ok || general.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range general.Specs {
+			alias, ok := spec.(*ast.TypeSpec)
+			if !ok || !alias.Assign.IsValid() {
+				continue
+			}
+			selected, ok := alias.Type.(*ast.SelectorExpr)
+			if ok && (selected.Sel.Name == "Admission" || selected.Sel.Name == "Account" || selected.Sel.Name == "Claim" || selected.Sel.Name == "NonClaim") {
+				readOnlyAliases[selected] = true
+			}
+		}
+	}
 	for _, imported := range file.Imports {
 		name, err := strconv.Unquote(imported.Path.Value)
 		if err != nil {
@@ -47,7 +64,7 @@ func nativeInputIssuerViolations(path string, source []byte) ([]string, error) {
 		}
 		root, ok := selector.X.(*ast.Ident)
 		facade := path == "input/admission.go" || path == "authority/admission.go"
-		if ok && aliases[root.Name] && facade && selector.Sel.Name != "Admission" && selector.Sel.Name != "Account" && selector.Sel.Name != "Claim" {
+		if ok && aliases[root.Name] && facade && !readOnlyAliases[selector] {
 			violations = append(violations, "read-only facade exposes native construction: "+path)
 		}
 		return true
@@ -110,10 +127,28 @@ import "github.com/division-sh/swarm/internal/sessionprovider/internal/inputfact
 import "github.com/division-sh/swarm/internal/sessionprovider/internal/authorityfact"
 var New = authorityfact.SealOwnedAccount
 `,
+		`package input
+import "github.com/division-sh/swarm/internal/sessionprovider/internal/authorityfact"
+var New = authorityfact.SealOwnedNonClaim
+`,
+		`package input
+import "github.com/division-sh/swarm/internal/sessionprovider/internal/authorityfact"
+var Raw = authorityfact.NonClaim{}
+`,
 	} {
 		violations, err := nativeInputIssuerViolations("input/admission.go", []byte(source))
 		if err != nil || len(violations) == 0 {
 			t.Fatalf("raw constructor/DTO reexport accepted: %v %v", violations, err)
 		}
+	}
+}
+
+func TestNativeInputIssuerCensusAdmitsOnlyOpaqueReadOnlyNonClaimAlias(t *testing.T) {
+	violations, err := nativeInputIssuerViolations("authority/admission.go", []byte(`package authority
+import "github.com/division-sh/swarm/internal/sessionprovider/internal/authorityfact"
+type NonClaim = authorityfact.NonClaim
+`))
+	if err != nil || len(violations) != 0 {
+		t.Fatal("opaque read-only alias classified as a constructor", violations, err)
 	}
 }

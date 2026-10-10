@@ -5,6 +5,7 @@ import (
 
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	capturedata "github.com/division-sh/swarm/internal/sessioncapture"
+	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 )
 
@@ -40,6 +41,12 @@ func (s *captureStore) capture(ctx context.Context, event capturedEvent) error {
 }
 func (s *captureStore) pending(ctx context.Context) ([]capturedEvent, error) {
 	return s.owner.Pending(ctx)
+}
+func (s *captureStore) settleNonClaim(ctx context.Context, fact authority.NonClaim) error {
+	return s.owner.SettleNonClaim(ctx, fact)
+}
+func (s *captureStore) nonClaimReceipts(ctx context.Context) ([]capturedEvent, error) {
+	return s.owner.NonClaimReceipts(ctx)
 }
 func (s *captureStore) recordFailure(ctx context.Context, failure callbackFailure) error {
 	return s.owner.RecordFailure(ctx, failure)

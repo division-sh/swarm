@@ -5,6 +5,7 @@ import (
 
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/sessioncapture"
+	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	private "github.com/division-sh/swarm/internal/store/internal/backend/sessionpersistence"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
@@ -46,6 +47,12 @@ func (s *Capture) Capture(ctx context.Context, event sessioncapture.Event) error
 }
 func (s *Capture) Pending(ctx context.Context) ([]sessioncapture.Event, error) {
 	return s.owner.Pending(ctx)
+}
+func (s *Capture) SettleNonClaim(ctx context.Context, fact authority.NonClaim) error {
+	return s.owner.SettleNonClaim(ctx, fact)
+}
+func (s *Capture) NonClaimReceipts(ctx context.Context) ([]sessioncapture.Event, error) {
+	return s.owner.NonClaimReceipts(ctx)
 }
 func (s *Capture) PendingPublications(ctx context.Context) ([]sessioncapture.PendingCapture, error) {
 	return s.owner.PendingPublications(ctx)
@@ -92,17 +99,18 @@ type CaptureCorruption = private.CaptureCorruption
 type CaptureFault = private.CaptureFault
 
 const (
-	CorruptConnection      = private.CorruptConnection
-	CorruptAccount         = private.CorruptAccount
-	CorruptConversation    = private.CorruptConversation
-	CorruptEvent           = private.CorruptEvent
-	CorruptKind            = private.CorruptKind
-	CorruptByteCount       = private.CorruptByteCount
-	CorruptEnvelope        = private.CorruptEnvelope
-	CorruptDigest          = private.CorruptDigest
-	CaptureInsertFault     = private.CaptureInsertFault
-	CaptureStageFault      = private.CaptureStageFault
-	CaptureRetirementFault = private.CaptureRetirementFault
+	CorruptConnection       = private.CorruptConnection
+	CorruptAccount          = private.CorruptAccount
+	CorruptConversation     = private.CorruptConversation
+	CorruptEvent            = private.CorruptEvent
+	CorruptKind             = private.CorruptKind
+	CorruptByteCount        = private.CorruptByteCount
+	CorruptEnvelope         = private.CorruptEnvelope
+	CorruptDigest           = private.CorruptDigest
+	CorruptSetupDisposition = private.CorruptSetupDisposition
+	CaptureInsertFault      = private.CaptureInsertFault
+	CaptureStageFault       = private.CaptureStageFault
+	CaptureRetirementFault  = private.CaptureRetirementFault
 )
 
 func (f *Fixture) CorruptCaptureIndex(ctx context.Context, dimension CaptureCorruption) error {

@@ -11299,7 +11299,15 @@ tool_model:
         also routes awaiting_external_identity input, with its existing identity operation and no activation,
         through the same private capture and sealed human-claim owner. SDK success requires the exact durable
         claim receipt before capture retirement. Unknown challenges receive only the existing ignored disposition;
-        ordinary first-sender text cannot bind an operator or create business authority. Unsettled claim recovery
+        ordinary first-sender text cannot bind an operator or create business authority. Admitted ordinary text,
+        non-exact challenge text and supported edit/revoke input instead receive an explicit non-claim disposition
+        in the existing private capture owner, preserving their exact original bytes and a bound disposition digest.
+        The closed compiled projection owns that disposition; raw DTOs, released input, stale responsibility,
+        missing/ambiguous text mapping, corrupt provenance and observation or persistence failure cannot mint it.
+        Expected non-claims leave the pending queue only after commit and cannot obstruct a subsequent valid claim,
+        including after connection restart. SDK acknowledgment follows complete verified disposition readback.
+        Unsupported empty/non-text content remains a typed normalization refusal, not a manufactured non-claim.
+        Unsettled claim recovery
         uses frozen original bytes and the exact original onboarding revision, even across a new socket occurrence;
         it cannot adopt refreshed source, operation or account authority. A verified historical receipt may retire
         identical capture without executing the claim again. Human confirmation remains separate and mandatory.
@@ -11348,6 +11356,13 @@ tool_model:
         A confirmed operator identity may already supply an exact positive identity-binding revision during onboarding;
         that revision is not a service/run publication generation or permission to execute business work.
         The two scopes are a closed product, not an absent-business-field inference or a bootstrap execution grant.
+        An explicit committed non-claim setup disposition retains its original capture as non-executable evidence,
+        outside pending count/byte quotas. Every duplicate, pending, recovery and disposition read validates complete
+        capture routing, byte accounting and both digests, including historical rows. Only identical authenticated
+        redelivery under the same stable account, source, principal and operation may reconcile that historical
+        disposition across process/binding revisions; it never becomes a new claim or business publication.
+        No arbitrary capture deletion, automatic resend, generalized dead-letter queue, migration or schema
+        compatibility is introduced. An incompatible private capture schema refuses before callback installation.
         different payload or scope evidence conflicts rather than overwriting history. Account, conversation,
         provider event and message/edit/revoke kind are distinct identity dimensions. Captured work survives ordinary
         private-state reopen and is never reinterpreted using a replacement account, source, principal or binding.

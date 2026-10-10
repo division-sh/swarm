@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -105,11 +104,11 @@ func TestWhatsAppRuntimeClaimRecoveryBothStores(t *testing.T) {
 				identity := beginRuntimeClaimFixture(t, f)
 				event, admitted := f.receive(t, identity.Challenge)
 				if phase == "settled" || phase == "settled_stale_revision" {
-					seal, _, err := prepareSessionClaim(f.ctx, admitted, f.trigger, f.channel)
+					prepared, err := prepareSessionSetup(f.ctx, admitted, f.trigger, f.channel)
 					if err != nil {
 						t.Fatal(err)
 					}
-					if _, err := f.selected.SettleSessionChannelClaim(f.ctx, seal); err != nil {
+					if _, err := f.selected.SettleSessionChannelClaim(f.ctx, prepared.claim); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -182,12 +181,10 @@ func TestWhatsAppRuntimeClaimDoesNotAutoBindFirstSenderBothStores(t *testing.T) 
 				at := time.Now()
 				sendRuntimeIncomingAtFixture(t, f, c, id, text, at)
 				if cell == "ordinary_text" {
-					waitRuntimeIncomingFailure(t, f, c, id)
-					fixture, spool := openCaptureFixture(t, filepath.Join(c.state.directory.path, "provider.db"), f.operation.SessionConnectionID)
-					defer fixture.Close()
-					rows, err := spool.pending(context.Background())
+					waitRuntimeIncomingReceipt(t, f, c, id)
+					rows, err := c.captures.nonClaimReceipts(f.ctx)
 					if err != nil || len(rows) != 1 || rows[0].EventID != id || rows[0].Scope.Kind != channelonboarding.SessionInputOnboarding {
-						t.Fatal("refused first sender lost exact setup capture", len(rows), err)
+						t.Fatal("non-claim first sender lost exact setup receipt", len(rows), err)
 					}
 				} else {
 					waitRuntimeIncomingReceipt(t, f, c, id)
