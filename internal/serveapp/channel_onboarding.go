@@ -23,7 +23,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
-	sessionexecution "github.com/division-sh/swarm/internal/sessionprovider/execution"
 )
 
 type servePrebindingActivation struct {
@@ -445,6 +444,7 @@ func declaredActivationCoordinate(contextDef runtime.BundleContext, binding pack
 
 type serveChannelActivationRefresher struct {
 	manager     *runtime.RuntimeContextManager
+	sessions    serveSessionBootstrapOwner
 	store       channelonboarding.Store
 	identities  *operatorchannel.Service
 	credentials *runtimecredentials.SnapshotOwner
@@ -748,13 +748,13 @@ type channelConfirmationEffectStore interface {
 }
 
 type serveChannelConfirmationDispatcher struct {
-	effects              channelConfirmationEffectStore
-	credentials          *runtimecredentials.SnapshotOwner
-	posture              executionposture.Posture
-	runtimeInstanceID    string
-	httpClient           *http.Client
-	sessionChannelWrites map[string]sessionexecution.Channel
-	now                  func() time.Time
+	effects           channelConfirmationEffectStore
+	credentials       *runtimecredentials.SnapshotOwner
+	posture           executionposture.Posture
+	runtimeInstanceID string
+	httpClient        *http.Client
+	sessions          serveSessionBootstrapOwner
+	now               func() time.Time
 }
 
 func newServeChannelConfirmationDispatcher(
@@ -866,9 +866,6 @@ func channelEffectTerminal(outcome runtimeeffects.ChannelOnboardingEffectOutcome
 }
 
 func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx context.Context, request channelonboarding.ConfirmationRequest) (channelonboarding.ConfirmationResult, error) {
-	if err := request.Candidate.Plan.RequireExecutableProvider(); err != nil {
-		return channelonboarding.ConfirmationResult{}, err
-	}
 	if d == nil || d.effects == nil || d.credentials == nil {
 		return channelonboarding.ConfirmationResult{}, fmt.Errorf("channel confirmation dispatcher is unavailable")
 	}
@@ -906,6 +903,10 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 		}
 	}
 
+	nativeExecutor, err := selectServeChannelWrite(ctx, d.sessions, op, compiled.Plan)
+	if err != nil {
+		return channelonboarding.ConfirmationResult{}, err
+	}
 	confirmationText := "Swarm channel connected."
 	if binding.ConversationScope == operatorchannel.ConversationScopeShared {
 		confirmationText += " Future notices, decision cards, and updates sent here will be visible to this group."
@@ -960,7 +961,7 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 			"bundle_hash":             op.Coordinate.BundleHash,
 			"plan_generation":         op.Coordinate.PlanGeneration.Diagnostic(),
 		},
-		d.sessionChannelWrites[activation.OperationID],
+		nativeExecutor,
 		channelCredentialHTTPExecutor(d.httpClient, d.credentials, compiled.Plan, activation.CredentialAdmissions, tool),
 	)
 	if err != nil {
@@ -975,6 +976,11 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 func (r *serveChannelActivationRefresher) RefreshChannelActivations(ctx context.Context) error {
 	if r == nil {
 		return fmt.Errorf("serve channel activation refresher is required")
+	}
+	if r.sessions != nil {
+		if err := r.sessions.RetireInactiveSessions(ctx); err != nil {
+			return err
+		}
 	}
 	if err := r.publishChannelActivations(ctx); err != nil {
 		return err

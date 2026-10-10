@@ -48,7 +48,6 @@ func TestNativeChannelWriteDispatchNeverFallsBackToHTTP(t *testing.T) {
 	}))
 	defer server.Close()
 	httpExecutor := runtimeregistration.HTTPExecutor{Client: server.Client()}
-	dispatcher := &serveChannelDeliveryDispatcher{sessionChannelWrites: map[string]sessionexecution.Channel{operationID: {}}}
 	for _, row := range []struct {
 		name        string
 		operationID string
@@ -61,7 +60,7 @@ func TestNativeChannelWriteDispatchNeverFallsBackToHTTP(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			_, err := executeChannelWrite(ctx, row.operationID, "deliver", "whatsapp.send_text", tool,
 				map[string]any{"destination": "100000000001@s.whatsapp.net", "text": "never sent"}, row.credentials, nil,
-				dispatcher.sessionChannelWrites[row.operationID], httpExecutor)
+				sessionexecution.Channel{}, httpExecutor)
 			if err == nil || requests.Load() != 0 {
 				t.Fatalf("unowned native dispatch used an alternate transport: requests=%d err=%v", requests.Load(), err)
 			}

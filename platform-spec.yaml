@@ -11264,6 +11264,11 @@ tool_model:
         work lease owns the SDK, callbacks, database and possession through complete retirement; it creates no
         standing service, executable target or enabled business binding. Parent retirement cancels and joins that
         connection. A failed drain or close keeps both possession and runtime work until explicit complete cleanup.
+        Serve activation refresh first rereads each original retained onboarding responsibility. Failed or retired
+        parents consume that connection's complete cancellation-aware close, including partial construction;
+        observation or join failure preserves its cache entry and cleanup evidence and refuses publication.
+        No refresh constructs a replacement, logs out, or deletes pairing. Current sibling responsibilities remain
+        owned. Successful repeated cleanup joins the same original connection before activation reconciliation.
         Concurrent close callers wait through cancellation-aware serialization; expiration returns the caller's
         cancellation without releasing or canceling another cleanup owner's retained work or possession.
         Explicit Close requests retirement independently of the caller's join deadline; the existing counted
@@ -11512,6 +11517,10 @@ tool_model:
         the private session owner for its original onboarding operation. The facade reselects the exact compiled
         operation and verifies the selected tool's canonical identity before journal authorization. A missing,
         foreign, canceled or reconstructed handle cannot execute and never falls back to HTTP or static credentials.
+        Serve selects this facade through its original retained bootstrap owner after the exact current operation,
+        compiled plan, activation and held session observation agree. A cache lookup or disconnected handle cannot
+        grant execution. No separate per-operation facade map can substitute a successor connection. Replaying an
+        already terminal confirmation consumes its existing journal evidence rather than requiring a new send.
         Runtime installation must supply these owned handles; the declaration or facade type alone does not
         establish supported provider readiness or bypass activation admission.
       session_private_persistence: >

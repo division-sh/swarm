@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -13,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
+	sessionexecution "github.com/division-sh/swarm/internal/sessionprovider/execution"
 )
 
 // Connections belong to retained onboarding operations and the selected runtime,
@@ -265,6 +267,76 @@ func (s *serveSessionBootstrap) ObserveSession(ctx context.Context, op channelon
 		return operatorchannel.ProviderAuthority{}, empty, false, errors.Join(channelonboarding.ErrRevisionConflict, context.Cause(ctx))
 	}
 	return provider, observed, true, nil
+}
+
+func (s *serveSessionBootstrap) ChannelExecution(ctx context.Context, op channelonboarding.Operation) (sessionexecution.Channel, error) {
+	if err := s.validateRetainedSessionOperation(ctx, op); err != nil {
+		return sessionexecution.Channel{}, err
+	}
+	// Capture the original connection before observing it. Concurrent explicit
+	// recovery cannot substitute a successor connection into this selection.
+	connection, err := s.currentConnection(ctx, op.OperationID)
+	if err != nil {
+		return sessionexecution.Channel{}, err
+	}
+	provider, _, current, err := s.ObserveSession(ctx, op)
+	defer provider.CloseExecution()
+	if err != nil || !current {
+		return sessionexecution.Channel{}, errors.Join(channelonboarding.ErrRevisionConflict, err)
+	}
+	return connection.ChannelExecution(ctx)
+}
+
+func (s *serveSessionBootstrap) RetireInactiveSessions(ctx context.Context) error {
+	if s == nil || s.store == nil || ctx == nil {
+		return channelonboarding.ErrInvalidRequest
+	}
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
+	type retained struct {
+		id      string
+		attempt *serveSessionBootstrapAttempt
+	}
+	s.mu.Lock()
+	entries := make([]retained, 0, len(s.connections))
+	for id, attempt := range s.connections {
+		entries = append(entries, retained{id: id, attempt: attempt})
+	}
+	s.mu.Unlock()
+	sort.Slice(entries, func(i, j int) bool { return entries[i].id < entries[j].id })
+	var result error
+	for _, entry := range entries {
+		if ctx.Err() != nil {
+			return errors.Join(result, context.Cause(ctx))
+		}
+		op, err := s.store.GetChannelOnboarding(ctx, entry.id)
+		if err != nil {
+			result = errors.Join(result, fmt.Errorf("observe retained session %s: %w", entry.id, err))
+			continue
+		}
+		if op.Phase != channelonboarding.PhaseFailed && op.Phase != channelonboarding.PhaseRetired {
+			continue
+		}
+		// Keep the original construction/cleanup entry even after joining. A
+		// failed bootstrap can still own partial state; its error is not a join.
+		select {
+		case <-entry.attempt.done:
+		case <-ctx.Done():
+			return errors.Join(result, context.Cause(ctx))
+		}
+		if entry.attempt.connection != nil {
+			if op.OperationID != entry.id || op.Posture != channelonboarding.ActivationSessionConnection ||
+				op.SessionConnectionID != entry.attempt.connection.ConnectionID() {
+				result = errors.Join(result, channelonboarding.ErrRevisionConflict)
+				continue
+			}
+			if err := entry.attempt.connection.Close(ctx); err != nil {
+				result = errors.Join(result, fmt.Errorf("join retained session %s: %w", entry.id, err))
+			}
+		}
+	}
+	return errors.Join(result, context.Cause(ctx))
 }
 
 func (s *serveSessionBootstrap) openSessionAttempt(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, attempt *serveSessionBootstrapAttempt, bootstrap bool) (err error) {

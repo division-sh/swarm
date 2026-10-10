@@ -45,10 +45,8 @@ type serveChannelDeliveryDispatcher struct {
 	posture           executionposture.Posture
 	runtimeInstanceID string
 	httpClient        *http.Client
-	// Immutable per-connection execution handles, keyed by the reserved onboarding operation.
-	sessionChannelWrites map[string]sessionexecution.Channel
-	sessions             serveSessionBootstrapOwner
-	now                  func() time.Time
+	sessions          serveSessionBootstrapOwner
+	now               func() time.Time
 }
 
 type channelCardActionResult struct {
@@ -500,13 +498,30 @@ func (d *serveChannelDeliveryDispatcher) currentCompiledDelivery(ctx context.Con
 	return selected, compiled.Plan, lease, nil
 }
 
+func (d *serveChannelDeliveryDispatcher) channelWriteExecutor(ctx context.Context, selected channelonboarding.ConnectedChannelActivation,
+	plan packs.OutboundBindingPlan,
+) (sessionexecution.Channel, error) {
+	if plan.Transport() != packs.ChannelTransportSession {
+		return sessionexecution.Channel{}, plan.RequireExecutableProvider()
+	}
+	op, err := d.activations.GetChannelOnboarding(ctx, selected.OperationID)
+	if err != nil {
+		return sessionexecution.Channel{}, err
+	}
+	if op.ActivationRevision != selected.Revision || op.BindingRevision != selected.BindingRevision ||
+		!op.Coordinate.Matches(selected.Coordinate) || op.SessionAccount != selected.SessionAccount || op.PrincipalID != selected.PrincipalID {
+		return sessionexecution.Channel{}, channelonboarding.ErrRevisionConflict
+	}
+	return selectServeChannelWrite(ctx, d.sessions, op, plan)
+}
+
 func (d *serveChannelDeliveryDispatcher) selectedPresentation(ctx context.Context, candidate runtimechanneldelivery.Candidate) (packs.PresentationBounds, packs.CompiledChannelCapabilities, error) {
-	_, plan, lease, err := d.currentCompiledDelivery(ctx, candidate)
+	selected, plan, lease, err := d.currentCompiledDelivery(ctx, candidate)
 	if err != nil {
 		return packs.PresentationBounds{}, packs.CompiledChannelCapabilities{}, err
 	}
 	defer lease.Release()
-	if err := plan.RequireExecutableProvider(); err != nil {
+	if _, err := d.channelWriteExecutor(ctx, selected, plan); err != nil {
 		return packs.PresentationBounds{}, packs.CompiledChannelCapabilities{}, err
 	}
 	bounds, err := plan.PresentationBounds()
@@ -539,7 +554,8 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 		return err
 	}
 	defer lease.Release()
-	if err := plan.RequireExecutableProvider(); err != nil {
+	nativeExecutor, err := d.channelWriteExecutor(ctx, selected, plan)
+	if err != nil {
 		return err
 	}
 	if err := plan.RequireOperation(operation); err != nil {
@@ -607,7 +623,7 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 	_, err = executeChannelWrite(
 		effectCtx, selected.OperationID, operation, toolID, tool, input, credentials,
 		map[string]string{"delivery_id": candidate.DeliveryID, "render_id": prepared.RenderID},
-		d.sessionChannelWrites[selected.OperationID],
+		nativeExecutor,
 		channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, selected.CredentialAdmissions, tool),
 	)
 	return err

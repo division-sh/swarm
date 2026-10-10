@@ -7,9 +7,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/sessionprovider"
+	sessionexecution "github.com/division-sh/swarm/internal/sessionprovider/execution"
 )
 
 // Platform code receives the existing owner's held construction context, not
@@ -21,6 +23,26 @@ type serveSessionBootstrapOwner interface {
 	operatorchannel.CredentialCurrentness
 	operatorchannel.SessionAdmissionOwner
 	ObserveSession(context.Context, channelonboarding.Operation) (operatorchannel.ProviderAuthority, operatorchannel.SessionConnectionObservation, bool, error)
+	ChannelExecution(context.Context, channelonboarding.Operation) (sessionexecution.Channel, error)
+	RetireInactiveSessions(context.Context) error
+}
+
+func selectServeChannelWrite(ctx context.Context, sessions serveSessionBootstrapOwner, op channelonboarding.Operation,
+	plan packs.OutboundBindingPlan,
+) (sessionexecution.Channel, error) {
+	if plan.Transport() != packs.ChannelTransportSession {
+		return sessionexecution.Channel{}, plan.RequireExecutableProvider()
+	}
+	identity, identityErr := plan.InterfaceIdentity()
+	generation, generationErr := plan.PlanGeneration()
+	if identityErr != nil || generationErr != nil || op.Posture != channelonboarding.ActivationSessionConnection ||
+		identity.Normalized() != op.Interface.Normalized() || !generation.Equal(op.Coordinate.PlanGeneration) {
+		return sessionexecution.Channel{}, errors.Join(channelonboarding.ErrRevisionConflict, identityErr, generationErr)
+	}
+	if sessions == nil {
+		return sessionexecution.Channel{}, &operatorchannel.SessionProviderUnavailableError{Provider: op.Provider}
+	}
+	return sessions.ChannelExecution(ctx, op)
 }
 
 func observeServeChannelSession(ctx context.Context, sessions serveSessionBootstrapOwner, op channelonboarding.Operation,
