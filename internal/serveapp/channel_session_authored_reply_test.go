@@ -134,6 +134,7 @@ func requireServedNativeActivityOutcome(t *testing.T, endpoint, messageID, desti
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	logServedNativeActivityFailure(t, endpoint)
 	t.Fatal("genuine native reply did not settle its original activity request/result")
 }
 
