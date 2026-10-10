@@ -202,7 +202,7 @@ func requestPostgresCompletionCandidateTx(
 	if lifecycleState == runtimerunlifecycle.StatePaused {
 		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateDeferredPaused}, nil
 	}
-	selectedRunID, err := selectedCompletionRunTx(ctx, tx, true, runID)
+	selectedRunID, err := selectedRunBinding(ctx, tx, true, runID)
 	if err != nil {
 		return runtimerunlifecycle.CandidateRequestResult{}, err
 	}
@@ -288,7 +288,7 @@ func requestSQLiteCompletionCandidateTx(
 	if lifecycleState == runtimerunlifecycle.StatePaused {
 		return runtimerunlifecycle.CandidateRequestResult{Disposition: runtimerunlifecycle.CandidateDeferredPaused}, nil
 	}
-	selectedRunID, err := selectedCompletionRunTx(ctx, tx, false, runID)
+	selectedRunID, err := selectedRunBinding(ctx, tx, false, runID)
 	if err != nil {
 		return runtimerunlifecycle.CandidateRequestResult{}, err
 	}
@@ -529,7 +529,7 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 	if err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
-	if err := requireCompletionCandidateAuthorityTx(ctx, tx, true, candidate, bundleHash, s.completionAuthority); err != nil {
+	if err := requireCompletionCandidateAuthorityTx(ctx, tx, true, candidate, bundleHash, s.runAuthority); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	if strings.TrimSpace(bundleHash) != candidate.BundleHash || !currentDue.Valid || currentRev != candidate.Revision {
@@ -674,7 +674,7 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 	if err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
-	if err := requireCompletionCandidateAuthorityTx(ctx, tx, false, candidate, bundleHash, s.completionAuthority); err != nil {
+	if err := requireCompletionCandidateAuthorityTx(ctx, tx, false, candidate, bundleHash, s.runAuthority); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	dueAt, duePresent, err := sqliteTimeValue(currentDue)

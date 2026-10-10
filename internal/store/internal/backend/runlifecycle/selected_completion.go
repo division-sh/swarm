@@ -8,44 +8,18 @@ import (
 	"strings"
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 )
-
-type completionAuthorityOwner interface {
-	RequireCurrentExternalEffectAuthorityTx(context.Context, *sql.Tx, runtimeeffects.Authority) error
-}
-
-func (s *RunLifecyclePostgresOwner) BindCompletionAuthority(owner completionAuthorityOwner) error {
-	if s == nil || owner == nil {
-		return errors.New("run lifecycle PostgreSQL completion authority owner is required")
-	}
-	if s.completionAuthority != nil {
-		return errors.New("run lifecycle PostgreSQL completion authority owner is already bound")
-	}
-	s.completionAuthority = owner
-	return nil
-}
-
-func (s *RunLifecycleSQLiteOwner) BindCompletionAuthority(owner completionAuthorityOwner) error {
-	if s == nil || owner == nil {
-		return errors.New("run lifecycle SQLite completion authority owner is required")
-	}
-	if s.completionAuthority != nil {
-		return errors.New("run lifecycle SQLite completion authority owner is already bound")
-	}
-	s.completionAuthority = owner
-	return nil
-}
 
 // Binding membership, not the run's origin or the caller's context, determines
 // which executor may consume this durable completion coordinate.
-func selectedCompletionRunTx(ctx context.Context, tx *sql.Tx, postgres bool, runID string) (string, error) {
+func selectedRunBinding(ctx context.Context, q sourceadmission.RowQueryer, postgres bool, runID string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if tx == nil || runID == "" {
+	if q == nil || runID == "" {
 		return "", errors.New("completion mode requires transaction and run_id")
 	}
 	query := `SELECT CAST(fork_run_id AS TEXT) FROM run_fork_selected_contract_bindings WHERE fork_run_id = ?`
@@ -53,7 +27,7 @@ func selectedCompletionRunTx(ctx context.Context, tx *sql.Tx, postgres bool, run
 		query = `SELECT fork_run_id::text FROM run_fork_selected_contract_bindings WHERE fork_run_id = $1::uuid`
 	}
 	var selectedRunID string
-	if err := tx.QueryRowContext(ctx, query, runID).Scan(&selectedRunID); err != nil {
+	if err := q.QueryRowContext(ctx, query, runID).Scan(&selectedRunID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil
 		}
@@ -65,32 +39,28 @@ func selectedCompletionRunTx(ctx context.Context, tx *sql.Tx, postgres bool, run
 	return selectedRunID, nil
 }
 
-func requireCompletionCandidateAuthorityTx(ctx context.Context, tx *sql.Tx, postgres bool, candidate runtimerunlifecycle.Candidate, bundleHash string, owner completionAuthorityOwner) error {
-	selectedRunID, err := selectedCompletionRunTx(ctx, tx, postgres, candidate.RunID)
+func requireCompletionCandidateAuthorityTx(ctx context.Context, tx *sql.Tx, postgres bool, candidate runtimerunlifecycle.Candidate, bundleHash string, owner runAuthorityOwner) error {
+	selectedRunID, err := selectedRunBinding(ctx, tx, postgres, candidate.RunID)
 	if err != nil {
 		return err
 	}
 	if candidate.SelectedForkRunID != selectedRunID {
 		return completionAuthorityRefusal(candidate, "candidate execution mode differs from current binding", nil)
 	}
-	authority, present := runtimeeffects.AuthorityFromContext(ctx)
 	if selectedRunID == "" {
-		if authority.Kind == runtimeeffects.AuthoritySelectedContractFork {
-			return completionAuthorityRefusal(candidate, "selected authority cannot execute an ordinary candidate", nil)
+		if err := requireRunlessExecution(ctx); err != nil {
+			return completionAuthorityRefusal(candidate, "selected authority cannot execute an ordinary candidate", err)
 		}
 		return nil
-	}
-	if !present || !authority.Valid() || authority.Kind != runtimeeffects.AuthoritySelectedContractFork || authority.SelectedFork.ForkRunID != selectedRunID {
-		return completionAuthorityRefusal(candidate, "exact selected execution authority is required", nil)
 	}
 	source, admitted := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !admitted || source.BundleHash() != candidate.BundleHash || bundleHash != candidate.BundleHash {
 		return completionAuthorityRefusal(candidate, "selected completion requires the exact current run bundle", nil)
 	}
-	if owner == nil {
-		return completionAuthorityRefusal(candidate, "selected completion authority owner is required", nil)
-	}
-	if err := owner.RequireCurrentExternalEffectAuthorityTx(ctx, tx, authority); err != nil {
+	if err := requireSelectedRunAuthorityTx(ctx, tx, selectedRunID, bundleHash, owner); err != nil {
+		if errors.Is(err, runtimerunlifecycle.ErrRunExecutionAuthority) {
+			return completionAuthorityRefusal(candidate, "exact current selected execution authority is required", err)
+		}
 		if envelope, typed := runtimefailures.EnvelopeFromError(err); typed && envelope.Class == runtimefailures.ClassSupersededGeneration {
 			return completionAuthorityRefusal(candidate, "selected completion authority is stale", err)
 		}

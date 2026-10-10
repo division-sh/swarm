@@ -19,6 +19,11 @@ type RowQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+type ExecutionQuery = interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 func LoadPostgresTx(ctx context.Context, tx *sql.Tx, runID string, active, readOnly bool) (runtimecorrelation.SourceArtifactFact, error) {
 	return loadTx(ctx, tx, runID, privateactivity.DialectPostgres, active, readOnly)
 }
@@ -81,13 +86,21 @@ func loadTx(ctx context.Context, tx *sql.Tx, runID string, dialect privateactivi
 
 // Query admission is always fresh and nonminting, even if q contains a sql.Tx.
 func RequirePostgresActiveQuery(ctx context.Context, q RowQueryer, runID string) error {
-	_, err := load(ctx, q, runID, privateactivity.DialectPostgres, true, false)
+	_, err := ReadPostgresActiveSourceQuery(ctx, q, runID)
 	return err
 }
 
 func RequireSQLiteActiveQuery(ctx context.Context, q RowQueryer, runID string) error {
-	_, err := load(ctx, q, runID, privateactivity.DialectSQLite, true, false)
+	_, err := ReadSQLiteActiveSourceQuery(ctx, q, runID)
 	return err
+}
+
+func ReadPostgresActiveSourceQuery(ctx context.Context, q RowQueryer, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+	return load(ctx, q, runID, privateactivity.DialectPostgres, true, false)
+}
+
+func ReadSQLiteActiveSourceQuery(ctx context.Context, q RowQueryer, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+	return load(ctx, q, runID, privateactivity.DialectSQLite, true, false)
 }
 
 func load(ctx context.Context, q RowQueryer, runID string, dialect privateactivity.Dialect, active, lock bool) (runtimecorrelation.SourceArtifactFact, error) {

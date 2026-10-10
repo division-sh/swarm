@@ -8,7 +8,6 @@ import (
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
-	privategenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
@@ -20,6 +19,22 @@ func TestGenericScheduleExactEffectsAdmissionPreparationCancellationBothStores(t
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			postgres := tc.name == "postgres"
 			at := time.Now().UTC().Truncate(time.Microsecond)
+			var owner interface {
+				SetNowFnForTest(func() time.Time)
+				AdmitTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error)
+				PrepareOccurrenceTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.Wakeup, time.Time) (runtimegenericschedule.PreparedOccurrence, error)
+				CancelAdmissionTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.AdmissionCommand, string, time.Time) (runtimegenericschedule.CancelResult, error)
+				CancelActivationTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error)
+			}
+			switch selected := selected.(type) {
+			case *PostgresStore:
+				owner = selected.genericSchedulePostgresOwner
+			case *SQLiteRuntimeStore:
+				owner = selected.genericScheduleSQLiteOwner
+			default:
+				t.Fatalf("unsupported exact-effects store %T", selected)
+			}
+			owner.SetNowFnForTest(func() time.Time { return at })
 			head := func() int64 {
 				t.Helper()
 				var revision int64
@@ -59,14 +74,16 @@ func TestGenericScheduleExactEffectsAdmissionPreparationCancellationBothStores(t
 			var created runtimegenericschedule.AdmissionResult
 			run("timer admission", func() string { return created.Activation.ID }, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 				var err error
-				created, err = privategenericschedule.AdmitTx(txctx, attempt, postgres, command, func() time.Time { return at })
+				created, err = owner.AdmitTx(txctx, attempt, command)
 				if err == nil && created.Outcome != runtimegenericschedule.AdmissionCreated {
 					t.Fatalf("admit: %+v", created)
 				}
 				return err
 			})
 			run("timer exact replay", nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-				replayed, err := privategenericschedule.AdmitTx(txctx, attempt, postgres, command, func() time.Time { return at.Add(time.Hour) })
+				owner.SetNowFnForTest(func() time.Time { return at.Add(time.Hour) })
+				replayed, err := owner.AdmitTx(txctx, attempt, command)
+				owner.SetNowFnForTest(func() time.Time { return at })
 				if err == nil && (replayed.Outcome != runtimegenericschedule.AdmissionExactReplay || replayed.Activation.ID != created.Activation.ID) {
 					t.Fatalf("admit replay: %+v", replayed)
 				}
@@ -77,21 +94,21 @@ func TestGenericScheduleExactEffectsAdmissionPreparationCancellationBothStores(t
 				t.Fatal(err)
 			}
 			run("timer occurrence preparation", func() string { return created.Activation.ID }, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-				prepared, err := privategenericschedule.PrepareOccurrenceTx(txctx, attempt, postgres, wakeup, at.Add(time.Minute))
+				prepared, err := owner.PrepareOccurrenceTx(txctx, attempt, wakeup, at.Add(time.Minute))
 				if err == nil && prepared.Activation.ID != created.Activation.ID {
 					t.Fatalf("prepare: %+v", prepared)
 				}
 				return err
 			})
 			run("timer cancellation", func() string { return created.Activation.ID }, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-				cancelled, err := privategenericschedule.CancelAdmissionTx(txctx, attempt, postgres, command, "operator_cancelled", at.Add(2*time.Minute))
+				cancelled, err := owner.CancelAdmissionTx(txctx, attempt, command, "operator_cancelled", at.Add(2*time.Minute))
 				if err == nil && cancelled.Outcome != runtimegenericschedule.CancelChanged {
 					t.Fatalf("cancel immutable admission: %+v", cancelled)
 				}
 				return err
 			})
 			run("timer cancel replay", nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-				_, err := privategenericschedule.CancelTx(txctx, attempt, postgres, runtimegenericschedule.CancelCommand{
+				_, err := owner.CancelActivationTx(txctx, attempt, runtimegenericschedule.CancelCommand{
 					ActivationID: created.Activation.ID, Cause: "operator_cancelled", CancelledAt: at.Add(2 * time.Minute),
 				})
 				return err
@@ -103,7 +120,7 @@ func TestGenericScheduleExactEffectsAdmissionPreparationCancellationBothStores(t
 			var malformed runtimegenericschedule.AdmissionResult
 			run("malformed timer admission", func() string { return malformed.Activation.ID }, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 				var err error
-				malformed, err = privategenericschedule.AdmitTx(txctx, attempt, postgres, command, func() time.Time { return at })
+				malformed, err = owner.AdmitTx(txctx, attempt, command)
 				return err
 			})
 			if _, err := db.ExecContext(ctx, `UPDATE timers SET immutable_hash='corrupt' WHERE timer_id=$1::uuid`, malformed.Activation.ID); err != nil {
@@ -114,14 +131,14 @@ func TestGenericScheduleExactEffectsAdmissionPreparationCancellationBothStores(t
 				t.Fatal(err)
 			}
 			run("malformed timer preparation", func() string { return malformed.Activation.ID }, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-				prepared, err := privategenericschedule.PrepareOccurrenceTx(txctx, attempt, postgres, variantWakeup, at.Add(time.Minute))
+				prepared, err := owner.PrepareOccurrenceTx(txctx, attempt, variantWakeup, at.Add(time.Minute))
 				if err == nil && prepared.Outcome != runtimegenericschedule.PrepareTerminal {
 					t.Fatalf("malformed variant prepare: %+v", prepared)
 				}
 				return err
 			})
 			run("malformed timer prepare replay", nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-				_, err := privategenericschedule.PrepareOccurrenceTx(txctx, attempt, postgres, variantWakeup, at.Add(time.Minute))
+				_, err := owner.PrepareOccurrenceTx(txctx, attempt, variantWakeup, at.Add(time.Minute))
 				return err
 			})
 			for _, spelling := range []string{strings.ToUpper(runID), strings.ReplaceAll(runID, "-", "")} {
@@ -129,7 +146,7 @@ func TestGenericScheduleExactEffectsAdmissionPreparationCancellationBothStores(t
 				var admitted runtimegenericschedule.AdmissionResult
 				run("run spelling admission", func() string { return admitted.Activation.ID }, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 					var err error
-					admitted, err = privategenericschedule.AdmitTx(txctx, attempt, postgres, variantCommand, func() time.Time { return at })
+					admitted, err = owner.AdmitTx(txctx, attempt, variantCommand)
 					if err == nil && admitted.Outcome != runtimegenericschedule.AdmissionCreated {
 						t.Fatalf("run spelling admission: %+v", admitted)
 					}

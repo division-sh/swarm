@@ -657,6 +657,7 @@ func (s CandidateScope) MatchesCandidate(c Candidate) bool {
 }
 
 var ErrCompletionAuthority = errors.New("completion execution authority is invalid")
+var ErrRunExecutionAuthority = errors.New("run execution authority is not current")
 
 type CandidateCursor struct {
 	RunID string

@@ -22,7 +22,7 @@ func idleClaimOwner(t *testing.T) (*PostgresOwner, sqlmock.Sqlmock, *sql.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner, err := NewPostgres(backend, func() error { return nil })
+	owner, err := NewPostgres(backend, func() error { return nil }, standaloneExecutionFixture{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,6 +48,7 @@ func idleClaimWakeup(t *testing.T, id string) runtimegenericschedule.Wakeup {
 func expectIdleClaimAcquired(mock sqlmock.Sqlmock, wakeup runtimegenericschedule.Wakeup) {
 	mock.ExpectQuery(`SELECT pg_try_advisory_lock`).WithArgs(claimKey(wakeup)).WillReturnRows(sqlmock.NewRows([]string{"acquired"}).AddRow(true))
 	mock.ExpectQuery(`SELECT EXISTS`).WithArgs(wakeup.ActivationID(), wakeup.DueAt()).WillReturnRows(sqlmock.NewRows([]string{"active"}).AddRow(true))
+	mock.ExpectQuery(`SELECT CAST\(run_id AS TEXT\) FROM timers`).WithArgs(wakeup.ActivationID()).WillReturnRows(sqlmock.NewRows([]string{"run_id"}).AddRow(nil))
 }
 
 func TestGenericClaimUnusedConnectionClosesOnEveryUnheldExit(t *testing.T) {
@@ -118,6 +119,7 @@ func TestGenericClaimExactReleasePreservesSiblingConnection(t *testing.T) {
 		t.Fatal("sibling claim was released")
 	}
 	mock.ExpectQuery(`SELECT EXISTS`).WithArgs(b.ActivationID(), b.DueAt()).WillReturnRows(sqlmock.NewRows([]string{"active"}).AddRow(true))
+	mock.ExpectQuery(`SELECT CAST\(run_id AS TEXT\) FROM timers`).WithArgs(b.ActivationID()).WillReturnRows(sqlmock.NewRows([]string{"run_id"}).AddRow(nil))
 	if claimed, err := owner.ClaimGenericScheduleWakeup(context.Background(), b); err != nil || !claimed {
 		t.Fatalf("sibling reentrance changed: %t %v", claimed, err)
 	}

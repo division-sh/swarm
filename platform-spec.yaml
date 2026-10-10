@@ -21029,7 +21029,17 @@ run_model:
         remains historical evidence, not the current occurrence''s terminal disposition. The shared generic lifecycle
         validator enforces these relationships before continuing readback normalizes progress for comparison;
         a canceled companion remains the exact canceled disposition. Readback never repairs missing work,
-        grants execution or discharges source-history admission by itself. Preactivation authority and
+        grants execution or discharges source-history admission by itself. Generic execution selection and writes
+        consume the existing run-lifecycle execution owner: durable selected binding, current running child state,
+        exact run/source context and the current selected execution fence are required, independently of inherited
+        row provenance. Selected lease freshness uses actual database time at the authority read or fence, not
+        transaction-start time; a wait inside an older transaction cannot extend an expired lease. Ordinary paused
+        runs retain their existing eligibility; selected authority cannot execute
+        ordinary or runless clocks. Selection is nonminting and never substitutes for the fresh transaction-bound
+        check before admission, preparation, publication, cancellation or malformed-row disposition. The run lock
+        precedes timer locks. Exact admission replay may return immutable readback but cannot create work or acquire
+        execution. Native fork construction and admitted run/standing lifecycle cleanup remain distinct owned
+        transitions; retired execution authority cannot prevent their required cleanup. Preactivation authority and
         published-occurrence continuation remain independent requirements. Pending fan-out barrier materialization
         validates its exact captured source schedule before writes and retains the admitted absolute due rather
         than resetting it to child birth. An already published barrier occurrence requires its historical delivery

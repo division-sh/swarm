@@ -34,7 +34,7 @@ func ParkClockRunsTx(ctx context.Context, attempt *mutationprotocol.Attempt, pos
 				return errors.Join(err, errors.New("standing schedule disappeared during parking"))
 			}
 			if activation.Command.OwnerKind != runtimegenericschedule.OwnerInstance {
-				if _, err := CancelTx(ctx, attempt, postgres, runtimegenericschedule.CancelCommand{ActivationID: ref.ActivationID, Cause: cause, CancelledAt: at}); err != nil {
+				if _, err := cancelOwnedCleanupTx(ctx, tx, attempt, postgres, runtimegenericschedule.CancelCommand{ActivationID: ref.ActivationID, Cause: cause, CancelledAt: at}); err != nil {
 					return err
 				}
 				continue

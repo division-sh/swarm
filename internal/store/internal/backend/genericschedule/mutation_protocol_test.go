@@ -28,6 +28,7 @@ func TestCancelGenericScheduleMutationProtocolNoopAndRollback(t *testing.T) {
 				}
 				t.Cleanup(func() { _ = db.Close() })
 				mock.ExpectBegin()
+				mock.ExpectQuery(`SELECT CAST\(run_id AS TEXT\) FROM timers`).WithArgs("00000000-0000-4000-8000-000000002446").WillReturnRows(sqlmock.NewRows([]string{"run_id"}))
 				query := mock.ExpectQuery("FROM timers WHERE timer_id")
 				if testCase.err != nil {
 					query.WillReturnError(testCase.err)
@@ -49,7 +50,7 @@ func TestCancelGenericScheduleMutationProtocolNoopAndRollback(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					owner, err := NewPostgres(backend, func() error { return nil })
+					owner, err := NewPostgres(backend, func() error { return nil }, standaloneExecutionFixture{})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -59,7 +60,7 @@ func TestCancelGenericScheduleMutationProtocolNoopAndRollback(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					owner, err := NewSQLite(backend, func() error { return nil })
+					owner, err := NewSQLite(backend, func() error { return nil }, standaloneExecutionFixture{})
 					if err != nil {
 						t.Fatal(err)
 					}
