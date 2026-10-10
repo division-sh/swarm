@@ -1317,3 +1317,43 @@ blind core/full rerun. On focused success, batch with the approved E2E-13 flag
 once, then fresh core+12 supplements and hosted full; no b47 red receipt carry.
 Existing2353/2394/harness watchlist records own the defect and proof refinement;
 no new issue, production/spec semantics, framework, driver or vendor change.
+
+## Bounded In-Window Pressure Observation Repair
+
+Reviewer-G6092312347 authorizes this TEST-ONLY correction atop048ad8000,
+amending the earlier requirement to reproduce literal zero samples on both
+heads. The failed333.579s race aggregate remains failed evidence: synchronous
+22-intent refill occupied10.256s without selecting the main-loop ticker,
+despite43 actual commits and maximum commit gap859ms. This is a pre-existing
+observation-scheduling flaw, not evidence that production serving stalled.
+That attribution classifies the assertion, not the exact four-slot trigger.
+
+User-selected base44c4047f0 and head048 both pass the diagnostic startup root
+under actual two-co-runner overlap. PG second refill8.334s/6.039s delays the
+first tick until refill returns; each reports one real observation. SQLite
+reports four observations on each side before a refill longer than10s.
+The planned four-slot comparison was not achieved, test-phase alignment differs,
+and these instrumented diagnostics earn no qualification or receipt carry.
+No candidate slowdown is established at this narrower load; absence of added
+cost under heavier qualification is NOT claimed. Complete chronology/hashes:
+PR6092294073. Existing2353/2394 retain the test-health/performance record.
+
+The same pressure helper now services due ticks after each newly durable refill
+item using the unchanged selected-store population read. The initial wave has
+no observation channel/window. Both refill and ordinary-select paths credit a
+sample only when that actual read starts and finishes before the original end.
+Counter increments without readback, after-window observations and goroutine
+observers are forbidden. The positive samples assertion,10s window,15s actual
+commit-progress bound,22..44 durable population, real leases/worker count,
+receipt/effect/final-accounting and90s drain assertions remain unchanged.
+No new test root, registry/unit membership, timing budget, production behavior,
+compatibility, framework or spec semantic change is introduced.
+
+Before pushing, run the corrected complete startup root on both stores with
+race and the full starvation/FIFO/accounting/finite pressure controls. Any
+genuine population/progress/lease failure requires separate classification,
+not another blind qualification. Then push the corrected frozen head once and
+run fresh whole Local core22/22, all six complete channel units and six named
+supplements (worker race x3), plus exact-head hosted full CI. No red-core or
+diagnostic receipt carry; server2 allocation remains explicit after D joins.
+The final-head audit and both local/hosted success still precede merge approval.

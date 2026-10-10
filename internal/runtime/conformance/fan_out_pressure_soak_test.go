@@ -462,6 +462,18 @@ func proveSupplementalPressureSoak(t *testing.T, backend string, floor int, span
 	installSupplementalScanObserver(t, f, p, nil)
 	f.runtimes[0].pipeline.InstallFanOutWorkNotifier(p)
 	produced, waves, finished := 0, 0, 0
+	var end time.Time
+	var observationTicks <-chan time.Time
+	samples := 0
+	observePopulation := func() {
+		if !time.Now().Before(end) {
+			return
+		}
+		assertPressureSoakPopulation(t, f, floor, 2*floor)
+		if time.Now().Before(end) {
+			samples++
+		}
+	}
 	consume := func(r supplementalReceipt) {
 		assertPressureSoakReceipt(t, r, run)
 		finished++
@@ -476,6 +488,12 @@ func proveSupplementalPressureSoak(t *testing.T, backend string, floor int, span
 			// Release only newly observed durable work, without holding the
 			// writer at the floor until the entire ingress wave completes.
 			c.added(1)
+			// Synchronous refill must not starve real in-window observations.
+			select {
+			case <-observationTicks:
+				observePopulation()
+			default:
+			}
 		drainReceipts:
 			for {
 				select {
@@ -493,13 +511,13 @@ func proveSupplementalPressureSoak(t *testing.T, backend string, floor int, span
 	addWave(2 * floor)
 	assertPressureSoakPopulation(t, f, floor, 2*floor)
 	started := c.startWindow()
-	end := started.Add(span)
+	end = started.Add(span)
 	observations := time.NewTicker(time.Second)
 	defer observations.Stop()
+	observationTicks = observations.C
 	deadline := time.NewTimer(span)
 	defer deadline.Stop()
 	lastLog := started
-	samples := 0
 	for time.Now().Before(end) {
 		s, changed := c.snapshot()
 		if s.Err != nil || p.snapshot().Err != nil {
@@ -520,9 +538,8 @@ func proveSupplementalPressureSoak(t *testing.T, backend string, floor int, span
 		case r := <-p.completed:
 			consume(r)
 		case <-changed:
-		case <-observations.C:
-			assertPressureSoakPopulation(t, f, floor, 2*floor)
-			samples++
+		case <-observationTicks:
+			observePopulation()
 			if time.Since(lastLog) >= 15*time.Second {
 				logSupplementalState(t, f, p, fmt.Sprintf("pressure elapsed=%s resident_floor=%d resident_ceiling=%d waves=%d", time.Since(started), floor, 2*floor, waves))
 				lastLog = time.Now()
