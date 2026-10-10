@@ -386,6 +386,9 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	if err != nil {
 		return fmt.Errorf("create selected-contract fork-local runtime container bus: %w", err)
 	}
+	if err := admitPreparedSourcePublications(ctx, bus, req.Prepared, sourceEvents, req.SourceRunID, req.ForkRunID, c.proof.ExecutionOwner); err != nil {
+		return err
+	}
 	scheduler := runtimepipeline.NewSchedulerWithWorkOwner(forkOwner)
 	if err := scheduler.PrepareStartup(); err != nil {
 		return err
@@ -648,20 +651,9 @@ func (c selectedContractForkLocalRuntimeContainer) publishCommittedInputs() erro
 	req, attachment := c.req, c.attachment
 	runCtx, bus := attachment.ctx, attachment.runtime.bus
 	for _, sourceEvent := range attachment.sourceEvents {
-		input := req.Prepared.inputs[sourceEvent.SourceEventID]
-		_, hasPublication := sourceEvent.InputPublication.Event()
-		if hasPublication != input.Present() {
-			return fmt.Errorf("selected input publication changed after preparation")
-		}
-		if hasPublication {
-			fingerprint, err := selectedPreparationFingerprint(sourceEvent.InputPublication.Coordinates())
-			if err != nil || fingerprint != req.Prepared.inputCoordinates[sourceEvent.SourceEventID] {
-				return fmt.Errorf("selected input evidence changed after preparation: %v", err)
-			}
-			input, err = input.WithStoreProjectedPayload(sourceEvent.Payload)
-			if err != nil {
-				return err
-			}
+		input, err := selectedSourceInput(req.Prepared, sourceEvent)
+		if err != nil {
+			return err
 		}
 		forkEventID := activityidentity.ForkLineageEventID(req.ForkRunID, sourceEvent.SourceEventID)
 		evt, err := selectedContractForkEvent(req.SourceRunID, req.ForkRunID, forkEventID, sourceEvent, c.proof.ExecutionOwner)
