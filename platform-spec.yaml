@@ -11314,6 +11314,14 @@ tool_model:
         SDK-store owner then quiesces new ordinary work and drains admitted transactions; inherited transaction work
         may complete, but ended transaction contexts grant nothing. This quiescence keeps only the exact current
         explicit deletion permit available after the drain; it never grants deletion after ordinary retirement.
+      session_explicit_logout_reservation: >
+        Logout is a distinct destructive channel responsibility, not unbind or a message capability. Its selected-store
+        reservation freezes the retained onboarding operation and revision, paired account admission, complete source
+        coordinate and original SDK occurrence. Reservation atomically retires every executable consumer of that exact
+        connection while retaining pairing evidence and transport possession. Contradictory or other-principal consumers
+        refuse with rollback. A pending logout conflicts with any overlapping identity or source teardown; unrelated
+        connections remain independent. Exact request replay returns the original immutable responsibility, not a new
+        target. This private evidence is not an SDK execution permit and is omitted from public teardown serialization.
       session_private_directory_component: >
         On supported Linux and Darwin hosts, the concrete connection directory is keyed by the retained connection
         UUID under an existing private runtime-state base, never source hash, run or process occurrence. Directory,
@@ -17097,7 +17105,7 @@ platform_tables:
             teardown_id UUID PRIMARY KEY,
             request_key_hash TEXT NOT NULL UNIQUE,
             request_hash TEXT NOT NULL,
-            kind TEXT NOT NULL CHECK (kind IN ('unbind','proof_revoke','interface_retirement','context_retirement')),
+            kind TEXT NOT NULL CHECK (kind IN ('unbind','proof_revoke','interface_retirement','context_retirement','logout')),
             principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
             interface_key TEXT,
             interface_ref TEXT CHECK (interface_ref IS NULL OR interface_ref = 'swarm.hitl-channel/v2'),
@@ -17109,6 +17117,8 @@ platform_tables:
             context_publication_generation BIGINT CHECK (context_publication_generation IS NULL OR context_publication_generation > 0),
             expected_binding_revision BIGINT CHECK (expected_binding_revision IS NULL OR expected_binding_revision > 0),
             expected_proof_revision BIGINT CHECK (expected_proof_revision IS NULL OR expected_proof_revision > 0),
+            logout_connection_id UUID,
+            logout_target TEXT,
             phase TEXT NOT NULL CHECK (phase IN ('reserved','authority_retired','succeeded','failed')),
             teardown_revision BIGINT NOT NULL CHECK (teardown_revision > 0),
             retired_operations BIGINT NOT NULL DEFAULT 0 CHECK (retired_operations >= 0),
@@ -17119,12 +17129,14 @@ platform_tables:
             updated_at TIMESTAMPTZ NOT NULL,
             completed_at TIMESTAMPTZ,
             CHECK ((kind = 'context_retirement' AND bundle_hash IS NOT NULL AND context_publication_generation IS NOT NULL AND interface_key IS NULL) OR (kind <> 'context_retirement' AND interface_key IS NOT NULL AND bundle_hash IS NULL AND context_publication_generation IS NULL)),
-            CHECK ((kind = 'unbind' AND expected_binding_revision IS NOT NULL AND expected_proof_revision IS NULL) OR (kind = 'proof_revoke' AND expected_binding_revision IS NULL AND expected_proof_revision IS NOT NULL) OR (kind IN ('interface_retirement','context_retirement') AND expected_binding_revision IS NULL AND expected_proof_revision IS NULL)),
+            CHECK ((kind = 'unbind' AND expected_binding_revision IS NOT NULL AND expected_proof_revision IS NULL) OR (kind = 'proof_revoke' AND expected_binding_revision IS NULL AND expected_proof_revision IS NOT NULL) OR (kind IN ('interface_retirement','context_retirement','logout') AND expected_binding_revision IS NULL AND expected_proof_revision IS NULL)),
+            CHECK ((kind = 'logout' AND logout_connection_id IS NOT NULL AND logout_target IS NOT NULL) OR (kind <> 'logout' AND logout_connection_id IS NULL AND logout_target IS NULL)),
             CHECK ((phase IN ('succeeded','failed')) = (completed_at IS NOT NULL)),
             INDEX idx_channel_teardown_principal (principal_id, requested_at),
             INDEX idx_channel_teardown_phase (phase, updated_at),
             INDEX idx_channel_teardown_interface (interface_key, phase),
-            INDEX idx_channel_teardown_bundle (bundle_hash, context_publication_generation, phase)
+            INDEX idx_channel_teardown_bundle (bundle_hash, context_publication_generation, phase),
+            UNIQUE INDEX idx_channel_teardown_logout_connection (logout_connection_id) WHERE kind = 'logout'
         );
     connected_channel_activations:
       description: >-
@@ -26715,6 +26727,7 @@ cli_specification:
           channel_rebind_interface: {command: swarm channel rebind, selector: 'flag:interface', family: operator_channel, mode: full_only, safety: mutating}
           channel_rebind_target: {command: swarm channel rebind, selector: 'flag:target', family: none, mode: different_concept, scope_rule: exact package-qualified provider activation target, safety: mutating}
           channel_resume_operation: {command: swarm channel resume, selector: 'arg:operation-id', family: none, mode: different_concept, scope_rule: exact durable channel onboarding operation identifier, safety: mutating}
+          channel_logout_operation: {command: swarm channel logout, selector: 'arg:operation-id', family: none, mode: different_concept, scope_rule: 'exact retained channel onboarding operation identifier; never a provider account or session path', safety: mutating}
           channel_status_interface: {command: swarm channel status, selector: 'arg:interface', family: operator_channel, mode: full_only}
           channel_status_source: {command: swarm channel status, selector: 'flag:source', family: none, mode: different_concept, scope_rule: 'explicit local directory admitted once for exact source identity; paired with exact target'}
           channel_status_target: {command: swarm channel status, selector: 'flag:target', family: none, mode: different_concept, scope_rule: exact package-qualified provider activation target}
@@ -27189,6 +27202,13 @@ cli_specification:
               json_shape: channel unbind operation result with exact successor binding revision
               quiet_values:
               - operation_id
+            channel_logout:
+              command: swarm channel logout
+              classification: shared_output
+              fact_owner: /v1/rpc channel.logout
+              json_shape: exact retained onboarding revision and durable logout teardown and effect identities
+              quiet_values:
+              - teardown_id
             serve:
               command: swarm serve
               classification: exception
@@ -28776,6 +28796,9 @@ cli_specification:
         unbind:
           command: swarm channel unbind <interface> [--json|--quiet]
           api_owner: /v1/rpc channel.unbind
+        logout:
+          command: swarm channel logout <operation-id> [--json|--quiet]
+          api_owner: /v1/rpc channel.onboarding_get plus channel.logout
     serve:
       command: swarm serve [directory] [flags]
       group: getting_started
@@ -31545,6 +31568,7 @@ api_specification:
         - channel.onboarding_start
         - channel.onboarding_retry
         - channel.unbind
+        - channel.logout
         - channel.confirm
         - channel.proof_revoke
         - test.setup_entities
@@ -35596,6 +35620,7 @@ api_specification:
           identity_operation: {$ref: '#/components/schemas/OperatorChannelOperation'}
           binding: {$ref: '#/components/schemas/OperatorChannelBinding'}
           readiness: {$ref: '#/components/schemas/ConnectedChannelReadiness'}
+          logout: {$ref: '#/components/schemas/ChannelLogoutResult'}
           pairing:
             type: object
             additionalProperties: false
@@ -35606,6 +35631,37 @@ api_specification:
               expires_at: {$ref: '#/components/schemas/Timestamp'}
               paired: {type: boolean}
               connected: {type: boolean}
+      ChannelLogoutResult:
+        type: object
+        additionalProperties: false
+        required: [operation_id, expected_revision, effect_operation_id, teardown]
+        properties:
+          operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          expected_revision: {type: integer, minimum: 1}
+          effect_operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          teardown:
+            type: object
+            additionalProperties: false
+            required: [teardown_id, kind, principal_id, scope, phase, revision, retired_operations, retired_activations, requested_at, updated_at]
+            properties:
+              teardown_id: {$ref: '#/components/schemas/OpaqueId'}
+              kind: {type: string, enum: [logout]}
+              principal_id: {$ref: '#/components/schemas/OpaqueId'}
+              scope:
+                type: object
+                additionalProperties: false
+                required: [interface]
+                properties:
+                  interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
+              phase: {type: string, enum: [reserved, authority_retired, succeeded, failed]}
+              revision: {type: integer, minimum: 1}
+              retired_operations: {type: integer, minimum: 0}
+              retired_activations: {type: integer, minimum: 0}
+              failure_code: {type: string}
+              failure_message: {type: string}
+              requested_at: {$ref: '#/components/schemas/Timestamp'}
+              updated_at: {$ref: '#/components/schemas/Timestamp'}
+              completed_at: {$ref: '#/components/schemas/Timestamp'}
       OperatorChannelOperationResult:
         type: object
         additionalProperties: false
@@ -40022,6 +40078,23 @@ api_specification:
       - {name: idempotency_key, required: false, schema: {type: string}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
       errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, IDEMPOTENCY_CONFLICT]
+    channel.logout:
+      tier: must_have
+      description: >-
+        Explicitly unlink one original paired session connection selected by its retained onboarding operation and
+        exact revision. The authenticated stable principal owns the durable teardown, which fences business use
+        without disconnecting the transport needed for the effect. The existing effect journal owns launch and
+        outcome; launched or uncertain logout is never automatically resent, re-paired or adopted by a successor.
+        Ordinary unbind, reset and source retirement retain pairing. Readback exposes no raw account, session path,
+        pairing secret or SDK handle. The CLI reads channel.onboarding_get then delegates to this method.
+      scope: {required: [control:channels]}
+      idempotency: bearer-token-scoped API request occurrence plus stable-principal exact durable logout replay.
+      params:
+      - {name: operation_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
+      - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
+      - {name: idempotency_key, required: false, schema: {type: string}}
+      result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelLogoutResult'}}
+      errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, IDEMPOTENCY_CONFLICT]
     channel.proof_revoke:
       tier: must_have
       description: Revoke one exact current or retained machine-local verified-account proof revision. Derived local bindings immediately read back revoked and cannot grant authority; a listed interface without a proof fails as CHANNEL_PROOF_UNAVAILABLE.

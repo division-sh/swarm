@@ -303,6 +303,21 @@ methods:
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
     service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
     gap_classification: []
+  - method: channel.logout
+    transport: http
+    required_params: [operation_id, expected_revision]
+    declared_errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, IDEMPOTENCY_CONFLICT]
+    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestChannelLogoutAPIPrincipalAndRevisionAdmission}]}
+    required_param_validation: {status: covered, proof_refs: [{kind: go_test, name: TestChannelLogoutAPIPrincipalAndRevisionAdmission}]}
+    unknown_top_level_param_validation: {status: covered, proof_refs: [{kind: go_test, name: TestChannelLogoutAPIPrincipalAndRevisionAdmission}]}
+    auth: {status: covered, proof_refs: [{kind: go_test, name: TestChannelLogoutAPIPrincipalAndRevisionAdmission}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
+    declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestChannelLogoutAPIPrincipalAndRevisionAdmission}]}
+    idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestChannelLogoutAPIPrincipalAndRevisionAdmission}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestChannelLogoutAPIPrincipalAndRevisionAdmission}]}
+    notification_schema: {status: not_applicable}
+    examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
+    service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
+    gap_classification: []
   - method: channel.unbind
     transport: http
     required_params: [interface, expected_revision]

@@ -29,3 +29,26 @@ Only after those named tests pass is the predicate JSON regenerated using
 `SWARM_UPDATE_ADMISSION_PREDICATE_CENSUS=1`. Ordinary census and hostile mutation
 controls rerun without that variable. Hash equality is drift detection, not
 execution proof or complete #2577 closure.
+
+## N66 Logout Recovery Consumer
+
+`channelonboarding.DestructiveService.Recover` now dispatches the distinct
+`logout` responsibility through its typed session-lifecycle port. It does not
+invoke the ordinary activation refresher, release credentials, select a fresh
+SDK occurrence or complete the responsibility itself. The original operation,
+revision, paired-account admission, declaration/source coordinate and SDK
+occurrence remain frozen in the existing selected teardown owner.
+
+`TestSessionLogoutRecoveryConsumesFrozenResponsibilityBothStores` executes the
+real SQLite/PostgreSQL reservation and recovery owner twice. Its observation
+adapter asserts unchanged frozen evidence, no fresh preparation, no ordinary
+disconnecting cleanup, no invented settlement and canceled-wait refusal.
+`TestSessionLogoutFencesCurrentActivationBothStores` proves that reservation
+retires current executable activation and rejects standing republication and
+unjournaled completion. The observation adapter grants no SDK or journal
+authority: native dispatch, outcome settlement, restart-to-completion and the
+served logout journey remain unfinished in the same #2577 PR.
+
+This accounts for the changed A10/A27 consumer body before regeneration; it
+does not alter the scanner, its scope rules or the existing P08/P10/P21 proof
+obligations, and does not claim their full N66 execution closure.

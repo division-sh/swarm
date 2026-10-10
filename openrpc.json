@@ -2373,6 +2373,216 @@
       ]
     },
     {
+      "name": "channel.logout",
+      "description": "Explicitly unlink one original paired session connection selected by its retained onboarding operation and exact revision. The authenticated stable principal owns the durable teardown, which fences business use without disconnecting the transport needed for the effect. The existing effect journal owns launch and outcome; launched or uncertain logout is never automatically resent, re-paired or adopted by a successor. Ordinary unbind, reset and source retirement retain pairing. Readback exposes no raw account, session path, pairing secret or SDK handle. The CLI reads channel.onboarding_get then delegates to this method.",
+      "params": [
+        {
+          "name": "operation_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "expected_revision",
+          "required": true,
+          "schema": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/ChannelLogoutResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32015,
+          "message": "Application error: CHANNEL_OPERATION_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "CHANNEL_OPERATION_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32011,
+          "message": "Application error: CHANNEL_BINDING_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "CHANNEL_BINDING_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32018,
+          "message": "Application error: CHANNEL_REVISION_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "CHANNEL_REVISION_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32041,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
       "name": "channel.onboarding_get",
       "description": "Read one durable onboarding operation, its nested identity state, and its exact-current connected readiness without advancing or replaying effects.",
       "params": [
@@ -14934,6 +15144,106 @@
         ],
         "type": "object"
       },
+      "ChannelLogoutResult": {
+        "additionalProperties": false,
+        "properties": {
+          "effect_operation_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "expected_revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "operation_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "teardown": {
+            "additionalProperties": false,
+            "properties": {
+              "completed_at": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "failure_code": {
+                "type": "string"
+              },
+              "failure_message": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "logout"
+                ],
+                "type": "string"
+              },
+              "phase": {
+                "enum": [
+                  "reserved",
+                  "authority_retired",
+                  "succeeded",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              "principal_id": {
+                "$ref": "#/components/schemas/OpaqueId"
+              },
+              "requested_at": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "retired_activations": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "retired_operations": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "revision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "scope": {
+                "additionalProperties": false,
+                "properties": {
+                  "interface": {
+                    "$ref": "#/components/schemas/OperatorChannelInterface"
+                  }
+                },
+                "required": [
+                  "interface"
+                ],
+                "type": "object"
+              },
+              "teardown_id": {
+                "$ref": "#/components/schemas/OpaqueId"
+              },
+              "updated_at": {
+                "$ref": "#/components/schemas/Timestamp"
+              }
+            },
+            "required": [
+              "teardown_id",
+              "kind",
+              "principal_id",
+              "scope",
+              "phase",
+              "revision",
+              "retired_operations",
+              "retired_activations",
+              "requested_at",
+              "updated_at"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "operation_id",
+          "expected_revision",
+          "effect_operation_id",
+          "teardown"
+        ],
+        "type": "object"
+      },
       "ChannelOnboardingCandidate": {
         "additionalProperties": false,
         "properties": {
@@ -15198,6 +15508,9 @@
           },
           "identity_operation": {
             "$ref": "#/components/schemas/OperatorChannelOperation"
+          },
+          "logout": {
+            "$ref": "#/components/schemas/ChannelLogoutResult"
           },
           "operation": {
             "$ref": "#/components/schemas/ChannelOnboardingOperation"
