@@ -258,6 +258,17 @@ func (o *clientOccurrence) logout(ctx context.Context) error {
 		return err
 	}
 	defer release()
+	o.mu.Lock()
+	callbacks := o.callbacks
+	o.mu.Unlock()
+	if callbacks != nil {
+		if err := callbacks.join(workCtx); err != nil {
+			return err
+		}
+	}
+	if err := o.stores.fence.quiesceForLogout(workCtx); err != nil {
+		return err
+	}
 	workCtx = context.WithValue(workCtx, explicitLogoutKey{}, o.stores.fence)
 	if err := o.client.Logout(workCtx); err != nil {
 		return err
@@ -281,6 +292,9 @@ func (o *clientOccurrence) reserveLogout(ctx context.Context) (context.Context, 
 		return nil, nil, errClientOccurrenceFenced
 	}
 	o.logoutReserved = true
+	if o.callbacks != nil {
+		o.callbacks.fence()
+	}
 	drained := make(chan struct{})
 	if o.inFlight == 0 {
 		close(drained)
