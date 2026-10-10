@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -282,6 +283,7 @@ type Runtime struct {
 	LLMRuntimes        *llm.AgentRuntimeSet
 	ToolExecutor       *runtimetools.Executor
 	ChannelActivations *runtimechannelactivation.Owner
+	channelSessions    atomic.Pointer[channelSessionAdmission]
 	Manager            *runtimemanager.AgentManager
 	RuntimeIngress     *runtimeingress.Controller
 	RunControl         *runtimeruncontrol.Controller

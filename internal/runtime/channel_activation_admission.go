@@ -5,8 +5,24 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 )
+
+type channelSessionAdmission struct {
+	owner operatorchannel.SessionAdmissionOwner
+}
+
+func (rt *Runtime) bindChannelSessionAdmission(binding *channelSessionAdmission) error {
+	if rt == nil || binding == nil || binding.owner == nil {
+		return fmt.Errorf("channel session admission requires its original owner")
+	}
+	if rt.channelSessions.CompareAndSwap(nil, binding) || rt.channelSessions.Load() == binding {
+		return nil
+	}
+	return fmt.Errorf("channel session admission owner cannot be replaced")
+}
 
 func (rt *Runtime) validateChannelActivationPublication(ctx context.Context, publication channelonboarding.ChannelActivationPublication) error {
 	var owner *credentials.SnapshotOwner
@@ -49,20 +65,36 @@ func (rt *Runtime) validateChannelActivationPublication(ctx context.Context, pub
 }
 
 func (rt *Runtime) validateLearnedChannelPublication(ctx context.Context, activation channelonboarding.CompiledActivation) error {
-	profile, ok := activation.Plan.OnboardingProfile()
-	if !ok {
-		return fmt.Errorf("learned channel publication requires its onboarding profile")
+	responsibility, err := activation.AdmissionResponsibility()
+	if err != nil {
+		return err
 	}
-	current, err := channelonboarding.AdmissionResponsibilityCurrent(ctx, rt.Options.ChannelOnboardingStore, channelonboarding.AdmissionResponsibility{
-		OperationID: activation.OnboardingOperationID, OperationRevision: activation.OnboardingRevision,
-		ActivationRevision: activation.ActivationRevision, Coordinate: activation.Coordinate,
-		TargetSelector: activation.Plan.RegistrationTarget(), Provider: profile.Provider(), Credentials: activation.CredentialAdmissions,
-	}, true)
+	current, err := channelonboarding.AdmissionResponsibilityCurrent(ctx, rt.Options.ChannelOnboardingStore, responsibility, true)
 	if err != nil {
 		return err
 	}
 	if !current {
 		return fmt.Errorf("%w: learned channel publication lost its exact admission responsibility", channelonboarding.ErrRevisionConflict)
+	}
+	if activation.Plan.Transport() == packs.ChannelTransportSession {
+		return rt.validateNativeChannelPublication(ctx, activation)
+	}
+	return nil
+}
+
+func (rt *Runtime) validateNativeChannelPublication(ctx context.Context, activation channelonboarding.CompiledActivation) error {
+	binding := rt.channelSessions.Load()
+	if binding == nil {
+		return &operatorchannel.SessionProviderUnavailableError{Provider: activation.SessionAccount.Provider}
+	}
+	native, err := binding.owner.AdmitSessionAccount(ctx, activation.SessionAccount)
+	defer native.Close()
+	if err != nil {
+		return err
+	}
+	parent, revision := native.Parent()
+	if parent != activation.OnboardingOperationID || revision < activation.OnboardingRevision || native.Validate(ctx, activation.SessionAccount) != nil {
+		return fmt.Errorf("%w: native channel publication lost its original SDK admission", channelonboarding.ErrRevisionConflict)
 	}
 	return nil
 }

@@ -1336,6 +1336,12 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(5, "channel_onboarding", err)
 		return 1
 	}
+	if sessionBootstrap != nil {
+		if err := runtimeContextManager.BindChannelSessionAdmissionOwner(sessionBootstrap); err != nil {
+			presenter.fail(5, "channel_onboarding", err)
+			return 1
+		}
+	}
 	operatorChannels, err := operatorchannel.NewService(stores.OperatorChannels(), proofStore, channelProviderOwner, channelInterfaces, runtimeInstanceID)
 	if err != nil {
 		presenter.fail(5, "operator_channel", err)

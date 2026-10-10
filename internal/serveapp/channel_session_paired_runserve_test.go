@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -65,6 +66,7 @@ func TestRunServeWhatsAppSignedPairingBothStores(t *testing.T) {
 				result.Pairing != nil || result.Operation.Coordinate.TargetGeneration != 0 {
 				t.Fatal("signed pairing did not reach the original runless operator claim", result)
 			}
+			identityID := result.IdentityOperation.OperationID
 			from := peer.claim(result.IdentityOperation.Challenge)
 			previous := result.Operation.Coordinate
 			if code := process.stop(); code != 0 {
@@ -76,10 +78,17 @@ func TestRunServeWhatsAppSignedPairingBothStores(t *testing.T) {
 			result = channelonboarding.Result{}
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id}, &result)
 			if result.Operation.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation || result.IdentityOperation == nil ||
+				result.IdentityOperation.OperationID != identityID ||
 				result.IdentityOperation.State != operatorchannel.StateAwaitingConfirmation ||
 				result.IdentityOperation.ExternalAccountRef != operatorchannel.MaskPresentation(from.String()) || result.Operation.Coordinate.TargetGeneration != 0 ||
 				result.Operation.Coordinate.RuntimeInstanceID == previous.RuntimeInstanceID || result.Operation.Coordinate.BundleHash != previous.BundleHash {
 				t.Fatal("encrypted claim did not reach authenticated confirmation without a business target", result.Operation, result.IdentityOperation, "want sender", from.String())
+			}
+			peer.mu.Lock()
+			connections := peer.connections
+			peer.mu.Unlock()
+			if connections < 2 {
+				t.Fatal("ordinary restart did not restore a genuine SDK connection", connections)
 			}
 			var confirmed struct {
 				Operation operatorchannel.Operation `json:"operation"`
@@ -105,6 +114,46 @@ func TestRunServeWhatsAppSignedPairingBothStores(t *testing.T) {
 			}
 			if code := process.stop(); code != 0 {
 				t.Fatal("paired RunServe shutdown failed", code, process.outputString())
+			}
+			opts.TestChannelOnboardingBarrier = nil
+			process = startServeRuntimeTestProcess(t, opts)
+			process.waitForReadyLine()
+			endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+			result = channelonboarding.Result{}
+			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
+			if result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Readiness == nil || !result.Readiness.Ready {
+				t.Fatal("interrupted native activation did not recover to executable readiness", result)
+			}
+			select {
+			case sent := <-peer.sent:
+				if sent.ID != strings.ReplaceAll(result.Operation.ConfirmationOperationID, "-", "") || sent.Body.GetConversation() != "Swarm channel connected." {
+					t.Fatal("served confirmation journal differs from decrypted provider output", sent)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("ready native channel had no genuine decrypted confirmation send")
+			}
+			if code := process.stop(); code != 0 {
+				t.Fatal("enabled RunServe shutdown failed", code, process.outputString())
+			}
+			completed := result.Operation
+			process = startServeRuntimeTestProcess(t, opts)
+			process.waitForReadyLine()
+			endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+			result = channelonboarding.Result{}
+			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
+			if result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Readiness == nil || !result.Readiness.Ready ||
+				result.Operation.IdentityOperationID != identityID || result.Operation.BindingRevision != completed.BindingRevision ||
+				result.Operation.Coordinate.TargetGeneration != completed.Coordinate.TargetGeneration ||
+				result.Operation.Coordinate.RuntimeInstanceID == completed.Coordinate.RuntimeInstanceID {
+				t.Fatal("completed native restart lost its original responsibility", result.Operation, result.Readiness)
+			}
+			if code := process.stop(); code != 0 {
+				t.Fatal("retained enabled RunServe shutdown failed", code, process.outputString())
+			}
+			select {
+			case sent := <-peer.sent:
+				t.Fatal("completed confirmation was resent during ordinary restart", sent.ID)
+			default:
 			}
 		})
 	}

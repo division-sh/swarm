@@ -207,11 +207,11 @@ func compileServeLearnedChannelActivations(ctx context.Context, store channelonb
 		if err != nil {
 			return nil, err
 		}
-		current, err = channelonboarding.AdmissionResponsibilityCurrent(ctx, store, channelonboarding.AdmissionResponsibility{
-			OperationID: compiled.OnboardingOperationID, OperationRevision: compiled.OnboardingRevision,
-			ActivationRevision: compiled.ActivationRevision, Coordinate: compiled.Coordinate,
-			TargetSelector: candidate.Target.Selector, Provider: candidate.Provider, Credentials: compiled.CredentialAdmissions,
-		}, true)
+		responsibility, err := compiled.AdmissionResponsibility()
+		if err != nil {
+			return nil, err
+		}
+		current, err = channelonboarding.AdmissionResponsibilityCurrent(ctx, store, responsibility, true)
 		if err != nil {
 			return nil, err
 		}

@@ -17,6 +17,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/division-sh/swarm/internal/testutil/whatsappfixture"
 	waBinary "go.mau.fi/whatsmeow/binary"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waWa6"
 	"go.mau.fi/whatsmeow/socket"
 	"go.mau.fi/whatsmeow/types"
@@ -36,9 +37,17 @@ type serveNativeProtocolPeer struct {
 	connections  int
 	paired       chan struct{}
 	pairOnce     sync.Once
-	keysReady    chan struct{}
-	keysOnce     sync.Once
 	receipts     chan waBinary.Node
+	sender       *whatsappfixture.SignalSender
+	from         types.JID
+	fromLID      types.JID
+	sent         chan servedNativeMessage
+}
+
+type servedNativeMessage struct {
+	ID   string
+	To   types.JID
+	Body *waE2E.Message
 }
 
 func newServeNativeProtocolPeer(t *testing.T) *serveNativeProtocolPeer {
@@ -48,7 +57,7 @@ func newServeNativeProtocolPeer(t *testing.T) *serveNativeProtocolPeer {
 	peer := &serveNativeProtocolPeer{t: t, ctx: ctx,
 		account: types.NewJID("15551234567", types.DefaultUserServer),
 		lid:     types.NewJID("100000000001", types.HiddenUserServer), paired: make(chan struct{}),
-		keysReady: make(chan struct{}), receipts: make(chan waBinary.Node, 16)}
+		receipts: make(chan waBinary.Node, 16), sent: make(chan servedNativeMessage, 16)}
 	peer.account.Device, peer.lid.Device = 1, 1
 	var mu sync.Mutex
 	var sockets []*websocket.Conn
@@ -111,6 +120,11 @@ func newServeNativeProtocolPeer(t *testing.T) *serveNativeProtocolPeer {
 		}
 		server.Close()
 		workers.Wait()
+		if peer.sender != nil {
+			if err := peer.sender.Close(); err != nil {
+				t.Error(err)
+			}
+		}
 		transport.CloseIdleConnections()
 		http.DefaultTransport = base
 	})
@@ -144,6 +158,12 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 			return
 		}
 		if node.Tag != "iq" {
+			if node.Tag == "message" {
+				if err := p.acceptMessage(wire, node); err != nil {
+					p.t.Error(err)
+					return
+				}
+			}
 			if node.Tag == "receipt" {
 				select {
 				case p.receipts <- *node:
@@ -177,15 +197,43 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 				p.mu.Lock()
 				p.prekeys = keys
 				p.mu.Unlock()
-				p.keysOnce.Do(func() { close(p.keysReady) })
 			}
 		}
 		response := waBinary.Node{Tag: "iq", Attrs: waBinary.Attrs{"id": node.Attrs["id"], "type": "result"}}
+		if node.Attrs["xmlns"] == "usync" {
+			content, err := p.deviceList(node)
+			if err != nil {
+				p.t.Error(err)
+				return
+			}
+			response.Content = content
+		}
 		if node.Attrs["xmlns"] == "encrypt" && node.Attrs["type"] == "get" {
-			p.mu.Lock()
-			count := len(p.prekeys)
-			p.mu.Unlock()
-			response.Content = []waBinary.Node{{Tag: "count", Attrs: waBinary.Attrs{"value": strconv.Itoa(count)}}}
+			if key, requested := node.GetOptionalChildByTag("key"); requested {
+				var users []waBinary.Node
+				for _, user := range key.GetChildren() {
+					p.mu.Lock()
+					sender := p.sender
+					p.mu.Unlock()
+					jid, ok := user.Attrs["jid"].(types.JID)
+					if sender == nil || !ok {
+						p.t.Error("SDK requested an unowned public prekey")
+						return
+					}
+					bundle, err := sender.PublicPreKey(p.ctx, jid)
+					if err != nil {
+						p.t.Error(err)
+						return
+					}
+					users = append(users, bundle)
+				}
+				response.Content = []waBinary.Node{{Tag: "list", Content: users}}
+			} else {
+				p.mu.Lock()
+				count := len(p.prekeys)
+				p.mu.Unlock()
+				response.Content = []waBinary.Node{{Tag: "count", Attrs: waBinary.Attrs{"value": strconv.Itoa(count)}}}
+			}
 		}
 		if err := wire.Send(p.ctx, response); err != nil {
 			if p.ctx.Err() == nil {
@@ -220,18 +268,18 @@ func (p *serveNativeProtocolPeer) pair(qr string) {
 
 func (p *serveNativeProtocolPeer) claim(challenge string) types.JID {
 	p.t.Helper()
-	select {
-	case <-p.keysReady:
-	case <-time.After(30 * time.Second):
-		p.t.Fatal("real SDK did not upload its public prekeys")
-	}
 	p.mu.Lock()
-	wire, registration, key := p.wire, p.registration, p.prekeys[0]
-	p.prekeys = p.prekeys[1:]
+	wire, registration := p.wire, p.registration
 	p.mu.Unlock()
 	from := types.NewJID("15551234568", types.DefaultUserServer)
 	from.Device = 1
-	message := whatsappfixture.EncryptPairingText(p.t, registration, key, p.account, from, challenge, "SERVED_CLAIM")
+	fromLID := types.NewJID("100000000002", types.HiddenUserServer)
+	fromLID.Device = 1
+	sender := whatsappfixture.NewPairingSender(p.t, registration, p.account, from, fromLID)
+	p.mu.Lock()
+	p.sender, p.from, p.fromLID = sender, from, fromLID
+	p.mu.Unlock()
+	message := sender.EncryptText(p.t, challenge, "SERVED_CLAIM")
 	if err := wire.Send(p.ctx, message); err != nil {
 		p.t.Fatal(err)
 	}
@@ -244,4 +292,55 @@ func (p *serveNativeProtocolPeer) claim(challenge string) types.JID {
 		p.t.Fatal("SDK did not acknowledge the durable encrypted claim")
 	}
 	return from.ToNonAD()
+}
+
+func (p *serveNativeProtocolPeer) deviceList(request *waBinary.Node) ([]waBinary.Node, error) {
+	list, found := request.GetOptionalChildByTag("usync", "list")
+	if !found {
+		return nil, fmt.Errorf("SDK device query has no requested users")
+	}
+	p.mu.Lock()
+	from, fromLID := p.from, p.fromLID
+	p.mu.Unlock()
+	var users []waBinary.Node
+	for _, user := range list.GetChildren() {
+		jid, ok := user.Attrs["jid"].(types.JID)
+		if user.Tag != "user" || !ok || jid != from.ToNonAD() && jid != fromLID.ToNonAD() && jid != p.account.ToNonAD() && jid != p.lid.ToNonAD() {
+			return nil, fmt.Errorf("SDK requested an unowned external device list: %v", user.Attrs)
+		}
+		lid := p.lid.ToNonAD()
+		if jid == from.ToNonAD() || jid == fromLID.ToNonAD() {
+			lid = fromLID.ToNonAD()
+		}
+		users = append(users, waBinary.Node{Tag: "user", Attrs: waBinary.Attrs{"jid": jid}, Content: []waBinary.Node{
+			{Tag: "lid", Attrs: waBinary.Attrs{"val": lid}},
+			{Tag: "devices", Content: []waBinary.Node{{Tag: "device-list", Content: []waBinary.Node{
+				{Tag: "device", Attrs: waBinary.Attrs{"id": "1"}},
+			}}}},
+		}})
+	}
+	return []waBinary.Node{{Tag: "usync", Content: []waBinary.Node{{Tag: "list", Content: users}}}}, nil
+}
+
+func (p *serveNativeProtocolPeer) acceptMessage(wire *whatsappfixture.Transport, node *waBinary.Node) error {
+	p.mu.Lock()
+	sender := p.sender
+	p.mu.Unlock()
+	if sender == nil {
+		return fmt.Errorf("SDK sent before genuine operator input")
+	}
+	message, err := sender.DecryptOutbound(p.ctx, node)
+	if err != nil {
+		return err
+	}
+	id, ok := node.Attrs["id"].(string)
+	if !ok || id == "" {
+		return fmt.Errorf("SDK sent without an exact message identity")
+	}
+	select {
+	case p.sent <- servedNativeMessage{ID: id, To: node.Attrs["to"].(types.JID), Body: message}:
+	default:
+		return fmt.Errorf("outbound plaintext evidence overflow")
+	}
+	return wire.Send(p.ctx, waBinary.Node{Tag: "ack", Attrs: waBinary.Attrs{"id": id, "class": "message", "t": time.Now().Unix()}})
 }

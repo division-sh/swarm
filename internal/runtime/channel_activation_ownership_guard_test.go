@@ -89,6 +89,44 @@ func TestChannelActivationExecutableReaderCensus(t *testing.T) {
 	}
 }
 
+func TestLearnedActivationConsumersKeepCompleteResponsibilityProjection(t *testing.T) {
+	for path, function := range map[string]string{
+		"channel_activation_admission.go":   "validateLearnedChannelPublication",
+		"../serveapp/channel_onboarding.go": "compileServeLearnedChannelActivations",
+	} {
+		t.Run(function, func(t *testing.T) {
+			parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found, calls := false, 0
+			for _, declaration := range parsed.Decls {
+				fn, ok := declaration.(*ast.FuncDecl)
+				if !ok || fn.Name.Name != function {
+					continue
+				}
+				found = true
+				ast.Inspect(fn.Body, func(node ast.Node) bool {
+					if call, ok := node.(*ast.CallExpr); ok {
+						if selector, ok := call.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "AdmissionResponsibility" {
+							calls++
+						}
+					}
+					if literal, ok := node.(*ast.CompositeLit); ok {
+						if selector, ok := literal.Type.(*ast.SelectorExpr); ok && selector.Sel.Name == "AdmissionResponsibility" {
+							t.Error("activation consumer reconstructed an incomplete responsibility")
+						}
+					}
+					return true
+				})
+			}
+			if !found || calls != 1 {
+				t.Fatal("activation consumer stopped using the complete canonical projection", found, calls)
+			}
+		})
+	}
+}
+
 func TestEffectiveSourceHasNoChannelDeploymentInterpreter(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	raw, err := os.ReadFile(filepath.Join(repoRoot, "internal", "runtime", "effective_source.go"))
