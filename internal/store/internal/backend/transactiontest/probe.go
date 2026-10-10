@@ -74,6 +74,7 @@ type Counts struct {
 	CleanupDuration  time.Duration
 	Mutation         MutationCounts
 	Revision         RevisionCounts
+	JSONCopies       JSONCopyCounts
 	FirstCommitAt    time.Time
 	LastCommitAt     time.Time
 }
@@ -89,7 +90,18 @@ type Snapshot struct {
 type Collector struct {
 	mu       sync.Mutex
 	options  Options
+	slot     *Slot
 	snapshot Snapshot
+}
+
+// Stop detaches future transactions; already captured attempts still settle
+// into this receipt. A stale collector cannot detach a successor installation.
+func (c *Collector) Stop() {
+	c.slot.mu.Lock()
+	defer c.slot.mu.Unlock()
+	if c.slot.collector == c {
+		c.slot.collector = nil
+	}
 }
 
 func (c *Collector) Snapshot() Snapshot {
@@ -131,19 +143,9 @@ func (s *Slot) Install(options Options) (*Collector, func(), error) {
 	if s.collector != nil {
 		return nil, nil, errors.New("selected backend already has a transaction probe")
 	}
-	c := &Collector{options: options, snapshot: Snapshot{ByOperation: make(map[Operation]Counts), ActiveByClass: make(map[ActiveClass]uint64)}}
+	c := &Collector{options: options, slot: s, snapshot: Snapshot{ByOperation: make(map[Operation]Counts), ActiveByClass: make(map[ActiveClass]uint64)}}
 	s.collector = c
-	var once sync.Once
-	restore := func() {
-		once.Do(func() {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			if s.collector == c {
-				s.collector = nil
-			}
-		})
-	}
-	return c, restore, nil
+	return c, c.Stop, nil
 }
 
 type Attempt struct {
@@ -161,6 +163,8 @@ type Attempt struct {
 	revision                                                RevisionCounts
 	mutationMu                                              sync.Mutex
 	mutation                                                MutationCounts
+	jsonMu                                                  sync.Mutex
+	jsonCopies                                              JSONCopyCounts
 	activeClass                                             ActiveClass
 	finished                                                bool
 }
@@ -277,9 +281,14 @@ func (a *Attempt) Finish(finalErr error) {
 	a.mutationMu.Lock()
 	mutation := a.mutation
 	a.mutationMu.Unlock()
+	a.jsonMu.Lock()
+	jsonCopies := a.jsonCopies
+	a.jsonMu.Unlock()
+	jsonCopies.settle(a.acknowledged, a.commitAttempted, a.rollbackAttempted)
 	add := func(counts Counts) Counts {
 		counts.Revision.add(revision)
 		counts.Mutation.add(mutation)
+		counts.JSONCopies.add(jsonCopies)
 		counts.CommitDuration += a.commitDuration
 		counts.DelayDuration += a.delayDuration
 		counts.PermitWait += a.permitWait
