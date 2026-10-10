@@ -14,6 +14,7 @@ func TestCatalogSourceRunLifecycleUsesSelectedOwnerBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			h := newRuntimeHarnessForBackend(t, fixture.Root, backend, true)
+			h.shutdown()
 			var selected runtimebus.RunLifecycleReadPersistence = h.pg
 			if h.sqlite != nil {
 				selected = h.sqlite
