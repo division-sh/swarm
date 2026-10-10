@@ -116,7 +116,6 @@ func scalarTemplateKeyedDescriptors(descriptors []runtimebus.ActiveFlowInstanceD
 type scalarTemplateInstanceParityStore interface {
 	componentFlowConstructionStore
 	storetest.RunFixtureStore
-	runtimebus.FlowInstanceRoutePersistence
 	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimebus.PreparedPublishEventReader
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)

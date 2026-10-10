@@ -21,7 +21,7 @@ func TestConstructionCommandsDoNotCarryInstanceRouteMirror(t *testing.T) {
 
 func TestEventBusDoesNotOwnInstanceRoutePublication(t *testing.T) {
 	typeOf := reflect.TypeOf((*EventBus)(nil))
-	for _, name := range []string{"PublishPersistedFlowInstanceRouteForAttempt", "RetireFlowInstanceRouteForAttempt"} {
+	for _, name := range []string{"PublishPersistedFlowInstanceRouteForAttempt", "RetireFlowInstanceRouteForAttempt", "ListFlowInstanceRoutes", "VerifyFlowInstanceRoute"} {
 		if _, found := typeOf.MethodByName(name); found {
 			t.Fatalf("EventBus restores parallel attachment ownership: %s", name)
 		}
@@ -29,6 +29,15 @@ func TestEventBusDoesNotOwnInstanceRoutePublication(t *testing.T) {
 	for _, name := range []string{"publications", "fencedPublications", "nextPublication", "generationMu", "generation"} {
 		if _, found := reflect.TypeOf(RouteTable{}).FieldByName(name); found {
 			t.Fatalf("RouteTable restores mutable publication ownership: %s", name)
+		}
+	}
+}
+
+func TestEventBusDoesNotRequireStandaloneInstanceRouteMutation(t *testing.T) {
+	owner := reflect.TypeOf(DurableDependencies{})
+	for _, name := range []string{"FlowRouteSets", "FlowRouteRollback", "FlowRoutes", "FlowRouteRecords"} {
+		if _, present := owner.FieldByName(name); present {
+			t.Fatalf("EventBus restores standalone instance-route mutation dependency %s", name)
 		}
 	}
 }

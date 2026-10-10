@@ -161,13 +161,6 @@ type flowActivationTestBus struct {
 	creationStore      *flowActivationTestInstanceStore
 }
 
-type flowActivationSemanticRouteBus struct {
-	*flowActivationTestBus
-	durable       *runtimebus.RouteTable
-	process       *runtimebus.RouteTable
-	durableRoutes map[string][]runtimebus.FlowInstanceRouteRecord
-}
-
 type flowActivationTestAgentRoutePreparation struct {
 	deliveries chan *worklifetime.EventDelivery
 }
@@ -402,8 +395,6 @@ func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersi
 		switch typed := bus.(type) {
 		case *flowActivationTestBus:
 			typed.creationStore = testInstances
-		case *flowActivationSemanticRouteBus:
-			typed.flowActivationTestBus.creationStore = testInstances
 		}
 	}
 	activationOwner, _ := bus.(FlowInstanceActivationCommitter)
@@ -1425,65 +1416,6 @@ func (b *flowActivationTestBus) AddFlowInstanceRoute(req runtimebus.FlowInstance
 	return b.AddFlowInstanceRouteContext(context.Background(), req)
 }
 
-func (b *flowActivationSemanticRouteBus) StageFlowInstanceRouteContext(
-	_ context.Context,
-	req runtimebus.FlowInstanceRouteMaterializationRequest,
-) (runtimebus.FlowInstanceRouteTopologyResult, error) {
-	if b == nil || b.durable == nil {
-		return runtimebus.FlowInstanceRouteTopologyResult{}, errors.New("semantic durable route table is required")
-	}
-	req = req.Normalized()
-	if err := b.durable.AddFlowInstanceRoute(req); err != nil {
-		return runtimebus.FlowInstanceRouteTopologyResult{}, err
-	}
-	if b.durableRoutes == nil {
-		b.durableRoutes = map[string][]runtimebus.FlowInstanceRouteRecord{}
-	}
-	b.durableRoutes[req.Identity.Key()] = b.durable.MaterializedRoutes(req.Identity)
-	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
-}
-
-func (b *flowActivationSemanticRouteBus) PublishPersistedFlowInstanceRoute(
-	req runtimebus.FlowInstanceRouteMaterializationRequest,
-) error {
-	if b == nil || b.process == nil {
-		return errors.New("semantic process route table is required")
-	}
-	req = req.Normalized()
-	if b.process.HasFlowInstanceRoute(req.Identity) {
-		return nil
-	}
-	return b.process.AddFlowInstanceRoute(req)
-}
-
-func (b *flowActivationSemanticRouteBus) RetirePublishedFlowInstanceRoute(
-	identity runtimeflowidentity.RunScopedFlowInstance,
-) error {
-	if b == nil || b.process == nil {
-		return errors.New("semantic process route table is required")
-	}
-	return b.process.RemoveFlowInstanceRoute(identity)
-}
-
-func (b *flowActivationSemanticRouteBus) HasFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) bool {
-	return b != nil && b.process != nil && b.process.HasFlowInstanceRoute(identity)
-}
-
-func (b *flowActivationSemanticRouteBus) VerifyFlowInstanceRoute(
-	_ context.Context,
-	identity runtimeflowidentity.RunScopedFlowInstance,
-) error {
-	if !b.HasFlowInstanceRoute(identity) {
-		return errors.New("semantic route is not process-ready")
-	}
-	durable := b.durableRoutes[identity.Key()]
-	process := b.process.MaterializedRoutes(identity)
-	if !reflect.DeepEqual(durable, process) {
-		return fmt.Errorf("semantic durable/process route mismatch: durable=%#v process=%#v", durable, process)
-	}
-	return nil
-}
-
 func (b *flowActivationTestBus) StageFlowInstanceRouteContext(ctx context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) (runtimebus.FlowInstanceRouteTopologyResult, error) {
 	req = req.Normalized()
 	if b.addErr != nil {
@@ -1573,25 +1505,6 @@ func (b *flowActivationTestBus) HasFlowInstanceRoute(identity runtimeflowidentit
 		}
 	}
 	return false
-}
-
-func (b *flowActivationTestBus) VerifyFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	if !b.HasFlowInstanceRoute(identity) {
-		return errors.New("route not process-ready")
-	}
-	if b.routeStore != nil {
-		routes, err := b.routeStore.ListFlowInstanceRoutes(ctx)
-		if err != nil {
-			return err
-		}
-		for _, route := range routes {
-			if route == identity {
-				return nil
-			}
-		}
-		return errors.New("route not durably registered")
-	}
-	return nil
 }
 
 func (b *flowActivationTestBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
@@ -2066,7 +1979,7 @@ func findPublishedFlowActivationEvent(t *testing.T, bus *flowActivationTestBus, 
 	return eventtest.RunCreatingRootIngress("", events.EventType(""), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
 }
 
-func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
+func TestActivateFlowInstanceUsesConstructedAttachmentEvidence(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
 	am := newFlowActivationManager(t, bus, instances)
@@ -2082,8 +1995,16 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if len(bus.addedPaths) != 1 || bus.addedPaths[0] != "review/inst-1" {
-		t.Fatalf("added paths = %#v, want [review/inst-1]", bus.addedPaths)
+	stored, found, err := instances.Load(flowActivationRunContext(), testActivationFlowIdentity(req))
+	if err != nil || !found || stored.StorageRef != req.Instance.InstancePath || stored.EntityID != req.Instance.EntityID {
+		t.Fatalf("constructed instance evidence = %+v found=%t err=%v", stored, found, err)
+	}
+	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(flowActivationRunContext(), req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil || !found || readiness.Phase != runtimepipeline.FlowAttachmentReady || readiness.Plan.Identity != req.Instance {
+		t.Fatalf("exact attachment evidence = %+v found=%t err=%v", readiness, found, err)
+	}
+	if len(bus.addedPaths) != 0 {
+		t.Fatalf("activation published non-authoritative route membership: %#v", bus.addedPaths)
 	}
 	if len(instances.creates) != 1 || instances.creates[0].EntityType != "review_entity" {
 		t.Fatalf("activation entity contract = %#v, want canonical review_entity and no schema.Entity interpretation", instances.creates)
@@ -2158,7 +2079,8 @@ func TestActivateFlowInstanceRejectsMissingCanonicalEntityContract(t *testing.T)
 
 func TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
+	instances := &flowActivationTestInstanceStore{}
+	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 	ctx := runtimepipelinefixture.WithSQLTx(testAuthorActivityContext(context.Background()), &sql.Tx{})
@@ -2170,8 +2092,12 @@ func TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority(t *testin
 	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("flow agent did not start from the closed activation result")
 	}
-	if len(bus.addedPaths) != 1 || bus.addedPaths[0] != "review/inst-1" {
-		t.Fatalf("committed route materialization = %#v, want review/inst-1", bus.addedPaths)
+	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(flowActivationRunContext(), flowActivationTestRunID, runtimeflowidentity.DeriveRoute("review", "inst-1"))
+	if err != nil || !found || readiness.Phase != runtimepipeline.FlowAttachmentReady {
+		t.Fatalf("committed attachment evidence = %+v found=%t err=%v", readiness, found, err)
+	}
+	if len(bus.addedPaths) != 0 {
+		t.Fatalf("activation published non-authoritative route membership: %#v", bus.addedPaths)
 	}
 	if len(postCommit) != 0 {
 		t.Fatalf("ambient post-commit actions = %d, want zero", len(postCommit))
@@ -3478,24 +3404,14 @@ func TestDynamicFlowRuntimeReadinessSiblingAdditionReconcilesUnchangedAgentTopol
 func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopology(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
-	durableRoutes := map[string][]runtimebus.FlowInstanceRouteRecord{}
 
 	sourceABundle := testFlowRouteRevisionBundle(t, "task.started")
 	sourceA := semanticview.Wrap(sourceABundle)
-	durableA, err := runtimebus.DeriveRouteTable(sourceA)
-	if err != nil {
-		t.Fatalf("derive source A durable routes: %v", err)
-	}
 	processA, err := runtimebus.DeriveRouteTable(sourceA)
 	if err != nil {
 		t.Fatalf("derive source A process routes: %v", err)
 	}
-	busA := &flowActivationSemanticRouteBus{
-		flowActivationTestBus: &flowActivationTestBus{},
-		durable:               durableA,
-		process:               processA,
-		durableRoutes:         durableRoutes,
-	}
+	busA := &flowActivationTestBus{}
 	managerA := newFlowActivationManager(t, busA, instances, agents)
 	setFlowActivationManagerSemanticSource(managerA, sourceA)
 	ctxA := testAuthorActivityContext(context.Background())
@@ -3512,14 +3428,6 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 		t.Fatalf("source A readiness: found=%v err=%v readiness=%#v", found, err, initial)
 	}
 
-	hasRecord := func(records []runtimebus.FlowInstanceRouteRecord, pattern, subscriber string) bool {
-		for _, record := range records {
-			if record.EventPattern == pattern && record.SubscriberID == subscriber {
-				return true
-			}
-		}
-		return false
-	}
 	hasSubscriber := func(subscribers []runtimebus.Subscriber, id string) bool {
 		for _, subscriber := range subscribers {
 			if subscriber.Recipient.ID() == id {
@@ -3531,17 +3439,15 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 	oldEvent := "review/inst-1/task.started"
 	newEvent := "review/inst-1/task.revised"
 	routeObserver := identitytest.FlowNode(t, "review", "route-observer").Key()
-	ownerA := testActivationFlowIdentity(reqA)
 	resolveA := func(eventType string) []runtimebus.Subscriber {
-		return processA.ResolveForRun(reqA.TriggerEvent.RunID(), eventType)
+		subscribers, err := processA.PubsubReceiverDefinitions(reqA.TriggerEvent.RunID(), reqA.Instance, []string{eventType})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return subscribers
 	}
-	if !hasRecord(durableRoutes[ownerA.Key()], oldEvent, routeObserver) ||
-		!hasSubscriber(resolveA(oldEvent), routeObserver) {
-		t.Fatalf(
-			"source A route-only facts missing: durable=%#v process=%#v",
-			durableRoutes[ownerA.Key()],
-			resolveA(oldEvent),
-		)
+	if !hasSubscriber(resolveA(oldEvent), routeObserver) {
+		t.Fatalf("source A compiled handler missing: %#v", resolveA(oldEvent))
 	}
 
 	sourceBBundle := testFlowRouteRevisionBundle(t, "task.revised")
@@ -3552,20 +3458,11 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 	if err != nil {
 		t.Fatalf("revised bundle source fact: %v", err)
 	}
-	durableB, err := runtimebus.DeriveRouteTable(sourceB)
-	if err != nil {
-		t.Fatalf("derive source B durable routes: %v", err)
-	}
 	processB, err := runtimebus.DeriveRouteTable(sourceB)
 	if err != nil {
 		t.Fatalf("derive source B process routes: %v", err)
 	}
-	busB := &flowActivationSemanticRouteBus{
-		flowActivationTestBus: &flowActivationTestBus{},
-		durable:               durableB,
-		process:               processB,
-		durableRoutes:         durableRoutes,
-	}
+	busB := &flowActivationTestBus{}
 	managerB := newFlowActivationManager(t, busB, instances, agents)
 	if err := managerA.Shutdown(); err != nil {
 		t.Fatalf("retire source A manager: %v", err)
@@ -3591,25 +3488,18 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 		!reflect.DeepEqual(revised.Plan.Agents, initial.Plan.Agents) {
 		t.Fatalf("route-only revision changed wrong plan facts: before=%#v after=%#v", initial.Plan, revised.Plan)
 	}
-	revisedRecords := durableRoutes[testActivationFlowIdentity(reqB).Key()]
 	resolveB := func(eventType string) []runtimebus.Subscriber {
-		return processB.ResolveForRun(reqB.TriggerEvent.RunID(), eventType)
+		subscribers, err := processB.PubsubReceiverDefinitions(reqB.TriggerEvent.RunID(), reqB.Instance, []string{eventType})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return subscribers
 	}
-	if hasRecord(revisedRecords, oldEvent, routeObserver) ||
-		hasSubscriber(resolveB(oldEvent), routeObserver) {
-		t.Fatalf(
-			"source B retained stale route-only facts: durable=%#v process=%#v",
-			revisedRecords,
-			resolveB(oldEvent),
-		)
+	if hasSubscriber(resolveB(oldEvent), routeObserver) {
+		t.Fatalf("source B retained its predecessor's compiled handler: %#v", resolveB(oldEvent))
 	}
-	if !hasRecord(revisedRecords, newEvent, routeObserver) ||
-		!hasSubscriber(resolveB(newEvent), routeObserver) {
-		t.Fatalf(
-			"source B route-only facts missing: durable=%#v process=%#v",
-			revisedRecords,
-			resolveB(newEvent),
-		)
+	if !hasSubscriber(resolveB(newEvent), routeObserver) {
+		t.Fatalf("source B compiled handler missing: %#v", resolveB(newEvent))
 	}
 }
 

@@ -33,11 +33,15 @@ type FlowInstanceSelectionRequest struct {
 	MissingInstanceID string
 	Constructor       FlowInstanceActivationRequest
 	Prepared          []FlowInstanceActivationPlan
+	RunProposal       FlowInstanceRunProposal
 }
 
 // PrepareFlowInstanceSelection is the shared R5.1 select/create boundary.
 // A stored identity is never reconstructed from fields or a creation hash.
 func PrepareFlowInstanceSelection(ctx context.Context, reader FlowInstanceIndexReader, planner FlowInstanceActivationPlanner, request FlowInstanceSelectionRequest) (FlowInstanceSelection, error) {
+	if err := ctx.Err(); err != nil {
+		return FlowInstanceSelection{}, err
+	}
 	if reader == nil || !request.Lookup.Valid() || !request.Lookup.DeclaredSelection() {
 		return FlowInstanceSelection{}, fmt.Errorf("flow selection requires its admitted declared lookup and index owner")
 	}
@@ -50,6 +54,14 @@ func PrepareFlowInstanceSelection(ctx context.Context, reader FlowInstanceIndexR
 	if err != nil {
 		return FlowInstanceSelection{}, err
 	}
+	if request.RunProposal.Present() {
+		if err := request.RunProposal.Validate(request.Lookup.RunID(), request.Lookup.SourceFact()); err != nil {
+			return FlowInstanceSelection{}, err
+		}
+		if request.Lookup.ParentIdentity() != (flowidentity.Instance{}) && !parentPrepared {
+			return FlowInstanceSelection{}, fmt.Errorf("proposed run receiver requires its prepared construction parent")
+		}
+	}
 	if proposed != nil {
 		if request.Mode == contracts.FlowInputResolutionModeCreate {
 			owner, err := flowidentity.NewRunScopedFlowInstance(request.Lookup.RunID(), proposed.Identity.Route())
@@ -60,6 +72,12 @@ func PrepareFlowInstanceSelection(ctx context.Context, reader FlowInstanceIndexR
 		}
 		return FlowInstanceSelection{Proposed: proposed}, nil
 	}
+	if request.RunProposal.Present() {
+		if request.Mode == contracts.FlowInputResolutionModeSelect {
+			return FlowInstanceSelection{}, &WorkflowInstanceLookupMiss{RequestedKey: request.Lookup.FlowID()}
+		}
+		return prepareMissingFlowInstance(ctx, planner, request)
+	}
 	observation, found, err := readFlowInstanceSelection(ctx, reader, request.Lookup, parentPrepared)
 	if err != nil {
 		return FlowInstanceSelection{}, err
@@ -68,29 +86,33 @@ func PrepareFlowInstanceSelection(ctx context.Context, reader FlowInstanceIndexR
 		return FlowInstanceSelection{}, fmt.Errorf("instance index returned an observation as absence")
 	}
 	if found {
-		if err := observation.ValidateSelection(request.Lookup); err != nil {
-			return FlowInstanceSelection{}, err
-		}
-		if request.Mode == contracts.FlowInputResolutionModeCreate {
-			return FlowInstanceSelection{}, flowInstanceOccupiedConflict(observation.Owner())
-		}
-		instance, err := observation.WorkflowInstance()
-		if err != nil {
-			return FlowInstanceSelection{}, err
-		}
-		stage := ""
-		if instance.StageDefined {
-			stage = instance.CurrentState
-		}
-		if err := NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(request.Lookup.Source(), request.Lookup.FlowID()); err != nil {
-			return FlowInstanceSelection{}, err
-		}
-		return FlowInstanceSelection{Observation: observation}, nil
+		return selectObservedFlowInstance(request, observation)
 	}
 	if request.Mode == contracts.FlowInputResolutionModeSelect {
 		return FlowInstanceSelection{}, &WorkflowInstanceLookupMiss{RequestedKey: request.Lookup.FlowID()}
 	}
 	return prepareMissingFlowInstance(ctx, planner, request)
+}
+
+func selectObservedFlowInstance(request FlowInstanceSelectionRequest, observation FlowInstanceObservation) (FlowInstanceSelection, error) {
+	if err := observation.ValidateSelection(request.Lookup); err != nil {
+		return FlowInstanceSelection{}, err
+	}
+	if request.Mode == contracts.FlowInputResolutionModeCreate {
+		return FlowInstanceSelection{}, flowInstanceOccupiedConflict(observation.Owner())
+	}
+	instance, err := observation.WorkflowInstance()
+	if err != nil {
+		return FlowInstanceSelection{}, err
+	}
+	stage := ""
+	if instance.StageDefined {
+		stage = instance.CurrentState
+	}
+	if err := NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(request.Lookup.Source(), request.Lookup.FlowID()); err != nil {
+		return FlowInstanceSelection{}, err
+	}
+	return FlowInstanceSelection{Observation: observation}, nil
 }
 
 func selectPreparedFlowInstance(request FlowInstanceSelectionRequest) (*FlowInstanceActivationPlan, bool, error) {

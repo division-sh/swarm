@@ -384,7 +384,7 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResultWithEmissionPlan(c
 	for _, node := range pc.WorkflowNodes() {
 		matched, err := pc.workflowNodeDeliveryRouteMatches(ctx, node.Node, evt.RunID(), evt.TargetRoute())
 		if err != nil {
-			return handledAny, committedAny, err
+			return handledAny, outcome, err
 		}
 		if !matched {
 			continue

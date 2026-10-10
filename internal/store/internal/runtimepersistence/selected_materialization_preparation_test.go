@@ -91,20 +91,22 @@ func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fo
 	t.Helper()
 	switch selected := selected.(type) {
 	case *PostgresStore:
+		workflow := runtimepipeline.NewWorkflowPersistence(selected)
 		durable := runtimebus.DurableDependencies{
 			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
+
 			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
-			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected, ConstructionPublications: selected,
+			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
+			Instances: workflow, ConstructionPublications: workflow,
 		}
 		roles := runtimemanager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected, EffectsRecovery: selected,
 			DeliveryQuiescence: selected, EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
-			FlowRoutes: selected, StandingRestarts: selected,
+			StandingRestarts: selected,
 		}
 		owner, err := runforkexecution.NewSelectedContractExecutionOwner(
-			runtimepipeline.NewWorkflowPersistence(selected), fork, selected, selected,
+			workflow, fork, selected, selected,
 			selected, durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
 		)
@@ -113,20 +115,22 @@ func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fo
 		}
 		return owner
 	case *SQLiteRuntimeStore:
+		workflow := runtimepipeline.NewWorkflowPersistence(selected)
 		durable := runtimebus.DurableDependencies{
 			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-			FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
+
 			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
-			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected, ConstructionPublications: selected,
+			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
+			Instances: workflow, ConstructionPublications: workflow,
 		}
 		roles := runtimemanager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected, EffectsRecovery: selected,
 			DeliveryQuiescence: selected, EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
-			FlowRoutes: selected, StandingRestarts: selected,
+			StandingRestarts: selected,
 		}
 		owner, err := runforkexecution.NewSelectedContractExecutionOwner(
-			runtimepipeline.NewWorkflowPersistence(selected), fork, selected, selected,
+			workflow, fork, selected, selected,
 			selected, durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
 		)

@@ -486,7 +486,7 @@ func testEventBusCrossFlowTargetOwnerRejectsWrongFullPathBeforePersistence(t *te
 
 func TestEventBusCrossFlowTargetOwnerFailsClosedBeforeMutation(t *testing.T) {
 	t.Run("scoped event without flow instance", TestEventBusPublish_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsBeforePersistence)
-	t.Run("mixed exact and wildcard cross flow", TestEventBusPublish_MixedExactAndWildcardCrossFlowRoutesFailBeforePersistence)
+	t.Run("uncompiled cross-flow declarations", TestEventBusPublish_UncompiledCrossFlowDeclarationsCannotCreateRecipients)
 	t.Run("descendant without connect", TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence)
 	t.Run("missing or ambiguous root owner", TestEventBusPublish_SingletonConnectToRootRejectsMissingOrAmbiguousSelectedOwnerBeforeMutation)
 }

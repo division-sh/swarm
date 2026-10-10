@@ -81,17 +81,18 @@ func (s *finalFlowInstanceAuthoringLifecycleStore) Activate(ctx context.Context,
 
 func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsReplayableTemplateTarget(t *testing.T) {
 	source := finalflowinstanceauthoring.LoadSource(t, finalflowinstanceauthoring.Options{})
+	evt := finalFlowInstanceAuthoringAccountReadyEvent(uuid.NewString(), "acct-42")
 	store := &finalFlowInstanceAuthoringLifecycleStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:          source,
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
+		Durable:                 DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: evt.RunID()}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	store.bus = eb
 
-	evt := finalFlowInstanceAuthoringAccountReadyEvent(uuid.NewString(), "acct-42")
 	installConnectionSourceConstructionForRun(t, eb, source, "producer", evt.RunID())
 	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {
@@ -113,8 +114,12 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	if preview.FlowID != finalflowinstanceauthoring.TemplateFlowID || preview.FlowInstance == "" || preview.EntityID == "" {
 		t.Fatalf("preflight target = %#v, want %s template route", preview, finalflowinstanceauthoring.TemplateFlowID)
 	}
-	if routes := eb.RouteTable().MaterializedRoutes(testRunScopedFlowRouteForRun(evt.RunID(), runtimeflowidentity.StoredRoute(finalflowinstanceauthoring.TemplateFlowID, runtimeflowidentity.LogicalInstanceID(preview.FlowInstance), preview.FlowInstance))); len(routes) != 0 {
-		t.Fatalf("preflight leaked materialized route table state: %#v", routes)
+	lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, eb.sourceArtifactFact, testRunScopedFlowRouteForRun(evt.RunID(), runtimeflowidentity.StoredRoute(finalflowinstanceauthoring.TemplateFlowID, runtimeflowidentity.LogicalInstanceID(preview.FlowInstance), preview.FlowInstance)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed, found, err := store.LookupFlowInstance(constructionIndexContext(t, source), lookup); err != nil || found || observed.Valid() {
+		t.Fatalf("preflight published a native receiver: observed=%+v found=%v err=%v", observed, found, err)
 	}
 
 	if err := eb.Publish(context.Background(), evt); err != nil {

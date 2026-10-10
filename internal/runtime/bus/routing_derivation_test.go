@@ -2,7 +2,6 @@ package bus_test
 
 import (
 	"context"
-	"database/sql"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,35 +23,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
-
-func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
-	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
-		Produces:     []string{"task.started"},
-		SubscribesTo: []string{"task.started"},
-	})
-	eb, err := newScopedTestEventBus(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	if err := eb.AddFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("review", "inst-1")),
-	}); err != nil {
-		t.Fatalf("AddFlowInstance: %v", err)
-	}
-	wantNode := testFlowNode(t, "review", "materialized-node")
-	if got := eb.RouteTable().ResolveForRun(eventBusTestRunID, "review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != wantNode.Key() {
-		t.Fatalf("resolved subscribers after add = %#v", got)
-	}
-	if err := eb.RemoveFlowInstanceRouteFixture(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("review", "inst-1"))); err != nil {
-		t.Fatalf("RemoveFlowInstance: %v", err)
-	}
-	if got := eb.RouteTable().ResolveForRun(eventBusTestRunID, "review/inst-1/task.started"); len(got) != 0 {
-		t.Fatalf("resolved subscribers after remove = %#v, want none", got)
-	}
-}
 
 func TestRouteTableKeylessConstructionPublishesExactRunOwners(t *testing.T) {
 	repo := canonicalrouting.RepoRoot(t)
@@ -123,7 +95,7 @@ func TestEventBusFlowInstanceTemplateDerivesSubscriptionsFromHandlerKeys(t *test
 	}); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
-	if got := eb.RouteTable().ResolveForRun(eventBusTestRunID, "review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != testFlowNode(t, "review", "materialized-node").Key() {
+	if got := eb.RouteTable().PubsubReceiverDefinitionsFixture(t, eventBusTestRunID, runtimebus.ConstructedFlowInstanceIdentityFixture(source, "review", "inst-1", eventBusTestRunID), "review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != testFlowNode(t, "review", "materialized-node").Key() {
 		t.Fatalf("resolved subscribers = %#v, want materialized-node declaration identity", got)
 	}
 }
@@ -156,7 +128,7 @@ func TestEventBusExactSubscriptionAdmissionPreservesLocalNodeAndSameScopeAgentRo
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	got := routes.ResolveForRun(eventBusTestRunID, "child/task.done")
+	got := routes.PubsubDeclarationDefinitionsFixture(t, "child", "child/task.done")
 	if len(got) != 2 {
 		t.Fatalf("Resolve(child/task.done) = %#v, want local node and same-scope agent", got)
 	}
@@ -183,7 +155,7 @@ func TestDeriveRouteTableRegistersNestedPhysicalAgentDeclarationExactlyOnce(t *t
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	resolved := routes.ResolveForRun(eventBusTestRunID, flowPath+"/work.requested")
+	resolved := routes.PubsubDeclarationDefinitionsFixture(t, "parent/child/support", flowPath+"/work.requested")
 	if len(resolved) != 1 {
 		t.Fatalf("nested agent subscribers = %#v, want one physical subscriber", resolved)
 	}
@@ -247,15 +219,13 @@ func TestDeriveRouteTableRequiresExactPackageOwnerAcrossRouteSurfaces(t *testing
 					t.Fatalf("DeriveRouteTable: %v", err)
 				}
 				if mode == "template" {
-					if err := routes.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("orders", "one"))}); err != nil {
-						t.Fatalf("AddFlowInstanceRoute: %v", err)
-					}
-					assertExactFlowRoute(t, routes.ResolveForRun(eventBusTestRunID, "orders/one/root.start"), "subscription", "orders")
+					instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "orders", "one", eventBusTestRunID)
+					assertExactFlowRoute(t, routes.PubsubReceiverDefinitionsFixture(t, eventBusTestRunID, instance, "orders/one/root.start"), "subscription", "orders")
 					return
 				}
-				resolved := routes.ResolveForRun(eventBusTestRunID, "orders/root.start")
+				resolved := routes.PubsubDeclarationDefinitionsFixture(t, "orders", "orders/root.start")
 				assertExactFlowRoute(t, resolved, "subscription", "orders")
-				if got := routes.ResolveForRun(eventBusTestRunID, "root.start"); len(got) != 0 {
+				if got := routes.PubsubDeclarationDefinitionsFixture(t, "orders", "root.start"); len(got) != 0 {
 					t.Fatalf("root input manufactured private subscription: %#v", got)
 				}
 			})
@@ -357,10 +327,10 @@ func TestEventBusLocalNodeWildcardAdmissionPreservesScope(t *testing.T) {
 				t.Fatalf("DeriveRouteTable: %v", err)
 			}
 			wantLocal := authored != "missing.*"
-			if got := len(routes.ResolveForRun(eventBusTestRunID, "child/task.done")); (got == 1) != wantLocal {
+			if got := len(routes.PubsubDeclarationDefinitionsFixture(t, "child", "child/task.done")); (got == 1) != wantLocal {
 				t.Fatalf("Resolve(child/task.done) count = %d, want local match %t", got, wantLocal)
 			}
-			if got := routes.ResolveForRun(eventBusTestRunID, "sibling/task.done"); len(got) != 0 {
+			if got := routes.PubsubDeclarationDefinitionsFixture(t, "child", "sibling/task.done"); len(got) != 0 {
 				t.Fatalf("Resolve(sibling/task.done) = %#v, want no cross-scope subscriber", got)
 			}
 		})
@@ -374,19 +344,14 @@ func TestEventBusTemplateAgentSameScopeExactAdmissionRendersConcreteInstanceRout
 	agent.Subscriptions = []string{"operating/opco.product_initialization_requested"}
 	flow.Agents["ceo"] = agent
 
-	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	source := semanticview.Wrap(bundle)
+	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	route := runtimeflowidentity.DeriveRoute("operating", "11111111-1111-4111-8111-111111111111")
-	identity := testRunScopedFlowRoute(route)
-	if err := rt.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity:            identity,
-		ActivationVariables: map[string]string{"vertical_id": route.InstanceID},
-	}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
-	}
-	got := rt.ResolveForRun(eventBusTestRunID, route.InstancePath+"/opco.product_initialization_requested")
+	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "operating", route.InstanceID, eventBusTestRunID)
+	got := rt.PubsubReceiverDefinitionsFixture(t, eventBusTestRunID, instance, route.InstancePath+"/opco.product_initialization_requested")
 	if len(got) != 1 || got[0].Recipient.LocalID() != "ceo" || got[0].AgentPlan.FlowInstance() != route.InstancePath {
 		t.Fatalf("resolved subscribers = %#v, want concrete same-scope agent route", got)
 	}
@@ -439,7 +404,6 @@ type routePersistenceTestStore struct {
 	deliveries         map[string][]string
 	upsertErr          error
 	deleteErr          error
-	rollbackCalls      []string
 	deleteCalls        []runtimeflowidentity.RunScopedFlowInstance
 	replaceCalls       []runtimeflowidentity.RunScopedFlowInstance
 	upsertCalls        int
@@ -526,25 +490,6 @@ func (s *routePersistenceTestStore) UpsertFlowInstanceRoute(_ context.Context, r
 	return nil
 }
 
-func (s *routePersistenceTestStore) ReplaceFlowInstanceRouteRecords(
-	ctx context.Context,
-	identity runtimeflowidentity.RunScopedFlowInstance,
-	routes []runtimebus.FlowInstanceRouteRecord,
-) error {
-	s.replaceCalls = append(s.replaceCalls, identity)
-	for key, route := range s.routes {
-		if route.Identity == identity {
-			delete(s.routes, key)
-		}
-	}
-	for _, route := range routes {
-		if err := s.UpsertFlowInstanceRoute(ctx, route); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (s *routePersistenceTestStore) ReplaceFlowInstanceRouteTopology(
 	ctx context.Context,
 	sets []runtimebus.FlowInstanceRouteRecordSet,
@@ -554,9 +499,17 @@ func (s *routePersistenceTestStore) ReplaceFlowInstanceRouteTopology(
 		before[key] = route
 	}
 	for _, set := range sets {
-		if err := s.ReplaceFlowInstanceRouteRecords(ctx, set.Identity, set.Routes); err != nil {
-			s.routes = before
-			return runtimebus.FlowInstanceRouteTopologyResult{}, err
+		s.replaceCalls = append(s.replaceCalls, set.Identity)
+		for key, route := range s.routes {
+			if route.Identity == set.Identity {
+				delete(s.routes, key)
+			}
+		}
+		for _, route := range set.Routes {
+			if err := s.UpsertFlowInstanceRoute(ctx, route); err != nil {
+				s.routes = before
+				return runtimebus.FlowInstanceRouteTopologyResult{}, err
+			}
 		}
 	}
 	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
@@ -585,160 +538,8 @@ func TestEventBusPublishPersistedFlowInstanceRouteDoesNotRewritePersistence(t *t
 	if store.upsertCalls != 0 || len(store.routes) != 0 {
 		t.Fatalf("route recovery rewrote persistence: calls=%d routes=%#v", store.upsertCalls, store.routes)
 	}
-	if got := eb.RouteTable().ResolveForRun(eventBusTestRunID, "review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != testFlowNode(t, "review", "materialized-node").Key() {
+	if got := eb.RouteTable().PubsubReceiverDefinitionsFixture(t, eventBusTestRunID, runtimebus.ConstructedFlowInstanceIdentityFixture(source, "review", "inst-1", eventBusTestRunID), "review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != testFlowNode(t, "review", "materialized-node").Key() {
 		t.Fatalf("restored route subscribers = %#v, want materialized-node declaration identity", got)
-	}
-}
-
-func TestEventBusStageFlowInstanceRouteKeepsPublicationManifestInvisibleUntilReadiness(t *testing.T) {
-	store := &routePersistenceTestStore{}
-	bundle := routeMaterializationConfigVarBundle(t)
-	source := semanticview.Wrap(bundle)
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
-		ContractBundle: source,
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	eb.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(context.Context, events.Event, []events.DeliveryRoute) error {
-		return nil
-	}))
-	route := runtimeflowidentity.DeriveRoute("operating", "11111111-1111-4111-8111-111111111111")
-	identity := testRunScopedFlowRoute(route)
-	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
-		ID: "operating-owner", FlowInstance: route.InstancePath, EntityID: runtimeflowidentity.EntityID(route.InstancePath),
-	}}
-	req := runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: identity,
-		ActivationVariables: map[string]string{
-			"vertical_id": "11111111-1111-4111-8111-111111111111",
-		},
-	}
-	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
-	req = eb.RouteTable().ConstructedRouteRequestFixture(req)
-	if committed, err := eb.StageFlowInstanceRouteContext(stageCtx, req); err != nil || !committed.Acknowledged {
-		t.Fatalf("StageFlowInstanceRouteContext: committed=%+v err=%v", committed, err)
-	}
-	if len(store.routes) == 0 {
-		t.Fatal("staged route was not persisted")
-	}
-	if eb.HasFlowInstanceRoute(identity) {
-		t.Fatal("staged route became process-visible before readiness")
-	}
-	agentIdentity, admission := routeMaterializationAgentRoute(t, source, identity)
-	agentPlan, err := agentIdentity.Plan()
-	if err != nil {
-		t.Fatalf("project materialized agent plan: %v", err)
-	}
-	eb.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
-		Identity: agentIdentity, EntityID: runtimeflowidentity.EntityID(route.InstancePath),
-	})
-	runtimebustest.SubscribeIdentity(t, eb, agentIdentity, admission)
-	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
-	instanceEnvelope := events.EventEnvelope{
-		EntityID: runtimeflowidentity.EntityID(route.InstancePath), FlowInstance: route.InstancePath,
-	}
-	before := eventtest.RuntimeControl(
-		eventtest.UUID("event-before-runtime-readiness"),
-		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"),
-		"", "", nil, 0, eventBusTestRunID, "", instanceEnvelope, time.Time{},
-	)
-	if err := eb.Publish(context.Background(), before); err != nil {
-		t.Fatalf("Publish before readiness: %v", err)
-	}
-	if got := store.deliveries[before.ID()]; len(got) != 0 {
-		t.Fatalf("pre-readiness delivery recipients = %#v, want none", got)
-	}
-	if err := eb.PublishPersistedFlowInstanceRouteFixture(req); err != nil {
-		t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
-	}
-	resolved := eb.RouteTable().ResolveForRun(eventBusTestRunID, "operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested")
-	if len(resolved) != 1 || resolved[0].AgentPlan != agentPlan {
-		t.Fatalf("published agent route = %#v, want exact identity %s", resolved, agentIdentity)
-	}
-	after := eventtest.RuntimeControl(
-		eventtest.UUID("event-after-runtime-readiness"),
-		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"),
-		"", "", nil, 0, eventBusTestRunID, "", instanceEnvelope, time.Time{},
-	)
-	if err := eb.Publish(context.Background(), after); err != nil {
-		t.Fatalf("Publish after readiness: %v", err)
-	}
-	got := store.deliveries[after.ID()]
-	if len(got) != 1 || got[0] != "ceo" {
-		t.Fatalf("post-readiness delivery recipients = %#v, want exact instantiated agent", got)
-	}
-}
-
-func TestEventBusStageFlowInstanceRouteRejectsForeignSemanticSourceDescriptorsBeforeReplacement(t *testing.T) {
-	repo := canonicalrouting.RepoRoot(t)
-	root := canonicalrouting.CopyCompleteObserverDependencies(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := semanticview.Wrap(bundle)
-	current := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "current"))
-	foreign := runtimeflowidentity.DeriveRoute("observer", "foreign")
-	store := &routePersistenceTestStore{
-		flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
-			{InstanceID: current.Route.InstanceID, FlowInstance: current.Route.InstancePath, FlowTemplate: "producer"},
-			{
-				InstanceID: foreign.InstanceID, FlowInstance: foreign.InstancePath, FlowTemplate: "observer",
-				BundleHash:      "bundle-v2:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-				WorkflowVersion: "1.0.0",
-			},
-		},
-	}
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	prior := runtimebus.FlowInstanceRouteRecord{
-		Identity: current, EventPattern: "producer/current/prior.event",
-		SubscriberType: "agent", SubscriberID: "prior-agent", SourceFlow: "producer",
-	}
-	store.routes = map[string]runtimebus.FlowInstanceRouteRecord{"prior": prior}
-	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
-	_, err = eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: current, Instance: runtimebus.ConstructedFlowInstanceIdentityFixture(source, "producer", current.Route.InstanceID, current.RunID)})
-	if err == nil || !strings.Contains(err.Error(), "semantic source does not match") {
-		t.Fatalf("StageFlowInstanceRouteContext error = %v, want foreign semantic-source rejection", err)
-	}
-	if len(store.replaceCalls) != 0 {
-		t.Fatalf("route owners replaced across foreign semantic-source rejection: %#v", store.replaceCalls)
-	}
-	if len(store.stagedRoutes) != 0 || len(store.routes) != 1 || store.routes["prior"] != prior {
-		t.Fatalf("route truth changed across foreign semantic-source rejection: staged=%#v routes=%#v", store.stagedRoutes, store.routes)
-	}
-}
-
-func TestEventBusStageFlowInstanceRouteAcceptsExactEmptyRouteSet(t *testing.T) {
-	store := &routePersistenceTestStore{}
-	source := routeMaterializationNodeSource(t, "observer", runtimecontracts.SystemNodeContract{})
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	identity := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("observer", "inst-1"))
-	req := runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: identity,
-	}
-	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
-	req = eb.RouteTable().ConstructedRouteRequestFixture(req)
-	if committed, err := eb.StageFlowInstanceRouteContext(stageCtx, req); err != nil || !committed.Acknowledged {
-		t.Fatalf("StageFlowInstanceRouteContext: committed=%+v err=%v", committed, err)
-	}
-	if store.upsertCalls != 0 {
-		t.Fatalf("empty route set persistence calls = %d, want none", store.upsertCalls)
-	}
-	if eb.HasFlowInstanceRoute(identity) {
-		t.Fatal("empty staged route became process-visible before readiness")
-	}
-	if err := eb.PublishPersistedFlowInstanceRouteFixture(req); err != nil {
-		t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
-	}
-	if !eb.HasFlowInstanceRoute(identity) {
-		t.Fatal("exact empty route topology was not published as process-ready")
 	}
 }
 
@@ -761,12 +562,6 @@ func TestEventBusFlowInstanceRouteRejectsUnknownCanonicalTemplateWithoutMutation
 	if eb.HasFlowInstanceRoute(identity) || len(store.routes) != 0 || store.upsertCalls != 0 {
 		t.Fatalf("unknown template mutated route state: owner=%v routes=%#v upserts=%d", eb.HasFlowInstanceRoute(identity), store.routes, store.upsertCalls)
 	}
-}
-
-func (s *routePersistenceTestStore) RollbackFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	s.rollbackCalls = append(s.rollbackCalls, identity.Key())
-	delete(s.routes, identity.Key())
-	return nil
 }
 
 func (s *routePersistenceTestStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
@@ -799,7 +594,7 @@ func TestEventBusFlowInstanceRouteIdentityOwnerRejectsMismatchedExplicitPath(t *
 	if err := eb.AddFlowInstanceRouteFixture(req); err != nil {
 		t.Fatalf("exact AddFlowInstanceRoute replay: %v", err)
 	}
-	if got := eb.RouteTable().ResolveForRun(eventBusTestRunID, "review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != testFlowNode(t, "review", "materialized-node").Key() {
+	if got := eb.RouteTable().PubsubReceiverDefinitionsFixture(t, eventBusTestRunID, runtimebus.ConstructedFlowInstanceIdentityFixture(source, "review", "inst-1", eventBusTestRunID), "review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != testFlowNode(t, "review", "materialized-node").Key() {
 		t.Fatalf("routes after exact replay = %#v, want one installed owner route", got)
 	}
 	replaceCalls := len(store.replaceCalls)
@@ -822,7 +617,7 @@ func TestEventBusFlowInstanceRouteIdentityOwnerRejectsMismatchedExplicitPath(t *
 	if !eb.RouteTable().HasFlowInstanceRoute(installed) {
 		t.Fatal("installed identity disappeared after mismatched add/remove")
 	}
-	if got := eb.RouteTable().ResolveForRun(eventBusTestRunID, "review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != testFlowNode(t, "review", "materialized-node").Key() {
+	if got := eb.RouteTable().PubsubReceiverDefinitionsFixture(t, eventBusTestRunID, runtimebus.ConstructedFlowInstanceIdentityFixture(source, "review", "inst-1", eventBusTestRunID), "review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != testFlowNode(t, "review", "materialized-node").Key() {
 		t.Fatalf("routes after mismatched add/remove = %#v, want owner authority unchanged", got)
 	}
 	normalizedRemoval := runtimeflowidentity.RunScopedFlowInstance{
@@ -836,14 +631,14 @@ func TestEventBusFlowInstanceRouteIdentityOwnerRejectsMismatchedExplicitPath(t *
 	if err := eb.RemoveFlowInstanceRouteFixture(normalizedRemoval); err != nil {
 		t.Fatalf("RemoveFlowInstanceRoute owner: %v", err)
 	}
-	if len(store.replaceCalls) != replaceCalls+1 || store.replaceCalls[len(store.replaceCalls)-1] != installed {
-		t.Fatalf("persistence replacement calls = %#v, want one canonical owner removal after setup", store.replaceCalls)
+	if len(store.replaceCalls) != replaceCalls || eb.RouteTable().HasFlowInstanceRoute(installed) {
+		t.Fatalf("isolated removal retained its owner or wrote a retired mirror: owner=%v calls=%#v", eb.RouteTable().HasFlowInstanceRoute(installed), store.replaceCalls)
 	}
 	if err := eb.RemoveFlowInstanceRouteFixture(normalizedRemoval); err != nil {
 		t.Fatalf("exact RemoveFlowInstanceRoute replay: %v", err)
 	}
-	if len(store.replaceCalls) != replaceCalls+2 {
-		t.Fatalf("persistence replacement calls after absent replay = %#v, want exact replay reconciliation", store.replaceCalls)
+	if len(store.replaceCalls) != replaceCalls || eb.RouteTable().HasFlowInstanceRoute(installed) {
+		t.Fatalf("absent replay restored its owner or wrote a retired mirror: owner=%v calls=%#v", eb.RouteTable().HasFlowInstanceRoute(installed), store.replaceCalls)
 	}
 }
 
@@ -855,69 +650,15 @@ func (s *routePersistenceTestStore) ListFlowInstanceRoutes(context.Context) ([]r
 	return out, nil
 }
 
-func TestEventBusFlowInstanceRoutesPersistAcrossAddAndRemove(t *testing.T) {
-	store := &routePersistenceTestStore{}
-	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
-		Produces:     []string{"task.started"},
-		SubscribesTo: []string{"task.started"},
-	})
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	if err := eb.AddFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("review", "inst-1")),
-	}); err != nil {
-		t.Fatalf("AddFlowInstance: %v", err)
-	}
-	if _, ok := store.routes[testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("review", "inst-1")).Key()]; !ok {
-		t.Fatalf("persisted routes = %#v, want review/inst-1", store.routes)
-	}
-	if err := eb.RemoveFlowInstanceRouteFixture(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("review", "inst-1"))); err != nil {
-		t.Fatalf("RemoveFlowInstance: %v", err)
-	}
-	if len(store.routes) != 0 {
-		t.Fatalf("persisted routes after remove = %#v, want none", store.routes)
-	}
-}
-
-func TestEventBusAddFlowInstanceRouteDoesNotPublishWhenTopologyCommitFails(t *testing.T) {
-	store := &routePersistenceTestStore{
-		upsertErr:        context.DeadlineExceeded,
-		upsertAfterWrite: true,
-		deleteErr:        context.Canceled,
-	}
-	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
-		Produces:     []string{"task.started"},
-		SubscribesTo: []string{"task.started"},
-	})
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	err = eb.AddFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("review", "inst-1")),
-	})
-	if err == nil {
-		t.Fatal("expected AddFlowInstanceRoute to fail")
-	}
-	if len(store.routes) != 0 {
-		t.Fatalf("persisted routes after rollback = %#v, want none", store.routes)
-	}
-	if len(store.rollbackCalls) != 0 {
-		t.Fatalf("external rollback calls = %#v, want none because the named operation owns rollback", store.rollbackCalls)
-	}
-	if got := eb.RouteTable().ResolveForRun(eventBusTestRunID, "review/inst-1/task.started"); len(got) != 0 {
-		t.Fatalf("resolved subscribers after failed add = %#v, want none", got)
-	}
-}
-
-func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSubscriber(t *testing.T) {
+func TestEventBusIndexedFlowInstanceDeliversDeclaredAgentSubscriber(t *testing.T) {
 	store := &routePersistenceTestStore{}
 	bundle := routeMaterializationConfigVarBundle(t)
 	source := semanticview.Wrap(bundle)
+	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "operating", "11111111-1111-4111-8111-111111111111", eventBusTestRunID)
+	index := runtimebus.FlowInstanceIndexFixture(runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, instance.InstanceID))
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
 		ContractBundle: source,
+		Durable:        runtimebus.DurableDependencies{Instances: index},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -930,22 +671,6 @@ func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSub
 	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
 		ID: "operating-owner", FlowInstance: routeIdentity.InstancePath, EntityID: runtimeflowidentity.EntityID(routeIdentity.InstancePath),
 	}}
-	if err := eb.AddFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: identity,
-		ActivationVariables: map[string]string{
-			"vertical_id": "11111111-1111-4111-8111-111111111111",
-		},
-	}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
-	}
-	route, ok := store.routes[identity.Key()]
-	if !ok {
-		t.Fatalf("persisted routes = %#v, want operating instance route", store.routes)
-	}
-	if route.SubscriberID != "ceo" {
-		t.Fatalf("persisted subscriber_id = %q, want stable declared ceo name", route.SubscriberID)
-	}
-
 	agentIdentity, admission := routeMaterializationAgentRoute(t, source, identity)
 	agentPlan, err := agentIdentity.Plan()
 	if err != nil {
@@ -956,13 +681,17 @@ func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSub
 	})
 	runtimebustest.SubscribeIdentity(t, eb, agentIdentity, admission)
 	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
-	resolved := eb.RouteTable().ResolveForRun(eventBusTestRunID, "operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested")
+	resolved := eb.RouteTable().PubsubReceiverDefinitionsFixture(t, eventBusTestRunID, runtimebus.ConstructedFlowInstanceIdentityFixture(source, "operating", identity.Route.InstanceID, eventBusTestRunID), "operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested")
 	if len(resolved) != 1 || resolved[0].AgentPlan != agentPlan {
 		t.Fatalf("active agent route = %#v, want exact identity %s", resolved, agentIdentity)
 	}
-	evt := eventtest.RuntimeControl(eventtest.UUID("event-rendered-route-delivery"),
-		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"), "", "", nil, 0, eventBusTestRunID, "",
-		events.EventEnvelope{EntityID: runtimeflowidentity.EntityID(routeIdentity.InstancePath), FlowInstance: routeIdentity.InstancePath}, time.Time{})
+	if len(store.routes) != 0 || store.upsertCalls != 0 || len(store.replaceCalls) != 0 {
+		t.Fatalf("compiled binding wrote retired route mirror: routes=%#v upserts=%d replacements=%#v", store.routes, store.upsertCalls, store.replaceCalls)
+	}
+	evt := eventtest.ExistingRunRootIngressWithRoutingSource(eventtest.UUID("event-rendered-route-delivery"),
+		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"), "", "", nil, 0, eventBusTestRunID,
+		events.EventEnvelope{EntityID: instance.EntityID, FlowInstance: instance.InstancePath},
+		eventtest.ConcreteTemplateRoutingSource(instance.TemplateID, instance.InstancePath, instance.EntityID), time.Time{})
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -970,31 +699,6 @@ func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSub
 	got := store.deliveries[evt.ID()]
 	if len(got) != 1 || got[0] != "ceo" {
 		t.Fatalf("delivery recipients = %#v, want stable declared ceo name", got)
-	}
-}
-
-func TestEventBusRemoveNestedFlowInstanceDropsDerivedRoutes(t *testing.T) {
-	source := routeMaterializationNodeSource(t, "child/grandchild", runtimecontracts.SystemNodeContract{
-		Produces:     []string{"micro.started"},
-		SubscribesTo: []string{"micro.started"},
-	})
-	eb, err := newScopedTestEventBus(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	if err := eb.AddFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1")),
-	}); err != nil {
-		t.Fatalf("AddFlowInstance: %v", err)
-	}
-	if got := eb.RouteTable().ResolveForRun(eventBusTestRunID, "child/grandchild/inst-1/micro.started"); len(got) != 1 || got[0].Recipient.ID() != testFlowNode(t, "child/grandchild", "materialized-node").Key() {
-		t.Fatalf("resolved subscribers after add = %#v", got)
-	}
-	if err := eb.RemoveFlowInstanceRouteFixture(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1"))); err != nil {
-		t.Fatalf("RemoveFlowInstance: %v", err)
-	}
-	if got := eb.RouteTable().ResolveForRun(eventBusTestRunID, "child/grandchild/inst-1/micro.started"); len(got) != 0 {
-		t.Fatalf("resolved subscribers after remove = %#v, want none", got)
 	}
 }
 
@@ -1044,10 +748,8 @@ func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryP
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	if err := rt.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
-	}
-	got := rt.ResolveForRun(eventBusTestRunID, "operating/inst-1/opco.product_initialization_requested")
+	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "operating", "inst-1", eventBusTestRunID)
+	got := rt.PubsubReceiverDefinitionsFixture(t, eventBusTestRunID, instance, "operating/inst-1/opco.product_initialization_requested")
 	if len(got) != 1 {
 		t.Fatalf("resolved subscribers = %#v, want one lifecycle-orchestrator route", got)
 	}
@@ -1057,22 +759,17 @@ func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryP
 }
 
 func TestRouteTableFlowInstanceRouteKeepsAgentNameStableAcrossActivationConfig(t *testing.T) {
-	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(routeMaterializationConfigVarBundle(t)))
+	source := semanticview.Wrap(routeMaterializationConfigVarBundle(t))
+	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	firstRoute := runtimeflowidentity.DeriveRoute("operating", "11111111-1111-4111-8111-111111111111")
-	identity := testRunScopedFlowRoute(firstRoute)
-	if err := rt.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: identity,
-		ActivationVariables: map[string]string{
-			"vertical_id": "11111111-1111-4111-8111-111111111111",
-		},
-	}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	first := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "operating", firstRoute.InstanceID, eventBusTestRunID)
+	got, err := rt.PubsubReceiverDefinitions(eventBusTestRunID, first, []string{first.InstancePath + "/opco.product_initialization_requested"})
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	got := rt.ResolveForRun(eventBusTestRunID, "operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested")
 	if len(got) != 1 {
 		t.Fatalf("resolved subscribers = %#v, want one ceo route", got)
 	}
@@ -1083,24 +780,18 @@ func TestRouteTableFlowInstanceRouteKeepsAgentNameStableAcrossActivationConfig(t
 		t.Fatalf("resolved subscriber identity = %#v, want exact first instance", got[0].AgentPlan)
 	}
 	siblingRoute := runtimeflowidentity.DeriveRoute("operating", "22222222-2222-4222-8222-222222222222")
-	siblingIdentity := testRunScopedFlowRoute(siblingRoute)
-	if err := rt.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: siblingIdentity,
-		ActivationVariables: map[string]string{
-			"vertical_id": "11111111-1111-4111-8111-111111111111",
-		},
-	}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute sibling: %v", err)
+	second := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "operating", siblingRoute.InstanceID, eventBusTestRunID)
+	sibling, err := rt.PubsubReceiverDefinitions(eventBusTestRunID, second, []string{second.InstancePath + "/opco.product_initialization_requested"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	sibling := rt.ResolveForRun(eventBusTestRunID, "operating/22222222-2222-4222-8222-222222222222/opco.product_initialization_requested")
 	if len(sibling) != 1 || sibling[0].Recipient.LocalID() != got[0].Recipient.LocalID() ||
 		sibling[0].AgentPlan.FlowInstance() != siblingRoute.InstancePath ||
 		sibling[0].AgentPlan == got[0].AgentPlan {
 		t.Fatalf("resolved sibling subscriber = %#v, want same slug with distinct concrete identity from %#v", sibling, got[0])
 	}
-	routes := rt.MaterializedRoutes(identity)
-	if len(routes) != 1 || routes[0].SubscriberID != "ceo" {
-		t.Fatalf("materialized routes = %#v, want stable declared ceo subscriber", routes)
+	if len(rt.ConnectDeclarationDefinitions("operating")) != 0 {
+		t.Fatal("local subscription acquired an undeclared connection")
 	}
 }
 
@@ -1133,10 +824,8 @@ func TestRouteTableExplicitAgentNameChangesPublicNameNotScopedCoordinate(t *test
 	}
 	var concrete []agentidentity.Plan
 	for _, identity := range identities {
-		if err := routes.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(identity)}); err != nil {
-			t.Fatalf("AddFlowInstanceRoute(%s): %v", identity.InstancePath, err)
-		}
-		got := routes.ResolveForRun(eventBusTestRunID, identity.InstancePath+"/opco.product_initialization_requested")
+		instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "operating", identity.InstanceID, eventBusTestRunID)
+		got := routes.PubsubReceiverDefinitionsFixture(t, eventBusTestRunID, instance, identity.InstancePath+"/opco.product_initialization_requested")
 		if len(got) != 1 || got[0].Recipient.LocalID() != "executive" || got[0].AgentPlan.FlowInstance() != identity.InstancePath {
 			t.Fatalf("resolved %s = %#v, want executive on exact instance", identity.InstancePath, got)
 		}
@@ -1310,15 +999,10 @@ func TestRouteTableTemplateOutputConnectDoesNotCreateCrossFlowPubSubSubscriber(t
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	identity := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "component-a"))
-	if err := rt.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: runtimebus.ConstructedFlowInstanceIdentityFixture(source, identity.Route.ScopeKey, identity.Route.InstanceID, identity.RunID)}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
-	}
-
-	if got := rt.ResolveForRun(eventBusTestRunID, "producer/component-a/deploy.done"); len(got) != 0 {
+	if got := rt.PubsubDeclarationDefinitionsFixture(t, ".", "producer/component-a/deploy.done"); len(got) != 0 {
 		t.Fatalf("direct template output subscribers = %#v, connect dispatch must own the boundary edge", got)
 	}
-	got := rt.Resolve("deploy.done")
+	got := rt.PubsubDeclarationDefinitionsFixture(t, ".", "deploy.done")
 	if len(got) != 1 {
 		t.Fatalf("receiver-local subscribers = %#v, want one root-receiver route", got)
 	}
@@ -1326,13 +1010,7 @@ func TestRouteTableTemplateOutputConnectDoesNotCreateCrossFlowPubSubSubscriber(t
 		t.Fatalf("resolved subscriber = %#v, want root-receiver connect route", got[0])
 	}
 
-	if err := rt.RemoveFlowInstanceRoute(identity); err != nil {
-		t.Fatalf("RemoveFlowInstanceRoute: %v", err)
-	}
-	if got := rt.ResolveForRun(eventBusTestRunID, "deploy.done"); len(got) != 1 {
-		t.Fatalf("receiver-local subscribers after remove = %#v, want root-receiver", got)
-	}
-	if got := rt.ResolveForRun(eventBusTestRunID, "producer/component-b/deploy.done"); len(got) != 0 {
+	if got := rt.PubsubDeclarationDefinitionsFixture(t, ".", "producer/component-b/deploy.done"); len(got) != 0 {
 		t.Fatalf("resolved subscribers for never-added instance = %#v, want none", got)
 	}
 }
@@ -1379,13 +1057,13 @@ func TestDeriveRouteTable_InputPinsDoNotAutoWireFromProducerOutput(t *testing.T)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	if got := rt.ResolveForRun(eventBusTestRunID, "producer/scan.requested"); len(got) != 0 {
+	if got := rt.PubsubDeclarationDefinitionsFixture(t, "discovery", "producer/scan.requested"); len(got) != 0 {
 		t.Fatalf("Resolve(producer/scan.requested) = %#v, want none for retired sibling auto-wire", got)
 	}
-	if got := rt.ResolveForRun(eventBusTestRunID, "scan.requested"); len(got) != 0 {
+	if got := rt.PubsubDeclarationDefinitionsFixture(t, "discovery", "scan.requested"); len(got) != 0 {
 		t.Fatalf("Resolve(scan.requested) = %#v, want none", got)
 	}
-	if got := rt.ResolveForRun(eventBusTestRunID, "discovery/scan.requested"); len(got) != 1 || got[0].Recipient.LocalID() != "scan-orchestrator" {
+	if got := rt.PubsubDeclarationDefinitionsFixture(t, "discovery", "discovery/scan.requested"); len(got) != 1 || got[0].Recipient.LocalID() != "scan-orchestrator" {
 		t.Fatalf("Resolve(discovery/scan.requested) = %#v, want scan-orchestrator local input route", got)
 	}
 }
@@ -1441,10 +1119,10 @@ func TestDeriveRouteTable_HandlerOnlyInputPinsDoNotAutoWireFromProducerOutput(t 
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	if got := rt.ResolveForRun(eventBusTestRunID, "producer/scan.requested"); len(got) != 0 {
+	if got := rt.PubsubDeclarationDefinitionsFixture(t, "consumer", "producer/scan.requested"); len(got) != 0 {
 		t.Fatalf("Resolve(producer/scan.requested) = %#v, want none for retired sibling auto-wire", got)
 	}
-	got := rt.ResolveForRun(eventBusTestRunID, "consumer/scan.requested")
+	got := rt.PubsubDeclarationDefinitionsFixture(t, "consumer", "consumer/scan.requested")
 	if len(got) != 1 || got[0].Recipient.LocalID() != "consumer-node" {
 		t.Fatalf("Resolve(consumer/scan.requested) = %#v, want consumer-node local input route", got)
 	}
@@ -1496,7 +1174,7 @@ func TestDeriveRouteTable_StaticChildFlowInputSubscriptionsResolveCanonicalNodeO
 			if err != nil {
 				t.Fatalf("DeriveRouteTable: %v", err)
 			}
-			got := rt.ResolveForRun(eventBusTestRunID, tc.eventType)
+			got := rt.PubsubDeclarationDefinitionsFixture(t, tc.flowPath, tc.eventType)
 			if len(got) != 1 ||
 				got[0].Recipient.LocalID() != tc.nodeID ||
 				!got[0].Recipient.IsNode() ||
@@ -1539,7 +1217,7 @@ func TestDeriveRouteTable_RuntimeProducedFollowUpSubscriptionsResolveCanonicalNo
 			if err != nil {
 				t.Fatalf("DeriveRouteTable: %v", err)
 			}
-			got := rt.ResolveForRun(eventBusTestRunID, tc.eventType)
+			got := rt.PubsubDeclarationDefinitionsFixture(t, tc.flowPath, tc.eventType)
 			found := false
 			for _, subscriber := range got {
 				if subscriber.Recipient.LocalID() == tc.nodeID &&
@@ -1618,10 +1296,10 @@ func TestDeriveRouteTable_AmbiguousInputPinsFailClosedWithoutEscapeHatch(t *test
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	if got := rt.ResolveForRun(eventBusTestRunID, "producer_a/ticket.ready"); len(got) != 0 {
+	if got := rt.PubsubDeclarationDefinitionsFixture(t, "consumer", "producer_a/ticket.ready"); len(got) != 0 {
 		t.Fatalf("Resolve(producer_a/ticket.ready) = %#v, want none", got)
 	}
-	if got := rt.ResolveForRun(eventBusTestRunID, "producer_b/ticket.ready"); len(got) != 0 {
+	if got := rt.PubsubDeclarationDefinitionsFixture(t, "consumer", "producer_b/ticket.ready"); len(got) != 0 {
 		t.Fatalf("Resolve(producer_b/ticket.ready) = %#v, want none", got)
 	}
 }
@@ -1660,11 +1338,11 @@ func TestDeriveRouteTable_InputPinsStayLocalWithoutExternalProducer(t *testing.T
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	got := rt.ResolveForRun(eventBusTestRunID, "scoring/score.dimension_complete")
+	got := rt.PubsubDeclarationDefinitionsFixture(t, "scoring", "scoring/score.dimension_complete")
 	if len(got) != 1 || got[0].Recipient.LocalID() != "scoring-node" {
 		t.Fatalf("Resolve(scoring/score.dimension_complete) = %#v, want scoring-node", got)
 	}
-	if got := rt.ResolveForRun(eventBusTestRunID, "score.dimension_complete"); len(got) != 0 {
+	if got := rt.PubsubDeclarationDefinitionsFixture(t, "scoring", "score.dimension_complete"); len(got) != 0 {
 		t.Fatalf("Resolve(score.dimension_complete) = %#v, want none", got)
 	}
 }
@@ -1686,10 +1364,10 @@ func TestDeriveRouteTable_NestedPackageConnectLocalizesWithinParentFlow(t *testi
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	if got := rt.ResolveForRun(eventBusTestRunID, "child/grandchild/micro.done"); len(got) != 0 {
+	if got := rt.PubsubDeclarationDefinitionsFixture(t, "child", "child/grandchild/micro.done"); len(got) != 0 {
 		t.Fatalf("direct descendant route = %#v, connect dispatch must own the boundary edge", got)
 	}
-	got := rt.ResolveForRun(eventBusTestRunID, "child/micro.done")
+	got := rt.PubsubDeclarationDefinitionsFixture(t, "child", "child/micro.done")
 	if len(got) != 1 || got[0].Recipient.LocalID() != "child-aggregator" {
 		t.Fatalf("Resolve(child/micro.done) = %#v, want receiver-local child-aggregator carrier", got)
 	}
@@ -1698,7 +1376,7 @@ func TestDeriveRouteTable_NestedPackageConnectLocalizesWithinParentFlow(t *testi
 	}
 }
 
-func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *testing.T) {
+func TestDeriveRouteTable_NestedTemplateInstancesBindSemanticScopeKey(t *testing.T) {
 	grandchild := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child/grandchild"},
 		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
@@ -1743,69 +1421,25 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatal(err)
 	}
-	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	source := semanticview.Wrap(bundle)
+	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	firstRoute := runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1")
-	identity := testRunScopedFlowRoute(firstRoute)
-	if err := rt.AddConstructedFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
-		t.Fatalf("AddFlowInstance: %v", err)
-	}
-	routes := rt.MaterializedRoutes(identity)
-	if len(routes) != 1 {
-		t.Fatalf("MaterializedRoutes = %#v, want 1 route", routes)
-	}
-	if routes[0].Identity.Route.ScopeKey != "child/grandchild" {
-		t.Fatalf("ScopeKey = %q, want child/grandchild", routes[0].Identity.Route.ScopeKey)
-	}
-	if routes[0].Identity.Route.InstanceID != "inst-1" {
-		t.Fatalf("InstanceID = %q, want inst-1", routes[0].Identity.Route.InstanceID)
-	}
-	if routes[0].SourceFlow != "child/grandchild" {
-		t.Fatalf("SourceFlow = %q, want child/grandchild", routes[0].SourceFlow)
-	}
-
-	store := &routePersistenceTestStore{flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{{
-		InstanceID:    firstRoute.InstanceID,
-		FlowInstance:  firstRoute.InstancePath,
-		FlowTemplate:  "child/grandchild",
-		AddressFields: map[string]string{"entity.account_id": "acct-1"},
-	}}}
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "child/grandchild", "inst-1", eventBusTestRunID)
+	routes, err := rt.PubsubReceiverDefinitions(eventBusTestRunID, instance, []string{instance.InstancePath + "/micro.started"})
 	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
+		t.Fatal(err)
 	}
-	secondRoute := runtimeflowidentity.DeriveRoute("child/grandchild", "inst-2")
-	second := testRunScopedFlowRoute(secondRoute)
-	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
-	if committed, err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: second,
-		Instance: runtimebus.ConstructedFlowInstanceIdentityFixture(semanticview.Wrap(bundle), "child/grandchild", secondRoute.InstanceID, second.RunID),
-	}); err != nil || !committed.Acknowledged {
-		t.Fatalf("stage second nested template instance: committed=%+v err=%v", committed, err)
+	if len(routes) != 1 {
+		t.Fatalf("compiled receiver definitions = %#v, want 1 route", routes)
 	}
-	replaced := map[runtimeflowidentity.RunScopedFlowInstance]bool{}
-	for _, route := range store.replaceCalls {
-		replaced[route] = true
+	if instance.ScopeKey != "child/grandchild" || instance.InstanceID != "inst-1" {
+		t.Fatalf("compiled receiver identity = %#v, want exact nested scope/key", instance)
 	}
-	if len(replaced) != 1 || !replaced[second] {
-		t.Fatalf("replaced nested route owners = %#v, want only independent %s", store.replaceCalls, secondRoute.InstancePath)
+	node, isNode := routes[0].Recipient.Node()
+	if !isNode || routes[0].Path != instance.InstancePath || node.FlowPath() != "child/grandchild" || routes[0].LocalizedEvent != "micro.started" {
+		t.Fatalf("compiled subscriber = %#v, want exact nested handler/local event", routes[0])
 	}
 
-	// An unrelated existing sibling is not part of this replacement's
-	// compiled dependency scope, even if its descriptor is malformed.
-	store.flowInstances[0].FlowTemplate = "child"
-	store.replaceCalls = nil
-	store.stagedRoutes = nil
-	committed, err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: second,
-		Instance: runtimebus.ConstructedFlowInstanceIdentityFixture(semanticview.Wrap(bundle), "child/grandchild", secondRoute.InstanceID, second.RunID),
-	})
-	if err != nil || !committed.Acknowledged {
-		t.Fatalf("unrelated malformed sibling blocked exact nested replacement: committed=%+v err=%v", committed, err)
-	}
-	if len(store.replaceCalls) != 1 || store.replaceCalls[0] != second {
-		t.Fatalf("nested replacement included unrelated malformed sibling: replacements=%#v", store.replaceCalls)
-	}
 }

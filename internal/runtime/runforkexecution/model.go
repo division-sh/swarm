@@ -64,10 +64,6 @@ func canonicalSelectedContractRouteTopology(frontier runfork.RunForkContractFron
 		})
 	}
 	for _, blocker := range routeAdmission.UnsupportedBlockers {
-		if strings.TrimSpace(blocker.Code) == runfork.RunForkBlockerFlowRouteHistoryUnproven &&
-			routeAdmission.SourceRouteFactsPresent && dynamicSupported {
-			continue
-		}
 		blockers = appendRunForkUnsupportedBlocker(blockers, blocker)
 	}
 
@@ -86,7 +82,6 @@ func canonicalSelectedContractRouteTopology(frontier runfork.RunForkContractFron
 		StaticTopologySupported:        true,
 		DynamicTopologySupported:       dynamicSupported,
 		DynamicTopologyOwner:           selectedContractDynamicRouteTopologyOwner(dynamicFlowInstances),
-		SourceRouteFactsPresent:        routeAdmission.SourceRouteFactsPresent,
 		StaticRouteEvents:              staticEvents,
 		DynamicFlowInstances:           dynamicFlowInstances,
 		DynamicTopologyProofs:          dynamicProofs,

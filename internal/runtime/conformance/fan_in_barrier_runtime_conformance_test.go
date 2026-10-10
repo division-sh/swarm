@@ -589,11 +589,6 @@ func newFanInBarrierRouteProofBus(t *testing.T, backend fanInBarrierConformanceS
 	if err != nil {
 		t.Fatalf("create fan-in route proof EventBus: %v", err)
 	}
-	for _, route := range mustFanInBarrierRoutes(t, backend) {
-		if err := flowroutefixture.Publish(eventBus, route); err != nil {
-			t.Fatalf("restore fan-in proof route %s: %v", route.Identity.Route.InstancePath, err)
-		}
-	}
 	return eventBus
 }
 
@@ -842,11 +837,6 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 			t.Errorf("stop exact join scheduling: %v", err)
 		}
 	})
-	for _, route := range mustFanInBarrierRoutes(t, backend) {
-		if err := flowroutefixture.Publish(eventBus, route); err != nil {
-			t.Fatalf("restore fan-in route %s: %v", route.Identity.Route.InstancePath, err)
-		}
-	}
 	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowNodes: %v", err)
@@ -1063,24 +1053,6 @@ func requireFanInBarrierReportTargets(
 	if len(sourceEntities) != wantCount {
 		t.Fatalf("fan-in report source entities = %#v, want %d distinguishable child owners", sourceEntities, wantCount)
 	}
-}
-
-func mustFanInBarrierRoutes(t *testing.T, backend fanInBarrierConformanceStore) []runtimebus.FlowInstanceRouteMaterializationRequest {
-	t.Helper()
-	ctx := testAuthorActivityContext(context.Background())
-	routes, err := backend.ListFlowInstanceRoutes(ctx)
-	if err != nil {
-		t.Fatalf("ListFlowInstanceRoutes: %v", err)
-	}
-	out := make([]runtimebus.FlowInstanceRouteMaterializationRequest, 0, len(routes))
-	for _, route := range routes {
-		readiness, found, err := backend.LoadDynamicFlowRuntimeReadiness(ctx, route.RunID, route.Route)
-		if err != nil || !found {
-			t.Fatalf("load constructed fan-in owner %s: found=%v err=%v", route.Route.InstancePath, found, err)
-		}
-		out = append(out, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route, Instance: readiness.Plan.Identity})
-	}
-	return out
 }
 
 func publishFanInBarrierEvent(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, eventID, flowID, localEvent string, payload map[string]any) {
