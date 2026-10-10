@@ -16,6 +16,7 @@ import (
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 func TestServedWhatsAppLaunchedProcessDeathBothStores(t *testing.T) {
@@ -50,7 +51,8 @@ func TestServedWhatsAppLaunchedProcessDeathBothStores(t *testing.T) {
 				peer.withholdAck = text
 				peer.mu.Unlock()
 				if activity {
-					peer.customer(text, "PROCESS_DEATH_CUSTOMER")
+					message, _, _ := peer.customerMessage(text, "PROCESS_DEATH_CUSTOMER")
+					peer.sendEncryptedFrame(message)
 				} else {
 					peer.text("/inbox", "PROCESS_DEATH_INBOX")
 				}
@@ -73,7 +75,7 @@ func TestServedWhatsAppLaunchedProcessDeathBothStores(t *testing.T) {
 				if activity {
 					requireServedNativeActivityOutcome(t, endpoint, message.ID, "15551234571@s.whatsapp.net", text, "effect_recovery_outcome_unconfirmed")
 				} else {
-					requireServedNativeUncertainInbox(t, reader, message.ID)
+					requireServedNativeUncertainInbox(t, reader, message)
 				}
 				select {
 				case resent := <-peer.sent:
@@ -168,23 +170,28 @@ func awaitServedNativeProcessSend(t *testing.T, peer *serveNativeProtocolPeer, p
 	}
 }
 
-func requireServedNativeUncertainInbox(t *testing.T, reader storetest.ChannelObservation, messageID string) {
+func requireServedNativeUncertainInbox(t *testing.T, reader storetest.ChannelObservation, message servedNativeMessage) {
 	t.Helper()
+	_, sourceID, found := strings.Cut(message.Body.GetConversation(), "\nReference: ")
+	operationID, parseErr := uuid.Parse(message.ID)
+	if !found || uuid.Validate(sourceID) != nil || parseErr != nil {
+		t.Fatal("original encrypted Inbox has no exact source/effect identity", message)
+	}
 	plans, err := reader.ListCurrentChannelDeliveryPlans(context.Background(), "", 200)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, plan := range plans {
-		if plan.SourceKind == "response" && strings.ReplaceAll(plan.CurrentReceiptID, "-", "") == messageID {
-			if plan.State != "uncertain" {
+		if plan.SourceKind == "response" && plan.SourceID == sourceID {
+			if plan.State != "uncertain" || plan.CurrentReceiptID != "" {
 				t.Fatal("startup lost unconfirmed Inbox evidence or fabricated success", plan)
 			}
-			receipt, found, err := reader.GetCurrentChannelSentReceipt(context.Background(), plan.DeliveryID, plan.CurrentReceiptID)
+			receipt, found, err := reader.GetCurrentChannelSentReceipt(context.Background(), plan.DeliveryID, operationID.String())
 			if err != nil || found || receipt != (render.SentReceipt{}) {
 				t.Fatal("unacknowledged Inbox acquired a sent receipt", receipt, found, err)
 			}
 			return
 		}
 	}
-	t.Fatal("startup lost the original launched Inbox receipt identity", messageID, plans)
+	t.Fatal("startup lost the original launched Inbox responsibility", message.ID, sourceID, plans)
 }

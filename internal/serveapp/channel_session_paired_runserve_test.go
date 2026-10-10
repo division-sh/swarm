@@ -98,6 +98,13 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool, rese
 			process := startServeRuntimeTestProcess(t, opts)
 			process.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+			peer.onACKTimeout = func(id string) { logServedNativeWait(t, endpoint, peer, "encrypted_ack:"+id) }
+			t.Cleanup(func() {
+				if t.Failed() {
+					logServedNativeWait(t, endpoint, peer, "failed_original_journey")
+					t.Logf("original served output:\n%s", process.outputString())
+				}
+			})
 			var result channelonboarding.Result
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_start", map[string]any{
 				"provider": "whatsapp", "verb": "connect", "save_proof": false, "idempotency_key": "native-pairing"}, &result)
