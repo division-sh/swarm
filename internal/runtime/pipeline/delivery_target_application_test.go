@@ -132,10 +132,10 @@ func VerifyDeliveryTargetApplicationConsumesDeclarationBoundJoinTargetWithoutPay
 		t.Fatal(err)
 	}
 
-	entityID := eventtest.UUID("join-declaration-application-owner-" + backend)
+	entityID := testPipelineRunID
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
-		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "awaiting",
+		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "awaiting", Mode: "static",
 		Fields: map[string]any{"portfolio_id": "portfolio-main"}, EntityType: "test_entity",
 	})); err != nil {
 		t.Fatalf("seed exact declaration target: %v", err)
@@ -311,12 +311,32 @@ func VerifyDeliveryTargetApplicationRejectsStateOnlyChildRelabeledAsParentOnBoth
 	if err := fixture.RequireRun(ctx, testPipelineRunID); err != nil {
 		t.Fatal(err)
 	}
-	instancePath := "review/child/instance"
+	root := constructorUnitIdentity(t, source, testPipelineRunID, ".")
+	if err := fixture.Construct(ctx, constructedScenarioInstanceForTest(t, source, ctx, ".")); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := runtimeflowidentity.KeyedChild(source, root, "review", "chosen-parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, source, ctx, WorkflowInstance{
+		InstanceID: parent.InstanceID, StorageRef: parent.InstancePath, EntityID: parent.EntityID,
+		WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), CurrentState: "active",
+		EntityType: "review_entity", Fields: map[string]any{"instance_key": "chosen-parent"},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	child, err := runtimeflowidentity.KeylessChild(source, parent, "review/child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	instancePath := child.InstancePath
 	entityID := eventtest.UUID("state-only-child-relabeled-as-parent-" + backend)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: "instance", StorageRef: instancePath, EntityID: entityID,
-		WorkflowName: "review/child", WorkflowVersion: source.WorkflowVersion(),
+		WorkflowName: "review/child", WorkflowVersion: source.WorkflowVersion(), Mode: "static",
+		ParentFlowID: child.ParentRoute.FlowID, ParentFlowInstance: child.ParentRoute.FlowInstance, ParentEntityID: child.ParentEntityID,
 		CurrentState: "active", EntityType: "review_item", Fields: map[string]any{"marker": "unchanged"},
 		EnteredStageAt: now, CreatedAt: now, UpdatedAt: now,
 	})); err != nil {
@@ -407,8 +427,6 @@ func VerifyDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycl
 			switch testCase.name {
 			case "lifecycle-only":
 				instance.Fields = map[string]any{}
-			case "wrong-descriptor":
-				instance.WorkflowName, instance.Mode = "other-flow", "template"
 			}
 			if err := fixture.Construct(ctx, instance); err != nil {
 				t.Fatalf("construct %s native prestate: %v", testCase.name, err)
@@ -416,6 +434,16 @@ func VerifyDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycl
 			var changed int64
 			var err error
 			switch testCase.name {
+			case "wrong-descriptor":
+				restore, faultErr := fixture.ForeignDeclaration(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instancePath))
+				if faultErr != nil {
+					t.Fatal(faultErr)
+				}
+				t.Cleanup(func() {
+					if err := restore(context.WithoutCancel(ctx)); err != nil {
+						t.Error(err)
+					}
+				})
 			case "lifecycle-only":
 				changed, err = fixture.MissingFields(ctx, testPipelineRunID, entityID)
 			case "terminated-status":
@@ -437,7 +465,7 @@ func VerifyDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycl
 			}
 			switch testCase.name {
 			case "wrong-descriptor":
-				if before.Lifecycle.WorkflowName != "other-flow" || before.Lifecycle.Mode != "template" {
+				if before.Lifecycle.WorkflowName != "other-flow" || before.Lifecycle.Mode != "static" {
 					t.Fatal("wrong descriptor was not persisted")
 				}
 			case "terminated-status":
