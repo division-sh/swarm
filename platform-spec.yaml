@@ -6034,6 +6034,9 @@ engine:
           operation-local admitted observations instantiate their recipients. No mutable or persisted per-instance route
           membership proves existence, construction, source authority or executable readiness. Declaration applicability
           is not concrete existence, and existence is not attachment permission.
+          Prospective workflow publication and join admission carry the committing mutation's immutable parent and
+          instance key through the same exact header decoder. They MUST NOT reconstruct either from mutable fields,
+          an address descriptor, or route membership.
           EventBus MUST NOT require a route-mirror listing or use persisted-versus-process route equality as an
           attachment check. Static-agent declaration plans derive from the admitted source once and remain independent
           of concrete route publication or removal; callers receive detached declaration observations.

@@ -14,7 +14,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -22,7 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -186,16 +185,16 @@ type a2MembershipAdmission struct {
 
 func newA2MembershipAdmission(t *testing.T, selected gateRecoveryStoreCase, source semanticview.Source, runID string, initial pipeline.WorkflowInstance) *a2MembershipAdmission {
 	t.Helper()
-	insertGateRecoveryRun(t, selected, runID)
+	ctx, fact := nativeConstructionContextFixture(t, selected.events.(storetest.RunFixtureStore), source, runID)
 	f := &a2MembershipAdmission{selected: selected, owner: testRunScopedWorkflowInstanceForRun(runID, initial.StorageRef),
-		ctx:   withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)),
+		ctx:   ctx,
 		probe: lifecycleprobe.New(), logger: &exactJoinRuntimeLogger{},
 		observer: &a2SameCommitObservedPersistence{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner)}}
 	nodes, err := pipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.bus, err = newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, TestLifecycleProbe: f.probe, Logger: f.logger},
+	f.bus, err = newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), TestLifecycleProbe: f.probe, Logger: f.logger},
 		"platform.join_complete", "platform.join_timeout")
 	if err != nil {
 		t.Fatal(err)
@@ -203,15 +202,14 @@ func newA2MembershipAdmission(t *testing.T, selected gateRecoveryStoreCase, sour
 	schedules, _ := newExactJoinScheduleLifecycleForTest(t, f.ctx, selected, f.bus)
 	selected.persistence = pipeline.NewWorkflowPersistence(f.observer)
 	f.pc = newGateRecoveryCoordinator(f.bus, selected, pipeline.PipelineCoordinatorOptions{
-		Module: proposedEffectProofModule{source: source, nodes: nodes}, GenericSchedules: schedules, TestLifecycleProbe: f.probe,
+		Module: proposedEffectProofModule{source: source, nodes: nodes}, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: f.probe,
 	})
 	f.bus.SetInterceptors(f.pc)
-	constructed := commitA2FixtureConstruction(t, f.pc, selected.events, f.ctx, f.owner, initial, time.Now().UTC())
-	if initial.StorageRef != runID {
-		if err := flowroutefixture.Publish(f.bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: f.owner, Instance: constructed.Identity}); err != nil {
-			t.Fatalf("publish admitted existing receiver: %v", err)
-		}
+	if initial.WorkflowName != semanticview.RootExecutionFlowID(source) {
+		commitKeylessConstructorComponent(t, f.ctx, selected, f.pc, source)
 	}
+	constructed := commitA2FixtureConstruction(t, f.pc, selected.events, f.ctx, f.owner, initial, time.Now().UTC())
+	requireIndexedConstructionFixture(t, f.ctx, selected.persistence, source, runID, constructed.Identity)
 	return f
 }
 

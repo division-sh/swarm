@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -23,7 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -37,9 +36,8 @@ func TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores(t *testin
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			runID, key := uuid.NewString(), uuid.NewString()
-			insertGateRecoveryRun(t, selected, runID)
-			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, canonicalrouting.ArrivalJoinRoutingFiles(t, canonicalrouting.ArrivalJoinMultiUntil)))
+			ctx, fact := nativeConstructionContextFixture(t, selected.events.(storetest.RunFixtureStore), source, runID)
 			worker := externalPipelineSourceNode(t, source, ".", "worker")
 			flows := []string{"orders", "mirror"}
 			paths := []string{"orders/" + key, "mirror/" + key}
@@ -58,7 +56,7 @@ func TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores(t *testin
 			newBus := func() *runtimebus.EventBus {
 				t.Helper()
 				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-					ContractBundle: source, TestLifecycleProbe: probe, Logger: logger,
+					ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), TestLifecycleProbe: probe, Logger: logger,
 				}, "platform.join_complete", "platform.join_timeout")
 				if err != nil {
 					t.Fatal(err)
@@ -68,7 +66,7 @@ func TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores(t *testin
 			bus := newBus()
 			schedules, _ := newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
 			pc := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{
-				Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe,
+				Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe,
 			})
 			bus.SetInterceptors(pc)
 			now := time.Now().UTC()
@@ -77,22 +75,17 @@ func TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores(t *testin
 				CurrentState: "active", EntityType: "root_state", Fields: map[string]any{"work_count": int64(0)},
 			}, now)
 			constructed := make([]pipeline.FlowInstanceActivationPlan, len(paths))
-			publishRoutes := func() {
+			requireConstructions := func() {
 				t.Helper()
-				for index, path := range paths {
-					if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{
-						Identity: testRunScopedWorkflowInstanceForRun(runID, path),
-						Instance: constructed[index].Identity,
-					}); err != nil {
-						t.Fatal(err)
-					}
+				for _, plan := range constructed {
+					requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, plan.Identity)
 				}
 			}
 			for index, path := range paths {
 				readiness := pipeline.DynamicFlowRuntimeReadinessPlan{
 					Identity: flowidentity.Instance{TemplateID: flows[index], ScopeKey: flows[index], InstanceID: key,
 						InstancePath: path, EntityID: flowidentity.EntityID(path), HasStoredPath: true},
-					RunID: runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
+					RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 				}
 				readiness.Identity.ParentRoute = flowidentity.ParentRoute{FlowID: parent.Identity.TemplateID, FlowInstance: parent.Identity.InstancePath, EntityID: parent.Identity.EntityID}
 				readiness.Identity.ParentEntityID = parent.Identity.EntityID
@@ -104,7 +97,7 @@ func TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores(t *testin
 				}, now)
 				markGateRecoveryTopologyReadyFixture(t, selected, readiness, now)
 			}
-			publishRoutes()
+			requireConstructions()
 			load := func(index int) pipeline.WorkflowInstance {
 				t.Helper()
 				instance, found, err := pc.Load(ctx, testRunScopedWorkflowInstanceForRun(runID, paths[index]))
@@ -279,10 +272,10 @@ func TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores(t *testin
 			var driver *exactJoinScheduleDriver
 			schedules, driver = newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
 			pc = newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{
-				Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe,
+				Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe,
 			})
 			bus.SetInterceptors(pc)
-			publishRoutes()
+			requireConstructions()
 			if restored, err := schedules.Restore(ctx); err != nil || restored != 4 {
 				t.Fatalf("restore exactly four captured continuations: count=%d err=%v", restored, err)
 			}
@@ -349,10 +342,10 @@ func TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores(t *testin
 			bus = newBus()
 			schedules, _ = newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
 			pc = newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{
-				Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe,
+				Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe,
 			})
 			bus.SetInterceptors(pc)
-			publishRoutes()
+			requireConstructions()
 			for index := range paths {
 				reenter(index)
 				if entry(index) == captured[index] {

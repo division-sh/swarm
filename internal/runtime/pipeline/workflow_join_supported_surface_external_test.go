@@ -27,7 +27,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -185,9 +185,8 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				selected := storeCase.open(t)
 				runtimeLogger := &exactJoinRuntimeLogger{}
 				runID := uuid.NewString()
-				insertGateRecoveryRun(t, selected, runID)
-				ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				source := exactExternalWorkflowJoinSource(t, flowID)
+				ctx, fact := nativeConstructionContextFixture(t, selected.events.(storetest.RunFixtureStore), source, runID)
 				joinNode := externalPipelineSourceNode(t, source, flowID, "join-node")
 				path := runID
 				workflowName := semanticview.RootExecutionFlowID(source)
@@ -215,33 +214,36 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				}
 				probe := runtimelifecycleprobe.New()
 				eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-					ContractBundle: source, TestLifecycleProbe: probe, Logger: runtimeLogger,
+					ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), TestLifecycleProbe: probe, Logger: runtimeLogger,
 				}, "platform.join_complete", "platform.join_timeout")
 				if err != nil {
 					t.Fatalf("new join EventBus: %v", err)
 				}
 				lifecycle, driver := newExactJoinScheduleLifecycleForTest(t, ctx, selected, eventBus)
 				coordinator := newGateRecoveryCoordinator(eventBus, selected, runtimepipeline.PipelineCoordinatorOptions{
-					Module: module, Persistence: selected.persistence,
+					Module: module, SourceArtifactFact: fact, Persistence: selected.persistence,
 					GenericSchedules: lifecycle, TestLifecycleProbe: probe,
 				})
 				eventBus.SetInterceptors(coordinator)
+				if flowID != "" {
+					commitKeylessConstructorComponent(t, ctx, selected, coordinator, source)
+				}
 
 				route := testRunScopedWorkflowInstanceForRun(runID, path).Route
 				entityID := runtimeflowidentity.EntityID(path)
 				createdAt := time.Now().UTC()
+				fields := map[string]any{"expected": []any{"a", "b"}}
+				if flowID != "" {
+					fields["order_id"] = instanceID
+				}
 				constructedPlan := commitA2FixtureConstruction(t, coordinator, selected.events, ctx, testRunScopedWorkflowInstanceForRun(runID, path), runtimepipeline.WorkflowInstance{
 					InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: source.WorkflowVersion(),
 					EntityID: entityID, CurrentState: "awaiting", StageDefined: true, EnteredStageAt: createdAt, CreatedAt: createdAt,
-					Fields:     map[string]any{"expected": []any{"a", "b"}},
+					Fields:     fields,
 					EntityType: "join_state",
 				}, createdAt)
 				constructed := constructedPlan.Identity
-				if flowID != "" {
-					if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, route.InstancePath), Instance: constructed}); err != nil {
-						t.Fatalf("add flow join route: %v", err)
-					}
-				}
+				requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, constructed)
 				initialInstance := waitForExactJoinState(t, ctx, coordinator, route, "awaiting")
 				initialArm := exactJoinPersistedArm(t, initialInstance)
 				deadlineSchedule := exactJoinPendingSchedule(t, selected, ctx, initialArm)
@@ -425,9 +427,8 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 						t.Fatalf("selected store %T lacks generic schedule or event readback ownership", selected.events)
 					}
 					runID := uuid.NewString()
-					insertGateRecoveryRun(t, selected, runID)
-					ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 					source := exactExternalWorkflowJoinSourceWithTimeout(t, flowID, outcome.timeout)
+					ctx, fact := nativeConstructionContextFixture(t, selected.events.(storetest.RunFixtureStore), source, runID)
 					joinNode := externalPipelineSourceNode(t, source, flowID, "join-node")
 					path := runID
 					workflowName := semanticview.RootExecutionFlowID(source)
@@ -447,33 +448,36 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 					}
 					probe := runtimelifecycleprobe.New()
 					eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-						ContractBundle: source, TestLifecycleProbe: probe, Logger: runtimeLogger,
+						ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact), TestLifecycleProbe: probe, Logger: runtimeLogger,
 					}, outcome.eventName)
 					if err != nil {
 						t.Fatalf("new schedule occurrence EventBus: %v", err)
 					}
 					lifecycle, driver := newExactJoinScheduleLifecycleForTest(t, ctx, selected, eventBus)
 					coordinator := newGateRecoveryCoordinator(eventBus, selected, runtimepipeline.PipelineCoordinatorOptions{
-						Module: module, Persistence: selected.persistence,
+						Module: module, SourceArtifactFact: fact, Persistence: selected.persistence,
 						GenericSchedules: lifecycle, TestLifecycleProbe: probe,
 					})
 					eventBus.SetInterceptors(coordinator)
+					if flowID != "" {
+						commitKeylessConstructorComponent(t, ctx, selected, coordinator, source)
+					}
 
 					route := testRunScopedWorkflowInstanceForRun(runID, path).Route
 					entityID := runtimeflowidentity.EntityID(path)
 					createdAt := time.Now().UTC()
+					fields := map[string]any{"expected": outcome.expected}
+					if flowID != "" {
+						fields["order_id"] = instanceID
+					}
 					constructedPlan := commitA2FixtureConstruction(t, coordinator, selected.events, ctx, testRunScopedWorkflowInstanceForRun(runID, path), runtimepipeline.WorkflowInstance{
 						InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: source.WorkflowVersion(),
 						EntityID: entityID, CurrentState: "awaiting", StageDefined: true, EnteredStageAt: createdAt, CreatedAt: createdAt,
-						Fields:     map[string]any{"expected": outcome.expected},
+						Fields:     fields,
 						EntityType: "join_state",
 					}, createdAt)
 					constructed := constructedPlan.Identity
-					if flowID != "" {
-						if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, route.InstancePath), Instance: constructed}); err != nil {
-							t.Fatalf("add flow join route: %v", err)
-						}
-					}
+					requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, constructed)
 
 					initialInstance := waitForExactJoinState(t, ctx, coordinator, route, "awaiting")
 					initialArm := exactJoinPersistedArm(t, initialInstance)

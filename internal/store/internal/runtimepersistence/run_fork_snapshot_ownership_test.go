@@ -284,6 +284,18 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 						t.Run(invalid, func(t *testing.T) {
 							f := newSnapshotOwnershipFixture(t, backend, false, false)
 							plan := f.plan(t)
+							if len(plan.Entities) != 2 {
+								t.Fatalf("constructed parent and child headers: %#v", plan.Entities)
+							}
+							var child runfork.RunForkEntityState
+							for _, entity := range plan.Entities {
+								if entity.EntityID == f.entityID {
+									child = entity
+								}
+							}
+							if child.EntityID != f.entityID {
+								t.Fatal("fixed snapshot lost its exact child header")
+							}
 							var forkRunID string
 							var forkBefore [5]int
 							var forkEntityBefore snapshotOwnershipEntityRow
@@ -294,13 +306,13 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								}
 								forkRunID = materialized.ForkRunID
 								forkBefore = snapshotOwnershipCounts(t, f, forkRunID)
-								assertSnapshotOwnershipEntity(t, f, forkRunID, plan.Entities[0], 1)
+								assertSnapshotOwnershipEntity(t, f, forkRunID, child, 1)
 								forkEntityBefore = readSnapshotOwnershipEntity(t, f, forkRunID)
 							}
 							f.advance(t)
 							sourceEntityBefore := readSnapshotOwnershipEntity(t, f, f.runID)
 							latest, err := f.store.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: f.runID})
-							if err != nil || len(latest.Entities) != 1 {
+							if err != nil || len(latest.Entities) != 2 {
 								t.Fatalf("latest source plan: %#v, %v", latest, err)
 							}
 							var raw []byte

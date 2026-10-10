@@ -3,7 +3,6 @@ package pipeline_test
 import (
 	"context"
 	"encoding/json"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +20,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
@@ -38,10 +38,8 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 				t.Run(storeCase.name+"/"+acquisition+"/"+keyRelation, func(t *testing.T) {
 					selected := storeCase.open(t)
 					runID := uuid.NewString()
-					insertGateRecoveryRun(t, selected, runID)
-					ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-
 					source, node := targetedDeclaredKeyExecutionSource(t, acquisition)
+					ctx, fact := nativeConstructionContextFixture(t, selected.events.(storetest.RunFixtureStore), source, runID)
 					module := proposedEffectProofModule{
 						source: source,
 						nodes: []runtimepipeline.WorkflowNode{{
@@ -49,11 +47,11 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 							ExecutionType: runtimecontracts.SystemNodeExecutionType,
 						}},
 					}
-					eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
+					eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact)})
 					if err != nil {
 						t.Fatalf("new declared-key EventBus: %v", err)
 					}
-					coordinator := newGateRecoveryCoordinator(eventBus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: module})
+					coordinator := newGateRecoveryCoordinator(eventBus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: module, SourceArtifactFact: fact})
 					commitKeylessConstructorComponent(t, ctx, selected, coordinator, source)
 
 					exactPath := "review/" + uuid.NewString()
@@ -92,6 +90,10 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						},
 					}
 					materialize := func(instance runtimepipeline.WorkflowInstance) {
+						instance.InstanceKey, err = runtimepipeline.AdmitFlowInstanceKey(source, "review", instance.Fields["receiver_id"])
+						if err != nil {
+							t.Fatal(err)
+						}
 						constructed, err := runtimeflowidentity.KeyedChild(source, parent, "review", instance.InstanceID)
 						if err != nil {
 							t.Fatal(err)
@@ -129,9 +131,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 							}
 						}
 						markGateRecoveryTopologyReadyFixture(t, selected, readiness, createdAt)
-						if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, instance.StorageRef), Instance: readiness.Identity}); err != nil {
-							t.Fatalf("publish %s route: %v", instance.Fields["owner"], err)
-						}
+						requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, readiness.Identity)
 					}
 					materialize(instances[0])
 					if keyRelation != "later_match" {

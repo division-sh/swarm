@@ -1,9 +1,7 @@
 package pipeline_test
 
 import (
-	"context"
 	"encoding/json"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"testing"
 	"time"
 
@@ -11,10 +9,10 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
@@ -32,21 +30,16 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 			t.Run(backend.name+"/"+name, func(t *testing.T) {
 				selected := backend.open(t)
 				runID := uuid.NewString()
-				insertGateRecoveryRun(t, selected, runID)
-				ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				source, node := targetedDeclaredKeyExecutionSource(t, "select_or_create")
+				ctx, fact := nativeConstructionContextFixture(t, selected.events.(storetest.RunFixtureStore), source, runID)
 				module := proposedEffectProofModule{source: source,
 					nodes: []runtimepipeline.WorkflowNode{{Node: node, Subscriptions: []events.EventType{"review/work.keyed"}, ExecutionType: runtimecontracts.SystemNodeExecutionType}},
 				}
-				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
+				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact)})
 				if err != nil {
 					t.Fatal(err)
 				}
-				pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: module})
-				fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
-				if !ok {
-					t.Fatal("missing admitted source")
-				}
+				pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: module, SourceArtifactFact: fact})
 				commitKeylessConstructorComponent(t, ctx, selected, pc, source)
 				parent, err := runtimeflowidentity.StandingForGeneration(source, ".", runID)
 				if err != nil {
@@ -61,6 +54,10 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				unrelatedKey, err := runtimepipeline.AdmitFlowInstanceKey(source, "review", unrelatedRoute.InstanceID)
+				if err != nil {
+					t.Fatal(err)
+				}
 				unrelatedReadiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 					Identity: unrelatedConstructed,
 					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
@@ -69,7 +66,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 					construction58Ctx := ctx
 					construction58At := time.Now().UTC()
 					construction58Instance, construction58Lifecycle, err := pc.PrepareInitialEntryLifecycle(construction58Ctx, unrelatedIdentity, runtimepipeline.WorkflowInstance{
-						InstanceID: unrelatedRoute.InstanceID, StorageRef: unrelatedPath, EntityID: runtimeflowidentity.EntityID(unrelatedPath),
+						InstanceID: unrelatedRoute.InstanceID, InstanceKey: unrelatedKey, StorageRef: unrelatedPath, EntityID: runtimeflowidentity.EntityID(unrelatedPath),
 						ParentFlowID: unrelatedConstructed.ParentRoute.FlowID, ParentFlowInstance: unrelatedConstructed.ParentRoute.FlowInstance, ParentEntityID: unrelatedConstructed.ParentEntityID,
 						WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "review_entity",
 						Fields: map[string]any{"receiver_id": unrelatedRoute.InstanceID, "account_id": "unrelated-key"}, RuntimeReadiness: &unrelatedReadiness,
@@ -95,9 +92,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 					}
 				}
 				markGateRecoveryTopologyReadyFixture(t, selected, unrelatedReadiness, time.Now().UTC())
-				if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: unrelatedIdentity, Instance: unrelatedReadiness.Identity}); err != nil {
-					t.Fatal(err)
-				}
+				requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, unrelatedReadiness.Identity)
 				receiverKey := uuid.NewString()
 				payload, err := json.Marshal(map[string]any{"receiver_id": receiverKey, "account_id": "appearing-key", "item": "accepted"})
 				if err != nil {
@@ -112,11 +107,15 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				instanceKey, err := runtimepipeline.AdmitFlowInstanceKey(source, "review", receiverKey)
+				if err != nil {
+					t.Fatal(err)
+				}
 				readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 					Identity: constructed,
 					RunID:    runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
 				}
-				instance := runtimepipeline.WorkflowInstance{InstanceID: route.InstanceID, StorageRef: instancePath, EntityID: entityID,
+				instance := runtimepipeline.WorkflowInstance{InstanceID: route.InstanceID, InstanceKey: instanceKey, StorageRef: instancePath, EntityID: entityID,
 					ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
 					WorkflowName: "review", WorkflowVersion: source.WorkflowVersion(), Mode: "template", CurrentState: "active", EntityType: "review_entity",
 					Fields: map[string]any{"receiver_id": receiverKey, "account_id": "stored-business-key", "owner": "appeared"}, RuntimeReadiness: &readiness}
@@ -147,9 +146,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 					}
 				}
 				markGateRecoveryTopologyReadyFixture(t, selected, readiness, time.Now().UTC())
-				if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: readiness.Identity}); err != nil {
-					t.Fatal(err)
-				}
+				requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, readiness.Identity)
 				evt, err = events.ResolveEnvelope(evt, events.EnvelopeForTargetRoute(evt.NormalizedEnvelope(), events.RouteIdentity{FlowID: "review", FlowInstance: instancePath, EntityID: entityID}))
 				if err != nil {
 					t.Fatal(err)
@@ -180,7 +177,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 				}
 				// Reconstruct the semantic consumer after publication, retaining the
 				// same durable admitted route rather than performing another election.
-				pc = newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: module})
+				pc = newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: module, SourceArtifactFact: fact})
 				if err := bus.Publish(ctx, evt); err != nil {
 					t.Fatalf("exact duplicate after appearance: %v", err)
 				}
