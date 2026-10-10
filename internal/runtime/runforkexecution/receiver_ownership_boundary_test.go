@@ -63,8 +63,8 @@ func receiverOwnershipAllowances() map[string]recipientBoundaryAllowance {
 	const model = "write:runtime/runfork."
 	const backend = "store/internal/backend/runforkpersistence::"
 	return map[string]recipientBoundaryAllowance{
-		backend + "projectRunForkWorkflowTimerOwnership/" + model + "EntityIdentity.EntityID":                                                           {1, "compare validated ProjectEntityOwnership source with the canonical root before projecting the exact inherited timer"},
-		backend + "projectRunForkWorkflowTimerOwnership/" + model + "EntityIdentity.FlowInstance":                                                       {1, "compare validated ProjectEntityOwnership source with the canonical root before projecting the exact inherited timer"},
+		"runtime/runfork::projectWorkflowTimerRecordOwnership/" + model + "EntityIdentity.EntityID":                                                     {1, "compare canonical source ownership before shared primitive timer projection"},
+		"runtime/runfork::projectWorkflowTimerRecordOwnership/" + model + "EntityIdentity.FlowInstance":                                                 {1, "compare canonical source ownership before shared primitive timer projection"},
 		backend + "projectRunForkStageEntry/" + model + "EntityIdentity.EntityID":                                                                       {1, "compare validated ProjectEntityOwnership source with the canonical root before remapping retained stage-entry evidence"},
 		backend + "projectRunForkStageEntry/" + model + "EntityIdentity.FlowInstance":                                                                   {1, "compare validated ProjectEntityOwnership source with the canonical root before remapping retained stage-entry evidence"},
 		backend + "projectRunForkJoinReference/" + model + "EntityIdentity.EntityID":                                                                    {1, "compare canonical source ownership after stage-entry admission to select only the root declaration scope"},
