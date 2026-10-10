@@ -40,7 +40,8 @@ type runScopedCatalogSelectedStore interface {
 	runtimeruncontrol.Store
 	runtimerunforkexecution.SelectedContractActivationStore
 	MaterializeRunForkForSelectedContractExecution(context.Context, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
-	ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error)
+	runtimepipeline.FlowInstanceIndexReader
+	runtimebus.PreparedPublishEventReader
 	ListOperatorAgents(context.Context, operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error)
 	LoadRunLifecycleSnapshot(context.Context, string) (runtimebus.RunLifecycleSnapshot, error)
 	LoadRunForkSelectedContractSourceEventModes(context.Context, string, []string) ([]executionmode.Mode, error)
@@ -193,7 +194,11 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			resolvedWorkerRoutes := h.rt.Bus.RouteTable().ResolveForRun(sourceRunID, flowPath+"/worker.ready")
+			constructed := catalogRunScopedInstanceObservation(t, h, selected, sourceRunID, flowPath)
+			resolvedWorkerRoutes, err := h.rt.Bus.RouteTable().PubsubReceiverDefinitions(sourceRunID, constructed.Identity(), []string{flowPath + "/worker.ready"})
+			if err != nil {
+				t.Fatal(err)
+			}
 			hasWorkerAgentPlan := false
 			for _, route := range resolvedWorkerRoutes {
 				if route.AgentPlan.AgentID() == "worker-agent" {
@@ -201,7 +206,7 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 				}
 			}
 			if !hasWorkerAgentPlan {
-				t.Fatalf("materialized worker route has no declared worker-agent plan: %#v", resolvedWorkerRoutes)
+				t.Fatalf("native worker has no bound declared worker-agent plan: %#v", resolvedWorkerRoutes)
 			}
 
 			workerPlan, err := h.rt.Bus.CheckPublishRecipientPlan(catalogRunContext(h, sourceRunID), workerReady)
@@ -227,10 +232,7 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			if err != nil || !ok {
 				t.Fatalf("load source flow before fork: ok=%t err=%v", ok, err)
 			}
-			sourceRoutesBefore, err := selected.ListFlowInstanceRouteRecords(catalogRunContext(h, sourceRunID), sourceOwner)
-			if err != nil || len(sourceRoutesBefore) == 0 {
-				t.Fatalf("source routes before fork = %#v err=%v", sourceRoutesBefore, err)
-			}
+			sourceRoutesBefore := catalogCommittedDeliveryRoutes(t, catalogRunContext(h, sourceRunID), selected, sourceEvent.ID())
 			sourceAgent := catalogRunScopedAgentDeliveryIdentity(t, h, sourceRunID, flowPath, string(sourceEvent.Type()), "pending")
 
 			var sourceStore interface {
@@ -291,10 +293,7 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			if err != nil || !ok {
 				t.Fatalf("load source flow after fork: ok=%t err=%v", ok, err)
 			}
-			sourceRoutesAfter, err := selected.ListFlowInstanceRouteRecords(catalogRunContext(h, sourceRunID), sourceOwner)
-			if err != nil {
-				t.Fatalf("source routes after fork: %v", err)
-			}
+			sourceRoutesAfter := catalogCommittedDeliveryRoutes(t, catalogRunContext(h, sourceRunID), selected, sourceEvent.ID())
 			if sourceBefore.CurrentState != sourceAfter.CurrentState || sourceBefore.Revision != sourceAfter.Revision ||
 				!reflect.DeepEqual(sourceBefore.Fields, sourceAfter.Fields) || !reflect.DeepEqual(sourceRoutesBefore, sourceRoutesAfter) {
 				t.Fatalf("source flow changed across fork: before=%#v routes=%#v after=%#v routes=%#v", sourceBefore, sourceRoutesBefore, sourceAfter, sourceRoutesAfter)
@@ -505,18 +504,44 @@ func assertCatalogRunScopedFlowOwner(
 	if instance.Status != "active" || !instance.TerminatedAt.IsZero() {
 		t.Fatalf("ordinary final entry retired %s: %+v", owner.Key(), instance)
 	}
-	routes, err := selected.ListFlowInstanceRouteRecords(catalogRunContext(h, runID), owner)
+	observed := catalogRunScopedInstanceObservation(t, h, selected, runID, flowPath)
+	constructed, err := instance.ConstructionIdentity(owner)
+	if err != nil || observed.Identity() != constructed {
+		t.Fatalf("%s index differs from original header: observation=%+v constructed=%+v err=%v", owner.Key(), observed.Identity(), constructed, err)
+	}
+}
+
+func catalogRunScopedInstanceObservation(t testing.TB, h *runtimeHarness, selected runtimepipeline.FlowInstanceIndexReader, runID, flowPath string) runtimepipeline.FlowInstanceObservation {
+	t.Helper()
+	ctx := catalogRunContext(h, runID)
+	fact, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("catalog instance read requires its original source fact")
+	}
+	request, err := runtimepipeline.NewExactFlowInstanceLookup(semanticview.Wrap(h.bundle), fact, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(flowPath)})
 	if err != nil {
-		t.Fatalf("%s route records: %v", owner.Key(), err)
+		t.Fatal(err)
 	}
-	if len(routes) == 0 {
-		t.Fatalf("%s has no active route records", owner.Key())
+	observed, found, err := selected.LookupFlowInstance(ctx, request)
+	if err != nil || !found {
+		t.Fatalf("catalog exact native/fixed-history instance read: found=%t err=%v", found, err)
 	}
-	for _, route := range routes {
-		if route.Identity != owner {
-			t.Fatalf("route identity = %#v, want %#v", route.Identity, owner)
-		}
+	if err := observed.ValidateSelection(request); err != nil {
+		t.Fatal(err)
 	}
+	return observed
+}
+
+func catalogCommittedDeliveryRoutes(t testing.TB, ctx context.Context, selected runtimebus.PreparedPublishEventReader, eventID string) []events.DeliveryRoute {
+	t.Helper()
+	prepared, found, err := selected.LoadPreparedPublishEvent(ctx, eventID)
+	if err != nil || !found || len(prepared.DeliveryRoutes) == 0 {
+		t.Fatalf("catalog committed delivery evidence: found=%t routes=%+v err=%v", found, prepared.DeliveryRoutes, err)
+	}
+	if err := prepared.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return prepared.DeliveryRoutes
 }
 
 func waitForCatalogRunScopedSpawnSettlement(t testing.TB, h *runtimeHarness, runID, flowPath string) {
