@@ -104,7 +104,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	workOwner := newSupervisorTestRuntimeOccurrence(t, bundleHash)
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{
 		ContractBundle:         source,
-		Durable:                runtimebus.DurableDependencies{ActiveFlows: processIngressNoFlowDescriptors{}, TargetOwners: processIngressTargetOwners{{RunID: runID, FlowInstance: owner.InstancePath, EntityID: owner.EntityID}}, ConstructionPublications: eventsStore},
+		Durable:                runtimebus.DurableDependencies{ConstructionPublications: eventsStore},
 		SourceArtifactFact:     mustServeTestEphemeralSourceArtifactFact(bundleHash),
 		ProviderOutputVerifier: catalog,
 		WorkOwner:              workOwner, ReceiverExecution: eventreceiver.NormalExecution(),

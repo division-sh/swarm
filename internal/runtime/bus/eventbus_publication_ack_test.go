@@ -120,7 +120,6 @@ func TestDeploymentRunStartDispatchesOnlyAcknowledgedConstruction(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			bus.durable.ActiveFlows = &topologyOperationDescriptors{source: bus.semanticSource}
 			ref, err := durabledata.ParseDeclarationRef(".", "records.loaded")
 			if err != nil {
 				t.Fatal(err)
@@ -153,7 +152,6 @@ func TestDeploymentRunStartForwardsOnlyExactEventlessFeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bus.durable.ActiveFlows = &topologyOperationDescriptors{source: bus.semanticSource}
 	ref, err := durabledata.ParseDeclarationRef(".", "records.loaded")
 	if err != nil {
 		t.Fatal(err)
@@ -307,7 +305,6 @@ func TestFlowActivationBusHelperPreservesAcknowledgedError(t *testing.T) {
 				t.Fatal(err)
 			}
 			bus.routeTable = table
-			bus.durable.ActiveFlows = &topologyOperationDescriptors{source: bus.semanticSource}
 			store := &flowActivationAcknowledgementProbeStore{acknowledged: acknowledged, fault: fault}
 			bus.store = store
 			identity := ConstructedFlowInstanceIdentityFixture(source, "workers", "alpha", busInternalTestRunID)

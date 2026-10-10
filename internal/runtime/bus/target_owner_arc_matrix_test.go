@@ -492,7 +492,7 @@ func testEventBusCrossFlowTargetOwnerRejectsWrongFullPathBeforePersistence(t *te
 	runID := uuid.NewString()
 	source, eventType, _, _, _ := targetOwnerArcFixture(t, test, runID)
 	wrongRoute := events.RouteIdentity{
-		FlowID: "producer", FlowInstance: "unrelated/worker/result", EntityID: eventtest.UUID("wrong-full-path-owner"),
+		FlowID: test.sourcePath, FlowInstance: "unrelated/worker/result", EntityID: eventtest.UUID("wrong-full-path-owner"),
 	}.Normalized()
 	wrongSource, err := events.NewStaticFlowRoutingSource(wrongRoute)
 	if err != nil {

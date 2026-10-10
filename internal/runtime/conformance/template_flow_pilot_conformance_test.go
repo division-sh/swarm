@@ -414,7 +414,6 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 			Instances:                receipts,
 			ConstructionPublications: receipts,
 			ActiveAgents:             store,
-			ActiveFlows:              store,
 		},
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 			t.Fatal("existing account route descriptors should satisfy fan-out delivery")
@@ -593,7 +592,6 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 					Instances:                receipts,
 					ConstructionPublications: receipts,
 					ActiveAgents:             store,
-					ActiveFlows:              store,
 				},
 				TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 					t.Fatal("fail-closed fan-out route should not activate an account instance")

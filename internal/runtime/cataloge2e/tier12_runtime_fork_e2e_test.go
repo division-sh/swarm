@@ -172,7 +172,7 @@ func selectedContractExecutionOwnerForCatalogTest(t testing.TB, db *sql.DB, sele
 		EmitFeedback: selected,
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
-		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+		ActiveAgents: selected, PreparedEvents: selected,
 		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected, ConstructionPublications: selected, Instances: selected,
 	}
 	managerRoles := runtimemanager.PersistenceRoles{
@@ -219,7 +219,7 @@ func selectedContractExecutionOwnerForCatalogHarness(t testing.TB, h *runtimeHar
 		EmitFeedback: selected,
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
-		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+		ActiveAgents: selected, PreparedEvents: selected,
 		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected, ConstructionPublications: selected, Instances: selected,
 	}
 	managerRoles := runtimemanager.PersistenceRoles{

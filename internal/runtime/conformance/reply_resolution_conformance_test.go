@@ -92,8 +92,6 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 			Instances:                receipts,
 			ConstructionPublications: receipts,
 			ReplyContext:             store,
-			ActiveFlows:              store,
-			TargetOwners:             store,
 		},
 	})
 	if err != nil {
@@ -167,8 +165,6 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 			Instances:                receipts,
 			ConstructionPublications: receipts,
 			ReplyContext:             store,
-			ActiveFlows:              store,
-			TargetOwners:             store,
 		},
 	})
 	if err != nil {

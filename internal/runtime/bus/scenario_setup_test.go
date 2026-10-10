@@ -76,7 +76,6 @@ func TestScenarioSetupDispatchesOnlyAcknowledgedConstruction(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			bus.durable.ActiveFlows = &topologyOperationDescriptors{source: bus.semanticSource}
 			bus.durable.ScenarioSetup = store
 			runID, entityID := uuid.NewString(), uuid.NewString()
 			if test.root {

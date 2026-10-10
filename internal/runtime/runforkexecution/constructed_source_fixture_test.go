@@ -86,7 +86,7 @@ func seedSelectedConstructedRootHistory(t *testing.T, ctx context.Context, selec
 			Instances: workflow, ConstructionPublications: workflow,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
-			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+			ActiveAgents: selected, PreparedEvents: selected,
 			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 		},
 	})

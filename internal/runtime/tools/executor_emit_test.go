@@ -221,7 +221,7 @@ func newEmitRoutePlanEventBus(t *testing.T, store *emitRoutePlanStore, source se
 		ExecutionPosture:   executionposture.Live,
 		SourceArtifactFact: sourceFact,
 		ContractBundle:     source,
-		Durable:            runtimebus.DurableDependencies{TargetOwners: store, Instances: store.instanceIndex, EmitFeedback: store},
+		Durable:            runtimebus.DurableDependencies{Instances: store.instanceIndex, EmitFeedback: store},
 		WorkOwner:          owner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {

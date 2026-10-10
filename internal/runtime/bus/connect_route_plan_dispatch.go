@@ -560,24 +560,8 @@ func (r connectRoutePlanResolver) matchedPlans(ctx context.Context, evt events.E
 // This scope supplies lookup candidates, never execution permission. Native
 // headers supply actual paths; later target admission still checks ownership.
 func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt events.Event) (selectedTargetOwnerLookupScope, bool, error) {
-	paths := make(map[string]struct{})
-	scope := selectedTargetOwnerLookupScope{}
-	add := func(route events.RouteIdentity) {
-		if path := route.Normalized().FlowInstance; path != "" {
-			paths[path] = struct{}{}
-		}
-	}
-	add(evt.RoutingSource().Route())
-	add(evt.SourceRoute())
-	add(evt.TargetRoute())
-	for _, route := range evt.TargetRoutes() {
-		add(route)
-	}
-	if evt.RoutingSource().Kind() == events.RoutingSourceRoot || evt.RoutingSource().Kind() == events.RoutingSourceDeploymentFeed {
-		paths["."] = struct{}{}
-		if runID := strings.TrimSpace(evt.RunID()); runID != "" {
-			paths[runID] = struct{}{}
-		}
+	if r.source == nil {
+		return selectedTargetOwnerLookupScope{}, false, nil
 	}
 	flows := make(map[string]struct{})
 	for _, plan := range r.matchedPlans(ctx, evt) {
@@ -586,21 +570,35 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 	if evt.RoutingSource().Kind() == events.RoutingSourceExternalIngress {
 		flows[evt.RoutingSource().Route().FlowID] = struct{}{}
 	}
-	if len(flows) > 0 {
-		if err := r.addIndexedLookupPaths(ctx, evt.RunID(), flows, paths); err != nil {
-			return selectedTargetOwnerLookupScope{}, false, err
-		}
+	coordinates, err := r.targetLookupCoordinates(evt)
+	if err != nil {
+		return selectedTargetOwnerLookupScope{}, false, err
 	}
-	if len(flows) == 0 && len(paths) == 0 {
+	if len(flows) == 0 && len(coordinates) == 0 {
 		return selectedTargetOwnerLookupScope{}, false, nil
 	}
-	out := make([]string, 0, len(paths))
-	for path := range paths {
-		out = append(out, path)
+	scope, err := r.lookupTargetScope(ctx, evt.RunID(), flows, coordinates)
+	return scope, err == nil, err
+}
+
+func (r connectRoutePlanResolver) targetLookupCoordinates(evt events.Event) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
+	routes := []events.RouteIdentity{evt.RoutingSource().Route(), evt.SourceRoute(), evt.TargetRoute()}
+	routes = append(routes, evt.TargetRoutes()...)
+	if evt.RoutingSource().Kind() == events.RoutingSourceRoot || evt.RoutingSource().Kind() == events.RoutingSourceDeploymentFeed {
+		routes = append(routes, events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(r.source), FlowInstance: evt.RunID()})
 	}
-	sort.Strings(out)
-	scope.instancePaths = out
-	return scope, true, nil
+	var owners []runtimeflowidentity.RunScopedFlowInstance
+	for _, route := range routes {
+		if route.FlowInstance == "" {
+			continue
+		}
+		owner, err := runtimeflowidentity.NewRunScopedFlowInstance(evt.RunID(), runtimeflowidentity.StoredRoute(runtimeflowidentity.ScopeKey(r.source, route.FlowID), "", route.FlowInstance))
+		if err != nil {
+			return nil, err
+		}
+		owners = append(owners, owner)
+	}
+	return owners, nil
 }
 
 func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.Context, runID string, plan runtimepinrouting.ConnectRoutePlan, materialized runtimepinrouting.ConnectRoutePlanMaterialization, decision connectInstanceSelection, routeCreatedInPlan bool) ([]runtimepinrouting.ConnectDeliveryRoute, []runtimepinrouting.ConnectDeliveryRoute, []Subscriber, events.ConnectEvaluationLedger, error) {

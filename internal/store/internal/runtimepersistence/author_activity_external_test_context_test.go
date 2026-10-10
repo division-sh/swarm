@@ -154,7 +154,7 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 		ConstructionPublications: selected,
 		ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
-		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+		ActiveAgents: selected, PreparedEvents: selected,
 		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 	}
 	if feedback, ok := selected.(runtimepipeline.WorkflowEmitFeedbackOwner); ok {

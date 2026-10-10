@@ -29,6 +29,11 @@ func TestEventBusHasNoPersistedTopologyOwner(t *testing.T) {
 	if _, present := reflect.TypeOf((*EventBus)(nil)).MethodByName("StageFlowInstanceRouteContext"); present {
 		t.Error("EventBus still exposes persisted topology staging")
 	}
+	for _, field := range []string{"ActiveFlows", "TargetOwners"} {
+		if _, present := reflect.TypeOf(DurableDependencies{}).FieldByName(field); present {
+			t.Errorf("EventBus still accepts retired instance descriptor reader %s", field)
+		}
+	}
 }
 
 func TestCompiledRoutesCannotExportMaterializedMembership(t *testing.T) {
@@ -219,12 +224,6 @@ func ExactDurableTestDependencies(selected any) DurableDependencies {
 	if deps.ActiveAgents == nil {
 		deps.ActiveAgents = defaults
 	}
-	if deps.ActiveFlows == nil {
-		deps.ActiveFlows = defaults
-	}
-	if deps.TargetOwners == nil {
-		deps.TargetOwners = defaults
-	}
 	if deps.PreparedEvents == nil {
 		deps.PreparedEvents = defaults
 	}
@@ -265,12 +264,6 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 	if role, ok := selected.(ActiveAgentDescriptorLister); ok {
 		deps.ActiveAgents = role
 	}
-	if role, ok := selected.(ActiveFlowInstanceDescriptorLister); ok {
-		deps.ActiveFlows = role
-	}
-	if role, ok := selected.(SelectedRunTargetOwnerLister); ok {
-		deps.TargetOwners = role
-	}
 	if role, ok := selected.(PreparedPublishEventReader); ok {
 		deps.PreparedEvents = role
 	}
@@ -293,7 +286,7 @@ func TestDurableDependenciesDoNotRequireReceiverElectionReader(t *testing.T) {
 		Instances:    roles,
 		RunLifecycle: roles, DeliveryLifecycle: roles,
 
-		ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
+		ActiveAgents:   roles,
 		PreparedEvents: roles, TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles,
 	}
 	opts := EventBusOptions{

@@ -117,6 +117,23 @@ func CopyRootOutputConnectMissingReceiver(t testing.TB) string {
 	return root
 }
 
+func CopyRootOutputConnectWithChildPublisher(t testing.TB) string {
+	t.Helper()
+	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
+	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\npins:\n  outputs: [root.ready]\n")
+	writeClosedVariantFile(t, root, "child/events.yaml", "root.ready:\n  entity_id: text\n")
+	writeClosedVariantFile(t, root, "child/nodes.yaml", `child-node:
+  execution_type: system_node
+  subscribes_to: [root.ready]
+  event_handlers:
+    root.ready:
+      guard:
+        id: selected_owner
+        check: _entity.id != ""
+`)
+	return root
+}
+
 // CopyRootOutputSingletonConnect owns the canonical first-delivery
 // root-to-singleton target-ownership proof.
 func CopyRootOutputSingletonConnect(t testing.TB) string {

@@ -22,6 +22,49 @@ type unscopedConnectIndexTestReader struct {
 	requested []pipeline.FlowInstanceLookupScope
 }
 
+func TestTargetOwnerProjectionConsumesOnlyScopedIndexObservations(t *testing.T) {
+	source := connectRoutePlanRootProducerSingletonSource(t)
+	event := eventtest.ExistingRunRootIngress(eventtest.UUID("index-target-event"), "root.ready", "operator", "", []byte(`{}`), 0,
+		busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
+	ctx := correlation.WithInboundEvent(constructionIndexContext(t, source), event)
+	index := &constructionIndexTestReader{}
+	resolver := newConnectRoutePlanResolver(source, nil, nil, index, nil)
+	bus := &EventBus{semanticSource: source, durable: DurableDependencies{Instances: index}}
+	for _, flowID := range []string{".", "consumer"} {
+		identity := ConstructedFlowInstanceIdentityFixture(source, flowID, "", event.RunID())
+		index.observations = append(index.observations, constructionIndexObservation(t, source, event.RunID(), identity, ""))
+	}
+	scope, bounded, err := resolver.selectedTargetScope(ctx, event)
+	if err != nil || !bounded || len(scope.observations) != 2 {
+		t.Fatalf("native target scope lost exact constructed owners: %+v bounded=%t err=%v", scope, bounded, err)
+	}
+	owners, available, err := bus.activeTargetDescriptors(withSelectedTargetOwnerLookupScope(ctx, scope))
+	if err != nil || !available || len(owners) != 2 {
+		t.Fatalf("target projection consulted a parallel descriptor reader: %+v available=%t err=%v", owners, available, err)
+	}
+	for i, observed := range scope.observations {
+		identity := observed.Identity()
+		if owners[i].FlowID != identity.TemplateID || owners[i].FlowInstance != identity.InstancePath || owners[i].EntityID != identity.EntityID {
+			t.Fatalf("target owner lost its admitted declaration/coordinate: %+v != %+v", owners[i], identity)
+		}
+	}
+	index.observations = nil
+	empty, bounded, err := resolver.selectedTargetScope(ctx, event)
+	if err != nil || !bounded {
+		t.Fatal(err)
+	}
+	owners, available, err = bus.activeTargetDescriptors(withSelectedTargetOwnerLookupScope(ctx, empty))
+	if err != nil || !available || len(owners) != 0 {
+		t.Fatalf("source declaration invented existing target: %+v available=%t err=%v", owners, available, err)
+	}
+	if _, _, err := bus.activeTargetDescriptors(ctx); err == nil {
+		t.Fatal("unbounded target inventory substituted for compiled scope")
+	}
+	if _, _, err := bus.activeTargetDescriptors(withSelectedTargetOwnerLookupScope(correlation.WithInboundEvent(context.Background(), event), scope)); err == nil {
+		t.Fatal("target lookup accepted missing admitted source")
+	}
+}
+
 func TestReplyOriginLookupPreservesPreparedConstructionAndIndependentFailures(t *testing.T) {
 	source := connectRoutePlanCarriedKeyResolutionSource(t, contracts.FlowInputResolutionModeSelect)
 	ctx := constructionIndexContext(t, source)
@@ -134,7 +177,7 @@ func TestConnectLookupScopeRejectsForeignInventoryAndIndependentErrors(t *testin
 				constructionIndexObservation(t, source, test.runID, instance, test.key),
 			}}}
 			resolver := newConnectRoutePlanResolver(source, table, nil, reader, nil)
-			if scope, bounded, err := resolver.selectedTargetScope(ctx, event); err == nil || bounded || len(scope.instancePaths) != 0 {
+			if scope, bounded, err := resolver.selectedTargetScope(ctx, event); err == nil || bounded || len(scope.observations) != 0 {
 				t.Fatalf("foreign inventory admitted or became an unbounded fallback: scope=%+v bounded=%v err=%v", scope, bounded, err)
 			}
 			if len(reader.requested) != 1 || !slices.Equal(reader.requested[0].FlowIDs(), []string{"account"}) || len(reader.requested[0].Coordinates()) != 0 {

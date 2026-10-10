@@ -197,7 +197,7 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 			}
 			bus, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 				ContractBundle: source,
-				Durable:        runtimebus.DurableDependencies{ActiveFlows: store, ConstructionPublications: store},
+				Durable:        runtimebus.DurableDependencies{ConstructionPublications: store},
 				TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 					t.Fatal("fail-closed route must not plan a template instance")
 					return runtimepipeline.FlowInstanceActivationPlan{}, nil
