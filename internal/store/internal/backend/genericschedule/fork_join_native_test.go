@@ -44,7 +44,7 @@ import (
 
 type forkJoinNativePipelineOwner interface {
 	MaterializeRunForkArrivalJoinScheduleTx(context.Context, *mutationprotocol.Attempt, storegenericschedule.ForkJoinRequest) (runtimegenericschedule.Activation, error)
-	RequireRunForkArrivalJoinScheduleTx(context.Context, *mutationprotocol.Attempt, storegenericschedule.ForkJoinRequest) (runtimegenericschedule.Activation, error)
+	ReadRunForkArrivalJoinScheduleInventoryTx(context.Context, *mutationprotocol.Attempt, string) ([]runtimegenericschedule.Activation, error)
 }
 
 type forkJoinNativeScheduleOwner interface {
@@ -93,7 +93,7 @@ func TestForkJoinNativeRestoreReadbackBothStores(t *testing.T) {
 							t.Fatal("exact native restoration minted or changed the child row")
 						}
 						read := f.run(ctx, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimegenericschedule.Activation, error) {
-							return f.pipeline.RequireRunForkArrivalJoinScheduleTx(ctx, attempt, request)
+							return forkJoinNativeRequireExact(f, ctx, attempt, request)
 						})
 						actual := forkJoinNativeAcknowledged(t, read)
 						if !reflect.DeepEqual(created.Canonical(), actual.Canonical()) {
@@ -338,7 +338,7 @@ func forkJoinNativeRestore(t *testing.T, f *forkJoinNativeFixture, ctx context.C
 		if err != nil {
 			return runtimegenericschedule.Activation{}, err
 		}
-		read, err := f.pipeline.RequireRunForkArrivalJoinScheduleTx(ctx, attempt, request)
+		read, err := forkJoinNativeRequireExact(f, ctx, attempt, request)
 		if err == nil && !reflect.DeepEqual(created.Canonical(), read.Canonical()) {
 			return runtimegenericschedule.Activation{}, errors.New("same-attempt child readback changed")
 		}
@@ -354,7 +354,7 @@ func forkJoinNativeRequireMissing(t *testing.T, f *forkJoinNativeFixture, ctx co
 		t.Fatal(err)
 	}
 	result := f.run(ctx, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimegenericschedule.Activation, error) {
-		return f.pipeline.RequireRunForkArrivalJoinScheduleTx(ctx, attempt, request)
+		return forkJoinNativeRequireExact(f, ctx, attempt, request)
 	})
 	if result.Err() == nil || result.Acknowledged() {
 		t.Fatal("read-only requirement minted or acknowledged a missing child schedule")
@@ -377,7 +377,7 @@ func forkJoinNativeRequireWrongProvenance(t *testing.T, f *forkJoinNativeFixture
 			if restore {
 				return f.pipeline.MaterializeRunForkArrivalJoinScheduleTx(ctx, attempt, wrong)
 			}
-			return f.pipeline.RequireRunForkArrivalJoinScheduleTx(ctx, attempt, wrong)
+			return forkJoinNativeRequireExact(f, ctx, attempt, wrong)
 		})
 		if result.Err() == nil || result.Acknowledged() {
 			t.Fatal("same scoped command accepted different captured cut provenance")
@@ -385,7 +385,7 @@ func forkJoinNativeRequireWrongProvenance(t *testing.T, f *forkJoinNativeFixture
 	}
 	foreignCtx := correlation.WithRunID(ctx, request.Source.Command.RunID)
 	result := f.run(foreignCtx, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimegenericschedule.Activation, error) {
-		return f.pipeline.RequireRunForkArrivalJoinScheduleTx(ctx, attempt, request)
+		return forkJoinNativeRequireExact(f, ctx, attempt, request)
 	})
 	if result.Err() == nil || result.Acknowledged() {
 		t.Fatal("foreign run context acknowledged child schedule readback")
@@ -449,7 +449,7 @@ func forkJoinNativeRequireRollback(t *testing.T, f *forkJoinNativeFixture, ctx c
 			return runtimegenericschedule.Activation{}, err
 		}
 		childID = created.ID
-		if _, err := f.pipeline.RequireRunForkArrivalJoinScheduleTx(ctx, attempt, rollback); err != nil {
+		if _, err := forkJoinNativeRequireExact(f, ctx, attempt, rollback); err != nil {
 			return runtimegenericschedule.Activation{}, err
 		}
 		return runtimegenericschedule.Activation{}, abort
@@ -461,4 +461,41 @@ func forkJoinNativeRequireRollback(t *testing.T, f *forkJoinNativeFixture, ctx c
 		t.Fatalf("rolled-back child row survived: found=%t err=%v", found, err)
 	}
 	forkJoinNativeRequireMissing(t, f, rollbackCtx, rollback)
+}
+
+func forkJoinNativeRequireExact(f *forkJoinNativeFixture, ctx context.Context, attempt *mutationprotocol.Attempt, request storegenericschedule.ForkJoinRequest) (runtimegenericschedule.Activation, error) {
+	if err := request.Validate(); err != nil {
+		return runtimegenericschedule.Activation{}, err
+	}
+	inventory, err := f.pipeline.ReadRunForkArrivalJoinScheduleInventoryTx(ctx, attempt, request.Child.RunID)
+	if err != nil {
+		return runtimegenericschedule.Activation{}, err
+	}
+	scope, err := request.Child.ScopeKey()
+	if err != nil {
+		return runtimegenericschedule.Activation{}, err
+	}
+	for _, actual := range inventory {
+		actualScope, err := actual.Command.ScopeKey()
+		if err != nil {
+			return runtimegenericschedule.Activation{}, err
+		}
+		if actualScope != scope || actual.Command.ScheduleKey != request.Child.ScheduleKey {
+			continue
+		}
+		expected, err := request.Expected(actual.ID)
+		if err != nil {
+			return runtimegenericschedule.Activation{}, err
+		}
+		want, err := expected.EvidenceDigest()
+		if err != nil {
+			return runtimegenericschedule.Activation{}, err
+		}
+		got, err := actual.EvidenceDigest()
+		if err != nil || got != want {
+			return runtimegenericschedule.Activation{}, errors.New("native child differs from its exact requested projection")
+		}
+		return actual, nil
+	}
+	return runtimegenericschedule.Activation{}, errors.New("native child is missing")
 }

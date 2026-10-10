@@ -60,7 +60,7 @@ func TestSelectedSuccessorTimerReadbackUsesPermanentResolvedPoint(t *testing.T) 
 				stop := errors.New("stop after exact timer replan")
 				planned := false
 				port := runForkWorkflowTimerReadbackPort{
-					postgres: postgres, timers: &workflowTimerMaterializerOwner{},
+					postgres: postgres, timers: &workflowTimerMaterializerOwner{}, arrivalSchedules: &arrivalJoinInventoryOwner{},
 					snapshot: func(context.Context, *sql.Tx, string) (runlifecycle.Snapshot, error) { return f.snapshot, nil },
 					plan: func(_ context.Context, _ *sql.Tx, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
 						planned = true

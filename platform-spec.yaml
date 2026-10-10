@@ -21017,8 +21017,15 @@ run_model:
         typed cut retained separately; no wakeup is installed by persistence. Generic live reads and fixed-cut
         reconstruction share the typed origin decoder and reject partial or mismatched provenance. Arrival command
         admission validates its typed stage-entry run, entity and instance path against its routed owner, not only
-        self-consistent payload/hash fields. These native obligations do not discharge the complete-inventory,
-        preactivation authority, published-occurrence continuation or continuing-recovery requirements. Pending fan-out barrier materialization
+        self-consistent payload/hash fields. Staged activation and successor recovery require complete inherited
+        arrival-schedule inventory through the canonical generic decoder in the exact native attempt. The inventory
+        includes any generic row carrying partial provenance; an unexpected inherited row cannot hide behind an
+        expected-key lookup or an empty expected set. Ordinary newly admitted child schedules are not inherited rows.
+        Unactivated rows must exactly match their cut projection. Continuing readback retains the original child
+        admission, due, command and source/cut identity while accepting canonically validated chronological child
+        progress; a canceled companion remains the exact canceled disposition. Readback never repairs missing work,
+        grants execution or discharges source-history admission by itself. Preactivation authority and
+        published-occurrence continuation remain independent requirements. Pending fan-out barrier materialization
         validates its exact captured source schedule before writes and retains the admitted absolute due rather
         than resetting it to child birth. An already published barrier occurrence requires its historical delivery
         continuation and is never rearmed. Timed-join, pending barrier and dynamic-flow continuation remain gated by #642.'

@@ -46,7 +46,8 @@ func TestForkJoinOriginDecoderRefusesPartialEvidence(t *testing.T) {
 	}
 }
 
-func TestForkJoinOriginBindsDecodedActivationAndDigest(t *testing.T) {
+func forkJoinOriginTestActivation(t *testing.T) Activation {
+	t.Helper()
 	command := testJoinScheduleCommand(t, "orders", "orders/order-1", attemptgeneration.Generation{})
 	_, ref, ok := timeridentity.ParseJoinHandle(command.Payload.Interface().(map[string]any))
 	if !ok {
@@ -73,6 +74,14 @@ func TestForkJoinOriginBindsDecodedActivationAndDigest(t *testing.T) {
 		PointKind: forkpoint.RunStart, PointRevision: 1,
 		SourceAdmittedAt: activation.AdmittedAt.Add(-time.Hour), Owner: ForkJoinReconstructionOwner,
 	}
+	if err := activation.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return activation
+}
+
+func TestForkJoinOriginBindsDecodedActivationAndDigest(t *testing.T) {
+	activation := forkJoinOriginTestActivation(t)
 	before := *activation.ForkJoinOrigin
 	want, err := activation.EvidenceDigest()
 	if err != nil {
@@ -84,8 +93,87 @@ func TestForkJoinOriginBindsDecodedActivationAndDigest(t *testing.T) {
 	if err != nil || got == want || *activation.ForkJoinOrigin != before {
 		t.Fatal("canonical provenance aliases the source or escapes evidence digest")
 	}
-	copy.ForkJoinOrigin.SourceRunID = command.RunID
+	copy.ForkJoinOrigin.SourceRunID = activation.Command.RunID
 	if err := copy.Validate(); err == nil {
 		t.Fatal("same-run source lineage was admitted")
+	}
+}
+
+func TestForkJoinReplayRetainsCauseThroughCanonicalProgress(t *testing.T) {
+	expected := forkJoinOriginTestActivation(t)
+	for _, name := range []string{"active", "prepared", "fired", "cancelled", "failed", "parked", "fired_without_occurrence", "changed_birth", "changed_due", "changed_source", "changed_cut", "ordinary", "before_birth", "before_due", "bad_occurrence", "changed_payload"} {
+		t.Run(name, func(t *testing.T) {
+			actual := expected.Canonical()
+			at := actual.CurrentDueAt.Add(time.Minute)
+			switch name {
+			case "prepared", "fired", "before_due", "bad_occurrence":
+				actual.CurrentEventID = OccurrenceEventID(actual.ID, actual.CurrentDueAt)
+				actual.CurrentEventAdmittedAt = at
+				if name == "fired" {
+					actual.Status, actual.FiredAt, actual.AcceptedAt = StatusFired, at, at
+				}
+				if name == "before_due" {
+					actual.CurrentEventAdmittedAt = actual.CurrentDueAt.Add(-time.Second)
+				}
+				if name == "bad_occurrence" {
+					actual.CurrentEventID = uuid.NewString()
+				}
+			case "cancelled", "before_birth":
+				actual.Status, actual.CancelCause, actual.CancelledAt = StatusCancelled, "join_stage_exit", at
+				if name == "before_birth" {
+					actual.CancelledAt = actual.AdmittedAt.Add(-time.Second)
+				}
+			case "failed":
+				actual.Status, actual.FailedAt, actual.Failure = StatusFailed, at, Failure{Code: "publication_failed"}
+			case "parked":
+				actual.Status = StatusParked
+			case "fired_without_occurrence":
+				actual.Status, actual.FiredAt, actual.AcceptedAt = StatusFired, at, at
+			case "changed_birth":
+				actual.AdmittedAt = actual.AdmittedAt.Add(time.Second)
+			case "changed_due":
+				actual.CurrentDueAt, actual.InitialDueAt = at, at
+				actual.Command.Due = AbsoluteDue(at)
+				actual.ImmutableHash, _ = actual.Command.ImmutableHash()
+			case "changed_source":
+				actual.ForkJoinOrigin.SourceActivationID = uuid.NewString()
+			case "changed_cut":
+				actual.ForkJoinOrigin.PointRevision++
+			case "ordinary":
+				actual.ForkJoinOrigin = nil
+			case "changed_payload":
+				payload := actual.Command.Payload.Interface().(map[string]any)
+				payload["extra"] = "different_business_data"
+				actual.Command.Payload, _ = canonicaljson.FromGo(payload)
+				actual.ImmutableHash, _ = actual.Command.ImmutableHash()
+			}
+			err := actual.ValidateForkJoinReplay(expected)
+			allowed := name == "active" || name == "prepared" || name == "fired" || name == "cancelled" || name == "failed"
+			if (err == nil) != allowed {
+				t.Fatalf("%s progress: err=%v", name, err)
+			}
+		})
+	}
+	if err := expected.Validate(); err != nil {
+		t.Fatal("replay mutated expected cause", err)
+	}
+	closed := expected.Canonical()
+	closed.Status, closed.CancelCause, closed.CancelledAt = StatusCancelled, "join_closed", closed.AdmittedAt
+	if err := closed.ValidateForkJoinReplay(closed); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"reopened", "changed_cause", "changed_time"} {
+		actual := closed.Canonical()
+		switch name {
+		case "reopened":
+			actual.Status, actual.CancelCause, actual.CancelledAt = StatusActive, "", time.Time{}
+		case "changed_cause":
+			actual.CancelCause = "join_stage_exit"
+		case "changed_time":
+			actual.CancelledAt = actual.CancelledAt.Add(time.Second)
+		}
+		if err := actual.ValidateForkJoinReplay(closed); err == nil {
+			t.Fatal("canceled inherited disposition changed", name)
+		}
 	}
 }
