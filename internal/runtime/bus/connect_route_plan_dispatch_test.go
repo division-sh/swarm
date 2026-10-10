@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -108,7 +109,6 @@ type connectRoutePlanMutationStore struct {
 
 type connectRoutePlanLifecycleStore struct {
 	*connectRoutePlanDescriptorStore
-	bus                             *EventBus
 	activations                     []runtimepipeline.FlowInstanceActivationRequest
 	failAfterDescriptorWithoutRoute error
 }
@@ -277,10 +277,13 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 					source := connectReceiverPinCollisionSource(t, producerMode, rootReceiver, subscriberType, false)
 					store := newTargetRouteMemoryStore()
 					producerEntityID := eventtest.UUID("producer-entity")
-					receiverEntityID := eventtest.UUID("receiver-entity")
+					if producerMode == "static" {
+						producerEntityID = runtimeflowidentity.EntityID("producer")
+					}
+					receiverEntityID := runtimeflowidentity.EntityID("consumer")
 					receiverFlowInstance := "consumer"
 					if rootReceiver {
-						receiverEntityID = eventtest.UUID("root-entity")
+						receiverEntityID = runtimeflowidentity.EntityID(runID)
 						receiverFlowInstance = runID
 					}
 					store.setTargetOwners(ActiveTargetDescriptor{
@@ -290,7 +293,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 					if err != nil {
 						t.Fatalf("DeriveRouteTable: %v", err)
 					}
-					eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: routeTable})
+					eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}}, RouteTable: routeTable})
 					if err != nil {
 						t.Fatalf("NewEventBusWithOptions: %v", err)
 					}
@@ -306,6 +309,17 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 					}
 					eventID := uuid.NewString()
 					evt := connectRoutePlanStaticProducerEvent(eventID, eventType, "", "", []byte(`{}`), 0, runID, "", envelope, time.Now().UTC())
+					root := ConstructedFlowInstanceIdentityFixture(source, semanticview.RootExecutionFlowID(source), "", runID)
+					if rootReceiver {
+						root.EntityID = receiverEntityID
+					}
+					store.installIndexObservation(constructionIndexObservation(t, source, runID, root, ""))
+					producer := StoredFlowInstanceIdentityFixture(source, "producer", map[bool]string{true: "inst-1"}[producerMode == "template"], runID, producerEntityID)
+					store.installIndexObservation(constructionIndexObservation(t, source, runID, producer, map[bool]string{true: "inst-1"}[producerMode == "template"]))
+					if !rootReceiver {
+						consumer := StoredFlowInstanceIdentityFixture(source, "consumer", "", runID, receiverEntityID)
+						store.installIndexObservation(constructionIndexObservation(t, source, runID, consumer, ""))
+					}
 					if subscriberType == "agent" {
 						flowPath := "consumer"
 						if rootReceiver {
@@ -343,11 +357,15 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplicateEdges(t *testing.T) {
 	source := connectReceiverPinCollisionSource(t, "static", false, "node", true)
 	store := newConnectRoutePlanStaticStore()
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	installMixedStaticConstructionFixture(t, store, source, []ActiveTargetDescriptor{
+		{FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")},
+		{FlowInstance: "consumer", EntityID: connectRoutePlanStaticOwner().EntityID},
+	})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(), "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-entity")}}, time.Now().UTC())
+	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(), "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")}}, time.Now().UTC())
 	identity := connectRoutePlanTestDeclaredAgentIdentity(t, source, "consumer", "legal-agent", "consumer")
 	subscribeTestAgentAdmissionWithIdentity(
 		t,
@@ -374,12 +392,17 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 	} {
 		t.Run("public "+tc.name, func(t *testing.T) {
 			store := newConnectRoutePlanStaticStore()
-			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: connectReceiverPinLegalSource(t, tc.shape)})
+			source := connectReceiverPinLegalSource(t, tc.shape)
+			installMixedStaticConstructionFixture(t, store, source, []ActiveTargetDescriptor{
+				{FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")},
+				{FlowInstance: "consumer", EntityID: connectRoutePlanStaticOwner().EntityID},
+			})
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			eventID := uuid.NewString()
-			evt := connectRoutePlanStaticProducerEvent(eventID, "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-entity")}}, time.Now().UTC())
+			evt := connectRoutePlanStaticProducerEvent(eventID, "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")}}, time.Now().UTC())
 			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -407,7 +430,7 @@ func TestMixedPubsubConnectCompositionMatchedConnectPreservesLocal(t *testing.T)
 	producerOwner := testSelectedRunTargetOwner("producer-owner", "producer", "producer-owner")
 	consumerOwner := connectRoutePlanStaticOwner()
 	store.setTargetOwners(producerOwner, consumerOwner)
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: routeTable})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}, RouteTable: routeTable})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -479,7 +502,7 @@ func TestMixedPubsubConnectCompositionTypedSourceOutranksConnectedEnvelopeTarget
 	producerOwner := testSelectedRunTargetOwner("producer-owner", "producer", "producer-owner")
 	consumerOwner := connectRoutePlanStaticOwner()
 	store.setTargetOwners(producerOwner, consumerOwner)
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -530,7 +553,7 @@ func TestMixedPubsubConnectCompositionNoConnectMatchPreservesLocal(t *testing.T)
 	store := newTargetRouteMemoryStore()
 	producerOwner := testSelectedRunTargetOwner("producer-owner", "producer", "producer-owner")
 	store.setTargetOwners(producerOwner)
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -558,7 +581,7 @@ func TestMixedPubsubConnectCompositionConnectFailureIsAtomic(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	producerOwner := testSelectedRunTargetOwner("producer-owner", "producer", "producer-owner")
 	store.setTargetOwners(producerOwner)
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -668,12 +691,17 @@ func TestConnectRoutePlanReceiverPinCollisionFailsBeforeReplyContextMutation(t *
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	replyStore := &connectRoutePlanReplyMutationStore{}
-	resolver := newConnectRoutePlanResolver(source, routeTable, nil, nil, replyStore)
+	index := constructionIndexTestReader{observations: []runtimepipeline.FlowInstanceObservation{
+		constructionIndexObservation(t, source, busInternalTestRunID, ConstructedFlowInstanceIdentityFixture(source, semanticview.RootExecutionFlowID(source), "", busInternalTestRunID), ""),
+		constructionIndexObservation(t, source, busInternalTestRunID, ConstructedFlowInstanceIdentityFixture(source, "producer", "", busInternalTestRunID), ""),
+		constructionIndexObservation(t, source, busInternalTestRunID, ConstructedFlowInstanceIdentityFixture(source, "consumer", "", busInternalTestRunID), ""),
+	}}
+	resolver := newConnectRoutePlanResolver(source, routeTable, nil, index, replyStore)
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(), "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
-		Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-entity")},
+		Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")},
 	}, time.Now().UTC())
 
-	dispatch, err := resolver.Plan(context.Background(), evt)
+	dispatch, err := resolver.Plan(constructionIndexContext(t, source), evt)
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -942,13 +970,7 @@ func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runti
 	if s.failAfterDescriptorWithoutRoute != nil {
 		return s.failAfterDescriptorWithoutRoute
 	}
-	if s.bus == nil {
-		return nil
-	}
-	return s.bus.AddFlowInstanceRouteContextFixture(ctx, FlowInstanceRouteMaterializationRequest{
-		Identity:            testRunScopedFlowRouteForRun(req.TriggerEvent.RunID(), req.Instance.Route()),
-		ActivationVariables: connectRoutePlanActivationVariables(req),
-	})
+	return nil
 }
 
 func (s *connectRoutePlanConcurrentLifecycleStore) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]ActiveFlowInstanceDescriptor, error) {
@@ -1016,15 +1038,8 @@ func (s *connectRoutePlanConcurrentLifecycleStore) Activate(ctx context.Context,
 		FlowTemplate:  req.Instance.TemplateID,
 		AddressFields: connectRoutePlanActivationAddressFields(fields),
 	})
-	bus := s.bus
 	s.mu.Unlock()
-	if bus == nil {
-		return nil
-	}
-	return bus.AddFlowInstanceRouteContextFixture(ctx, FlowInstanceRouteMaterializationRequest{
-		Identity:            testRunScopedFlowRouteForRun(req.TriggerEvent.RunID(), req.Instance.Route()),
-		ActivationVariables: connectRoutePlanActivationVariables(req),
-	})
+	return nil
 }
 
 func (s *connectRoutePlanConcurrentLifecycleStore) ActivationCount() int {
@@ -1077,7 +1092,7 @@ func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
 	store := newConnectRoutePlanStaticStore()
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: source, Interceptors: []EventInterceptor{interceptor},
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}, Interceptors: []EventInterceptor{interceptor},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1155,7 +1170,7 @@ func TestEventBusPublish_ConnectRoutePlanRejectsConflictingAdmittedTargetBeforeP
 	})
 
 	store := newConnectRoutePlanStaticStore()
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1221,7 +1236,7 @@ func TestEventBusConnectRouteDeliversToLiveAgentCarrier(t *testing.T) {
 		Rename: "deploy.completed",
 	}}))
 	store := newConnectRoutePlanStaticStore()
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1318,7 +1333,7 @@ func connectRoutePlanLifecycleAgentRoute(
 func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T) {
 	source := connectRoutePlanRootProducerStaticSource(t)
 	store := newConnectRoutePlanStaticStore()
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1382,7 +1397,7 @@ func TestEventBusPublish_RootConnectToNestedStaticPersistsExactReceiverOwner(t *
 	store := newTargetRouteMemoryStore()
 	childEntity := runtimeflowidentity.EntityID("consumer")
 	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: childEntity})
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1445,7 +1460,7 @@ func TestEventBusCompiledNestedStaticPreservesSelectedReceiverOwner(t *testing.T
 func TestEventBusPublish_RootConnectParentContextCannotSupplyMissingReceiver(t *testing.T) {
 	source := connectRoutePlanRootProducerStaticSource(t)
 	store := newTargetRouteMemoryStore()
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1479,7 +1494,7 @@ func TestEventBusPublish_RootConnectToSingletonUsesReceiverOwnedMaterializingTar
 	source := connectRoutePlanRootProducerSingletonSource(t)
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: runtimeflowidentity.EntityID("consumer")})
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1671,7 +1686,7 @@ func TestEventBusPublish_SingletonConnectToRootUsesExactSelectedRootOwner(t *tes
 	store.setTargetOwners(ActiveTargetDescriptor{
 		ID: "selected-root-owner", FlowInstance: runID, EntityID: rootEntityID,
 	})
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1743,7 +1758,7 @@ func TestEventBusPublish_SingletonConnectToRootRejectsMissingOrAmbiguousSelected
 			store := newTargetRouteMemoryStore()
 			runID := uuid.NewString()
 			store.setTargetOwners(tc.owners(runID)...)
-			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}}})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -1781,7 +1796,7 @@ func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEv
 		testSelectedRunTargetOwner("consumer-a-owner", "consumer-a", "consumer-a-owner"),
 		testSelectedRunTargetOwner("consumer-b-owner", "consumer-b", "consumer-b-owner"),
 	)
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1842,7 +1857,11 @@ func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanUsesSelectedOwner(t *
 	})
 
 	store := newConnectRoutePlanStaticStore()
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	installMixedStaticConstructionFixture(t, store, source, []ActiveTargetDescriptor{
+		{FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")},
+		{FlowInstance: "consumer", EntityID: connectRoutePlanStaticOwner().EntityID},
+	})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -2038,9 +2057,13 @@ func TestEventBusMultiPlanMatchedEmptyPersistsEveryPlanOutcome(t *testing.T) {
 		testSelectedRunTargetOwner("consumer-a-owner", "consumer-a", "consumer-a-owner"),
 		testSelectedRunTargetOwner("consumer-b-owner", "consumer-b", "consumer-b-owner"),
 	)
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: newRouteTable(source)})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}, RouteTable: newRouteTable(source)})
 	if err != nil {
 		t.Fatal(err)
+	}
+	installConnectionSourceConstruction(t, eb, source, "producer")
+	for _, flowID := range []string{"consumer-a", "consumer-b"} {
+		store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, ConstructedFlowInstanceIdentityFixture(source, flowID, "", busInternalTestRunID), ""))
 	}
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(), "producer/work.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	if got := len(graph.MatchingPlans(evt)); got != 2 {
@@ -2085,7 +2108,7 @@ func TestEventBusConnectRecipientRegistrationExpandsWildcardOverDeclaredInputs(t
 		Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed",
 	}}))
 	store := newConnectRoutePlanStaticStore()
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -2120,7 +2143,11 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	})
 
 	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newConnectRoutePlanStaticStore()}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	installMixedStaticConstructionFixture(t, store.targetRouteMemoryStore, source, []ActiveTargetDescriptor{
+		{FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")},
+		{FlowInstance: "consumer", EntityID: connectRoutePlanStaticOwner().EntityID},
+	})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -2158,7 +2185,7 @@ func TestEnginePublication_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T)
 	})
 
 	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newConnectRoutePlanStaticStore()}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -2168,6 +2195,10 @@ func TestEnginePublication_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T)
 
 	want := connectRoutePlanStaticDeliveryRoute(t)
 
+	installMixedStaticConstructionFixture(t, store.targetRouteMemoryStore, source, []ActiveTargetDescriptor{
+		{FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")},
+		{FlowInstance: "consumer", EntityID: connectRoutePlanStaticOwner().EntityID},
+	})
 	plans, err := eb.PrepareEnginePublications(context.Background(), []runtimeengine.EmitIntent{{Event: evt}})
 	if err != nil {
 		t.Fatalf("PrepareEnginePublications: %v", err)
@@ -2208,14 +2239,13 @@ func TestEventRouteSettlementDuplicateAndRecoveryPreserveOriginalFact(t *testing
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
 	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
-	}
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1")), "v-1"))
+	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))})
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -2273,17 +2303,13 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
 	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{
-		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "alpha")),
-		Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "alpha", busInternalTestRunID, alphaEntityID),
-	}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute(alpha): %v", err)
-	}
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "consumer", "alpha", busInternalTestRunID, alphaEntityID), "v-1"))
+	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "alpha")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "consumer", "alpha", busInternalTestRunID, alphaEntityID)})
 
 	if err := eb.ResetInMemoryState(); err != nil {
 		t.Fatalf("ResetInMemoryState: %v", err)
@@ -2293,12 +2319,13 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 		InstanceID: "beta", EntityID: betaEntityID, FlowInstance: "consumer/beta",
 		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 	}}
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{
-		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "beta")),
-		Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "beta", busInternalTestRunID, betaEntityID),
-	}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute(beta): %v", err)
-	}
+	store.mu.Lock()
+	store.instanceObservations = slices.DeleteFunc(store.instanceObservations, func(observed runtimepipeline.FlowInstanceObservation) bool {
+		return observed.Identity().TemplateID == "consumer"
+	})
+	store.mu.Unlock()
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "consumer", "beta", busInternalTestRunID, betaEntityID), "v-1"))
+	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "beta")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "consumer", "beta", busInternalTestRunID, betaEntityID)})
 
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
@@ -2351,15 +2378,13 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
 	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1")), "v-1"))
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
-	}
+	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))})
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -2426,7 +2451,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
-	store.bus = eb
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -2516,9 +2540,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 	}}
 	store.flowInstanceDescriptorCalls = 0
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "drift")), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "drift", busInternalTestRunID, eventtest.UUID("ent-drift"))}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
-	}
+	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "drift")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "consumer", "drift", busInternalTestRunID, eventtest.UUID("ent-drift"))})
 	store.flowInstanceDescriptorCalls = 0
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
@@ -2599,14 +2621,13 @@ func TestEventBusPublish_ConnectRoutePlanPreviewCreateFeedsLaterSelect(t *testin
 				},
 			}
 			eb, err := newScopedTestEventBus(store, EventBusOptions{
-				ContractBundle:          semanticview.Wrap(bundle),
+				ContractBundle: semanticview.Wrap(bundle), Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 				TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			installConnectionSourceConstruction(t, eb, semanticview.Wrap(bundle), "producer")
-			store.bus = eb
 			evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 				events.EventType("producer/account.setup"), "", "", json.RawMessage(tc.payload), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -2682,14 +2703,13 @@ func TestCommittedReplayReusesPersistedSyntheticInstanceSourceWithoutReminting(t
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:          source,
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
-	store.bus = eb
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -2788,14 +2808,13 @@ func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanCreateResolutionAdmit
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:          source,
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
-	store.bus = eb
 	evt := connectRoutePlanStaticProducerEvent("",
 		events.EventType("producer/validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Time{})
 
@@ -2826,14 +2845,13 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:          source,
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
-	store.bus = eb
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -3005,17 +3023,14 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionUsesRenamedPayloadSourc
 					},
 				},
 			}
-			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate)})
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate)})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			installConnectionSourceConstruction(t, eb, source, "producer")
-			store.bus = eb
 			for index, instanceID := range []string{"authoritative", "conflicting"} {
 				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID), []string{"acct-authoritative", "acct-conflicting"}[index]))
-				if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID)), Instance: StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)}); err != nil {
-					t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
-				}
+				store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID)), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)})
 			}
 			eventID := uuid.NewString()
 			evt := connectRoutePlanStaticProducerEvent(eventID,
@@ -3050,11 +3065,10 @@ func TestEventBusCheckPublishRecipientPlan_RenamedInstanceSourceRemediationUsesA
 					targetRouteMemoryStore: newTargetRouteMemoryStore(),
 				},
 			}
-			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate)})
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate)})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			store.bus = eb
 			evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 				events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"cannot-satisfy-authored-source"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -3109,7 +3123,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:          source,
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
@@ -3117,10 +3131,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "account", "one", busInternalTestRunID, eventtest.UUID("ent-1")), "acct-1"))
-	store.bus = eb
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "account", "one", busInternalTestRunID, eventtest.UUID("ent-1"))}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
-	}
+	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "one")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "account", "one", busInternalTestRunID, eventtest.UUID("ent-1"))})
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -3159,16 +3170,13 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 		AddressFields: map[string]string{"entity.account_id": "acct-1"},
 	}}
 	restarted, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:          source,
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("restart EventBus against replacement topology: %v", err)
 	}
-	store.bus = restarted
-	if err := restarted.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "drift")), Instance: StoredFlowInstanceIdentityFixture(source, "account", "drift", busInternalTestRunID, eventtest.UUID("ent-drift"))}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute(drift) after restart: %v", err)
-	}
+	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "drift")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "account", "drift", busInternalTestRunID, eventtest.UUID("ent-drift"))})
 	replayTarget := subscribeInternalDeliveriesForTest(t, restarted, want.Recipient.ID())
 	hostileReplacement := subscribeInternalDeliveriesForTest(t, restarted, "account-node-drift")
 	store.flowInstanceDescriptorCalls = 0
@@ -3240,23 +3248,20 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 				},
 			}
 			eb, err := newScopedTestEventBus(store, EventBusOptions{
-				ContractBundle:          source,
+				ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 				TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			installConnectionSourceConstruction(t, eb, source, "producer")
-			store.bus = eb
 			for index, instanceID := range tc.addRoutes {
 				key := "acct-1"
 				if instanceID == "other" {
 					key = "acct-2"
 				}
 				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID), key))
-				if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID)), Instance: StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)}); err != nil {
-					t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
-				}
+				store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID)), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)})
 			}
 			eventID := uuid.NewString()
 			evt := connectRoutePlanStaticProducerEvent(eventID,
@@ -3326,7 +3331,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:          source,
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
@@ -3334,10 +3339,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "account", "one", busInternalTestRunID, eventtest.UUID("ent-1")), "acct-1"))
-	store.bus = eb
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "account", "one", busInternalTestRunID, eventtest.UUID("ent-1"))}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
-	}
+	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "one")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "account", "one", busInternalTestRunID, eventtest.UUID("ent-1"))})
 	existingID := uuid.NewString()
 	existing := connectRoutePlanStaticProducerEvent(existingID,
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -3365,6 +3367,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 
 	missingID := uuid.NewString()
 	missingRunID := uuid.NewString()
+	eb.durable.RunLifecycle = &publicationRunPreflightTestStore{runID: missingRunID}
 	missing := connectRoutePlanStaticProducerEvent(missingID,
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-2"}`), 0, missingRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	installConnectionSourceConstructionForRun(t, eb, source, "producer", missingRunID)
@@ -3435,9 +3438,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 		AddressFields: map[string]string{"entity.account_id": "acct-2"},
 	}}
 	store.flowInstanceDescriptorCalls = 0
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "drift")), Instance: StoredFlowInstanceIdentityFixture(source, "account", "drift", busInternalTestRunID, eventtest.UUID("ent-drift"))}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
-	}
+	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "drift")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "account", "drift", busInternalTestRunID, eventtest.UUID("ent-drift"))})
 	store.flowInstanceDescriptorCalls = 0
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: missing, Scope: runtimepipelineobligation.ScopeSubscribed,
@@ -3471,7 +3472,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionDoesNotReuseUnr
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
-	store.bus = eb
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-partial"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -3510,19 +3510,16 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForA
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:          source,
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
-	store.bus = eb
 	for index, instanceID := range []string{"one", "two"} {
 		store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID), "acct-1"))
-		if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID)), Instance: StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)}); err != nil {
-			t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
-		}
+		store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID)), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)})
 	}
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
@@ -3569,14 +3566,13 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameK
 	// TestA9ConcurrentKeyedIngressElectionBothStores's real stores and barriers.
 	owner := &concurrentPlanFinalizationBarrier{testFlowInstanceActivationOwner: newTestFlowInstanceActivationOwner(store.Activate), ready: make(chan struct{})}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:          source,
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		TemplateInstancePlanner: owner,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
-	store.bus = eb
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	eventIDs := []string{uuid.NewString(), uuid.NewString()}
@@ -3670,24 +3666,19 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation
 				},
 			}
 			eb, err := newScopedTestEventBus(store, EventBusOptions{
-				ContractBundle:          source,
+				ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 				TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			installConnectionSourceConstruction(t, eb, source, "producer")
-			store.bus = eb
 			if tc.consumer == canonicalrouting.TemplateInstanceAgentConsumer {
 				identity, admission, entityID := connectRoutePlanLifecycleAgentRoute(t, source, tc.secondPin)
 				subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, entityID)
 			}
-			eb.RouteTable().mu.RLock()
-			originalOwners := make(map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.Instance)
-			for owner, instance := range eb.RouteTable().instanceOwners {
-				originalOwners[owner] = instance
-			}
-			eb.RouteTable().mu.RUnlock()
+			originalOwners := slices.Clone(store.instanceObservations)
+			originalReceipts := maps.Clone(store.constructions)
 			evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 				events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -3714,10 +3705,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation
 			if len(store.routes[evt.ID()]) != 0 {
 				t.Fatalf("persisted delivery routes = %#v, want none", store.routes[evt.ID()])
 			}
-			eb.RouteTable().mu.RLock()
-			unchanged := reflect.DeepEqual(eb.RouteTable().instanceOwners, originalOwners)
-			eb.RouteTable().mu.RUnlock()
-			if !unchanged {
+			if !reflect.DeepEqual(store.instanceObservations, originalOwners) || !reflect.DeepEqual(store.constructions, originalReceipts) {
 				t.Fatal("rejected receiver-pin collision changed the installed source constructions")
 			}
 		})
@@ -3738,7 +3726,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsCreatedAgentBeforeLiveCarrier(t
 	}
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:          source,
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 		Interceptors:            []EventInterceptor{interceptor},
 	})
@@ -3746,7 +3734,6 @@ func TestEventBusPublish_ConnectRoutePlanPersistsCreatedAgentBeforeLiveCarrier(t
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
-	store.bus = eb
 	identity, _, _ := connectRoutePlanLifecycleAgentRoute(t, source, canonicalrouting.TemplateInstanceNoSecondPin)
 	evt := connectRoutePlanStaticProducerEvent(
 		uuid.NewString(),
@@ -3822,7 +3809,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleAdmissionPreservesDuplicateEdg
 			}
 			interceptor := &connectRoutePlanNodeInterceptor{}
 			opts := EventBusOptions{
-				ContractBundle:          source,
+				ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 				TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 			}
 			if !tc.wantAgent {
@@ -3833,7 +3820,6 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleAdmissionPreservesDuplicateEdg
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			installConnectionSourceConstruction(t, eb, source, "producer")
-			store.bus = eb
 			evt := connectRoutePlanStaticProducerEvent(uuid.NewString(), "producer/deploy.done", "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 			var agentEvents <-chan *LocalDelivery
@@ -3900,14 +3886,13 @@ func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryIsNoOpAndExpl
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:          source,
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
-	store.bus = eb
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -3949,14 +3934,13 @@ func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:          source,
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
-	store.bus = eb
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"source_vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -4003,7 +3987,7 @@ func TestEventBusPublish_ConnectRoutePlanRejectsCreateConflict(t *testing.T) {
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:          source,
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
@@ -4012,10 +3996,7 @@ func TestEventBusPublish_ConnectRoutePlanRejectsCreateConflict(t *testing.T) {
 	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID,
 		StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1")), "v-1"))
-	store.bus = eb
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
-	}
+	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))})
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
@@ -4041,7 +4022,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleUnavailableBlocksLowerPreceden
 	}
 	materializerCalled := false
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: source,
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 			materializerCalled = true
 			return []DeliveryRouteBlueprint{{
@@ -4156,15 +4137,13 @@ func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarge
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
 	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1")), "v-1"))
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
-	}
+	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))})
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"source_vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -4223,13 +4202,11 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
 	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
-	}
+	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))})
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"nested":{"source_vertical_id":"v-1"}}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
@@ -4315,7 +4292,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 				targetRouteMemoryStore: newTargetRouteMemoryStore(),
 				flowInstances:          tc.flowInstances,
 			}
-			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -4326,9 +4303,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 					key = "v-2"
 				}
 				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "consumer", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID), key))
-				if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", instanceID)), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)}); err != nil {
-					t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
-				}
+				store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", instanceID)), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "consumer", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)})
 			}
 			eventID := uuid.NewString()
 			evt := connectRoutePlanStaticProducerEvent(eventID,
@@ -4410,7 +4385,7 @@ func TestMixedPubsubConnectCompositionMatchedZeroConnectRecipientsPreservesLocal
 		events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: connectRoutePlanStaticOwner().EntityID},
 		events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")},
 	)
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -4487,7 +4462,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForInvalidLoweredPlan(t *tes
 		To:     "consumer",
 		Rename: "missing.input",
 	}}))
-	eb, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -4542,7 +4517,7 @@ func TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer(t
 	}}))
 	materializerCalled := false
 	eb, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{
-		ContractBundle: source,
+		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 			materializerCalled = true
 			return []DeliveryRouteBlueprint{{
@@ -4698,16 +4673,9 @@ func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *
 	if err != nil || !ok || len(scope.instancePaths) != 0 || scope.sourceEntityID != "" {
 		t.Fatalf("declaration without construction widened its lookup: ok=%t scope=%#v", ok, scope)
 	}
-	for _, test := range []struct{ runID, id string }{{evt.RunID(), "one"}, {evt.RunID(), "two"}, {uuid.NewString(), "foreign"}} {
-		instance := ConstructedFlowInstanceIdentityFixture(source, "account", test.id, test.runID)
-		owner := runtimeflowidentity.RunScopedFlowInstance{RunID: test.runID, Route: instance.Route()}
-		if err := table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: instance}); err != nil {
-			t.Fatal(err)
-		}
-	}
 	scope, ok, err = resolver.selectedTargetScope(ctx, evt)
 	if err != nil || !ok || len(scope.instancePaths) != 0 {
-		t.Fatalf("process index substituted for committed constructor evidence: ok=%t scope=%#v", ok, scope)
+		t.Fatalf("repeated declaration binding invented a receiver: ok=%t scope=%#v", ok, scope)
 	}
 	previewContext := withConnectRoutePlanPreview(ctx)
 	scope, ok, err = resolver.selectedTargetScope(previewContext, evt)

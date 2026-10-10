@@ -660,11 +660,6 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 			ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
 			WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), EnteredStageAt: at, CreatedAt: at,
 		})
-		if err := eb.AddFlowInstanceRouteContextFixture(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
-			Identity: testRunScopedFlowRoute(constructed.Route()), Instance: constructed,
-		}); err != nil {
-			t.Fatalf("publish constructed source %s: %v", flowID, err)
-		}
 	}
 	constructionCtx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 	initialized, lifecycle, err := pc.PrepareInitialEntryLifecycle(constructionCtx, testRunScopedFlowRoute(instanceRoute), runtimepipeline.WorkflowInstance{
@@ -687,9 +682,6 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	}
 	if err := pc.FinalizeInitialEntryLifecycle(constructionCtx, committed.Lifecycle); err != nil {
 		t.Fatalf("finalize account initial lifecycle: %v", err)
-	}
-	if err := eb.AddFlowInstanceRouteContextFixture(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(instanceRoute)}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	agentID := "account-agent"
 	var agentIdentity runtimeagentidentity.Identity
@@ -4654,9 +4646,6 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	if err := eb.AddFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1"))}); err != nil {
-		t.Fatalf("AddFlowInstance: %v", err)
 	}
 	runtimebustest.Subscribe(t, eb, "worker-inst-1")
 	defer runtimebustest.Unsubscribe(eb, "worker-inst-1")

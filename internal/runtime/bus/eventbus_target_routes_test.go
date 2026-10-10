@@ -1936,9 +1936,6 @@ func TestEventBusPublish_TargetedTemplateInstanceRouteTableNodePersistsSemanticN
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.PublishPersistedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
-		t.Fatalf("PublishPersistedFlowInstanceRouteFixture: %v", err)
-	}
 	evt := eventtest.RuntimeControlWithRoutingSource(
 		uuid.NewString(),
 		events.EventType("operating/opco.product_initialization_requested"),
@@ -2067,9 +2064,6 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.PublishPersistedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
-		t.Fatalf("PublishPersistedFlowInstanceRouteFixture: %v", err)
-	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
 	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		uuid.NewString(),
@@ -2135,9 +2129,6 @@ func TestEventBusPublish_SemanticScopeFlowInstanceResolvesConcreteRoute(t *testi
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	if err := eb.PublishPersistedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
-		t.Fatalf("PublishPersistedFlowInstanceRouteFixture: %v", err)
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
 	evt := eventtest.RuntimeControlWithRoutingSource(
@@ -2208,9 +2199,6 @@ func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBefor
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
-			}
-			if err := eb.PublishPersistedFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1"))}); err != nil {
-				t.Fatalf("PublishPersistedFlowInstanceRouteFixture: %v", err)
 			}
 			concreteEventType := "repo-scaffold/inst-1/" + tc.eventType
 			ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType(concreteEventType))
@@ -2835,7 +2823,6 @@ func TestEventBusRootAPIAdmissionDoesNotAuthorizePrivateChildren(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			lifecycleStore.bus = eb
 			envelope := events.EventEnvelope{}
 			if explicitTarget {
 				envelope = events.EnvelopeForTargetRoute(envelope, target)
