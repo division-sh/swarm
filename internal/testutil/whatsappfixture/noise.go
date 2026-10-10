@@ -67,10 +67,17 @@ func NewNoiseServer(t *testing.T) *NoiseServer {
 }
 
 type Transport struct {
-	conn  *websocket.Conn
-	read  noiseCipher
-	write noiseCipher
-	mu    sync.Mutex
+	conn    *websocket.Conn
+	read    noiseCipher
+	write   noiseCipher
+	mu      sync.Mutex
+	payload *waWa6.ClientPayload
+}
+
+// ClientPayload is the authenticated public handshake evidence received by
+// the external peer. It contains no Swarm owner or SDK private key.
+func (p *Transport) ClientPayload() *waWa6.ClientPayload {
+	return proto.Clone(p.payload).(*waWa6.ClientPayload)
 }
 
 var ErrMalformedNode = errors.New("SDK test peer received malformed encrypted node")
@@ -197,7 +204,12 @@ func (s *NoiseServer) Handshake(ctx context.Context, conn *websocket.Conn) (*Tra
 	if err := mix(serverEphemeral.Priv[:], clientStatic); err != nil {
 		return nil, err
 	}
-	if _, err = state.Decrypt(finish.GetClientFinish().GetPayload()); err != nil {
+	payload, err := state.Decrypt(finish.GetClientFinish().GetPayload())
+	if err != nil {
+		return nil, err
+	}
+	peer.payload = &waWa6.ClientPayload{}
+	if err := proto.Unmarshal(payload, peer.payload); err != nil {
 		return nil, err
 	}
 	transportKeys := make([]byte, 64)
