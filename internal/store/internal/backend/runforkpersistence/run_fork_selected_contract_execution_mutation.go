@@ -1132,7 +1132,11 @@ func (s *RunForkSQLiteOwner) requireRunForkSelectedContractExecutionSettlementTx
 
 func (s *RunForkPostgresOwner) ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string, source semanticview.Source) error {
 	allowedEvents := uniqueNonEmptyStrings(allowedSourceEventIDs)
-	if len(allowedEvents) == 0 {
+	timerEvents, err := selectedContractWorkflowTimerLineage(ctx, tx, forkRunID, true, s.PipelinePostgresOwner.ReadWorkflowTimerActivationTx)
+	if err != nil {
+		return err
+	}
+	if len(allowedEvents) == 0 && len(timerEvents) == 0 {
 		feed, err := selectedDeploymentFeedPresentTx(ctx, tx, forkRunID)
 		if err != nil {
 			return fmt.Errorf("check selected deployment feed: %w", err)
@@ -1225,6 +1229,8 @@ func (s *RunForkPostgresOwner) ensureRunForkSelectedContractExecutionForkState(c
 			FROM unnest($4::uuid[], $5::text[], $6::text[]) AS selected(run_id, agent_id, flow_instance)
 		),
 		selected_tree AS (
+			SELECT e.event_id FROM events e WHERE e.run_id=$1::uuid AND e.event_id=ANY($9::uuid[])
+			UNION
 			SELECT e.event_id
 			FROM events e
 			INNER JOIN run_fork_selected_contract_executions x
@@ -1265,7 +1271,7 @@ func (s *RunForkPostgresOwner) ensureRunForkSelectedContractExecutionForkState(c
 		  AND NOT EXISTS (
 			SELECT 1 FROM selected_tree tree WHERE tree.event_id = e.event_id
 		  )
-	`, forkRunID, pq.Array(allowedEvents), pq.Array(runForkSelectedContractForkLocalRuntimePlatformEventNames()), pq.Array(selectedAgentRunIDs), pq.Array(selectedAgentIDs), pq.Array(selectedAgentFlowInstances), pq.Array(activityIDs), pq.Array(observations)).Scan(&strayEvents, &strayEventEvidence); err != nil {
+	`, forkRunID, pq.Array(allowedEvents), pq.Array(runForkSelectedContractForkLocalRuntimePlatformEventNames()), pq.Array(selectedAgentRunIDs), pq.Array(selectedAgentIDs), pq.Array(selectedAgentFlowInstances), pq.Array(activityIDs), pq.Array(observations), pq.Array(timerEvents)).Scan(&strayEvents, &strayEventEvidence); err != nil {
 		return fmt.Errorf("check selected-contract fork event lineage: %w", err)
 	}
 	if strayEvents > 0 {
