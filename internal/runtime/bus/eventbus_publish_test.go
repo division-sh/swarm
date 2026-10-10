@@ -650,7 +650,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc = newEventBusWorkflowCoordinator(eb, db, pg, module)
+	pc = newEventBusWorkflowCoordinator(eb, pg, module)
 	if pc == nil {
 		t.Fatal("expected pipeline coordinator")
 	}
@@ -2784,7 +2784,7 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 	})
 	t.Run("authorized_terminal_receiver_records_diagnostic", func(t *testing.T) {
 		target := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: runtimeflowidentity.EntityID("consumer")}
-		coordinator := newEventBusWorkflowCoordinator(eb, nil, selected, newFixtureWorkflowModule(t, bundle))
+		coordinator := newEventBusWorkflowCoordinator(eb, selected, newFixtureWorkflowModule(t, bundle))
 		owner := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "consumer", "", runID)
 		if err := coordinator.MarkTerminated(ctx, testRunScopedFlowRouteForRun(runID, owner.Route()), runtimeidentity.NormalizeEntityID(target.EntityID), at.Add(time.Second)); err != nil {
 			t.Fatalf("terminate admitted receiver: %v", err)
@@ -3491,7 +3491,6 @@ func loadEventBusTempBundle(t *testing.T, files map[string]string) *runtimecontr
 
 func newEventBusWorkflowCoordinator(
 	eventBus *runtimebus.EventBus,
-	db *sql.DB,
 	selected completeEventDispatchStore,
 	module runtimepipeline.WorkflowModule,
 ) *runtimepipeline.PipelineCoordinator {
@@ -3548,7 +3547,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc = newEventBusWorkflowCoordinator(eb, db, pg, module)
+	pc = newEventBusWorkflowCoordinator(eb, pg, module)
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
@@ -3787,7 +3786,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc = newEventBusWorkflowCoordinator(eb, db, pg, module)
+	pc = newEventBusWorkflowCoordinator(eb, pg, module)
 	if _, ok := any(pc).(runtimebus.DeliveryRouteInterceptor); !ok {
 		t.Fatal("PipelineCoordinator does not implement DeliveryRouteInterceptor")
 	}
@@ -4117,7 +4116,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc = newEventBusWorkflowCoordinator(eb, db, pg, module)
+	pc = newEventBusWorkflowCoordinator(eb, pg, module)
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
@@ -4456,7 +4455,7 @@ func TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutat
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc = newEventBusWorkflowCoordinator(eb, db, pg, module)
+	pc = newEventBusWorkflowCoordinator(eb, pg, module)
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}

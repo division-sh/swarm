@@ -36,7 +36,7 @@ func seedComponentFlowConstruction(t *testing.T, ctx context.Context, selected c
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinator := newEventBusWorkflowCoordinator(bus, nil, selected, newFixtureWorkflowModule(t, bundle))
+	coordinator := newEventBusWorkflowCoordinator(bus, selected, newFixtureWorkflowModule(t, bundle))
 	if coordinator == nil {
 		t.Fatal("component construction requires the real workflow coordinator")
 	}
