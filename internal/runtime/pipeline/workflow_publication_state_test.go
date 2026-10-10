@@ -35,8 +35,9 @@ func TestProspectiveJoinAdmissionPreservesConstructedParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := WorkflowEngineStateRecord{Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: constructed.Route()},
-		EntityID: constructed.EntityID, WorkflowName: constructed.TemplateID, WorkflowVersion: "v1", Mode: "standard", Status: "active",
-		CurrentState: "ready", ExpectedState: "ready", ExpectedRevision: 3, EnteredStageAt: at, CreatedAt: at, UpdatedAt: at,
+		EntityID: constructed.EntityID, WorkflowName: constructed.TemplateID, WorkflowVersion: "v1", Mode: "static", Status: "active",
+		ParentInstance: constructed.ParentRoute.FlowInstance,
+		CurrentState:   "ready", ExpectedState: "ready", ExpectedRevision: 3, EnteredStageAt: at, CreatedAt: at, UpdatedAt: at,
 		Fields: json.RawMessage(`{}`), Bookkeeping: json.RawMessage(`{}`), Gates: json.RawMessage(`{}`),
 		Accumulator: json.RawMessage(`{}`), InitialFields: json.RawMessage(`{}`), Config: raw,
 		Transition: WorkflowEngineStateTransitionUpdateStateAndCompanion}
@@ -55,6 +56,20 @@ func TestProspectiveJoinAdmissionPreservesConstructedParent(t *testing.T) {
 		item.Status != "active" || len(item.Fields) != 0 {
 		t.Fatalf("prospective construction metadata changed: item=%#v err=%v", item, err)
 	}
+	t.Run("keyed_mutable_fields", func(t *testing.T) {
+		keyed := record
+		keyed.Mode, keyed.EntityType, keyed.InstanceKey = "template", "child_state", "immutable-key"
+		keyed.Fields = json.RawMessage(`{"child_id":"edited-current-value"}`)
+		prepared, err := prepareWorkflowPublicationState(keyed, WorkflowLifecycleMutationPlan{}, constructed.TemplateID, fact)
+		if err != nil {
+			t.Fatal(err)
+		}
+		item, err := prepared.JoinAdmissionInstance(prepared.Candidate().Route)
+		if err != nil || item == nil || item.InstanceKey != keyed.InstanceKey || item.Fields["child_id"] != "edited-current-value" ||
+			item.ParentFlowInstance != constructed.ParentRoute.FlowInstance || item.ParentEntityID != constructed.ParentEntityID {
+			t.Fatalf("prospective receiver lost its immutable selection facts: item=%+v err=%v", item, err)
+		}
+	})
 }
 
 func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T) {
@@ -67,7 +82,8 @@ func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T)
 	record := WorkflowEngineStateRecord{
 		Identity: owner, EntityID: eventtest.UUID("prospective-entity"), WorkflowName: "review", WorkflowVersion: "v1",
 		Mode: "template", Status: "active", CurrentState: "review", EntityType: "work",
-		Fields: json.RawMessage(`{"case_id":"exact"}`), Bookkeeping: json.RawMessage(`{}`), Gates: json.RawMessage(`{}`),
+		InstanceKey: "exact",
+		Fields:      json.RawMessage(`{"case_id":"exact"}`), Bookkeeping: json.RawMessage(`{}`), Gates: json.RawMessage(`{}`),
 		Accumulator: json.RawMessage(`{}`), Config: json.RawMessage(`{}`), InitialFields: json.RawMessage(`{}`),
 		EnteredStageAt: at, CreatedAt: at, UpdatedAt: at, Transition: WorkflowEngineStateTransitionCreateStateAndCompanion,
 	}
@@ -99,6 +115,8 @@ func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T)
 					s.Identity.Route = flowidentity.StoredRoute("review", "two", "review/two")
 				},
 				"entity":          func(s *WorkflowEngineStateRecord) { s.EntityID = eventtest.UUID("other-entity") },
+				"parent":          func(s *WorkflowEngineStateRecord) { s.ParentInstance = "foreign-parent" },
+				"instance key":    func(s *WorkflowEngineStateRecord) { s.InstanceKey = "foreign-key" },
 				"entity contract": func(s *WorkflowEngineStateRecord) { s.EntityType = "other" },
 				"revision":        func(s *WorkflowEngineStateRecord) { s.ExpectedRevision++ },
 				"expected stage":  func(s *WorkflowEngineStateRecord) { s.ExpectedState = "other" },
