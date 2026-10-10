@@ -51,7 +51,7 @@ const descriptorFixedReadTargetsBefore = `
 	`
 
 func TestDescriptorFixedReadsFreshFactsAndCanonicalErrors(t *testing.T) {
-	db, _ := sqliteRouteStatementFixture(t, 0)
+	db := sqliteRouteStatementFixture(t)
 	b, err := sqlitebackend.New(db)
 	if err != nil {
 		t.Fatal(err)
