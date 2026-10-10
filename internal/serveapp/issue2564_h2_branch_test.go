@@ -177,6 +177,7 @@ func TestIssue2564H2CounterOracleSingleStageAndHostileEvidence(t *testing.T) {
 			case "wrong_total":
 				changed.C1 = 1
 			case "absent_branch_coverage":
+				changed = issue2564H2Hub{Count: 2, C2: 2}
 				if issue2564H2BranchCoverage(changed) == nil {
 					t.Fatal("single-stage stress evidence substituted for synchronized coverage")
 				}
