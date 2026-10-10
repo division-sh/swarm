@@ -76,6 +76,7 @@ type admittedProjection struct {
 	modes             []byte
 	projection        []byte
 	timers            map[inheritedTimerAdmissionKey]inheritedTimerAdmission
+	arrivals          map[string]inheritedArrivalAdmission
 }
 
 func Admit(req AdmissionRequest) (Admission, error) {
@@ -105,6 +106,10 @@ func Admit(req AdmissionRequest) (Admission, error) {
 		return Admission{}, fmt.Errorf("selected-contract readiness frontier disagrees with canonical source admission: %v", err)
 	}
 	timers, err := admitInheritedWorkflowTimers(req.Source, req.Plan)
+	if err != nil {
+		return Admission{}, err
+	}
+	arrivals, err := admitInheritedArrivals(req.Source, req.Plan)
 	if err != nil {
 		return Admission{}, err
 	}
@@ -147,7 +152,8 @@ func Admit(req AdmissionRequest) (Admission, error) {
 		planBinding:       planBinding, frontierBinding: frontierBinding,
 		selection: req.ContractSelection, sourceFact: req.SourceArtifactFact,
 		planning: planning, modes: modes, effectiveSource: req.EffectiveSourceIdentity, projection: projection,
-		timers: timers,
+		timers:   timers,
+		arrivals: arrivals,
 	}}, nil
 }
 

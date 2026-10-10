@@ -11,6 +11,25 @@ import (
 
 const ForkJoinReconstructionOwner = "store.run_fork.arrival_join_schedule"
 
+type ForkJoinDisposition string
+
+const (
+	ForkJoinRetained    ForkJoinDisposition = "retained"
+	ForkJoinRuleRemoved ForkJoinDisposition = "rule_removed"
+)
+
+func (d ForkJoinDisposition) Validate(source Activation) error {
+	switch d {
+	case ForkJoinRetained:
+		return nil
+	case ForkJoinRuleRemoved:
+		if source.Status == StatusActive {
+			return nil
+		}
+	}
+	return fmt.Errorf("inherited join disposition requires retained history or an unfulfilled removed rule")
+}
+
 // This validates source shape, not fixed-cut publication absence or authority.
 // Published occurrences require exact event/delivery continuation, not rearming.
 func (a Activation) ValidateForkJoinRestorationSource() error {

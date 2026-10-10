@@ -10,13 +10,13 @@ import (
 )
 
 func requireMaterializedRunForkTimerHistory(ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan, childRunID string,
-	selection runForkWorkflowTimerSelectionOwner, workflow runForkWorkflowTimerMaterializationOwner, arrival runForkArrivalJoinMaterializationOwner,
+	selection runfork.InheritedScheduleSelection, workflow runForkWorkflowTimerMaterializationOwner, arrival runForkArrivalJoinMaterializationOwner,
 	bornAt time.Time, admission runfork.RunForkReplayResumeAdmission) (runfork.RunForkReplayResumeAdmission, error) {
 	return requireRunForkTimerHistory(ctx, attempt, plan, childRunID, selection, workflow, arrival, bornAt, admission, runForkWorkflowTimerAtCut)
 }
 
 func requireContinuingRunForkTimerHistory(ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan, childRunID string,
-	selection runForkWorkflowTimerSelectionOwner, workflow runForkWorkflowTimerMaterializationOwner, arrival runForkArrivalJoinMaterializationOwner,
+	selection runfork.InheritedScheduleSelection, workflow runForkWorkflowTimerMaterializationOwner, arrival runForkArrivalJoinMaterializationOwner,
 	bornAt time.Time, admission runfork.RunForkReplayResumeAdmission) (runfork.RunForkReplayResumeAdmission, error) {
 	return requireRunForkTimerHistory(ctx, attempt, plan, childRunID, selection, workflow, arrival, bornAt, admission, runForkWorkflowTimerContinuing)
 }
@@ -24,7 +24,7 @@ func requireContinuingRunForkTimerHistory(ctx context.Context, attempt *mutation
 // Neither family can discharge source history alone. All errors retain the
 // input admission; these require-only reads never repair missing child work.
 func requireRunForkTimerHistory(ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan, childRunID string,
-	selection runForkWorkflowTimerSelectionOwner, workflow runForkWorkflowTimerMaterializationOwner, arrival runForkArrivalJoinMaterializationOwner,
+	selection runfork.InheritedScheduleSelection, workflow runForkWorkflowTimerMaterializationOwner, arrival runForkArrivalJoinMaterializationOwner,
 	bornAt time.Time, admission runfork.RunForkReplayResumeAdmission, phase runForkWorkflowTimerReadbackPhase) (runfork.RunForkReplayResumeAdmission, error) {
 	if phase != runForkWorkflowTimerAtCut && phase != runForkWorkflowTimerContinuing {
 		return admission, fmt.Errorf("timer history readback requires an exact lifecycle phase")
@@ -47,7 +47,7 @@ func requireRunForkTimerHistory(ctx context.Context, attempt *mutationprotocol.A
 	if phase == runForkWorkflowTimerContinuing {
 		arrivalPhase = runForkArrivalScheduleContinuing
 	}
-	arrivals, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, childRunID, bornAt, arrival, arrivalPhase)
+	arrivals, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, childRunID, bornAt, selection, arrival, arrivalPhase)
 	if err != nil {
 		return admission, err
 	}

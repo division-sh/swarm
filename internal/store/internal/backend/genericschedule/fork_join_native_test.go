@@ -73,20 +73,30 @@ func TestForkJoinNativeRestoreReadbackBothStores(t *testing.T) {
 					name      string
 					timeout   bool
 					cancelled bool
+					removed   bool
 				}{
 					{name: "active_completion"},
 					{name: "cancelled_completion", cancelled: true},
 					{name: "active_timeout", timeout: true},
 					{name: "cancelled_timeout", timeout: true, cancelled: true},
+					{name: "removed_completion", removed: true},
+					{name: "removed_timeout", timeout: true, removed: true},
 				} {
 					t.Run(flow+"/"+shape.name, func(t *testing.T) {
 						ctx, request := forkJoinNativeRequest(t, f, flow, shape.timeout, shape.cancelled)
+						if shape.removed {
+							request.Disposition = runtimegenericschedule.ForkJoinRuleRemoved
+						}
 						sourceBefore := request.Source.Canonical()
 						forkJoinNativeRequireMissing(t, f, ctx, request)
 						created := forkJoinNativeRestore(t, f, ctx, request)
 						expected, err := request.Expected(created.ID)
 						if err != nil || !reflect.DeepEqual(created.Canonical(), expected.Canonical()) || !created.InitialDueAt.Before(created.AdmittedAt) {
 							t.Fatalf("native restore lost the captured overdue due, mode, disposition, or origin: got=%+v want=%+v err=%v", created, expected, err)
+						}
+						if shape.removed && (created.Status != runtimegenericschedule.StatusCancelled || created.CancelCause != "rule_removed" ||
+							!created.CancelledAt.Equal(request.BornAt) || created.CurrentEventID != "" || !created.CurrentEventAdmittedAt.IsZero()) {
+							t.Fatalf("removed rule restored executable work or lost its cut cancellation: %+v", created)
 						}
 						reused := forkJoinNativeRestore(t, f, ctx, request)
 						if !reflect.DeepEqual(created.Canonical(), reused.Canonical()) {
@@ -308,7 +318,8 @@ func forkJoinNativeRequest(t *testing.T, f *forkJoinNativeFixture, flow string, 
 	if born.Before(actual.CancelledAt) {
 		born = actual.CancelledAt
 	}
-	request := storegenericschedule.ForkJoinRequest{Source: loaded, Child: child, PointKind: forkpoint.DeploymentRevision, PointRevision: 7, BornAt: born}
+	request := storegenericschedule.ForkJoinRequest{Source: loaded, Child: child, PointKind: forkpoint.DeploymentRevision, PointRevision: 7, BornAt: born,
+		Disposition: runtimegenericschedule.ForkJoinRetained}
 	if err := request.Validate(); err != nil {
 		t.Fatal(err)
 	}

@@ -353,6 +353,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			}
 			meta := metadata[state.History.EntityID]
 			meta.PreparedHeader = &header
+			meta.RemovedArrivalRefs = state.RemovedArrivalRefs
 			metadata[state.History.EntityID] = meta
 		}
 		for _, entity := range plan.Entities {
@@ -363,7 +364,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if _, err := materializeRunForkWorkflowTimers(forkCtx, attempt, plan, forkRunID, req.Readiness, port.workflowTimers, now); err != nil {
 			return err
 		}
-		if err := materializeRunForkArrivalJoinSchedules(forkCtx, attempt, plan, forkRunID, now, port.arrivalSchedules); err != nil {
+		if err := materializeRunForkArrivalJoinSchedules(forkCtx, attempt, plan, forkRunID, now, req.Readiness, port.arrivalSchedules); err != nil {
 			return err
 		}
 		replayAdmission, err = requireMaterializedRunForkTimerHistory(forkCtx, attempt, plan, forkRunID, req.Readiness, port.workflowTimers, port.arrivalSchedules, now, replayAdmission)

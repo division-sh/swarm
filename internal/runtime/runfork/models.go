@@ -1223,17 +1223,17 @@ type RunForkSelectedContractAgentTopology struct {
 }
 
 type RunForkSelectedContractExecutionActivateRequest struct {
-	InheritedWorkflowTimers InheritedWorkflowTimerSelection `json:"-"`
-	ForkOperation           *ForkOperationRequest
-	ExecutedEventCount      int
-	DataPins                []durabledata.Pin
-	ExecutionSource         semanticview.Source
-	ForkRunID               string
-	AllowSourceFreeze       bool
-	AllowedSourceEventIDs   []string
-	FrontierAdmission       RunForkContractFrontierAdmission
-	RouteTopology           RunForkSelectedContractRouteTopology
-	RecipientPlanning       RunForkSelectedContractRecipientPlanning
+	InheritedSchedules    InheritedScheduleSelection `json:"-"`
+	ForkOperation         *ForkOperationRequest
+	ExecutedEventCount    int
+	DataPins              []durabledata.Pin
+	ExecutionSource       semanticview.Source
+	ForkRunID             string
+	AllowSourceFreeze     bool
+	AllowedSourceEventIDs []string
+	FrontierAdmission     RunForkContractFrontierAdmission
+	RouteTopology         RunForkSelectedContractRouteTopology
+	RecipientPlanning     RunForkSelectedContractRecipientPlanning
 }
 
 type RunForkSelectedContractSourceEvent struct {
@@ -1413,7 +1413,7 @@ func (e *RunForkSourceFreezeBusyError) Unwrap() error {
 }
 
 type SelectedContractRuntimeExecutionIssueRequest struct {
-	InheritedWorkflowTimers    InheritedWorkflowTimerSelection `json:"-"`
+	InheritedSchedules         InheritedScheduleSelection `json:"-"`
 	Preparation                SelectedForkPreparationBinding
 	DeclarationPlan            agenttopology.SelectedDeclarationPlan
 	Admission                  RunForkSelectedContractExecutionAdmission

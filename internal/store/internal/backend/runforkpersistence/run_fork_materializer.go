@@ -11,6 +11,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
@@ -27,11 +28,12 @@ import (
 )
 
 type runForkEntityMetadata struct {
-	FlowInstance   string
-	EntityType     string
-	Slug           string
-	Name           string
-	PreparedHeader *runtimepipeline.WorkflowEngineStateRecord
+	FlowInstance       string
+	EntityType         string
+	Slug               string
+	Name               string
+	PreparedHeader     *runtimepipeline.WorkflowEngineStateRecord
+	RemovedArrivalRefs []timeridentity.JoinRef
 }
 
 type ActiveRunSourceOwnerFunc func(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
@@ -814,6 +816,9 @@ func projectRunForkHistoricalFields(sourceRunID, forkRunID, entityID, targetBund
 	accumulator, bindings, err := forkGateActivationState(accumulator, forkRunID, meta.FlowInstance, entityID, targetBundleHash)
 	if err != nil {
 		return projected, fmt.Errorf("fork gate state for entity %s: %w", entityID, err)
+	}
+	if err := cancelRunForkRemovedArrivalState(accumulator, meta.RemovedArrivalRefs); err != nil {
+		return projected, err
 	}
 	createdAt := storerunlifecycle.CanonicalTimestamp(now)
 	updatedAt := createdAt

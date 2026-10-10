@@ -58,10 +58,10 @@ func requireSelectedSuccessorWorkflowTimers(ctx context.Context, attempt *mutati
 		switch {
 		case operation.Status == runfork.ForkOperationMaterialized && snapshot.State == runlifecycle.StatePaused:
 			_, err = requireMaterializedRunForkTimerHistory(ctx, attempt, plan, snapshot.RunID,
-				req.InheritedWorkflowTimers, port.timers, port.arrivalSchedules, bornAt, admission)
+				req.InheritedSchedules, port.timers, port.arrivalSchedules, bornAt, admission)
 		case operation.Status == runfork.ForkOperationActivated && snapshot.State == runlifecycle.StateRunning:
 			_, err = requireContinuingRunForkTimerHistory(ctx, attempt, plan, snapshot.RunID,
-				req.InheritedWorkflowTimers, port.timers, port.arrivalSchedules, bornAt, admission)
+				req.InheritedSchedules, port.timers, port.arrivalSchedules, bornAt, admission)
 		default:
 			err = fmt.Errorf("selected timer continuation has no executable permanent operation/state pair")
 		}

@@ -98,10 +98,10 @@ func TestForkArrivalInventoryRequiresEveryInheritedRow(t *testing.T) {
 					if name == "exact" {
 						owner := &arrivalJoinInventoryOwner{rows: actual}
 						withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
-							if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, owner, runForkArrivalScheduleAtCut); err != nil {
+							if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, owner, runForkArrivalScheduleAtCut); err != nil {
 								t.Fatal(err)
 							}
-							if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, owner, runForkArrivalScheduleContinuing); err != nil {
+							if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, owner, runForkArrivalScheduleContinuing); err != nil {
 								t.Fatal(err)
 							}
 						})
@@ -170,27 +170,27 @@ func TestForkArrivalInventoryReadbackRequiresNativeFrameAndEmptyCensus(t *testin
 	plan.Entities, plan.JoinSchedules = nil, nil
 	owner := &arrivalJoinInventoryOwner{rows: rows}
 	withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
-		if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, owner, runForkArrivalScheduleAtCut); err == nil {
+		if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, owner, runForkArrivalScheduleAtCut); err == nil {
 			t.Fatal("empty expected set hid extra inherited rows")
 		}
 		owner.rows = nil
-		if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, owner, runForkArrivalScheduleAtCut); err != nil {
+		if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, owner, runForkArrivalScheduleAtCut); err != nil {
 			t.Fatal(err)
 		}
 		for _, bad := range []context.Context{context.Background(), correlation.WithRunID(ctx, uuid.NewString())} {
 			before := owner.reads
-			if _, err := readRunForkArrivalJoinInventory(bad, attempt, plan, workflowTimerProjectionChildRun, bornAt, owner, runForkArrivalScheduleAtCut); err == nil || owner.reads != before {
+			if _, err := readRunForkArrivalJoinInventory(bad, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, owner, runForkArrivalScheduleAtCut); err == nil || owner.reads != before {
 				t.Fatal("foreign frame reached readback")
 			}
 		}
-		if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, nil, runForkArrivalScheduleAtCut); err == nil {
+		if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, nil, runForkArrivalScheduleAtCut); err == nil {
 			t.Fatal("empty inventory skipped canonical owner")
 		}
-		if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, owner, 0); err == nil {
+		if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, owner, 0); err == nil {
 			t.Fatal("unclassified lifecycle phase accepted")
 		}
 	})
-	if _, err := readRunForkArrivalJoinInventory(context.Background(), nil, plan, workflowTimerProjectionChildRun, bornAt, owner, runForkArrivalScheduleAtCut); err == nil {
+	if _, err := readRunForkArrivalJoinInventory(context.Background(), nil, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, owner, runForkArrivalScheduleAtCut); err == nil {
 		t.Fatal("missing native attempt accepted")
 	}
 }

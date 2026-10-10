@@ -124,7 +124,7 @@ func TestRunForkTimerHistoryNativeTerminalOrdinaryAndArrivalBothStores(t *testin
 						if _, err := materializeRunForkWorkflowTimers(ctx, attempt, plan, workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, f.pipeline, bornAt); err != nil {
 							return plan.ReplayResumeAdmission, err
 						}
-						if err := materializeRunForkArrivalJoinSchedules(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, f.pipeline); err != nil {
+						if err := materializeRunForkArrivalJoinSchedules(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, f.pipeline); err != nil {
 							return plan.ReplayResumeAdmission, err
 						}
 					}

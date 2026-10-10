@@ -20991,7 +20991,8 @@ run_model:
         restoration retains its refusal until exact historical event/delivery continuation is admitted; it must not
         be rearmed through ForkJoinRequest. This evidence correction does not remove declaration capability blockers
         or replace activated current execution authority. Before activation,
-        every retained arm has its original due coordinate and no child firing or cancellation. Recovery of an activated
+        every retained arm has its original due coordinate and no child firing; only admitted rule-removal cancellation
+        may be present at child birth. Recovery of an activated
         child accepts only lawful occurrence progress under immutable cause replay; pause alone does not prove an
         unactivated child. Successor timer admission replans using the permanent operation''s full resolved point,
         including its start selector, not event metadata reconstructed from the minimal child binding. The sealed
@@ -21047,7 +21048,18 @@ run_model:
         under current selected authority after child birth. Source preparation cannot postdate that birth.
         Already-published sources still use exact event/delivery continuation, never this restoration path. A canceled
         source arm records a canceled child disposition atomically at child birth, with its source admission and
-        typed cut retained separately; no wakeup is installed by persistence. Generic live reads and fixed-cut
+        typed cut retained separately; no wakeup is installed by persistence. The sealed selected readiness owner
+        resolves retained arrival declarations through the canonical semantic view. Removing an unfulfilled arrival
+        rule cancels its exact child schedule as rule_removed at that same birth and closes the dependent child arm
+        with the same typed reason, canceled timer and no pending or fired outcome. Both canonical header and optional
+        entity-state projections consume one exact admitted child-reference set; original members, collected outputs,
+        arming/due coordinates and source cut remain evidence. The source arm, reservation and lifecycle never change.
+        Already-published occurrences continue their exact historical event/delivery, and already-settled source
+        cancellations retain their original cause rather than being relabeled. Materialization, reuse, activation and
+        successor recovery carry the same sealed selection and require the physical cancellation plus exact dependent
+        state under its canonical instance/entity owner. Missing, reopened, retargeted or altered dependent evidence
+        fails closed without repair or publication. No new timer, outcome, delivery or history family is invented.
+        Generic live reads and fixed-cut
         reconstruction retain already accepted arrival publications in a separate complete fixed-cut event census,
         included in the preparation fingerprint. An already-published occurrence has no reconstructed child timer:
         its original event, due coordinate and unfinished durable node-delivery binding are continued through the

@@ -25,10 +25,14 @@ type ForkJoinRequest struct {
 	PointRevision int64
 	PointEventID  string
 	BornAt        time.Time
+	Disposition   runtimegenericschedule.ForkJoinDisposition
 }
 
 func (r ForkJoinRequest) Validate() error {
 	if err := r.Source.ValidateForkJoinRestorationSource(); err != nil {
+		return err
+	}
+	if err := r.Disposition.Validate(r.Source); err != nil {
 		return err
 	}
 	if err := r.Child.Validate(); err != nil {
@@ -101,6 +105,10 @@ func (r ForkJoinRequest) Expected(childID string) (runtimegenericschedule.Activa
 	if r.Source.Status == runtimegenericschedule.StatusCancelled {
 		child.CancelCause, child.CancelledAt = r.Source.CancelCause, r.BornAt
 	}
+	if r.Disposition == runtimegenericschedule.ForkJoinRuleRemoved {
+		child.Status = runtimegenericschedule.StatusCancelled
+		child.CancelCause, child.CancelledAt = string(r.Disposition), r.BornAt
+	}
 	return child, child.Validate()
 }
 
@@ -133,8 +141,12 @@ func RestoreForkJoinTx(ctx context.Context, attempt *mutationprotocol.Attempt, p
 			if err := stampForkJoinOrigin(ctx, tx, postgres, child.ID, request); err != nil {
 				return err
 			}
-			if request.Source.Status == runtimegenericschedule.StatusCancelled {
-				child, err = cancelLoadedTx(ctx, tx, dialectFor(postgres), child, request.Source.CancelCause, request.BornAt)
+			expected, err := request.Expected(child.ID)
+			if err != nil {
+				return err
+			}
+			if expected.Status == runtimegenericschedule.StatusCancelled {
+				child, err = cancelLoadedTx(ctx, tx, dialectFor(postgres), child, expected.CancelCause, request.BornAt)
 				if err != nil {
 					return err
 				}
