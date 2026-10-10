@@ -11581,6 +11581,16 @@ tool_model:
         for exact retained session authority. Admitted tool intent does not establish connection readiness or
         authorize execution: the existing selected activation, owned native connection and effect owners must
         admit the exact operation at launch. Without those owners, discovery and invocation fail closed.
+        Native runtime writes consume the existing durable activity-attempt journal, not an invented
+        operator-delivery plan or a second effect journal. Only a newly claimed live private activity may issue
+        a process-local, single-consumption handoff to the original session facade. It binds the exact activity
+        request, immutable input, source, compiled connector and plan generation, completed selected onboarding,
+        activation, principal binding and SDK account/connection occurrence. Persisted or reconstructed public
+        fields cannot issue or recover this handoff. The original held activation is checked again before the
+        sole SDK send, which uses the exact journal request identity. A verified provider response consumes the
+        compiled result projection before settling that same journal. A send error or malformed acknowledgment
+        remains uncertain; replay and restart use the recorded attempt without another SDK call. An absent or
+        foreign runtime installation fails closed, with no HTTP, credential, builtin or MCP fallback.
         These provider operations are private activities, never agent grants or LLM tool definitions. A nearest
         native declaration blocks same-name builtin fallback and discovered MCP substitution without losing its
         immutable intent projection. Before alias normalization or emit routing, dispatch retains the exact
