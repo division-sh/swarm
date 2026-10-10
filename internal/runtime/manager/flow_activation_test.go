@@ -2102,8 +2102,9 @@ func TestActivateFlowInstanceArmsInitialTimersOnlyAfterRuntimeInstallation(t *te
 		if instanceID != "review/inst-1" {
 			return fmt.Errorf("armed instance = %q, want review/inst-1", instanceID)
 		}
-		if len(bus.addedPaths) != 1 || bus.addedPaths[0] != "review/inst-1" {
-			return fmt.Errorf("timer armed before route installation: %#v", bus.addedPaths)
+		readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(flowActivationRunContext(), flowActivationTestRunID, runtimeflowidentity.DeriveRoute("review", "inst-1"))
+		if err != nil || !found || readiness.Phase != runtimepipeline.FlowAttachmentRouteInstalled || len(instances.creates) != 1 || instances.creates[0].StorageRef != instanceID {
+			return fmt.Errorf("timer armed without exact constructed attachment: readiness=%+v found=%t creates=%+v err=%v", readiness, found, instances.creates, err)
 		}
 		if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 			return errors.New("timer armed before agent installation")
@@ -2709,6 +2710,7 @@ func TestDynamicFlowRuntimeReadinessRejectsRevisionAfterAdmissionBeforeExecution
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
+	agentsBefore := am.ListAgentConfigs()
 
 	admitted := make(chan struct{})
 	release := make(chan struct{})
@@ -2751,12 +2753,20 @@ func TestDynamicFlowRuntimeReadinessRejectsRevisionAfterAdmissionBeforeExecution
 	); err != nil || !changed {
 		t.Fatalf("revise admitted readiness: changed=%v err=%v", changed, err)
 	}
+	successor, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil || !found {
+		t.Fatalf("load durable successor before stale callback: found=%t err=%v", found, err)
+	}
 	close(release)
 	if err := <-reconciled; !errors.Is(err, errDynamicFlowRuntimeReadinessPlanStale) {
 		t.Fatalf("post-admission revision error = %v, want stale-plan rejection", err)
 	}
-	if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-		t.Fatal("stale admitted callback retired the already-published route")
+	if !reflect.DeepEqual(am.ListAgentConfigs(), agentsBefore) {
+		t.Fatal("stale admitted callback changed the installed agents")
+	}
+	after, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil || !found || !reflect.DeepEqual(after, successor) {
+		t.Fatalf("stale callback changed the durable successor: found=%t readiness=%+v err=%v", found, after, err)
 	}
 }
 
@@ -2771,6 +2781,7 @@ func TestDynamicFlowRuntimeReadinessRejectsABAAfterAdmissionBeforeExecution(t *t
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
+	agentsBefore := am.ListAgentConfigs()
 
 	admitted := make(chan struct{})
 	release := make(chan struct{})
@@ -2815,8 +2826,12 @@ func TestDynamicFlowRuntimeReadinessRejectsABAAfterAdmissionBeforeExecution(t *t
 	if err := <-reconciled; !errors.Is(err, errDynamicFlowRuntimeReadinessPlanStale) {
 		t.Fatalf("post-ABA callback error = %v, want stale-plan rejection", err)
 	}
-	if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-		t.Fatal("stale admitted callback retired the already-published route")
+	if !reflect.DeepEqual(am.ListAgentConfigs(), agentsBefore) {
+		t.Fatal("stale admitted callback changed the installed agents")
+	}
+	after, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil || !found || !reflect.DeepEqual(after, current) {
+		t.Fatalf("stale callback changed the durable ABA successor: found=%t readiness=%+v err=%v", found, after, err)
 	}
 }
 
@@ -3175,8 +3190,8 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 		readiness.Pending() {
 		t.Fatalf("post-CAS revised readiness successor did not complete: %#v", readiness)
 	}
-	if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-		t.Fatal("post-CAS revised topology route was not published")
+	if !flowActivationAttemptReadyForTest(am, testAuthorActivityContext(barrierCtx), req) {
+		t.Fatal("post-CAS revised attachment has no exact owned activation attempt")
 	}
 	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("post-CAS revised topology agent was not published")
@@ -3695,10 +3710,10 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 	if err := receiveFlowActivationResult(t, leaderErr); err != nil {
 		t.Fatalf("coalesced leader: %v", err)
 	}
-	if len(bus.addedPaths) != 1 || len(instances.armedEntries) != 1 || len(bus.published) != 1 {
+	if len(instances.creates) != 1 || len(instances.armedEntries) != 1 || len(bus.published) != 1 || !flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) {
 		t.Fatalf(
-			"coalesced side effects: stage=%d arm=%d publish=%d, want 1/1/1",
-			len(bus.addedPaths),
+			"coalesced side effects: create=%d arm=%d publish=%d, want 1/1/1 with exact ready attachment",
+			len(instances.creates),
 			len(instances.armedEntries),
 			len(bus.published),
 		)
@@ -4360,8 +4375,8 @@ func TestEnsureFlowInstanceVerifiesReadinessAfterNamedMutationCommit(t *testing.
 	} else if created {
 		t.Fatal("EnsureFlowInstance reported a new instance")
 	}
-	if !restartBus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-		t.Fatal("flow route was not process-ready after named mutation commit")
+	if !flowActivationAttemptReadyForTest(restarted, ctx, req) {
+		t.Fatal("exact owned attachment was not ready after named mutation commit")
 	}
 	for _, agentID := range []string{"reviewer", "writer"} {
 		if _, ok := testFlowActivationAgentConfig(t, restarted, agentID, "review/inst-1"); !ok {
@@ -4424,23 +4439,36 @@ func TestFlowActivationUsesCompiledInitialOverRawSchemaAndRejectsRequestConflict
 
 func TestActivateFlowInstanceRouteMaterializationExcludesBusinessState(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
+	instances := &flowActivationTestInstanceStore{}
+	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"vertical_id": {Type: "string"}})
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	setSuppliedFields(t, &req, map[string]any{"vertical_id": "11111111-1111-4111-8111-111111111111"})
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
-		t.Fatalf("ActivateFlowInstance: %v", err)
+	ctx := testAuthorActivityContext(context.Background())
+	setFlowActivationManagerSemanticSource(am, req.ContractBundle)
+	plan, err := am.PrepareFlowInstanceActivation(ctx, req)
+	if err != nil {
+		t.Fatalf("PrepareFlowInstanceActivation: %v", err)
 	}
-	if len(bus.addedRouteRequests) != 1 {
-		t.Fatalf("route materialization requests = %#v, want one", bus.addedRouteRequests)
-	}
-	if _, found := bus.addedRouteRequests[0].ActivationVariables["vertical_id"]; found {
+	if _, found := plan.ActivationVariables["vertical_id"]; found {
 		t.Fatal("business state leaked into route activation variables")
 	}
-	if got := bus.addedRouteRequests[0].ActivationVariables["instance_id"]; got != "inst-1" {
+	if got := plan.ActivationVariables["instance_id"]; got != "inst-1" {
 		t.Fatalf("route activation variable instance_id = %q, want inst-1", got)
+	}
+	if len(instances.creates) != 0 || len(bus.published) != 0 || len(am.ListAgentConfigs()) != 0 {
+		t.Fatal("constructor preparation mutated the receiver")
+	}
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	if len(instances.creates) != 1 || instances.creates[0].Fields["vertical_id"] != "11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("constructed business state = %+v, want one admitted receiver with its supplied field", instances.creates)
+	}
+	if !flowActivationAttemptReadyForTest(am, ctx, req) || len(bus.addedRouteRequests) != 0 {
+		t.Fatal("activation requires exact attachment without materializing route membership")
 	}
 }
 
@@ -5454,7 +5482,7 @@ func TestStandingFlowAgentsBindAttemptBeforeManagerRun(t *testing.T) {
 			t.Fatalf("agent %s pre-admission readiness = %+v err=%v", name, readiness, err)
 		}
 	}
-	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) || len(instances.armedEntries) != 0 {
+	if flowActivationAttemptReadyForTest(am, ctx, req) || len(instances.armedEntries) != 0 {
 		t.Fatal("pre-admission preparation published executable flow work")
 	}
 	if err := am.PrepareAdmittedDynamicFlowAgentsForStart(ctx); err != nil {
@@ -5468,8 +5496,8 @@ func TestStandingFlowAgentsBindAttemptBeforeManagerRun(t *testing.T) {
 			t.Fatalf("agent %s admitted pre-run readiness = %+v err=%v", name, readiness, err)
 		}
 	}
-	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) || len(instances.armedEntries) != 0 {
-		t.Fatal("admitted pre-run preparation published route or timer work")
+	if flowActivationAttemptReadyForTest(am, ctx, req) || len(instances.armedEntries) != 0 {
+		t.Fatal("admitted pre-run preparation completed attachment or armed timer work")
 	}
 	runCtx, cancelRun := context.WithCancel(ctx)
 	if err := am.Run(managedExecutionTestContext(t, runCtx)); err != nil {
@@ -5483,8 +5511,8 @@ func TestStandingFlowAgentsBindAttemptBeforeManagerRun(t *testing.T) {
 	if err := finish(); err != nil {
 		t.Fatalf("finish standing flow after Manager.Run: %v", err)
 	}
-	if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-		t.Fatal("standing route was not published after Manager.Run")
+	if !flowActivationAttemptReadyForTest(am, ctx, req) {
+		t.Fatal("standing attachment has no exact owned activation attempt after Manager.Run")
 	}
 	for _, name := range []string{"reviewer", "writer"} {
 		cfg, _ := testFlowActivationAgentConfig(t, am, name, req.Instance.InstancePath)
