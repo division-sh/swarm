@@ -16,6 +16,7 @@ const (
 	StandingRestartActiveIntrinsic   StandingRestartDispositionKind = "active_intrinsic"
 	StandingRestartSuspended         StandingRestartDispositionKind = "suspended"
 	StandingRestartCredentialDormant StandingRestartDispositionKind = "credential_dormant"
+	StandingRestartSessionDormant    StandingRestartDispositionKind = "session_dormant"
 	StandingRestartRecoveryRequired  StandingRestartDispositionKind = "recovery_required"
 	StandingRestartOrphaned          StandingRestartDispositionKind = "orphaned"
 	StandingRestartTerminalDeclared  StandingRestartDispositionKind = "terminal_declared"
@@ -33,6 +34,7 @@ const (
 	StandingRestartRestoreThenReset     StandingRestartRemediation = "restore_then_reset"
 	StandingRestartProvisionCredentials StandingRestartRemediation = "provision_credentials_then_restart"
 	StandingRestartResumeChannel        StandingRestartRemediation = "resume_channel_onboarding"
+	StandingRestartConnectSession       StandingRestartRemediation = "connect_session_channel"
 )
 
 type StandingBindingBlockReason string
@@ -40,10 +42,11 @@ type StandingBindingBlockReason string
 const (
 	StandingBindingCredentialsAbsent StandingBindingBlockReason = "credentials_absent"
 	StandingBindingRecoveryRequired  StandingBindingBlockReason = "recovery_required"
+	StandingBindingSessionRequired   StandingBindingBlockReason = "session_admission_required"
 )
 
 func (r StandingBindingBlockReason) Validate(enabled bool) error {
-	if enabled && r == "" || !enabled && (r == StandingBindingCredentialsAbsent || r == StandingBindingRecoveryRequired) {
+	if enabled && r == "" || !enabled && (r == StandingBindingCredentialsAbsent || r == StandingBindingRecoveryRequired || r == StandingBindingSessionRequired) {
 		return nil
 	}
 	return fmt.Errorf("standing binding enabled=%t contradicts block reason %q", enabled, r)
@@ -55,6 +58,8 @@ func (r StandingBindingBlockReason) EffectiveState() string {
 		return "dormant"
 	case StandingBindingRecoveryRequired:
 		return "recovery_required"
+	case StandingBindingSessionRequired:
+		return "session_required"
 	default:
 		return ""
 	}
@@ -66,6 +71,8 @@ func (r StandingBindingBlockReason) QuiescenceReason() string {
 		return "ingress_credentials_absent"
 	case StandingBindingRecoveryRequired:
 		return "ingress_authority_stale"
+	case StandingBindingSessionRequired:
+		return "ingress_session_admission_required"
 	default:
 		return ""
 	}
@@ -134,6 +141,8 @@ func (d StandingRestartDisposition) RunControlGuidance() string {
 		return "provision the named ingress credentials with `swarm secrets set <key>`, then restart serve or use explicit channel connect"
 	case StandingRestartResumeChannel:
 		return "inspect `swarm channel status`, then use `swarm channel resume <operation-id>` with fresh credentials and complete its required ceremony"
+	case StandingRestartConnectSession:
+		return "use `swarm channel connect <provider>`, complete pairing and the authenticated operator ceremony, or resume its exact pending operation"
 	default:
 		return "repair the standing service disposition"
 	}
@@ -146,7 +155,7 @@ func (d StandingRestartDisposition) Validate() error {
 			return errors.New("ordinary standing restart disposition cannot carry a current owner")
 		}
 		return nil
-	case StandingRestartActiveIntrinsic, StandingRestartSuspended, StandingRestartCredentialDormant, StandingRestartRecoveryRequired, StandingRestartOrphaned,
+	case StandingRestartActiveIntrinsic, StandingRestartSuspended, StandingRestartCredentialDormant, StandingRestartSessionDormant, StandingRestartRecoveryRequired, StandingRestartOrphaned,
 		StandingRestartTerminalDeclared, StandingRestartTerminalOrphaned, StandingRestartInvalidCurrent:
 	default:
 		return fmt.Errorf("invalid standing restart disposition %q", d.Kind)
@@ -212,6 +221,8 @@ func ClassifyStandingRestart(fact StandingRestartFact) (StandingRestartDispositi
 		result.Kind, result.Remediation = StandingRestartRecoveryRequired, StandingRestartResumeChannel
 	case fact.DeclarationPresent && !fact.BindingEnabled && fact.EffectiveState == "dormant" && state == StatePaused:
 		result.Kind, result.Remediation = StandingRestartCredentialDormant, StandingRestartProvisionCredentials
+	case fact.DeclarationPresent && !fact.BindingEnabled && fact.EffectiveState == "session_required" && state == StatePaused:
+		result.Kind, result.Remediation = StandingRestartSessionDormant, StandingRestartConnectSession
 	case !fact.DeclarationPresent && fact.EffectiveState == "orphaned" &&
 		(fact.OperatorOverride == "none" || fact.OperatorOverride == "suspended") &&
 		state == StatePaused:
@@ -231,7 +242,7 @@ func ClassifyStandingRestart(fact StandingRestartFact) (StandingRestartDispositi
 }
 
 func validateStandingDesiredState(fact StandingRestartFact) error {
-	if fact.EffectiveState != "active" && fact.EffectiveState != "suspended" && fact.EffectiveState != "orphaned" && fact.EffectiveState != "dormant" && fact.EffectiveState != "recovery_required" {
+	if fact.EffectiveState != "active" && fact.EffectiveState != "suspended" && fact.EffectiveState != "orphaned" && fact.EffectiveState != "dormant" && fact.EffectiveState != "recovery_required" && fact.EffectiveState != "session_required" {
 		return fmt.Errorf("invalid standing restart effective_state %q", fact.EffectiveState)
 	}
 	if fact.OperatorOverride != "none" && fact.OperatorOverride != "suspended" {
@@ -241,7 +252,7 @@ func validateStandingDesiredState(fact StandingRestartFact) error {
 		(fact.OperatorOverride == "none" || fact.OperatorOverride == "suspended")) ||
 		(fact.DeclarationPresent && fact.BindingEnabled && fact.EffectiveState == "active" && fact.OperatorOverride == "none") ||
 		(fact.DeclarationPresent && fact.BindingEnabled && fact.EffectiveState == "suspended" && fact.OperatorOverride == "suspended") ||
-		(fact.DeclarationPresent && !fact.BindingEnabled && (fact.EffectiveState == "dormant" || fact.EffectiveState == "recovery_required"))
+		(fact.DeclarationPresent && !fact.BindingEnabled && (fact.EffectiveState == "dormant" || fact.EffectiveState == "recovery_required" || fact.EffectiveState == "session_required"))
 	if !desiredValid {
 		return fmt.Errorf(
 			"standing restart desired-state product is inconsistent: declaration_present=%t effective_state=%s operator_override=%s",
