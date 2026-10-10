@@ -315,7 +315,12 @@ func (s *serveSessionBootstrap) RetireInactiveSessions(ctx context.Context) erro
 			result = errors.Join(result, fmt.Errorf("observe retained session %s: %w", entry.id, err))
 			continue
 		}
-		if op.Phase != channelonboarding.PhaseFailed && op.Phase != channelonboarding.PhaseRetired {
+		retired, err := serveSessionRetirementRequired(ctx, s.store, op)
+		if err != nil {
+			result = errors.Join(result, fmt.Errorf("observe session retirement %s: %w", entry.id, err))
+			continue
+		}
+		if !retired {
 			continue
 		}
 		// Keep the original construction/cleanup entry even after joining. A
@@ -337,6 +342,24 @@ func (s *serveSessionBootstrap) RetireInactiveSessions(ctx context.Context) erro
 		}
 	}
 	return errors.Join(result, context.Cause(ctx))
+}
+
+func serveSessionRetirementRequired(ctx context.Context, store channelonboarding.Store, op channelonboarding.Operation) (bool, error) {
+	if ctx.Err() != nil {
+		return false, context.Cause(ctx)
+	}
+	switch op.Phase {
+	case channelonboarding.PhaseFailed, channelonboarding.PhaseRetired:
+		return true, nil
+	case channelonboarding.PhaseSucceeded:
+		current, err := channelonboarding.RetainedSessionCurrent(ctx, store, op)
+		if ctx.Err() != nil {
+			return false, errors.Join(err, context.Cause(ctx))
+		}
+		return !current, err
+	default:
+		return false, nil
+	}
 }
 
 func (s *serveSessionBootstrap) openSessionAttempt(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, attempt *serveSessionBootstrapAttempt, bootstrap bool) (err error) {

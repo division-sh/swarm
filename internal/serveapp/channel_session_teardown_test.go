@@ -235,3 +235,49 @@ func TestServeSessionTeardownKeepsCurrentSuccessorBothStores(t *testing.T) {
 		})
 	}
 }
+
+type serveCompletedSessionObservationFault struct {
+	channelonboarding.Store
+	lookup func()
+	cause  error
+}
+
+func (s serveCompletedSessionObservationFault) GetChannelOnboarding(ctx context.Context, id string) (channelonboarding.Operation, error) {
+	op, err := s.Store.GetChannelOnboarding(ctx, id)
+	// Projection-only adverse input; the served journey supplies actual success.
+	op.Phase = channelonboarding.PhaseSucceeded
+	return op, err
+}
+
+func (s serveCompletedSessionObservationFault) GetConnectedChannelActivation(context.Context, string) (channelonboarding.ConnectedChannelActivation, error) {
+	if s.lookup != nil {
+		s.lookup()
+	}
+	return channelonboarding.ConnectedChannelActivation{}, s.cause
+}
+
+func TestServeCompletedSessionCleanupPreservesFailedObservationBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f, op, _ := pairedServeSessionObserver(t, backend)
+			original := f.adapter.connection(op.OperationID)
+			work := f.owner.ActiveCount()
+			store := f.adapter.store
+			cause := errors.New("completed activation observation unavailable")
+			f.adapter.store = serveCompletedSessionObservationFault{Store: store, cause: cause}
+			if err := f.adapter.RetireInactiveSessions(f.ctx); !errors.Is(err, cause) || f.owner.ActiveCount() != work || original.CheckBootstrap(f.ctx) != nil {
+				t.Fatal("failed completed-session observation discarded original ownership", err)
+			}
+			caller, cancel := context.WithCancel(f.ctx)
+			defer cancel()
+			f.adapter.store = serveCompletedSessionObservationFault{Store: store, lookup: cancel, cause: channelonboarding.ErrNotFound}
+			if err := f.adapter.RetireInactiveSessions(caller); !errors.Is(err, context.Canceled) || f.owner.ActiveCount() != work || original.CheckBootstrap(f.ctx) != nil {
+				t.Fatal("lookup cancellation became completed-session retirement", err)
+			}
+			f.adapter.store = store
+			if err := f.adapter.RetireInactiveSessions(f.ctx); err != nil || original.CheckBootstrap(f.ctx) != nil || f.adapter.connection(op.OperationID) != original {
+				t.Fatal("observation recovery substituted or retired the original owner", err)
+			}
+		})
+	}
+}
