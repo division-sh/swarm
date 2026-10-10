@@ -1444,3 +1444,43 @@ helper is renamed, moved, wrapped or hidden; one common real prerequisite
 serves both cuts, and the explicit raw local declaration is removed. Rerun
 both complete roots and affected guards/debt at the corrected frozen head;
 9ed focused passes do not erase that failed ratchet or qualify the next head.
+
+## Controlled Predecessor Settlement Proof And Startup Residual
+
+At signed a6c31f0a5, the shared real prerequisite has no new raw observer
+constructor/helper multiplicity: affected authority/debt controls PASS22 records,
+zero skips, with the debt baseline unchanged. The clean E2E-13/14 race aggregate
+is RED99.253s: initial E2E-13 SQLite harness.start times out after boot19/22,
+BEFORE predecessor connect or either new gate; PostgreSQL E2E-13 and BOTH E2E-14
+leaves pass. No pre-cancel stack was retained. This distinct startup failure
+stays recorded under2353/PR6093083923, not called inherited, fixed or erased by
+later passes. Reviewer-G6093102780 independently passes both roots normally
+and under race, permits focused qualification to proceed without a tier cycle,
+and requires a matched-base diagnosis if initial startup recurs in hosted CI.
+
+The additional causal challenge6093010549 PASSES in an owned disposable a6c
+checkout with the SAME existing provider apply barrier as the old-head RED.
+At the first actual missing sent-receipt read, BOTH stores show exact native
+attempt launched, setting planned/no readback, one registration/confirmation,
+and credential barrier NOT armed. Releasing the held provider write then
+permits the exact receipt and public native qualification to complete; BEFORE
+arm the SAME operation is settled and SAME setting installed/readback valid.
+At the actual credential crash the predecessor remains settled, not uncertain.
+The complete E2E-13 root passes under race: SQLite14.35s, PostgreSQL9.85s,
+package25.243s, with the original15s recovery,3/3 effects and one-card assertions
+unchanged. Actual payloads are confirmation, the exact standing card, then
+confirmation; exactly one native write. No runtime defect is exposed by this
+controlled proof and no uncertainty clearing or automatic replay is added.
+
+This controlled diagnostic uses test-only observations and does NOT substitute
+for clean exact-head hosted execution. Raw JSON SHA256:
+36f0bda9ed0963a277c4d1c26c038a9b4a7b92b339f2a60f213a9c0626d60f85;
+diagnostic patch SHA256:
+a42fc96dd1f36c91a2006c1cddb82168ff512d50d7095fbedca998874f8e156e.
+The old-head delayed-provider RED37.521s and clean a6c startup RED remain failed
+evidence. Per6092846414/6093102780 LOCAL stays focused-only, unaffected1a43
+pressure/peer/census/structural proof carries, and affected guards run at the
+pushed head. No Local-Tier core claim, new server2 qualification, receipt waiver,
+deadline/assertion change, guard exception, baseline increase or new owner.
+Hosted exact-head full/900s soak success, final proof audit and review still
+precede merge;2535/2353/2394/2250 remain open.
