@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -830,6 +831,7 @@ func testContractFrontierConnectSource(t testing.TB, producerMode string) semant
 }
 
 func mustCompileContractFrontierBundle(bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
+	bundle.SourceArtifact = sourceartifactfixture.Artifact()
 	if root := bundle.FlowTree.Root; root != nil {
 		if bundle.FlowTree.ByID == nil {
 			bundle.FlowTree.ByID = make(map[string]*runtimecontracts.FlowContractView)
