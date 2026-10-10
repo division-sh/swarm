@@ -165,24 +165,6 @@ func (s *PipelineSQLiteOwner) ListActiveFlowInstanceDescriptors(ctx context.Cont
 	return scanExactActiveFlowInstanceDescriptors(rows, "sqlite active flow instance descriptor")
 }
 
-func exactScopePredicate(column string, postgres bool, first, count int) string {
-	var query strings.Builder
-	query.WriteString(column)
-	query.WriteString(" IN (")
-	for i := range count {
-		if i > 0 {
-			query.WriteByte(',')
-		}
-		if postgres {
-			fmt.Fprintf(&query, "$%d", first+i)
-		} else {
-			query.WriteByte('?')
-		}
-	}
-	query.WriteByte(')')
-	return query.String()
-}
-
 func scanExactActiveFlowInstanceDescriptors(rows *sql.Rows, label string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	defer rows.Close()
 	out := []runtimebus.ActiveFlowInstanceDescriptor{}
