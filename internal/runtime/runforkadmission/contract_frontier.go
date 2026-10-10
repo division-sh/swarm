@@ -72,6 +72,15 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 	incompleteRoutes := map[string]bool{}
 	for i := range frontier {
 		eventName := frontier[i].EventName
+		if publication, found := req.Plan.HistoricalArrivalPublication(frontier[i].SourceEventID); found {
+			recipient, err := admitPublishedArrivalFrontier(req.Source, req.Plan, publication)
+			if err != nil {
+				return runfork.RunForkContractFrontierAdmission{}, err
+			}
+			frontier[i].DerivedRecipients = []forkrecipient.Evidence{recipient}
+			frontier[i].WorkflowNodeSubscribers = []string{recipient.HandlerNode().Key()}
+			continue
+		}
 		runtimeOwners := make([]string, 0)
 		for _, owner := range req.Source.RuntimeEventOwners(eventName) {
 			runtimeOwners = append(runtimeOwners, owner.Key())

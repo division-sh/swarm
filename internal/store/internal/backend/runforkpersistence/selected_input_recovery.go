@@ -233,7 +233,13 @@ func validateSelectedForkPublishedInputPayload(event events.Event, sourceEvent r
 
 func validateSelectedForkPublishedInputFrame(binding runfork.RunForkSelectedContractBinding, lineage runfork.RunForkSelectedContractExecutionLineage, event events.Event, sourceEvent runfork.RunForkSelectedContractSourceEvent) error {
 	// Compare the two retained timestamps, never a fresh publication timestamp.
-	if !lineage.CreatedAt.Equal(event.CreatedAt()) || event.Producer().Type() != events.EventProducerPlatform || event.Producer().ID() != lineage.SelectionAuthority || event.TaskID() != "" || event.ParentEventID() != "" || event.ChainDepth() != 0 {
+	if !lineage.CreatedAt.Equal(event.CreatedAt()) {
+		return fmt.Errorf("selected input lineage changed its retained publication time")
+	}
+	if sourceEvent.PublishedArrival.Present() {
+		return sourceEvent.PublishedArrival.ValidateEvent(event, lineage.SelectionAuthority)
+	}
+	if event.Producer().Type() != events.EventProducerPlatform || event.Producer().ID() != lineage.SelectionAuthority || event.TaskID() != "" || event.ParentEventID() != "" || event.ChainDepth() != 0 {
 		return fmt.Errorf("selected input publication changed its original publication frame")
 	}
 	if original, present := sourceEvent.InputPublication.Event(); present && (original.RunID() != binding.SourceRunID || original.ID() != sourceEvent.SourceEventID || string(original.Type()) != sourceEvent.EventName || original.ExecutionMode() != sourceEvent.ExecutionMode) {

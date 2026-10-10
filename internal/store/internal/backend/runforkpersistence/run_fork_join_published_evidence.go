@@ -5,6 +5,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 // A source occurrence is read from its fixed cut, never from current timers or
@@ -36,4 +37,23 @@ func runForkPublishedArrivalEvidence(snapshot *runForkRevisionSnapshot, activati
 		return events.AdmittedEvent{}, err
 	}
 	return event, nil
+}
+
+func historicalArrivalPublications(snapshot *runForkRevisionSnapshot, arrivals []genericschedule.Activation) ([]runfork.PublishedArrival, error) {
+	var publications []runfork.PublishedArrival
+	for _, activation := range arrivals {
+		if activation.Status != genericschedule.StatusFired {
+			continue
+		}
+		admitted, err := runForkPublishedArrivalEvidence(snapshot, activation)
+		if err != nil {
+			return nil, err
+		}
+		publication, err := runfork.NewPublishedArrival(activation, admitted.Event())
+		if err != nil {
+			return nil, err
+		}
+		publications = append(publications, publication)
+	}
+	return publications, nil
 }

@@ -1,6 +1,7 @@
 package runforkexecution
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -336,6 +337,23 @@ type publishSelectedContractForkEventsRequest struct {
 
 func selectedContractForkEvent(sourceRunID, forkRunID, forkEventID string, sourceEvent runfork.RunForkSelectedContractSourceEvent, producerID string) (events.Event, error) {
 	var event events.Event
+	if sourceEvent.PublishedArrival.Present() {
+		original := sourceEvent.PublishedArrival.SourceEvent()
+		child := sourceEvent.PublishedArrival.ChildCommand()
+		if original.RunID() != sourceRunID || original.ID() != sourceEvent.SourceEventID || child.RunID != forkRunID ||
+			string(original.Type()) != sourceEvent.EventName || original.ExecutionMode() != sourceEvent.ExecutionMode ||
+			child.RoutingSource != sourceEvent.RoutingSource {
+			return event, fmt.Errorf("selected arrival contradicts its sealed source/child projection")
+		}
+		projected, err := sourceEvent.PublishedArrival.Event(forkEventID, producerID)
+		if err != nil {
+			return event, err
+		}
+		if !bytes.Equal(sourceEvent.Payload, projected.Payload()) {
+			return event, fmt.Errorf("selected arrival payload differs from its sealed projection")
+		}
+		return projected, nil
+	}
 	if len(sourceEvent.Payload) == 0 {
 		return event, fmt.Errorf("selected-contract source event %s has no admitted payload bytes", strings.TrimSpace(sourceEvent.SourceEventID))
 	}

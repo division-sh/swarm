@@ -21032,7 +21032,20 @@ run_model:
         acquire inherited provenance on reuse. Original absolute due and execution mode are retained. A canceled
         source arm records a canceled child disposition atomically at child birth, with its source admission and
         typed cut retained separately; no wakeup is installed by persistence. Generic live reads and fixed-cut
-        reconstruction share the typed origin decoder and reject partial or mismatched provenance. Arrival command
+        reconstruction retain already accepted arrival publications in a separate complete fixed-cut event census,
+        included in the preparation fingerprint. An already-published occurrence has no reconstructed child timer:
+        its original event, due coordinate and unfinished durable node-delivery binding are continued through the
+        existing selected-publication and delivery owners. The strict original declaration and handle kind are
+        retained while child task, stage-entry, entity and generation coordinates consume the canonical fork
+        correspondence. The generic producer and original event timestamp remain distinct from the selected
+        execution authority stamp. Original route context and payload projection are retained through the existing
+        construction-context projection; no new return destination or arm is inferred. Source publication evidence
+        and complete native inventory do not authorize execution or establish delivery settlement. Prepared-only
+        occurrence stamps cannot take this branch, and accepted source occurrences never enter ForkJoinRequest.
+        Current selected authority still gates publication, original event/lineage readback precedes duplicate
+        receiver preflight on successor recovery, and terminal completion requires the exact child delivery outcome.
+        Generic live reads and fixed-cut reconstruction share the typed origin decoder and reject partial or
+        mismatched provenance. Arrival command
         admission validates its typed stage-entry run, entity and instance path against its routed owner, not only
         self-consistent payload/hash fields. Staged activation and successor recovery require complete inherited
         arrival-schedule inventory through the canonical generic decoder in the exact native attempt. The inventory

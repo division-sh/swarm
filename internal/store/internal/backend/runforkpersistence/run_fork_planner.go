@@ -255,6 +255,14 @@ func planRunForkSnapshot(
 	}
 	evidence.TimerHistory.Point = plan.ForkPoint
 	plan.JoinSchedules = evidence.JoinSchedules
+	publications, err := historicalArrivalPublications(snapshot, plan.JoinSchedules)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
+	plan, err = plan.WithHistoricalArrivalPublications(snapshot.Revision, publications)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmission(evidence)
 	plan.RouteHistory = evidence.RouteHistory
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmissionWithMaterializedEntitySnapshotMetadata(plan.ReplayResumeAdmission, entitySnapshotMetadataAdmission)

@@ -162,6 +162,7 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 		Plan          RunForkPlan
 		History       []string
 		Inputs        []InputPublicationCoordinates
+		Arrivals      []InputPublicationCoordinates
 		FirstTurn     *InputPublicationCoordinates
 		Replies       []replycontext.Record
 		Timers        []timerobligation.WorkflowTimerActivationRecord
@@ -169,7 +170,7 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 		Frontier      RunForkContractFrontierAdmission
 		Recipients    RunForkSelectedContractRecipientPlanning
 		Declarations  string
-	}{plan, history, plan.HistoricalInputCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, frontier, planning, declarationRevision})
+	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalArrivalCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, frontier, planning, declarationRevision})
 	if err != nil {
 		return "", err
 	}

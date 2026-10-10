@@ -33,6 +33,18 @@ func prepareRunForkArrivalJoinRequests(plan runfork.RunForkPlan, childRunID stri
 	}
 	requests := make([]storegenericschedule.ForkJoinRequest, 0, len(projected))
 	for _, row := range projected {
+		if row.source.Status == genericschedule.StatusFired {
+			publication, found := plan.HistoricalArrivalPublication(row.source.CurrentEventID)
+			if !found {
+				return nil, fmt.Errorf("published arrival requires its fixed-cut historical publication")
+			}
+			if _, err := row.source.ValidatePublishedOccurrence(publication.Event()); err != nil {
+				return nil, err
+			}
+			// Its event and existing delivery are continued by selected publication;
+			// there is deliberately no child schedule to rearm or claim.
+			continue
+		}
 		request := storegenericschedule.ForkJoinRequest{
 			Source: row.source, Child: row.command, BornAt: bornAt,
 			PointKind: forkpoint.Kind(plan.ForkPoint.Kind), PointRevision: plan.ForkPoint.Revision, PointEventID: plan.ForkPoint.EventID,

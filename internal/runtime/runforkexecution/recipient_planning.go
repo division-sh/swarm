@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -301,6 +302,7 @@ type selectedContractRecipientPlanPublishGuard struct {
 	plansBySourceEvent map[string]runfork.RunForkSelectedContractRecipientPlanEvent
 	sourceByForkEvent  map[string]string
 	sourceAgents       map[string]struct{}
+	publishedArrivals  map[string]events.DeliveryRoute
 	semanticSource     semanticview.Source
 	workflowProjection selectedContractWorkflowProjection
 }
@@ -346,9 +348,22 @@ func newSelectedContractRecipientPlanPublishGuard(planning runfork.RunForkSelect
 		plansBySourceEvent: plans,
 		sourceByForkEvent:  map[string]string{},
 		sourceAgents:       allowedAgents,
+		publishedArrivals:  map[string]events.DeliveryRoute{},
 		semanticSource:     source,
 		workflowProjection: projection,
 	}, nil
+}
+
+func (g *selectedContractRecipientPlanPublishGuard) ExpectPublishedArrivalDelivery(event events.Event, route events.DeliveryRoute) error {
+	_, expected, err := g.expectedRecipientPlanEvent(event)
+	if err != nil {
+		return err
+	}
+	if _, found, err := selectedPublishedArrivalDeliveryRoute(g.semanticSource, event, expected.Recipients, route); err != nil || !found {
+		return fmt.Errorf("retain published arrival delivery: found=%v: %w", found, err)
+	}
+	g.publishedArrivals[event.ID()] = route.Normalized()
+	return nil
 }
 
 func (g *selectedContractRecipientPlanPublishGuard) ExpectForkEvent(forkEventID, sourceEventID string) {
@@ -478,7 +493,35 @@ func (g *selectedContractRecipientPlanPublishGuard) MaterializeNodeDeliveryRoute
 	if err != nil {
 		return nil, err
 	}
+	if route, found, err := selectedPublishedArrivalDeliveryRoute(g.semanticSource, evt, expected.Recipients, g.publishedArrivals[evt.ID()]); found || err != nil {
+		if err != nil {
+			return nil, err
+		}
+		return []runtimebus.DeliveryRouteBlueprint{route}, nil
+	}
 	return selectedContractNodeDeliveryRoutes(g.semanticSource, expected.EventName, expected.Recipients)
+}
+
+func selectedPublishedArrivalDeliveryRoute(source semanticview.Source, event events.Event, selected []forkrecipient.Evidence, original events.DeliveryRoute) (runtimebus.DeliveryRouteBlueprint, bool, error) {
+	recipient, target, handler, found, err := runtimepipeline.ResolveWorkflowJoinOccurrenceDeliveryTarget(source, event)
+	if err != nil || !found {
+		return runtimebus.DeliveryRouteBlueprint{}, found, err
+	}
+	handlerEvent, exact := handler.EventOverride()
+	if !exact || len(selected) != 1 || selected[0].Recipient != recipient || !selected[0].HandlerNode().Equal(handler.Node()) ||
+		selected[0].HandlerEvent() != handlerEvent || selected[0].Path != target.FlowInstance {
+		return runtimebus.DeliveryRouteBlueprint{}, true, fmt.Errorf("retained arrival route differs from its exact selected binding")
+	}
+	if _, _, connected := selected[0].Connect(); connected {
+		return runtimebus.DeliveryRouteBlueprint{}, true, fmt.Errorf("retained arrival cannot acquire a new connect binding")
+	}
+	if _, err := original.Identity(); err != nil || original.Recipient != recipient || !original.Target.ExistingEntity() ||
+		!events.SameRouteIdentity(original.Target.Route(), target) || !original.ConnectClaim.Empty() ||
+		!original.Initialization.Empty() || !original.AgentIdentity.IsZero() {
+		return runtimebus.DeliveryRouteBlueprint{}, true, fmt.Errorf("retained arrival lost its projected original delivery")
+	}
+	return runtimebus.DeliveryRouteBlueprint{Recipient: recipient, Target: target, Handler: handler,
+		Context: original.Context, PayloadProjection: original.PayloadProjection}, true, nil
 }
 
 func (g *selectedContractRecipientPlanPublishGuard) authorizesEvent(event events.Event) bool {
@@ -488,7 +531,16 @@ func (g *selectedContractRecipientPlanPublishGuard) authorizesEvent(event events
 	if event.AdmissionClass() != events.EventAdmissionSelectedForkReplay || event.ProducerType() != events.EventProducerPlatform {
 		return false
 	}
-	_, ok := g.sourceAgents[event.Producer().ID()]
+	if _, ok := g.sourceAgents[event.Producer().ID()]; ok {
+		return true
+	}
+	// A retained occurrence keeps its generic producer. Its selected lineage
+	// still names the exact execution owner; the producer is not that authority.
+	lineage, selected := event.SelectedForkLineage()
+	if !selected || event.Producer().ID() != genericschedule.OccurrenceProducerID() {
+		return false
+	}
+	_, ok := g.sourceAgents[lineage.AuthorityStamp()]
 	return ok
 }
 
@@ -500,6 +552,9 @@ func (g *selectedContractRecipientPlanPublishGuard) expectedRecipientPlanEvent(e
 	sourceEventID := strings.TrimSpace(g.sourceByForkEvent[forkEventID])
 	if sourceEventID == "" {
 		return "", runfork.RunForkSelectedContractRecipientPlanEvent{}, fmt.Errorf("selected-contract publish path missing %s evidence for fork event %s", runfork.RunForkSelectedContractRecipientPlanningOwner, forkEventID)
+	}
+	if lineage, selected := evt.SelectedForkLineage(); selected && lineage.SourceEventID() != sourceEventID {
+		return "", runfork.RunForkSelectedContractRecipientPlanEvent{}, fmt.Errorf("selected publish lineage disagrees with its exact source event")
 	}
 	expected, ok := g.plansBySourceEvent[sourceEventID]
 	if !ok {
