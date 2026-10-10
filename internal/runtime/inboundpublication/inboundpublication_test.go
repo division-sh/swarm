@@ -1,6 +1,7 @@
 package inboundpublication
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -14,6 +15,33 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
+
+func TestRequestCanonicalBytesRetainOriginalPublicationEvidence(t *testing.T) {
+	request := evidenceProofRequest(t)
+	request.ExpectedPublicationSequence = 7
+	request.OriginalTransportMetadata = json.RawMessage(`{"second":2,"first":1}`)
+	original, err := request.CanonicalBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Request
+	if err := json.Unmarshal(original, &decoded); err != nil || decoded.ExpectedPublicationSequence != 7 {
+		t.Fatal("request encoding changed its original occurrence", err)
+	}
+	decoded.OriginalTransportMetadata = json.RawMessage(`{ "first": 1, "second": 2 }`)
+	canonical, err := decoded.CanonicalBytes()
+	if err != nil || !bytes.Equal(canonical, original) {
+		t.Fatal("equivalent metadata changed canonical request evidence", err)
+	}
+	decoded.ExpectedPublicationSequence++
+	changed, err := decoded.CanonicalBytes()
+	if err != nil || bytes.Equal(changed, original) {
+		t.Fatal("request encoding dropped its original sequence", err)
+	}
+	if got := (CommitCommand{Request: request}).PublicationSequence(); got != 7 {
+		t.Fatalf("webhook request lost its existing exact fence: %d", got)
+	}
+}
 
 func TestEventIntegrityFingerprintIncludesExactProducerAndClassAuthority(t *testing.T) {
 	eventID := uuid.NewString()

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"github.com/google/uuid"
 )
 
@@ -68,5 +69,22 @@ func TestProviderAuthorityDistinguishesRealCredentialsAndSessionAccounts(t *test
 				t.Fatal("contradictory provider authority was admitted")
 			}
 		})
+	}
+}
+
+type inventedSessionObserver struct{}
+
+func (inventedSessionObserver) CurrentValueMatchesSeal(context.Context, runtimecredentials.ValueEvidence) (bool, error) {
+	return true, nil
+}
+func (inventedSessionObserver) AdmitSessionAccount(context.Context, SessionAccountAdmission) (authority.Admission, error) {
+	return authority.Admission{}, nil
+}
+
+func TestProviderAuthorityRefusesFabricatedSessionObservation(t *testing.T) {
+	retained := ProviderAuthority{Kind: ProviderAuthoritySession, Session: SessionAccountAdmission{Provider: "whatsapp", ConnectionID: uuid.NewString(),
+		AccountRef: "invented@s.whatsapp.net", AdmissionID: uuid.NewString(), Revision: 1}}
+	if current, err := retained.Current(context.Background(), inventedSessionObserver{}); current || err == nil {
+		t.Fatal("caller observation minted native execution authority", err)
 	}
 }
