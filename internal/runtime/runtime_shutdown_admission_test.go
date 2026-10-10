@@ -1022,6 +1022,83 @@ func TestRuntimeShutdownPreservesLateCompletionCommitDiagnostic(t *testing.T) {
 	}
 }
 
+func TestRuntimeShutdownReportsEarlyCompletionCommitDiagnosticOnce(t *testing.T) {
+	diagnostic := errors.New("acknowledged completion cleanup before retirement")
+	store := &runtimeShutdownLateCommitCompletionStore{
+		runtimeShutdownCompletionStore: runtimeShutdownCompletionStore{
+			started: make(chan struct{}), release: make(chan struct{}),
+		},
+		diagnostic: diagnostic,
+	}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(store.release) }) }
+	defer release()
+	occurrence := runtimeTestOccurrence(t, runtimeTestBundleHash)
+	if baseline := occurrence.ActiveCount(); baseline != 0 {
+		t.Fatalf("runtime occurrence baseline = %d, want zero", baseline)
+	}
+	executor, err := runtimerunlifecycle.NewExecutor(
+		store,
+		runtimerunlifecycle.CandidateScope{BundleHash: runtimeTestBundleHash},
+		runtimerunlifecycle.FinalCatalog{},
+		occurrence,
+		runtimerunlifecycle.ExecutorOptions{},
+	)
+	if err != nil {
+		t.Fatalf("create run lifecycle executor: %v", err)
+	}
+	t.Cleanup(func() {
+		release()
+		_ = executor.Retire(context.Background())
+		_ = executor.Wait(context.Background())
+	})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start run lifecycle executor: %v", err)
+	}
+	candidate := runtimerunlifecycle.Candidate{
+		RunID:      "11111111-1111-4111-8111-111111111111",
+		BundleHash: runtimeTestBundleHash,
+		Revision:   1,
+		DueAt:      runtimerunlifecycle.CanonicalTimestamp(time.Now().UTC().Add(-time.Second)),
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit completion candidate: %v", err)
+	}
+	select {
+	case <-store.started:
+	case <-time.After(time.Second):
+		t.Fatal("completion persistence did not start")
+	}
+	release()
+	// The committed terminal wakeup follows diagnostic recording, so Retire
+	// will observe the same error that the final Wait must report exactly once.
+	select {
+	case <-executor.CompletionWakeups():
+	case <-time.After(time.Second):
+		t.Fatal("acknowledged terminal completion did not wake its consumer")
+	}
+	rt := &Runtime{workOccurrence: occurrence, runLifecycleExecutor: executor}
+	err = rt.Shutdown()
+	if !errors.Is(err, diagnostic) {
+		t.Fatalf("shutdown lost the early acknowledged commit diagnostic: %v", err)
+	}
+	if strings.Contains(err.Error(), "retirement timed out") {
+		t.Fatalf("shutdown misclassified the early diagnostic as a retirement timeout: %v", err)
+	}
+	if count := strings.Count(err.Error(), diagnostic.Error()); count != 1 {
+		t.Fatalf("shutdown reported the acknowledged commit diagnostic %d times, want once: %v", count, err)
+	}
+	if got := store.executions.Load(); got != 1 {
+		t.Fatalf("completion executed %d times, want one acknowledged commit", got)
+	}
+	if active := executor.ActiveCandidates(); active != 0 {
+		t.Fatalf("shutdown retained %d completion candidates", active)
+	}
+	if active := occurrence.ActiveCount(); active != 0 {
+		t.Fatalf("shutdown occurrence leases = %d, want zero", active)
+	}
+}
+
 func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
 	publicationStore := &cancellationBlockingInboundStore{
