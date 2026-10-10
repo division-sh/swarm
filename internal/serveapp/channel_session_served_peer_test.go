@@ -26,23 +26,25 @@ import (
 // Only the external TLS/Noise peer is replaced. RunServe constructs the real
 // SDK, selected persistence, capture, identity and target owners.
 type serveNativeProtocolPeer struct {
-	t            *testing.T
-	ctx          context.Context
-	account      types.JID
-	lid          types.JID
-	mu           sync.Mutex
-	wire         *whatsappfixture.Transport
-	registration *waWa6.ClientPayload_DevicePairingRegistrationData
-	prekeys      []waBinary.Node
-	connections  int
-	disconnected int
-	paired       chan struct{}
-	pairOnce     sync.Once
-	receipts     chan waBinary.Node
-	sender       *whatsappfixture.SignalSender
-	from         types.JID
-	fromLID      types.JID
-	sent         chan servedNativeMessage
+	t             *testing.T
+	ctx           context.Context
+	account       types.JID
+	lid           types.JID
+	mu            sync.Mutex
+	wire          *whatsappfixture.Transport
+	registration  *waWa6.ClientPayload_DevicePairingRegistrationData
+	prekeys       []waBinary.Node
+	prekeyUploads int
+	postLogins    int
+	connections   int
+	disconnected  int
+	paired        chan struct{}
+	pairOnce      sync.Once
+	receipts      chan waBinary.Node
+	sender        *whatsappfixture.SignalSender
+	from          types.JID
+	fromLID       types.JID
+	sent          chan servedNativeMessage
 }
 
 type servedNativeMessage struct {
@@ -202,6 +204,7 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 			if len(keys) != 0 {
 				p.mu.Lock()
 				p.prekeys = keys
+				p.prekeyUploads++
 				p.mu.Unlock()
 			}
 		}
@@ -247,7 +250,30 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 			}
 			return
 		}
+		if node.Attrs["xmlns"] == "passive" && node.Attrs["type"] == "set" {
+			if _, active := node.GetOptionalChildByTag("active"); active {
+				p.mu.Lock()
+				p.postLogins++
+				p.mu.Unlock()
+			}
+		}
 	}
+}
+
+func (p *serveNativeProtocolPeer) awaitPostLogin() (int, int) {
+	p.t.Helper()
+	deadline := time.Now().Add(serveRuntimeReadyTimeout)
+	for time.Now().Before(deadline) {
+		p.mu.Lock()
+		connected, uploads, completed := p.connections, p.prekeyUploads, p.postLogins
+		p.mu.Unlock()
+		if completed == connected && connected > 0 && uploads > 0 {
+			return completed, uploads
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	p.t.Fatal("SDK did not complete its genuine prekey upload/post-login before the planned restart")
+	return 0, 0
 }
 
 func (p *serveNativeProtocolPeer) success(wire *whatsappfixture.Transport) error {
