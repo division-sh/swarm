@@ -327,10 +327,6 @@ func (s *PostgresStore) CreateRun(ctx context.Context, request runlifecycle.Crea
 	return s.runLifecyclePostgresOwner.CreateRun(ctx, request)
 }
 
-func (s *PostgresStore) DeleteFlowInstanceRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) error {
-	return s.pipelinePostgresOwner.DeleteFlowInstanceRoute(ctx, identity)
-}
-
 func (s *PostgresStore) DeleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (runfork.ConversationForkDeleteResult, error) {
 	return s.runForkPostgresOwner.DeleteOperatorConversationFork(ctx, forkID, now)
 }
@@ -569,10 +565,6 @@ func (s *PostgresStore) ListEventDeliveryRoutes(ctx context.Context, eventID str
 
 func (s *PostgresStore) ListFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.RunScopedFlowInstance) ([]bus.FlowInstanceRouteRecord, error) {
 	return s.pipelinePostgresOwner.ListFlowInstanceRouteRecords(ctx, identity)
-}
-
-func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]flowidentity.RunScopedFlowInstance, error) {
-	return s.pipelinePostgresOwner.ListFlowInstanceRoutes(ctx)
 }
 
 func (s *PostgresStore) ListFlowInstances(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error) {
@@ -1111,10 +1103,6 @@ func (s *PostgresStore) RequirePresentRunSource(ctx context.Context, runID strin
 	return s.runLifecyclePostgresOwner.RequirePresentRunSource(ctx, runID)
 }
 
-func (s *PostgresStore) RequirePublicationRunActive(ctx context.Context, runID string) error {
-	return s.runLifecyclePostgresOwner.RequirePublicationRunActive(ctx, runID)
-}
-
 func (s *PostgresStore) RequireRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractBinding, error) {
 	return s.runForkPostgresOwner.RequireRunForkSelectedContractBinding(ctx, forkRunID)
 }
@@ -1313,10 +1301,6 @@ func (s *PostgresStore) UpdateLiveSessionWatchdog(ctx context.Context, lease *se
 
 func (s *PostgresStore) UpsertConversation(ctx context.Context, lease *sessions.Lease, rec llm.ConversationRecord) error {
 	return s.lLMPostgresOwner.UpsertConversation(ctx, lease, rec)
-}
-
-func (s *PostgresStore) UpsertFlowInstanceRoute(ctx context.Context, route bus.FlowInstanceRouteRecord) error {
-	return s.pipelinePostgresOwner.UpsertFlowInstanceRoute(ctx, route)
 }
 
 func (s *PostgresStore) ValidateInboundPublicationIntegrity(ctx context.Context) error {
@@ -1599,10 +1583,6 @@ func (s *SQLiteRuntimeStore) CreateRun(ctx context.Context, request runlifecycle
 	return s.runLifecycleSQLiteOwner.CreateRun(ctx, request)
 }
 
-func (s *SQLiteRuntimeStore) DeleteFlowInstanceRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) error {
-	return s.pipelineSQLiteOwner.DeleteFlowInstanceRoute(ctx, identity)
-}
-
 func (s *SQLiteRuntimeStore) DeleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (runfork.ConversationForkDeleteResult, error) {
 	return s.runForkSQLiteOwner.DeleteOperatorConversationFork(ctx, forkID, now)
 }
@@ -1837,10 +1817,6 @@ func (s *SQLiteRuntimeStore) ListDurableAgentLifecycleStates(ctx context.Context
 
 func (s *SQLiteRuntimeStore) ListFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.RunScopedFlowInstance) ([]bus.FlowInstanceRouteRecord, error) {
 	return s.pipelineSQLiteOwner.ListFlowInstanceRouteRecords(ctx, identity)
-}
-
-func (s *SQLiteRuntimeStore) ListFlowInstanceRoutes(ctx context.Context) ([]flowidentity.RunScopedFlowInstance, error) {
-	return s.pipelineSQLiteOwner.ListFlowInstanceRoutes(ctx)
 }
 
 func (s *SQLiteRuntimeStore) ListFlowInstances(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error) {
@@ -2363,10 +2339,6 @@ func (s *SQLiteRuntimeStore) RequirePresentRunSource(ctx context.Context, runID 
 	return s.runLifecycleSQLiteOwner.RequirePresentRunSource(ctx, runID)
 }
 
-func (s *SQLiteRuntimeStore) RequirePublicationRunActive(ctx context.Context, runID string) error {
-	return s.runLifecycleSQLiteOwner.RequirePublicationRunActive(ctx, runID)
-}
-
 func (s *SQLiteRuntimeStore) RequireRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractBinding, error) {
 	return s.runForkSQLiteOwner.RequireRunForkSelectedContractBinding(ctx, forkRunID)
 }
@@ -2565,10 +2537,6 @@ func (s *SQLiteRuntimeStore) UpdateLiveSessionWatchdog(ctx context.Context, leas
 
 func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, lease *sessions.Lease, rec llm.ConversationRecord) error {
 	return s.lLMSQLiteOwner.UpsertConversation(ctx, lease, rec)
-}
-
-func (s *SQLiteRuntimeStore) UpsertFlowInstanceRoute(ctx context.Context, route bus.FlowInstanceRouteRecord) error {
-	return s.pipelineSQLiteOwner.UpsertFlowInstanceRoute(ctx, route)
 }
 
 func (s *SQLiteRuntimeStore) ValidateInboundPublicationIntegrity(ctx context.Context) error {

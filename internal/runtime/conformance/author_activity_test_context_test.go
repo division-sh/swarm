@@ -298,7 +298,6 @@ type conformanceDurableEventBusStore interface {
 	decisioncard.HumanTaskStore
 	runtimepipeline.DecisionCardDraftExpiry
 	runtimepipeline.HumanTaskExpiry
-	runtimebus.FlowInstanceRoutePersistence
 	runtimebus.FlowInstanceRouteRecordReader
 	runtimebus.FlowInstanceRouteTopologyPersistence
 	runtimebus.ActiveAgentDescriptorLister

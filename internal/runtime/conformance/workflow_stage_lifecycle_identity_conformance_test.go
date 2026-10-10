@@ -38,7 +38,7 @@ import (
 type stageLifecycleIdentityStore interface {
 	decisioncard.Store
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
-	ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error)
+	runtimepipeline.FlowInstanceIndexReader
 	ListWorkflowTimerActivations(context.Context, string, string, bool) ([]runtimepipeline.WorkflowTimerActivation, error)
 	Snapshot(context.Context, string) (runtimedelivery.Snapshot, error)
 }
@@ -142,7 +142,7 @@ func TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends(t
 			if err := runtime.Bus.PublishAcknowledged(runCtx, setupEvent); err != nil {
 				t.Fatalf("publish keyed scout setup: %v", err)
 			}
-			activation, initial, flowIdentity := discoverStageLifecycleIdentityActivation(t, runCtx, lifecycleStore, publications.publication(setupEventID), runID, batchID)
+			activation, initial, flowIdentity := discoverStageLifecycleIdentityActivation(t, runCtx, lifecycleStore, module.source, publications.publication(setupEventID), runID, batchID)
 			assertStageLifecycleEntryIdentity(t, initial, flowIdentity, "construction", "", "")
 			if initial.CurrentState != "collecting" || initial.Status != "active" {
 				t.Fatalf("committed construction = %#v, want initial collecting/active", initial)
@@ -169,7 +169,7 @@ func TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends(t
 			startStageLifecycleIdentityRuntime(t, runtime)
 			runtimeCtx = testAuthorActivityContextForBundle(context.Background(), runtime.Options.SourceArtifactFact)
 			runCtx = runtimecorrelation.WithRunID(runtimeCtx, runID)
-			assertStageLifecyclePersistedRoute(t, runCtx, lifecycleStore, flowIdentity)
+			assertStageLifecycleIndexedConstruction(t, runCtx, lifecycleStore, module.source, flowIdentity)
 			if deliveryID := assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, db, setupEventID, activation); deliveryID != setupDeliveryID {
 				t.Fatal("restart replaced the admitted setup delivery")
 			}
@@ -444,7 +444,7 @@ func stageLifecycleIdentitySQLiteDeps(deps runtimepkg.RuntimeDeps, selected *sto
 	return deps
 }
 
-func discoverStageLifecycleIdentityActivation(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, observed stageLifecycleIdentityPublication, runID, batchID string) (stageLifecycleIdentityActivation, runtimepipeline.WorkflowInstance, runtimeflowidentity.RunScopedFlowInstance) {
+func discoverStageLifecycleIdentityActivation(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, source semanticview.Source, observed stageLifecycleIdentityPublication, runID, batchID string) (stageLifecycleIdentityActivation, runtimepipeline.WorkflowInstance, runtimeflowidentity.RunScopedFlowInstance) {
 	t.Helper()
 	publication := observed.committed
 	if observed.err != nil || len(observed.initial) != 2 {
@@ -487,7 +487,7 @@ func discoverStageLifecycleIdentityActivation(t *testing.T, ctx context.Context,
 	if _, err := uuid.Parse(activation.EntityID); err != nil {
 		t.Fatalf("keyed entity_id %q is not canonical: %v", activation.EntityID, err)
 	}
-	assertStageLifecyclePersistedRoute(t, ctx, selected, owner)
+	assertStageLifecycleIndexedConstruction(t, ctx, selected, source, owner)
 	var initial runtimepipeline.WorkflowInstance
 	for _, instance := range observed.initial {
 		if instance.WorkflowName == "scout" {
@@ -502,20 +502,22 @@ func discoverStageLifecycleIdentityActivation(t *testing.T, ctx context.Context,
 	return activation, initial, owner
 }
 
-func assertStageLifecyclePersistedRoute(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, want runtimeflowidentity.RunScopedFlowInstance) {
+func assertStageLifecycleIndexedConstruction(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, source semanticview.Source, want runtimeflowidentity.RunScopedFlowInstance) {
 	t.Helper()
-	routes, err := selected.ListFlowInstanceRoutes(ctx)
+	request, err := runtimepipeline.NewFlowInstanceLookupScope(source, conformanceSourceArtifactFact(t, source), want.RunID, []string{"scout"}, nil)
 	if err != nil {
-		t.Fatalf("discover persisted lifecycle routes: %v", err)
+		t.Fatal(err)
 	}
-	var scouts []runtimeflowidentity.RunScopedFlowInstance
-	for _, route := range routes {
-		if route.RunID == want.RunID && route.Route.ScopeKey == "scout" {
-			scouts = append(scouts, route)
-		}
+	instances, err := selected.ListFlowInstances(ctx, request)
+	if err != nil || len(instances) != 1 || instances[0].Owner() != want {
+		t.Fatalf("indexed scout constructions = %+v err=%v, want exact %v", instances, err, want)
 	}
-	if len(scouts) != 1 || scouts[0] != want {
-		t.Fatalf("persisted scout routes = %#v, want exact %v", scouts, want)
+	exact, err := runtimepipeline.NewExactFlowInstanceLookup(source, request.SourceFact(), want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := instances[0].ValidateSelection(exact); err != nil {
+		t.Fatal(err)
 	}
 }
 

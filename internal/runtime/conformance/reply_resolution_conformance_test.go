@@ -23,6 +23,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -580,7 +581,7 @@ func TestReplyResolutionConformance_TypedHumanTaskPreservesReplyAuthorityAcrossR
 
 			// Rebuild the bus and coordinator before any operator outcome. No
 			// process-local request state may be needed to resume the requester.
-			resumedBus, outcomes := newDurableReplyHumanTaskRuntime(t, ctx, backend, source)
+			resumedBus, outcomes, _ := newDurableReplyHumanTaskRuntime(t, ctx, backend, source)
 			persistedCard, err := cards.GetDecisionCard(ctx, card.CardID)
 			if err != nil {
 				t.Fatalf("reload typed human-task card: %v", err)
@@ -678,7 +679,7 @@ func proveTypedHumanTaskStaleOrigin(t *testing.T, ctx context.Context, backend d
 	card := createReplyConformanceHumanTask(t, ctx, cards, runID, requestID, deliveryContext, "stale")
 	waitReplyConformanceBus(t, ctx, requestBus)
 
-	resumedBus, outcomes := newDurableReplyHumanTaskRuntime(t, ctx, backend, source)
+	resumedBus, outcomes, coordinator := newDurableReplyHumanTaskRuntime(t, ctx, backend, source)
 	decisionAt := time.Now().UTC()
 	decisionEventID := uuid.NewString()
 	decided, err := storetest.DecisionCardDomain(cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
@@ -695,13 +696,14 @@ func proveTypedHumanTaskStaleOrigin(t *testing.T, ctx context.Context, backend d
 	if got := approvedOutcome.DeliveryContext().ReplyContextID(); got != deliveryContext.ReplyContextID() {
 		t.Fatalf("stale-origin approved reply context = %q, want %q", got, deliveryContext.ReplyContextID())
 	}
-	if err := resumedBus.RouteTable().RemoveFlowInstanceRoute(runtimeflowidentity.RunScopedFlowInstance{
+	owner := runtimeflowidentity.RunScopedFlowInstance{
 		RunID: runID,
 		Route: runtimeflowidentity.StoredRoute(
 			templatereply.RequesterFlowID, "account-a", templatereply.RequesterFlowID+"/account-a",
 		),
-	}); err != nil {
-		t.Fatalf("remove stale requester route: %v", err)
+	}
+	if err := coordinator.MarkTerminated(ctx, owner, runtimeidentity.NormalizeEntityID(runtimeflowidentity.EntityID(owner.Route.InstancePath)), time.Now().UTC()); err != nil {
+		t.Fatalf("terminate stale requester through its lifecycle owner: %v", err)
 	}
 
 	replyID := uuid.NewString()
@@ -782,7 +784,7 @@ func createReplyConformanceHumanTask(t *testing.T, ctx context.Context, cards re
 	return card
 }
 
-func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, source semanticview.Source) (*bus.EventBus, <-chan *bus.LocalDelivery) {
+func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, source semanticview.Source) (*bus.EventBus, <-chan *bus.LocalDelivery, *runtimepipeline.PipelineCoordinator) {
 	t.Helper()
 	cards, ok := backend.(replyHumanTaskConformanceStore)
 	if !ok {
@@ -840,7 +842,7 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 		t.Fatalf("admit provider human-task outcome subscriptions: %v", err)
 	}
 	outcomes := runtimebustest.SubscribeIdentity(t, eb, requesterIdentity, admission)
-	return eb, outcomes
+	return eb, outcomes, coordinator
 }
 
 func replyConformanceCardLifecycleEvent(t *testing.T, card decisioncard.Card, eventID, eventType string, at time.Time) events.Event {
@@ -910,35 +912,22 @@ func newDurableReplyConformanceBus(t *testing.T, ctx context.Context, backend du
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	persisted, err := backend.ListFlowInstanceRoutes(ctx)
-	if err != nil {
-		t.Fatalf("ListFlowInstanceRoutes: %v", err)
-	}
-	persistedByPath := make(map[string]struct{}, len(persisted))
-	for _, route := range persisted {
-		persistedByPath[route.Key()] = struct{}{}
-	}
 	runID := runtimecorrelation.RunIDFromContext(ctx)
 	for _, accountID := range []string{"account-a", "account-b"} {
-		req := bus.FlowInstanceRouteMaterializationRequest{
-			Identity: runtimeflowidentity.RunScopedFlowInstance{
-				RunID: runID,
-				Route: runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, accountID, templatereply.RequesterFlowID+"/"+accountID),
-			},
-			ActivationVariables: map[string]string{"account_id": accountID},
+		owner := runtimeflowidentity.RunScopedFlowInstance{
+			RunID: runID,
+			Route: runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, accountID, templatereply.RequesterFlowID+"/"+accountID),
 		}
-		evidence, err := backend.LoadFlowConstructionPublication(ctx, req.Identity, runtimeflowidentity.EntityID(req.Identity.Route.InstancePath))
+		request, err := runtimepipeline.NewExactFlowInstanceLookup(source, conformanceSourceArtifactFact(t, source), owner)
 		if err != nil {
-			t.Fatalf("read exact requester construction: %v", err)
+			t.Fatal(err)
 		}
-		req.Instance = evidence.Identity
-		if _, exists := persistedByPath[req.Identity.Key()]; exists {
-			err = flowroutefixture.Publish(eb, req)
-		} else {
-			err = flowroutefixture.StageAndPublish(ctx, eb, req)
+		observed, found, err := backend.LookupFlowInstance(ctx, request)
+		if err != nil || !found || observed.Identity().EntityID != runtimeflowidentity.EntityID(owner.Route.InstancePath) {
+			t.Fatalf("read exact requester construction %s: found=%t observed=%+v err=%v", accountID, found, observed, err)
 		}
-		if err != nil {
-			t.Fatalf("materialize requester route %s: %v", accountID, err)
+		if err := observed.ValidateSelection(request); err != nil {
+			t.Fatal(err)
 		}
 	}
 	return eb

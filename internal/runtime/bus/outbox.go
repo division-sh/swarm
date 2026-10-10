@@ -520,8 +520,8 @@ func (eb *EventBus) takeMatchingPendingOutboxOperation(event events.Event) (pend
 // existing persisted-obligation recovery path can classify it (including an
 // already-terminal no-op). This never grants generic publication permission.
 func (eb *EventBus) requireCommittedInheritedFanOut(ctx context.Context, event events.Event) error {
-	reader, ok := eb.store.(PreparedPublishEventReader)
-	if !ok {
+	reader := eb.durable.PreparedEvents
+	if reader == nil {
 		return fmt.Errorf("inherited fan-out dispatch requires canonical committed-event readback")
 	}
 	prepared, found, err := loadValidatedPreparedPublishEvent(ctx, reader, event.ID())

@@ -18,10 +18,11 @@ import (
 
 type publicationRunPreflightTestStore struct {
 	InMemoryEventStore
+	runlifecycle.OperationOwner
 	fault error
 }
 
-func (s *publicationRunPreflightTestStore) RequirePublicationRunActive(ctx context.Context, _ string) error {
+func (s *publicationRunPreflightTestStore) RequireActiveRun(ctx context.Context, _ string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -66,7 +67,8 @@ func TestPublicationRunProposalRequiresExactIsolatedNativeAbsence(t *testing.T) 
 		{"joined cancellation", true, errors.Join(missing, context.Canceled), false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			bus := &EventBus{store: &publicationRunPreflightTestStore{fault: test.fault}}
+			owner := &publicationRunPreflightTestStore{fault: test.fault}
+			bus := &EventBus{store: &InMemoryEventStore{}, durable: DurableDependencies{RunLifecycle: owner}}
 			proposed, err := bus.requireExistingRunActive(context.Background(), admitRunProposalEvent(t, test.creating))
 			if proposed != test.proposed {
 				t.Fatalf("proposal = %t, want %t; error = %v", proposed, test.proposed, err)
@@ -86,7 +88,7 @@ func TestPublicationRunProposalRequiresExactIsolatedNativeAbsence(t *testing.T) 
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if proposed, err := (&EventBus{store: &publicationRunPreflightTestStore{}}).requireExistingRunActive(ctx, admitted); proposed || !errors.Is(err, context.Canceled) {
+	if proposed, err := (&EventBus{store: &InMemoryEventStore{}, durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{}}}).requireExistingRunActive(ctx, admitted); proposed || !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation became a proposal: %t %v", proposed, err)
 	}
 }

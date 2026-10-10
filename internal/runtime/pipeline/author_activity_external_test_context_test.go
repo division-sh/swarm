@@ -112,7 +112,6 @@ type scopedTestDurableStore interface {
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
-	runtimebus.FlowInstanceRoutePersistence
 	runtimebus.FlowInstanceRouteRecordReader
 	runtimebus.FlowInstanceRouteTopologyPersistence
 	runtimebus.ActiveAgentDescriptorLister
