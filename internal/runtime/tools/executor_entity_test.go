@@ -1280,10 +1280,10 @@ func TestEntityTools_GetEntityReturnsStoredCurrentState(t *testing.T) {
 		},
 	})
 	if _, err := db.ExecContext(ctx, `
-		UPDATE entity_state
+		UPDATE flow_instances
 		SET current_state = 'marginal_review'
-		WHERE entity_id = $1::uuid
-	`, entityID); err != nil {
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, entityToolTestRunID, entityID); err != nil {
 		t.Fatalf("seed current_state: %v", err)
 	}
 
@@ -1596,10 +1596,10 @@ func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
 		},
 	})
 	if _, err := db.ExecContext(ctx, `
-		UPDATE entity_state
+		UPDATE flow_instances
 		SET current_state = 'marginal_review'
-		WHERE entity_id = $1::uuid
-	`, entityID); err != nil {
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, entityToolTestRunID, entityID); err != nil {
 		t.Fatalf("seed current_state: %v", err)
 	}
 
