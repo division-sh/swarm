@@ -241,7 +241,7 @@ func (c *RuntimeConnection) currentOperationScope(ctx context.Context) (channelo
 		op.PrincipalID != c.operation.PrincipalID || op.Interface.Normalized() != c.operation.Interface.Normalized() ||
 		op.TargetSelector != c.operation.TargetSelector ||
 		op.SessionConnectionID != c.operation.SessionConnectionID ||
-		!op.Coordinate.MatchesDeclaration(c.operation.Coordinate) ||
+		!op.Coordinate.MatchesRuntimeContext(c.operation.Coordinate) ||
 		op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired || op.ValidateSessionAccount() != nil {
 		return op, errRuntimeConnection
 	}
@@ -299,6 +299,29 @@ func (c *RuntimeConnection) ConnectionID() string {
 		return ""
 	}
 	return c.operation.SessionConnectionID
+}
+
+// CheckSessionReuse is a connection-reuse decision, not account or business
+// admission. A current connected occurrence still consumes the selected reader;
+// an observation error is not an instruction to reconnect.
+func (c *RuntimeConnection) CheckSessionReuse(ctx context.Context, expected channelonboarding.Operation) (bool, error) {
+	if ctx == nil {
+		return false, errRuntimeConnection
+	}
+	if ctx.Err() != nil {
+		return false, context.Cause(ctx)
+	}
+	if c == nil || c.ctx == nil || c.ctx.Err() != nil || c.state == nil ||
+		expected.OperationID != c.operation.OperationID || expected.PrincipalID != c.operation.PrincipalID ||
+		expected.SessionConnectionID != c.operation.SessionConnectionID || expected.SessionAccount != c.sessionAccount() ||
+		!expected.Coordinate.MatchesRuntimeContext(c.operation.Coordinate) {
+		return false, nil
+	}
+	err := c.CheckBootstrap(ctx)
+	if errors.Is(err, errClientOccurrenceFenced) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // CheckBootstrap proves this original attempt remains connected. A retained

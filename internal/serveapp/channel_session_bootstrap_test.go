@@ -39,6 +39,7 @@ import (
 	"github.com/google/uuid"
 	waBinary "go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/socket"
+	"go.mau.fi/whatsmeow/types"
 )
 
 type serveBootstrapTestStore interface {
@@ -151,7 +152,9 @@ func serveBootstrapWireFixture(t *testing.T, mode string, owner *worklifetime.Ru
 	t.Helper()
 	noise := whatsappfixture.NewNoiseServer(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	entered := make(chan struct{}, 1)
+	entered := make(chan struct{})
+	var enteredOnce sync.Once
+	signalEntered := func() { enteredOnce.Do(func() { close(entered) }) }
 	var mu sync.Mutex
 	var peers []*websocket.Conn
 	var workers sync.WaitGroup
@@ -167,7 +170,7 @@ func serveBootstrapWireFixture(t *testing.T, mode string, owner *worklifetime.Ru
 		mu.Unlock()
 		defer workers.Done()
 		if mode == "dial_failure" {
-			entered <- struct{}{}
+			signalEntered()
 			http.Error(w, "deliberate test refusal", http.StatusServiceUnavailable)
 			return
 		}
@@ -186,7 +189,7 @@ func serveBootstrapWireFixture(t *testing.T, mode string, owner *worklifetime.Ru
 				t.Error(err)
 				return
 			}
-			entered <- struct{}{}
+			signalEntered()
 			if mode == "handshake_failure" {
 				_ = whatsappfixture.WriteFrame(ctx, conn, []byte{0xff})
 			} else {
@@ -199,7 +202,15 @@ func serveBootstrapWireFixture(t *testing.T, mode string, owner *worklifetime.Ru
 			t.Error(err)
 			return
 		}
-		entered <- struct{}{}
+		signalEntered()
+		if mode == "paired" {
+			if err := wire.Send(ctx, waBinary.Node{Tag: "success", Attrs: waBinary.Attrs{
+				"lid": types.NewJID("100000000001", types.HiddenUserServer), "t": time.Now().Unix(),
+			}}); err != nil {
+				t.Error(err)
+				return
+			}
+		}
 		for {
 			node, err := wire.Read(ctx)
 			if err != nil {

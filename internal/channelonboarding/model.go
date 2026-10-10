@@ -254,6 +254,12 @@ func (c ChannelRuntimeContextCoordinate) MatchesDeclaration(other ChannelRuntime
 	return c.ValidateContext() == nil && other.ValidateContext() == nil && c.Normalized() == other.Normalized()
 }
 
+// MatchesRuntimeContext fences the source/plan and live runtime occurrence.
+// Business target generation is a separate admission, not connection identity.
+func (c ChannelRuntimeContextCoordinate) MatchesRuntimeContext(other ChannelRuntimeContextCoordinate) bool {
+	return c.MatchesDurableIdentity(other) && c.MatchesContextOccurrence(other.RuntimeInstanceID, other.ContextPublicationGeneration)
+}
+
 type SlotState string
 
 const (
