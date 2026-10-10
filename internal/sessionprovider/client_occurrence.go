@@ -23,23 +23,25 @@ var errClientOccurrenceUsed = errors.New("WhatsApp client occurrence cannot reco
 // independently reconnectable transport. Selected-store admission and effects
 // remain the callers' responsibility, not authority inferred by this lifetime.
 type clientOccurrence struct {
-	mu           sync.Mutex
-	connectionID string
-	occurrenceID string
-	ctx          context.Context
-	cancel       context.CancelFunc
-	client       *whatsmeow.Client
-	stores       *sdkStores
-	callbacks    *callbackGuard
-	pairing      *pairingQR
-	started      bool
-	fenced       bool
-	inFlight     int
-	drained      chan struct{}
-	stopDone     chan struct{}
-	stopOnce     sync.Once
-	connected    chan struct{}
-	connectOnce  sync.Once
+	mu             sync.Mutex
+	connectionID   string
+	occurrenceID   string
+	ctx            context.Context
+	cancel         context.CancelFunc
+	client         *whatsmeow.Client
+	stores         *sdkStores
+	callbacks      *callbackGuard
+	pairing        *pairingQR
+	started        bool
+	fenced         bool
+	logoutReserved bool
+	logoutDrain    chan struct{}
+	inFlight       int
+	drained        chan struct{}
+	stopDone       chan struct{}
+	stopOnce       sync.Once
+	connected      chan struct{}
+	connectOnce    sync.Once
 }
 
 func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
@@ -212,7 +214,7 @@ func (o *clientOccurrence) acquire(ctx context.Context) (context.Context, func()
 		return nil, nil, errClientOccurrenceFenced
 	}
 	o.mu.Lock()
-	if o.fenced || !o.started || o.ctx.Err() != nil || !o.client.IsConnected() || !o.client.IsLoggedIn() {
+	if o.fenced || o.logoutReserved || !o.started || o.ctx.Err() != nil || !o.client.IsConnected() || !o.client.IsLoggedIn() {
 		o.mu.Unlock()
 		return nil, nil, errClientOccurrenceFenced
 	}
@@ -231,6 +233,10 @@ func (o *clientOccurrence) release() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.inFlight--
+	if o.inFlight == 0 && o.logoutDrain != nil {
+		close(o.logoutDrain)
+		o.logoutDrain = nil
+	}
 	if o.fenced && o.inFlight == 0 {
 		close(o.drained)
 	}
@@ -247,7 +253,7 @@ func (o *clientOccurrence) send(ctx context.Context, to types.JID, message *waE2
 }
 
 func (o *clientOccurrence) logout(ctx context.Context) error {
-	workCtx, release, err := o.acquire(ctx)
+	workCtx, release, err := o.reserveLogout(ctx)
 	if err != nil {
 		return err
 	}
@@ -258,6 +264,51 @@ func (o *clientOccurrence) logout(ctx context.Context) error {
 	}
 	o.fence()
 	return nil
+}
+
+// Reserve without retiring the socket or SDK stores: unlink still needs both.
+// This is only a process-local drain, not durable destruction authorization.
+func (o *clientOccurrence) reserveLogout(ctx context.Context) (context.Context, func(), error) {
+	if ctx == nil {
+		return nil, nil, errClientOccurrenceFenced
+	}
+	if ctx.Err() != nil {
+		return nil, nil, context.Cause(ctx)
+	}
+	o.mu.Lock()
+	if o.fenced || o.logoutReserved || !o.started || o.ctx.Err() != nil || !o.client.IsConnected() || !o.client.IsLoggedIn() {
+		o.mu.Unlock()
+		return nil, nil, errClientOccurrenceFenced
+	}
+	o.logoutReserved = true
+	drained := make(chan struct{})
+	if o.inFlight == 0 {
+		close(drained)
+	} else {
+		o.logoutDrain = drained
+	}
+	o.mu.Unlock()
+	select {
+	case <-drained:
+	case <-ctx.Done():
+		return nil, nil, context.Cause(ctx)
+	case <-o.ctx.Done():
+		return nil, nil, context.Cause(o.ctx)
+	}
+	o.mu.Lock()
+	if ctx.Err() != nil || o.fenced || o.ctx.Err() != nil || !o.client.IsConnected() || !o.client.IsLoggedIn() {
+		o.mu.Unlock()
+		return nil, nil, errors.Join(errClientOccurrenceFenced, context.Cause(ctx), context.Cause(o.ctx))
+	}
+	o.inFlight++
+	o.mu.Unlock()
+	workCtx, cancel := context.WithCancel(ctx)
+	stopCancellation := context.AfterFunc(o.ctx, cancel)
+	return workCtx, func() {
+		stopCancellation()
+		cancel()
+		o.release()
+	}, nil
 }
 
 func (o *clientOccurrence) fence() {
