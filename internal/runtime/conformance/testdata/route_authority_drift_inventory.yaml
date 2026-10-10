@@ -790,8 +790,9 @@ seam_families:
       - internal/runtime/runstart/root_inputs.go
     search_dimensions: [route_table_resolve, route_event_key_derivation, connect_route_plan, typed_connect_recipient_evaluation]
     notes: >
-      RouteTable.Resolve is limited to runless authored direct typed pub/sub
-      consumers in runstart. Selected-fork admission uses
+      RouteTable.Resolve and ResolveForRun are retired with their mutable
+      exact/wildcard resolution cache. Runstart binds explicit compiled root
+      declarations, which cannot establish native existence. Selected-fork admission uses
       ResolveIndependentPubsubFromSource with the exact source run and admitted
       RoutingSource; its SourceEventRouteKeys projection is shared with live
       publication and does not borrow historical receiver targets. The underlying

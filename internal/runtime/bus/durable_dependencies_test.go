@@ -32,8 +32,15 @@ func TestEventBusHasNoPersistedTopologyOwner(t *testing.T) {
 }
 
 func TestCompiledRoutesCannotExportMaterializedMembership(t *testing.T) {
-	if _, present := reflect.TypeOf((*RouteTable)(nil)).MethodByName("MaterializedRoutes"); present {
-		t.Error("compiled source table still exports retired materialized membership")
+	for _, name := range []string{"MaterializedRoutes", "Resolve", "ResolveForRun"} {
+		if _, present := reflect.TypeOf((*RouteTable)(nil)).MethodByName(name); present {
+			t.Errorf("compiled source table still exports retired membership API %s", name)
+		}
+	}
+	for _, name := range []string{"routes", "patterns", "eventPath", "instanceEventPath", "resolutionIndexDirty", "exactPatternIndexes", "wildcardPatternIndexes"} {
+		if _, present := reflect.TypeOf(RouteTable{}).FieldByName(name); present {
+			t.Errorf("compiled source table retains retired resolution cache %s", name)
+		}
 	}
 }
 

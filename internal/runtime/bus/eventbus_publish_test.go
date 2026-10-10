@@ -693,7 +693,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	}
 	agentID := "account-agent"
 	var agentIdentity runtimeagentidentity.Identity
-	for _, subscriber := range eb.RouteTable().ResolveForRun(eventBusTestRunID, "account/one/account.ready") {
+	for _, subscriber := range eb.RouteTable().PubsubReceiverDefinitionsFixture(t, eventBusTestRunID, accountConstruction, "account/one/account.ready") {
 		if subscriber.Recipient.IsAgent() && subscriber.Recipient.LocalID() == agentID {
 			agentIdentity, err = subscriber.AgentPlan.Live(eventBusTestRunID)
 			if err != nil {

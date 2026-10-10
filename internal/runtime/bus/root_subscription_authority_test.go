@@ -99,7 +99,7 @@ func TestProviderLocalConsumptionUsesOnlyExactSameInstanceOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	consumers := routes.ResolveForRun(busInternalTestRunID, "validation/thing.created")
+	consumers := routes.PubsubDeclarationDefinitionsFixture(t, "validation", "validation/thing.created")
 	if len(consumers) != 1 || consumers[0].RouteSourceCode() != "subscription" {
 		t.Fatalf("provider has competing subscription authority: %#v", consumers)
 	}

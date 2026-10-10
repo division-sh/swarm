@@ -281,7 +281,11 @@ func activationEqualitySourceRecipients(t *testing.T) []forkrecipient.Evidence {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, subscriber := range table.Resolve(event) {
+		definitions, err := table.PubsubDeclarationDefinitions("sink", []string{event})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, subscriber := range definitions {
 			in := forkrecipient.Input{Recipient: subscriber.Recipient, Path: "sink", HandlerEvent: plan.ReceiverLocalEvent(), AgentPlan: subscriber.AgentPlan, RouteSource: "selected-source"}
 			if in.Recipient.IsNode() {
 				in.HandlerNode, _ = in.Recipient.Node()
@@ -296,7 +300,11 @@ func activationEqualitySourceRecipients(t *testing.T) []forkrecipient.Evidence {
 	if len(out) != 3 {
 		t.Fatalf("fixture requires two node event/pins and one full agent plan; got %d", len(out))
 	}
-	for _, subscriber := range table.Resolve("work.requested") {
+	rootDefinitions, err := table.PubsubDeclarationDefinitions(".", []string{"work.requested"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, subscriber := range rootDefinitions {
 		if !subscriber.Recipient.IsNode() {
 			continue
 		}

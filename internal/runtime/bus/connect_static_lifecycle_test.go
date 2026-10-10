@@ -22,9 +22,8 @@ func TestConnectStaticDeclarationPlansDoNotDependOnInstanceRoutes(t *testing.T) 
 	if len(want) != 1 {
 		t.Fatalf("static declaration plans = %d, want 1", len(want))
 	}
-	table.patterns = nil
 	if got := table.staticAgentDeclarationPlans(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("process-route removal changed compiled declarations: got=%+v want=%+v", got, want)
+		t.Fatalf("repeated compiled declarations changed: got=%+v want=%+v", got, want)
 	}
 	for plan := range want {
 		delete(want, plan)
