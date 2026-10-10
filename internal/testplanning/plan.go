@@ -214,7 +214,7 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 		}
 		unit := ProofUnit{
 			ID:               id,
-			WorkloadProfile:  profile,
+			WorkloadProfile:  unitWorkloadProfile(profile, extraUnits, id),
 			ExecutionTier:    executionTier(option.Venue, specialUnit.BudgetClass),
 			Packages:         unitPackages,
 			Run:              specialUnit.Run,
@@ -310,7 +310,7 @@ func (p RunPlan) Validate() error {
 		if unit.ExecutionTier != executionTier(p.Venue, unit.BudgetClass) {
 			return fmt.Errorf("unit %s has invalid execution tier %q", unit.ID, unit.ExecutionTier)
 		}
-		if unit.WorkloadProfile != p.Profile {
+		if unit.WorkloadProfile != unitWorkloadProfile(p.Profile, p.ExtraUnits, unit.ID) {
 			return fmt.Errorf("unit %s has invalid workload profile %q", unit.ID, unit.WorkloadProfile)
 		}
 		if unit.BudgetClass != "broad" && unit.BudgetClass != "full" && unit.BudgetClass != "soak" {

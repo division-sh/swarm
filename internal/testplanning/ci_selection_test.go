@@ -53,8 +53,12 @@ func TestBuildPlanCIUnitsAllowlistAndOverlap(t *testing.T) {
 		t.Fatal(err)
 	}
 	unit, err := plan.Unit("extra")
-	if err != nil || unit.Run != "^TestExtra$" || unit.CountMode != "count-1" || unit.EnvironmentID != "env" || !slices.Equal(plan.ExtraUnits, []string{"extra"}) {
+	if err != nil || unit.Run != "^TestExtra$" || unit.CountMode != "count-1" || unit.EnvironmentID != "env" || unit.WorkloadProfile != ProfileFull || !slices.Equal(plan.ExtraUnits, []string{"extra"}) {
 		t.Fatalf("extra-unit contract changed: %+v %v", plan, err)
+	}
+	base, _ := plan.Unit("catalog-full")
+	if plan.Profile != ProfileLifecycle || base.WorkloadProfile != ProfileLifecycle {
+		t.Fatal("supplement promoted the entire base tier")
 	}
 	for _, tc := range []struct {
 		name, tier, venue string

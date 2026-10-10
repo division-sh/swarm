@@ -14,12 +14,11 @@ func TestCIUnitsTimingAddsFrozenFullWithoutReprojectingLowerTiers(t *testing.T) 
 	plan, evidence := rootEvidenceFixture(t)
 	plan.Profile = testplanning.ProfileLifecycle
 	plan.ExtraUnits = []string{plan.Units[0].ID}
-	plan.Units[0].WorkloadProfile = plan.Profile
 	plan.Digest = ""
 	raw, _ := json.Marshal(plan)
 	digest := sha256.Sum256(raw)
 	plan.Digest = hex.EncodeToString(digest[:])
-	evidence.Profile, evidence.WorkloadProfile, evidence.PlanDigest = plan.Profile, plan.Profile, plan.Digest
+	evidence.Profile, evidence.PlanDigest = plan.Profile, plan.Digest
 	pkg := plan.Units[0].Packages[0]
 	cell := TimingCell{Package: pkg, Environment: evidence.EnvironmentID, Count: evidence.CountMode}
 	policy := rootTimingPolicy()
@@ -68,7 +67,7 @@ func TestCIUnitsTimingAddsFrozenFullWithoutReprojectingLowerTiers(t *testing.T) 
 			}
 		})
 	}
-	for _, change := range []string{"missing", "skipped", "foreign-unit", "foreign-attempt", "foreign-source", "wrong-count"} {
+	for _, change := range []string{"missing", "skipped", "foreign-unit", "foreign-attempt", "foreign-source", "wrong-count", "downgraded-workload"} {
 		t.Run(change, func(t *testing.T) {
 			receipt := evidence
 			receipt.Report.Tests = slices.Clone(evidence.Report.Tests)
@@ -86,6 +85,8 @@ func TestCIUnitsTimingAddsFrozenFullWithoutReprojectingLowerTiers(t *testing.T) 
 				receipt.HeadSHA = "foreign"
 			case "wrong-count":
 				receipt.CountMode = "cache-default"
+			case "downgraded-workload":
+				receipt.WorkloadProfile = testplanning.ProfileLifecycle
 			}
 			if change != "missing" {
 				items[0] = receipt

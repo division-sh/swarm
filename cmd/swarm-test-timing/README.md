@@ -102,6 +102,9 @@ no-op or overlapping selections refuse. Selection precedes native root binding,
 batching and deferral generation; original count, recipe and backend children
 remain required. Full-only extras add the frozen full timing comparison without
 changing the pinned reference or lower-tier membership.
+Each supplement carries its original full workload and native full-owner
+completion obligations, including higher-tier registry children; the aggregate
+tier stays unchanged. A lower-tier skip cannot satisfy a selected supplement.
 
 `-ci-selection -plan PLAN -workflow-run-id ID -workflow-attempt N -result-json JSON`
 emits the plan-bound selection report. Its digest hashes compact UTF-8 JSON with

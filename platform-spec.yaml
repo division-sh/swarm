@@ -23932,7 +23932,10 @@ test_specification:
         for example 'CI-Units: conformance-soak-sqlite, conformance-soak-postgres'. Absent means no extras;
         empty, malformed, duplicate, unknown, local-only or base-tier no-op units refuse planning. Unit order is canonicalized by sorting.
         The planner augments before package, root, batch, projection and deferral derivation; original unit/backend/count/recipe/child contracts
-        remain exact and overlaps refuse rather than rewriting execution cells. Lifecycle and full retain every mandatory core guard/census root
+        remain exact and overlaps refuse rather than rewriting execution cells. Each supplemental unit retains its full workload_profile
+        and completion obligations from the canonical native full census, even when the aggregate profile is core or lifecycle;
+        it cannot acquire lower-tier skips or lose higher-tier parity children. Receipts bind aggregate profile and per-unit workload separately.
+        Lifecycle and full retain every mandatory core guard/census root
         through their existing owners; the core-only guard unit is not duplicated.
         Selection identity is SHA256 of compact UTF-8 JSON without a trailing newline, with ordered fields
         version (1), tier and extra_units (sorted non-null array). The plan records extra_units and includes them in its ordinary digest.
