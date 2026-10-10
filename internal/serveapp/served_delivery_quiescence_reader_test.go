@@ -27,20 +27,6 @@ func servedInspectionDeliveryReader(t testing.TB, inspection store.ReadOnlyInspe
 	}
 }
 
-func openServedInspectionDeliveryReader(t testing.TB, backend, location string) servedRunDeliveryReader {
-	t.Helper()
-	inspection, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := inspection.Close(); err != nil {
-			t.Errorf("close served delivery inspection: %v", err)
-		}
-	})
-	return servedInspectionDeliveryReader(t, inspection)
-}
-
 func TestServedRunDeliveryQuiescenceReaderPreservesStableStatusCut(t *testing.T) {
 	for _, test := range []struct {
 		name string
