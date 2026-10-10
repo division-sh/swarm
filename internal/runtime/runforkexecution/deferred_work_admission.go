@@ -18,7 +18,6 @@ import (
 const selectedContractDeferredWorkOwnerUnavailable = "selected_contract_deferred_work_owner_unavailable"
 
 const (
-	selectedContractDeferredWorkWorkflowJoinTimeout = "workflow_join_timeout"
 	selectedContractDeferredWorkFanOutBarrier       = "fan_out_delivery_barrier"
 	selectedContractDeferredWorkDynamicFlowCreation = "dynamic_flow_instance_creation"
 )
@@ -190,20 +189,14 @@ func fanOutElementLabel(ref runtimecontracts.FanOutElementRef) string {
 
 func selectedContractDeferredWorkCapabilities(source semanticview.Source) []string {
 	capabilities := make([]string, 0, 4)
-	// Ordinary workflow timers have a retained execution owner. Fixed-cut
-	// timer evidence remains blocked until native materialization/readback.
+	// Workflow and arrival schedules have retained execution owners. Availability
+	// does not discharge their fixed-cut evidence or native inventory admission.
 	if source != nil {
-		hasTimedJoin, hasFanOutBarrier := false, false
+		hasFanOutBarrier := false
 		for _, join := range source.WorkflowJoins() {
-			if join.Spec.Deadline != nil && strings.TrimSpace(join.Spec.Deadline.After) != "" {
-				hasTimedJoin = true
-			}
 			if join.Mode == runtimecontracts.WorkflowJoinModeFanOutDelivery {
 				hasFanOutBarrier = true
 			}
-		}
-		if hasTimedJoin {
-			capabilities = append(capabilities, selectedContractDeferredWorkWorkflowJoinTimeout)
 		}
 		if hasFanOutBarrier {
 			capabilities = append(capabilities, selectedContractDeferredWorkFanOutBarrier)

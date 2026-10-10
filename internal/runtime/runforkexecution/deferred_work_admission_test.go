@@ -56,15 +56,13 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 			}}, nil),
 		},
 		{
-			name: "workflow join deadline retains timeout capability",
+			name: "workflow join deadline has retained execution ownership",
 			plan: basePlan,
 			source: selectedDeferredWorkTestSource(nil, []runtimecontracts.WorkflowJoinPlan{{
 				Spec: runtimecontracts.JoinSpec{
 					Deadline: &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry},
 				},
 			}}),
-			wantCode:   selectedContractDeferredWorkOwnerUnavailable,
-			capability: selectedContractDeferredWorkWorkflowJoinTimeout,
 		},
 		{
 			name:       "fan-out barrier declaration requires deferred execution owner",
@@ -231,13 +229,11 @@ func TestSelectedContractDeferredWorkAdmissionRejectsSourceDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	drifted := selectedDeferredWorkTestSource(nil, []runtimecontracts.WorkflowJoinPlan{{
-		Spec: runtimecontracts.JoinSpec{
-			Deadline: &runtimecontracts.JoinDeadlineSpec{After: "1h", From: runtimecontracts.JoinDeadlineFromStageEntry},
-		},
+		Mode: runtimecontracts.WorkflowJoinModeFanOutDelivery,
 	}})
 	if err := admission.validate(plan.SourceRunID, plan.ForkPoint, drifted); err == nil ||
-		!strings.Contains(err.Error(), selectedContractDeferredWorkWorkflowJoinTimeout) {
-		t.Fatalf("source drift error = %v, want workflow join capability rejection", err)
+		!strings.Contains(err.Error(), selectedContractDeferredWorkFanOutBarrier) {
+		t.Fatalf("source drift error = %v, want unsupported barrier capability rejection", err)
 	}
 }
 
