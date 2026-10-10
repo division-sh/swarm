@@ -833,6 +833,7 @@ seam_families:
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/connect_instance_selection.go
       - internal/runtime/bus/indexed_connect_receivers.go
+      - internal/runtime/bus/indexed_connect_receivers_test.go
       - internal/runtime/bus/connect_candidate_scope_test.go
       - internal/runtime/bus/a9_existing_selection_probe_test.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
