@@ -38,7 +38,7 @@ func workflowTimerHistoryPlan(t *testing.T, timers ...pipeline.WorkflowTimerActi
 	for _, timer := range timers {
 		plan.WorkflowTimers = append(plan.WorkflowTimers, timer.PersistenceRecord())
 	}
-	inventory, err := runForkWorkflowTimerRecordInventory(plan.SourceRunID, plan.WorkflowTimers)
+	inventory, err := runForkTimerRecordInventory(plan.SourceRunID, plan.WorkflowTimers, plan.JoinSchedules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestRunForkWorkflowTimerHistoryInventoryCoversAllRelevantRows(t *testing.T)
 	snapshot := &runForkRevisionSnapshot{RunID: active.RunID, Timers: []runForkRevisionTimer{
 		workflowTimerHistorySnapshot(t, cancelled), workflowTimerHistorySnapshot(t, active), workflowTimerHistorySnapshot(t, fired),
 	}}
-	inventory, err := loadRunForkTimerHistoryInventory(snapshot, runForkSourceFacts{}, nil)
+	inventory, err := loadRunForkTimerHistoryInventory(snapshot, runForkSourceFacts{}, nil, nil)
 	if err != nil || !inventory.Complete || len(inventory.WorkflowTimerIDs) != 3 || len(inventory.ActiveTimerIDs) != 1 || len(inventory.UnresolvedTimerIDs) != 0 {
 		t.Fatalf("incomplete ordinary inventory: %+v err=%v", inventory, err)
 	}
@@ -82,7 +82,7 @@ func TestRunForkWorkflowTimerHistoryInventoryCoversAllRelevantRows(t *testing.T)
 			mixed.Timers = append(mixed.Timers, runForkRevisionTimer{TimerSnapshot: runforkrevision.TimerSnapshot{
 				TimerID: "generic-deadline", RunID: active.RunID, TaskType: taskType,
 			}})
-			got, err := loadRunForkTimerHistoryInventory(&mixed, runForkSourceFacts{}, nil)
+			got, err := loadRunForkTimerHistoryInventory(&mixed, runForkSourceFacts{}, nil, nil)
 			if err != nil || len(got.WorkflowTimerIDs) != 3 || !reflect.DeepEqual(got.UnresolvedTimerIDs, []string{"generic-deadline"}) {
 				t.Fatalf("mixed history lost rows: %+v err=%v", got, err)
 			}
@@ -90,7 +90,7 @@ func TestRunForkWorkflowTimerHistoryInventoryCoversAllRelevantRows(t *testing.T)
 			admission := runForkReplayResumeAdmission(runForkAdmissionEvidence{RelevantTimer: true, TimerHistory: got})
 			plan := workflowTimerHistoryPlan(t, active, fired, cancelled)
 			plan.ReplayResumeAdmission = admission
-			if allowed, err := runForkWorkflowTimerHistoryMaterializable(plan); err != nil || allowed {
+			if allowed, err := runForkTimerHistoryMaterializable(plan); err != nil || allowed {
 				t.Fatalf("ordinary subset discharged unresolved timer family: allowed=%t err=%v", allowed, err)
 			}
 		})
@@ -108,7 +108,7 @@ func TestRunForkWorkflowTimerHistoryInventoryPreservesForeignAndBarrierBoundarie
 		workflowTimerHistorySnapshot(t, source), foreign, global, unrelated, owned,
 	}}
 	facts := runForkSourceFacts{EntityIDs: []string{source.EntityID}, FlowInstances: []string{source.Route.InstancePath}}
-	inventory, err := loadRunForkTimerHistoryInventory(snapshot, facts, map[string]struct{}{owned.TimerID: {}})
+	inventory, err := loadRunForkTimerHistoryInventory(snapshot, facts, map[string]struct{}{owned.TimerID: {}}, nil)
 	if err != nil || !reflect.DeepEqual(inventory.UnresolvedTimerIDs, []string{"foreign-timer", "global-timer"}) || len(inventory.WorkflowTimerIDs) != 1 {
 		t.Fatalf("relevance or validated barrier exclusion changed: %+v err=%v", inventory, err)
 	}
@@ -126,7 +126,7 @@ func TestRunForkWorkflowTimerHistoryInventoryPreservesForeignAndBarrierBoundarie
 			case "bad_task_ref":
 				rows[0].TimerName = "not-a-workflow-timer"
 			}
-			if _, err := loadRunForkTimerHistoryInventory(&runForkRevisionSnapshot{RunID: source.RunID, Timers: rows}, facts, nil); err == nil {
+			if _, err := loadRunForkTimerHistoryInventory(&runForkRevisionSnapshot{RunID: source.RunID, Timers: rows}, facts, nil, nil); err == nil {
 				t.Fatal("corrupt inventory acquired prospective admission")
 			}
 		})
@@ -138,7 +138,7 @@ func TestRunForkWorkflowTimerHistoryProspectiveCertificateIsExactAndStillBlocked
 	fired := workflowTimerHistoryTerminal(t, "fired", "66666666-6666-4666-8666-666666666666")
 	plan := workflowTimerHistoryPlan(t, source, fired)
 	before, _ := json.Marshal(plan)
-	if allowed, err := runForkWorkflowTimerHistoryMaterializable(plan); err != nil || !allowed {
+	if allowed, err := runForkTimerHistoryMaterializable(plan); err != nil || !allowed {
 		t.Fatalf("exact ordinary inventory cannot be materialized: allowed=%t err=%v", allowed, err)
 	}
 	after, _ := json.Marshal(plan)
@@ -185,13 +185,13 @@ func TestRunForkWorkflowTimerHistoryProspectiveCertificateIsExactAndStillBlocked
 			case "missing_fact":
 				candidate.ReplayResumeAdmission.Dispositions = candidate.ReplayResumeAdmission.Dispositions[:3]
 			}
-			if allowed, _ := runForkWorkflowTimerHistoryMaterializable(candidate); allowed {
+			if allowed, _ := runForkTimerHistoryMaterializable(candidate); allowed {
 				t.Fatal("changed or incomplete inventory acquired materialization admission")
 			}
 		})
 	}
 	plan.WorkflowTimers[0], plan.WorkflowTimers[1] = plan.WorkflowTimers[1], plan.WorkflowTimers[0]
-	if allowed, err := runForkWorkflowTimerHistoryMaterializable(plan); err != nil || !allowed {
+	if allowed, err := runForkTimerHistoryMaterializable(plan); err != nil || !allowed {
 		t.Fatalf("row ordering changed canonical inventory: allowed=%t err=%v", allowed, err)
 	}
 }
@@ -246,8 +246,8 @@ func TestRunForkWorkflowTimerAdmissionReadbackIsRequireOnlyAndComplete(t *testin
 			before, _ := json.Marshal(plan.ReplayResumeAdmission)
 			withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
 				for i := 0; i < 2; i++ {
-					admitted, err := requireMaterializedRunForkWorkflowTimers(ctx, attempt, plan, workflowTimerProjectionChildRun,
-						selection, owner, bornAt, plan.ReplayResumeAdmission)
+					admitted, err := requireMaterializedRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun,
+						selection, owner, &arrivalJoinInventoryOwner{}, bornAt, plan.ReplayResumeAdmission)
 					if err != nil || len(admitted.UnsupportedBlockers) != 0 || !admitted.ReplayResumeFactsPresent || admitted.StateOnlyExecutionReady {
 						t.Fatalf("complete readback admission=%+v err=%v", admitted, err)
 					}
@@ -257,8 +257,8 @@ func TestRunForkWorkflowTimerAdmissionReadbackIsRequireOnlyAndComplete(t *testin
 				for id := range owner.rows {
 					delete(owner.rows, id)
 				}
-				admitted, err := requireMaterializedRunForkWorkflowTimers(ctx, attempt, plan, workflowTimerProjectionChildRun,
-					selection, owner, bornAt, plan.ReplayResumeAdmission)
+				admitted, err := requireMaterializedRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun,
+					selection, owner, &arrivalJoinInventoryOwner{}, bornAt, plan.ReplayResumeAdmission)
 				if err == nil || !reflect.DeepEqual(admitted, plan.ReplayResumeAdmission) || len(owner.rows) != 0 ||
 					owner.inserts != 1 || owner.cancels != cancels || owner.writes != writes {
 					t.Fatalf("complete inventory reuse repaired a missing timer or cancellation: owner=%+v err=%v", owner, err)
@@ -278,7 +278,7 @@ func assertWorkflowTimerAppliedDisposition(t *testing.T, admission runfork.RunFo
 		if disposition.Fact != runfork.RunForkReplayResumeFactTimerHistory {
 			continue
 		}
-		if disposition.Owner != runForkWorkflowTimerReadbackOwner || !strings.HasPrefix(disposition.Classification, runForkWorkflowTimerAppliedPrefix) ||
+		if disposition.Owner != runForkTimerReadbackOwner || !strings.HasPrefix(disposition.Classification, runForkTimerAppliedPrefix) ||
 			disposition.Disposition != want || disposition.BlockerCode != "" {
 			t.Fatalf("incorrect applied disposition: %+v", disposition)
 		}
@@ -293,8 +293,8 @@ func TestRunForkWorkflowTimerAdmissionTerminalOnlyNeverRearms(t *testing.T) {
 	plan := workflowTimerHistoryPlan(t, fired, cancelled)
 	owner := &workflowTimerMaterializerOwner{rows: make(map[string]pipeline.WorkflowTimerActivation)}
 	withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
-		admitted, err := requireMaterializedRunForkWorkflowTimers(ctx, attempt, plan, workflowTimerProjectionChildRun, nil, owner,
-			fired.CreatedAt.Add(2*time.Hour), plan.ReplayResumeAdmission)
+		admitted, err := requireMaterializedRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun, nil, owner,
+			&arrivalJoinInventoryOwner{}, fired.CreatedAt.Add(2*time.Hour), plan.ReplayResumeAdmission)
 		if err != nil || !admitted.StateOnlyExecutionReady || admitted.ReplayResumeFactsPresent || len(admitted.UnsupportedBlockers) != 0 {
 			t.Fatalf("terminal-only admission=%+v err=%v", admitted, err)
 		}
@@ -320,12 +320,12 @@ func TestRunForkWorkflowTimerAdmissionReadbackRequiresEveryActiveSourceRow(t *te
 		projected[0].activation.Ref.ActivationID: projected[0].activation,
 	}}
 	withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
-		got, err := requireMaterializedRunForkWorkflowTimers(ctx, attempt, plan, workflowTimerProjectionChildRun, selection, owner, bornAt, plan.ReplayResumeAdmission)
+		got, err := requireMaterializedRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun, selection, owner, &arrivalJoinInventoryOwner{}, bornAt, plan.ReplayResumeAdmission)
 		if err == nil || !reflect.DeepEqual(got, plan.ReplayResumeAdmission) || owner.reads != 1 || owner.writes != 0 {
 			t.Fatalf("partial readback discharged complete inventory: admission=%+v owner=%+v err=%v", got, owner, err)
 		}
 		owner.rows[projected[1].activation.Ref.ActivationID] = projected[1].activation
-		got, err = requireMaterializedRunForkWorkflowTimers(ctx, attempt, plan, workflowTimerProjectionChildRun, selection, owner, bornAt, plan.ReplayResumeAdmission)
+		got, err = requireMaterializedRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun, selection, owner, &arrivalJoinInventoryOwner{}, bornAt, plan.ReplayResumeAdmission)
 		if err != nil || len(got.UnsupportedBlockers) != 0 || owner.reads != 2 || owner.writes != 0 {
 			t.Fatalf("complete require-only inventory failed: admission=%+v owner=%+v err=%v", got, owner, err)
 		}
@@ -371,8 +371,8 @@ func TestRunForkWorkflowTimerAdmissionReadbackRefusesCorruptionAndPreservesOther
 				owner.rows = nil
 			}
 			withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
-				admitted, err := requireMaterializedRunForkWorkflowTimers(ctx, attempt, plan, workflowTimerProjectionChildRun,
-					selected, owner, bornAt, plan.ReplayResumeAdmission)
+				admitted, err := requireMaterializedRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun,
+					selected, owner, &arrivalJoinInventoryOwner{}, bornAt, plan.ReplayResumeAdmission)
 				if err == nil || !reflect.DeepEqual(admitted, plan.ReplayResumeAdmission) || owner.writes != 0 {
 					t.Fatalf("corrupt readback discharged or repaired history: admitted=%+v writes=%d err=%v", admitted, owner.writes, err)
 				}
@@ -383,7 +383,7 @@ func TestRunForkWorkflowTimerAdmissionReadbackRefusesCorruptionAndPreservesOther
 	admission := runForkReplayResumeAdmissionWithBlocker(plan.ReplayResumeAdmission, runfork.RunForkReplayResumeFactOpenReplyContext,
 		runForkReplayResumeBlocker(runfork.RunForkBlockerOpenReplyContextUnsupported))
 	withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
-		got, err := requireMaterializedRunForkWorkflowTimers(ctx, attempt, plan, workflowTimerProjectionChildRun, selection, owner, bornAt, admission)
+		got, err := requireMaterializedRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun, selection, owner, &arrivalJoinInventoryOwner{}, bornAt, admission)
 		if err != nil || len(got.UnsupportedBlockers) != 1 || got.UnsupportedBlockers[0].Code != runfork.RunForkBlockerOpenReplyContextUnsupported || got.StateOnlyExecutionReady {
 			t.Fatalf("timer discharge changed unrelated reply refusal: %+v err=%v", got, err)
 		}
@@ -409,20 +409,20 @@ func TestRunForkWorkflowTimerAdmissionRequiresExactLiveFrameIncludingTerminalOnl
 				cancelled, cancel := context.WithCancel(ctx)
 				cancel()
 				for _, candidate := range []context.Context{detached, cancelled, correlation.WithRunID(ctx, plan.SourceRunID)} {
-					if got, err := requireMaterializedRunForkWorkflowTimers(candidate, attempt, plan, workflowTimerProjectionChildRun,
-						selection, owner, bornAt, plan.ReplayResumeAdmission); err == nil || !reflect.DeepEqual(got, plan.ReplayResumeAdmission) {
+					if got, err := requireMaterializedRunForkTimerHistory(candidate, attempt, plan, workflowTimerProjectionChildRun,
+						selection, owner, &arrivalJoinInventoryOwner{}, bornAt, plan.ReplayResumeAdmission); err == nil || !reflect.DeepEqual(got, plan.ReplayResumeAdmission) {
 						t.Fatal("detached, cancelled, or foreign child context acquired timer discharge")
 					}
 				}
 				withWorkflowTimerReadbackAttempt(t, func(_ context.Context, foreign *mutationprotocol.Attempt) {
-					if _, err := requireMaterializedRunForkWorkflowTimers(ctx, foreign, plan, workflowTimerProjectionChildRun,
-						selection, owner, bornAt, plan.ReplayResumeAdmission); err == nil {
+					if _, err := requireMaterializedRunForkTimerHistory(ctx, foreign, plan, workflowTimerProjectionChildRun,
+						selection, owner, &arrivalJoinInventoryOwner{}, bornAt, plan.ReplayResumeAdmission); err == nil {
 						t.Fatal("foreign attempt borrowed another native frame")
 					}
 				})
 			})
-			if _, err := requireMaterializedRunForkWorkflowTimers(staleCtx, staleAttempt, plan, workflowTimerProjectionChildRun,
-				selection, owner, bornAt, plan.ReplayResumeAdmission); err == nil || owner.reads != 0 || owner.writes != 0 {
+			if _, err := requireMaterializedRunForkTimerHistory(staleCtx, staleAttempt, plan, workflowTimerProjectionChildRun,
+				selection, owner, &arrivalJoinInventoryOwner{}, bornAt, plan.ReplayResumeAdmission); err == nil || owner.reads != 0 || owner.writes != 0 {
 				t.Fatal("stale frame acquired discharge or refused frame reached the owner")
 			}
 		})

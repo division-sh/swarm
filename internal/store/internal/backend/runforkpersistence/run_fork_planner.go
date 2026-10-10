@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -30,6 +31,7 @@ type runForkAdmissionEvidence struct {
 	Pending                 []runfork.RunForkPendingWork
 	RelevantTimer           bool
 	TimerHistory            runForkTimerHistoryInventory
+	JoinSchedules           []genericschedule.Activation
 	RelevantRoute           bool
 	RouteHistory            runfork.RunForkRouteHistoryProjection
 	ActiveSession           bool
@@ -231,10 +233,6 @@ func planRunForkSnapshot(
 	}
 	plan.Entities = entities
 	plan.ReconstructedEntityCount = len(entities)
-	plan.JoinSchedules, err = loadRunForkArrivalJoinSchedules(snapshot, entities)
-	if err != nil {
-		return runfork.RunForkPlan{}, err
-	}
 
 	pending, err := loadRunForkPendingWorkFromRevision(snapshot)
 	if err != nil {
@@ -256,6 +254,7 @@ func planRunForkSnapshot(
 		return runfork.RunForkPlan{}, err
 	}
 	evidence.TimerHistory.Point = plan.ForkPoint
+	plan.JoinSchedules = evidence.JoinSchedules
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmission(evidence)
 	plan.RouteHistory = evidence.RouteHistory
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmissionWithMaterializedEntitySnapshotMetadata(plan.ReplayResumeAdmission, entitySnapshotMetadataAdmission)

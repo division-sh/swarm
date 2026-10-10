@@ -36,9 +36,14 @@ func TestFixedRevisionArrivalJoinScheduleRetainsExactEvidence(t *testing.T) {
 					}
 				}
 				facts := loadRunForkSourceFactsFromRevision(snapshot, entities)
-				inventory, err := loadRunForkTimerHistoryInventory(snapshot, facts, nil)
-				if err != nil || len(inventory.UnresolvedTimerIDs) != len(actual) {
-					t.Fatalf("relation alone discharged native execution blocker: inventory=%+v err=%v", inventory, err)
+				inventory, err := loadRunForkTimerHistoryInventory(snapshot, facts, nil, actual)
+				if err != nil || len(inventory.ArrivalScheduleIDs) != len(actual) || len(inventory.UnresolvedTimerIDs) != 0 {
+					t.Fatalf("complete arrival correspondence lost source inventory: inventory=%+v err=%v", inventory, err)
+				}
+				inventory.Point = runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 7}
+				admission := runForkReplayResumeAdmission(runForkAdmissionEvidence{RelevantTimer: true, TimerHistory: inventory})
+				if admission.StateOnlyExecutionReady || admission.DeliveryEventReplayReady || len(admission.UnsupportedBlockers) == 0 {
+					t.Fatal("source relation granted execution without complete native readback")
 				}
 				after, _ := json.Marshal(struct {
 					Snapshot *runForkRevisionSnapshot

@@ -61,8 +61,8 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) runfork.Run
 			Message:     blocker.Message,
 		}
 		if certificate, err := evidence.TimerHistory.pendingCertificate(); err == nil {
-			disposition.Owner, disposition.Classification = runForkWorkflowTimerInventoryOwner, certificate
-			disposition.Message = "complete exact ordinary workflow timer history awaits selected child materialization and native readback; source projection is not execution authority"
+			disposition.Owner, disposition.Classification = runForkTimerInventoryOwner, certificate
+			disposition.Message = "complete exact workflow and arrival timer history awaits both selected child inventories; source projection is not execution authority"
 		}
 		dispositions = append(dispositions, disposition)
 		hasHistoricalReplayRequirement = true
@@ -181,10 +181,10 @@ func dischargeMaterializedRunForkReplyAdmission(admission runfork.RunForkReplayR
 
 // Called only after require-only native readback covers every projected active
 // source row. Terminal source facts are certified but never rearmed.
-func dischargeMaterializedRunForkWorkflowTimerAdmission(admission runfork.RunForkReplayResumeAdmission, pending, applied string, projectedCount int) (runfork.RunForkReplayResumeAdmission, error) {
+func dischargeMaterializedRunForkTimerAdmission(admission runfork.RunForkReplayResumeAdmission, pending, applied string, projectedCount int) (runfork.RunForkReplayResumeAdmission, error) {
 	if admission.Owner != runfork.RunForkReplayResumeAdmissionOwner ||
-		!strings.HasPrefix(pending, runForkWorkflowTimerPendingPrefix) ||
-		!strings.HasPrefix(applied, runForkWorkflowTimerAppliedPrefix) || projectedCount < 0 {
+		!strings.HasPrefix(pending, runForkTimerPendingPrefix) ||
+		!strings.HasPrefix(applied, runForkTimerAppliedPrefix) || projectedCount < 0 {
 		return admission, fmt.Errorf("workflow timer discharge requires its exact inventory and readback certificates")
 	}
 	dispositions := append([]runfork.RunForkReplayResumeDisposition(nil), admission.Dispositions...)
@@ -194,17 +194,17 @@ func dischargeMaterializedRunForkWorkflowTimerAdmission(admission runfork.RunFor
 			continue
 		}
 		facts++
-		if disposition.Owner != runForkWorkflowTimerInventoryOwner || disposition.Classification != pending ||
+		if disposition.Owner != runForkTimerInventoryOwner || disposition.Classification != pending ||
 			disposition.Disposition != runfork.RunForkReplayResumeDispositionFailClosedBlocker || disposition.BlockerCode != runfork.RunForkBlockerTimerHistoryUnproven {
 			return admission, fmt.Errorf("workflow timer discharge does not match exact source inventory admission")
 		}
-		dispositions[i].Owner, dispositions[i].Classification = runForkWorkflowTimerReadbackOwner, applied
+		dispositions[i].Owner, dispositions[i].Classification = runForkTimerReadbackOwner, applied
 		dispositions[i].BlockerCode = ""
 		dispositions[i].Disposition = runfork.RunForkReplayResumeDispositionReconstruct
-		dispositions[i].Message = "complete exact ordinary workflow timer inventory has selected child projection and native readback; original due, arm and typed source lineage are retained"
+		dispositions[i].Message = "complete workflow and arrival timer inventories have exact selected child native readback; original due, arm and typed source lineage are retained"
 		if projectedCount == 0 {
 			dispositions[i].Disposition = runfork.RunForkReplayResumeDispositionNoHistoricalAction
-			dispositions[i].Message = "complete exact terminal ordinary workflow timer inventory requires no child rearm; its fixed-cut history has been certified"
+			dispositions[i].Message = "complete exact terminal timer history requires no child rearm; its fixed-cut history has been certified"
 		}
 	}
 	blockers := make([]runfork.RunForkUnsupportedBlocker, 0, len(admission.UnsupportedBlockers))

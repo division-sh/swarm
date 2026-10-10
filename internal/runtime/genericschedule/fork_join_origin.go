@@ -11,6 +11,17 @@ import (
 
 const ForkJoinReconstructionOwner = "store.run_fork.arrival_join_schedule"
 
+// Published occurrences require exact event/delivery continuation, not rearming.
+func (a Activation) ValidateForkJoinRestorationSource() error {
+	if err := a.Validate(); err != nil {
+		return err
+	}
+	if a.CurrentEventID != "" || a.Status != StatusActive && a.Status != StatusCancelled {
+		return fmt.Errorf("published or otherwise terminal join requires historical occurrence continuation, not schedule restoration")
+	}
+	return nil
+}
+
 // ForkJoinOrigin is retained provenance, not a permission to publish or resume.
 // It consumes the existing timer lineage columns on live and historical reads.
 type ForkJoinOrigin struct {
