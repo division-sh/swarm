@@ -3,11 +3,13 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 )
 
 // Transferred from B70ab4d333 /888cb4958 under6010346696. The three OR arms
@@ -68,7 +70,7 @@ func ReadServedRunDebugSummaryForTest(ctx context.Context, selected any, runID s
 }
 
 func readServedRunDebugSection(ctx context.Context, selected any, backend, scope, runID string) string {
-	if scope == "runs" || scope == "event_deliveries" || scope == "settled_delivery_attempts" || scope == "delivery_agents" {
+	if scope == "runs" || scope == "entity_state" || scope == "event_deliveries" || scope == "settled_delivery_attempts" || scope == "delivery_agents" {
 		out, stage := []string{}, ""
 		err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
 			var err error
@@ -79,6 +81,8 @@ func readServedRunDebugSection(ctx context.Context, selected any, backend, scope
 				case *SQLiteRuntimeStore:
 					out, stage, err = owner.runLifecycleSQLiteOwner.ReadRunDebugStorageTx(ctx, tx, runID)
 				}
+			} else if scope == "entity_state" {
+				out, err = readServedEntityDebugStorageTx(ctx, tx, runID)
 			} else {
 				out, stage, err = delivery.ReadRunDeliveryDebugSection(ctx, tx, backend == "postgres", scope, runID)
 			}
@@ -142,15 +146,38 @@ func readServedRunDebugSection(ctx context.Context, selected any, backend, scope
 	return scope + ": " + strings.Join(out, "; ")
 }
 
+func readServedEntityDebugStorageTx(ctx context.Context, tx *sql.Tx, runID string) (out []string, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT `+workflowheader.DataReadColumns+` `+workflowheader.DataReadFrom+` WHERE es.run_id=$1 ORDER BY es.created_at, es.entity_id LIMIT 5`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = nil
+		}
+	}()
+	for rows.Next() {
+		data, err := workflowheader.ScanData(rows, sqliteTimeValue)
+		if err != nil {
+			return nil, err
+		}
+		var stage any
+		if data.Entity.CurrentState != nil {
+			stage = *data.Entity.CurrentState
+		}
+		out = append(out, fmt.Sprint([]any{data.Entity.EntityID, data.Entity.FlowInstance, stage}))
+	}
+	return out, rows.Err()
+}
+
 func servedRunDebugSQL(backend, scope string) string {
 	sqlText := ""
 	switch backend {
 	case "postgres":
 		switch scope {
-		case "entity_state":
-			sqlText = `SELECT entity_id::text, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = $1::uuid ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":
-			sqlText = `SELECT DISTINCT fi.instance_path, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path WHERE es.run_id = $1::uuid ORDER BY fi.instance_path LIMIT 5`
+			sqlText = `SELECT fi.instance_path, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi WHERE fi.run_id = $1::uuid ORDER BY fi.instance_path LIMIT 5`
 		case "events":
 			sqlText = `SELECT event_id::text, event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 5`
 		case "event_receipts":
@@ -162,10 +189,8 @@ func servedRunDebugSQL(backend, scope string) string {
 		}
 	case "sqlite":
 		switch scope {
-		case "entity_state":
-			sqlText = `SELECT entity_id, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = ? ORDER BY created_at, entity_id LIMIT 5`
 		case "flow_instances":
-			sqlText = `SELECT DISTINCT fi.instance_path, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi JOIN entity_state es ON es.run_id = fi.run_id AND es.flow_instance = fi.instance_path WHERE es.run_id = ? ORDER BY fi.instance_path LIMIT 5`
+			sqlText = `SELECT fi.instance_path, fi.flow_template, COALESCE(fi.status, '') FROM flow_instances fi WHERE fi.run_id = ? ORDER BY fi.instance_path LIMIT 5`
 		case "events":
 			sqlText = `SELECT event_id, event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = ? ORDER BY created_at, event_id LIMIT 5`
 		case "event_receipts":
