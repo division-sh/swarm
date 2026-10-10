@@ -102,3 +102,52 @@ func TestCISelectionReportModeRefusesUnboundRun(t *testing.T) {
 		}
 	}
 }
+
+func TestCIUnitsMalformedDeclarationsFailClosed(t *testing.T) {
+	dir := t.TempDir()
+	policy, weights, packages := writePlannerFixtures(t, dir)
+	plan := writeSyntheticPlan(t, dir, policy, weights, packages, "execution")
+	for _, declaration := range []string{
+		"ci-units: extra",
+		"Ci-Units: extra",
+		"CI-UNITS: extra",
+		" CI-Units: extra",
+		"\tci-units: extra",
+		"ci-units : extra",
+		"ci-units=extra",
+		"CI-Units: extra\nci-units: extra",
+	} {
+		t.Run(declaration, func(t *testing.T) {
+			body := "CI-Tier: full\n" + declaration
+			t.Run("current-body", func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "current.json")
+				data, _ := json.Marshal(map[string]any{"body": body, "head": map[string]string{"sha": "branch"}})
+				if err := os.WriteFile(path, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+				err := run(config{checkCITier: true, planPath: plan, currentPRPath: path, workflowHeadSHA: "branch"})
+				if err == nil || !strings.Contains(err.Error(), "CI-Units requires one canonical declaration") {
+					t.Fatalf("malformed declaration passed current-body admission: %v", err)
+				}
+			})
+			t.Run("planning", func(t *testing.T) {
+				dir := t.TempDir()
+				eventPath := filepath.Join(dir, "event.json")
+				data, _ := json.Marshal(map[string]any{"pull_request": map[string]string{"body": body}})
+				if err := os.WriteFile(eventPath, data, 0600); err != nil {
+					t.Fatal(err)
+				}
+				planPath, matrixPath := filepath.Join(dir, "plan.json"), filepath.Join(dir, "matrix.json")
+				err := run(config{planCI: true, proofPolicyPath: policy, weightModelPath: weights, packagesPath: packages, eventPath: eventPath, planPath: planPath, matrixPath: matrixPath, markdownPath: filepath.Join(dir, "plan.md"), event: "pull_request", headSHA: "execution"})
+				if err == nil || !strings.Contains(err.Error(), "CI-Units requires one canonical declaration") {
+					t.Fatalf("malformed declaration passed planning admission: %v", err)
+				}
+				for _, path := range []string{planPath, matrixPath} {
+					if _, err := os.Stat(path); !os.IsNotExist(err) {
+						t.Fatalf("refused declaration published %s: %v", path, err)
+					}
+				}
+			})
+		})
+	}
+}

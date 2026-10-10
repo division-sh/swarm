@@ -51,7 +51,7 @@ func CIUnits(body string) ([]string, error) {
 	var declarations []string
 	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimSuffix(line, "\r")
-		if strings.HasPrefix(strings.TrimSpace(line), "CI-Units") {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(line)), "ci-units") {
 			declarations = append(declarations, line)
 		}
 	}
