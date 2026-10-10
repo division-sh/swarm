@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime"
 	"testing"
 	"time"
 
@@ -33,15 +34,37 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 							} else {
 								rt = startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 							}
+							var runID, seedID, receiverID string
+							var due, admissionStarted, admissionFinished, decisionReady time.Time
+							t.Cleanup(func() {
+								if !t.Failed() {
+									return
+								}
+								t.Logf("competing-exit failure before cleanup: backend=%s exit=%s order=%s run=%s seed=%s entity=%s admission_started=%s admission_finished=%s decision_ready=%s due=%s observed=%s", backend, exit, order, runID, seedID, receiverID, admissionStarted.Format(time.RFC3339Nano), admissionFinished.Format(time.RFC3339Nano), decisionReady.Format(time.RFC3339Nano), due.Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano))
+								if runID != "" {
+									ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+									defer cancel()
+									evidence, err := storetest.ObserveH2WorkloadSnapshot(ctx, rt.ReceiverStateReader, runID)
+									t.Logf("owned failure-time admission/timer/delivery evidence: %+v error=%v", evidence, err)
+								}
+								stack := make([]byte, 2<<20)
+								n := runtime.Stack(stack, true)
+								t.Logf("failure-time finalization/claim stacks:\n%s", stack[:n])
+							})
+							admissionStarted = time.Now().UTC()
 							seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "event_name": "work.requested", "payload": map[string]any{"seed": true}, "idempotency_key": "competing-start"})
+							admissionFinished = time.Now().UTC()
+							runID, seedID = seed.RunID, seed.EventID
 							if diagnostic != nil {
 								diagnostic.runID, diagnostic.seedEventID = seed.RunID, seed.EventID
 							}
 							entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
+							receiverID = entityID
 							if diagnostic != nil {
 								diagnostic.entityID = entityID
 							}
 							decision := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+							decisionReady = time.Now().UTC()
 							_, before := requireReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, ".", seed.RunID, entityID)
 							if before.CurrentState != "review" {
 								t.Fatalf("contenders did not start at review: %+v", before)
@@ -49,7 +72,6 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 							// The supported untargeted publication selects this run's
 							// sole primary entity through the API route owner.
 							cancel := map[string]any{"run_id": seed.RunID, "source_event_id": seed.EventID, "event_name": "work.cancelled", "payload": map[string]any{"seed": true}, "idempotency_key": "competing-cancel"}
-							var due time.Time
 							if exit == "timer" {
 								due = lifecycleCompetingTimerDue(t, rt, seed.RunID, entityID)
 							}

@@ -58,12 +58,17 @@ func TestVerifyRunJobflowRegistryIntegrationBothStores(t *testing.T) {
 			process.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 			runID := uuid.NewString()
+			copies := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 			out, errOut, code := registryProofCLI(t, "run", "start", "--connect", strings.TrimSuffix(endpoint, "/v1/rpc"),
 				"--run-id", runID, "--data", "company.registered="+filepath.Join(root, "data/companies.jsonl"), "--no-follow")
 			if code != 0 || errOut != "" || !strings.Contains(out, "run_id="+runID) {
 				t.Fatalf("public registry run.start: code=%d stdout=%s stderr=%s\nserve=%s", code, out, errOut, process.outputString())
 			}
 			registryProofWaitCompleted(t, endpoint, runID)
+			// Close the write interval before business/history inspection, verify,
+			// or intentional corruption. Already captured attempts still join.
+			copies.Stop()
+			registryProofCopyReceipt(t, copies)
 			entities, entityIDs := registryProofBusinessResults(t, endpoint, runID, outputEvents, companies)
 			history := storetest.ObserveEntityMutationHistory(t, context.Background(), selected, runID)
 			for _, row := range history {
@@ -97,6 +102,26 @@ func TestVerifyRunJobflowRegistryIntegrationBothStores(t *testing.T) {
 				t.Run("drift/"+mode, func(t *testing.T) { verify(t, "drift", mode, injectedEntity) })
 			}
 		})
+	}
+}
+
+func registryProofCopyReceipt(t *testing.T, collector *storetest.TransactionCollector) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		snapshot := collector.Snapshot()
+		if snapshot.Active == 0 {
+			raw, err := json.Marshal(snapshot.Total)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("Q6_REGISTRY_COPY_RECEIPT counts=%s", raw)
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("registry write interval retains unsettled transactions: %+v", snapshot)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
