@@ -71,8 +71,13 @@ func TestServedDeliveryQuiescenceMechanicalCallerRecipesPreserveAllOtherWork(t *
 		}
 		want, err := canonicalFunction(transformed)
 		got, afterErr := canonicalFunction(row.After)
+		current := row.After
+		if row.Successor != "" {
+			current = row.Successor
+		}
+		currentPin, pinErr := canonicalFunction(current)
 		actual, actualErr := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
-		if err != nil || afterErr != nil || actualErr != nil || want != got || actual != got {
+		if err != nil || afterErr != nil || pinErr != nil || actualErr != nil || want != got || actual != currentPin {
 			t.Fatalf("delivery caller changed setup, temporal cuts or assertions: %s", row.Function)
 		}
 		mutant := strings.Replace(row.After, "ReadRunDeliveries", "ForeignRunDeliveries", 1)
@@ -146,12 +151,16 @@ func TestServedDeliveryQuiescenceOwnerRecipesRemainSourcePinned(t *testing.T) {
 		}
 		matched++
 		actual := selectedCausalObservationBody(t, row.File, row.Function)
-		want, err := canonicalFunction(row.After)
+		current := row.After
+		if row.Successor != "" {
+			current = row.Successor
+		}
+		want, err := canonicalFunction(current)
 		got, actualErr := canonicalFunction(actual)
 		if err != nil || actualErr != nil || want != got {
 			t.Fatalf("construction/lifetime/delivery predicate changed: %s", row.Function)
 		}
-		if row.Function != "waitServedRunDeliveryQuiescence" && !strings.Contains(row.After, "p.deps.DeliveryStore.SummarizeRun") && !strings.Contains(row.After, "InspectionDeliveryReader(t,") {
+		if row.Function != "waitServedRunDeliveryQuiescence" && !strings.Contains(current, "p.deps.DeliveryStore.SummarizeRun") && !strings.Contains(current, "InspectionDeliveryReader(t,") {
 			t.Fatalf("constructor did not bind an original delivery or inspection owner: %s", row.Function)
 		}
 	}
