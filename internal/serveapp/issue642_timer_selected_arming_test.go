@@ -2,9 +2,11 @@ package serveapp
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime/pprof"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +22,28 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
+
+type issue642ArmingForkDiagnostic struct {
+	apiv1.RunForkExecutor
+	t *testing.T
+}
+
+func (p issue642ArmingForkDiagnostic) ExecuteRunFork(ctx context.Context, req apiv1.RunForkExecutionRequest) (apiv1.RunForkExecutionResult, error) {
+	started := time.Now()
+	sampled := make(chan struct{})
+	probe := time.AfterFunc(4*time.Second, func() {
+		defer close(sampled)
+		var stacks bytes.Buffer
+		_ = pprof.Lookup("goroutine").WriteTo(&stacks, 2)
+		p.t.Logf("ISSUE642_NEW_ARM_SLOW_FORK_STACK\n%s", stacks.String())
+	})
+	result, err := p.RunForkExecutor.ExecuteRunFork(ctx, req)
+	if !probe.Stop() {
+		<-sampled
+	}
+	p.t.Logf("ISSUE642_NEW_ARM_FORK_DURATION duration=%s err=%v", time.Since(started), err)
+	return result, err
+}
 
 // Supplemental served new-arm proof, not registry-v5 qualification.
 func TestIssue642NewlyArmedTimerUsesSelectedDelayAndEffectBothStores(t *testing.T) {
@@ -61,7 +85,7 @@ func issue642NewlyArmedSelectedTimer(t *testing.T, backend, delay string) {
 	buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
 		caps, err := previous(owner, req)
 		if err == nil {
-			caps.RunFork = sourceForkErrorProbe{RunForkExecutor: caps.RunFork, t: t}
+			caps.RunFork = issue642ArmingForkDiagnostic{RunForkExecutor: caps.RunFork, t: t}
 		}
 		return caps, err
 	}
