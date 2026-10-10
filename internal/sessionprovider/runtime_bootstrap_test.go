@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	credentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -32,17 +33,18 @@ import (
 )
 
 type runtimeBootstrapFixture struct {
-	t          *testing.T
-	ctx        context.Context
-	store      sessionInputSelectedStore
-	peer       *sdkPeer
-	owner      *worklifetime.RuntimeOccurrence
-	directory  string
-	candidate  channelonboarding.Candidate
-	principal  operatorchannel.Principal
-	service    *channelonboarding.Service
-	channels   *operatorchannel.Service
-	connection *RuntimeConnection
+	t           *testing.T
+	ctx         context.Context
+	store       sessionInputSelectedStore
+	peer        *sdkPeer
+	owner       *worklifetime.RuntimeOccurrence
+	directory   string
+	candidate   channelonboarding.Candidate
+	principal   operatorchannel.Principal
+	service     *channelonboarding.Service
+	channels    *operatorchannel.Service
+	connection  *RuntimeConnection
+	credentials *credentials.SnapshotOwner
 }
 
 func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapFixture {
@@ -108,11 +110,12 @@ func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapF
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.credentials = currentness
 	proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.channels, err = operatorchannel.NewService(f.store, proofs, currentness, []operatorchannel.InterfaceIdentity{identity}, runtimeID)
+	f.channels, err = operatorchannel.NewService(f.store, proofs, f, []operatorchannel.InterfaceIdentity{identity}, runtimeID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,6 +146,15 @@ func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapF
 func (f *runtimeBootstrapFixture) QualifySessionPlan(c channelonboarding.Candidate) error {
 	return QualifyBootstrapPlan(c.Plan)
 }
+func (f *runtimeBootstrapFixture) CurrentValueMatchesSeal(ctx context.Context, value credentials.ValueEvidence) (bool, error) {
+	return f.credentials.CurrentValueMatchesSeal(ctx, value)
+}
+func (f *runtimeBootstrapFixture) AdmitSessionAccount(ctx context.Context, account operatorchannel.SessionAccountAdmission) (authority.Admission, error) {
+	if f.connection == nil {
+		return authority.Admission{}, errRuntimeConnection
+	}
+	return f.connection.AdmitSessionAccount(ctx, account)
+}
 func (f *runtimeBootstrapFixture) BootstrapSession(_ context.Context, op channelonboarding.Operation, c channelonboarding.Candidate) error {
 	if f.connection == nil {
 		var err error
@@ -163,6 +175,9 @@ func (f *runtimeBootstrapFixture) ReadSessionPairing(ctx context.Context, op cha
 		return channelonboarding.PairingReadback{Status: "not_started"}, nil
 	}
 	return f.connection.PairingReadback(ctx, principal)
+}
+func (f *runtimeBootstrapFixture) CheckpointSessionPairing(ctx context.Context, op channelonboarding.Operation) (channelonboarding.Operation, bool, error) {
+	return f.connection.CheckpointPairing(ctx, op.Revision)
 }
 func (*runtimeBootstrapFixture) RefreshChannelActivations(context.Context) error {
 	return errors.New("bootstrap cannot enable a channel activation")

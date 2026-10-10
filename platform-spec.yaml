@@ -11272,6 +11272,16 @@ tool_model:
         activating_provider is the pairing phase; no second lifecycle or authored bootstrap flag is introduced.
         Constructor qualification permits this scoped control-plane work only. It does not clear account,
         operator claim/confirmation, executable activation or private-output admission requirements.
+        A retained bootstrap handle is not a successful attempt. Reuse waits for the original attempt result
+        and checks the concrete original connection's current lifetime; failed, fenced or closed attempts refuse
+        without another Connect, changed connection identity or premature cleanup/possession release. Cancellation
+        after runtime selection is checked before construction and again at Connect; retained partial owners join
+        cleanup before relinquishing responsibility. Only the private connection owner may checkpoint the exact
+        persisted SDK account while its original reserved occurrence is authenticated. It freezes account provenance
+        and advances to awaiting_external_identity under the selected operation revision, without claiming a human
+        binding or executable target. Repetition retains the original account admission; supplied QR observations
+        cannot create it. The existing identity ceremony consumes this session provenance through genuine native
+        admission rather than fabricating a provider credential.
       session_pairing_qr: >
         The concrete WhatsApp pairing owner consumes the public QR and ADV-rotation events through the same guarded
         occurrence callback as incoming capture; the SDK GetQRChannel convenience helper is not a supported Swarm

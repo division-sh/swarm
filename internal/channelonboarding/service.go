@@ -122,6 +122,7 @@ type ReadinessProjector interface {
 type SessionBootstrapOwner interface {
 	QualifySessionPlan(Candidate) error
 	BootstrapSession(context.Context, Operation, Candidate) error
+	CheckpointSessionPairing(context.Context, Operation) (Operation, bool, error)
 	ReadSessionPairing(context.Context, Operation, operatorchannel.Principal) (PairingReadback, error)
 }
 
@@ -943,7 +944,21 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				if err := s.sessions.BootstrapSession(ctx, op, candidate); err != nil {
 					return s.blockedResult(ctx, op, candidate, err)
 				}
-				return s.result(ctx, op, &candidate)
+				next, paired, err := s.sessions.CheckpointSessionPairing(ctx, op)
+				if err != nil {
+					return s.blockedResult(ctx, op, candidate, err)
+				}
+				if next.OperationID != op.OperationID || next.PrincipalID != op.PrincipalID ||
+					!next.Coordinate.MatchesDeclaration(op.Coordinate) || next.SessionConnectionID != op.SessionConnectionID ||
+					paired && (next.Phase != PhaseAwaitingExternalIdentity || next.SessionAccount.Validate() != nil) ||
+					!paired && (next.Phase != op.Phase || next.Revision != op.Revision) {
+					return Result{}, fmt.Errorf("%w: session pairing changed onboarding responsibility", ErrRevisionConflict)
+				}
+				op = next
+				if !paired {
+					return s.result(ctx, op, &candidate)
+				}
+				continue
 			}
 			if err := s.activations.RefreshChannelActivationCandidates(ctx); err != nil {
 				if terminal, ok := AsTerminalActivationError(err); ok {
@@ -1523,11 +1538,7 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 			return failed, false, err
 		}
 	}
-	providerCredential, err := providerIdentityEvidence(op, candidate)
-	if err != nil {
-		return op, false, err
-	}
-	providerAuthority, err := operatorchannel.CredentialProviderAuthority(providerCredential)
+	providerAuthority, err := providerIdentityAuthority(op, candidate)
 	if err != nil {
 		return op, false, err
 	}
@@ -1590,6 +1601,28 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 		IdentityOperationID: identityOp.OperationID, Now: s.now().UTC(),
 	})
 	return next, true, err
+}
+
+func providerIdentityAuthority(op Operation, candidate Candidate) (operatorchannel.ProviderAuthority, error) {
+	if op.Posture == ActivationSessionConnection {
+		if err := op.ValidateSessionAccount(); err != nil {
+			return operatorchannel.ProviderAuthority{}, err
+		}
+		authority := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: op.SessionAccount}
+		if candidate.ProviderCredentialRole != "" {
+			evidence, err := providerIdentityEvidence(op, candidate)
+			if err != nil {
+				return operatorchannel.ProviderAuthority{}, err
+			}
+			authority.Credential = evidence
+		}
+		return authority, authority.Validate()
+	}
+	evidence, err := providerIdentityEvidence(op, candidate)
+	if err != nil {
+		return operatorchannel.ProviderAuthority{}, err
+	}
+	return operatorchannel.CredentialProviderAuthority(evidence)
 }
 
 func providerIdentityEvidence(op Operation, candidate Candidate) (runtimecredentials.ValueEvidence, error) {

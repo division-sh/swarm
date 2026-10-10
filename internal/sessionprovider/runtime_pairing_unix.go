@@ -5,10 +5,73 @@ package sessionprovider
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/google/uuid"
 )
+
+// CheckpointPairing freezes only the genuine SDK account in this reserved private
+// directory. It does not confirm a human, admit a target or publish an activation.
+func (c *RuntimeConnection) CheckpointPairing(ctx context.Context, expectedRevision int64) (result channelonboarding.Operation, paired bool, err error) {
+	work, err := c.begin(ctx)
+	if err != nil {
+		return result, false, err
+	}
+	defer func() { err = errors.Join(err, work.Done()) }()
+	ctx = work.Context()
+	if err := c.lockLifecycle(ctx); err != nil {
+		return result, false, err
+	}
+	defer func() { <-c.lifecycle }()
+	op, err := c.currentOperationScope(ctx)
+	if err != nil {
+		return result, false, err
+	}
+	if op.Revision != expectedRevision || (op.Phase != channelonboarding.PhaseActivatingProvider && op.Phase != channelonboarding.PhaseAwaitingExternalIdentity) {
+		return result, false, channelonboarding.ErrRevisionConflict
+	}
+	occurrence := c.state.currentOccurrence()
+	if !c.state.ownsConnectedOccurrence(ctx, occurrence) {
+		return op, false, nil
+	}
+	owned, release, err := occurrence.acquire(ctx)
+	if err != nil {
+		return result, false, err
+	}
+	defer release()
+	device, err := c.state.device(owned)
+	if err != nil {
+		return result, false, err
+	}
+	if device.ID == nil || owned.Err() != nil || !c.state.ownsConnectedOccurrence(owned, occurrence) {
+		return result, false, errSessionAccount
+	}
+	account := op.SessionAccount
+	if account == (operatorchannel.SessionAccountAdmission{}) {
+		account = operatorchannel.SessionAccountAdmission{Provider: op.Provider, ConnectionID: op.SessionConnectionID,
+			AccountRef: device.ID.ToNonAD().String(), AdmissionID: uuid.NewString(), Revision: 1}
+	}
+	if account.Validate() != nil || account.AccountRef != device.ID.ToNonAD().String() ||
+		account.ConnectionID != c.operation.SessionConnectionID ||
+		c.sessionAccount() != (operatorchannel.SessionAccountAdmission{}) && c.sessionAccount() != account {
+		return result, false, errSessionAccount
+	}
+	if op.Phase == channelonboarding.PhaseActivatingProvider {
+		op, err = c.store.AdvanceChannelOnboarding(owned, channelonboarding.AdvanceRequest{OperationID: op.OperationID,
+			ExpectedRevision: expectedRevision, Phase: channelonboarding.PhaseAwaitingExternalIdentity,
+			SessionAccount: &account, Now: time.Now().UTC()})
+		if err != nil {
+			return result, false, err
+		}
+	}
+	if owned.Err() != nil || c.ctx.Err() != nil {
+		return result, false, errClientOccurrenceFenced
+	}
+	c.account.Store(&account)
+	return op, true, nil
+}
 
 // PairingReadback accepts the API owner's selected principal, not a provider
 // sender. The private QR owner rechecks the operation at the disclosure boundary.
