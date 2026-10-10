@@ -76,6 +76,10 @@ func (a directOperatorChannelDestructiveTestAdapter) RevokeProof(ctx context.Con
 	return a.service.RevokeProof(ctx, selector, revision, a.now)
 }
 
+func (a directOperatorChannelDestructiveTestAdapter) Logout(context.Context, string, int64, string, string) (channelonboarding.SessionLogoutReadback, error) {
+	return channelonboarding.SessionLogoutReadback{}, channelonboarding.ErrConflict
+}
+
 func (s *recordingOperatorChannelIdempotency) WithAPIIdempotency(ctx context.Context, req apiidempotency.Request, execute func(context.Context) (apiidempotency.Completion, error)) (apiidempotency.Completion, bool, error) {
 	s.actors = append(s.actors, req.Actor.ID)
 	return s.delegate.WithAPIIdempotency(ctx, req, execute)
@@ -106,7 +110,7 @@ func TestOperatorChannelAPIContractEvidence(t *testing.T) {
 		Channels: service, Confirmation: directOperatorChannelConfirmationTestAdapter{service: service}, Destructive: directOperatorChannelDestructiveTestAdapter{service: service, now: now},
 		Readback: operatorChannelIdentityReadbackAdapter{service: service}, Idempotency: idempotency, Now: func() time.Time { return now },
 	})
-	for _, method := range []string{"channel.confirm", "channel.unbind", "channel.proof_revoke", "channel.list"} {
+	for _, method := range []string{"channel.confirm", "channel.unbind", "channel.proof_revoke", "channel.logout", "channel.list"} {
 		if handlers[method] == nil {
 			t.Fatalf("operator channel handler %s is missing", method)
 		}
