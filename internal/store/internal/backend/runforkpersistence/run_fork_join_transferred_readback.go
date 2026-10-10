@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -70,14 +72,15 @@ func readRunForkTransferredJoinInventory(ctx context.Context, attempt *mutationp
 func loadRunForkTransferredJoinInventory(ctx context.Context, attempt *mutationprotocol.Attempt, childRunID string) ([]genericschedule.TransferredJoinOccurrence, error) {
 	var actual []genericschedule.TransferredJoinOccurrence
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT accumulator FROM flow_instances WHERE run_id=$1`, childRunID)
+		rows, err := tx.QueryContext(ctx, `SELECT CAST(entity_id AS TEXT), instance_path, flow_template, accumulator FROM flow_instances WHERE run_id=$1`, childRunID)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
+			var entityID, instancePath, template string
 			var raw any
-			if err := rows.Scan(&raw); err != nil {
+			if err := rows.Scan(&entityID, &instancePath, &template, &raw); err != nil {
 				return err
 			}
 			accumulator, err := storeentity.DecodeJSONMap(raw)
@@ -88,11 +91,30 @@ func loadRunForkTransferredJoinInventory(ctx context.Context, attempt *mutationp
 			if err != nil {
 				return err
 			}
+			for _, transfer := range transfers {
+				if err := requireRunForkTransferredJoinOwner(transfer, childRunID, entityID, instancePath, template); err != nil {
+					return err
+				}
+			}
 			actual = append(actual, transfers...)
 		}
 		return rows.Err()
 	})
 	return actual, err
+}
+
+func requireRunForkTransferredJoinOwner(transfer genericschedule.TransferredJoinOccurrence, runID, entityID, instancePath, template string) error {
+	route := flowidentity.StoredRoute(template, "", instancePath)
+	if route.ScopeKey != template || route.InstancePath != instancePath {
+		return fmt.Errorf("transferred join has noncanonical materialized owner coordinates")
+	}
+	_, ref, ok := timeridentity.ParseJoinHandle(transfer.Command.Payload.Interface().(map[string]any))
+	if !ok {
+		return fmt.Errorf("transferred join lacks its exact retained arrival reference")
+	}
+	entry := ref.StageEntry()
+	// Retained stages can precede the header's current stage; ownership cannot.
+	return entry.RequireOwner(runID, route.ScopeKey, route.InstanceID, route.InstancePath, entityID, entry.Stage)
 }
 
 func requireRunForkTransferredJoinInventory(childRunID string, expected, actual []genericschedule.TransferredJoinOccurrence) error {
