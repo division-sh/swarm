@@ -18951,6 +18951,897 @@
       }
     },
     {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].provider",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].category",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].description",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].effect_class",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].handler_type",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].in_process",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].input_schema",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].input_schema.additionalProperties",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].input_schema.properties",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].input_schema.properties.destination",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].input_schema.properties.destination.minLength",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].input_schema.properties.destination.type",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].input_schema.properties.text",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].input_schema.properties.text.maxLength",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].input_schema.properties.text.minLength",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].input_schema.properties.text.type",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].input_schema.required",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "sequence"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].input_schema.required[0]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].input_schema.required[1]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].input_schema.type",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].output_schema",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].output_schema.additionalProperties",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].output_schema.properties",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].output_schema.properties.id",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].output_schema.properties.id.minLength",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].output_schema.properties.id.type",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].output_schema.required",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "sequence"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].output_schema.required[0]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.connector.connector\"].tools[\"whatsapp.send_text\"].output_schema.type",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].capabilities",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].capabilities.acknowledgment",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].capabilities.actions_as_buttons",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].capabilities.actions_as_text",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].capabilities.card_render",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].capabilities.edit",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].capabilities.inbox_listing",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].capabilities.reply_to_reference",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].events",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].events.text",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].events.text.event",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].events.text.fields",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].events.text.fields.conversation_reference",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].events.text.fields.conversation_scope",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].events.text.fields.entry_invocation",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].events.text.fields.external_account_reference",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].events.text.fields.provider_message_reference",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].events.text.fields.reply_to_message_reference",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].events.text.fields.text",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].onboarding",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].onboarding.ceremony",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].onboarding.confirmation",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].onboarding.connection_health",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].onboarding.learned_destination",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].onboarding.learned_destination.destination",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].opaque_types",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].opaque_types.conversation_reference",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].opaque_types.conversation_reference.minLength",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].opaque_types.conversation_reference.type",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].opaque_types.delivery_reference",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].opaque_types.delivery_reference.minLength",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].opaque_types.delivery_reference.type",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].opaque_types.destination",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].opaque_types.destination.minLength",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].opaque_types.destination.type",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].opaque_types.external_account_reference",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].opaque_types.external_account_reference.minLength",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].opaque_types.external_account_reference.type",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].operations",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].operations.deliver",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].operations.deliver.input",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].operations.deliver.input.destination",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].operations.deliver.input.text",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].operations.deliver.output",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].operations.deliver.output.delivery_reference",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].operations.deliver.tool",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].provider",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "pack_sources[\"provider.whatsapp.hitl_channel.channel\"].transport",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
       "path": "packs.platform_membership",
       "provenance": {
         "origin": "authored",
@@ -19162,6 +20053,126 @@
     },
     {
       "path": "packs.platform_membership.packs[13].type",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "inventory.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs.platform_membership.packs[14]",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "inventory.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs.platform_membership.packs[14].id",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "inventory.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs.platform_membership.packs[14].path",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "inventory.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs.platform_membership.packs[14].type",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "inventory.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs.platform_membership.packs[15]",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "inventory.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs.platform_membership.packs[15].id",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "inventory.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs.platform_membership.packs[15].path",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "inventory.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs.platform_membership.packs[15].type",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "inventory.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs.platform_membership.packs[16]",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "inventory.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs.platform_membership.packs[16].id",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "inventory.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs.platform_membership.packs[16].path",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "inventory.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs.platform_membership.packs[16].type",
       "provenance": {
         "origin": "authored",
         "source_file": "inventory.yaml",
@@ -23566,6 +24577,792 @@
         "origin": "authored",
         "pack_identity": "provider.typeform",
         "source_file": "provider-triggers/typeform/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].body",
+      "provenance": {
+        "origin": "boundary_snapshot",
+        "rule_id": "pack.admitted_body_bytes",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/trigger.yaml"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.capabilities",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.capabilities.can",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.capabilities.can.emit_events",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "sequence"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.capabilities.can.emit_events[0]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.capabilities.can.emit_events[1]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.capabilities.can.emit_events[2]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.capabilities.can.emit_events[3]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.capabilities.can.persist_dedupe_markers",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.capabilities.can.receive_session_events",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.capabilities.cannot",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "sequence"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.capabilities.cannot[0]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.capabilities.cannot[1]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.capabilities.cannot[2]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.id",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.manifest_hash",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.platform_version",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.provenance",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.provenance.source",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.requires",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "empty_mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.tests",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "sequence"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.tests[0]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.tests[1]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.type",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp\"].envelope.version",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp",
+        "source_file": "provider-triggers/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].body",
+      "provenance": {
+        "origin": "boundary_snapshot",
+        "rule_id": "pack.admitted_body_bytes",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/connector.yaml"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.capabilities",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.capabilities.can",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.capabilities.can.call_provider_actions",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "sequence"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.capabilities.can.call_provider_actions[0]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.capabilities.can.journal_activity_attempts",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.capabilities.can.lower_through_activity",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.capabilities.cannot",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "sequence"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.capabilities.cannot[0]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.capabilities.cannot[1]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.capabilities.cannot[2]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.id",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.manifest_hash",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.platform_version",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.provenance",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.provenance.source",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.requires",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "empty_mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.tests",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "sequence"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.tests[0]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.type",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.connector\"].envelope.version",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.connector",
+        "source_file": "provider-connectors/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].body",
+      "provenance": {
+        "origin": "boundary_snapshot",
+        "rule_id": "pack.admitted_body_bytes",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/channel.yaml"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.capabilities",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.capabilities.can",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "empty_mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.capabilities.cannot",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "sequence"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.capabilities.cannot[0]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.capabilities.cannot[1]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.capabilities.cannot[2]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.id",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.implements",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "sequence"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.implements[0]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.manifest_hash",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.platform_version",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.provenance",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.provenance.source",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.requires",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.requires.packs",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.requires.packs.connector",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.requires.packs.trigger",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.tests",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "sequence"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.tests[0]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.tests[1]",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.type",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "packs[\"provider.whatsapp.hitl_channel\"].envelope.version",
+      "provenance": {
+        "origin": "authored",
+        "pack_identity": "provider.whatsapp.hitl_channel",
+        "source_file": "channels/whatsapp/pack.yaml",
         "source_line": 1,
         "source_column": 1,
         "source_presence": "scalar"

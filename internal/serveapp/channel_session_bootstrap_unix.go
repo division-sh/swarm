@@ -69,7 +69,7 @@ func init() {
 
 func newNativeServeSessionBootstrap(selectRuntime serveSessionBootstrapRuntime, store channelonboarding.Store,
 	credentials operatorchannel.CredentialCurrentness, directory string,
-) (channelonboarding.SessionBootstrapOwner, error) {
+) (serveSessionBootstrapOwner, error) {
 	return &serveSessionBootstrap{connections: make(map[string]*serveSessionBootstrapAttempt),
 		selectRuntime: selectRuntime, store: store, credentials: credentials, directory: directory}, nil
 }
@@ -237,6 +237,9 @@ func (s *serveSessionBootstrap) openSessionAttempt(ctx context.Context, op chann
 	s.mu.Unlock()
 	if err == nil {
 		err = connection.Connect(ctx)
+	}
+	if err == nil && !bootstrap {
+		err = connection.AwaitSessionAccount(ctx)
 	}
 	if err != nil && connection != nil {
 		err = errors.Join(err, connection.Close(ctx))

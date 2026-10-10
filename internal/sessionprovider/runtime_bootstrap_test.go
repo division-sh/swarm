@@ -190,7 +190,13 @@ func (f *runtimeBootstrapFixture) ResumeSession(ctx context.Context, op channelo
 		return err
 	}
 	f.peer.attach(f.t, f.connection.state.currentOccurrence().client)
-	return f.connection.Connect(ctx)
+	if err := f.connection.Connect(ctx); err != nil {
+		return err
+	}
+	if op.SessionAccount != (operatorchannel.SessionAccountAdmission{}) {
+		return f.connection.AwaitSessionAccount(ctx)
+	}
+	return nil
 }
 func (f *runtimeBootstrapFixture) ReadSessionPairing(ctx context.Context, op channelonboarding.Operation, principal operatorchannel.Principal) (channelonboarding.PairingReadback, error) {
 	if f.connection == nil {

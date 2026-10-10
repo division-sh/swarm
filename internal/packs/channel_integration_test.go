@@ -1952,10 +1952,18 @@ func loadTelegramChannelCompilerInputs(t *testing.T) (*packs.InterfaceRegistry, 
 	registry := loadChannelInterfaceRegistry(t)
 	triggerCatalog := packfixture.TriggerCatalog(t)
 	channels := packfixture.ChannelPacks(t)
-	if len(channels) != 1 {
-		t.Fatalf("Telegram channel packs = %#v, want one", channels)
+	var channel packs.LoadedChannelPack
+	count := 0
+	for _, candidate := range channels {
+		if candidate.Envelope.ID == "provider.telegram.hitl_channel" {
+			channel = candidate
+			count++
+		}
 	}
-	triggerID := channels[0].Envelope.Requires.Packs[packs.TypeTrigger]
+	if count != 1 {
+		t.Fatalf("exact Telegram channel count = %d, want one", count)
+	}
+	triggerID := channel.Envelope.Requires.Packs[packs.TypeTrigger]
 	var trigger packs.TriggerPackDescriptor
 	for _, candidate := range triggerCatalog.PackDescriptors() {
 		if candidate.Identity.ID() == triggerID {
@@ -1966,7 +1974,7 @@ func loadTelegramChannelCompilerInputs(t *testing.T) (*packs.InterfaceRegistry, 
 	if trigger.Identity.ID() == "" {
 		t.Fatalf("Telegram trigger descriptor %q is missing", triggerID)
 	}
-	connectorID := channels[0].Envelope.Requires.Packs[packs.TypeConnector]
+	connectorID := channel.Envelope.Requires.Packs[packs.TypeConnector]
 	var connector packs.ConnectorPackDescriptor
 	for _, candidate := range packfixture.ConnectorRegistry(t).PackDescriptors() {
 		if candidate.Identity.ID() == connectorID {
@@ -1977,7 +1985,7 @@ func loadTelegramChannelCompilerInputs(t *testing.T) (*packs.InterfaceRegistry, 
 	if connector.Identity.ID() == "" {
 		t.Fatalf("Telegram connector descriptor %q is missing", connectorID)
 	}
-	return registry, channels[0], trigger, connector
+	return registry, channel, trigger, connector
 }
 
 func loadChannelInterfaceRegistry(t *testing.T) *packs.InterfaceRegistry {

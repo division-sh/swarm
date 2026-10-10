@@ -152,6 +152,89 @@ func TestWhatsAppPublicRecoveryRestoresOriginalPairedResponsibilityBothStores(t 
 	}
 }
 
+func retainedRuntimeBootstrapFixture(t *testing.T, a *activeInputFixture) *runtimeBootstrapFixture {
+	t.Helper()
+	file, err := credentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := credentials.NewSnapshotOwner(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := channelonboarding.Candidate{Provider: a.operation.Provider, Interface: a.operation.Interface,
+		Coordinate: a.operation.Coordinate, Plan: a.channel, Posture: a.operation.Posture, Ceremony: a.operation.Ceremony,
+		ConfirmationOperation: "deliver", ConnectionHealth: "provider_connection",
+		Target: channelonboarding.CandidateTarget{Selector: a.operation.TargetSelector, FlowPath: ".", Provider: "whatsapp", Alias: "whatsapp",
+			ServiceID: flowidentity.StandingServiceID("."), Generation: a.operation.Coordinate.TargetGeneration,
+			PublicationSequence: a.standing.PublicationSequence, AdmissionGeneration: a.catalog.Generation()}}
+	f := &runtimeBootstrapFixture{t: t, ctx: a.ctx, store: a.selected, peer: newSDKPeer(t), owner: a.workOwner,
+		directory: a.basePath, candidate: candidate, credentials: current}
+	f.channels, err = operatorchannel.NewService(a.selected, a.proofs, f, []operatorchannel.InterfaceIdentity{candidate.Interface}, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.principal, err = f.channels.PreparePrincipal(f.ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := channelonboarding.NewCredentialWriter(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := channelonboarding.NewCandidateCatalog([]channelonboarding.Candidate{candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.service, err = channelonboarding.NewService(channelonboarding.ServiceOptions{Store: a.selected, SourceArtifacts: a.selected.(sourceartifact.Reader),
+		Identities: f.channels, Credentials: writer, Catalog: func() (*channelonboarding.CandidateCatalog, error) { return catalog, nil },
+		Sessions: f, Activations: f, Confirmation: f, Readiness: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func TestWhatsAppStartupRestoresBeforeProofWithoutDrivingEffectsBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			a := newActiveInputFixtureWithProof(t, backend, false, true)
+			a.activate(t)
+			if err := a.state.close(a.ctx); err != nil {
+				t.Fatal(err)
+			}
+			f := retainedRuntimeBootstrapFixture(t, a)
+			if f.principal.ID != a.operation.PrincipalID {
+				t.Fatal("principal preparation changed the original human authority")
+			}
+			if _, _, err := f.channels.Bootstrap(f.ctx, time.Now().UTC()); err == nil {
+				t.Fatal("retained proof executed without native ownership")
+			}
+			if err := f.service.RestoreSessions(f.ctx); err != nil {
+				t.Fatal("restoration attempted effect driving before proof admission", err)
+			}
+			current, err := a.selected.GetChannelOnboarding(f.ctx, a.operation.OperationID)
+			if err != nil || current.Revision != a.operation.Revision || current.Phase != a.operation.Phase ||
+				current.SessionAccount != a.operation.SessionAccount || current.IdentityOperationID != a.operation.IdentityOperationID {
+				t.Fatal("restoration advanced or replaced the frozen onboarding responsibility", current, err)
+			}
+			_, bindings, err := f.channels.Bootstrap(f.ctx, time.Now().UTC())
+			if err != nil || len(bindings) != 1 || bindings[0].ProviderAuthority.Session != a.operation.SessionAccount {
+				t.Fatal("retained proof did not consume restored exact account authority", bindings, err)
+			}
+			connection := f.connection
+			if err := f.service.RestoreSessions(f.ctx); err != nil || f.connection != connection {
+				t.Fatal("repeated startup restoration replaced current native ownership", err)
+			}
+			caller, cancel := context.WithCancel(f.ctx)
+			cancel()
+			if err := f.service.RestoreSessions(caller); !errors.Is(err, context.Canceled) {
+				t.Fatal("canceled startup restoration acquired authority", err)
+			}
+		})
+	}
+}
+
 func TestWhatsAppSucceededRecoveryRestoresOnlyCurrentActivationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

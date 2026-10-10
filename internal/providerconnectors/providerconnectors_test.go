@@ -482,6 +482,7 @@ func TestCapabilitySubjectsEnumerateExactInstalledInventoryWithoutMakingToolsEff
 		"telegram.install_shared_inbox_commands",
 		"telegram.send_interactive",
 		"telegram.send_message",
+		"whatsapp.send_text",
 	}
 	if len(subjects) != len(want) {
 		t.Fatalf("subjects = %#v, want %d installed actions", subjects, len(want))
@@ -507,7 +508,7 @@ func TestCapabilitySubjectsEffectiveFlowLocalIdentityReplacesAvailableTeachingRo
 	if err != nil {
 		t.Fatalf("CapabilitySubjects: %v", err)
 	}
-	if len(subjects) != 12 {
+	if len(subjects) != 13 {
 		t.Fatalf("subjects = %#v, want one effective identity replacing its installed row", subjects)
 	}
 	for _, subject := range subjects {

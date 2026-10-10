@@ -142,7 +142,7 @@ func TestServeSessionIncomingSelectionConsumesExactCompiledOwners(t *testing.T) 
 			ordered[0], ordered[1] = ordered[1], ordered[0]
 		}
 		for _, candidate := range candidates {
-			incoming, err := serveSessionIncomingSelection(definition, ordered, candidate)
+			incoming, err := serveSessionIncomingSelection(definition, definition.Runtime, ordered, candidate)
 			if err != nil || incoming == nil || incoming.Bus != definition.Runtime.Bus || incoming.Posture != executionposture.Live ||
 				incoming.Alias != candidate.Target.Alias || incoming.Trigger.Provider() != "whatsapp" ||
 				incoming.Trigger.Transport() != packs.ChannelTransportSession || !incoming.Trigger.Generation().Equal(candidate.Target.AdmissionGeneration) ||
@@ -177,7 +177,7 @@ func TestServeSessionIncomingSelectionConsumesExactCompiledOwners(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			candidate := candidates[0]
 			tc.mutate(&candidate)
-			if incoming, err := serveSessionIncomingSelection(definition, declarations, candidate); err == nil || incoming != nil {
+			if incoming, err := serveSessionIncomingSelection(definition, definition.Runtime, declarations, candidate); err == nil || incoming != nil {
 				t.Fatal("contradictory candidate supplied incoming owners", incoming, err)
 			}
 		})
@@ -196,13 +196,13 @@ func TestServeSessionIncomingSelectionConsumesExactCompiledOwners(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			broken := definition
 			tc.mutate(&broken)
-			if incoming, err := serveSessionIncomingSelection(broken, declarations, candidates[0]); err == nil || incoming != nil {
+			if incoming, err := serveSessionIncomingSelection(broken, broken.Runtime, declarations, candidates[0]); err == nil || incoming != nil {
 				t.Fatal("incomplete runtime supplied incoming owners", incoming, err)
 			}
 		})
 	}
 	for _, declarations := range [][]runtimepkg.StandingTargetDeclaration{nil, {declarations[0], declarations[0]}} {
-		if incoming, err := serveSessionIncomingSelection(definition, declarations, candidates[0]); err == nil || incoming != nil {
+		if incoming, err := serveSessionIncomingSelection(definition, definition.Runtime, declarations, candidates[0]); err == nil || incoming != nil {
 			t.Fatal("missing/duplicate declaration supplied incoming owners", incoming, err)
 		}
 	}

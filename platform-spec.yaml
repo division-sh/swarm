@@ -10759,11 +10759,13 @@ tool_model:
       fall back to envelope narrative, or preserve a legacy surface alongside this owner.
   provider_connector_tools:
     description: >
-      Outbound provider connectors are authored HTTP tools represented by the existing `ToolSchemaEntry` model with
+      Outbound provider connectors are authored HTTP tools or closed shipped native targets represented by the existing `ToolSchemaEntry` model with
       `category: provider_connector`, and executed only through handler `activity` requests. Connector declarations may be
       flow-local entries in tools.yaml or explicitly imported connector-pack bodies, but both routes must produce the same
       canonical `ToolSchemaEntry` object. The category is a readback and validation profile, not a new runtime dispatcher:
-      dispatch remains owned by the HTTP activity executor and non-idempotent writes remain owned by `activity_attempts`.
+      HTTP dispatch remains owned by the HTTP activity executor and non-idempotent writes remain owned by `activity_attempts`.
+      Native target declaration and execution consume session_outbound_tool_target in the channel capability model;
+      neither an installed pack nor an imported declaration supplies native execution authority.
     canonical_owners:
       declaration: "ToolSchemaEntry with `category: provider_connector`, authored in tools.yaml or imported from a verified connector pack."
       pack_import: schema.yaml imports.connector_packs owns explicit connector tool enablement; selected-root packs/manifest.yaml owns project pack inventory.
@@ -10772,16 +10774,17 @@ tool_model:
       non_idempotent_journal: "`activity_attempts`."
       mock_response_plan: >
         One immutable exact-tool response plan satisfies mock-mode non_idempotent_write execution. It is compiled from every effective
-        canonical provider_connector ToolSchemaEntry and output_schema after explicit connector-pack imports, regardless of whether
+        canonical HTTP provider_connector ToolSchemaEntry and output_schema after explicit connector-pack imports, regardless of whether
         the effective declaration is flow-local or pack-imported. Declaration origin is provenance/readback only and MUST NOT select
         response eligibility. Ordinary served construction and each disk- or catalog-loaded selected contract compile and consume the
         plan from their own exact effective semantic source; caller-injected, process-current, or historical/current cross-source plans
         are forbidden. The plan is generated fixture infrastructure, not a second connector declaration, authored response DSL,
         provider branch, mock/live selector, or live fallback.
-      credentials: "static credential store keys listed under tool `credentials`, or managed credential handles listed under tool `managed_credential`; exactly one credential mode owns connector auth."
+      credentials: "HTTP connectors declare exactly one static or managed credential mode; native targets use only their exact admitted session authority, never substitute credentials."
       readback: "tool_model.provider_capability_surface, consuming canonical static and managed credential descriptors."
       display: "first CAN action label is derived from the authored tool `description`; if absent, it falls back to normalized `<action> via <Provider>`."
     stage_1_profile:
+      applicability: HTTP provider connectors only; native declarations consume the closed shared target contract.
       required:
       - "tool id MUST use `<provider>.<action>` form."
       - "`handler_type` MUST resolve to `http` and include an `http` block with explicit `method` and `url`."
@@ -10793,6 +10796,12 @@ tool_model:
       - "`response_mapping`; connector response mapping is split until specified."
       - "`rate_limit` and `rate_limit_max_wait`; connector admission/rate limiting is split until specified."
       - "direct runtime provider adapter code or bespoke connector dispatch."
+    native_profile: >
+      Native connector and registration body validation delegates to the canonical ToolSchemaEntry closed
+      in_process target contract, including exact provider/category/effect and private declaration naming.
+      HTTP, MCP, module, response, rate or credential substitutes remain forbidden. Compiled channel delivery
+      consumes the same immutable tool schema and exact output projection. Declaration qualification does not
+      install a session, manufacture provider readiness or bypass the selected connection/effect launch owners.
     connector_pack_profile:
       status: "first slices: Telegram static connector pack proof, Slack managed-credential connector pack proof, Notion Basic+JSON workspace-grant connector proof, Microsoft Graph client_credentials `.default` connector proof, and GitHub App installation-token issue/comment multi-action connector proof"
       body_file: connector.yaml
@@ -10828,8 +10837,11 @@ tool_model:
     generated_mock_response_compilation:
       owner: internal/providerconnectors provider-generic effective-source compiler feeding MockResponsePlan
       eligibility: >
+        This responder owner covers HTTP connectors only. It validates native in_process connector declarations
+        through their shared closed target contract but generates no response for them: native execution still
+        requires the selected native session/effect owner, not a schema-inhabited HTTP fixture.
         Enumerate the exact effective semantic source ToolEntries after pack imports and compile every entry validated as a canonical
-        provider_connector. Explicit import remains the enablement fence for packed tools because unimported tools are absent from the
+        HTTP provider_connector. Explicit import remains the enablement fence for packed tools because unimported tools are absent from the
         effective source. Flow-local and imported entries otherwise consume identical response-generation semantics.
       deterministic_inhabitation: >
         Connector response roots consume the exact admitted output-schema kind; object-only mock response carriers and
@@ -11295,6 +11307,12 @@ tool_model:
         post-reservation settlement keeps its existing independent lifetime. Recovery serializes current reread,
         canonical rebind, native restoration and subsequent drive; succeeded native operations are restored only
         for their own current non-retired activation, not historical or successor slots.
+        Serve prepares the selected local operator principal without executing retained provider proofs. After
+        teardown recovery and exact runtime-context preparation, the onboarding owner restores native transport
+        responsibility before retained proof materialization or binding admission. This restoration-only pass
+        performs no confirmation delivery, registration promotion or business target admission. Local reconciliation,
+        channel publication and business release follow; ordinary effect-driving recovery remains a separate later
+        step. Unsupported hosts retain native refusal, while webhook credentials retain their existing owner.
         Physical connection scope requires the exact durable declaration and runtime/publication occurrence,
         separately from business target generation. Admitting or retiring a business target does not replace the
         bot account or invalidate an otherwise current connection. Business input and writes still require the

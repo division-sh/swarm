@@ -67,6 +67,44 @@ func awaitOccurrenceProbe(t *testing.T, ctx context.Context, done <-chan error) 
 	return nil
 }
 
+func TestWhatsAppConnectedWakeupPreservesCancellationAndRetirement(t *testing.T) {
+	peer := newSDKPeer(t)
+	_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
+	device := newSDKDeviceFixture(t, container)
+	o, err := newClientOccurrence(peer.ctx, uuid.NewString(), uuid.NewString(), device, container.LIDMap(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := o.join(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	caller, cancel := context.WithCancel(peer.ctx)
+	done := make(chan error, 1)
+	go func() { done <- o.awaitConnected(caller) }()
+	cancel()
+	if err := awaitOccurrenceProbe(t, peer.ctx, done); !errors.Is(err, context.Canceled) {
+		t.Fatal("pending login wait lost caller cancellation", err)
+	}
+	peer.attach(t, o.client)
+	if err := o.connect(peer.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.awaitConnected(peer.ctx); err != nil {
+		t.Fatal("genuine SDK login did not release its waiter", err)
+	}
+	if err := o.awaitConnected(caller); !errors.Is(err, context.Canceled) {
+		t.Fatal("late SDK login replaced canceled caller authority", err)
+	}
+	o.fence()
+	if err := o.awaitConnected(peer.ctx); err == nil {
+		t.Fatal("historical SDK login wakeup survived occurrence retirement")
+	}
+}
+
 func TestWhatsAppClientOccurrenceNormalSendAndExplicitLogout(t *testing.T) {
 	for _, operation := range []string{"send", "logout"} {
 		t.Run(operation, func(t *testing.T) {

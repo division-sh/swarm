@@ -38,6 +38,8 @@ type clientOccurrence struct {
 	drained      chan struct{}
 	stopDone     chan struct{}
 	stopOnce     sync.Once
+	connected    chan struct{}
+	connectOnce  sync.Once
 }
 
 func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
@@ -53,7 +55,7 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 	ownedCtx, cancel := context.WithCancel(ctx)
 	o := &clientOccurrence{connectionID: connectionID, occurrenceID: occurrenceID,
 		ctx: ownedCtx, cancel: cancel, stores: stores,
-		drained: make(chan struct{}), stopDone: make(chan struct{})}
+		drained: make(chan struct{}), stopDone: make(chan struct{}), connected: make(chan struct{})}
 	client := whatsmeow.NewClient(device, log)
 	o.client = client
 	client.BackgroundEventCtx = ownedCtx
@@ -70,6 +72,8 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 	client.PreRetryCallback = func(*events.Receipt, types.MessageID, int, *waE2E.Message) bool { return false }
 	client.AddEventHandlerWithSuccessStatus(func(event any) bool {
 		switch event.(type) {
+		case *events.Connected:
+			o.connectOnce.Do(func() { close(o.connected) })
 		case *events.Disconnected, *events.ManualLoginReconnect, *events.LoggedOut,
 			*events.StreamReplaced, *events.StreamError, *events.ConnectFailure,
 			*events.CATRefreshError, *events.ClientOutdated, *events.TemporaryBan:
@@ -79,6 +83,22 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 		return true
 	})
 	return o, nil
+}
+
+// The SDK event is a wakeup, not authority. Callers must re-admit the exact
+// account after it, including current occurrence and selected responsibility.
+func (o *clientOccurrence) awaitConnected(ctx context.Context) error {
+	if ctx == nil {
+		return errClientOccurrenceFenced
+	}
+	select {
+	case <-o.connected:
+		return errors.Join(context.Cause(ctx), context.Cause(o.ctx))
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	case <-o.ctx.Done():
+		return context.Cause(o.ctx)
+	}
 }
 
 func (o *clientOccurrence) bindCallbacks(handle func(context.Context, any) error,

@@ -799,14 +799,29 @@ func (s *Service) Recover(ctx context.Context) error {
 		return err
 	}
 	for _, op := range operations {
-		if err := s.recoverOperation(ctx, op.OperationID); err != nil {
+		if err := s.recoverOperation(ctx, op.OperationID, false); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Service) recoverOperation(ctx context.Context, id string) error {
+// RestoreSessions restores transport ownership before retained identity proofs
+// execute. It does not drive provider effects or business target admission.
+func (s *Service) RestoreSessions(ctx context.Context) error {
+	operations, err := s.store.ListChannelOnboardingOperations(ctx)
+	if err != nil {
+		return err
+	}
+	for _, op := range operations {
+		if err := s.recoverOperation(ctx, op.OperationID, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) recoverOperation(ctx context.Context, id string, restoreOnly bool) error {
 	unlock, err := s.lockDrive(ctx, id)
 	if err != nil {
 		return err
@@ -815,6 +830,9 @@ func (s *Service) recoverOperation(ctx context.Context, id string) error {
 	op, err := s.store.GetChannelOnboarding(ctx, id)
 	if err != nil {
 		return err
+	}
+	if restoreOnly && (!sessionResumeRequired(op) || op.Phase == PhaseFailed || op.Phase == PhaseRetired) {
+		return nil
 	}
 	if op.Phase.Terminal() {
 		if op.Phase != PhaseSucceeded || op.Posture != ActivationSessionConnection {
@@ -845,7 +863,7 @@ func (s *Service) recoverOperation(ctx context.Context, id string) error {
 	if err := s.resumeSession(ctx, op, candidate); err != nil {
 		return fmt.Errorf("restore channel onboarding %s: %w", op.OperationID, err)
 	}
-	if recoveryNeedsFreshTargetAdmission(op, candidate) {
+	if restoreOnly || recoveryNeedsFreshTargetAdmission(op, candidate) {
 		// Restoring paired control work does not admit a replacement target or
 		// execute the retained declaration's historical business generation.
 		return nil
@@ -874,7 +892,7 @@ func recoveryNeedsFreshTargetAdmission(op Operation, candidate Candidate) bool {
 }
 
 func (s *Service) resumeSession(ctx context.Context, op Operation, candidate Candidate) error {
-	if op.Posture != ActivationSessionConnection || op.Phase != PhaseActivatingProvider && op.SessionAccount == (operatorchannel.SessionAccountAdmission{}) {
+	if !sessionResumeRequired(op) {
 		return nil
 	}
 	if s.sessions == nil {
@@ -890,6 +908,11 @@ func (s *Service) resumeSession(ctx context.Context, op Operation, candidate Can
 		}
 	}
 	return s.sessions.ResumeSession(ctx, op, candidate)
+}
+
+func sessionResumeRequired(op Operation) bool {
+	return op.Posture == ActivationSessionConnection &&
+		(op.Phase == PhaseActivatingProvider || op.SessionAccount != (operatorchannel.SessionAccountAdmission{}))
 }
 
 func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, providerCredential string) (Result, error) {

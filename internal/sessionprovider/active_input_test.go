@@ -57,6 +57,7 @@ type activeInputFixture struct {
 	owner      *sessionInputOwner
 	authority  *sessionAuthorityOwner
 	identities *operatorchannel.Service
+	proofs     operatorchannel.ProofStore
 	channel    packs.SatisfactionPlan
 	trigger    providertriggers.InboundAdmissionPlan
 	catalog    *providertriggers.CatalogSnapshot
@@ -82,6 +83,10 @@ func newActiveInputFixture(t *testing.T, backend string) *activeInputFixture {
 }
 
 func newActiveInputFixtureWithOutput(t *testing.T, backend string, outbound bool) *activeInputFixture {
+	return newActiveInputFixtureWithProof(t, backend, outbound, false)
+}
+
+func newActiveInputFixtureWithProof(t *testing.T, backend string, outbound, saveProof bool) *activeInputFixture {
 	t.Helper()
 	f := &activeInputFixture{handled: make(chan capturedEvent, 1)}
 	if backend == "sqlite" {
@@ -129,7 +134,7 @@ func newActiveInputFixtureWithOutput(t *testing.T, backend string, outbound bool
 	f.operation, err = f.selected.ReserveChannelOnboarding(ctx, channelonboarding.StartRequest{OperationID: id,
 		RequestKeyHash: id, RequestHash: id, PrincipalID: principal.ID, Verb: channelonboarding.VerbConnect, Provider: "whatsapp",
 		Interface: identity, Coordinate: f.source.Coordinate, TargetSelector: "ingress:.:whatsapp",
-		Posture: channelonboarding.ActivationSessionConnection, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge, RequestedAt: now})
+		Posture: channelonboarding.ActivationSessionConnection, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge, SaveProof: saveProof, RequestedAt: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,6 +212,7 @@ func newActiveInputFixtureWithOutput(t *testing.T, backend string, outbound bool
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.proofs = proofs
 	f.identities, err = operatorchannel.NewService(f.selected, proofs, f.authority, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
 	if err != nil {
 		t.Fatal(err)
@@ -307,7 +313,7 @@ func (f *activeInputFixture) activate(t *testing.T) {
 	ctx, now := f.ctx, time.Now().UTC().Truncate(time.Microsecond)
 	authority := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: f.operation.SessionAccount}
 	identity, err := f.identities.Begin(ctx, f.operation.Interface.Selector, operatorchannel.OperationConnect, 0,
-		uuid.NewString(), uuid.NewString(), f.operation.OperationID, authority, false, now)
+		uuid.NewString(), uuid.NewString(), f.operation.OperationID, authority, f.operation.SaveProof, now)
 	if err != nil {
 		t.Fatal(err)
 	}

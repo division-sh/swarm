@@ -1331,18 +1331,29 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(5, "operator_channel", err)
 		return 1
 	}
-	operatorChannels, err := operatorchannel.NewService(stores.OperatorChannels(), proofStore, providerCredentialOwner, channelInterfaces, runtimeInstanceID)
+	sessionBootstrap, err := newServeSessionBootstrap(serveSessionBootstrapRuntimeSelector(runtimeContextManager), channelOnboardingStore, providerCredentialOwner, swarmDir.Path)
+	if err != nil {
+		var unsupported *operatorchannel.SessionProviderUnavailableError
+		if !errors.As(err, &unsupported) {
+			presenter.fail(5, "channel_onboarding", err)
+			return 1
+		}
+		// Unsupported hosts retain native refusal; webhook admission still
+		// consumes the original credential owner.
+	}
+	var channelProviderOwner operatorchannel.CredentialCurrentness = providerCredentialOwner
+	if sessionBootstrap != nil {
+		channelProviderOwner = sessionBootstrap
+	}
+	operatorChannels, err := operatorchannel.NewService(stores.OperatorChannels(), proofStore, channelProviderOwner, channelInterfaces, runtimeInstanceID)
 	if err != nil {
 		presenter.fail(5, "operator_channel", err)
 		return 1
 	}
-	operatorPrincipal, recoveredBindings, err := operatorChannels.Bootstrap(ctx, bootStartedAt)
+	operatorPrincipal, err := operatorChannels.PreparePrincipal(ctx, bootStartedAt)
 	if err != nil {
 		presenter.fail(5, "operator_channel", err)
 		return 1
-	}
-	for _, binding := range recoveredBindings {
-		presenter.recordOperatorChannelProofReuse(binding)
 	}
 	bootReport := primaryContext.validation.BootReport
 	stateStoreSummary := serveRuntimeStateStoreSummary(runtimeContexts)
@@ -1499,16 +1510,6 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
 		native:      stores.ChannelNative(),
 		credentials: providerCredentialOwner, effects: confirmationEffects, ingress: ready,
-	}
-	sessionBootstrap, err := newServeSessionBootstrap(serveSessionBootstrapRuntimeSelector(runtimeContextManager), channelOnboardingStore, providerCredentialOwner, swarmDir.Path)
-	if err != nil {
-		var unsupported *operatorchannel.SessionProviderUnavailableError
-		if !errors.As(err, &unsupported) {
-			presenter.fail(20, "channel_onboarding", err)
-			return 1
-		}
-		// No installer means session operations retain their typed refusal;
-		// unrelated webhook channels are unchanged on unsupported hosts.
 	}
 	channelOnboarding, err := channelonboarding.NewService(channelonboarding.ServiceOptions{
 		Store: channelOnboardingStore, Identities: operatorChannels, Credentials: credentialWriter,
@@ -1695,7 +1696,20 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return err
 		}
 		supervisor.resetContextsManaged = true
-		return reconcileRetiredConnectedChannelContexts(ctx, runtimeContextManager, channelOnboardingStore, channelDestructive)
+		if err := reconcileRetiredConnectedChannelContexts(ctx, runtimeContextManager, channelOnboardingStore, channelDestructive); err != nil {
+			return err
+		}
+		if err := channelOnboarding.RestoreSessions(ctx); err != nil {
+			return fmt.Errorf("restore native ownership before retained channel proofs: %w", err)
+		}
+		_, recoveredBindings, err := operatorChannels.Bootstrap(ctx, bootStartedAt)
+		if err != nil {
+			return fmt.Errorf("recover retained channel proofs: %w", err)
+		}
+		for _, binding := range recoveredBindings {
+			presenter.recordOperatorChannelProofReuse(binding)
+		}
+		return nil
 	}, channelOnboarding); err != nil {
 		presenter.fail(22, "channel_onboarding", err)
 		return 1
