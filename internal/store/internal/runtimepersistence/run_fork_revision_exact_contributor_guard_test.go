@@ -118,7 +118,7 @@ func revisionProjectionTables(contributor ast.Node) []string {
 	tables := map[string]struct{}{}
 	ast.Inspect(contributor, func(node ast.Node) bool {
 		if field, ok := node.(*ast.KeyValueExpr); ok && revisionGuardNode(field.Key) == "source" {
-			if revisionGuardNode(field.Value) == `"events e" + eventrecord.SelectedForkLineageSQL` {
+			if revisionGuardNode(field.Value) == `"events e " + eventrecord.SelectedForkLineageSQL` {
 				for _, match := range from.FindAllStringSubmatch("FROM events e "+eventrecord.SelectedForkLineageSQL, -1) {
 					table := strings.ToLower(match[1])
 					if table != "candidate" {
@@ -152,7 +152,7 @@ func revisionProjectionTables(contributor ast.Node) []string {
 
 func TestRunForkEventLineageProjectionContributorGuard(t *testing.T) {
 	for _, selector := range []string{"eventrecord.SelectedForkLineageSQL", "other.SelectedForkLineageSQL", "eventrecord.UnknownSQL"} {
-		source := `package p; func canonicalProjectionSpec() { switch family { case FamilyEvents: spec = projectionSpec{source: "events e" + ` + selector + `} } }`
+		source := `package p; func canonicalProjectionSpec() { switch family { case FamilyEvents: spec = projectionSpec{source: "events e " + ` + selector + `} } }`
 		got, err := revisionProjectionContributors(source)
 		if err != nil {
 			t.Fatal(err)
