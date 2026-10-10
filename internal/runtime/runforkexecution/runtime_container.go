@@ -616,6 +616,9 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 			return fmt.Errorf("synchronize recovered selected child deliveries: %w", err)
 		}
 	}
+	if err := agentRuntime.genericSchedules.ReconcileRunWakeups(runCtx, req.ForkRunID); err != nil {
+		return fmt.Errorf("restore selected child generic schedule wakeups: %w", err)
+	}
 	if err := attachment.scheduler.ReleaseStartup(runCtx); err != nil {
 		return fmt.Errorf("release selected child wakeups: %w", err)
 	}

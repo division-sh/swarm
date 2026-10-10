@@ -225,7 +225,7 @@ func insertSQLiteRunForkSelectedContractBranchDivergence(ctx context.Context, tx
 
 func (s *RunForkSQLiteOwner) ensureSQLiteRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string, source semanticview.Source) error {
 	allowedEvents := uniqueNonEmptyStrings(allowedSourceEventIDs)
-	timerEvents, err := selectedContractWorkflowTimerLineage(ctx, tx, forkRunID, false, s.PipelineSQLiteOwner.ReadWorkflowTimerActivationTx)
+	timerEvents, err := selectedContractTimerLineage(ctx, tx, forkRunID, false, s.PipelineSQLiteOwner.ReadWorkflowTimerActivationTx)
 	if err != nil {
 		return err
 	}

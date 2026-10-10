@@ -209,6 +209,11 @@ func loadRunForkTimerHistoryInventory(snapshot *runForkRevisionSnapshot, facts r
 			if err := requireRunForkArrivalSourceRecord(timer, arrival); err != nil {
 				return runForkTimerHistoryInventory{}, err
 			}
+			if arrival.Status == genericschedule.StatusFired {
+				if _, err := runForkPublishedArrivalEvidence(snapshot, arrival); err != nil {
+					return runForkTimerHistoryInventory{}, err
+				}
+			}
 			delete(arrivalByID, timer.TimerID)
 			continue
 		}
