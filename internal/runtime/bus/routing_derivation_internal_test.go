@@ -9,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
@@ -246,121 +245,56 @@ func TestRouteTableMixedRolesExactWildcardConstruction(t *testing.T) {
 	}
 }
 
-func TestRouteTableTemplateObserverAndMaterializedPatternPreserveDistinctRoles(t *testing.T) {
-	const (
-		templatePath = "workers"
-		instancePath = "workers/worker-a"
-		localEvent   = "work.ready"
-	)
+func TestPubsubProjectionPreservesDistinctHandlerRoles(t *testing.T) {
+	firstNode := testFlowNode(t, "observer", "first-handler")
+	secondNode := testFlowNode(t, "observer", "second-handler")
+	roles := []Subscriber{
+		{Recipient: events.MustNodeDeliveryRecipient(firstNode), Path: "observer", routeSource: subscriberRouteSourceSubscription,
+			LocalizedEvent: "work.ready", handlerNode: firstNode, targetHandler: runtimepipeline.MustDeliveryTargetHandler(firstNode)},
+		{Recipient: events.MustNodeDeliveryRecipient(secondNode), Path: "observer", routeSource: subscriberRouteSourceSubscription,
+			LocalizedEvent: "work.ready", handlerNode: secondNode, targetHandler: runtimepipeline.MustDeliveryTargetHandler(secondNode)},
+	}
 	for _, reverse := range []bool{false, true} {
-		name := "forward"
+		ordered := append([]Subscriber(nil), roles...)
 		if reverse {
-			name = "reverse"
+			ordered[0], ordered[1] = ordered[1], ordered[0]
 		}
-		t.Run(name, func(t *testing.T) {
-			owner := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute(templatePath, "worker-a"))
-			rt := newRouteTable(nil)
-			rt.eventPath[instancePath+"/"+localEvent] = struct{}{}
-			firstNode := testFlowNode(t, "observer", "first-handler")
-			secondNode := testFlowNode(t, "observer", "second-handler")
-			roles := []Subscriber{
-				{
-					Recipient: events.MustNodeDeliveryRecipient(firstNode), Path: "observer",
-					routeSource: subscriberRouteSourceSubscription, LocalizedEvent: localEvent,
-					handlerNode:   firstNode,
-					targetHandler: runtimepipeline.MustDeliveryTargetHandler(firstNode),
-				},
-				{
-					Recipient: events.MustNodeDeliveryRecipient(secondNode), Path: "observer",
-					routeSource: subscriberRouteSourceSubscription, LocalizedEvent: localEvent,
-					handlerNode:   secondNode,
-					targetHandler: runtimepipeline.MustDeliveryTargetHandler(secondNode),
-				},
-			}
-			if reverse {
-				roles[0], roles[1] = roles[1], roles[0]
-			}
-			for _, role := range roles {
-				observer := routeTemplateSourceObserver{
-					SourceTemplatePath: templatePath, SourceLocalEvent: localEvent,
-					Subscriber: role, SubscriberInstancePath: "observer",
-				}
-				rt.addTemplateSourceObserverLocked(observer)
-				rt.materializeTemplateSourceObserverLocked(observer, owner)
-			}
-			if got := len(rt.templateObservers[templatePath]); got != 2 {
-				t.Fatalf("template observer roles = %d, want 2", got)
-			}
-			if got := len(rt.patterns); got != 2 {
-				t.Fatalf("materialized pattern roles = %d, want 2: %#v", got, rt.patterns)
-			}
-
-			// Reinstalling exact equal roles must be idempotent across a rebuild.
-			for _, observer := range append([]routeTemplateSourceObserver(nil), rt.templateObservers[templatePath]...) {
-				rt.addTemplateSourceObserverLocked(observer)
-				rt.materializeTemplateSourceObserverLocked(observer, owner)
-			}
-			if got := len(rt.templateObservers[templatePath]); got != 2 {
-				t.Fatalf("reinstalled observer roles = %d, want 2", got)
-			}
-			if got := len(rt.patterns); got != 2 {
-				t.Fatalf("reinstalled materialized roles = %d, want 2", got)
-			}
-
-			rt.patterns = rt.patterns[:1]
-			for _, observer := range rt.templateObservers[templatePath] {
-				rt.materializeTemplateSourceObserverLocked(observer, owner)
-			}
-			rt.rebuildLocked()
-			resolved := rt.ResolveForRun(busInternalTestRunID, instancePath+"/"+localEvent)
-			if len(resolved) != 2 {
-				t.Fatalf("remove/reinstall/rebuild roles = %#v, want 2", resolved)
-			}
-		})
+		got := dedupeSubscribers(append(ordered, ordered...))
+		if len(got) != 2 {
+			t.Fatalf("distinct handler roles collapsed: %+v", got)
+		}
+		for _, role := range roles {
+			got = appendUniqueSubscriber(got, role)
+		}
+		if len(got) != 2 {
+			t.Fatalf("equal roles were not idempotent: %+v", got)
+		}
+		if rebuilt := dedupeSubscribers(append(got[:1:1], roles...)); len(rebuilt) != 2 {
+			t.Fatalf("repeated projection lost a handler role: %+v", rebuilt)
+		}
 	}
 }
 
-func TestRouteTableTemplateObserverPreservesDistinctAgentIdentities(t *testing.T) {
+func TestPubsubProjectionPreservesDistinctAgentIdentities(t *testing.T) {
 	name, err := agentidentity.DeclaredName("shared-agent", "test-owner")
 	if err != nil {
-		t.Fatalf("declared agent name: %v", err)
+		t.Fatal(err)
 	}
-	firstRoute, err := agentidentity.PresentRoute("workers", "worker-a", "workers/worker-a")
-	if err != nil {
-		t.Fatalf("first route: %v", err)
-	}
-	secondRoute, err := agentidentity.PresentRoute("workers", "worker-b", "workers/worker-b")
-	if err != nil {
-		t.Fatalf("second route: %v", err)
-	}
-	firstIdentity, err := agentidentity.NewPlan(name, firstRoute)
-	if err != nil {
-		t.Fatalf("first identity: %v", err)
-	}
-	secondIdentity, err := agentidentity.NewPlan(name, secondRoute)
-	if err != nil {
-		t.Fatalf("second identity: %v", err)
-	}
-	rt := newRouteTable(nil)
-	rt.eventPath["sources/source-a/work.ready"] = struct{}{}
-	owner := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("sources", "source-a"))
-	for _, identity := range []agentidentity.Plan{firstIdentity, secondIdentity} {
-		observer := routeTemplateSourceObserver{
-			SourceTemplatePath: "sources", SourceLocalEvent: "work.ready",
-			Subscriber: Subscriber{
-				Recipient: events.MustAgentDeliveryRecipient("shared-agent"), Path: "workers",
-				routeSource: subscriberRouteSourceSubscription, LocalizedEvent: "work.ready", AgentPlan: identity,
-			},
-			SubscriberInstancePath: "workers",
+	var roles []Subscriber
+	for _, id := range []string{"worker-a", "worker-b"} {
+		route, err := agentidentity.PresentRoute("workers", id, "workers/"+id)
+		if err != nil {
+			t.Fatal(err)
 		}
-		rt.addTemplateSourceObserverLocked(observer)
-		rt.materializeTemplateSourceObserverLocked(observer, owner)
+		plan, err := agentidentity.NewPlan(name, route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		roles = append(roles, Subscriber{Recipient: events.MustAgentDeliveryRecipient("shared-agent"), Path: "workers",
+			routeSource: subscriberRouteSourceSubscription, LocalizedEvent: "work.ready", AgentPlan: plan})
 	}
-	if got := len(rt.templateObservers["sources"]); got != 2 {
-		t.Fatalf("template agent observer roles = %d, want 2", got)
-	}
-	if got := len(rt.patterns); got != 2 {
-		t.Fatalf("materialized template agent roles = %d, want 2", got)
+	if got := dedupeSubscribers(append(roles, roles...)); len(got) != 2 {
+		t.Fatalf("distinct concrete agent identities collapsed: %+v", got)
 	}
 }
 

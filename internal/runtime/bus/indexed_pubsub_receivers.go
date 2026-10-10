@@ -115,7 +115,6 @@ func (r connectRoutePlanResolver) pubsubLookupScope(event events.Event, publicat
 		}
 	}
 	var exact []flowidentity.RunScopedFlowInstance
-	var flows []string
 	if !publication.declarationOnly && route.FlowID != "" && route.FlowInstance != "" {
 		owner, err := flowidentity.NewRunScopedFlowInstance(event.RunID(), flowidentity.StoredRoute(flowidentity.ScopeKey(r.source, route.FlowID), "", route.FlowInstance))
 		if err != nil {
@@ -124,27 +123,8 @@ func (r connectRoutePlanResolver) pubsubLookupScope(event events.Event, publicat
 		if len(r.routeTable.templates[owner.Route.ScopeKey].Subscribers) > 0 {
 			exact = append(exact, owner)
 		}
-		flows, err = r.pubsubObserverDeclarations(owner)
-		if err != nil {
-			return pipeline.FlowInstanceLookupScope{}, err
-		}
 	}
-	return pipeline.NewFlowInstanceLookupScope(r.source, fact, event.RunID(), flows, exact)
-}
-
-func (r connectRoutePlanResolver) pubsubObserverDeclarations(owner flowidentity.RunScopedFlowInstance) ([]string, error) {
-	var flows []string
-	for _, dependency := range r.routeTable.compiledRouteOwnerDependencies(r.routeTable.inputProducers) {
-		if dependency.SourceFlowPath != owner.Route.ScopeKey {
-			continue
-		}
-		ids := r.routeTable.activeTemplateIDsForFlowPaths([]string{dependency.ReceiverFlowPath})
-		if len(ids) == 0 {
-			return nil, fmt.Errorf("pubsub observer dependency is outside its compiled source")
-		}
-		flows = append(flows, ids...)
-	}
-	return flows, nil
+	return pipeline.NewFlowInstanceLookupScope(r.source, fact, event.RunID(), nil, exact)
 }
 
 func pubsubScopeIncludes(scope pipeline.FlowInstanceLookupScope, owner flowidentity.RunScopedFlowInstance, flowID string) bool {

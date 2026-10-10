@@ -215,8 +215,12 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 			opts.PipelineObligations = provider.PipelineObligations()
 		}
 	}
+	runOwner := opts.Durable.RunLifecycle
 	if opts.PipelineObligations != nil {
 		opts.Durable = ExactDurableTestDependencies(store)
+	}
+	if runOwner != nil {
+		opts.Durable.RunLifecycle = runOwner
 	}
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
