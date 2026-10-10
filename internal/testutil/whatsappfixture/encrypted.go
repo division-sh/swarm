@@ -65,9 +65,26 @@ func (s *SignalSender) Close() error { return s.fixture.Close() }
 
 func (s *SignalSender) EncryptText(t testing.TB, text, messageID string) waBinary.Node {
 	t.Helper()
+	return s.encryptMessage(t, &waE2E.Message{Conversation: proto.String(text)}, messageID)
+}
+
+func (s *SignalSender) EncryptReply(t testing.TB, text, messageID, originalID, originalText string) waBinary.Node {
+	t.Helper()
+	if originalID == "" || originalText == "" {
+		t.Fatal("encrypted reply requires its explicit original message reference")
+	}
+	return s.encryptMessage(t, &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+		Text: proto.String(text), ContextInfo: &waE2E.ContextInfo{StanzaID: proto.String(originalID),
+			Participant:   proto.String(s.receiver.ToNonAD().String()),
+			QuotedMessage: &waE2E.Message{Conversation: proto.String(originalText)}},
+	}}, messageID)
+}
+
+func (s *SignalSender) encryptMessage(t testing.TB, message *waE2E.Message, messageID string) waBinary.Node {
+	t.Helper()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	plain, err := proto.Marshal(&waE2E.Message{Conversation: proto.String(text)})
+	plain, err := proto.Marshal(message)
 	if err != nil {
 		t.Fatal(err)
 	}
