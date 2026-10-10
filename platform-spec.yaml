@@ -20951,8 +20951,8 @@ run_model:
         non-agent replay, restart recovery, and operator surfaces remain fail-closed or split siblings unless
         independently approved.'
       3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution,
-        runtime.run_fork.selected_contract_deferred_work_admission classifies source timer history, workflow-timer
-        declarations, timed-join and fan-out delivery-barrier declarations, connect-time resolution through the exhaustive current matrix
+        runtime.run_fork.selected_contract_deferred_work_admission classifies timed-join and
+        fan-out delivery-barrier declarations, connect-time resolution through the exhaustive current matrix
         (`create` and `select-or-create` can create; `select`, `fan-out`, and `reply` cannot) as
         unsupported while the ephemeral selected-fork container has no
         long-lived deferred-work owner. Direct execution rejects before materialization; staged activation rejects before
@@ -20968,7 +20968,17 @@ run_model:
         not_applicable or unknown_unversioned without querying current routing_rules. Generic execution preserves
         flow_route_history_unproven. Selected execution may clear unknown_unversioned only through matching selected
         frontier/binding/static-dynamic topology/recipient proof and persisted route recovery, before materialization,
-        publish, or activation. Feature-preserving timer and dynamic-flow readiness ownership remains gated by #642.'
+        publish, or activation. Unknown, mixed, or incomplete timer history remains blocked. Ordinary workflow timer
+        continuation consumes the complete fixed-cut source inventory and the sealed selected-readiness projection,
+        never current source timer state. Materialization, staged activation and recovery read the complete inherited
+        child inventory through the canonical timer owner in their exact native mutation attempt. Before activation,
+        every retained arm has its original due coordinate and no child firing or cancellation. Recovery of an activated
+        child accepts only lawful occurrence progress under immutable cause replay; pause alone does not prove an
+        unactivated child. A removed declaration is canceled at child materialization as rule_removed, retaining
+        original arming lineage and child birth; terminal source timers are never rearmed. Extra, missing, duplicate,
+        corrupt or foreign inherited rows cannot discharge admission. Source certificates alone grant no execution,
+        and wakeups/publication require activated current selected authority. Changed delay applies only to newly
+        armed work. Timed-join, pending barrier and dynamic-flow continuation remain gated by #642.'
       3e_selected_contract_route_admission: 'For selected-contract mutating fork execution, selected route/subscription
         admission is evidence-only and non-mutating. It distinguishes frontier recipient admission from historical
         route reconstruction, carries unknown_unversioned as an unresolved requirement, and uses the selected contract
@@ -21119,8 +21129,9 @@ run_model:
         a later scope write is source advancement and cannot inherit the underlying event''s earlier revision or
         occurrence time. Fork-local replay/recovery
         proof must be newly written under the fork run_id by selected-contract execution or approved fork-local
-        delivery-event replay owners. Source committed replay-scope facts absent from the selected revision
-        remain fail-closed unless a separate approved owner changes that policy. This owner does not close same-run
+        delivery-event replay owners. Later source scope writes remain source-only advancement evidence: they cannot
+        inherit the older cut and cannot suppress independently admitted child obligations. Exact child scope conflicts
+        still refuse atomically. This owner does not close same-run
         recovery, fork-local delivery-event replay recovery, sessions, turns, audits, timers, routes, non-agent replay,
         restart recovery, contract-swap boot/resume, or operator surfaces.'
       3h3_selected_contract_diagnostic_platform_outcome_policy: 'For selected-contract fixed-event execution,

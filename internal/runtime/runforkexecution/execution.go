@@ -200,15 +200,16 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	}
 	ctx = runtimeeffects.WithAuthority(ctx, container.authority)
 	activation, err := ports.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-		ForkOperation:         req.ForkOperation,
-		DataPins:              materialization.DataPins,
-		ExecutionSource:       loadedSource.Source,
-		ForkRunID:             materialization.ForkRunID,
-		AllowSourceFreeze:     req.AllowSourceFreeze,
-		AllowedSourceEventIDs: sourceEventIDs,
-		FrontierAdmission:     frontier,
-		RouteTopology:         routeTopology,
-		RecipientPlanning:     *model.RecipientPlanning,
+		InheritedWorkflowTimers: prepared.readiness,
+		ForkOperation:           req.ForkOperation,
+		DataPins:                materialization.DataPins,
+		ExecutionSource:         loadedSource.Source,
+		ForkRunID:               materialization.ForkRunID,
+		AllowSourceFreeze:       req.AllowSourceFreeze,
+		AllowedSourceEventIDs:   sourceEventIDs,
+		FrontierAdmission:       frontier,
+		RouteTopology:           routeTopology,
+		RecipientPlanning:       *model.RecipientPlanning,
 	})
 	result.Activation = activation
 	if !activation.Activated {
@@ -257,6 +258,13 @@ func admitSelectedDeploymentRevisionFrontier(plan runfork.RunForkPlan, frontier 
 		return plan.ForkPoint.Validate()
 	}
 	if plan.ForkPoint.Kind != runfork.RunForkPointDeploymentRevision {
+		for _, timer := range plan.WorkflowTimers {
+			if timer.Status == "active" {
+				// A recorded obligation is owed work even with no replayable
+				// business message. Native readback still gates execution.
+				return plan.ForkPoint.Validate()
+			}
+		}
 		return fmt.Errorf("selected-contract event-point execution requires selected frontier events")
 	}
 	if err := plan.ForkPoint.Validate(); err != nil {

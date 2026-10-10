@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/google/uuid"
 )
 
@@ -111,5 +112,33 @@ func TestSelectedDeploymentRevisionFrontierRequiresExactFeedWork(t *testing.T) {
 				t.Fatal("zero-frontier execution without exact deployment revision/feed work was admitted")
 			}
 		})
+	}
+}
+
+func TestSelectedEventFrontierRecognizesOwedTimerWithoutGrantingExecution(t *testing.T) {
+	plan := runfork.RunForkPlan{
+		SourceRunID:         uuid.NewString(),
+		ForkPoint:           runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: uuid.NewString(), Revision: 3},
+		WorkflowTimers:      []timerobligation.WorkflowTimerActivationRecord{{Status: "active"}},
+		UnsupportedBlockers: []runfork.RunForkUnsupportedBlocker{{Code: runfork.RunForkBlockerTimerHistoryUnproven}},
+	}
+	// This is availability only. Exact timer decoding and persisted child
+	// readback must still succeed before native execution admission.
+	if err := admitSelectedDeploymentRevisionFrontier(plan, runfork.RunForkContractFrontierAdmission{}); err != nil {
+		t.Fatalf("owed event-cut timer was rejected before native admission: %v", err)
+	}
+	if plan.ExecutionReady || len(plan.UnsupportedBlockers) != 1 {
+		t.Fatal("availability discharged native timer proof")
+	}
+	for _, status := range []string{"fired", "cancelled", ""} {
+		plan.WorkflowTimers[0].Status = status
+		if err := admitSelectedDeploymentRevisionFrontier(plan, runfork.RunForkContractFrontierAdmission{}); err == nil {
+			t.Fatalf("terminal or absent timer invented owed work: %q", status)
+		}
+	}
+	plan.WorkflowTimers[0].Status = "active"
+	plan.ForkPoint.Revision = 0
+	if err := admitSelectedDeploymentRevisionFrontier(plan, runfork.RunForkContractFrontierAdmission{}); err == nil {
+		t.Fatal("unbound cut acquired availability")
 	}
 }

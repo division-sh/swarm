@@ -49,7 +49,6 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 		historicalBoundaryOwner + "loadRunForkRevisionSnapshotScope/ledger_sql":                                                                          {1, "shared full or mutation-only snapshot ranks before filtering tombstones and admits surviving present facts"},
 		historicalBoundaryOwner + "validateRunMutationCoordinates/ledger_sql":                                                                            {1, "run oracle validates every ordering coordinate without decoding payloads or granting historical execution"},
 		historicalBoundaryOwner + "collectRunForkSourceAdvancedFacts/ledger_sql":                                                                         {1, "post-R family inventory, not payload decoding"},
-		historicalBoundaryOwner + "ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision/ledger_sql":                                              {1, "post-R marker existence, not historical payload admission"},
 		historicalBoundaryOwner + "ensureRunForkNoPostForkActiveConversationDeliverySessionCoupling/ledger_sql":                                          {1, "current coupling revision safety, not historical payload admission"},
 		historicalBoundaryWriter + "latestFactReadQuery/ledger_sql":                                                                                      {2, "shared latest equality query: one local constant and its exact formatting use"},
 		historicalBoundaryWriter + "readAffectedLatestFactsWithSeeks/ledger_sql":                                                                         {2, "bounded exact seeks and preserved mixed-family selection both feed the same strict ledger hydration"},
@@ -81,13 +80,13 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 		"resolveSQLiteRunForkRevisionPoint", "lockRunForkSourceRevisionFrontier",
 		"RunForkPostgresOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers", "RunForkSQLiteOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers",
 		"RunForkPostgresOwner.PlanRunFork", "RunForkPostgresOwner.ReadEntityAtEventCutForTest", "RunForkPostgresOwner.LoadRunForkSelectedContractSourceEvents",
-		"postgresRunForkSelectedContractActivationPort", "postgresRunForkSelectedContractMaterializationPort",
+		"postgresRunForkSelectedContractActivationPort", "postgresRunForkSelectedContractMaterializationPort", "postgresRunForkWorkflowTimerReadbackPort",
 	} {
 		allowed[historicalBoundaryOwner+caller+"/reference:"+historicalBoundaryOwner+"resolveRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "exact shared contextual event-point consumer"}
 	}
 	for _, caller := range []string{
 		"lockSQLiteRunForkSourceRevisionFrontier", "RunForkSQLiteOwner.PlanRunFork", "RunForkSQLiteOwner.ReadEntityAtEventCutForTest", "RunForkSQLiteOwner.ActivateRunFork", "RunForkSQLiteOwner.LoadRunForkSelectedContractSourceEvents",
-		"sqliteRunForkSelectedContractActivationPort", "sqliteRunForkSelectedContractMaterializationPort",
+		"sqliteRunForkSelectedContractActivationPort", "sqliteRunForkSelectedContractMaterializationPort", "sqliteRunForkWorkflowTimerReadbackPort",
 	} {
 		allowed[historicalBoundaryOwner+caller+"/reference:"+historicalBoundaryOwner+"resolveSQLiteRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "thin SQLite adapter consumes the shared contextual event point"}
 	}

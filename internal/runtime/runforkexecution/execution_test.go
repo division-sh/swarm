@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -95,19 +96,10 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			wantCapability: selectedContractDeferredWorkFanOutBarrier,
 		},
 		{
-			name:            "revisioned active source timer",
+			name:            "source timer lacks fixed-revision owner metadata",
 			fixture:         "tests/tier5-flow-lifecycle/test-timer-fire",
 			eventName:       "timer.scheduled",
 			seedSourceTimer: true,
-			wantCode:        runfork.RunForkBlockerTimerHistoryUnproven,
-			wantCapability:  selectedContractDeferredWorkRevisionTimerHistory,
-		},
-		{
-			name:           "selected handler can create workflow timer",
-			fixture:        "tests/tier5-flow-lifecycle/test-timer-fire",
-			eventName:      "timer.scheduled",
-			wantCode:       selectedContractDeferredWorkOwnerUnavailable,
-			wantCapability: selectedContractDeferredWorkWorkflowTimer,
 		},
 		{
 			name:           "selected handler can arm workflow join timeout",
@@ -149,18 +141,19 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			sourceEventID := uuid.NewString()
 			at := time.Unix(1700002210, 0).UTC()
 			entityID := uuid.NewString()
-			seedSelectedExecutionSourceRunWithPrimaryRoute(
-				t,
-				db,
-				sourceRunID,
-				entityID,
-				sourceEventID,
-				test.eventName,
-				at,
-				"test_entity",
-				selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "flow-a/1"),
-				nil,
-			)
+			if test.seedSourceTimer {
+				seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, test.eventName, at, "test_entity",
+					selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "flow-a/1"), nil)
+			} else {
+				loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts})
+				if err != nil {
+					t.Fatal(err)
+				}
+				entityID = sourceRunID
+				route := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "")
+				route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: sourceRunID, EntityID: entityID})
+				seedSelectedConstructedRootHistory(t, ctx, db, pg, loaded, sourceRunID, sourceEventID, test.eventName, at, executionmode.Live, []events.DeliveryRoute{route})
+			}
 
 			sourceTimerID := ""
 			if test.seedSourceTimer {
@@ -212,12 +205,21 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
 			})
 			failure, ok := runtimefailures.EnvelopeFromError(err)
-			if err == nil || !ok || failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != test.wantCode {
-				t.Fatalf("ExecuteSelectedContractRunFork result=%#v error=%v, want %s rejection", result, err, test.wantCode)
-			}
-			capabilities, ok := failure.Detail.Attributes["capabilities"].([]string)
-			if !ok || !slices.Contains(capabilities, test.wantCapability) {
-				t.Fatalf("failure capabilities = %#v, want %q", failure.Detail.Attributes["capabilities"], test.wantCapability)
+			if test.seedSourceTimer {
+				// This hostile fixture has no immutable constructor receipt. It
+				// must fail at that owner, not an obsolete timer capability gate.
+				if err == nil || !strings.Contains(err.Error(), "admit original atomic construction tree") ||
+					!strings.Contains(err.Error(), "requires exact fixed-revision owner metadata") {
+					t.Fatalf("hostile timer owner metadata was not refused exactly: %v", err)
+				}
+			} else {
+				if err == nil || !ok || failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != test.wantCode {
+					t.Fatalf("ExecuteSelectedContractRunFork result=%#v error=%v, want %s rejection", result, err, test.wantCode)
+				}
+				capabilities, ok := failure.Detail.Attributes["capabilities"].([]string)
+				if !ok || !slices.Contains(capabilities, test.wantCapability) {
+					t.Fatalf("failure capabilities = %#v, want %q", failure.Detail.Attributes["capabilities"], test.wantCapability)
+				}
 			}
 			if result.Owner != runfork.RunForkSelectedContractExecutionOwner || result.Materialization.ForkRunID != "" {
 				t.Fatalf("rejected result = %#v, want owner and no materialization", result)
@@ -440,19 +442,6 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 	}{
 		{name: "delivery replay fan-out barrier", fanOutBarrier: true, eventName: "items.ready", wantCapability: selectedContractDeferredWorkFanOutBarrier},
 		{name: "state only fan-out barrier", fanOutBarrier: true, stateOnly: true, eventName: "items.ready", wantCapability: selectedContractDeferredWorkFanOutBarrier},
-		{
-			name:           "delivery replay workflow timer",
-			fixture:        "tests/tier5-flow-lifecycle/test-timer-fire",
-			eventName:      "timer.scheduled",
-			wantCapability: selectedContractDeferredWorkWorkflowTimer,
-		},
-		{
-			name:           "state only workflow timer",
-			fixture:        "tests/tier5-flow-lifecycle/test-timer-fire",
-			eventName:      "timer.scheduled",
-			stateOnly:      true,
-			wantCapability: selectedContractDeferredWorkWorkflowTimer,
-		},
 		{
 			name:           "delivery replay workflow join timeout",
 			fixture:        "examples/routing/fan-in/barrier",
@@ -3932,7 +3921,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	}
 }
 
-func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMarker(t *testing.T) {
+func TestActivateSelectedContractRunForkKeepsPostTReplayScopeSourceLocal(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
@@ -3968,6 +3957,10 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 		runforkrevision.FamilyEventDeliveries,
 		runforkrevision.FamilyCommittedReplayScopes,
 	)
+	sourceBefore, err := storetest.ReadSelectedForkSourceDomain(ctx, pg, sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := activateLiveSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
 		AllowSourceFreeze: true,
@@ -3977,13 +3970,26 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 		SourceLoader:      loader,
 		AgentRuntime:      SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
 	})
-	if err == nil || !strings.Contains(err.Error(), "source_committed_replay_scope_advanced_after_fork_point") {
-		t.Fatalf("ActivateSelectedContractRunFork error = %v, want post-T marker blocker", err)
+	if err != nil || !result.Activated || result.SourceFrozen || !result.SourceAdvancedAfterFork {
+		t.Fatalf("source-local scope suppressed selected continuation: result=%+v err=%v", result, err)
 	}
-	if result.ExecutedEventCount != 0 || len(result.ForkEvents) != 0 || result.Activated {
-		t.Fatalf("result = %#v, want no fork publish before marker block", result)
+	for deadline := time.Now().Add(15 * time.Second); ; {
+		stage := storetest.ObserveWriterStage(t, ctx, pg, materialized.ForkRunID, materialized.ForkRunID, "done")
+		if stage.State == "done" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("acknowledged selected continuation never completed its receiver: %+v", stage)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	assertNoForkExecutionRowsForRun(t, db, materialized.ForkRunID)
+	sourceAfter, err := storetest.ReadSelectedForkSourceDomain(ctx, pg, sourceRunID)
+	if err != nil || !reflect.DeepEqual(sourceBefore, sourceAfter) {
+		t.Fatalf("selected continuation changed source scope/business evidence: %v", err)
+	}
+	if count := storetest.ObserveEventCardinality(t, ctx, pg, afterEventID); count != 1 {
+		t.Fatalf("post-cut source event identity changed: count=%d", count)
+	}
 }
 
 func persistRunForkManagedTurn(t testing.TB, ctx context.Context, selected *store.PostgresStore, event events.Event, identity agentidentity.Identity, runID, sessionID, turnID, entityID string, at time.Time) {

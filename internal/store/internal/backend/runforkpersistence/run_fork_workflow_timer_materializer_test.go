@@ -21,7 +21,11 @@ type workflowTimerMaterializerSelection struct {
 	fail    string
 }
 
-func (s workflowTimerMaterializerSelection) SelectInheritedWorkflowTimer(projected pipeline.WorkflowTimerActivation) (*pipeline.WorkflowTimerActivation, error) {
+func (s workflowTimerMaterializerSelection) SelectInheritedWorkflowTimerRecord(record pipeline.WorkflowTimerActivationPersistenceRecord) (*pipeline.WorkflowTimerActivationPersistenceRecord, error) {
+	projected, err := pipeline.DecodeWorkflowTimerActivationPersistenceRecord(record)
+	if err != nil {
+		return nil, err
+	}
 	if s.fail == projected.Ref.DeclarationKey {
 		return nil, errors.New("selected declaration admission failed")
 	}
@@ -35,15 +39,28 @@ func (s workflowTimerMaterializerSelection) SelectInheritedWorkflowTimer(project
 		selected.FireAt = projected.FireAt.Add(projected.RecurrenceInterval)
 	}
 	selected.Payload = []byte(`{"new_arm_only":true}`)
-	return &selected, selected.Validate()
+	value := selected.PersistenceRecord()
+	return &value, selected.Validate()
 }
 
 type workflowTimerMaterializerOwner struct {
-	rows     map[string]pipeline.WorkflowTimerActivation
-	inserts  int
-	cancels  int
-	writes   int
-	requires int
+	rows    map[string]pipeline.WorkflowTimerActivation
+	inserts int
+	cancels int
+	writes  int
+	reads   int
+}
+
+func (o *workflowTimerMaterializerOwner) ReadRunForkWorkflowTimerInventoryTx(ctx context.Context, _ *mutationprotocol.Attempt, _ string) ([]pipeline.WorkflowTimerActivation, error) {
+	o.reads++
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	rows := make([]pipeline.WorkflowTimerActivation, 0, len(o.rows))
+	for _, row := range o.rows {
+		rows = append(rows, row.Canonical())
+	}
+	return rows, nil
 }
 
 func (o *workflowTimerMaterializerOwner) MaterializeRunForkWorkflowTimerTx(_ context.Context, _ *mutationprotocol.Attempt, expected pipeline.WorkflowTimerActivation, removed bool) error {
@@ -74,21 +91,6 @@ func (o *workflowTimerMaterializerOwner) MaterializeRunForkWorkflowTimerTx(_ con
 	return nil
 }
 
-func (o *workflowTimerMaterializerOwner) RequireRunForkWorkflowTimerTx(_ context.Context, _ *mutationprotocol.Attempt, expected pipeline.WorkflowTimerActivation, removed bool) error {
-	o.requires++
-	actual, found := o.rows[expected.Ref.ActivationID]
-	if !found {
-		return fmt.Errorf("missing materialized timer")
-	}
-	if err := actual.ValidateCauseReplay(expected); err != nil {
-		return err
-	}
-	if removed && (actual.Status != "cancelled" || actual.CancelCause != pipeline.WorkflowTimerCancelCauseRuleRemoved || !actual.CancelledAt.Equal(expected.CreatedAt)) {
-		return fmt.Errorf("missing rule removal disposition")
-	}
-	return nil
-}
-
 func workflowTimerMaterializerPlan(source pipeline.WorkflowTimerActivation, point runfork.RunForkPoint) runfork.RunForkPlan {
 	return runfork.RunForkPlan{SourceRunID: source.RunID, ForkPoint: point,
 		WorkflowTimers: []pipeline.WorkflowTimerActivationPersistenceRecord{source.PersistenceRecord()},
@@ -116,7 +118,7 @@ func TestRunForkWorkflowTimerMaterializerRetainsFixedCutClockAndSelectedEffects(
 				bornAt := source.CreatedAt.Add(5 * time.Hour)
 				owner := &workflowTimerMaterializerOwner{rows: make(map[string]pipeline.WorkflowTimerActivation)}
 				removed, err := materializeRunForkWorkflowTimers(context.Background(), new(mutationprotocol.Attempt), plan,
-					workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, owner, bornAt, false)
+					workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, owner, bornAt)
 				if err != nil || len(removed) != 0 || owner.inserts != 1 || owner.cancels != 0 {
 					t.Fatalf("materialization: removed=%+v inserts=%d cancels=%d err=%v", removed, owner.inserts, owner.cancels, err)
 				}
@@ -138,30 +140,23 @@ func TestRunForkWorkflowTimerMaterializerRetainsFixedCutClockAndSelectedEffects(
 	}
 }
 
-func TestRunForkWorkflowTimerMaterializerRemovalAndReuseAreExact(t *testing.T) {
+func TestRunForkWorkflowTimerMaterializerRemovalIsExactOnce(t *testing.T) {
 	source := workflowTimerProjectionSource(t, true)
 	plan := workflowTimerMaterializerPlan(source, runfork.RunForkPoint{Kind: runfork.RunForkPointRunStart, Revision: 3})
 	bornAt := source.CreatedAt.Add(2 * time.Hour)
 	owner := &workflowTimerMaterializerOwner{rows: make(map[string]pipeline.WorkflowTimerActivation)}
 	selection := workflowTimerMaterializerSelection{removed: map[string]bool{source.Ref.DeclarationKey: true}}
-	for _, reuse := range []bool{false, false, true, true} {
+	for i := 0; i < 2; i++ {
 		removed, err := materializeRunForkWorkflowTimers(context.Background(), new(mutationprotocol.Attempt), plan,
-			workflowTimerProjectionChildRun, selection, owner, bornAt, reuse)
+			workflowTimerProjectionChildRun, selection, owner, bornAt)
 		if err != nil || len(removed) != 1 || removed[0].Status != "cancelled" ||
 			removed[0].CancelCause != pipeline.WorkflowTimerCancelCauseRuleRemoved || !removed[0].CancelledAt.Equal(bornAt) ||
 			!removed[0].FireAt.Equal(source.FireAt) || !removed[0].SourceArmedAt.Equal(source.CreatedAt) {
 			t.Fatalf("exact removal decision: removed=%+v err=%v", removed, err)
 		}
 	}
-	if owner.inserts != 1 || owner.cancels != 1 || owner.writes != 2 || owner.requires != 2 {
+	if owner.inserts != 1 || owner.cancels != 1 || owner.writes != 2 || owner.reads != 0 {
 		t.Fatalf("replay created another physical timer/cancellation: %+v", owner)
-	}
-	for id := range owner.rows {
-		delete(owner.rows, id)
-	}
-	if _, err := materializeRunForkWorkflowTimers(context.Background(), new(mutationprotocol.Attempt), plan,
-		workflowTimerProjectionChildRun, selection, owner, bornAt, true); err == nil || len(owner.rows) != 0 || owner.inserts != 1 {
-		t.Fatalf("exact reuse repaired a missing timer: rows=%+v err=%v", owner.rows, err)
 	}
 }
 
@@ -201,7 +196,7 @@ func TestRunForkWorkflowTimerMaterializerValidatesBeforeAnyWrite(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			owner := &workflowTimerMaterializerOwner{rows: make(map[string]pipeline.WorkflowTimerActivation)}
 			if _, err := materializeRunForkWorkflowTimers(context.Background(), new(mutationprotocol.Attempt), tc.plan,
-				workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, owner, source.CreatedAt.Add(2*time.Hour), false); err == nil || owner.writes != 0 {
+				workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, owner, source.CreatedAt.Add(2*time.Hour)); err == nil || owner.writes != 0 {
 				t.Fatalf("invalid fixed-cut evidence reached writer: writes=%d err=%v", owner.writes, err)
 			}
 		})
@@ -212,7 +207,7 @@ func TestRunForkWorkflowTimerMaterializerValidatesBeforeAnyWrite(t *testing.T) {
 	plan.WorkflowTimers = append(plan.WorkflowTimers, second.PersistenceRecord())
 	owner := &workflowTimerMaterializerOwner{rows: make(map[string]pipeline.WorkflowTimerActivation)}
 	if _, err := materializeRunForkWorkflowTimers(context.Background(), new(mutationprotocol.Attempt), plan,
-		workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{fail: second.Ref.DeclarationKey}, owner, source.CreatedAt.Add(2*time.Hour), false); err == nil || owner.writes != 0 {
+		workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{fail: second.Ref.DeclarationKey}, owner, source.CreatedAt.Add(2*time.Hour)); err == nil || owner.writes != 0 {
 		t.Fatalf("selection failure became removal or partial writes: writes=%d err=%v", owner.writes, err)
 	}
 }
@@ -233,7 +228,7 @@ func TestRunForkWorkflowTimerMaterializerPreservesExactLoopCorrespondence(t *tes
 	plan.Entities[0].Accumulator = engine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets()
 	owner := &workflowTimerMaterializerOwner{rows: make(map[string]pipeline.WorkflowTimerActivation)}
 	if _, err := materializeRunForkWorkflowTimers(context.Background(), new(mutationprotocol.Attempt), plan,
-		workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, owner, source.CreatedAt.Add(2*time.Hour), false); err != nil {
+		workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, owner, source.CreatedAt.Add(2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	want, err := loopruntime.ForkGeneration(source.Ref.Generation, workflowTimerProjectionChildRun, workflowTimerProjectionChildRun)
@@ -248,7 +243,7 @@ func TestRunForkWorkflowTimerMaterializerPreservesExactLoopCorrespondence(t *tes
 	plan.Entities[0].Accumulator = nil
 	owner.writes = 0
 	if _, err := materializeRunForkWorkflowTimers(context.Background(), new(mutationprotocol.Attempt), plan,
-		workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, owner, source.CreatedAt.Add(2*time.Hour), false); err == nil || owner.writes != 0 {
+		workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, owner, source.CreatedAt.Add(2*time.Hour)); err == nil || owner.writes != 0 {
 		t.Fatalf("missing source loop evidence reached writer: writes=%d err=%v", owner.writes, err)
 	}
 }
@@ -258,7 +253,7 @@ func TestRunForkWorkflowTimerMaterializerDoesNotRearmSettledCutRows(t *testing.T
 	source.Status, source.FiredAt = "fired", source.FireAt
 	plan := workflowTimerMaterializerPlan(source, runfork.RunForkPoint{Kind: runfork.RunForkPointRunStart, Revision: 3})
 	if removed, err := materializeRunForkWorkflowTimers(context.Background(), nil, plan, workflowTimerProjectionChildRun,
-		nil, nil, source.CreatedAt.Add(2*time.Hour), false); err != nil || len(removed) != 0 {
+		nil, nil, source.CreatedAt.Add(2*time.Hour)); err != nil || len(removed) != 0 {
 		t.Fatalf("settled fixed-cut timer was made executable: removed=%+v err=%v", removed, err)
 	}
 }

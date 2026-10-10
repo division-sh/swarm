@@ -359,10 +359,6 @@ func (s *PostgresStore) EnsureOperatorPrincipal(ctx context.Context, now time.Ti
 	return s.operatorChannelPostgresOwner.EnsureOperatorPrincipal(ctx, now)
 }
 
-func (s *PostgresStore) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID string, forkEventID string) error {
-	return s.runForkPostgresOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, sourceRunID, forkEventID)
-}
-
 func (s *PostgresStore) EnsureRuntimeIngressState(ctx context.Context, now time.Time) (ingress.State, error) {
 	return s.runtimeIngressPostgresOwner.EnsureRuntimeIngressState(ctx, now)
 }
@@ -1107,6 +1103,10 @@ func (s *PostgresStore) RequireGateRouteAdmitted(ctx context.Context, runID stri
 	return s.pipelinePostgresOwner.RequireGateRouteAdmitted(ctx, runID)
 }
 
+func (s *PostgresStore) RequireMaterializedRunForkForSelectedContractExecution(ctx context.Context, forkRunID string, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
+	return s.runForkPostgresOwner.RequireMaterializedRunForkForSelectedContractExecution(ctx, forkRunID, req)
+}
+
 func (s *PostgresStore) RequirePresentRun(ctx context.Context, runID string) error {
 	return s.runLifecyclePostgresOwner.RequirePresentRun(ctx, runID)
 }
@@ -1653,10 +1653,6 @@ func (s *SQLiteRuntimeStore) DiscardMaterializedSelectedContractExecutionFork(ct
 
 func (s *SQLiteRuntimeStore) EnsureOperatorPrincipal(ctx context.Context, now time.Time) (operatorchannel.Principal, error) {
 	return s.operatorChannelSQLiteOwner.EnsureOperatorPrincipal(ctx, now)
-}
-
-func (s *SQLiteRuntimeStore) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID string, forkEventID string) error {
-	return s.runForkSQLiteOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, sourceRunID, forkEventID)
 }
 
 func (s *SQLiteRuntimeStore) EnsureRuntimeIngressState(ctx context.Context, now time.Time) (ingress.State, error) {
@@ -2373,6 +2369,10 @@ func (s *SQLiteRuntimeStore) RequireActiveRunSource(ctx context.Context, runID s
 
 func (s *SQLiteRuntimeStore) RequireGateRouteAdmitted(ctx context.Context, runID string) error {
 	return s.pipelineSQLiteOwner.RequireGateRouteAdmitted(ctx, runID)
+}
+
+func (s *SQLiteRuntimeStore) RequireMaterializedRunForkForSelectedContractExecution(ctx context.Context, forkRunID string, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
+	return s.runForkSQLiteOwner.RequireMaterializedRunForkForSelectedContractExecution(ctx, forkRunID, req)
 }
 
 func (s *SQLiteRuntimeStore) RequirePresentRun(ctx context.Context, runID string) error {
