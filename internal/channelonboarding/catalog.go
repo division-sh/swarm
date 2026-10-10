@@ -199,6 +199,15 @@ func (c *CandidateCatalog) Resolve(selection CandidateSelection) (Candidate, err
 // FindExact returns only a candidate owned by the same current runtime
 // occurrence.
 func (c *CandidateCatalog) FindExact(provider string, identity operatorchannel.InterfaceIdentity, coordinate ChannelRuntimeContextCoordinate, targetSelector string) (Candidate, bool) {
+	if coordinate.Validate() != nil {
+		return Candidate{}, false
+	}
+	return c.FindExactDeclaration(provider, identity, coordinate, targetSelector)
+}
+
+// FindExactDeclaration retains exact source/plan/runtime identity without
+// inventing the executable target that declaration-first pairing must precede.
+func (c *CandidateCatalog) FindExactDeclaration(provider string, identity operatorchannel.InterfaceIdentity, coordinate ChannelRuntimeContextCoordinate, targetSelector string) (Candidate, bool) {
 	if c == nil {
 		return Candidate{}, false
 	}
@@ -206,7 +215,7 @@ func (c *CandidateCatalog) FindExact(provider string, identity operatorchannel.I
 	identity = identity.Normalized()
 	targetSelector = strings.TrimSpace(targetSelector)
 	for _, candidate := range c.candidates {
-		if candidate.Provider == provider && candidate.Interface.Normalized() == identity && candidate.Target.Selector == targetSelector && candidate.Coordinate.Matches(coordinate) {
+		if candidate.Provider == provider && candidate.Interface.Normalized() == identity && candidate.Target.Selector == targetSelector && candidate.Coordinate.MatchesDeclaration(coordinate) {
 			return candidate, true
 		}
 	}

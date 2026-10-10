@@ -19,10 +19,17 @@ import (
 	"github.com/coder/websocket"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -131,9 +138,9 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 	f := &serveBootstrapTestFixture{ctx: ctx, owned: owned, owner: owner, op: op, candidate: candidate, principal: principal}
 	f.adapter = &serveSessionBootstrap{connections: make(map[string]*serveSessionBootstrapAttempt),
 		store: selected, credentials: current, directory: directory,
-		selectRuntime: func(context.Context, channelonboarding.ChannelRuntimeContextCoordinate) (context.Context, func() error, error) {
+		selectRuntime: func(context.Context, channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error) {
 			f.selections.Add(1)
-			return owned, func() error { return nil }, nil
+			return owned, nil, func() error { return nil }, nil
 		}}
 	return f
 }
@@ -249,10 +256,10 @@ func TestServeSessionBootstrapCanceledAttemptCacheBothStores(t *testing.T) {
 			caller, cancel := context.WithCancel(f.ctx)
 			defer cancel()
 			selectRuntime := f.adapter.selectRuntime
-			f.adapter.selectRuntime = func(ctx context.Context, coordinate channelonboarding.ChannelRuntimeContextCoordinate) (context.Context, func() error, error) {
-				owned, release, err := selectRuntime(ctx, coordinate)
+			f.adapter.selectRuntime = func(ctx context.Context, candidate channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error) {
+				owned, incoming, release, err := selectRuntime(ctx, candidate)
 				cancel()
-				return owned, release, err
+				return owned, incoming, release, err
 			}
 			if err := f.adapter.BootstrapSession(caller, f.op, f.candidate); !errors.Is(err, context.Canceled) {
 				t.Fatal("canceled handoff succeeded", err)
@@ -278,6 +285,80 @@ func TestServeSessionBootstrapCanceledAttemptCacheBothStores(t *testing.T) {
 				t.Fatal("failed bootstrap automatically selected another attempt")
 			}
 		})
+	}
+}
+
+func TestServeSessionBootstrapInstallsIncomingOwnersBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, mode := range []string{"installed", "missing_bus", "foreign_bus"} {
+			t.Run(backend+"/"+mode, func(t *testing.T) {
+				f := newServeBootstrapTestFixture(t, backend)
+				bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repoRootForTest(), canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress), runtimePlatformSpecPath(t))
+				if err != nil {
+					t.Fatal(err)
+				}
+				fact, _ := correlation.SourceArtifactFactFromContext(f.owned)
+				owner := f.owner
+				if mode == "foreign_bus" {
+					fact = mustServeTestEphemeralSourceArtifactFact(serveRuntimeTestBundleHash)
+					owner = newSupervisorTestRuntimeOccurrence(t, fact.BundleHash())
+				}
+				bus, err := runtimebus.NewEphemeralEventBusWithOptions(&processIngressEventStore{}, runtimebus.EventBusOptions{
+					WorkOwner: owner, ContractBundle: semanticview.Wrap(bundle), SourceArtifactFact: fact, ReceiverExecution: eventreceiver.NormalExecution(),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := bus.ResetInMemoryState(); err != nil {
+						t.Error(err)
+					}
+				})
+				trigger, err := sessionDiscoveryCatalog(t).CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: f.candidate.Target.Alias, Provider: f.candidate.Provider})
+				if err != nil {
+					t.Fatal(err)
+				}
+				incoming := &sessionprovider.RuntimeIncomingOptions{Bus: bus, Trigger: trigger, Alias: f.candidate.Target.Alias, Posture: executionposture.Live}
+				if mode == "missing_bus" {
+					incoming.Bus = nil
+				}
+				f.adapter.selectRuntime = func(context.Context, channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error) {
+					f.selections.Add(1)
+					return f.owned, incoming, func() error { return nil }, nil
+				}
+				if mode == "installed" {
+					serveBootstrapWireFixture(t, "healthy", f.owner)
+					if err := f.adapter.BootstrapSession(f.ctx, f.op, f.candidate); err != nil {
+						t.Fatal("concrete adapter did not install runtime incoming", err)
+					}
+					connection := f.adapter.connection(f.op.OperationID)
+					if err := connection.ReconcileIncoming(f.ctx); err != nil {
+						t.Fatal("connected bootstrap retained an uninstalled incoming port", err)
+					}
+					current, err := f.adapter.store.GetChannelOnboarding(f.ctx, f.op.OperationID)
+					if err != nil || current.Revision != f.op.Revision || current.SessionAccount != (operatorchannel.SessionAccountAdmission{}) ||
+						current.IdentityOperationID != "" || current.ActivationRevision != 0 || current.Coordinate.TargetGeneration != 0 {
+						t.Fatal("incoming installation manufactured account, claim or business authority", current, err)
+					}
+					if err := connection.Close(f.ctx); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					if err := f.adapter.BootstrapSession(f.ctx, f.op, f.candidate); err == nil {
+						t.Fatal("incomplete/foreign incoming owners installed")
+					}
+					if f.adapter.connection(f.op.OperationID) != nil {
+						t.Fatal("invalid incoming owners constructed provider state")
+					}
+					if entries, err := os.ReadDir(f.adapter.directory); err != nil || len(entries) != 0 {
+						t.Fatal("invalid incoming owners opened private files", entries, err)
+					}
+				}
+				if f.selections.Load() != 1 {
+					t.Fatal("incoming installation reselected its runtime")
+				}
+			})
+		}
 	}
 }
 
