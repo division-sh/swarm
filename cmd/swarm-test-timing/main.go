@@ -28,6 +28,7 @@ type config struct {
 	eventPath                string
 	currentPRPath            string
 	checkCITier              bool
+	ciSelection              bool
 	proofPolicyPath          string
 	weightModelPath          string
 	planPath                 string
@@ -80,6 +81,7 @@ func main() {
 	flag.StringVar(&cfg.eventPath, "event-json", "", "GitHub event JSON data for CI-Tier selection")
 	flag.StringVar(&cfg.currentPRPath, "current-pr-json", "", "current PR API JSON data for summary revalidation")
 	flag.BoolVar(&cfg.checkCITier, "check-ci-tier", false, "refuse qualification thinner than the current PR body")
+	flag.BoolVar(&cfg.ciSelection, "ci-selection", false, "report exact tier/extra-unit selection and same-run check name")
 	flag.BoolVar(&cfg.warmProducts, "warm-build-products", false, "compile-only release products for the exact plan tier")
 	flag.StringVar(&cfg.buildCache, "build-cache", "", "optional compilation-only product cache")
 	flag.BoolVar(&cfg.verifyMerged, "verify-merged-proof", false, "observe exact qualified merged-tree replay, otherwise require full")
@@ -129,7 +131,7 @@ func main() {
 
 func run(cfg config) error {
 	modes := 0
-	for _, enabled := range []bool{cfg.captureTestTimeReference, cfg.verifyMerged, cfg.warmProducts, cfg.checkCITier, cfg.planCI, cfg.recordEvidence, cfg.evaluateBudget, cfg.updateWeights, cfg.observeCadence, cfg.validatePublish, cfg.assertExecution} {
+	for _, enabled := range []bool{cfg.captureTestTimeReference, cfg.verifyMerged, cfg.warmProducts, cfg.checkCITier, cfg.ciSelection, cfg.planCI, cfg.recordEvidence, cfg.evaluateBudget, cfg.updateWeights, cfg.observeCadence, cfg.validatePublish, cfg.assertExecution} {
 		if enabled {
 			modes++
 		}
@@ -171,9 +173,11 @@ func run(cfg config) error {
 		if cfg.workflowHeadSHA == "" || pr.Head.SHA != cfg.workflowHeadSHA {
 			return fmt.Errorf("current PR head does not match qualifying event head")
 		}
-		return testplanning.CheckCurrentCITier(plan.Profile, pr.Body)
+		return testplanning.CheckCurrentCISelection(plan, pr.Body)
 	}
 	switch {
+	case cfg.ciSelection:
+		return reportCISelection(cfg)
 	case cfg.planCI:
 		return planCI(cfg)
 	case cfg.recordEvidence:
@@ -202,6 +206,30 @@ func run(cfg config) error {
 	default:
 		return writeTimingReport(cfg)
 	}
+}
+
+func reportCISelection(cfg config) error {
+	plan, err := readPlan(cfg.planPath)
+	if err != nil {
+		return err
+	}
+	report, err := plan.CISelectionReport(cfg.workflowRunID, cfg.workflowAttempt)
+	if err != nil {
+		return err
+	}
+	if cfg.resultJSONPath == "" {
+		return fmt.Errorf("-result-json is required with -ci-selection")
+	}
+	if err := writeJSON(cfg.resultJSONPath, report); err != nil {
+		return err
+	}
+	out, closeOutput, err := openOutput(cfg.markdownPath)
+	if err != nil {
+		return err
+	}
+	defer closeOutput()
+	_, err = fmt.Fprintf(out, "### CI selection\n\n- tier: `%s`\n- extra units: `%s`\n- selection digest: `%s`\n- execution: `%s`\n- plan: `%s`\n- run: `%d`\n- attempt: `%d`\n\nSelection alone is not qualification.\n", report.Tier, strings.Join(report.ExtraUnits, ", "), report.SelectionDigest, report.ExecutionSHA, report.PlanDigest, report.WorkflowRunID, report.WorkflowAttempt)
+	return err
 }
 
 func captureTestTimeReference(cfg config) error {
@@ -260,7 +288,11 @@ func planCI(cfg config) error {
 	if err != nil {
 		return err
 	}
-	plan, err := testplanning.BuildPlan(policy, model, packages, profile, reason, cfg.headSHA)
+	extraUnits, err := testplanning.CIUnits(body)
+	if err != nil {
+		return err
+	}
+	plan, err := testplanning.BuildPlan(policy, model, packages, profile, reason, cfg.headSHA, testplanning.BuildOptions{ExtraUnits: extraUnits})
 	if err != nil {
 		return err
 	}

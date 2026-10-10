@@ -64,11 +64,3 @@ func PREventBody(raw []byte) (string, error) {
 	}
 	return *event.PullRequest.Body, nil
 }
-
-func CheckCurrentCITier(effective, body string) error {
-	current, _ := CITier(body)
-	if TierRank(effective) == 0 || TierRank(effective) < TierRank(current) {
-		return fmt.Errorf("effective tier %q cannot satisfy current CI-Tier %s", effective, current)
-	}
-	return nil
-}

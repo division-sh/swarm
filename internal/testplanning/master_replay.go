@@ -79,7 +79,10 @@ type MergeCheck struct {
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
 	DetailsURL string `json:"details_url"`
-	App        struct {
+	CheckSuite struct {
+		ID int64 `json:"id"`
+	} `json:"check_suite"`
+	App struct {
 		ID int64 `json:"id"`
 	} `json:"app"`
 }
@@ -97,14 +100,20 @@ func ValidateMasterReplay(repository, ref, masterSHA, masterTree, planTree strin
 	if err := plan.Validate(); err != nil {
 		return err
 	}
-	required, _ := CITier(pr.Body)
-	if plan.Venue != VenueCI || TierRank(plan.Profile) < TierRank(required) {
+	if err := CheckCurrentCISelection(plan, pr.Body); err != nil {
+		return err
+	}
+	if plan.Venue != VenueCI {
 		return fmt.Errorf("qualified plan is thinner than current merged PR requirement")
 	}
 	if run.ID <= 0 || run.RunAttempt <= 0 || run.HeadSHA != pr.Head.SHA || run.Event != "pull_request" || run.Name != "CI" || run.Status != "completed" || run.Conclusion != "success" {
 		return fmt.Errorf("latest PR qualification is not successful at this exact head")
 	}
-	return validateMergedChecks(repository, run, checks, protection)
+	selection, err := plan.CISelection()
+	if err != nil {
+		return err
+	}
+	return validateMergedChecks(repository, run, checks, protection, selection.CheckName(run.ID, run.RunAttempt))
 }
 
 func MergedAssociation(repository, ref, masterSHA string, prs []MergedPR) (MergedPR, error) {
@@ -118,7 +127,35 @@ func MergedAssociation(repository, ref, masterSHA string, prs []MergedPR) (Merge
 	return pr, nil
 }
 
-func validateMergedChecks(repository string, run QualifiedRun, checks []MergeCheck, protection []ProtectedCheck) error {
+func validateMergedChecks(repository string, run QualifiedRun, checks []MergeCheck, protection []ProtectedCheck, selectionCheck string) error {
+	if err := validateMergedProtection(protection); err != nil {
+		return err
+	}
+	expected := map[string]bool{"Required test summary": false, "SQLite local smoke": false, selectionCheck: false}
+	var suiteID int64
+	for _, check := range checks {
+		seen, ok := expected[check.Name]
+		if !ok || seen || check.App.ID != 15368 || check.HeadSHA != run.HeadSHA || check.Status != "completed" || check.Conclusion != "success" {
+			return fmt.Errorf("required check has wrong context/App/head/outcome")
+		}
+		if err := validateMergedJob(repository, run, check); err != nil {
+			return err
+		}
+		if check.CheckSuite.ID <= 0 || (suiteID != 0 && suiteID != check.CheckSuite.ID) {
+			return fmt.Errorf("required selection/summary checks belong to different suites")
+		}
+		suiteID = check.CheckSuite.ID
+		expected[check.Name] = true
+	}
+	for _, seen := range expected {
+		if !seen {
+			return fmt.Errorf("missing required check")
+		}
+	}
+	return nil
+}
+
+func validateMergedProtection(protection []ProtectedCheck) error {
 	expected := map[string]bool{"Required test summary": false, "SQLite local smoke": false}
 	if len(protection) != len(expected) {
 		return fmt.Errorf("protected check set changed")
@@ -129,24 +166,6 @@ func validateMergedChecks(repository string, run QualifiedRun, checks []MergeChe
 			return fmt.Errorf("required context/App changed")
 		}
 		expected[check.Context] = true
-	}
-	for name := range expected {
-		expected[name] = false
-	}
-	for _, check := range checks {
-		seen, ok := expected[check.Name]
-		if !ok || seen || check.App.ID != 15368 || check.HeadSHA != run.HeadSHA || check.Status != "completed" || check.Conclusion != "success" {
-			return fmt.Errorf("required check has wrong context/App/head/outcome")
-		}
-		if err := validateMergedJob(repository, run, check); err != nil {
-			return err
-		}
-		expected[check.Name] = true
-	}
-	for _, seen := range expected {
-		if !seen {
-			return fmt.Errorf("missing required check")
-		}
 	}
 	return nil
 }

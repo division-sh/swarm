@@ -1,6 +1,7 @@
 package testtiming
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,12 +9,14 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/testplanning"
 )
 
 func TestCITierCheckRecordsSameRunSelectionAndOutcome(t *testing.T) {
 	workflow := loadAdmissionWorkflow(t)
 	job := workflow.Jobs["ci-tier"]
-	if job.Name != "CI tier: ${{ needs.ci-plan.outputs.profile }}" || !slices.Equal(job.Needs, []string{"ci-plan", "required-tests"}) {
+	if job.Name != "${{ needs.ci-plan.outputs.selection_check }}" || !slices.Equal(job.Needs, []string{"ci-plan", "required-tests"}) {
 		t.Fatalf("tier has another authority or does not await completion: %+v", job)
 	}
 	for _, plan := range []string{"success", "failure", "cancelled", "skipped"} {
@@ -32,8 +35,7 @@ func TestCITierCheckRecordsSameRunSelectionAndOutcome(t *testing.T) {
 	}
 	for _, tier := range []string{"core", "lifecycle", "full", "", "unknown", "full; exit 0"} {
 		output := filepath.Join(t.TempDir(), "summary")
-		command := exec.Command("bash", "-c", step.Run)
-		command.Env = append(os.Environ(), "TIER="+tier, "PROOF_RESULT=failure", "PLAN_DIGEST=plan", "EXECUTION_SHA=source", "GITHUB_RUN_ID=42", "GITHUB_RUN_ATTEMPT=2", "GITHUB_STEP_SUMMARY="+output)
+		command := tierRecordCommand(t, step.Run, tier, "failure", output, "")
 		_, err := command.CombinedOutput()
 		valid := tier == "core" || tier == "lifecycle" || tier == "full"
 		if (err == nil) != valid {
@@ -41,21 +43,66 @@ func TestCITierCheckRecordsSameRunSelectionAndOutcome(t *testing.T) {
 		}
 		if valid {
 			data, err := os.ReadFile(output)
-			if err != nil || !strings.Contains(string(data), "run 42 attempt 2; execution source; plan plan; Required test summary: failure") || !strings.Contains(string(data), "Tier selection alone is not qualification") || strings.Contains(string(data), "qualified by") {
+			if err != nil || !strings.Contains(string(data), "Required test summary: failure") || !strings.Contains(string(data), "Selection alone is not qualification") || strings.Contains(string(data), "qualified by") {
 				t.Fatalf("missing source/run/attempt/plan evidence: %s %v", data, err)
 			}
 		}
 	}
 	for _, outcome := range []string{"success", "failure", "cancelled", "skipped", "", "unknown"} {
 		output := filepath.Join(t.TempDir(), "summary")
-		command := exec.Command("bash", "-c", step.Run)
-		command.Env = append(os.Environ(), "TIER=full", "PROOF_RESULT="+outcome, "PLAN_DIGEST=plan", "EXECUTION_SHA=source", "GITHUB_RUN_ID=42", "GITHUB_RUN_ATTEMPT=2", "GITHUB_STEP_SUMMARY="+output)
+		command := tierRecordCommand(t, step.Run, "full", outcome, output, "")
 		_, err := command.CombinedOutput()
 		valid := outcome == "success" || outcome == "failure" || outcome == "cancelled" || outcome == "skipped"
 		if (err == nil) != valid {
 			t.Fatalf("summary outcome %q admission: %v", outcome, err)
 		}
 	}
+	for _, wrong := range []string{"run", "attempt", "plan", "source", "selection", "missing"} {
+		command := tierRecordCommand(t, step.Run, "lifecycle", "success", filepath.Join(t.TempDir(), "summary"), wrong)
+		if raw, err := command.CombinedOutput(); err == nil {
+			t.Fatalf("foreign %s selection metadata admitted: %s", wrong, raw)
+		}
+	}
+	planStep := findWorkflowStep(workflow.Jobs["ci-plan"].Steps, "Plan proof topology")
+	if planStep == nil || !strings.Contains(planStep.Run, "-ci-selection") || !strings.Contains(planStep.Run, "-workflow-run-id \"$GITHUB_RUN_ID\" -workflow-attempt \"$GITHUB_RUN_ATTEMPT\"") || !strings.Contains(planStep.Run, "selection_check=$(jq -r .check_name") || step.Env["SELECTION_CHECK"] != "${{ needs.ci-plan.outputs.selection_check }}" {
+		t.Fatal("selection check is not produced by the canonical plan owner")
+	}
+}
+
+func tierRecordCommand(t *testing.T, script, tier, outcome, output, wrong string) *exec.Cmd {
+	t.Helper()
+	dir := t.TempDir()
+	results := filepath.Join(dir, "test-results")
+	if err := os.MkdirAll(results, 0700); err != nil {
+		t.Fatal(err)
+	}
+	selection := testplanning.CISelection{Version: 1, Tier: tier, ExtraUnits: []string{}}
+	report := testplanning.CISelectionReport{CISelection: selection, SelectionDigest: selection.Digest(), PlanDigest: "plan", ExecutionSHA: "source", WorkflowRunID: 42, WorkflowAttempt: 2, CheckName: selection.CheckName(42, 2)}
+	switch wrong {
+	case "run":
+		report.WorkflowRunID++
+	case "attempt":
+		report.WorkflowAttempt++
+	case "plan":
+		report.PlanDigest = "foreign"
+	case "source":
+		report.ExecutionSHA = "foreign"
+	case "selection":
+		report.CheckName = "CI tier: lifecycle"
+	}
+	raw, _ := json.Marshal(report)
+	for name, raw := range map[string][]byte{"ci-selection.json": raw, "ci-selection.md": []byte("plan selection summary\n"), "proof-plan.json": []byte(`{"head_sha":"source"}`)} {
+		if name == "ci-selection.json" && wrong == "missing" {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(results, name), raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	command := exec.Command("bash", "-c", script)
+	command.Dir = dir
+	command.Env = append(os.Environ(), "TIER="+tier, "PROOF_RESULT="+outcome, "PLAN_DIGEST=plan", "SELECTION_CHECK="+selection.CheckName(42, 2), "GITHUB_RUN_ID=42", "GITHUB_RUN_ATTEMPT=2", "GITHUB_STEP_SUMMARY="+output)
+	return command
 }
 
 func TestDebtAnalysisCIUsesExactReadOnlyRestoreAndProtectedProducer(t *testing.T) {

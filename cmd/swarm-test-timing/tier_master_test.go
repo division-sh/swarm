@@ -24,8 +24,8 @@ func TestCurrentPRTierRevalidationFailsClosed(t *testing.T) {
 		malformed, missing, pass bool
 	}{
 		{"full", "CI-Tier: full", "branch", false, false, true},
-		{"lower", "CI-Tier: core", "branch", false, false, true},
-		{"missing_tier_core_feedback", "", "branch", false, false, true},
+		{"lower_body_edit_requires_new_selection", "CI-Tier: core", "branch", false, false, false},
+		{"missing_tier_core_feedback", "", "branch", false, false, false},
 		{"wrong_head", "CI-Tier: full", "other", false, false, false},
 		{"absent_head", "CI-Tier: full", "", false, false, false},
 		{"malformed_api", "", "branch", true, false, false},
@@ -49,7 +49,7 @@ func TestCurrentPRTierRevalidationFailsClosed(t *testing.T) {
 		})
 	}
 	// Revalidation refuses thin scope; it cannot revoke an already-completed check.
-	if err := testplanning.CheckCurrentCITier(testplanning.ProfileCore, "CI-Tier: lifecycle"); err == nil {
+	if err := testplanning.CheckCurrentCISelection(testplanning.RunPlan{Profile: testplanning.ProfileCore}, "CI-Tier: lifecycle"); err == nil {
 		t.Fatal("old thin green accepted")
 	}
 }

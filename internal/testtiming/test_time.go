@@ -241,10 +241,7 @@ func EvaluateTestTime(reference TestTimeReference, policy testplanning.Policy, p
 			return result
 		}
 	}
-	for _, tier := range []string{testplanning.ProfileCore, testplanning.ProfileLifecycle, testplanning.ProfileFull} {
-		if testplanning.TierRank(tier) > testplanning.TierRank(plan.Profile) {
-			continue
-		}
+	for _, tier := range testTimeComparisonTiers(plan) {
 		row, problems := compareTimingTier(reference.Roots, roots, policy, tier)
 		result.Tiers = append(result.Tiers, row)
 		result.Problems = append(result.Problems, problems...)
@@ -253,6 +250,15 @@ func EvaluateTestTime(reference TestTimeReference, policy testplanning.Policy, p
 		result.Status = BudgetFail
 	}
 	return result
+}
+
+func testTimeComparisonTiers(plan testplanning.RunPlan) []string {
+	tiers := []string{testplanning.ProfileCore, testplanning.ProfileLifecycle, testplanning.ProfileFull}
+	selected := slices.Clone(tiers[:testplanning.TierRank(plan.Profile)])
+	if len(plan.ExtraUnits) != 0 && plan.Profile != testplanning.ProfileFull {
+		selected = append(selected, testplanning.ProfileFull)
+	}
+	return selected
 }
 
 func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, policy testplanning.Policy, tier string) (TestTimeTier, []string) {

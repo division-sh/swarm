@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -13,13 +14,15 @@ import (
 const RunPlanVersion = 2
 
 type BuildOptions struct {
-	Venue string
+	Venue      string
+	ExtraUnits []string
 }
 
 type RunPlan struct {
 	Version        int            `json:"version"`
 	PolicyVersion  int            `json:"policy_version"`
 	Profile        string         `json:"profile"`
+	ExtraUnits     []string       `json:"extra_units,omitempty"`
 	Venue          string         `json:"venue"`
 	Reason         string         `json:"reason"`
 	HeadSHA        string         `json:"head_sha"`
@@ -87,6 +90,14 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 	if !ok {
 		return RunPlan{}, fmt.Errorf("unknown profile %q", profile)
 	}
+	extraUnits, err := policy.selectExtraUnits(profile, option.ExtraUnits)
+	if err != nil {
+		return RunPlan{}, err
+	}
+	if len(extraUnits) != 0 && option.Venue != VenueCI {
+		return RunPlan{}, fmt.Errorf("CI-Units cannot select local execution")
+	}
+	unitIDs := append(slices.Clone(profilePolicy.Units), extraUnits...)
 	profileEnvironment, err := environmentForVenue(profilePolicy.EnvironmentID, profilePolicy.EnvironmentIDs, option.Venue)
 	if err != nil {
 		return RunPlan{}, fmt.Errorf("profile %s: %w", profile, err)
@@ -117,7 +128,7 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 				selected[pkg] = true
 			}
 		}
-		for _, id := range profilePolicy.Units {
+		for _, id := range unitIDs {
 			for _, pkg := range policy.Units[id].Packages {
 				selected[pkg] = true
 			}
@@ -186,7 +197,6 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 		sort.Strings(shards[i].Packages)
 	}
 	units := append([]ProofUnit(nil), shards...)
-	unitIDs := append([]string(nil), profilePolicy.Units...)
 	for _, id := range unitIDs {
 		specialUnit := policy.Units[id]
 		unitEnvironment, err := environmentForVenue(specialUnit.EnvironmentID, specialUnit.EnvironmentIDs, option.Venue)
@@ -227,6 +237,7 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 		Version:        RunPlanVersion,
 		PolicyVersion:  policy.Version,
 		Profile:        profile,
+		ExtraUnits:     extraUnits,
 		Venue:          option.Venue,
 		Reason:         reason,
 		HeadSHA:        strings.TrimSpace(headSHA),
@@ -251,6 +262,9 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 }
 
 func (p RunPlan) Validate() error {
+	if err := p.validateExtraUnits(); err != nil {
+		return err
+	}
 	if err := p.validateBatches(); err != nil {
 		return err
 	}
