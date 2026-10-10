@@ -85,6 +85,9 @@ func ValidateSource(source semanticview.Source) []error {
 	if source == nil {
 		return nil
 	}
+	if err := semanticview.ValidateToolDeclarationNames(source); err != nil {
+		return []error{err}
+	}
 	tools := source.ToolEntries()
 	names := make([]string, 0, len(tools))
 	for name := range tools {
@@ -120,6 +123,9 @@ func HasEffectiveConnectors(source semanticview.Source) bool {
 func CapabilitySubjects(ctx context.Context, source semanticview.Source, opts CapabilityOptions) ([]packs.Subject, error) {
 	if source == nil {
 		return nil, nil
+	}
+	if err := semanticview.ValidateToolDeclarationNames(source); err != nil {
+		return nil, err
 	}
 	if opts.Registry == nil {
 		return nil, fmt.Errorf("provider connector pack registry is required")
@@ -171,6 +177,9 @@ func isProviderRegistration(tool runtimecontracts.ToolSchemaEntry) bool {
 }
 
 func validateRegistrationTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error {
+	if err := tool.ValidateDeclarationName(toolID); err != nil {
+		return []error{err}
+	}
 	context := fmt.Sprintf("provider registration tool %q", strings.TrimSpace(toolID))
 	var errs []error
 	if _, _, ok := splitToolID(toolID); !ok {
@@ -206,6 +215,9 @@ func validateRegistrationTool(toolID string, tool runtimecontracts.ToolSchemaEnt
 }
 
 func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error {
+	if err := tool.ValidateDeclarationName(toolID); err != nil {
+		return []error{err}
+	}
 	context := fmt.Sprintf("provider connector tool %q", strings.TrimSpace(toolID))
 	var errs []error
 	provider, action, ok := splitToolID(toolID)

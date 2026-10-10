@@ -116,6 +116,9 @@ func mergeAgentContracts(bundle *WorkflowContractBundle, entries map[string]Agen
 	return nil
 }
 func mergeToolContracts(bundle *WorkflowContractBundle, entries map[string]ToolSchemaEntry, source ContractItemSource) error {
+	if err := ValidateToolDeclarationNames(entries); err != nil {
+		return err
+	}
 	for id, entry := range entries {
 		key := strings.TrimSpace(id)
 		if key == "" {

@@ -31,6 +31,9 @@ func projectToolDeclarationsValue(root yamlsource.Value) (map[string]ToolSchemaE
 		if err != nil {
 			return nil, fmt.Errorf("tool %q: %w", declaration.Name, err)
 		}
+		if err := entry.ValidateDeclarationName(declaration.Name); err != nil {
+			return nil, nodeValueError(declaration.Value, err)
+		}
 		entry.admissionProvenance = map[string]EffectiveValueProvenance{"declaration": authoredSourceProvenance(declaration.Value)}
 		if err := collectNodeValueProvenance(declaration.Value, "", entry.admissionProvenance, nil); err != nil {
 			return nil, err

@@ -1631,6 +1631,9 @@ func validateAcceptedTriggerDescriptor(trigger TriggerPackDescriptor) error {
 }
 
 func validateAcceptedConnectorDescriptor(connector ConnectorPackDescriptor) error {
+	if err := runtimecontracts.ValidateToolDeclarationNames(connector.Tools); err != nil {
+		return fmt.Errorf("accepted connector %q: %w", connector.Identity.ID(), err)
+	}
 	for toolName, tool := range connector.Tools {
 		if err := tool.InputSchema().ValidateDefinition(); err != nil {
 			return fmt.Errorf("accepted connector %q tool %q input schema: %w", connector.Identity.ID(), toolName, err)

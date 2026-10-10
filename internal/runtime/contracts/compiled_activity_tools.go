@@ -17,6 +17,9 @@ func CompileActivityToolBindings(bundle *WorkflowContractBundle, toolsByFlow map
 		if _, exists := bundle.exactFlowEventDeclarationView(flow); !exists {
 			return nil, fmt.Errorf("activity tools have unknown flow owner %q", flow)
 		}
+		if err := ValidateToolDeclarationNames(tools); err != nil {
+			return nil, fmt.Errorf("activity tools in flow %q: %w", flow, err)
+		}
 		for name, tool := range tools {
 			if err := tool.Validate(); err != nil {
 				return nil, fmt.Errorf("activity tool %q in flow %q: %w", name, flow, err)

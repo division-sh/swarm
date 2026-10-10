@@ -277,6 +277,9 @@ func mergeExecutionTool(entries map[string]ExecutionTool, name string, execution
 }
 
 func executionToolsForRuntime(source semanticview.Source, discovered map[string]runtimemcp.DiscoveredTool) (map[string]ExecutionTool, error) {
+	if err := semanticview.ValidateToolDeclarationNames(source); err != nil {
+		return nil, err
+	}
 	authoredErrors := append(ValidateRetiredDynamicAgentToolReferences(source), ValidateHITLIdentityLifecycleReferences(source)...)
 	if len(authoredErrors) > 0 {
 		return nil, errors.Join(authoredErrors...)
