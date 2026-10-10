@@ -29,6 +29,7 @@ func TestRunLifecycleOwnershipBoundaryGuard(t *testing.T) {
 	}
 	allowedCandidateColumns := map[string]bool{
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go": true,
+		"internal/store/internal/backend/runlifecycle/selected_completion.go":      true,
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_state.go":      true,
 		"internal/testutil/runlifecyclefixture/fixture.go":                         true,
 	}

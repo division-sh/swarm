@@ -25,7 +25,11 @@ func TestRunForkRevisionProjectionContributorCensusIsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := revisionProjectionContributors(string(body))
+	replyBody, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend/runforkrevision/reply_context_projection.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := revisionProjectionContributors(string(body), string(replyBody))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +46,7 @@ func revisionProjectionContributorCensus() map[string][]string {
 	return map[string][]string{
 		"FamilyEvents":                  {"events"},
 		"FamilyEntityMutations":         {"entity_mutations"},
-		"FamilyEntityMetadata":          {"entity_state", "flow_instances"},
+		"FamilyEntityMetadata":          {"entity_state", "flow_instances", "workflow_instance_initial_materializations"},
 		"FamilyEventDeliveries":         {"event_deliveries", "event_delivery_attempts", "event_delivery_handler_rule_selections"},
 		"FamilyCommittedReplayScopes":   {"committed_replay_scopes"},
 		"FamilyEventReceipts":           {"event_receipts", "events"},
@@ -56,7 +60,10 @@ func revisionProjectionContributorCensus() map[string][]string {
 	}
 }
 
-func revisionProjectionContributors(source string) (map[string][]string, error) {
+func revisionProjectionContributors(source string, replyHelperSource ...string) (map[string][]string, error) {
+	if len(replyHelperSource) > 1 {
+		return nil, fmt.Errorf("reply projection requires exactly its canonical helper source")
+	}
 	functions, err := revisionGuardFunctions(source)
 	if err != nil {
 		return nil, err
@@ -65,8 +72,8 @@ func revisionProjectionContributors(source string) (map[string][]string, error) 
 	if fn == nil {
 		return nil, fmt.Errorf("canonicalProjectionSpec missing")
 	}
-	from := regexp.MustCompile(`(?i)\b(?:FROM|JOIN)\s+([a-z_][a-z_0-9]*)`)
 	result := map[string][]string{}
+	var contributorErr error
 	ast.Inspect(fn.Body, func(node ast.Node) bool {
 		clause, ok := node.(*ast.CaseClause)
 		if !ok || len(clause.List) != 1 {
@@ -76,34 +83,95 @@ func revisionProjectionContributors(source string) (map[string][]string, error) 
 		if !ok || !strings.HasPrefix(family.Name, "Family") {
 			return true
 		}
-		tables := map[string]struct{}{}
-		ast.Inspect(clause, func(node ast.Node) bool {
-			if field, ok := node.(*ast.KeyValueExpr); ok && revisionGuardNode(field.Key) == "source" {
-				if literal, ok := field.Value.(*ast.BasicLit); ok && literal.Kind == token.STRING {
-					if sql, err := strconv.Unquote(literal.Value); err == nil {
-						for _, match := range from.FindAllStringSubmatch("FROM "+sql, -1) {
-							tables[strings.ToLower(match[1])] = struct{}{}
-						}
+		var contributor ast.Node = clause
+		if family.Name == "FamilyReplyContexts" {
+			if len(clause.Body) != 1 || revisionGuardNode(clause.Body[0]) != "spec = replyContextProjectionSpec()" {
+				contributorErr = fmt.Errorf("FamilyReplyContexts requires its exact canonical replyContextProjectionSpec call")
+				return false
+			}
+			if len(replyHelperSource) != 1 {
+				contributorErr = fmt.Errorf("replyContextProjectionSpec source missing")
+				return false
+			}
+			helpers, err := revisionGuardFunctions(replyHelperSource[0])
+			if err != nil {
+				contributorErr = err
+				return false
+			}
+			helper := helpers["replyContextProjectionSpec"]
+			if helper == nil {
+				contributorErr = fmt.Errorf("replyContextProjectionSpec missing from canonical helper source")
+				return false
+			}
+			contributor = helper.Body
+		}
+		result[family.Name] = revisionProjectionTables(contributor)
+		return false
+	})
+	return result, contributorErr
+}
+
+func revisionProjectionTables(contributor ast.Node) []string {
+	from := regexp.MustCompile(`(?i)\b(?:FROM|JOIN)\s+([a-z_][a-z_0-9]*)`)
+	tables := map[string]struct{}{}
+	ast.Inspect(contributor, func(node ast.Node) bool {
+		if field, ok := node.(*ast.KeyValueExpr); ok && revisionGuardNode(field.Key) == "source" {
+			if literal, ok := field.Value.(*ast.BasicLit); ok && literal.Kind == token.STRING {
+				if sql, err := strconv.Unquote(literal.Value); err == nil {
+					for _, match := range from.FindAllStringSubmatch("FROM "+sql, -1) {
+						tables[strings.ToLower(match[1])] = struct{}{}
 					}
 				}
 			}
-			literal, ok := node.(*ast.BasicLit)
-			if !ok || literal.Kind != token.STRING {
-				return true
-			}
-			sql, unquoteErr := strconv.Unquote(literal.Value)
-			if unquoteErr != nil {
-				return true
-			}
-			for _, match := range from.FindAllStringSubmatch(sql, -1) {
-				tables[strings.ToLower(match[1])] = struct{}{}
-			}
+		}
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
 			return true
-		})
-		result[family.Name] = sortedStringKeys(tables)
-		return false
+		}
+		sql, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			return true
+		}
+		for _, match := range from.FindAllStringSubmatch(sql, -1) {
+			tables[strings.ToLower(match[1])] = struct{}{}
+		}
+		return true
 	})
-	return result, nil
+	return sortedStringKeys(tables)
+}
+
+func TestRunForkRevisionReplyProjectionHelperGuardHostileControls(t *testing.T) {
+	projection := `package p; func canonicalProjectionSpec() { switch family { case FamilyReplyContexts: spec = replyContextProjectionSpec() } }`
+	helper := `package p; func replyContextProjectionSpec() projectionSpec {
+		const query = "SELECT r.id FROM reply_contexts r"
+		return projectionSpec{query: query, source: "reply_contexts r"}
+	}`
+	want := map[string][]string{"FamilyReplyContexts": {"reply_contexts"}}
+	for _, tc := range []struct {
+		name, projection string
+		helpers          []string
+		wantRefusal      bool
+	}{
+		{"exact_named_leaf", projection, []string{helper}, false},
+		{"missing_source", projection, nil, true},
+		{"missing_helper", projection, []string{"package p"}, true},
+		{"renamed_helper", projection, []string{strings.ReplaceAll(helper, "replyContextProjectionSpec", "otherProjectionSpec")}, true},
+		{"changed_call", strings.ReplaceAll(projection, "replyContextProjectionSpec", "otherProjectionSpec"), []string{helper}, true},
+		{"inline_is_not_named_owner", strings.ReplaceAll(projection, "replyContextProjectionSpec()", `projectionSpec{source: "reply_contexts r"}`), []string{helper}, true},
+		{"omitted_table", projection, []string{strings.ReplaceAll(helper, "reply_contexts", "other_table")}, true},
+		{"new_join_in_leaf", projection, []string{strings.Replace(helper, "FROM reply_contexts r", "FROM reply_contexts r JOIN unclassified_dependency d ON d.id=r.id", 1)}, true},
+		{"uncalled_function_is_not_evidence", projection, []string{`package p; func replyContextProjectionSpec() projectionSpec { return projectionSpec{} }; func unrelated() { _ = "SELECT * FROM reply_contexts" }`}, true},
+		{"other_function_is_not_expanded", projection, []string{`package p; func replyContextProjectionSpec() projectionSpec { return unrelated() }; func unrelated() projectionSpec { return projectionSpec{source: "reply_contexts r"} }`}, true},
+		{"duplicate_helper_source", projection, []string{helper, helper}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := revisionProjectionContributors(tc.projection, tc.helpers...)
+			refused := err != nil || !reflect.DeepEqual(got, want)
+			if refused != tc.wantRefusal {
+				t.Fatalf("reply helper guard got=%v err=%v wantRefusal=%t", got, err, tc.wantRefusal)
+			}
+		})
+	}
 }
 
 func validateRevisionPhysicalContributors(families map[string][]string, physical map[string]struct{}) error {
@@ -680,6 +748,22 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 			t.Fatal("joined selection contributor omitted without guard refusal")
 		}
 	})
+	for _, table := range []string{"reply_contexts", "workflow_instance_initial_materializations"} {
+		t.Run("omitted_canonical_table/"+table, func(t *testing.T) {
+			// Isolate this omission from unrelated drift in the live census.
+			families := revisionProjectionContributorCensus()
+			physical := map[string]struct{}{}
+			for _, tables := range families {
+				for _, contributor := range tables {
+					physical[contributor] = struct{}{}
+				}
+			}
+			delete(physical, table)
+			if err := validateRevisionPhysicalContributors(families, physical); err == nil || !strings.Contains(err.Error(), table) {
+				t.Fatalf("omitted canonical contributor %s was not refused: %v", table, err)
+			}
+		})
+	}
 	t.Run("new_join", func(t *testing.T) {
 		source := "package p; func canonicalProjectionSpec() { switch family { case FamilyDeadLetters: query := `SELECT * FROM dead_letters d JOIN unclassified_dependency x ON x.id=d.id`; _ = query } }"
 		got, err := revisionProjectionContributors(source)
