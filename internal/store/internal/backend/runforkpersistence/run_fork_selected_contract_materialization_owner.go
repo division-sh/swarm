@@ -98,7 +98,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 	if port.requireCurrent == nil || port.runMutation == nil || port.lockSourceStatus == nil || port.plan == nil ||
 		port.deliveries == nil || port.loadSource == nil || port.activeForkSource == nil || port.admitProfile == nil || port.loadSnapshot == nil ||
 		port.requireProfile == nil || port.durableData == nil || port.insertRun == nil || port.ensureProfile == nil ||
-		port.materializeEntity == nil || port.materializeBarriers == nil || port.workflowTimers == nil || port.now == nil {
+		port.materializeEntity == nil || port.materializeBarriers == nil || port.workflowTimers == nil || port.arrivalSchedules == nil || port.now == nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("selected-contract fork materialization operations are incomplete")
 	}
 	if err := port.requireCurrent(); err != nil {

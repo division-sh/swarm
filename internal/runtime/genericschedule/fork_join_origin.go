@@ -72,3 +72,44 @@ func validateForkJoinOrigin(a Activation) error {
 	}
 	return nil
 }
+
+// ValidateForkJoinReplay preserves the materialized cause while permitting the
+// canonical child lifecycle to progress. It does not authorize that progress.
+func (a Activation) ValidateForkJoinReplay(expected Activation) error {
+	if err := a.Validate(); err != nil {
+		return err
+	}
+	if err := expected.Validate(); err != nil {
+		return err
+	}
+	a, expected = a.Canonical(), expected.Canonical()
+	if expected.ForkJoinOrigin == nil || expected.CurrentEventID != "" ||
+		expected.Status != StatusActive && expected.Status != StatusCancelled {
+		return fmt.Errorf("fork join replay requires an unprogressed inherited projection")
+	}
+	if a.Status == StatusParked || a.Status == StatusFired && a.CurrentEventID == "" {
+		return fmt.Errorf("fork join progress requires a one-shot lifecycle and exact accepted occurrence")
+	}
+	for _, at := range []time.Time{a.CurrentEventAdmittedAt, a.CancelledAt, a.FiredAt, a.AcceptedAt, a.FailedAt} {
+		if !at.IsZero() && at.Before(a.AdmittedAt) {
+			return fmt.Errorf("fork join lifecycle progress precedes child admission")
+		}
+	}
+	if !a.CurrentEventAdmittedAt.IsZero() && a.CurrentEventAdmittedAt.Before(a.CurrentDueAt) {
+		return fmt.Errorf("fork join occurrence precedes its retained due coordinate")
+	}
+	want, err := expected.EvidenceDigest()
+	if err != nil {
+		return err
+	}
+	if expected.Status == StatusActive {
+		a.CurrentEventID, a.CurrentEventAdmittedAt = expected.CurrentEventID, expected.CurrentEventAdmittedAt
+		a.Status, a.CancelCause, a.CancelledAt = expected.Status, expected.CancelCause, expected.CancelledAt
+		a.FiredAt, a.AcceptedAt, a.FailedAt, a.Failure = expected.FiredAt, expected.AcceptedAt, expected.FailedAt, expected.Failure
+	}
+	got, err := a.EvidenceDigest()
+	if err != nil || got != want {
+		return fmt.Errorf("fork join replay changes its immutable child cause or retained disposition")
+	}
+	return nil
+}
