@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -35,6 +36,7 @@ func CompileMockResponsePlan(source semanticview.Source) (*MockResponsePlan, err
 	}
 
 	responses := make(map[string]any, len(toolIDs))
+	responders := make([]string, 0, len(toolIDs))
 	for _, toolID := range toolIDs {
 		tool := tools[toolID]
 		if errs := validateTool(toolID, tool); len(errs) > 0 {
@@ -43,6 +45,11 @@ func CompileMockResponsePlan(source semanticview.Source) (*MockResponsePlan, err
 				parts = append(parts, err.Error())
 			}
 			return nil, fmt.Errorf("compile mock connector response for tool %q: %s", toolID, strings.Join(parts, "; "))
+		}
+		// Native intent requires its owned session/effect implementation. A
+		// schema-generated HTTP fixture is never native provider authority.
+		if tool.Handler() == runtimecontracts.ToolHandlerInProcess {
+			continue
 		}
 		projected, err := tool.OutputSchema().Project()
 		if err != nil {
@@ -55,13 +62,17 @@ func CompileMockResponsePlan(source semanticview.Source) (*MockResponsePlan, err
 			return nil, fmt.Errorf("compile mock connector response for tool %q: output_schema: %w", toolID, err)
 		}
 		responses[toolID] = value
+		responders = append(responders, toolID)
+	}
+	if len(responses) == 0 {
+		return nil, nil
 	}
 
 	plan, err := NewMockResponsePlan(responses)
 	if err != nil {
 		return nil, fmt.Errorf("compile mock connector response plan: %w", err)
 	}
-	for _, toolID := range toolIDs {
+	for _, toolID := range responders {
 		if _, err := plan.Admit(toolID, tools[toolID]); err != nil {
 			return nil, fmt.Errorf("compile mock connector response for tool %q: generated value failed canonical output_schema validation: %w", toolID, err)
 		}
