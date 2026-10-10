@@ -841,7 +841,16 @@ units:
   serveapp-selected-rest:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^TestSelected(Fork($|[^R].*)|Reset.*|Recovery.*|Owner.*)$'
+    run: '^Test(Selected(Fork($|[^R].*)|Reset.*|Recovery.*|Owner.*)|Issue642.*)$'
+    required_children:
+      TestIssue642OrdinaryTimerForkContinuationBothStores: [sqlite, postgres]
+      TestIssue642ArmedTimerKeepsDueAcrossSelectedDelayChangeBothStores: [sqlite/1ms, sqlite/1h, postgres/1ms, postgres/1h]
+      TestIssue642OrdinaryTimerStagedActivationBothStores: [sqlite, postgres]
+      TestIssue642RecurringTimerForkPreservesDueArmAndCadenceBothStores: [sqlite, postgres]
+      TestIssue642RemovedArmedTimerCancelsWithoutPhantomFireBothStores: [sqlite/non_final, sqlite/selected_final, postgres/non_final, postgres/selected_final]
+      TestIssue642NewlyArmedTimerUsesSelectedDelayAndEffectBothStores: [sqlite/25ms, sqlite/1500ms, postgres/25ms, postgres/1500ms]
+      TestIssue642StagedTimerCorruptionRefusesBeforeActivationBothStores: [sqlite/missing, sqlite/progressed, sqlite/foreign_origin, postgres/missing, postgres/progressed, postgres/foreign_origin]
+      TestIssue642SustainedRecurringTimerForkExecutesTwoEffectsBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full
