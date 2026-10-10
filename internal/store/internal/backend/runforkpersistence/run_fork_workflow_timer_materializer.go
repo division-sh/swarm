@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/google/uuid"
 )
 
 type runForkWorkflowTimerSelectionOwner interface {
@@ -25,6 +27,86 @@ type runForkWorkflowTimerMaterializationOwner interface {
 type runForkWorkflowTimerProjection struct {
 	activation pipeline.WorkflowTimerActivation
 	removed    bool
+}
+
+// Require-only readback is also used on reuse/recovery. It cannot create a
+// missing timer or settle an unrelated dependent obligation.
+func requireMaterializedRunForkWorkflowTimers(
+	ctx context.Context,
+	attempt *mutationprotocol.Attempt,
+	plan runfork.RunForkPlan,
+	forkRunID string,
+	selection runForkWorkflowTimerSelectionOwner,
+	owner runForkWorkflowTimerMaterializationOwner,
+	bornAt time.Time,
+	admission runfork.RunForkReplayResumeAdmission,
+) (runfork.RunForkReplayResumeAdmission, error) {
+	materializable, err := runForkWorkflowTimerHistoryMaterializable(plan)
+	if err != nil {
+		return admission, err
+	}
+	if !materializable {
+		return admission, fmt.Errorf("workflow timer readback requires complete exact source inventory admission")
+	}
+	if err := requireRunForkWorkflowTimerReadbackFrame(ctx, attempt, plan, forkRunID, bornAt); err != nil {
+		return admission, err
+	}
+	if owner == nil {
+		return admission, fmt.Errorf("workflow timer readback requires its canonical timer owner")
+	}
+	inventory, err := runForkWorkflowTimerRecordInventory(plan.SourceRunID, plan.WorkflowTimers)
+	if err != nil {
+		return admission, err
+	}
+	inventory.Complete, inventory.Point = true, plan.ForkPoint
+	pending, err := inventory.pendingCertificate()
+	if err != nil {
+		return admission, err
+	}
+	projected, err := prepareRunForkWorkflowTimers(plan, forkRunID, selection, bornAt)
+	if err != nil {
+		return admission, err
+	}
+	if len(projected) != len(inventory.ActiveTimerIDs) {
+		return admission, fmt.Errorf("workflow timer readback does not cover the complete active source inventory")
+	}
+	for _, timer := range projected {
+		if err := owner.RequireRunForkWorkflowTimerTx(ctx, attempt, timer.activation, timer.removed); err != nil {
+			return admission, fmt.Errorf("read back fork workflow timer %s: %w", timer.activation.SourceTimerID, err)
+		}
+	}
+	if err := attempt.RequireExistingSQLFrame(ctx); err != nil {
+		return admission, err
+	}
+	applied, err := runForkWorkflowTimerAppliedCertificate(pending, forkRunID, bornAt, projected)
+	if err != nil {
+		return admission, err
+	}
+	return dischargeMaterializedRunForkWorkflowTimerAdmission(admission, pending, applied, len(projected))
+}
+
+func requireRunForkWorkflowTimerReadbackFrame(ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan, forkRunID string, bornAt time.Time) error {
+	if attempt == nil {
+		return fmt.Errorf("workflow timer readback requires its native attempt")
+	}
+	if err := attempt.RequireExistingSQLFrame(ctx); err != nil {
+		return err
+	}
+	source, sourceErr := uuid.Parse(plan.SourceRunID)
+	child, childErr := uuid.Parse(forkRunID)
+	if sourceErr != nil || childErr != nil || source == uuid.Nil || child == uuid.Nil || source == child ||
+		source.String() != plan.SourceRunID || child.String() != forkRunID || correlation.RunIDFromContext(ctx) != forkRunID {
+		return fmt.Errorf("workflow timer readback requires the exact distinct source and child run context")
+	}
+	if bornAt.IsZero() || bornAt != bornAt.UTC().Truncate(time.Microsecond) {
+		return fmt.Errorf("workflow timer readback requires canonical recorded child birth")
+	}
+	for _, record := range plan.WorkflowTimers {
+		if bornAt.Before(record.CreatedAt) {
+			return fmt.Errorf("workflow timer readback child birth precedes its source record")
+		}
+	}
+	return nil
 }
 
 // The plan is already fixed-cut admitted. This adapter never reads source rows,

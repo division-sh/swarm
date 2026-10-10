@@ -54,12 +54,17 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) runfork.Run
 	if evidence.RelevantTimer {
 		blocker := runForkReplayResumeBlocker(runfork.RunForkBlockerTimerHistoryUnproven)
 		blockers = appendRunForkBlocker(blockers, blocker)
-		dispositions = append(dispositions, runfork.RunForkReplayResumeDisposition{
+		disposition := runfork.RunForkReplayResumeDisposition{
 			Fact:        runfork.RunForkReplayResumeFactTimerHistory,
 			Disposition: runfork.RunForkReplayResumeDispositionFailClosedBlocker,
 			BlockerCode: blocker.Code,
 			Message:     blocker.Message,
-		})
+		}
+		if certificate, err := evidence.TimerHistory.pendingCertificate(); err == nil {
+			disposition.Owner, disposition.Classification = runForkWorkflowTimerInventoryOwner, certificate
+			disposition.Message = "complete exact ordinary workflow timer history awaits selected child materialization and native readback; source projection is not execution authority"
+		}
+		dispositions = append(dispositions, disposition)
 		hasHistoricalReplayRequirement = true
 	}
 	if strings.TrimSpace(evidence.RouteHistory.State) == runfork.RunForkRouteHistoryUnknownUnversioned {
@@ -172,6 +177,50 @@ func dischargeMaterializedRunForkReplyAdmission(admission runfork.RunForkReplayR
 	admission.BoundedReplaySupported = admission.DeliveryEventReplayReady
 	admission.StateOnlyExecutionReady = len(blockers) == 0 && !admission.ReplayResumeFactsPresent
 	return admission, nil
+}
+
+// Called only after require-only native readback covers every projected active
+// source row. Terminal source facts are certified but never rearmed.
+func dischargeMaterializedRunForkWorkflowTimerAdmission(admission runfork.RunForkReplayResumeAdmission, pending, applied string, projectedCount int) (runfork.RunForkReplayResumeAdmission, error) {
+	if admission.Owner != runfork.RunForkReplayResumeAdmissionOwner ||
+		!strings.HasPrefix(pending, runForkWorkflowTimerPendingPrefix) ||
+		!strings.HasPrefix(applied, runForkWorkflowTimerAppliedPrefix) || projectedCount < 0 {
+		return admission, fmt.Errorf("workflow timer discharge requires its exact inventory and readback certificates")
+	}
+	dispositions := append([]runfork.RunForkReplayResumeDisposition(nil), admission.Dispositions...)
+	facts := 0
+	for i, disposition := range dispositions {
+		if disposition.Fact != runfork.RunForkReplayResumeFactTimerHistory {
+			continue
+		}
+		facts++
+		if disposition.Owner != runForkWorkflowTimerInventoryOwner || disposition.Classification != pending ||
+			disposition.Disposition != runfork.RunForkReplayResumeDispositionFailClosedBlocker || disposition.BlockerCode != runfork.RunForkBlockerTimerHistoryUnproven {
+			return admission, fmt.Errorf("workflow timer discharge does not match exact source inventory admission")
+		}
+		dispositions[i].Owner, dispositions[i].Classification = runForkWorkflowTimerReadbackOwner, applied
+		dispositions[i].BlockerCode = ""
+		dispositions[i].Disposition = runfork.RunForkReplayResumeDispositionReconstruct
+		dispositions[i].Message = "complete exact ordinary workflow timer inventory has selected child projection and native readback; original due, arm and typed source lineage are retained"
+		if projectedCount == 0 {
+			dispositions[i].Disposition = runfork.RunForkReplayResumeDispositionNoHistoricalAction
+			dispositions[i].Message = "complete exact terminal ordinary workflow timer inventory requires no child rearm; its fixed-cut history has been certified"
+		}
+	}
+	blockers := make([]runfork.RunForkUnsupportedBlocker, 0, len(admission.UnsupportedBlockers))
+	timerBlockers := 0
+	for _, blocker := range admission.UnsupportedBlockers {
+		if blocker.Code == runfork.RunForkBlockerTimerHistoryUnproven {
+			timerBlockers++
+		} else {
+			blockers = append(blockers, blocker)
+		}
+	}
+	if facts != 1 || timerBlockers != 1 {
+		return admission, fmt.Errorf("workflow timer discharge requires exactly one inventory disposition and blocker")
+	}
+	admission.Dispositions, admission.UnsupportedBlockers = dispositions, blockers
+	return runfork.RecalculateReplayResumeAdmission(admission), nil
 }
 
 // runfork.RunForkReplayResumeAdmissionWithSelectedRouteResolution discharges only the
