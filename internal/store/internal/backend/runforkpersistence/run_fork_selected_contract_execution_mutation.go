@@ -159,6 +159,9 @@ type selectedContractWorkflowState struct {
 }
 
 func selectedContractAdmittedWorkflowStates(plan runfork.RunForkPlan, forkRunID string, admission runforkreadiness.Admission) ([]selectedContractWorkflowState, error) {
+	if _, err := prepareRunForkArrivalJoinSchedules(plan, forkRunID); err != nil {
+		return nil, err
+	}
 	projection, err := admission.Projection()
 	if err != nil {
 		return nil, err
