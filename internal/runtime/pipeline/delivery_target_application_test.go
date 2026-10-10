@@ -435,15 +435,9 @@ func VerifyDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycl
 			var err error
 			switch testCase.name {
 			case "wrong-descriptor":
-				restore, faultErr := fixture.ForeignDeclaration(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instancePath))
-				if faultErr != nil {
-					t.Fatal(faultErr)
+				if err := fixture.ForeignDeclaration(ctx, testRunScopedWorkflowInstanceFromContext(ctx, instancePath)); err != nil {
+					t.Fatal(err)
 				}
-				t.Cleanup(func() {
-					if err := restore(context.WithoutCancel(ctx)); err != nil {
-						t.Error(err)
-					}
-				})
 			case "lifecycle-only":
 				changed, err = fixture.MissingFields(ctx, testPipelineRunID, entityID)
 			case "terminated-status":

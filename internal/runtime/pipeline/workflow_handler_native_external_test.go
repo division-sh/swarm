@@ -115,8 +115,8 @@ func workflowHandlerNativeFixtureFromSelected(t *testing.T, source semanticview.
 		ConflictingEntityType: func(ctx context.Context, run, entity string) (int64, error) {
 			return storetest.SetWorkflowProjectionConflictingEntityType(ctx, selected, run, entity)
 		},
-		ForeignDeclaration: func(ctx context.Context, owner flowidentity.RunScopedFlowInstance) (func(context.Context) error, error) {
-			return storetest.SetWorkflowProjectionForeignDeclaration(ctx, selected, owner)
+		ForeignDeclaration: func(ctx context.Context, owner flowidentity.RunScopedFlowInstance) error {
+			return storetest.SetWorkflowProjectionForeignDeclaration(t, ctx, selected, owner)
 		},
 		MissingHeader: func(ctx context.Context, run, path string) (int64, error) {
 			return storetest.RemoveWorkflowProjectionHeader(ctx, selected, run, path)

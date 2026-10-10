@@ -40,7 +40,7 @@ type WorkflowHandlerNativeFixtureForTest struct {
 	PublishedEvent        func(context.Context, string) (events.Event, error)
 	PhysicalCounts        func(context.Context) (WorkflowEnginePhysicalCountsForTest, error)
 	ConflictingEntityType func(context.Context, string, string) (int64, error)
-	ForeignDeclaration    func(context.Context, flowidentity.RunScopedFlowInstance) (func(context.Context) error, error)
+	ForeignDeclaration    func(context.Context, flowidentity.RunScopedFlowInstance) error
 	MissingHeader         func(context.Context, string, string) (int64, error)
 	MissingFields         func(context.Context, string, string) (int64, error)
 	Draining              func(context.Context, string, string) (int64, error)
