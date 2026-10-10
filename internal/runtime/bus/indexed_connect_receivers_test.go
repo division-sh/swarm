@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -50,15 +51,48 @@ func TestReplyOriginLookupPreservesPreparedConstructionAndIndependentFailures(t 
 	resolver := connectRoutePlanResolver{source: source, lifecycle: connectInstanceSelector{index: constructionIndexTestReader{err: storeFailure}}}
 	previewCtx := withConnectRoutePlanPreview(ctx)
 	previewCtx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes).plans = plans
-	instance, found, err := resolver.replyOriginWorkflowInstance(previewCtx, request)
+	instance, found, err := resolver.indexedReceiverWorkflowInstance(previewCtx, request)
 	if err != nil || !found || instance.StorageRef != child.InstancePath || instance.EntityID != plans[1].Instance.EntityID {
 		t.Fatalf("prepared reply origin became native absence/read authority: %+v found=%t err=%v", instance, found, err)
 	}
 	for _, failure := range []error{context.Canceled, storeFailure, errors.Join(context.Canceled, storeFailure)} {
 		resolver.lifecycle.index = constructionIndexTestReader{err: failure}
-		if _, found, err := resolver.replyOriginWorkflowInstance(ctx, request); found || !errors.Is(err, failure) {
+		if _, found, err := resolver.indexedReceiverWorkflowInstance(ctx, request); found || !errors.Is(err, failure) {
 			t.Fatalf("reply read failure became a stale origin: found=%t err=%v want=%v", found, err, failure)
 		}
+		explicit := eventtest.ExistingRunRootIngress(eventtest.UUID("explicit-receiver"), "work.requested", "test", "", []byte(`{}`), 0, event.RunID(),
+			events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: child.TemplateID, FlowInstance: child.InstancePath, EntityID: child.EntityID}), event.CreatedAt())
+		if terminal, err := resolver.explicitReceiverTerminated(ctx, explicit); terminal || !errors.Is(err, failure) {
+			t.Fatalf("explicit receiver failure became a terminal diagnostic: terminal=%t err=%v want=%v", terminal, err, failure)
+		}
+	}
+}
+
+func TestTerminalTargetDiagnosticPreservesCreateAndReplyAdmission(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		source func(t *testing.T) []pinrouting.ConnectRoutePlan
+		want   bool
+	}{
+		{"empty", func(*testing.T) []pinrouting.ConnectRoutePlan { return nil }, false},
+		{"ordinary", func(t *testing.T) []pinrouting.ConnectRoutePlan {
+			plans, _ := compiledConnectPlans(connectRoutePlanRootProducerSingletonSource(t))
+			return plans
+		}, true},
+		{"create", func(t *testing.T) []pinrouting.ConnectRoutePlan {
+			plans, _ := compiledConnectPlans(connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteCreate, false))
+			return plans
+		}, false},
+		{"reply", func(t *testing.T) []pinrouting.ConnectRoutePlan {
+			plans, _ := compiledConnectPlans(loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyRootReplyBoundary(t, true, true)))
+			return plans
+		}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := terminalDiagnosticPlans(test.source(t)); got != test.want {
+				t.Fatalf("terminal diagnostic eligibility=%t want=%t", got, test.want)
+			}
+		})
 	}
 }
 
