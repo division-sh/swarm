@@ -275,13 +275,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			if err != nil {
 				return err
 			}
-			replayAdmission, err = requireMaterializedRunForkWorkflowTimers(runtimecorrelation.WithRunID(txctx, forkRunID), attempt, plan,
-				forkRunID, req.Readiness, port.workflowTimers, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), replayAdmission)
+			replayAdmission, err = requireMaterializedRunForkTimerHistory(runtimecorrelation.WithRunID(txctx, forkRunID), attempt, plan,
+				forkRunID, req.Readiness, port.workflowTimers, port.arrivalSchedules, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), replayAdmission)
 			if err != nil {
-				return err
-			}
-			if err := requireMaterializedRunForkArrivalJoinSchedules(runtimecorrelation.WithRunID(txctx, forkRunID), attempt, plan,
-				forkRunID, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), port.arrivalSchedules); err != nil {
 				return err
 			}
 			existing.DataPins = pins
@@ -370,10 +366,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err := materializeRunForkArrivalJoinSchedules(forkCtx, attempt, plan, forkRunID, now, port.arrivalSchedules); err != nil {
 			return err
 		}
-		if err := requireMaterializedRunForkArrivalJoinSchedules(forkCtx, attempt, plan, forkRunID, now, port.arrivalSchedules); err != nil {
-			return err
-		}
-		replayAdmission, err = requireMaterializedRunForkWorkflowTimers(forkCtx, attempt, plan, forkRunID, req.Readiness, port.workflowTimers, now, replayAdmission)
+		replayAdmission, err = requireMaterializedRunForkTimerHistory(forkCtx, attempt, plan, forkRunID, req.Readiness, port.workflowTimers, port.arrivalSchedules, now, replayAdmission)
 		if err != nil {
 			return err
 		}
@@ -434,7 +427,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 // A complete source inventory permits only materialization. Native child
 // readback, not this prospective filter, removes its execution blocker.
 func runForkSelectedMaterializationBlockers(plan runfork.RunForkPlan, admission runfork.RunForkReplayResumeAdmission) ([]runfork.RunForkUnsupportedBlocker, error) {
-	eligible, err := runForkWorkflowTimerHistoryMaterializable(plan)
+	eligible, err := runForkTimerHistoryMaterializable(plan)
 	if err != nil {
 		return nil, err
 	}

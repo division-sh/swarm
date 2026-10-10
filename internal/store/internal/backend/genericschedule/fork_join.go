@@ -28,7 +28,7 @@ type ForkJoinRequest struct {
 }
 
 func (r ForkJoinRequest) Validate() error {
-	if err := r.Source.Validate(); err != nil {
+	if err := r.Source.ValidateForkJoinRestorationSource(); err != nil {
 		return err
 	}
 	if err := r.Child.Validate(); err != nil {
@@ -45,9 +45,6 @@ func (r ForkJoinRequest) Validate() error {
 	}
 	if r.Source.Command.RunID == r.Child.RunID || r.BornAt.IsZero() || r.BornAt != canonicalTime(r.BornAt) || r.BornAt.Before(r.Source.AdmittedAt) {
 		return fmt.Errorf("fork join requires distinct runs and canonical child birth after source admission")
-	}
-	if r.Source.CurrentEventID != "" || r.Source.Status != runtimegenericschedule.StatusActive && r.Source.Status != runtimegenericschedule.StatusCancelled {
-		return fmt.Errorf("published or otherwise terminal join requires historical occurrence continuation, not schedule restoration")
 	}
 	if r.Source.Status == runtimegenericschedule.StatusCancelled && r.BornAt.Before(r.Source.CancelledAt) {
 		return fmt.Errorf("fork join child birth precedes retained cancellation")

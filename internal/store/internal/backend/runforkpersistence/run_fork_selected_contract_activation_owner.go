@@ -139,13 +139,9 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		if err != nil {
 			return err
 		}
-		result.ReplayResumeAdmission, err = requireMaterializedRunForkWorkflowTimers(runtimecorrelation.WithRunID(txctx, lineage.ForkRunID), attempt,
-			plan, lineage.ForkRunID, req.InheritedWorkflowTimers, port.workflowTimers, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), result.ReplayResumeAdmission)
+		result.ReplayResumeAdmission, err = requireMaterializedRunForkTimerHistory(runtimecorrelation.WithRunID(txctx, lineage.ForkRunID), attempt,
+			plan, lineage.ForkRunID, req.InheritedWorkflowTimers, port.workflowTimers, port.arrivalSchedules, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), result.ReplayResumeAdmission)
 		if err != nil {
-			return err
-		}
-		if err := requireMaterializedRunForkArrivalJoinSchedules(runtimecorrelation.WithRunID(txctx, lineage.ForkRunID), attempt,
-			plan, lineage.ForkRunID, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), port.arrivalSchedules); err != nil {
 			return err
 		}
 		if blockers := runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, result.ReplayResumeAdmission, req.AllowedSourceEventIDs); len(blockers) > 0 {

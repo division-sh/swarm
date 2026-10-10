@@ -7,16 +7,18 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
 const (
-	runForkWorkflowTimerInventoryOwner = "store.run_fork.workflow_timer_inventory"
-	runForkWorkflowTimerReadbackOwner  = "store.run_fork.workflow_timer_materialization"
-	runForkWorkflowTimerPendingPrefix  = "ordinary_workflow_timer_pending_readback:"
-	runForkWorkflowTimerAppliedPrefix  = "ordinary_workflow_timer_native_readback:"
+	runForkTimerInventoryOwner = "store.run_fork.timer_history_inventory"
+	runForkTimerReadbackOwner  = "store.run_fork.timer_history_materialization"
+	runForkTimerPendingPrefix  = "timer_history_pending_readback:"
+	runForkTimerAppliedPrefix  = "timer_history_native_readback:"
 )
 
 type runForkTimerHistoryInventory struct {
@@ -25,11 +27,12 @@ type runForkTimerHistoryInventory struct {
 	Point              runfork.RunForkPoint
 	WorkflowTimerIDs   []string
 	ActiveTimerIDs     []string
+	ArrivalScheduleIDs []string
 	UnresolvedTimerIDs []string
 	RecordDigest       string
 }
 
-func runForkWorkflowTimerRecordInventory(sourceRunID string, records []pipeline.WorkflowTimerActivationPersistenceRecord) (runForkTimerHistoryInventory, error) {
+func runForkTimerRecordInventory(sourceRunID string, records []pipeline.WorkflowTimerActivationPersistenceRecord, arrivals []genericschedule.Activation) (runForkTimerHistoryInventory, error) {
 	canonical := make([]pipeline.WorkflowTimerActivationPersistenceRecord, 0, len(records))
 	seen := make(map[string]struct{}, len(records))
 	inventory := runForkTimerHistoryInventory{SourceRunID: sourceRunID}
@@ -57,7 +60,17 @@ func runForkWorkflowTimerRecordInventory(sourceRunID string, records []pipeline.
 	sort.Strings(inventory.WorkflowTimerIDs)
 	sort.Strings(inventory.ActiveTimerIDs)
 	sort.Slice(canonical, func(i, j int) bool { return canonical[i].ActivationID < canonical[j].ActivationID })
-	digest, err := canonicaljson.Hash(canonical)
+	arrivalEvidence, err := runForkArrivalScheduleEvidence(sourceRunID, arrivals, seen)
+	if err != nil {
+		return runForkTimerHistoryInventory{}, err
+	}
+	for _, row := range arrivalEvidence {
+		inventory.ArrivalScheduleIDs = append(inventory.ArrivalScheduleIDs, row.ID)
+	}
+	digest, err := canonicaljson.Hash(struct {
+		Workflow []pipeline.WorkflowTimerActivationPersistenceRecord
+		Arrival  []runForkArrivalScheduleRecord
+	}{canonical, arrivalEvidence})
 	if err != nil {
 		return runForkTimerHistoryInventory{}, err
 	}
@@ -65,16 +78,42 @@ func runForkWorkflowTimerRecordInventory(sourceRunID string, records []pipeline.
 	return inventory, nil
 }
 
+type runForkArrivalScheduleRecord struct{ ID, Evidence string }
+
+func runForkArrivalScheduleEvidence(sourceRunID string, arrivals []genericschedule.Activation, seen map[string]struct{}) ([]runForkArrivalScheduleRecord, error) {
+	rows := make([]runForkArrivalScheduleRecord, 0, len(arrivals))
+	for _, schedule := range arrivals {
+		if err := schedule.Validate(); err != nil {
+			return nil, err
+		}
+		_, ref, valid := timeridentity.ParseJoinHandle(schedule.Command.Payload.Interface().(map[string]any))
+		if !valid || ref.Mode() != timeridentity.JoinRefModeArrival || schedule.Command.RunID != sourceRunID {
+			return nil, fmt.Errorf("timer history contains a foreign or non-arrival schedule")
+		}
+		if _, duplicate := seen[schedule.ID]; duplicate {
+			return nil, fmt.Errorf("timer history repeats activation %s", schedule.ID)
+		}
+		seen[schedule.ID] = struct{}{}
+		digest, err := schedule.EvidenceDigest()
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, runForkArrivalScheduleRecord{schedule.ID, digest})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+	return rows, nil
+}
+
 func (i runForkTimerHistoryInventory) pendingCertificate() (string, error) {
 	source, err := uuid.Parse(i.SourceRunID)
 	if !i.Complete || err != nil || source == uuid.Nil || source.String() != i.SourceRunID ||
-		len(i.WorkflowTimerIDs) == 0 || len(i.UnresolvedTimerIDs) != 0 || i.RecordDigest == "" {
-		return "", fmt.Errorf("timer history lacks complete exact ordinary workflow inventory")
+		len(i.WorkflowTimerIDs)+len(i.ArrivalScheduleIDs) == 0 || len(i.UnresolvedTimerIDs) != 0 || i.RecordDigest == "" {
+		return "", fmt.Errorf("timer history lacks complete exact workflow and arrival inventory")
 	}
 	if err := i.Point.Validate(); err != nil {
 		return "", err
 	}
-	if !slices.IsSorted(i.WorkflowTimerIDs) || !slices.IsSorted(i.ActiveTimerIDs) {
+	if !slices.IsSorted(i.WorkflowTimerIDs) || !slices.IsSorted(i.ActiveTimerIDs) || !slices.IsSorted(i.ArrivalScheduleIDs) {
 		return "", fmt.Errorf("timer history inventory is not canonical")
 	}
 	ids := make(map[string]struct{}, len(i.WorkflowTimerIDs))
@@ -94,6 +133,12 @@ func (i runForkTimerHistoryInventory) pendingCertificate() (string, error) {
 		}
 		active[id] = struct{}{}
 	}
+	for _, id := range i.ArrivalScheduleIDs {
+		if _, duplicate := ids[id]; duplicate || id == "" {
+			return "", fmt.Errorf("timer history repeats or omits an arrival identity")
+		}
+		ids[id] = struct{}{}
+	}
 	digest, err := canonicaljson.Hash(struct {
 		SourceRunID string
 		Point       runfork.RunForkPoint
@@ -102,19 +147,20 @@ func (i runForkTimerHistoryInventory) pendingCertificate() (string, error) {
 		Terminal    int
 		IDs         []string
 		ActiveIDs   []string
+		ArrivalIDs  []string
 		Records     string
 	}{i.SourceRunID, i.Point, len(i.WorkflowTimerIDs), len(i.ActiveTimerIDs), len(i.WorkflowTimerIDs) - len(i.ActiveTimerIDs),
-		i.WorkflowTimerIDs, i.ActiveTimerIDs, i.RecordDigest})
+		i.WorkflowTimerIDs, i.ActiveTimerIDs, i.ArrivalScheduleIDs, i.RecordDigest})
 	if err != nil {
 		return "", err
 	}
-	return runForkWorkflowTimerPendingPrefix + digest, nil
+	return runForkTimerPendingPrefix + digest, nil
 }
 
 // This permits postponing only the timer blocker during materialization. It
 // never discharges source admission or grants execution authority.
-func runForkWorkflowTimerHistoryMaterializable(plan runfork.RunForkPlan) (bool, error) {
-	inventory, err := runForkWorkflowTimerRecordInventory(plan.SourceRunID, plan.WorkflowTimers)
+func runForkTimerHistoryMaterializable(plan runfork.RunForkPlan) (bool, error) {
+	inventory, err := runForkTimerRecordInventory(plan.SourceRunID, plan.WorkflowTimers, plan.JoinSchedules)
 	if err != nil {
 		return false, err
 	}
@@ -122,6 +168,11 @@ func runForkWorkflowTimerHistoryMaterializable(plan runfork.RunForkPlan) (bool, 
 	certificate, err := inventory.pendingCertificate()
 	if err != nil {
 		return false, nil
+	}
+	for _, schedule := range plan.JoinSchedules {
+		if err := schedule.ValidateForkJoinRestorationSource(); err != nil {
+			return false, nil
+		}
 	}
 	admission := plan.ReplayResumeAdmission
 	if admission.Owner != runfork.RunForkReplayResumeAdmissionOwner {
@@ -133,7 +184,7 @@ func runForkWorkflowTimerHistoryMaterializable(plan runfork.RunForkPlan) (bool, 
 			continue
 		}
 		facts++
-		if disposition.Owner != runForkWorkflowTimerInventoryOwner || disposition.Classification != certificate ||
+		if disposition.Owner != runForkTimerInventoryOwner || disposition.Classification != certificate ||
 			disposition.Disposition != runfork.RunForkReplayResumeDispositionFailClosedBlocker || disposition.BlockerCode != runfork.RunForkBlockerTimerHistoryUnproven {
 			return false, nil
 		}
@@ -146,7 +197,7 @@ func runForkWorkflowTimerHistoryMaterializable(plan runfork.RunForkPlan) (bool, 
 	return facts == 1 && blockers == 1, nil
 }
 
-func runForkWorkflowTimerAppliedCertificate(pending, forkRunID string, bornAt time.Time, projected []runForkWorkflowTimerProjection) (string, error) {
+func runForkTimerAppliedCertificate(pending, forkRunID string, bornAt time.Time, projected []runForkWorkflowTimerProjection, arrival []genericschedule.Activation) (string, error) {
 	type projection struct {
 		Record  pipeline.WorkflowTimerActivationPersistenceRecord
 		Removed bool
@@ -160,6 +211,14 @@ func runForkWorkflowTimerAppliedCertificate(pending, forkRunID string, bornAt ti
 		}
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].Record.ActivationID < records[j].Record.ActivationID })
+	seen := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		seen[record.Record.ActivationID] = struct{}{}
+	}
+	arrivals, err := runForkArrivalScheduleEvidence(forkRunID, arrival, seen)
+	if err != nil {
+		return "", err
+	}
 	digest, err := canonicaljson.Hash(struct {
 		Inventory     string
 		ChildRunID    string
@@ -167,9 +226,10 @@ func runForkWorkflowTimerAppliedCertificate(pending, forkRunID string, bornAt ti
 		ReadbackCount int
 		RemovedCount  int
 		Projections   []projection
-	}{pending, forkRunID, bornAt, len(records), removed, records})
+		Arrival       []runForkArrivalScheduleRecord
+	}{pending, forkRunID, bornAt, len(records) + len(arrivals), removed, records, arrivals})
 	if err != nil {
 		return "", err
 	}
-	return runForkWorkflowTimerAppliedPrefix + digest, nil
+	return runForkTimerAppliedPrefix + digest, nil
 }

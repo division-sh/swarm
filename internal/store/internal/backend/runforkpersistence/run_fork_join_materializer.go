@@ -61,38 +61,46 @@ func materializeRunForkArrivalJoinSchedules(ctx context.Context, attempt *mutati
 	return nil
 }
 
-func requireMaterializedRunForkArrivalJoinSchedules(ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan, childRunID string, bornAt time.Time, owner runForkArrivalJoinMaterializationOwner) error {
-	return requireRunForkArrivalJoinInventory(ctx, attempt, plan, childRunID, bornAt, owner, runForkArrivalScheduleAtCut)
-}
-
-func requireContinuingRunForkArrivalJoinSchedules(ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan, childRunID string, bornAt time.Time, owner runForkArrivalJoinMaterializationOwner) error {
-	return requireRunForkArrivalJoinInventory(ctx, attempt, plan, childRunID, bornAt, owner, runForkArrivalScheduleContinuing)
-}
-
 // Complete readback creates no work and does not discharge source admission or
 // grant execution. Ordinary child schedules are not inherited inventory.
-func requireRunForkArrivalJoinInventory(ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan, childRunID string, bornAt time.Time, owner runForkArrivalJoinMaterializationOwner, phase runForkArrivalScheduleReadbackPhase) error {
+func readRunForkArrivalJoinInventory(ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan, childRunID string, bornAt time.Time, owner runForkArrivalJoinMaterializationOwner, phase runForkArrivalScheduleReadbackPhase) ([]genericschedule.Activation, error) {
 	if phase != runForkArrivalScheduleAtCut && phase != runForkArrivalScheduleContinuing {
-		return fmt.Errorf("arrival schedule readback requires an exact lifecycle phase")
+		return nil, fmt.Errorf("arrival schedule readback requires an exact lifecycle phase")
 	}
 	if err := requireRunForkWorkflowTimerReadbackFrame(ctx, attempt, plan, childRunID, bornAt); err != nil {
-		return err
+		return nil, err
 	}
 	requests, err := prepareRunForkArrivalJoinRequests(plan, childRunID, bornAt)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if owner == nil {
-		return fmt.Errorf("arrival join readback requires its canonical native schedule owner")
+		return nil, fmt.Errorf("arrival join readback requires its canonical native schedule owner")
 	}
 	actual, err := owner.ReadRunForkArrivalJoinScheduleInventoryTx(ctx, attempt, childRunID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := requireExactRunForkArrivalJoinInventory(requests, actual, phase); err != nil {
-		return err
+		return nil, err
 	}
-	return attempt.RequireExistingSQLFrame(ctx)
+	byKey, err := indexRunForkArrivalJoinInventory(actual)
+	if err != nil {
+		return nil, err
+	}
+	expected := make([]genericschedule.Activation, 0, len(requests))
+	for _, request := range requests {
+		scope, err := request.Child.ScopeKey()
+		if err != nil {
+			return nil, err
+		}
+		row, err := request.Expected(byKey[runForkArrivalScheduleKey{scope, request.Child.ScheduleKey}].ID)
+		if err != nil {
+			return nil, err
+		}
+		expected = append(expected, row)
+	}
+	return expected, attempt.RequireExistingSQLFrame(ctx)
 }
 
 func requireExactRunForkArrivalJoinInventory(requests []storegenericschedule.ForkJoinRequest, actual []genericschedule.Activation, phase runForkArrivalScheduleReadbackPhase) error {

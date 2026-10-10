@@ -20975,10 +20975,20 @@ run_model:
         not_applicable or unknown_unversioned without querying current routing_rules. Generic execution preserves
         flow_route_history_unproven. Selected execution may clear unknown_unversioned only through matching selected
         frontier/binding/static-dynamic topology/recipient proof and persisted route recovery, before materialization,
-        publish, or activation. Unknown, mixed, or incomplete timer history remains blocked. Ordinary workflow timer
-        continuation consumes the complete fixed-cut source inventory and the sealed selected-readiness projection,
-        never current source timer state. Materialization, staged activation and recovery read the complete inherited
-        child inventory through the canonical timer owner in their exact native mutation attempt. Before activation,
+        publish, or activation. Unknown or incomplete timer history remains blocked. Ordinary workflow timers and
+        retained arrival schedules share one complete fixed-cut source inventory, bound to the exact typed cut and
+        canonical records. The arrival rows must match their physical source rows and exact construction/arm relation;
+        they are not unknown history merely because they use the generic schedule family. Mixed admitted families
+        consume their distinct canonical native readers in one require-only source-history discharge. Neither an
+        ordinary subset nor an arrival subset clears the blocker alone; any missing, extra, foreign, corrupt or
+        unreadable family retains the input admission unchanged. The canonical source owner extracts the arrival
+        relation once and the planner consumes that same evidence, never current source timer state. Materialization,
+        reuse, staged activation and successor recovery consume the same complete discharge boundary in their exact
+        native mutation attempt. Continuing validation permits lawful child progress without changing the immutable
+        source/readback certificate. A source occurrence already published or otherwise outside lawful schedule
+        restoration retains its refusal until exact historical event/delivery continuation is admitted; it must not
+        be rearmed through ForkJoinRequest. This evidence correction does not remove declaration capability blockers
+        or replace activated current execution authority. Before activation,
         every retained arm has its original due coordinate and no child firing or cancellation. Recovery of an activated
         child accepts only lawful occurrence progress under immutable cause replay; pause alone does not prove an
         unactivated child. Successor timer admission replans using the permanent operation''s full resolved point,

@@ -7,6 +7,7 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
@@ -128,7 +129,11 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	if err := admitRunForkTerminalBarrierHistory(snapshot, fanOut, pending); err != nil {
 		return runForkAdmissionEvidence{}, err
 	}
-	timerHistory, err := loadRunForkTimerHistoryInventory(snapshot, facts, ownedSchedules)
+	arrivals, err := loadRunForkArrivalJoinSchedules(snapshot, entities)
+	if err != nil {
+		return runForkAdmissionEvidence{}, err
+	}
+	timerHistory, err := loadRunForkTimerHistoryInventory(snapshot, facts, ownedSchedules, arrivals)
 	if err != nil {
 		return runForkAdmissionEvidence{}, err
 	}
@@ -161,8 +166,9 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	}
 	return runForkAdmissionEvidence{
 		Pending:                 pending,
-		RelevantTimer:           len(timerHistory.WorkflowTimerIDs)+len(timerHistory.UnresolvedTimerIDs) != 0,
+		RelevantTimer:           len(timerHistory.WorkflowTimerIDs)+len(timerHistory.ArrivalScheduleIDs)+len(timerHistory.UnresolvedTimerIDs) != 0,
 		TimerHistory:            timerHistory,
+		JoinSchedules:           arrivals,
 		RouteHistory:            runfork.RunForkRouteHistoryProjection{State: routeState},
 		ActiveSession:           activeSession,
 		ActiveConversationAudit: len(snapshot.ConversationAudits) > 0,
@@ -171,11 +177,18 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	}, nil
 }
 
-func loadRunForkTimerHistoryInventory(snapshot *runForkRevisionSnapshot, facts runForkSourceFacts, ownedSchedules map[string]struct{}) (runForkTimerHistoryInventory, error) {
+func loadRunForkTimerHistoryInventory(snapshot *runForkRevisionSnapshot, facts runForkSourceFacts, ownedSchedules map[string]struct{}, arrivals []genericschedule.Activation) (runForkTimerHistoryInventory, error) {
 	entityIDs, flowInstances := stringSliceSet(facts.EntityIDs), stringSliceSet(facts.FlowInstances)
 	seen := make(map[string]struct{}, len(snapshot.Timers))
 	var records []pipeline.WorkflowTimerActivationPersistenceRecord
 	var unresolved []string
+	arrivalByID := make(map[string]genericschedule.Activation, len(arrivals))
+	for _, arrival := range arrivals {
+		if _, duplicate := arrivalByID[arrival.ID]; duplicate {
+			return runForkTimerHistoryInventory{}, fmt.Errorf("arrival inventory repeats source activation")
+		}
+		arrivalByID[arrival.ID] = arrival
+	}
 	for _, timer := range snapshot.Timers {
 		if _, owned := ownedSchedules[timer.TimerID]; owned {
 			continue
@@ -192,6 +205,13 @@ func loadRunForkTimerHistoryInventory(snapshot *runForkRevisionSnapshot, facts r
 			return runForkTimerHistoryInventory{}, fmt.Errorf("relevant timer history repeats row identity %s", timer.TimerID)
 		}
 		seen[timer.TimerID] = struct{}{}
+		if arrival, owned := arrivalByID[timer.TimerID]; owned {
+			if err := requireRunForkArrivalSourceRecord(timer, arrival); err != nil {
+				return runForkTimerHistoryInventory{}, err
+			}
+			delete(arrivalByID, timer.TimerID)
+			continue
+		}
 		if timer.TaskType != "workflow_timer" || timer.RunID != snapshot.RunID {
 			unresolved = append(unresolved, timer.TimerID)
 			continue
@@ -202,13 +222,32 @@ func loadRunForkTimerHistoryInventory(snapshot *runForkRevisionSnapshot, facts r
 		}
 		records = append(records, activation.PersistenceRecord())
 	}
-	inventory, err := runForkWorkflowTimerRecordInventory(snapshot.RunID, records)
+	if len(arrivalByID) != 0 {
+		return runForkTimerHistoryInventory{}, fmt.Errorf("arrival inventory omits its physical source row")
+	}
+	inventory, err := runForkTimerRecordInventory(snapshot.RunID, records, arrivals)
 	if err != nil {
 		return runForkTimerHistoryInventory{}, err
 	}
 	sort.Strings(unresolved)
 	inventory.Complete, inventory.UnresolvedTimerIDs = true, unresolved
 	return inventory, nil
+}
+
+func requireRunForkArrivalSourceRecord(timer runForkRevisionTimer, arrival genericschedule.Activation) error {
+	actual, err := projectRunForkGenericActivation(timer)
+	if err != nil {
+		return err
+	}
+	want, err := arrival.EvidenceDigest()
+	if err != nil {
+		return err
+	}
+	got, err := actual.EvidenceDigest()
+	if err != nil || got != want {
+		return fmt.Errorf("arrival inventory differs from its exact source row")
+	}
+	return nil
 }
 
 func loadRunForkSourceFactsFromRevision(snapshot *runForkRevisionSnapshot, entities []runfork.RunForkEntityState) runForkSourceFacts {
