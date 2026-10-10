@@ -36,21 +36,24 @@ type issue642JoinReaderScenario struct {
 	deadline       bool
 	noJoin         bool
 	missingTimeout bool
+	stageExit      bool
+	emptyList      bool
 }
 
 type issue642JoinReaderFixture struct {
-	ctx       context.Context
-	selected  gateRecoveryStoreCase
-	bus       *bus.EventBus
-	pc        *pipeline.PipelineCoordinator
-	owner     flowidentity.RunScopedFlowInstance
-	node      identity.ExecutableNode
-	probe     *lifecycleprobe.Probe
-	logger    *exactJoinRuntimeLogger
-	generic   genericschedule.Store
-	initial   joinruntime.Activation
-	timeout   *genericschedule.Activation
-	unrelated []genericschedule.Activation
+	ctx        context.Context
+	selected   gateRecoveryStoreCase
+	bus        *bus.EventBus
+	pc         *pipeline.PipelineCoordinator
+	owner      flowidentity.RunScopedFlowInstance
+	node       identity.ExecutableNode
+	probe      *lifecycleprobe.Probe
+	logger     *exactJoinRuntimeLogger
+	generic    genericschedule.Store
+	initial    joinruntime.Activation
+	completion *genericschedule.Activation
+	timeout    *genericschedule.Activation
+	unrelated  []genericschedule.Activation
 }
 
 // This proves native writer -> captured fixed cut -> public fork planner. The
@@ -68,11 +71,18 @@ func TestIssue642JoinWriterFixedCutReaderBothStores(t *testing.T) {
 				{name: "zero_with_deadline", deadline: true},
 				{name: "nonempty_completed", count: 1, deadline: true},
 				{name: "missing_timeout", count: 1, deadline: true, missingTimeout: true},
+				{name: "zero_stage_exit_without_deadline", stageExit: true},
+				{name: "zero_stage_exit_with_deadline", stageExit: true, deadline: true},
+				{name: "empty_list_stage_exit_without_deadline", stageExit: true, emptyList: true},
+				{name: "empty_list_stage_exit_with_deadline", stageExit: true, emptyList: true, deadline: true},
 			} {
 				t.Run(scenario.name, func(t *testing.T) {
 					f := issue642NewJoinReaderFixture(t, selected, scenario)
 					if scenario.count > 0 {
 						issue642CloseJoinReaderArm(t, f)
+					}
+					if scenario.stageExit {
+						issue642ExitEmptyJoinReaderArm(t, f)
 					}
 					issue642RequireJoinReaderCut(t, f, scenario)
 				})
@@ -89,6 +99,18 @@ func issue642NewJoinReaderFixture(t *testing.T, selected gateRecoveryStoreCase, 
 	if scenario.deadline {
 		files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "        output: payload.result\n", "        output: payload.result\n        deadline: {after: 1h, from: stage_entry}\n", 1)
 		files["nodes.yaml"] += "        on_deadline: {advances_to: ready}\n"
+	}
+	if scenario.emptyList {
+		files["entities.yaml"] += "  members_list: \"[text]\"\n"
+		files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "members: {count: 0, by: payload.member_id}", "members: {from: state.members_list, by: payload.member_id}", 1)
+	}
+	subscriptions := []events.EventType{"item.completed"}
+	if scenario.stageExit {
+		files["schema.yaml"] = strings.Replace(files["schema.yaml"], "  awaiting: {}\n", "  awaiting: {}\n  aborted: {}\n", 1)
+		files["schema.yaml"] += "    - manual.abort\n"
+		files["events.yaml"] += "manual.abort:\n"
+		files["nodes.yaml"] += "    manual.abort:\n      advances_to: aborted\n"
+		subscriptions = append(subscriptions, "manual.abort")
 	}
 	if scenario.noJoin {
 		files["nodes.yaml"] = "collector:\n  execution_type: system_node\n  event_handlers:\n    item.completed: {}\n"
@@ -121,17 +143,21 @@ func issue642NewJoinReaderFixture(t *testing.T, selected gateRecoveryStoreCase, 
 	schedules, _ := newExactJoinScheduleLifecycleForTest(t, ctx, selected, f.bus)
 	f.pc = newGateRecoveryCoordinator(f.bus, selected, pipeline.PipelineCoordinatorOptions{
 		Module: proposedEffectProofModule{source: source, nodes: []pipeline.WorkflowNode{
-			{Node: f.node, Subscriptions: []events.EventType{"item.completed"}, ExecutionType: contracts.SystemNodeExecutionType},
+			{Node: f.node, Subscriptions: subscriptions, ExecutionType: contracts.SystemNodeExecutionType},
 		}},
 		SourceArtifactFact: fact, WorkOwner: pipelineExternalTestWorkOwnerForSource(t, fact),
 		GenericSchedules: schedules, TestLifecycleProbe: f.probe,
 	})
 	f.bus.SetInterceptors(f.pc)
 	f.owner = flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute(".", runID, runID)}
+	fields := map[string]any{"final_expected": int64(0), "final_completed": int64(0), "final_results": []any{}, "final_reason": ""}
+	if scenario.emptyList {
+		fields["members_list"] = []any{}
+	}
 	initial, lifecycle, err := f.pc.PrepareInitialEntryLifecycle(ctx, f.owner, pipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: semanticview.RootExecutionFlowID(source), WorkflowVersion: source.WorkflowVersion(),
 		CurrentState: "awaiting", StageDefined: true, EntityType: "count_state", EnteredStageAt: at, CreatedAt: at,
-		Fields: map[string]any{"final_expected": int64(0), "final_completed": int64(0), "final_results": []any{}, "final_reason": ""},
+		Fields: fields,
 	}, at)
 	if err != nil {
 		t.Fatal(err)
@@ -141,8 +167,11 @@ func issue642NewJoinReaderFixture(t *testing.T, selected gateRecoveryStoreCase, 
 		if len(lifecycle.Schedules) != 1 || f.initial.Expected() != scenario.count {
 			t.Fatalf("canonical writer did not prepare its exact initial schedule/cardinality: schedules=%d arm=%+v", len(lifecycle.Schedules), f.initial)
 		}
-		if scenario.count == 0 && (!f.initial.ImmediateEmptyCompletion() || lifecycle.Schedules[0].Command.EventType != "platform.join_complete" || f.initial.DeadlineAt.IsZero() == scenario.deadline) {
+		if scenario.count == 0 && (!f.initial.EmptyCompletionWasArmed() || lifecycle.Schedules[0].Command.EventType != "platform.join_complete" || f.initial.DeadlineAt.IsZero() == scenario.deadline) {
 			t.Fatal("zero fixture did not follow the real immediate-completion writer branch")
+		}
+		if (f.initial.MemberCount == nil) != scenario.emptyList || len(f.initial.Members) != 0 {
+			t.Fatal("canonical writer changed explicit count/list membership evidence")
 		}
 	}
 	if scenario.missingTimeout {
@@ -163,6 +192,13 @@ func issue642NewJoinReaderFixture(t *testing.T, selected gateRecoveryStoreCase, 
 	}
 	if len(committed.Lifecycle.GenericScheduleActivations) != len(lifecycle.Schedules) {
 		t.Fatal("native constructor changed its prepared schedule census")
+	}
+	if !scenario.noJoin && scenario.count == 0 {
+		completion := committed.Lifecycle.GenericScheduleActivations[0]
+		if completion.Command.TaskID != f.initial.TimerTaskID() || completion.Command.EventType != "platform.join_complete" || !completion.InitialDueAt.Equal(f.initial.ArmedAt) {
+			t.Fatal("native constructor changed the exact immediate completion or invented a timeout")
+		}
+		f.completion = &completion
 	}
 	if scenario.count > 0 && !scenario.missingTimeout {
 		timeout := committed.Lifecycle.GenericScheduleActivations[0]
@@ -221,7 +257,7 @@ func issue642CloseJoinReaderArm(t *testing.T, f *issue642JoinReaderFixture) {
 	}
 	a2KnownTargetWaitForSettlement(t, f.ctx, f.bus, f.probe, event, f.node.Key(), "completed", "delivered", f.logger)
 	arm := exactJoinPersistedArmForOwner(t, issue642JoinReaderInstance(t, f), f.owner)
-	if arm.Status != joinruntime.StatusClosed || arm.CloseReason != joinruntime.CloseReasonComplete || arm.Expected() != 1 || arm.Completed() != 1 || !arm.OutcomePending || arm.OutcomeFired || arm.ImmediateEmptyCompletion() || !arm.JoinRef().Equal(f.initial.JoinRef()) || !arm.DeadlineAt.Equal(f.initial.DeadlineAt) {
+	if arm.Status != joinruntime.StatusClosed || arm.CloseReason != joinruntime.CloseReasonComplete || arm.Expected() != 1 || arm.Completed() != 1 || !arm.OutcomePending || arm.OutcomeFired || arm.EmptyCompletionWasArmed() || !arm.JoinRef().Equal(f.initial.JoinRef()) || !arm.DeadlineAt.Equal(f.initial.DeadlineAt) {
 		t.Fatalf("real arrival did not preserve its nonempty arm and pending continuation: %+v", arm)
 	}
 	if f.timeout != nil {
@@ -242,9 +278,60 @@ func issue642JoinReaderInstance(t *testing.T, f *issue642JoinReaderFixture) pipe
 	return instance
 }
 
+func issue642ExitEmptyJoinReaderArm(t *testing.T, f *issue642JoinReaderFixture) {
+	t.Helper()
+	beforeTimers := issue642JoinReaderTimerRows(t, f)
+	event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "manual.abort", "operator", "", []byte(`{}`), 0, f.owner.RunID,
+		events.EnvelopeForEntityID(events.EventEnvelope{}, f.owner.RunID), eventtest.RootRoutingSource(f.owner.RunID), time.Now().UTC())
+	if err := f.bus.PublishAcknowledged(f.ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	a2KnownTargetWaitForSettlement(t, f.ctx, f.bus, f.probe, event, f.node.Key(), "completed", "delivered", f.logger)
+	instance := issue642JoinReaderInstance(t, f)
+	arm := exactJoinPersistedArmForOwner(t, instance, f.owner)
+	if instance.CurrentState != "aborted" || len(instance.TransitionHistory) != 1 || instance.TransitionHistory[0].TriggerEventID != event.ID() ||
+		instance.TransitionHistory[0].From != "awaiting" || instance.TransitionHistory[0].To != "aborted" ||
+		arm.Status != joinruntime.StatusClosed || arm.CloseReason != joinruntime.CloseReasonStageExit || arm.OutcomePending || arm.OutcomeFired || !arm.TimerCancelled ||
+		arm.Expected() != 0 || arm.Completed() != 0 || !arm.JoinRef().Equal(f.initial.JoinRef()) || arm.TimerHandle() != f.initial.TimerHandle() ||
+		!arm.ArmedAt.Equal(f.initial.ArmedAt) || !arm.FireAt.Equal(f.initial.FireAt) || !arm.DeadlineAt.Equal(f.initial.DeadlineAt) ||
+		!reflect.DeepEqual(arm.MemberCount, f.initial.MemberCount) || !reflect.DeepEqual(arm.Members, f.initial.Members) {
+		t.Fatalf("actual stage-exit writer changed its empty completion admission evidence: instance=%+v arm=%+v", instance, arm)
+	}
+	if f.completion == nil {
+		t.Fatal("stage exit lacks its original native completion schedule")
+	}
+	completion, found, err := f.generic.LoadGenericScheduleActivation(f.ctx, f.completion.ID)
+	if err != nil || !found || completion.Status != genericschedule.StatusCancelled || completion.CancelCause != "join_stage_exit" ||
+		completion.ImmutableHash != f.completion.ImmutableHash || !completion.InitialDueAt.Equal(f.completion.InitialDueAt) ||
+		completion.CurrentEventID != "" || !completion.FiredAt.IsZero() || !completion.AcceptedAt.IsZero() {
+		t.Fatalf("stage exit did not retain its exact canceled, unpublished completion: found=%t schedule=%+v err=%v", found, completion, err)
+	}
+	if err := genericschedule.ValidateWorkflowJoinScheduleRelation(arm, completion); err != nil {
+		t.Fatal(err)
+	}
+	if after := issue642JoinReaderTimerRows(t, f); len(after.Rows) != len(beforeTimers.Rows) {
+		t.Fatal("stage exit created a timeout or replaced its original completion row")
+	}
+	f.completion = &completion
+}
+
+func issue642JoinReaderTimerRows(t *testing.T, f *issue642JoinReaderFixture) storetest.SelectedForkStorageTableSnapshot {
+	t.Helper()
+	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(f.ctx, f.selected.events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	timers, found := snapshot["timers"]
+	if !found {
+		t.Fatal("canonical native observation omitted the timers table")
+	}
+	return timers
+}
+
 func issue642RequireJoinReaderCut(t *testing.T, f *issue642JoinReaderFixture, scenario issue642JoinReaderScenario) {
 	t.Helper()
 	before := issue642JoinReaderInstance(t, f)
+	beforeTimers := issue642JoinReaderTimerRows(t, f)
 	marker := eventtest.ExistingRunRootIngress(uuid.NewString(), "reader.cut", "operator", "", []byte(`{}`), 0, f.owner.RunID, events.EventEnvelope{}, time.Now().UTC())
 	if err := f.bus.PublishAcknowledged(f.ctx, marker); err != nil {
 		t.Fatal(err)
@@ -273,6 +360,9 @@ func issue642RequireJoinReaderCut(t *testing.T, f *issue642JoinReaderFixture, sc
 	}
 	if !reflect.DeepEqual(before, issue642JoinReaderInstance(t, f)) {
 		t.Fatal("capture/planning changed the real receiver state")
+	}
+	if !reflect.DeepEqual(beforeTimers, issue642JoinReaderTimerRows(t, f)) {
+		t.Fatal("capture/planning changed native timers or created a timeout")
 	}
 	for _, expected := range f.unrelated {
 		actual, found, err := f.generic.LoadGenericScheduleActivation(f.ctx, expected.ID)
@@ -318,6 +408,9 @@ func issue642RequireCapturedJoinReaderState(t *testing.T, f *issue642JoinReaderF
 		}
 		if captured.Command.EventType == "platform.join_timeout" && (f.timeout == nil || captured.ID != f.timeout.ID || captured.Status != genericschedule.StatusCancelled) {
 			t.Fatal("reader substituted the original canceled timeout")
+		}
+		if scenario.stageExit && (f.completion == nil || !reflect.DeepEqual(captured.Canonical(), f.completion.Canonical()) || captured.Status != genericschedule.StatusCancelled || captured.CancelCause != "join_stage_exit") {
+			t.Fatal("reader lost the original canceled empty completion or invented a timeout")
 		}
 	}
 }

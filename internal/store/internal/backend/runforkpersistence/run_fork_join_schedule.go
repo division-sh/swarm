@@ -106,7 +106,7 @@ func runForkArrivalArmScheduleKeys(join joinruntime.Activation) ([]runForkJoinSc
 		return nil, err
 	}
 	keys := []runForkJoinScheduleKey{{scope, join.TimerTaskID()}}
-	if join.TimerHandle().Kind() == timeridentity.TimerHandleJoinComplete && !join.DeadlineAt.IsZero() && !join.ImmediateEmptyCompletion() {
+	if join.TimerHandle().Kind() == timeridentity.TimerHandleJoinComplete && !join.DeadlineAt.IsZero() && !join.EmptyCompletionWasArmed() {
 		handle, err := timeridentity.JoinTimeoutHandle(join.JoinRef())
 		if err != nil {
 			return nil, err
