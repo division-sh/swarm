@@ -79,3 +79,15 @@ func (s *ManagerDeliveryNativeFixture) activityTransitions(t *testing.T) []strin
 	t.Helper()
 	return s.Transitions(t)
 }
+
+func requireManagerNativeBlockedClaim(t *testing.T, native *ManagerDeliveryNativeFixture, event events.Event, agentID string) {
+	t.Helper()
+	deliveryID, err := runtimedelivery.DeliveryID(event.ID(), managerAgentDeliveryRouteForRun(event.RunID(), agentID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := native.Store.Snapshot(native.Context, deliveryID)
+	if err != nil || snapshot.DeliveryID != deliveryID || snapshot.EventID != event.ID() || snapshot.RunID != event.RunID() || snapshot.SubscriberID != agentID || snapshot.Authority != native.Authority || snapshot.Status != runtimedelivery.StatusInProgress || snapshot.ClaimVersion != 1 {
+		t.Fatalf("blocked work lacks its exact durable native claim: %+v,error=%v", snapshot, err)
+	}
+}
