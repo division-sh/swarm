@@ -16,6 +16,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 )
 
 const selectedCompletionRunID = "00000000-0000-4000-8000-000000000642"
@@ -23,16 +24,35 @@ const selectedCompletionOtherRunID = "00000000-0000-4000-8000-000000000643"
 const selectedCompletionBundle = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 type selectedCompletionAuthorityProbe struct {
-	calls int
-	err   error
-	got   runtimeeffects.Authority
-	tx    *sql.Tx
+	calls        int
+	err          error
+	got          runtimeeffects.Authority
+	tx           *sql.Tx
+	observations int
+	current      bool
+	observeErr   error
+	observed     runtimeeffects.Authority
+	query        sourceadmission.ExecutionQuery
+	priorQueries sqlmock.Sqlmock
+	priorErr     error
 }
 
 func (p *selectedCompletionAuthorityProbe) RequireCurrentExternalEffectAuthorityTx(_ context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
 	p.calls++
 	p.got, p.tx = authority, tx
+	if p.priorQueries != nil {
+		p.priorErr = p.priorQueries.ExpectationsWereMet()
+	}
 	return p.err
+}
+
+func (p *selectedCompletionAuthorityProbe) ObserveCurrentExternalEffectAuthority(_ context.Context, q sourceadmission.ExecutionQuery, authority runtimeeffects.Authority) (bool, error) {
+	p.observations++
+	p.observed, p.query = authority, q
+	if p.priorQueries != nil {
+		p.priorErr = p.priorQueries.ExpectationsWereMet()
+	}
+	return p.current, p.observeErr
 }
 
 func selectedCompletionTransaction(t *testing.T) (*sql.Tx, sqlmock.Sqlmock) {
@@ -119,33 +139,33 @@ func expectSelectedCompletionRunLock(mock sqlmock.Sqlmock, postgres bool, state 
 	mock.ExpectQuery(regexp.QuoteMeta(query)).WithArgs(selectedCompletionRunID).WillReturnRows(rows)
 }
 
-func executeSelectedCompletionTest(ctx context.Context, tx *sql.Tx, postgres bool, candidate runtimerunlifecycle.Candidate, owner completionAuthorityOwner, now time.Time) (runtimerunlifecycle.CompletionResult, error) {
+func executeSelectedCompletionTest(ctx context.Context, tx *sql.Tx, postgres bool, candidate runtimerunlifecycle.Candidate, owner runAuthorityOwner, now time.Time) (runtimerunlifecycle.CompletionResult, error) {
 	if postgres {
-		return (&RunLifecyclePostgresOwner{completionAuthority: owner}).executeCompletionCandidateTx(ctx, tx, nil, candidate, runtimerunlifecycle.FinalCatalog{})
+		return (&RunLifecyclePostgresOwner{runAuthority: owner}).executeCompletionCandidateTx(ctx, tx, nil, candidate, runtimerunlifecycle.FinalCatalog{})
 	}
-	return (&RunLifecycleSQLiteOwner{completionAuthority: owner, nowFn: func() time.Time { return now }}).
+	return (&RunLifecycleSQLiteOwner{runAuthority: owner, nowFn: func() time.Time { return now }}).
 		executeCompletionCandidateTx(ctx, tx, nil, candidate, runtimerunlifecycle.FinalCatalog{})
 }
 
 func TestSelectedCompletionBindAuthorityExactlyOnce(t *testing.T) {
 	probe := &selectedCompletionAuthorityProbe{}
 	postgres, sqlite := &RunLifecyclePostgresOwner{}, &RunLifecycleSQLiteOwner{}
-	if err := postgres.BindCompletionAuthority(nil); err == nil {
+	if err := postgres.BindExecutionAuthority(nil); err == nil {
 		t.Fatal("nil PostgreSQL completion authority accepted")
 	}
-	if err := sqlite.BindCompletionAuthority(nil); err == nil {
+	if err := sqlite.BindExecutionAuthority(nil); err == nil {
 		t.Fatal("nil SQLite completion authority accepted")
 	}
-	if err := postgres.BindCompletionAuthority(probe); err != nil {
+	if err := postgres.BindExecutionAuthority(probe); err != nil {
 		t.Fatal(err)
 	}
-	if err := sqlite.BindCompletionAuthority(probe); err != nil {
+	if err := sqlite.BindExecutionAuthority(probe); err != nil {
 		t.Fatal(err)
 	}
-	if postgres.BindCompletionAuthority(probe) == nil || sqlite.BindCompletionAuthority(probe) == nil {
+	if postgres.BindExecutionAuthority(probe) == nil || sqlite.BindExecutionAuthority(probe) == nil {
 		t.Fatal("completion authority replaced after binding")
 	}
-	if (*RunLifecyclePostgresOwner)(nil).BindCompletionAuthority(probe) == nil || (*RunLifecycleSQLiteOwner)(nil).BindCompletionAuthority(probe) == nil {
+	if (*RunLifecyclePostgresOwner)(nil).BindExecutionAuthority(probe) == nil || (*RunLifecycleSQLiteOwner)(nil).BindExecutionAuthority(probe) == nil {
 		t.Fatal("nil lifecycle owner accepted authority binding")
 	}
 }
@@ -208,7 +228,7 @@ func TestSelectedCompletionBindingReadCannotFallBackOnSQLFailure(t *testing.T) {
 			tx, mock := selectedCompletionTransaction(t)
 			failure := errors.New("selected bindings table unavailable")
 			mock.ExpectQuery(`FROM run_fork_selected_contract_bindings`).WithArgs(selectedCompletionRunID).WillReturnError(failure)
-			if mode, err := selectedCompletionRunTx(context.Background(), tx, postgres, selectedCompletionRunID); mode != "" || !errors.Is(err, failure) {
+			if mode, err := selectedRunBinding(context.Background(), tx, postgres, selectedCompletionRunID); mode != "" || !errors.Is(err, failure) {
 				t.Fatalf("membership error became ordinary completion: mode=%q err=%v", mode, err)
 			}
 		})
@@ -280,7 +300,7 @@ func TestSelectedCompletionExecutionRefusesBeforeAnyDueOrLifecycleMutation(t *te
 				ctx, authority := selectedCompletionContext(t)
 				selected, state, revision := true, "running", candidate.Revision
 				probe := &selectedCompletionAuthorityProbe{}
-				var owner completionAuthorityOwner = probe
+				var owner runAuthorityOwner = probe
 				switch scenario {
 				case "ordinary_for_selected":
 					candidate.SelectedForkRunID = ""

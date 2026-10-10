@@ -16,9 +16,14 @@ import (
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
+type genericScheduleCommitStore interface {
+	eventCommitTxStore
+	RequireRunExecutionTx(context.Context, *sql.Tx, string) error
+}
+
 func commitGenericScheduleOccurrence(
 	ctx context.Context,
-	store eventCommitTxStore,
+	store genericScheduleCommitStore,
 	postgres bool,
 	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (runtimegenericschedule.CommitResult, error)) mutationprotocol.Result[runtimegenericschedule.CommitResult],
 	candidateWriter mutationprotocol.CandidateWriter,
@@ -35,6 +40,9 @@ func commitGenericScheduleOccurrence(
 	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimegenericschedule.CommitResult, error) {
 		result := runtimegenericschedule.CommitResult{}
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := store.RequireRunExecutionTx(txctx, tx, command.Activation.Command.RunID); err != nil {
+				return err
+			}
 			acceptedAt, err := stampAcceptedAt(txctx, tx)
 			if err != nil {
 				return fmt.Errorf("stamp generic schedule occurrence acceptance: %w", err)

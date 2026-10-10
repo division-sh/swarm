@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 	"github.com/google/uuid"
 )
 
@@ -114,7 +115,16 @@ func RestoreForkJoinTx(ctx context.Context, attempt *mutationprotocol.Attempt, p
 	}
 	var child runtimegenericschedule.Activation
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		admitted, err := admitTx(ctx, tx, attempt, postgres, request.Child, func() time.Time { return request.BornAt })
+		var err error
+		if postgres {
+			_, err = sourceadmission.LoadPostgresTx(ctx, tx, request.Child.RunID, true, false)
+		} else {
+			_, err = sourceadmission.LoadSQLiteTx(ctx, tx, request.Child.RunID, true, false)
+		}
+		if err != nil {
+			return err
+		}
+		admitted, err := admitTx(ctx, tx, attempt, postgres, request.Child, func() time.Time { return request.BornAt }, nil)
 		if err != nil {
 			return err
 		}

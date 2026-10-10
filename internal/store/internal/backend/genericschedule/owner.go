@@ -22,7 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
-	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/google/uuid"
 )
@@ -105,6 +105,7 @@ func classifyPersistedScheduleFamily(eventType string, payloadRaw any) persisted
 type PostgresOwner struct {
 	backend     *postgresbackend.Backend
 	schemaGuard func() error
+	execution   RunExecutionOwner
 	nowMu       sync.RWMutex
 	nowFn       func() time.Time
 	claims      postgresClaims
@@ -113,6 +114,7 @@ type PostgresOwner struct {
 type SQLiteOwner struct {
 	backend     *sqlitebackend.Backend
 	schemaGuard func() error
+	execution   RunExecutionOwner
 	nowMu       sync.RWMutex
 	nowFn       func() time.Time
 }
@@ -123,24 +125,35 @@ type postgresClaims struct {
 	keys map[string]struct{}
 }
 
-func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error) (*PostgresOwner, error) {
+type RunExecutionOwner interface {
+	ObserveRunExecution(context.Context, sourceadmission.ExecutionQuery, string) (bool, error)
+	RequireRunExecutionTx(context.Context, *sql.Tx, string) error
+}
+
+func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, execution RunExecutionOwner) (*PostgresOwner, error) {
 	if backend == nil || !backend.Valid() {
 		return nil, errors.New("generic schedule postgres backend is required")
 	}
 	if schemaGuard == nil {
 		return nil, errors.New("generic schedule postgres schema guard is required")
 	}
-	return &PostgresOwner{backend: backend, schemaGuard: schemaGuard, nowFn: time.Now}, nil
+	if execution == nil {
+		return nil, errors.New("generic schedule postgres run execution owner is required")
+	}
+	return &PostgresOwner{backend: backend, schemaGuard: schemaGuard, execution: execution, nowFn: time.Now}, nil
 }
 
-func NewSQLite(backend *sqlitebackend.Backend, schemaGuard func() error) (*SQLiteOwner, error) {
+func NewSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, execution RunExecutionOwner) (*SQLiteOwner, error) {
 	if backend == nil || !backend.Valid() {
 		return nil, errors.New("generic schedule sqlite backend is required")
 	}
 	if schemaGuard == nil {
 		return nil, errors.New("generic schedule sqlite schema guard is required")
 	}
-	return &SQLiteOwner{backend: backend, schemaGuard: schemaGuard, nowFn: time.Now}, nil
+	if execution == nil {
+		return nil, errors.New("generic schedule sqlite run execution owner is required")
+	}
+	return &SQLiteOwner{backend: backend, schemaGuard: schemaGuard, execution: execution, nowFn: time.Now}, nil
 }
 
 func (o *PostgresOwner) SetNowFnForTest(nowFn func() time.Time) {
@@ -200,7 +213,7 @@ func (o *PostgresOwner) AdmitGenericScheduleOutcome(ctx context.Context, command
 		return runtimegenericschedule.AdmissionCommit{}, err
 	}
 	result := mutationprotocol.RunPostgres(ctx, o.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimegenericschedule.AdmissionResult, error) {
-		return AdmitTx(ctx, attempt, true, command, o.now)
+		return o.AdmitTx(ctx, attempt, command)
 	})
 	value, acknowledged := result.Value()
 	return runtimegenericschedule.AdmissionCommit{Result: value, Acknowledged: acknowledged}, result.Err()
@@ -211,40 +224,44 @@ func (o *SQLiteOwner) AdmitGenericScheduleOutcome(ctx context.Context, command r
 		return runtimegenericschedule.AdmissionCommit{}, err
 	}
 	result := mutationprotocol.RunSQLite(ctx, o.backend, "sqlite generic schedule admission", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimegenericschedule.AdmissionResult, error) {
-		return AdmitTx(ctx, attempt, false, command, o.now)
+		return o.AdmitTx(ctx, attempt, command)
 	})
 	value, acknowledged := result.Value()
 	return runtimegenericschedule.AdmissionCommit{Result: value, Acknowledged: acknowledged}, result.Err()
 }
 
 func (o *PostgresOwner) AdmitTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error) {
-	return AdmitTx(ctx, attempt, true, command, o.now)
+	return admitAttempt(ctx, attempt, true, command, o.now, o.execution)
 }
 
 func (o *SQLiteOwner) AdmitTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error) {
-	return AdmitTx(ctx, attempt, false, command, o.now)
+	return admitAttempt(ctx, attempt, false, command, o.now, o.execution)
 }
 
-// AdmitTx is the sole immutable generic activation admission implementation.
+// admitAttempt is the sole executable immutable activation admission boundary.
 // The due clock is called only after scoped-key lookup proves this is not replay.
-func AdmitTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, command runtimegenericschedule.AdmissionCommand, now func() time.Time) (runtimegenericschedule.AdmissionResult, error) {
+func admitAttempt(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, command runtimegenericschedule.AdmissionCommand, now func() time.Time, execution RunExecutionOwner) (runtimegenericschedule.AdmissionResult, error) {
 	command = command.Canonical()
 	if err := command.Validate(); err != nil {
 		return runtimegenericschedule.AdmissionResult{}, err
 	}
-	if attempt == nil || now == nil {
+	if attempt == nil || now == nil || execution == nil {
 		return runtimegenericschedule.AdmissionResult{}, errors.New("generic schedule admission requires mutation attempt and selected-store clock")
 	}
 	var result runtimegenericschedule.AdmissionResult
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		admissionErr := execution.RequireRunExecutionTx(ctx, tx, command.RunID)
+		if admissionErr != nil && !readbackOnlyAdmission(admissionErr) {
+			return admissionErr
+		}
 		var err error
-		result, err = admitTx(ctx, tx, attempt, postgres, command, now)
+		result, err = admitTx(ctx, tx, attempt, postgres, command, now, admissionErr)
 		return err
 	})
 	return result, err
 }
 
-func admitTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, postgres bool, command runtimegenericschedule.AdmissionCommand, now func() time.Time) (runtimegenericschedule.AdmissionResult, error) {
+func admitTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, postgres bool, command runtimegenericschedule.AdmissionCommand, now func() time.Time, admissionErr error) (runtimegenericschedule.AdmissionResult, error) {
 	scope, err := command.ScopeKey()
 	if err != nil {
 		return runtimegenericschedule.AdmissionResult{}, err
@@ -260,15 +277,8 @@ func admitTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt,
 	if found {
 		return exactReplay(scope, command.ScheduleKey, hash, persisted)
 	}
-	if command.RunID != "" {
-		if postgres {
-			err = storerunstate.RequirePostgresActiveTx(ctx, tx, command.RunID)
-		} else {
-			err = storerunstate.RequireSQLiteActiveTx(ctx, tx, command.RunID)
-		}
-		if err != nil {
-			return runtimegenericschedule.AdmissionResult{}, err
-		}
+	if admissionErr != nil {
+		return runtimegenericschedule.AdmissionResult{}, admissionErr
 	}
 	admittedAt := canonicalTime(now())
 	firstDue, err := command.Due.FirstDue(admittedAt)
@@ -348,7 +358,10 @@ func (o *PostgresOwner) listActive(ctx context.Context) ([]runtimegenericschedul
 	if err != nil {
 		return nil, err
 	}
-	return collectActiveGenericScheduleActivations(ctx, ids, o.LoadGenericScheduleActivation, o.failMalformed)
+	return collectActiveGenericScheduleActivations(ctx, ids, o.LoadGenericScheduleActivation, o.failMalformed,
+		func(ctx context.Context, id string) (bool, error) {
+			return observeActivationExecution(ctx, o.backend, o.execution, id)
+		})
 }
 
 func (o *SQLiteOwner) listActive(ctx context.Context) ([]runtimegenericschedule.Activation, error) {
@@ -356,7 +369,10 @@ func (o *SQLiteOwner) listActive(ctx context.Context) ([]runtimegenericschedule.
 	if err != nil {
 		return nil, err
 	}
-	return collectActiveGenericScheduleActivations(ctx, ids, o.LoadGenericScheduleActivation, o.failMalformed)
+	return collectActiveGenericScheduleActivations(ctx, ids, o.LoadGenericScheduleActivation, o.failMalformed,
+		func(ctx context.Context, id string) (bool, error) {
+			return observeActivationExecution(ctx, o.backend, o.execution, id)
+		})
 }
 
 func collectActiveGenericScheduleActivations(
@@ -364,9 +380,17 @@ func collectActiveGenericScheduleActivations(
 	ids []string,
 	load func(context.Context, string) (runtimegenericschedule.Activation, bool, error),
 	failMalformed func(context.Context, string, error) (bool, error),
+	observe func(context.Context, string) (bool, error),
 ) ([]runtimegenericschedule.Activation, error) {
 	result := make([]runtimegenericschedule.Activation, 0, len(ids))
 	for _, id := range ids {
+		eligible, err := observe(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if !eligible {
+			continue
+		}
 		activation, found, loadErr := load(ctx, id)
 		if malformed, ok := asMalformedActivation(loadErr); ok {
 			if dispositionForMalformedActivation(malformed) == malformedActivationReject {
@@ -393,7 +417,7 @@ func collectActiveGenericScheduleActivations(
 
 func (o *PostgresOwner) failMalformed(ctx context.Context, activationID string, malformed error) (bool, error) {
 	result := mutationprotocol.RunPostgres(ctx, o.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-		return struct{}{}, failMalformedAttempt(ctx, attempt, true, activationID, malformed, o.now())
+		return struct{}{}, failMalformedAttempt(ctx, attempt, true, activationID, malformed, o.now(), o.execution)
 	})
 	_, acknowledged := result.Value()
 	return acknowledged, result.Err()
@@ -401,16 +425,19 @@ func (o *PostgresOwner) failMalformed(ctx context.Context, activationID string, 
 
 func (o *SQLiteOwner) failMalformed(ctx context.Context, activationID string, malformed error) (bool, error) {
 	result := mutationprotocol.RunSQLite(ctx, o.backend, "sqlite malformed generic schedule terminalization", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-		return struct{}{}, failMalformedAttempt(ctx, attempt, false, activationID, malformed, o.now())
+		return struct{}{}, failMalformedAttempt(ctx, attempt, false, activationID, malformed, o.now(), o.execution)
 	})
 	_, acknowledged := result.Value()
 	return acknowledged, result.Err()
 }
 
-func failMalformedAttempt(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, activationID string, malformed error, at time.Time) error {
+func failMalformedAttempt(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, activationID string, malformed error, at time.Time, execution RunExecutionOwner) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		runID, err := timerRunIDTx(ctx, tx, activationID)
 		if err != nil {
+			return err
+		}
+		if err := execution.RequireRunExecutionTx(ctx, tx, runID); err != nil {
 			return err
 		}
 		storedTimerID, changed, err := failMalformedByIDTx(ctx, tx, postgres, activationID, malformed, at)
@@ -438,7 +465,7 @@ func (o *PostgresOwner) PrepareGenericScheduleOccurrence(ctx context.Context, wa
 		if err != nil {
 			return runtimegenericschedule.PreparedOccurrence{}, err
 		}
-		return PrepareOccurrenceTx(ctx, attempt, true, wakeup, admittedAt)
+		return o.PrepareOccurrenceTx(ctx, attempt, wakeup, admittedAt)
 	})
 	value, acknowledged := result.Value()
 	return runtimegenericschedule.PreparationCommit{Result: value, Acknowledged: acknowledged}, result.Err()
@@ -458,13 +485,21 @@ func (o *SQLiteOwner) PrepareGenericScheduleOccurrence(ctx context.Context, wake
 		if err != nil {
 			return runtimegenericschedule.PreparedOccurrence{}, err
 		}
-		return PrepareOccurrenceTx(ctx, attempt, false, wakeup, admittedAt)
+		return o.PrepareOccurrenceTx(ctx, attempt, wakeup, admittedAt)
 	})
 	value, acknowledged := result.Value()
 	return runtimegenericschedule.PreparationCommit{Result: value, Acknowledged: acknowledged}, result.Err()
 }
 
-func PrepareOccurrenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, wakeup runtimegenericschedule.Wakeup, admittedAt time.Time) (runtimegenericschedule.PreparedOccurrence, error) {
+func (o *PostgresOwner) PrepareOccurrenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, wakeup runtimegenericschedule.Wakeup, admittedAt time.Time) (runtimegenericschedule.PreparedOccurrence, error) {
+	return prepareOccurrenceAttempt(ctx, attempt, true, wakeup, admittedAt, o.execution)
+}
+
+func (o *SQLiteOwner) PrepareOccurrenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, wakeup runtimegenericschedule.Wakeup, admittedAt time.Time) (runtimegenericschedule.PreparedOccurrence, error) {
+	return prepareOccurrenceAttempt(ctx, attempt, false, wakeup, admittedAt, o.execution)
+}
+
+func prepareOccurrenceAttempt(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, wakeup runtimegenericschedule.Wakeup, admittedAt time.Time, execution RunExecutionOwner) (runtimegenericschedule.PreparedOccurrence, error) {
 	if err := wakeup.Validate(); err != nil {
 		return runtimegenericschedule.PreparedOccurrence{}, err
 	}
@@ -473,14 +508,18 @@ func PrepareOccurrenceTx(ctx context.Context, attempt *mutationprotocol.Attempt,
 	}
 	var result runtimegenericschedule.PreparedOccurrence
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		admissionErr := requireActivationExecutionTx(ctx, tx, execution, wakeup.ActivationID())
+		if admissionErr != nil && !ordinaryTerminalAdmission(admissionErr) {
+			return admissionErr
+		}
 		var err error
-		result, err = prepareOccurrenceTx(ctx, tx, attempt, postgres, wakeup, admittedAt)
+		result, err = prepareOccurrenceTx(ctx, tx, attempt, postgres, wakeup, admittedAt, admissionErr)
 		return err
 	})
 	return result, err
 }
 
-func prepareOccurrenceTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, postgres bool, wakeup runtimegenericschedule.Wakeup, admittedAt time.Time) (runtimegenericschedule.PreparedOccurrence, error) {
+func prepareOccurrenceTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, postgres bool, wakeup runtimegenericschedule.Wakeup, admittedAt time.Time, admissionErr error) (runtimegenericschedule.PreparedOccurrence, error) {
 	activation, found, err := loadByIDTx(ctx, tx, dialectFor(postgres), wakeup.ActivationID(), postgres)
 	if err != nil {
 		if malformed, ok := asMalformedActivation(err); ok {
@@ -514,11 +553,7 @@ func prepareOccurrenceTx(ctx context.Context, tx *sql.Tx, attempt *mutationproto
 		return runtimegenericschedule.PreparedOccurrence{Outcome: runtimegenericschedule.PrepareTerminal, Activation: activation}, nil
 	}
 	if activation.Command.RunID != "" {
-		if postgres {
-			err = storerunstate.RequirePostgresActiveTx(ctx, tx, activation.Command.RunID)
-		} else {
-			err = storerunstate.RequireSQLiteActiveTx(ctx, tx, activation.Command.RunID)
-		}
+		err = admissionErr
 		if errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {
 			activation, err = cancelLoadedTx(ctx, tx, dialectFor(postgres), activation, "run_terminalized", admittedAt)
 			if err != nil {
@@ -579,7 +614,7 @@ func (o *PostgresOwner) CancelGenericScheduleOutcome(ctx context.Context, comman
 		return runtimegenericschedule.CancelCommit{}, err
 	}
 	result := mutationprotocol.RunPostgres(ctx, o.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimegenericschedule.CancelResult, error) {
-		return CancelTx(ctx, attempt, true, command)
+		return o.CancelActivationTx(ctx, attempt, command)
 	})
 	value, acknowledged := result.Value()
 	return runtimegenericschedule.CancelCommit{Result: value, Acknowledged: acknowledged}, result.Err()
@@ -590,13 +625,13 @@ func (o *SQLiteOwner) CancelGenericScheduleOutcome(ctx context.Context, command 
 		return runtimegenericschedule.CancelCommit{}, err
 	}
 	result := mutationprotocol.RunSQLite(ctx, o.backend, "sqlite generic schedule cancellation", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimegenericschedule.CancelResult, error) {
-		return CancelTx(ctx, attempt, false, command)
+		return o.CancelActivationTx(ctx, attempt, command)
 	})
 	value, acknowledged := result.Value()
 	return runtimegenericschedule.CancelCommit{Result: value, Acknowledged: acknowledged}, result.Err()
 }
 
-func timerRunIDTx(ctx context.Context, tx *sql.Tx, activationID string) (string, error) {
+func timerRunIDTx(ctx context.Context, tx sourceadmission.RowQueryer, activationID string) (string, error) {
 	var runID sql.NullString
 	err := tx.QueryRowContext(ctx, `SELECT CAST(run_id AS TEXT) FROM timers WHERE timer_id=$1`, strings.TrimSpace(activationID)).Scan(&runID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -608,7 +643,7 @@ func timerRunIDTx(ctx context.Context, tx *sql.Tx, activationID string) (string,
 	return strings.TrimSpace(runID.String), nil
 }
 
-func CancelTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, command runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error) {
+func cancelAttempt(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, command runtimegenericschedule.CancelCommand, execution RunExecutionOwner) (runtimegenericschedule.CancelResult, error) {
 	command = command.Canonical()
 	if err := command.Validate(); err != nil {
 		return runtimegenericschedule.CancelResult{}, err
@@ -618,6 +653,9 @@ func CancelTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgres b
 	}
 	var result runtimegenericschedule.CancelResult
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireActivationExecutionTx(ctx, tx, execution, command.ActivationID); err != nil {
+			return err
+		}
 		var err error
 		result, err = cancelTx(ctx, tx, attempt, postgres, command)
 		return err
@@ -648,6 +686,15 @@ func cancelTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt
 	return runtimegenericschedule.CancelResult{Outcome: runtimegenericschedule.CancelChanged, Activation: activation}, nil
 }
 
+// Run terminalization and standing suspension already own their admitted
+// lifecycle transition, including cleanup after execution authority retires.
+func cancelOwnedCleanupTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, postgres bool, command runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error) {
+	if err := command.Validate(); err != nil {
+		return runtimegenericschedule.CancelResult{}, err
+	}
+	return cancelTx(ctx, tx, attempt, postgres, command)
+}
+
 // LoadActivationTx loads and locks one exact server-minted activation for a
 // composing lifecycle owner that must validate it before a coupled mutation.
 func LoadActivationTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, activationID string) (runtimegenericschedule.Activation, bool, error) {
@@ -673,17 +720,17 @@ func (o *SQLiteOwner) LoadActivationTx(ctx context.Context, attempt *mutationpro
 }
 
 func (o *PostgresOwner) CancelActivationTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error) {
-	return CancelTx(ctx, attempt, true, command)
+	return cancelAttempt(ctx, attempt, true, command, o.execution)
 }
 
 func (o *SQLiteOwner) CancelActivationTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error) {
-	return CancelTx(ctx, attempt, false, command)
+	return cancelAttempt(ctx, attempt, false, command, o.execution)
 }
 
 // CancelAdmissionTx cancels the exact immutable activation selected by the
 // admission command. It is the private composition form for outer workflow
 // transactions that know the stable schedule key but not the server-minted ID.
-func CancelAdmissionTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, command runtimegenericschedule.AdmissionCommand, cause string, cancelledAt time.Time) (runtimegenericschedule.CancelResult, error) {
+func cancelAdmissionAttempt(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, command runtimegenericschedule.AdmissionCommand, cause string, cancelledAt time.Time, execution RunExecutionOwner) (runtimegenericschedule.CancelResult, error) {
 	command = command.Canonical()
 	cause = strings.TrimSpace(cause)
 	cancelledAt = canonicalTime(cancelledAt)
@@ -695,6 +742,9 @@ func CancelAdmissionTx(ctx context.Context, attempt *mutationprotocol.Attempt, p
 	}
 	var result runtimegenericschedule.CancelResult
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := execution.RequireRunExecutionTx(ctx, tx, command.RunID); err != nil {
+			return err
+		}
 		var err error
 		result, err = cancelAdmissionTx(ctx, tx, attempt, postgres, command, cause, cancelledAt)
 		return err
@@ -737,11 +787,11 @@ func cancelAdmissionTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotoco
 }
 
 func (o *PostgresOwner) CancelAdmissionTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimegenericschedule.AdmissionCommand, cause string, cancelledAt time.Time) (runtimegenericschedule.CancelResult, error) {
-	return CancelAdmissionTx(ctx, attempt, true, command, cause, cancelledAt)
+	return cancelAdmissionAttempt(ctx, attempt, true, command, cause, cancelledAt, o.execution)
 }
 
 func (o *SQLiteOwner) CancelAdmissionTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimegenericschedule.AdmissionCommand, cause string, cancelledAt time.Time) (runtimegenericschedule.CancelResult, error) {
-	return CancelAdmissionTx(ctx, attempt, false, command, cause, cancelledAt)
+	return cancelAdmissionAttempt(ctx, attempt, false, command, cause, cancelledAt, o.execution)
 }
 
 func CancelRunsTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, runIDs []string, cause string, cancelledAt time.Time) ([]runtimetimercancellation.Ref, error) {
@@ -763,7 +813,7 @@ func cancelRunsTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Att
 		return nil, err
 	}
 	for _, ref := range refs {
-		if _, err := CancelTx(ctx, attempt, postgres, runtimegenericschedule.CancelCommand{ActivationID: ref.ActivationID, Cause: cause, CancelledAt: cancelledAt}); err != nil {
+		if _, err := cancelOwnedCleanupTx(ctx, tx, attempt, postgres, runtimegenericschedule.CancelCommand{ActivationID: ref.ActivationID, Cause: cause, CancelledAt: cancelledAt}); err != nil {
 			return nil, err
 		}
 	}

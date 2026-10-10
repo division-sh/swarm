@@ -53,7 +53,7 @@ func (o *PostgresOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup r
 		if o.claims.conn == nil {
 			delete(o.claims.keys, key)
 		} else {
-			active, err := activeWakeupOnConn(ctx, o.claims.conn, wakeup)
+			active, err := activeWakeupOnConn(ctx, o.claims.conn, wakeup, o.execution)
 			if err != nil {
 				return false, err
 			}
@@ -77,7 +77,7 @@ func (o *PostgresOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup r
 	if !acquired {
 		return false, nil
 	}
-	active, err := activeWakeupOnConn(ctx, conn, wakeup)
+	active, err := activeWakeupOnConn(ctx, conn, wakeup, o.execution)
 	if err != nil || !active {
 		_, unlockErr := conn.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtext($1))`, key)
 		if unlockErr != nil {
@@ -111,7 +111,10 @@ func (o *SQLiteOwner) ClaimGenericScheduleWakeup(ctx context.Context, wakeup run
 	if err != nil || !found {
 		return false, err
 	}
-	return activation.Status == runtimegenericschedule.StatusActive && activation.CurrentDueAt.Equal(wakeup.DueAt()), nil
+	if activation.Status != runtimegenericschedule.StatusActive || !activation.CurrentDueAt.Equal(wakeup.DueAt()) {
+		return false, nil
+	}
+	return o.execution.ObserveRunExecution(ctx, o.backend, activation.Command.RunID)
 }
 
 func (o *PostgresOwner) ReleaseGenericScheduleWakeup(ctx context.Context, wakeup runtimegenericschedule.Wakeup) error {
@@ -200,19 +203,21 @@ func (o *PostgresOwner) discardClaimConn() error {
 	return errors.Join(err, closeErr)
 }
 
-func activeWakeupOnConn(ctx context.Context, conn *sql.Conn, wakeup runtimegenericschedule.Wakeup) (bool, error) {
+func activeWakeupOnConn(ctx context.Context, conn *sql.Conn, wakeup runtimegenericschedule.Wakeup, execution RunExecutionOwner) (bool, error) {
 	if conn == nil {
 		return false, errors.New("generic schedule claim connection is required")
 	}
 	var active bool
 	err := conn.QueryRowContext(ctx, `SELECT EXISTS (
-		SELECT 1 FROM timers t LEFT JOIN runs r ON r.run_id = t.run_id
+		SELECT 1 FROM timers t
 		WHERE t.timer_id = $1::uuid AND t.task_type IN ('timer','scheduled_task','global_recurring')
 		AND t.status = 'active' AND t.fire_at = $2
-		AND (t.run_id IS NULL OR r.status IN ('running','paused'))
 	)`, strings.TrimSpace(wakeup.ActivationID()), wakeup.DueAt()).Scan(&active)
 	if err != nil {
 		return false, fmt.Errorf("check generic schedule wakeup claim: %w", err)
 	}
-	return active, nil
+	if !active {
+		return false, nil
+	}
+	return observeActivationExecution(ctx, conn, execution, wakeup.ActivationID())
 }
