@@ -11673,6 +11673,14 @@ tool_model:
         Only that verified historical path may acknowledge an identical delivery on a fresh occurrence without
         selecting a current target, restaging another request or dispatching again. Changed stable authority or content
         refuses rather than adopting history. No second spool, tombstone registry or compatibility path is introduced.
+        HTTP and native input share the compiled operator text/action/challenge and bare-draft classification owner.
+        Operator input commits zero business events through one private projection receipt binding the original
+        request, exact authenticated normalized output and compiled channel mapping. Exported input fields cannot
+        reconstruct that receipt, replace its source or output admission, or change its text, sender or conversation.
+        Native operator publication retains the same live SDK input and selected account, principal, binding,
+        activation, source and target fences as native business publication; zero outputs alone are not admission.
+        An explicit text /inbox entry and genuine provider replies require no fabricated native menu or interaction ACK.
+        Opening Inbox does not identify the sender, acknowledge a notice, choose a verdict or authorize a resend.
         Isolated projection, private-state and raw selected-store fixtures do not establish authenticated session
         capture-to-normalized-publication closure or supported WhatsApp execution.
       session_client_occurrence: >
@@ -12186,7 +12194,9 @@ tool_model:
         activation account rather than deriving health from pairing files, a cached handle or a connected DTO. Native
         observation requires no webhook exposure or registration owner. Closed or absent ownership is session_not_current;
         observation errors remain errors and never reconnect or adopt successor authority. All other plan, binding, proof
-        and confirmation gates remain mandatory, and the held native admission is released after projection. Any loss,
+        and confirmation gates remain mandatory, including exact equality of admitted, current expected and coordinate
+        target generations for both postures; live session health cannot replace service/target evidence. The held native
+        admission is released after projection. Any loss,
         rotation, replacement, reset, revocation, expiry, or supersession removes READY immediately. Channel list/readiness
         pairs a current activation only with the exact onboarding operation named by that activation; a newer failed
         reconnect or rebind attempt cannot replace the activation-owning operation in readiness projection. Proofless

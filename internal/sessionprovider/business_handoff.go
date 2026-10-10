@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -24,6 +25,7 @@ type sessionBusinessHandoff struct {
 	bus     *bus.EventBus
 	store   sessionBusinessStore
 	posture executionposture.Posture
+	channel packs.SatisfactionPlan
 }
 
 func (h *sessionBusinessHandoff) drain(ctx context.Context) error {
@@ -64,7 +66,7 @@ func (h *sessionBusinessHandoff) publish(ctx context.Context, event capturedEven
 		return err
 	}
 	defer admitted.Close()
-	prepared, err := prepareSessionBusinessPublication(ctx, admitted, h.trigger, h.alias, h.bus, h.store, h.posture)
+	prepared, err := prepareSessionBusinessPublication(ctx, admitted, h.trigger, h.alias, h.bus, h.store, h.posture, h.channel)
 	if err != nil {
 		return err
 	}

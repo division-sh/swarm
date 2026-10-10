@@ -381,19 +381,10 @@ func runInboundPublicationOperatorChannelActionProof(t *testing.T, ctx context.C
 	t.Helper()
 	command := func(providerEventID string) runtimeinbound.CommitCommand {
 		request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, providerEventID)
-		identity := operatorChannelContractIdentity("inbound-action-generation")
-		fact := operatorchannel.ActionFact{Kind: operatorchannel.ActionSourceCallback,
-			Interface: identity, ExternalAccountRef: "account-action", ConversationRef: "conversation-action",
-			ConversationScope: operatorchannel.ConversationScopeDirect, MessageReference: `{"id":91}`,
-			InteractionRef: "callback-91", Token: uuid.NewString(),
-		}
-		return runtimeinbound.CommitCommand{
-			Request: request, Finalization: runtimeinbound.Finalization{EvidenceEvent: inboundPublicationZeroOutputEvidence(t, request)},
-			OperatorChannelAction: &operatorchannel.InboundAction{
-				ActionFact: fact, Provider: request.Provider, ProviderEventID: request.ProviderEventID,
-				PublicationID: request.PublicationID, ProviderAuthorization: "verified-action-auth",
-			},
-		}
+		return inboundOperatorProofCommand(t, ctx, request, map[string]any{"callback_query": map[string]any{
+			"id": "callback-91", "data": uuid.NewString(), "from": map[string]any{"id": 1001},
+			"message": map[string]any{"message_id": 91, "chat": map[string]any{"id": 42, "type": "private"}},
+		}})
 	}
 	fault := command("operator-channel-action-fault")
 	drop := installOperatorChannelClaimFailureTrigger(t, db, sqlite, "operator_channel_action_intents", "INSERT")
@@ -455,19 +446,12 @@ func runInboundPublicationOperatorChannelActionProof(t *testing.T, ctx context.C
 func runInboundPublicationOperatorChannelTextProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
 	t.Helper()
 	request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, "operator-channel-text-fault")
-	fact := operatorchannel.TextFact{
-		Interface:          operatorChannelContractIdentity("inbound-text-generation"),
-		ExternalAccountRef: "account-text", ConversationRef: "conversation-text",
-		ConversationScope: operatorchannel.ConversationScopeShared,
-		Text:              "decision reason", MessageReference: `{"id":92}`, ReplyToReference: `{"id":91}`,
-	}
-	command := runtimeinbound.CommitCommand{
-		Request: request, Finalization: runtimeinbound.Finalization{EvidenceEvent: inboundPublicationZeroOutputEvidence(t, request)},
-		OperatorChannelText: &operatorchannel.InboundText{
-			TextFact: fact, Provider: request.Provider, ProviderEventID: request.ProviderEventID,
-			PublicationID: request.PublicationID, ProviderAuthorization: "verified-text-auth",
-		},
-	}
+	command := inboundOperatorProofCommand(t, ctx, request, map[string]any{"message": map[string]any{
+		"message_id": 92, "text": "decision reason", "from": map[string]any{"id": 1001},
+		"chat": map[string]any{"id": -42, "type": "group"}, "reply_to_message": map[string]any{"message_id": 91},
+	}})
+	request = command.Request
+	fact := command.OperatorChannelText.TextFact
 	drop := installOperatorChannelClaimFailureTrigger(t, db, sqlite, "operator_channel_text_intents", "INSERT")
 	if _, err := store.CommitInboundPublication(ctx, command); err == nil {
 		drop()
@@ -541,7 +525,10 @@ func runInboundPublicationOperatorChannelClaimProof(t *testing.T, ctx context.Co
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity := operatorChannelContractIdentity("inbound-atomic-generation")
+	identity, err := inboundOperatorProofPlan(t).InterfaceIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
 	begin := func(key string) operatorchannel.Operation {
 		op, err := channelStore.BeginChannelBinding(ctx, operatorchannel.BeginRequest{ProviderAuthority: operatorChannelProviderAuthority(),
 			OperationID: uuid.NewString(), Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,
@@ -556,15 +543,10 @@ func runInboundPublicationOperatorChannelClaimProof(t *testing.T, ctx context.Co
 	command := func(op operatorchannel.Operation, providerEventID string) runtimeinbound.CommitCommand {
 		request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, providerEventID)
 		request.OriginalReceivedAt = now.Add(time.Minute)
-		claim := operatorChannelContractClaim(op, operatorchannel.ConversationScopeShared, "account-atomic", "conversation-atomic", request.PublicationID)
-		claim.Provider = request.Provider
-		claim.ProviderEventID = request.ProviderEventID
-		claim.PublicationID = request.PublicationID
-		projection, _ := runtimeauthoractivity.InboundProjectionFromContext(ctx)
-		return runtimeinbound.CommitCommand{
-			Request: request, Finalization: runtimeinbound.Finalization{EvidenceEvent: inboundPublicationZeroOutputEvidence(t, request)},
-			AuthorProjection: projection, OperatorChannelClaim: &claim,
-		}
+		return inboundOperatorProofCommand(t, ctx, request, map[string]any{"message": map[string]any{
+			"message_id": 93, "text": op.Challenge, "from": map[string]any{"id": 1001},
+			"chat": map[string]any{"id": -42, "type": "group"},
+		}})
 	}
 	for _, fault := range []struct {
 		name      string

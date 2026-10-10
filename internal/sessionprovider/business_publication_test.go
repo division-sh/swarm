@@ -103,7 +103,7 @@ func TestWhatsAppBusinessCommitTemporalFencesBothStores(t *testing.T) {
 				f.activate(t)
 				eventBus := f.publicationBus(t)
 				event, admitted := f.receive(t, "exact business content")
-				prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live)
+				prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live, f.channel)
 				if err != nil {
 					t.Fatal("prepare", err)
 				}
@@ -197,7 +197,7 @@ func TestWhatsAppBusinessCommitCancellationWhileLockedBothStores(t *testing.T) {
 				f.activate(t)
 				eventBus := f.publicationBus(t)
 				_, admitted := f.receive(t, "blocked publication")
-				prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live)
+				prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live, f.channel)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -288,7 +288,7 @@ func TestWhatsAppBusinessCommitRuntimeDispatchAndHistoryBothStores(t *testing.T)
 			f.activate(t)
 			eventBus := f.publicationBus(t)
 			event, admitted := f.receive(t, "committed original content")
-			prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live)
+			prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live, f.channel)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -299,7 +299,7 @@ func TestWhatsAppBusinessCommitRuntimeDispatchAndHistoryBothStores(t *testing.T)
 			if err != nil || !result.Acknowledged || !result.Record.Created || len(result.Publications) != 2 {
 				t.Fatalf("runtime commit/dispatch: acknowledged=%t created=%t outputs=%d %v", result.Acknowledged, result.Record.Created, len(result.Publications), err)
 			}
-			duplicate, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live)
+			duplicate, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live, f.channel)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -341,7 +341,7 @@ func TestWhatsAppBusinessCommitSerializesUnbindBothStores(t *testing.T) {
 			f.activate(t)
 			eventBus := f.publicationBus(t)
 			event, admitted := f.receive(t, "commit elected before unbind")
-			prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live)
+			prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live, f.channel)
 			if err != nil {
 				t.Fatal(err)
 			}

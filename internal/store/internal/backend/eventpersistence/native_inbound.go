@@ -32,7 +32,10 @@ func admitNativeInboundPublicationTx(ctx context.Context, tx *sql.Tx, postgres b
 			return err
 		}
 	}
-	if len(command.Finalization.Events) == 0 || !input.LifetimeCurrent(ctx) {
+	if len(command.Finalization.Events) == 0 {
+		return command.RequireOperatorAdmission(ctx)
+	}
+	if !input.LifetimeCurrent(ctx) {
 		return fmt.Errorf("native business publication requires its sealed outputs and lifetime")
 	}
 	return nil

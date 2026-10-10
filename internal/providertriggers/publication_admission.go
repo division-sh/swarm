@@ -30,6 +30,8 @@ type admittedPublicationOutput struct {
 	authorization provideroutput.Authorization
 }
 
+func (a PublicationAdmission) SourceBundleHash() string { return a.bundleHash }
+
 func (p InboundAdmissionPlan) ProjectPublication(admitted AdmittedRequest, bundleHash, flowID string) (Delivery, PublicationAdmission, error) {
 	if admitted.sessionInput != nil {
 		if err := admitted.sessionInput.RequireBusiness(admitted.sessionInput.Context(), p.provider, p.generation); err != nil {
@@ -94,6 +96,34 @@ func (a PublicationAdmission) NativeInput() (nativeinput.Admission, bool) {
 // not reconstructed provider coordinates or a caller's copy of output facts.
 func (a PublicationAdmission) SameOwner(other PublicationAdmission) bool {
 	return len(a.outputs) > 0 && len(a.outputs) == len(other.outputs) && &a.outputs[0] == &other.outputs[0]
+}
+
+// Operator input consumes one authenticated normalized output without publishing
+// business events. SQL owners separately fence its selected native responsibility.
+func (a PublicationAdmission) ValidateOperatorOutput(ctx context.Context, bundleHash, flowID, provider string, output DeliveryEvent) error {
+	if ctx == nil || ctx.Err() != nil || a.bundleHash == "" || a.bundleHash != bundleHash || a.flowID != flowID ||
+		a.provider != provider || output.Kind != OutputKindNormalized {
+		return fmt.Errorf("operator input requires its exact authenticated normalized output")
+	}
+	if a.nativeInput != nil && !a.nativeInput.LifetimeCurrent(ctx) {
+		return fmt.Errorf("operator input no longer owns its native lifetime")
+	}
+	payload, err := canonicaljson.Bytes(output.Payload)
+	if err != nil {
+		return err
+	}
+	matches := 0
+	for _, admitted := range a.outputs {
+		if admitted.name == output.Name && admitted.kind == provideroutput.KindNormalized &&
+			!admitted.authorization.Empty() && admitted.authorization.Matches(output.Authorization) &&
+			admitted.payloadDigest == canonicaljson.HashBytes(payload) {
+			matches++
+		}
+	}
+	if matches != 1 {
+		return fmt.Errorf("operator input changed or ambiguously selected its admitted output")
+	}
+	return nil
 }
 
 // ValidateCommitOutput is store-safe: selected responsibility is checked by its

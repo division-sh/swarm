@@ -23,6 +23,22 @@ type serveSessionBootstrapOwner interface {
 	ObserveSession(context.Context, channelonboarding.Operation) (operatorchannel.ProviderAuthority, operatorchannel.SessionConnectionObservation, bool, error)
 }
 
+func observeServeChannelSession(ctx context.Context, sessions serveSessionBootstrapOwner, op channelonboarding.Operation,
+	activation channelonboarding.ConnectedChannelActivation,
+) (operatorchannel.ProviderAuthority, operatorchannel.SessionConnectionObservation, bool, error) {
+	var empty operatorchannel.SessionConnectionObservation
+	if sessions == nil {
+		return operatorchannel.ProviderAuthority{}, empty, false, nil
+	}
+	if activation.OperationID != op.OperationID || activation.PrincipalID != op.PrincipalID ||
+		activation.Posture != op.Posture || activation.Provider != op.Provider || activation.Interface.Normalized() != op.Interface.Normalized() ||
+		activation.Revision != op.ActivationRevision || activation.BindingRevision != op.BindingRevision ||
+		activation.SessionAccount != op.SessionAccount || !activation.Coordinate.Matches(op.Coordinate) {
+		return operatorchannel.ProviderAuthority{}, empty, false, channelonboarding.ErrRevisionConflict
+	}
+	return sessions.ObserveSession(ctx, op)
+}
+
 // One private platform constructor, initialized only by the compiled native
 // implementation. There is no registration API or pack-selected Go callback.
 var newServeSessionBootstrap = unavailableServeSessionBootstrap

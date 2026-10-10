@@ -1876,8 +1876,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		store: stores.ChannelDelivery(), native: stores.ChannelNative(), cards: storeDeps.DecisionCards,
 		mailbox: stores.MailboxAPI(), proposedEffects: storeDeps.ProposedEffects,
 		activations: channelOnboardingStore, manager: runtimeContextManager,
-		ingress: ready,
-		effects: stores.Effects(), credentials: providerCredentialOwner,
+		sessions: sessionBootstrap,
+		ingress:  ready,
+		effects:  stores.Effects(), credentials: providerCredentialOwner,
 		posture: posture, runtimeInstanceID: runtimeInstanceID, now: time.Now,
 	}); err != nil {
 		presenter.runtimeFailure("channel_delivery", err)

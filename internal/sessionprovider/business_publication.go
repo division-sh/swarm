@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -21,6 +23,7 @@ import (
 type sessionBusinessStore interface {
 	inbound.Runner
 	pipeline.StandingServicePersistence
+	HasCurrentChannelInputDraft(context.Context, operatorchannel.InboundText, time.Time) (bool, error)
 }
 
 type preparedSessionBusiness struct {
@@ -32,7 +35,7 @@ type preparedSessionBusiness struct {
 	history *inbound.Record
 }
 
-func prepareSessionBusinessPublication(ctx context.Context, input input.Admission, trigger providertriggers.InboundAdmissionPlan, alias string, eventBus *bus.EventBus, store sessionBusinessStore, posture executionposture.Posture) (preparedSessionBusiness, error) {
+func prepareSessionBusinessPublication(ctx context.Context, input input.Admission, trigger providertriggers.InboundAdmissionPlan, alias string, eventBus *bus.EventBus, store sessionBusinessStore, posture executionposture.Posture, channel packs.SatisfactionPlan) (preparedSessionBusiness, error) {
 	var absent preparedSessionBusiness
 	if ctx == nil || ctx.Err() != nil || eventBus == nil || store == nil || !input.LifetimeCurrent(ctx) {
 		return absent, fmt.Errorf("native publication requires its current input and runtime owners")
@@ -73,7 +76,15 @@ func prepareSessionBusinessPublication(ctx context.Context, input input.Admissio
 	}
 	batch := bus.InboundDeliveryBatch{Provider: request.Provider, Admission: admission}
 	projection := authoractivity.InboundProjection{}
+	var operatorEvent *inbound.OperatorProjection
+	selectBare := func(text operatorchannel.InboundText) (bool, error) {
+		return store.HasCurrentChannelInputDraft(ownedContext, text, request.OriginalReceivedAt)
+	}
 	for ordinal, output := range delivery.Events {
+		operatorEvent, err = inbound.ProjectOperatorOutput(output, request, []packs.SatisfactionPlan{channel}, selectBare, operatorEvent)
+		if err != nil {
+			return absent, err
+		}
 		item, err := inbound.ProjectOutputEvent(request, ordinal, output, posture)
 		if err != nil {
 			return absent, err
@@ -82,6 +93,13 @@ func prepareSessionBusinessPublication(ctx context.Context, input input.Admissio
 		if output.Kind == providertriggers.OutputKindNormalized {
 			projection = authoractivity.InboundProjection{SubjectType: output.AuthorSubjectType, SubjectID: output.AuthorSubjectID}
 		}
+	}
+	if operatorEvent != nil && operatorEvent.BareCandidate == nil {
+		command, err := sessionOperatorCommand(ownedContext, eventBus, admission, request, operatorEvent, posture)
+		if err != nil {
+			return absent, err
+		}
+		return preparedSessionBusiness{ctx: ownedContext, bus: eventBus, store: store, command: command}, nil
 	}
 	batch.AuthorSubjectType, batch.AuthorSubjectID = projection.SubjectType, projection.SubjectID
 	plan, err := eventBus.PrepareInboundDeliveryBatch(ownedContext, batch)
@@ -92,7 +110,27 @@ func prepareSessionBusinessPublication(ctx context.Context, input input.Admissio
 	if err != nil {
 		return absent, errors.Join(err, eventBus.AbandonInboundDeliveryPlan(context.WithoutCancel(ownedContext), plan))
 	}
+	if operatorEvent != nil {
+		command.PotentialBareText = operatorEvent.BareCandidate
+		if err := command.Validate(); err != nil {
+			return absent, errors.Join(err, eventBus.AbandonInboundDeliveryPlan(context.WithoutCancel(ownedContext), plan))
+		}
+	}
 	return preparedSessionBusiness{ctx: ownedContext, bus: eventBus, store: store, plan: plan, command: command}, nil
+}
+
+func sessionOperatorCommand(ctx context.Context, eventBus *bus.EventBus, admission providertriggers.PublicationAdmission,
+	request inbound.Request, projection *inbound.OperatorProjection, posture executionposture.Posture,
+) (inbound.CommitCommand, error) {
+	evidence, err := inbound.ProjectEvidence(request, nil, nil, posture)
+	if err != nil {
+		return inbound.CommitCommand{}, err
+	}
+	evidence, err = eventBus.PrepareInboundEvidence(ctx, evidence)
+	if err != nil {
+		return inbound.CommitCommand{}, err
+	}
+	return inbound.NewOperatorCommit(ctx, admission, request, evidence, projection)
 }
 
 func sessionBusinessRequest(ctx context.Context, event capturedEvent, alias string, store sessionBusinessStore, admitted input.Admission) (inbound.Request, error) {
@@ -175,6 +213,9 @@ func (p preparedSessionBusiness) commitAndDispatch() (inbound.CommitResult, erro
 		return inbound.CommitResult{Record: *p.history, Acknowledged: true}, nil
 	}
 	result, commitErr := p.store.CommitInboundPublication(p.ctx, p.command)
+	if len(p.command.Finalization.Events) == 0 {
+		return result, commitErr // Operator intents have no business recipients to dispatch.
+	}
 	cleanupContext := context.WithoutCancel(p.ctx)
 	if !result.Acknowledged || !result.Record.Created {
 		return result, errors.Join(commitErr, p.bus.AbandonInboundDeliveryPlan(cleanupContext, p.plan))

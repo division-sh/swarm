@@ -487,11 +487,12 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		if !validate() {
 			return
 		}
-		commitResult, err := g.store.CommitInboundPublication(pubCtx, runtimeinbound.CommitCommand{
-			Request: publicationRequest, Finalization: runtimeinbound.Finalization{EvidenceEvent: evidence},
-			OperatorChannelClaim: operatorEvent.Claim, OperatorChannelAction: operatorEvent.Action,
-			OperatorChannelText: operatorEvent.Text,
-		})
+		command, err := runtimeinbound.NewOperatorCommit(pubCtx, publicationAdmission, publicationRequest, evidence, operatorEvent)
+		if err != nil {
+			writeInboundPublicationError(w, err)
+			return
+		}
+		commitResult, err := g.store.CommitInboundPublication(pubCtx, command)
 		if !commitResult.Acknowledged {
 			if err == nil {
 				err = errors.New("inbound operator claim commit acknowledgement missing")

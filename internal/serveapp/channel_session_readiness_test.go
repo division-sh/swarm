@@ -25,13 +25,29 @@ func pairedServeSessionObserver(t *testing.T, backend string) (*serveBootstrapTe
 	if err := f.adapter.ResumeSession(f.ctx, f.op, f.candidate); err != nil {
 		t.Fatal(err)
 	}
-	op, paired, err := f.adapter.CheckpointSessionPairing(f.ctx, f.op)
-	if err != nil || !paired {
-		t.Fatal("actual SDK pairing did not checkpoint", op, paired, err)
+	wait, stop := context.WithTimeout(f.ctx, 5*time.Second)
+	defer stop()
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	var op channelonboarding.Operation
+	for {
+		current, paired, err := f.adapter.CheckpointSessionPairing(wait, f.op)
+		if err != nil {
+			t.Fatal("actual SDK pairing did not checkpoint", err)
+		}
+		if paired {
+			op = current
+			break
+		}
+		select {
+		case <-tick.C:
+		case <-wait.Done():
+			t.Fatal("SDK login did not complete within the existing fixture bound", context.Cause(wait))
+		}
 	}
 	coordinate := op.Coordinate
 	coordinate.TargetGeneration = 1
-	op, err = f.adapter.store.AdvanceChannelOnboarding(f.ctx, channelonboarding.AdvanceRequest{
+	op, err := f.adapter.store.AdvanceChannelOnboarding(f.ctx, channelonboarding.AdvanceRequest{
 		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: op.Phase, RebindCoordinate: &coordinate, Now: time.Now().UTC()})
 	if err != nil {
 		t.Fatal(err)
@@ -81,6 +97,7 @@ func TestServeSessionReadinessUsesOriginalOwnedObservationBothStores(t *testing.
 				ActivationRevision: 1, ActivationCurrent: true, BindingRevision: 1, ExpectedBindingRevision: 1,
 				CredentialsCurrent: true, ConfirmationTerminalSuccess: true, ConfirmationActivationRevision: 1, ConfirmationBindingRevision: 1,
 				Posture: channelonboarding.ActivationSessionConnection, SessionAuthority: provider, SessionObservation: &observation,
+				TargetGeneration: coordinate.TargetGeneration, ExpectedTargetGeneration: coordinate.TargetGeneration,
 				ObservedAt: observation.ObservedAt}
 			if projection := channelonboarding.ProjectReadiness(facts); !projection.Ready {
 				t.Fatal("owned observation did not satisfy the canonical health gate", projection)
