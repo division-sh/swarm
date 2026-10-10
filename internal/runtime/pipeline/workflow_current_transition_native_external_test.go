@@ -57,10 +57,12 @@ func TestWorkflowCurrentTransitionNativeBytesAndHistoricalCutsBothStores(t *test
 			bus.SetInterceptors(coordinator)
 			owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute(".", runID, runID)}
 			entityID := flowidentity.EntityID(runID)
+			constructionCopies := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 			plan := commitA2FixtureConstruction(t, coordinator, selected, ctx, owner, pipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
 				EntityType: "test_entity", CurrentState: "left", Fields: map[string]any{"marker": "initial"},
 			}, at)
+			currentTransitionCopyReceipt(t, constructionCopies, "construction")
 			admitAttachment, _ := newTimerReplayAttachmentOwner(t, ctx, selected)
 			admitAttachment(plan.Readiness)
 			publish := func(name string, index int) events.Event {
@@ -68,9 +70,11 @@ func TestWorkflowCurrentTransitionNativeBytesAndHistoricalCutsBothStores(t *test
 				event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(name), "operator", "", []byte(`{}`), 0,
 					runID, events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 					eventtest.RootRoutingSource(entityID), at.Add(-time.Duration(index)*time.Second))
+				copies := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 				if err := bus.PublishAndWait(ctx, event); err != nil {
 					t.Fatalf("publish %s at %d: %v", name, index, err)
 				}
+				currentTransitionCopyReceipt(t, copies, name)
 				return event
 			}
 			load := func() pipeline.WorkflowInstance {
@@ -166,6 +170,27 @@ func TestWorkflowCurrentTransitionNativeBytesAndHistoricalCutsBothStores(t *test
 				}
 			}
 		})
+	}
+}
+
+func currentTransitionCopyReceipt(t *testing.T, collector *storetest.TransactionCollector, phase string) {
+	t.Helper()
+	collector.Stop()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		snapshot := collector.Snapshot()
+		if snapshot.Active == 0 {
+			raw, err := json.Marshal(snapshot.Total)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("Q6_NATIVE_COPY_RECEIPT phase=%s counts=%s", phase, raw)
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("native copy observation did not settle: %+v", snapshot)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
