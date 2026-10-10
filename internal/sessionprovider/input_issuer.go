@@ -56,6 +56,19 @@ func (o *sessionInputOwner) recoverBusiness(ctx context.Context, reference Sessi
 	return o.admitRetainedInput(ctx, reference, native, true)
 }
 
+func (o *sessionInputOwner) recoverClaim(ctx context.Context, reference SessionInputReference) (input.Admission, error) {
+	if o == nil || ctx == nil || ctx.Err() != nil {
+		return input.Admission{}, fmt.Errorf("current native input owner is required")
+	}
+	native, err := o.native.readPendingClaimInput(ctx, reference)
+	if err != nil {
+		return input.Admission{}, err
+	}
+	// A fresh socket can consume frozen bytes, never a refreshed onboarding
+	// responsibility. Claim admission retains the exact original revision.
+	return o.admitRetainedInput(ctx, reference, native, false)
+}
+
 func (o *sessionInputOwner) admitRetainedInput(ctx context.Context, reference SessionInputReference, native nativeSessionInput, recovery bool) (input.Admission, error) {
 	if native.Release == nil {
 		return input.Admission{}, fmt.Errorf("native capture must retain its SDK lifetime")

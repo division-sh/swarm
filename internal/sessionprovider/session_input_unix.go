@@ -61,21 +61,25 @@ func newSessionInputReader(state *sessionState, spool *captureStore) (*sessionIn
 }
 
 func (r *sessionInputReader) readOwnedInput(ctx context.Context, reference SessionInputReference) (nativeSessionInput, error) {
-	return r.readRetainedInput(ctx, reference, false)
+	return r.readRetainedInput(ctx, reference, "")
 }
 
 func (r *sessionInputReader) readPendingBusinessInput(ctx context.Context, reference SessionInputReference) (nativeSessionInput, error) {
-	return r.readRetainedInput(ctx, reference, true)
+	return r.readRetainedInput(ctx, reference, channelonboarding.SessionInputBusiness)
 }
 
-func (r *sessionInputReader) readRetainedInput(ctx context.Context, reference SessionInputReference, recovery bool) (nativeSessionInput, error) {
+func (r *sessionInputReader) readPendingClaimInput(ctx context.Context, reference SessionInputReference) (nativeSessionInput, error) {
+	return r.readRetainedInput(ctx, reference, channelonboarding.SessionInputOnboarding)
+}
+
+func (r *sessionInputReader) readRetainedInput(ctx context.Context, reference SessionInputReference, recoveryScope channelonboarding.SessionInputScope) (nativeSessionInput, error) {
 	var result nativeSessionInput
 	if r == nil || ctx == nil || ctx.Err() != nil || reference.ConnectionID != r.spool.connectionID ||
 		uuid.Validate(reference.OccurrenceID) != nil || reference.Conversation == "" || reference.EventID == "" {
 		return result, errCaptureScopeChanged
 	}
 	occurrence := r.state.currentOccurrence()
-	if occurrence == nil || (!recovery && occurrence.occurrenceID != reference.OccurrenceID) {
+	if occurrence == nil || (recoveryScope == "" && occurrence.occurrenceID != reference.OccurrenceID) {
 		return result, errClientOccurrenceFenced
 	}
 	workContext, release, err := occurrence.acquire(ctx)
@@ -114,7 +118,8 @@ func (r *sessionInputReader) readRetainedInput(ctx context.Context, reference Se
 		if event.Conversation != reference.Conversation || event.EventID != reference.EventID || event.Kind != reference.Kind {
 			continue
 		}
-		if workContext.Err() != nil || !nativeCaptureMatchesReference(event, reference, account, ownedSource, recovery) {
+		if workContext.Err() != nil || (recoveryScope != "" && event.Scope.Kind != recoveryScope) ||
+			!nativeCaptureMatchesReference(event, reference, account, ownedSource, recoveryScope == channelonboarding.SessionInputBusiness) {
 			return result, errCaptureScopeChanged
 		}
 		retained = true

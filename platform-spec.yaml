@@ -11296,7 +11296,14 @@ tool_model:
         publication or successful SDK receipt. Retained capture and immutable staged request evidence survive
         publication rollback and connection restart; current commit fencing remains separate from original request
         bytes. Incoming reconciliation never reconnects the SDK or replays an outgoing effect. The optional port
-        alone does not qualify complete served installation, operator claim, Inbox or physical interoperability.
+        also routes awaiting_external_identity input, with its existing identity operation and no activation,
+        through the same private capture and sealed human-claim owner. SDK success requires the exact durable
+        claim receipt before capture retirement. Unknown challenges receive only the existing ignored disposition;
+        ordinary first-sender text cannot bind an operator or create business authority. Unsettled claim recovery
+        uses frozen original bytes and the exact original onboarding revision, even across a new socket occurrence;
+        it cannot adopt refreshed source, operation or account authority. A verified historical receipt may retire
+        identical capture without executing the claim again. Human confirmation remains separate and mandatory.
+        This optional port alone does not qualify complete served installation, Inbox or physical interoperability.
       session_pairing_qr: >
         The concrete WhatsApp pairing owner consumes the public QR and ADV-rotation events through the same guarded
         occurrence callback as incoming capture; the SDK GetQRChannel convenience helper is not a supported Swarm
