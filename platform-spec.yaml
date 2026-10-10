@@ -20158,6 +20158,13 @@ run_model:
       Activation does not copy source event IDs, replay delivered/completed
       or receipt-only facts, reconstruct timer, route, session, turn, or contract rows, or recompute recipients from
       current subscriptions.'
+    historical_delivery_cut_evidence: >-
+      Delivery/event replay consumes publication and recipient facts only from the exact admitted source cut.
+      After loading that revision, the native writer must not reload the source event or delivery from current
+      tables. An invocation-private index may share those fixed facts across recipients; absent, duplicate, foreign
+      or out-of-cut facts fail closed before child writes. Existing event decoding, schema evidence, full publication
+      receiver validation, current execution authority and generic historical-agent eligibility remain independent
+      requirements. This index is neither a persisted cache nor permission to execute.
     source_freeze:
       owner: store.run_fork.source_freeze
       contract: >
