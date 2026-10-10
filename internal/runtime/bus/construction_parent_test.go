@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -20,27 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-type constructionReceiptTestReader []flowidentity.Instance
-
-func (r constructionReceiptTestReader) LoadFlowConstructionPublication(ctx context.Context, owner flowidentity.RunScopedFlowInstance, entityID string) (pipeline.FlowConstructionPublicationEvidence, error) {
-	if err := ctx.Err(); err != nil {
-		return pipeline.FlowConstructionPublicationEvidence{}, err
-	}
-	for _, instance := range r {
-		if owner.RunID == busInternalTestRunID && instance.Route() == owner.Route && instance.EntityID == entityID {
-			return pipeline.FlowConstructionPublicationEvidence{Identity: instance}, nil
-		}
-	}
-	return pipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("absent test construction receipt")
-}
-
-type constructionReceiptFailureTestReader struct{ err error }
-
-func (r constructionReceiptFailureTestReader) LoadFlowConstructionPublication(context.Context, flowidentity.RunScopedFlowInstance, string) (pipeline.FlowConstructionPublicationEvidence, error) {
-	return pipeline.FlowConstructionPublicationEvidence{}, r.err
-}
-
-func TestA9ConstructionSelectionRequiresExactReceiptWithoutPlannerOrCacheFallback(t *testing.T) {
+func TestA9ConstructionSelectionRequiresExactIndexWithoutPlannerOrCacheFallback(t *testing.T) {
 	source := nestedConnectionConstructionSource(t)
 	root := flowidentity.Stored(source, ".", busInternalTestRunID, busInternalTestRunID, busInternalTestRunID, "")
 	parent, err := flowidentity.KeyedChild(source, root, "parent", "stored-parent")
@@ -48,32 +27,35 @@ func TestA9ConstructionSelectionRequiresExactReceiptWithoutPlannerOrCacheFallbac
 		t.Fatal(err)
 	}
 	parent.EntityID = eventtest.UUID("non-derived-parent")
-	contradictoryParent := parent
-	contradictoryParent.ParentRoute.FlowInstance = eventtest.UUID("foreign-parent-run")
 	table := &RouteTable{instanceOwners: map[flowidentity.RunScopedFlowInstance]flowidentity.Instance{
 		testRunScopedFlowRoute(root.Route()): root, testRunScopedFlowRoute(parent.Route()): parent,
 	}}
-	independent := errors.New("independent receipt failure")
+	rootObservation := constructionIndexObservation(t, source, busInternalTestRunID, root, "")
+	parentObservation := constructionIndexObservation(t, source, busInternalTestRunID, parent, "left")
+	independent := errors.New("independent index failure")
 	for _, test := range []struct {
 		name    string
-		reader  pipeline.FlowConstructionPublicationReader
+		reader  pipeline.FlowInstanceIndexReader
 		wantErr error
 		valid   bool
 	}{
-		{name: "genuine receipt without planner", reader: constructionReceiptTestReader{root, parent}, valid: true},
+		{name: "genuine receipt without planner", reader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{rootObservation, parentObservation}}, valid: true},
 		{name: "missing reader with populated cache"},
-		{name: "absent receipt", reader: constructionReceiptTestReader{root}},
-		{name: "foreign run", reader: constructionReceiptTestReader{root, parent}},
-		{name: "wrong same-key entity", reader: constructionReceiptTestReader{root, parent}},
-		{name: "wrong route", reader: constructionReceiptTestReader{root, parent}},
-		{name: "declaration as instance", reader: constructionReceiptTestReader{root, parent}},
-		{name: "contradictory parent receipt", reader: constructionReceiptTestReader{root, contradictoryParent}},
-		{name: "independent failure", reader: constructionReceiptFailureTestReader{independent}, wantErr: independent},
-		{name: "cancellation", reader: constructionReceiptFailureTestReader{context.Canceled}, wantErr: context.Canceled},
+		{name: "absent receipt", reader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{rootObservation}}},
+		{name: "foreign run", reader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{rootObservation, parentObservation}}},
+		{name: "wrong same-key entity", reader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{rootObservation, parentObservation}}},
+		{name: "wrong route", reader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{rootObservation, parentObservation}}},
+		{name: "declaration as instance", reader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{rootObservation, parentObservation}}},
+		{name: "contradictory parent receipt", reader: constructionIndexTestReader{err: &pipeline.FlowInstanceConstructionCorruption{Cause: errors.New("contradictory parent")}}},
+		{name: "independent failure", reader: constructionIndexTestReader{err: independent}, wantErr: independent},
+		{name: "cancellation", reader: constructionIndexTestReader{err: context.Canceled}, wantErr: context.Canceled},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			owner := newTemplateInstanceLifecycleOwner(source, table, nil, test.reader)
-			instances, err := owner.constructionOwners(context.Background(), busInternalTestRunID)
+			if table.instanceOwners[testRunScopedFlowRoute(parent.Route())] != parent {
+				t.Fatal("cache counterexample missing")
+			}
+			owner := connectInstanceSelector{source: source, index: test.reader}
+			instances, err := owner.constructionOwners(constructionIndexContext(t, source), busInternalTestRunID)
 			if err != nil || len(instances) != 0 {
 				t.Fatalf("process cache became committed construction evidence: %+v %v", instances, err)
 			}
@@ -91,7 +73,7 @@ func TestA9ConstructionSelectionRequiresExactReceiptWithoutPlannerOrCacheFallbac
 			if test.name == "declaration as instance" {
 				path = parent.TemplateID
 			}
-			actual, err := owner.constructionInstance(context.Background(), run, parent.TemplateID, path, entity, instances)
+			actual, err := owner.constructionInstance(constructionIndexContext(t, source), run, parent.TemplateID, path, entity, instances)
 			if test.valid {
 				if err != nil || actual != parent {
 					t.Fatalf("reader-only selection lost stored identity: %+v %v", actual, err)
@@ -111,10 +93,10 @@ func TestA9MissingCreationPlannerCannotBorrowReceiptAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := newTemplateInstanceLifecycleOwner(source, nil, nil, constructionReceiptTestReader{root, producer})
+	owner := connectInstanceSelector{source: source, index: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, busInternalTestRunID, root, ""), constructionIndexObservation(t, source, busInternalTestRunID, producer, "")}}}
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("no-creation-planner"), "producer/account.ready", "test", "", []byte(`{"account_id":"acct-1"}`), 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
-	materialized, decision, handled, err := owner.Materialize(withConnectRoutePlanPreview(context.Background()), event, plan, map[string]string{"payload.account_id": "acct-1"}, nil)
-	if err != nil || !handled || materialized.Failure != pinrouting.ConnectFailureLifecycleUnavailable || decision.Activation != nil || decision.identity != (flowidentity.Instance{}) {
+	materialized, decision, handled, err := owner.Materialize(withConnectRoutePlanPreview(constructionIndexContext(t, source)), event, plan, map[string]string{"payload.account_id": "acct-1"})
+	if err == nil || !handled || !materialized.Failure.Empty() || decision.Activation != nil || decision.identity != (flowidentity.Instance{}) {
 		t.Fatalf("receipt authority authorized new construction: %+v %+v handled=%t err=%v", materialized, decision, handled, err)
 	}
 }
@@ -149,8 +131,7 @@ func TestA9NestedConnectionSelectionUsesEveryEdgeKeyAndConstructedParent(t *test
 		table.instanceOwners[coordinate] = instance
 	}
 	add(root)
-	receipts := constructionReceiptTestReader{root}
-	var descriptors []pinrouting.Descriptor
+	index := constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, busInternalTestRunID, root, "")}}
 	parents := map[string]flowidentity.Instance{}
 	leaves := map[string]flowidentity.Instance{}
 	for _, parentKey := range []string{"left", "right"} {
@@ -159,7 +140,7 @@ func TestA9NestedConnectionSelectionUsesEveryEdgeKeyAndConstructedParent(t *test
 		if !failure.Empty() {
 			t.Fatal(failure)
 		}
-		parent, err := flowidentity.KeyedChild(source, root, "parent", templateInstanceLifecycleInstanceID(parentPlan, parentMaterial.Keys))
+		parent, err := flowidentity.KeyedChild(source, root, "parent", connectMissingInstanceID(parentPlan, parentMaterial.Keys))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -171,37 +152,40 @@ func TestA9NestedConnectionSelectionUsesEveryEdgeKeyAndConstructedParent(t *test
 		if !failure.Empty() {
 			t.Fatal(failure)
 		}
-		leaf, err := flowidentity.KeyedChild(source, middle, "parent/middle/leaf", templateInstanceLifecycleInstanceID(leafPlan, leafMaterial.Keys))
+		leaf, err := flowidentity.KeyedChild(source, middle, "parent/middle/leaf", connectMissingInstanceID(leafPlan, leafMaterial.Keys))
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, instance := range []flowidentity.Instance{parent, middle, leaf} {
 			add(instance)
-			receipts = append(receipts, instance)
+			key := ""
+			if instance.TemplateID == "parent" {
+				key = parentKey
+			}
+			if instance.TemplateID == "parent/middle/leaf" {
+				key = "same"
+			}
+			index.observations = append(index.observations, constructionIndexObservation(t, source, busInternalTestRunID, instance, key))
 		}
 		parents[parentKey], leaves[parentKey] = parent, leaf
-		descriptors = append(descriptors,
-			pinrouting.Descriptor{EntityID: parent.EntityID, FlowInstance: parent.InstancePath, AddressFields: map[string]string{"entity.id": parentKey}},
-			pinrouting.Descriptor{EntityID: leaf.EntityID, FlowInstance: leaf.InstancePath, AddressFields: map[string]string{"entity.id": "same"}},
-		)
 	}
-	owner := newTemplateInstanceLifecycleOwner(source, table, nil, receipts)
+	owner := connectInstanceSelector{source: source, index: index}
 	for _, parentKey := range []string{"left", "right"} {
 		payload, err := json.Marshal(map[string]any{"parent_key": parentKey, "leaf_key": "same"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		event := eventtest.ExistingRunRootIngress(eventtest.UUID(parentKey), "start", "test", "", payload, 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
-		ctx := withConnectRoutePlanPreview(context.Background())
+		ctx := withConnectRoutePlanPreview(constructionIndexContext(t, source))
 		values := map[string]string{"payload.parent_key": parentKey, "payload.leaf_key": "same"}
-		_, selection, _, err := owner.Materialize(ctx, event, parentPlan, values, descriptors)
+		_, selection, _, err := owner.Materialize(ctx, event, parentPlan, values)
 		if err != nil || selection.identity != parents[parentKey] {
 			t.Fatalf("parent edge selected another key: %+v err=%v", selection, err)
 		}
 		if err := selectConnectionConstruction(ctx, selection.identity); err != nil {
 			t.Fatal(err)
 		}
-		materialized, leaf, _, err := owner.Materialize(ctx, event, leafPlan, values, descriptors)
+		materialized, leaf, _, err := owner.Materialize(ctx, event, leafPlan, values)
 		if err != nil || !materialized.Failure.Empty() || leaf.identity != leaves[parentKey] {
 			t.Fatalf("leaf edge lost selected parent: %+v %+v err=%v", materialized, leaf, err)
 		}
@@ -217,7 +201,7 @@ func TestA9NestedConnectionSelectionUsesEveryEdgeKeyAndConstructedParent(t *test
 		}
 	}
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("no-ancestor"), "start", "test", "", []byte(`{"parent_key":"left","leaf_key":"same"}`), 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
-	if _, _, _, err := owner.Materialize(withConnectRoutePlanPreview(context.Background()), event, leafPlan, map[string]string{"payload.parent_key": "left", "payload.leaf_key": "same"}, descriptors); err == nil {
+	if _, _, _, err := owner.Materialize(withConnectRoutePlanPreview(constructionIndexContext(t, source)), event, leafPlan, map[string]string{"payload.parent_key": "left", "payload.leaf_key": "same"}); err == nil {
 		t.Fatal("sole existing receiver bypassed the missing ancestor edge")
 	}
 }
@@ -263,6 +247,7 @@ func TestA9ConnectionAncestorCandidatesAreResolvedOnlyByDependentPaths(t *testin
 					t.Fatal(err)
 				}
 				store.installConstructionReceipt(coordinate, pipeline.FlowConstructionPublicationEvidence{Identity: instance})
+				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, instance, key))
 				store.flowInstances = append(store.flowInstances, ActiveFlowInstanceDescriptor{
 					Identity: instance, RunID: busInternalTestRunID, InstanceID: instance.InstanceID,
 					EntityID: instance.EntityID, FlowInstance: instance.InstancePath, FlowTemplate: instance.TemplateID,
@@ -341,7 +326,7 @@ func TestA9ConnectionAncestorCandidatesDeduplicateOnlyExactOwners(t *testing.T) 
 	if err := selectConnectionConstruction(ctx, other); err != nil {
 		t.Fatal(err)
 	}
-	owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil)
+	owner := connectInstanceSelector{source: source}
 	actual, err := owner.selectedConstructionChild(ctx, busInternalTestRunID, root, "parent", nil, preview.selected)
 	if err != nil || actual != parent {
 		t.Fatalf("foreign structural parent changed exact selection: %+v %v", actual, err)

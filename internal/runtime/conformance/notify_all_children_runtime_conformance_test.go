@@ -2271,7 +2271,6 @@ func newNotifyAllChildrenRuntime(
 		DecisionCardDraftExpiry: backend,
 		HumanTaskExpiry:         backend,
 		DeliveryRuntime:         eventBus,
-		FlowRoutes:              eventBus,
 		TimerScheduler:          scheduler,
 		GenericSchedules:        genericSchedules,
 		TestEngineEmitNow:       engineNow,

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -211,17 +212,21 @@ func (s *flowInstanceIndexSnapshot) validateDeclaredAbsence(ctx context.Context,
 }
 
 func (s *flowInstanceIndexSnapshot) headers(ctx context.Context, predicate string, args ...any) ([]pipeline.WorkflowInstance, error) {
+	return readFlowInstanceIndexHeaders(ctx, s.tx, s.postgres, predicate, args...)
+}
+
+func readFlowInstanceIndexHeaders(ctx context.Context, tx *sql.Tx, postgres bool, predicate string, args ...any) ([]pipeline.WorkflowInstance, error) {
 	query := sqliteWorkflowInstanceSelect
-	if s.postgres {
+	if postgres {
 		query = postgresWorkflowInstanceSelect
 	}
-	rows, err := s.tx.QueryContext(ctx, query+` WHERE fi.run_id=$1 AND `+predicate, args...)
+	rows, err := tx.QueryContext(ctx, query+` WHERE fi.run_id=$1 AND `+predicate, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var headers []pipeline.WorkflowInstance
-	if s.postgres {
+	if postgres {
 		headers, err = scanPostgresWorkflowInstances(rows)
 	} else {
 		headers, err = scanSQLiteWorkflowInstances(rows)
@@ -233,6 +238,29 @@ func (s *flowInstanceIndexSnapshot) headers(ctx context.Context, predicate strin
 		return nil, err
 	}
 	return headers, nil
+}
+
+func requireFlowInstanceConstructionSelector(ctx context.Context, tx *sql.Tx, postgres bool, record pipeline.FlowInstanceActivationRecord) error {
+	headers, err := readFlowInstanceIndexHeaders(ctx, tx, postgres,
+		`fi.flow_template=$2 AND COALESCE(fi.parent_instance,'')=$3 AND COALESCE(fi.instance_key,'')=$4 LIMIT 2`,
+		record.Identity.RunID, record.WorkflowName, record.State.ParentInstance, record.State.InstanceKey)
+	if err != nil {
+		return err
+	}
+	if len(headers) > 1 {
+		return &pipeline.FlowInstanceConstructionCorruption{RunID: record.Identity.RunID, FlowID: record.WorkflowName, Cause: fmt.Errorf("construction selector has ambiguous occupancy")}
+	}
+	if len(headers) == 0 {
+		return nil
+	}
+	actual := headers[0]
+	if actual.StorageRef != record.Identity.Route.InstancePath || actual.EntityID != record.EntityID {
+		return &pipeline.FlowInstanceActivationConflict{Owner: record.Identity, Cause: failures.New(
+			failures.ClassConflictingDuplicate, "flow_instance_already_exists", "flow-instance-activation", "commit",
+			map[string]any{"flow_instance": actual.StorageRef, "entity_id": actual.EntityID},
+		)}
+	}
+	return nil
 }
 
 func (s *flowInstanceIndexSnapshot) observe(ctx context.Context, request pipeline.FlowInstanceLookupRequest, header pipeline.WorkflowInstance) (pipeline.FlowInstanceObservation, error) {

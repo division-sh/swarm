@@ -179,6 +179,7 @@ func TestFlowAttachmentPhaseFailureRetainsConstructionBothStores(t *testing.T) {
 						routes.sqliteFlowActivationBus = options.PersistenceRoles.AgentRoutes.(*sqliteFlowActivationBus)
 						options.PersistenceRoles.AgentRoutes = routes
 					})
+					f.constructKeylessRoot(t)
 					binding, err := f.grant.ProcessExecutionBinding()
 					if err != nil {
 						t.Fatal(err)
@@ -248,13 +249,16 @@ func TestFlowAttachmentPhaseFailureRetainsConstructionBothStores(t *testing.T) {
 					}
 					acknowledged := disposition == "acknowledged_error"
 					if acknowledged {
-						if row.Phase != pipeline.FlowAttachmentReady || row.AttemptState != "accepted" || len(f.bus.routePaths()) != 1 || len(f.manager.ListAgentConfigs()) != 1 {
-							t.Fatalf("acknowledged progress lost its exact resource owner: %+v routes=%v agents=%v", row, f.bus.routePaths(), f.manager.ListAgentConfigs())
+						if row.Phase != pipeline.FlowAttachmentReady || row.AttemptState != "accepted" || len(f.manager.ListAgentConfigs()) != 1 {
+							t.Fatalf("acknowledged progress lost its exact resource owner: %+v agents=%v", row, f.manager.ListAgentConfigs())
+						}
+						if err := f.workflows.VerifyDynamicFlowRuntimeActivationAttempt(f.ctx, predecessor); err != nil {
+							t.Fatalf("acknowledged attachment lost current attempt: %v", err)
 						}
 						routes.requireOwnedRoutes(t, 1, 0)
 					} else {
-						if row.AttemptState != "aborted" || len(f.bus.routePaths()) != 0 {
-							t.Fatalf("failed progress did not join and abandon predecessor: %+v routes=%v agents=%v", row, f.bus.routePaths(), f.manager.ListAgentConfigs())
+						if row.AttemptState != "aborted" {
+							t.Fatalf("failed progress did not join and abandon predecessor: %+v agents=%v", row, f.manager.ListAgentConfigs())
 						}
 						routes.requireOwnedRoutes(t, 0, 1)
 						waitCtx, cancel := context.WithTimeout(f.ctx, 5*time.Second)
@@ -291,8 +295,8 @@ func TestFlowAttachmentPhaseFailureRetainsConstructionBothStores(t *testing.T) {
 						routes.requireOwnedRoutes(t, 1, 1)
 					}
 					row, found, err = f.store.LoadDynamicFlowRuntimeReadiness(f.ctx, owner.RunID, owner.Route)
-					if err != nil || !found || row.AttemptOrdinal != wantOrdinal || row.Phase != pipeline.FlowAttachmentReady || row.AttemptState != "accepted" || len(f.bus.routePaths()) != 1 || len(f.manager.ListAgentConfigs()) != 1 {
-						t.Fatalf("retry inherited removed progress or lost topology: %+v found=%t err=%v routes=%v agents=%v", row, found, err, f.bus.routePaths(), f.manager.ListAgentConfigs())
+					if err != nil || !found || row.AttemptOrdinal != wantOrdinal || row.Phase != pipeline.FlowAttachmentReady || row.AttemptState != "accepted" || len(f.manager.ListAgentConfigs()) != 1 {
+						t.Fatalf("retry inherited removed progress or lost topology: %+v found=%t err=%v agents=%v", row, found, err, f.manager.ListAgentConfigs())
 					}
 					if !acknowledged {
 						stale, err := f.workflows.AdvanceFlowAttachment(f.ctx, predecessor, pipeline.FlowAttachmentPlanned, time.Now().UTC())

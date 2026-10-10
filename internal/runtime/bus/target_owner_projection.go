@@ -9,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -459,30 +458,6 @@ func (p selectedRunTargetOwnerProjection) validate() error {
 		}
 	}
 	return nil
-}
-
-func (p selectedRunTargetOwnerProjection) pinRoutingDescriptors() ([]runtimepinrouting.Descriptor, error) {
-	out := make([]runtimepinrouting.Descriptor, 0, len(p.descriptors))
-	prospective := p.prospective.Candidate()
-	for _, descriptor := range p.descriptors {
-		descriptor = descriptor.Normalized()
-		if !p.prospective.Empty() && descriptor.FlowInstance == prospective.Route.FlowInstance && descriptor.EntityID == prospective.Route.EntityID {
-			continue
-		}
-		out = append(out, runtimepinrouting.Descriptor{
-			FlowID: descriptor.FlowID,
-			ID:     descriptor.ID, EntityID: descriptor.EntityID, FlowInstance: descriptor.FlowInstance,
-			AddressFields: normalizeDescriptorAddressFields(descriptor.AddressFields),
-		})
-	}
-	if !p.prospective.Empty() {
-		descriptor, err := p.prospective.PinRoutingDescriptor()
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, descriptor)
-	}
-	return out, nil
 }
 
 func (p selectedRunTargetOwnerProjection) resolveSelectedRoute(blueprint events.RouteIdentity) (events.DeliveryTargetOwnership, error) {

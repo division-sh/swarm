@@ -1819,8 +1819,6 @@ func seedSelectedContractExecutionSourceWithEvent(t *testing.T, db *sql.DB, run 
 		}
 		parentCommand.Plan.Children = []runtimepipeline.FlowInstanceActivationPlan{leafCommand.Plan}
 		rootCommand.Plan.Children = append(rootCommand.Plan.Children, parentCommand.Plan)
-		rootCommand.RouteTopology = append(rootCommand.RouteTopology, parentCommand.RouteTopology...)
-		rootCommand.RouteTopology = append(rootCommand.RouteTopology, leafCommand.RouteTopology...)
 	}
 	committed, err := selected.CommitFlowInstanceActivation(ctx, rootCommand)
 	if err != nil || !committed.Acknowledged || !committed.Created {

@@ -131,7 +131,11 @@ func VerifyNativeSingletonCoordinatorPilotPipelineRejectsContainedItemDeliveryTa
 				FlowInstance: singletoncoordinatorpilot.FlowInstance + "/lead-42",
 				EntityID:     uuid.NewString(),
 			}
-			if pc.workflowNodeMatchesDeliveryTarget(pipelineNode(t, singletoncoordinatorpilot.FlowID, singletoncoordinatorpilot.NodeID), runtimecorrelation.RunIDFromContext(ctx), containedTarget) {
+			matched, err := pc.workflowNodeMatchesDeliveryTarget(ctx, pipelineSourceNode(t, pc.SemanticSource(), singletoncoordinatorpilot.FlowID, singletoncoordinatorpilot.NodeID), runtimecorrelation.RunIDFromContext(ctx), containedTarget)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if matched {
 				t.Fatalf("contained item target %#v matched singleton coordinator node; contained map entries must not be route recipients", containedTarget)
 			}
 		})

@@ -39,24 +39,26 @@ import (
 )
 
 type targetRouteMemoryStore struct {
-	mu                sync.Mutex
-	constructions     map[runtimeflowidentity.RunScopedFlowInstance]runtimepipeline.FlowConstructionPublicationEvidence
-	events            map[string]events.Event
-	settlements       map[string]events.RouteSettlement
-	routes            map[string][]events.DeliveryRoute
-	scopes            map[string]runtimepipelineobligation.CommittedScope
-	missing           []events.PersistedReplayEvent
-	receipts          map[string]string
-	receiptErrs       map[string]*runtimefailures.Envelope
-	claimIssuer       *runtimepipelineobligation.ClaimIssuer
-	scanIssuer        *runtimepipelineobligation.ScanIssuer
-	claims            map[string]runtimepipelineobligation.Claim
-	scans             map[string]runtimepipelineobligation.ScanRequest
-	active            map[string]bool
-	flowRoutes        []FlowInstanceRouteRecord
-	targetOwners      []ActiveTargetDescriptor
-	workflowInstances []runtimepipeline.WorkflowInstance
-	workflowStates    []runtimepipeline.WorkflowEntityStatePersistenceRecord
+	mu                      sync.Mutex
+	instanceObservations    []runtimepipeline.FlowInstanceObservation
+	constructionIndexSource semanticview.Source
+	constructions           map[runtimeflowidentity.RunScopedFlowInstance]runtimepipeline.FlowConstructionPublicationEvidence
+	events                  map[string]events.Event
+	settlements             map[string]events.RouteSettlement
+	routes                  map[string][]events.DeliveryRoute
+	scopes                  map[string]runtimepipelineobligation.CommittedScope
+	missing                 []events.PersistedReplayEvent
+	receipts                map[string]string
+	receiptErrs             map[string]*runtimefailures.Envelope
+	claimIssuer             *runtimepipelineobligation.ClaimIssuer
+	scanIssuer              *runtimepipelineobligation.ScanIssuer
+	claims                  map[string]runtimepipelineobligation.Claim
+	scans                   map[string]runtimepipelineobligation.ScanRequest
+	active                  map[string]bool
+	flowRoutes              []FlowInstanceRouteRecord
+	targetOwners            []ActiveTargetDescriptor
+	workflowInstances       []runtimepipeline.WorkflowInstance
+	workflowStates          []runtimepipeline.WorkflowEntityStatePersistenceRecord
 }
 
 func (s *targetRouteMemoryStore) installConstructionReceipt(owner runtimeflowidentity.RunScopedFlowInstance, evidence runtimepipeline.FlowConstructionPublicationEvidence) {
@@ -286,12 +288,10 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 	if _, exists := s.events[event.ID()]; exists {
 		result := CommittedPublication{
 			AppendOutcome: EventAppendExactDuplicate,
-			RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
 		}
 		for _, plan := range command.Activations {
 			result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan, ReadinessAttemptOrdinal: 1})
 		}
-		s.replaceFlowInstanceRouteTopologyLocked(command.RouteTopology)
 		result = result.WithCommitAcknowledgment()
 		return result, result.Validate()
 	}
@@ -311,7 +311,6 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 	}
 	result := CommittedPublication{
 		AppendOutcome: EventAppendInserted,
-		RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
 	}
 	for _, plan := range command.Activations {
 		result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan, Created: true, ReadinessAttemptOrdinal: 1})
@@ -319,13 +318,17 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 			s.constructions = make(map[runtimeflowidentity.RunScopedFlowInstance]runtimepipeline.FlowConstructionPublicationEvidence)
 		}
 		for _, constructor := range plan.ConstructionPlans() {
+			observed, err := admitConstructionIndexTestObservation(s.constructionIndexSource, constructor.Readiness.RunID, constructor.Identity, constructor.Instance.InstanceKey)
+			if err != nil {
+				return CommittedPublication{}, err
+			}
+			s.instanceObservations = append(s.instanceObservations, observed)
 			owner := runtimeflowidentity.RunScopedFlowInstance{RunID: constructor.Readiness.RunID, Route: constructor.Identity.Route()}
 			if _, exists := s.constructions[owner]; !exists {
-				s.constructions[owner] = runtimepipeline.FlowConstructionPublicationEvidence{Identity: constructor.Identity, CreatingInput: constructor.CreatingInput, Fields: constructor.Instance.Fields}
+				s.constructions[owner] = runtimepipeline.FlowConstructionPublicationEvidence{Identity: constructor.Identity, InstanceKey: constructor.Instance.InstanceKey, CreatingInput: constructor.CreatingInput, Fields: constructor.Instance.Fields}
 			}
 		}
 	}
-	s.replaceFlowInstanceRouteTopologyLocked(command.RouteTopology)
 	result = result.WithCommitAcknowledgment()
 	return result, result.Validate()
 }
@@ -1527,11 +1530,11 @@ func nodeOnlyDeliveryPlanner(t testing.TB, nodeID string, eventType events.Event
 	}
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{{
 					Recipient: events.MustNodeDeliveryRecipient(handlerNode), Path: ".", LocalizedEvent: event,
 					handlerNode: handlerNode, targetHandler: handler.ForEvent(eventType),
-				}}
+				}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
 			resolveRoutedNodeInternalRecipients: func(events.Event, []Subscriber) []deliveryRecipientCandidate {
@@ -1587,11 +1590,11 @@ func mixedNodeAgentDeliveryPlanner(t testing.TB, nodeID, agentID string, eventTy
 	}
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{{
 					Recipient: events.MustNodeDeliveryRecipient(handlerNode), LocalizedEvent: event,
 					handlerNode: handlerNode, targetHandler: handler.ForEvent(eventType),
-				}}
+				}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return []deliveryRecipientCandidate{
@@ -1775,11 +1778,11 @@ func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing
 	}
 	eb.deliveryPlanner = newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{
 					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child-a", "child-a-listener")), Path: "child-a/inst-1"},
 					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "child-b", "child-b-listener")), Path: "child-b/inst-1"},
-				}
+				}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
@@ -1854,11 +1857,11 @@ func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *tes
 	}
 	eb.deliveryPlanner = newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
 				return []Subscriber{
 					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Path: "worker/w-001"},
 					{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Path: "worker/w-002"},
-				}
+				}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate {
 				return []deliveryRecipientCandidate{{ID: "workflow-runtime", PersistAsDelivery: false}}
@@ -1917,8 +1920,8 @@ func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *test
 	}
 	eb.deliveryPlanner = newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{
-			resolveRoutedSubscribers: func(events.Event, []string) []Subscriber {
-				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Path: "worker/w-001"}}
+			resolveRoutedSubscribers: func(context.Context, events.Event, []string, ordinaryPublicationSource) ([]Subscriber, error) {
+				return []Subscriber{{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "worker", "task-handler")), Path: "worker/w-001"}}, nil
 			},
 			resolveSubscribedRecipients: func(string) []deliveryRecipientCandidate { return nil },
 			describeSubscribersForEvent: func(string, []Subscriber) []PublishDiagnosticRecipient {
