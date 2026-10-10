@@ -468,12 +468,7 @@ func (rt *Runtime) ValidateStandingIngressCredentials(ctx context.Context) error
 	if err := admission.projection.ValidateCurrent(ctx); err != nil {
 		return err
 	}
-	for _, binding := range admission.bindings {
-		if err := rt.validateStandingSessionBinding(ctx, binding); err != nil {
-			return err
-		}
-	}
-	return nil
+	return rt.validateStandingSessionBindings(ctx, admission.bindings, "")
 }
 
 // Request and readiness consume the same frozen binding; current presence is
@@ -572,9 +567,9 @@ func (rt *Runtime) evaluateStandingIngressAdmission(ctx context.Context, target 
 	return current, validate, nil
 }
 
-// Explicit connect is the only in-process credential-producing activation
-// boundary. Ordinary planning and diagnostic reads retain the frozen decision.
-func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation channelonboarding.Operation, candidate channelonboarding.Candidate) ([]StandingTarget, []StandingActivation, error) {
+// Explicit onboarding promotes one standing responsibility. Native promotion
+// additionally borrows the original SDK admission; readback cannot create it.
+func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation channelonboarding.Operation, candidate channelonboarding.Candidate, session operatorchannel.ProviderAuthority) ([]StandingTarget, []StandingActivation, error) {
 	if rt == nil || rt.Options.ChannelOnboardingStore == nil || rt.Options.WorkflowModule == nil {
 		return nil, nil, fmt.Errorf("channel target promotion requires runtime and selected onboarding owner")
 	}
@@ -585,10 +580,8 @@ func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation cha
 	if err != nil {
 		return nil, nil, err
 	}
-	admittedPhase := current.Phase == channelonboarding.PhaseCredentialsAdmitted && current.Posture == channelonboarding.ActivationWebhookRegistration ||
-		current.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation && current.Posture == channelonboarding.ActivationSessionConnection && current.BindingRevision > 0
-	if !admittedPhase || current.Revision != operation.Revision || !current.Coordinate.MatchesDeclaration(candidate.Coordinate) || current.TargetSelector != candidate.Target.Selector || current.Coordinate.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {
-		return nil, nil, fmt.Errorf("%w: channel target promotion has no exact admitted credential responsibility", channelonboarding.ErrRevisionConflict)
+	if err := rt.requireStandingChannelTargetAdmission(current, operation.Revision, candidate, session); err != nil {
+		return nil, nil, err
 	}
 	if err := rt.refreshStandingCredentialAdmission(ctx, candidate.Target.Selector); err != nil {
 		return nil, nil, err
@@ -623,6 +616,20 @@ func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation cha
 		return nil, nil, fmt.Errorf("channel target %s has no executable standing owner; inspect standing service %s", candidate.Target.Selector, candidate.Target.ServiceID)
 	}
 	return targets, activations, nil
+}
+
+func (rt *Runtime) requireStandingChannelTargetAdmission(current channelonboarding.Operation, revision int64, candidate channelonboarding.Candidate, session operatorchannel.ProviderAuthority) error {
+	admittedPhase := current.Phase == channelonboarding.PhaseCredentialsAdmitted && current.Posture == channelonboarding.ActivationWebhookRegistration ||
+		current.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation && current.Posture == channelonboarding.ActivationSessionConnection && current.BindingRevision > 0
+	if !admittedPhase || current.Revision != revision || current.Posture != candidate.Posture || current.Provider != candidate.Provider ||
+		current.Interface.Normalized() != candidate.Interface.Normalized() || current.Ceremony != candidate.Ceremony ||
+		!current.Coordinate.MatchesDeclaration(candidate.Coordinate) || current.TargetSelector != candidate.Target.Selector || current.Coordinate.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {
+		return fmt.Errorf("%w: channel target promotion has no exact admitted responsibility", channelonboarding.ErrRevisionConflict)
+	}
+	if current.Posture == channelonboarding.ActivationSessionConnection {
+		return channelonboarding.RequireSessionStandingAdmission(current, session)
+	}
+	return nil
 }
 
 func (rt *Runtime) projectCommittedStandingTargets(planned []StandingTarget, current runtimepipeline.StandingServiceReconciliation) ([]StandingTarget, []StandingActivation, error) {
@@ -665,12 +672,8 @@ func (rt *Runtime) refreshStandingCredentialAdmission(ctx context.Context, selec
 		if err := frozen.projection.ValidateCurrentKeys(ctx, siblingKeys); err != nil {
 			return fmt.Errorf("channel target admission cannot refresh sibling authority: %w", err)
 		}
-		for selector, binding := range frozen.bindings {
-			if selector != selected {
-				if err := rt.validateStandingSessionBinding(ctx, binding); err != nil {
-					return fmt.Errorf("channel target admission cannot refresh sibling session authority: %w", err)
-				}
-			}
+		if err := rt.validateStandingSessionBindings(ctx, frozen.bindings, selected); err != nil {
+			return fmt.Errorf("channel target admission cannot refresh sibling session authority: %w", err)
 		}
 	}
 	admission, err := rt.observeStandingCredentials(ctx)

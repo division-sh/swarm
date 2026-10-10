@@ -3,6 +3,7 @@ package channelonboarding
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -19,6 +20,21 @@ type AdmissionResponsibility struct {
 	Provider           string
 	Credentials        []CredentialAdmission
 	SessionAccount     operatorchannel.SessionAccountAdmission
+}
+
+// Fresh target promotion borrows the original SDK admission. Confirmed durable
+// responsibility separately owns retention, including while disconnected.
+func RequireSessionStandingAdmission(op Operation, session operatorchannel.ProviderAuthority) error {
+	if op.Posture != ActivationSessionConnection || op.Phase != PhaseAwaitingOperatorConfirmation ||
+		op.BindingRevision < 1 || op.ValidateSessionAccount() != nil {
+		return fmt.Errorf("%w: native standing promotion requires confirmed session responsibility", ErrRevisionConflict)
+	}
+	parent, revision := session.SessionParent()
+	expected := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: op.SessionAccount}
+	if parent != op.OperationID || revision != op.Revision || session.RequireExecutableFor(expected) != nil {
+		return fmt.Errorf("%w: native standing promotion requires the original held SDK admission", ErrRevisionConflict)
+	}
+	return nil
 }
 
 // RetainedSessionCurrent admits restoration for a completed native operation's

@@ -516,11 +516,18 @@ func (r *serveChannelActivationRefresher) AdmitChannelTarget(ctx context.Context
 	if r == nil || r.manager == nil {
 		return channelonboarding.Candidate{}, fmt.Errorf("channel target admission requires runtime context ownership")
 	}
+	if op.Posture != candidate.Posture || op.Provider != candidate.Provider || op.Interface.Normalized() != candidate.Interface.Normalized() {
+		return channelonboarding.Candidate{}, channelonboarding.ErrRevisionConflict
+	}
+	var provider operatorchannel.ProviderAuthority
 	if op.Posture == channelonboarding.ActivationSessionConnection {
 		if r.sessions == nil {
 			return channelonboarding.Candidate{}, &operatorchannel.SessionProviderUnavailableError{Provider: op.Provider}
 		}
-		provider, observed, current, err := r.sessions.ObserveSession(ctx, op)
+		var observed operatorchannel.SessionConnectionObservation
+		var current bool
+		var err error
+		provider, observed, current, err = r.sessions.ObserveSession(ctx, op)
 		defer provider.CloseExecution()
 		parentID, revision := provider.SessionParent()
 		if err != nil || !current || observed.Validate() != nil || !observed.Connected || observed.Admission != op.SessionAccount ||
@@ -528,7 +535,7 @@ func (r *serveChannelActivationRefresher) AdmitChannelTarget(ctx context.Context
 			return channelonboarding.Candidate{}, errors.Join(channelonboarding.ErrRevisionConflict, err)
 		}
 	}
-	if err := r.manager.AdmitChannelStandingTarget(ctx, op, candidate, r.testBarrier); err != nil {
+	if err := r.manager.AdmitChannelStandingTarget(ctx, op, candidate, provider, r.testBarrier); err != nil {
 		return channelonboarding.Candidate{}, err
 	}
 	catalog, err := serveChannelOnboardingCatalog(r.manager)

@@ -32,6 +32,7 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/cliapp/verify_deployment_workspace.go", "A15,A16,A17", "P13,P14,P15"},
 	{"internal/cliapp/verify_deployment_store.go", "A10,A19,A20,A21,A22,A23,A24,A27", "P08,P17,P18,P19,P20,P21,P27,P28"},
 	{"internal/channelonboarding/retained_inspection.go", "A10,A27", "P08,P10,P21"},
+	{"internal/channelonboarding/admission_current.go", "A10,A27", "2577-native-confirmed-retention,2577-native-held-target,P08,P10,P21"},
 	{"internal/channelonboarding/teardown.go", "A10,A27", "P08,P10,P21"},
 	{"internal/serveapp/channel_onboarding.go", "A10,A27", "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement"},
 	{"internal/serveapp/channel_session_bootstrap.go", "A10,A27", "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement"},

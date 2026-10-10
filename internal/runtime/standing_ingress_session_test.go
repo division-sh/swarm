@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -142,5 +144,33 @@ func TestStandingSessionFrozenBindingDoesNotAdoptReplacement(t *testing.T) {
 	stop()
 	if err := rt.ValidateStandingIngressCredentials(canceled); !errors.Is(err, context.Canceled) {
 		t.Fatal("canceled selected observation granted admission", err)
+	}
+}
+
+func TestStandingNativeTargetRejectsReconstructedAuthorityBeforePlanning(t *testing.T) {
+	rt, store := standingSessionRuntimeFixture(t)
+	plan := rt.Options.ChannelPlans[0]
+	profile, found := plan.OnboardingProfile()
+	if !found {
+		t.Fatal("admitted native plan has no onboarding owner")
+	}
+	op := store.operations[0]
+	op.Coordinate.BundleIdentity = "native-standing-refusal"
+	op.Coordinate.RuntimeInstanceID, op.Coordinate.ContextPublicationGeneration = uuid.NewString(), 1
+	op.Ceremony = channelonboarding.IdentityCeremony(profile.IdentityCeremony())
+	op.SessionConnectionID = uuid.NewString()
+	op.SessionAccount = operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: op.SessionConnectionID,
+		AccountRef: "15551234567@s.whatsapp.net", AdmissionID: uuid.NewString(), Revision: 1}
+	store.operations[0] = op
+	candidate := channelonboarding.Candidate{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate,
+		Plan: plan, Posture: op.Posture, Ceremony: op.Ceremony, ConfirmationOperation: profile.ConfirmationOperation(),
+		ConnectionHealth: profile.ConnectionHealth(), Target: channelonboarding.CandidateTarget{Selector: op.TargetSelector,
+			ServiceID: runtimeflowidentity.StandingServiceID("."), FlowPath: ".", Alias: "reception", Provider: op.Provider,
+			AdmissionGeneration: rt.Options.ProviderTriggerCatalog.Generation()}}
+	for _, authority := range []operatorchannel.ProviderAuthority{{}, {Kind: operatorchannel.ProviderAuthoritySession, Session: op.SessionAccount}} {
+		if _, _, err := rt.AdmitChannelStandingTarget(context.Background(), op, candidate, authority); err == nil ||
+			!strings.Contains(err.Error(), "original held SDK admission") || store.checks != 0 || rt.standingCredentialAdmission != nil {
+			t.Fatal("reconstructed authority reached planning or durable target mutation", err, store.checks)
+		}
 	}
 }

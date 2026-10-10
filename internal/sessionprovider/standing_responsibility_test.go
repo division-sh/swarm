@@ -4,10 +4,12 @@ package sessionprovider
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/google/uuid"
 )
 
@@ -37,6 +39,34 @@ func TestWhatsAppStandingResponsibilityRequiresRealConfirmationBothStores(t *tes
 			}
 			if current, err := f.selected.SessionStandingBindingCurrent(f.ctx, f.operation); err != nil || !current || f.operation.Coordinate.TargetGeneration != 0 {
 				t.Fatal("confirmed runless responsibility was not admitted", current, err)
+			}
+			structural := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: f.operation.SessionAccount}
+			if err := channelonboarding.RequireSessionStandingAdmission(f.operation, structural); !errors.Is(err, channelonboarding.ErrRevisionConflict) {
+				t.Fatal("durable account record granted fresh native target admission", err)
+			}
+			native, current, err := structural.AdmitExecution(f.ctx, f.authority)
+			if err != nil || !current {
+				native.CloseExecution()
+				t.Fatal("original SDK did not admit its confirmed native account", current, err)
+			}
+			if err := channelonboarding.RequireSessionStandingAdmission(f.operation, native); err != nil {
+				native.CloseExecution()
+				t.Fatal("fresh target guard lost genuine held native authority", err)
+			}
+			foreign := f.operation
+			foreign.Revision++
+			if err := channelonboarding.RequireSessionStandingAdmission(foreign, native); !errors.Is(err, channelonboarding.ErrRevisionConflict) {
+				native.CloseExecution()
+				t.Fatal("held native authority adopted another parent revision", err)
+			}
+			native.CloseExecution()
+			if err := channelonboarding.RequireSessionStandingAdmission(f.operation, native); !errors.Is(err, channelonboarding.ErrRevisionConflict) {
+				t.Fatal("released SDK admission still promoted a native target", err)
+			}
+			canceled, stop := context.WithCancel(f.ctx)
+			stop()
+			if current, err := f.selected.SessionStandingBindingCurrent(canceled, f.operation); current || !errors.Is(err, context.Canceled) {
+				t.Fatal("canceled selected observation granted standing responsibility", current, err)
 			}
 			for _, row := range []struct {
 				name string
