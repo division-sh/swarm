@@ -254,6 +254,7 @@ type CommitCommand struct {
 	OperatorChannelAction *operatorchannel.InboundAction
 	OperatorChannelText   *operatorchannel.InboundText
 	PotentialBareText     *operatorchannel.InboundText
+	operator              *operatorCommitProof
 }
 
 // PublicationSequence projects the sealed current native occurrence separately
@@ -351,6 +352,9 @@ func (c CommitCommand) Validate() error {
 		}
 	}
 	if len(c.Finalization.Events) == 0 {
+		if err := c.validateOperatorProof(); err != nil {
+			return err
+		}
 		switch {
 		case c.OperatorChannelClaim != nil:
 			if err := c.OperatorChannelClaim.Validate(); err != nil {
@@ -378,6 +382,8 @@ func (c CommitCommand) Validate() error {
 		}
 	} else if operatorKinds != 0 {
 		return fmt.Errorf("operator channel publication must contain zero business events")
+	} else if c.operator != nil {
+		return fmt.Errorf("operator projection cannot authorize business events")
 	}
 	if len(c.Publications) != len(c.Finalization.Events) {
 		return fmt.Errorf("inbound publication event and publication command counts differ")

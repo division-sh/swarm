@@ -18,15 +18,15 @@ normalized_events:
       ephemeral: {from: ephemeral, schema: {type: boolean}}
       reply_to_message_reference: {from: reply_to_message_reference, optional: true, schema: {type: string, minLength: 1}}
       entry_invocation:
-        from: entry_invocation
+        from: text
+        convert: {pattern: '^/(?P<reference>inbox)$'}
         optional: true
         schema:
           type: object
           additionalProperties: false
           required: [reference]
           properties:
-            reference: {type: string, minLength: 1, maxLength: 32}
-            address: {type: string, minLength: 5, maxLength: 32}
+            reference: {type: string, enum: [inbox], minLength: 1, maxLength: 32}
   - event: inbound.whatsapp.edit
     when: {equals: {kind: edit}, exists: [text, target_message_reference]}
     author_subject: {type: chat, field: conversation_reference}

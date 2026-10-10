@@ -440,11 +440,11 @@ func ProjectReadiness(f ReadinessFacts) ConnectedChannelReadiness {
 	if !f.ConfirmationTerminalSuccess || f.ConfirmationActivationRevision != f.ActivationRevision || f.ConfirmationBindingRevision != f.BindingRevision {
 		return fail(ReadinessConfirmationUnavailable)
 	}
+	if f.TargetGeneration == 0 || f.TargetGeneration != f.ExpectedTargetGeneration || f.TargetGeneration != f.Coordinate.TargetGeneration {
+		return fail(ReadinessTargetUnavailable)
+	}
 	switch f.Posture {
 	case ActivationWebhookRegistration:
-		if f.TargetGeneration == 0 || f.TargetGeneration != f.ExpectedTargetGeneration || f.TargetGeneration != f.Coordinate.TargetGeneration {
-			return fail(ReadinessTargetUnavailable)
-		}
 		if strings.TrimSpace(f.ExposureGeneration) == "" || f.ExposureGeneration != f.ExpectedExposureGeneration {
 			return fail(ReadinessExposureUnavailable)
 		}

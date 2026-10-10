@@ -47,6 +47,7 @@ type serveChannelDeliveryDispatcher struct {
 	httpClient        *http.Client
 	// Immutable per-connection execution handles, keyed by the reserved onboarding operation.
 	sessionChannelWrites map[string]sessionexecution.Channel
+	sessions             serveSessionBootstrapOwner
 	now                  func() time.Time
 }
 

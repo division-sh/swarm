@@ -725,16 +725,7 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 func (o *serveConnectedChannelReadiness) observeSessionReadiness(ctx context.Context, op channelonboarding.Operation,
 	activation channelonboarding.ConnectedChannelActivation, facts *channelonboarding.ReadinessFacts,
 ) (bool, error) {
-	if o.sessions == nil {
-		return false, nil
-	}
-	if activation.OperationID != op.OperationID || activation.PrincipalID != op.PrincipalID ||
-		activation.Posture != op.Posture || activation.Provider != op.Provider || activation.Interface.Normalized() != op.Interface.Normalized() ||
-		activation.Revision != op.ActivationRevision || activation.BindingRevision != op.BindingRevision ||
-		activation.SessionAccount != op.SessionAccount || !activation.Coordinate.Matches(op.Coordinate) {
-		return false, channelonboarding.ErrRevisionConflict
-	}
-	provider, observed, current, err := o.sessions.ObserveSession(ctx, op)
+	provider, observed, current, err := observeServeChannelSession(ctx, o.sessions, op, activation)
 	if err != nil || !current {
 		return false, err
 	}

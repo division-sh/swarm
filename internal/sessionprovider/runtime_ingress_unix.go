@@ -60,7 +60,7 @@ func newRuntimeIncoming(c *RuntimeConnection, opts RuntimeIncomingOptions) (*run
 	}
 	store := c.store.(runtimeIncomingStore) // checked before opening provider state
 	return &runtimeIncoming{connection: c, store: store, handoff: &sessionBusinessHandoff{
-		input: input, trigger: opts.Trigger, alias: opts.Alias, bus: opts.Bus, store: store, posture: opts.Posture}}, nil
+		input: input, trigger: opts.Trigger, alias: opts.Alias, bus: opts.Bus, store: store, posture: opts.Posture, channel: c.plan}}, nil
 }
 
 func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {

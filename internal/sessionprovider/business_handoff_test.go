@@ -24,7 +24,7 @@ import (
 func (f *activeInputFixture) businessHandoff(t *testing.T) *sessionBusinessHandoff {
 	t.Helper()
 	return &sessionBusinessHandoff{input: f.owner, trigger: f.trigger, alias: "whatsapp", bus: f.publicationBus(t),
-		store: f.selected.(sessionBusinessStore), posture: executionposture.Live}
+		store: f.selected.(sessionBusinessStore), posture: executionposture.Live, channel: f.channel}
 }
 
 // Reopen the same provider-owned directory, then use the ordinary selected
@@ -145,7 +145,7 @@ func TestWhatsAppNativeBusinessHandoffRestartBothStores(t *testing.T) {
 				var frozen []byte
 				if phase == "staged" {
 					eventBus := f.publicationBus(t)
-					prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live)
+					prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live, f.channel)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -211,7 +211,7 @@ func TestWhatsAppRecoveredBusinessPublicationOccurrenceFenceBothStores(t *testin
 			f.activate(t)
 			event, admitted := f.receive(t, "unfinished native message")
 			handoff := f.businessHandoff(t)
-			original, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", handoff.bus, handoff.store, handoff.posture)
+			original, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", handoff.bus, handoff.store, handoff.posture, f.channel)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -235,7 +235,7 @@ func TestWhatsAppRecoveredBusinessPublicationOccurrenceFenceBothStores(t *testin
 				t.Fatal(err)
 			}
 			t.Cleanup(recovered.Close)
-			prepared, err := prepareSessionBusinessPublication(f.ctx, recovered, f.trigger, "whatsapp", handoff.bus, handoff.store, handoff.posture)
+			prepared, err := prepareSessionBusinessPublication(f.ctx, recovered, f.trigger, "whatsapp", handoff.bus, handoff.store, handoff.posture, f.channel)
 			if err != nil {
 				recovered.Close()
 				t.Fatal(err)
@@ -282,7 +282,7 @@ func TestWhatsAppRecoveredBusinessRequestMutationBothStores(t *testing.T) {
 				f.activate(t)
 				event, admitted := f.receive(t, "unfinished native message")
 				handoff := f.businessHandoff(t)
-				original, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", handoff.bus, handoff.store, handoff.posture)
+				original, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", handoff.bus, handoff.store, handoff.posture, f.channel)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -305,7 +305,7 @@ func TestWhatsAppRecoveredBusinessRequestMutationBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer recovered.Close()
-				prepared, err := prepareSessionBusinessPublication(f.ctx, recovered, f.trigger, "whatsapp", handoff.bus, handoff.store, handoff.posture)
+				prepared, err := prepareSessionBusinessPublication(f.ctx, recovered, f.trigger, "whatsapp", handoff.bus, handoff.store, handoff.posture, f.channel)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -354,7 +354,7 @@ func TestWhatsAppRecoveredBusinessStandingRefusalsBothStores(t *testing.T) {
 				f.activate(t)
 				event, admitted := f.receive(t, "unfinished native message")
 				handoff := f.businessHandoff(t)
-				prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", handoff.bus, handoff.store, handoff.posture)
+				prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", handoff.bus, handoff.store, handoff.posture, f.channel)
 				if err != nil {
 					t.Fatal(err)
 				}

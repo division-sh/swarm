@@ -2544,6 +2544,108 @@
     "body_sha256": "3e166a7acbdbf61aba966ef790ec25a9d133caf9de4ff94ef5a205f51365165c"
   },
   {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.admitInboxEntryTransport",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "d23ef0e4998fcab8f0a2b9ad7e5966ad53441e7c20a208e7d34b49f2baa39e92"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.installNativeInboxCommands",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "3c23809d65911bd8d9ae8699f7d8cfa3894626e0c783700b69747dcce1e1f2b9"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.qualifyInstalledInboxEntry",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "18affd60047e505836ad78d906bda493dde4e9acc1a3a09cd3ec445e6e1e5795"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.qualifyNativeInboxActivation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "119d77c7b40da7620eef3e4754f0f212c01259aa0205a79b65736af71c334609"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.qualifyResolvedNativeEntry",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "fc866380cf67a6cfe1eb3ff5fed8e2156358923282951d6208ad881e522a93c1"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.qualifyTextReplyInboxEntry",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "979d05f59d39d03bf2afd6dcba6e35bc216999ce578d36c150d9e222f4a5fa6c"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.readNativeInboxAddress",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "b460aa6dd9a8d2c5f4ce9a5c32a56fd98c1c814555736e921b0440b1b92be576"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.readNativeInboxCommands",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "16437f7a9bff2aebc11b1cbf296d237c0357fbc2473477d9816804f90840d869"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.readNativeInboxLanguageCommands",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "018cc6170e8e0a2209806e3a936cd0815ce81425f5059162bc0b9ab65c958c06"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.readNativeInboxLauncher",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "4eb7464206056621bbf4bdb3664e58a98aafc0982e7cd791aabf20776adbfa67"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.readNativeInboxQualification",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "516db1ba1e8e718a8720273f1483da7a12f129d82f52e58e23792297895edc7f"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.reconcileNativeInboxActivation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "1bc05ed28e9b836aef9105f879880bf03c381355ceae4ee20a4ba7eb13bd3a2c"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.reconcileNativeInboxSettings",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "f943993dfc7352c0c90e37d321b5f2af2a12d6c6c791ef811a00d47b73fcc09a"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.recordNativeQualification",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "fc80661c3a27bf252053f37c83e52f62d56ac5625fa51c71a7aedab1028b9ab7"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.resolveInboxEntry",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "60387471ae10ae2f25d32ef5af754a88bcfdd768479c5cac3500947dbe32f107"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::nativeInboxInput",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "cc53c740a90f76917712fac7960a676c4687f7c2604b9fa3893bfd6cc442654c"
+  },
+  {
+    "owner": "internal/serveapp/channel_native.go::nativeInboxOperation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-inbox",
+    "body_sha256": "73151630d4137b8b814c4dee691c8fc7b15c67ba3b360c4dd8241998c3de3baa"
+  },
+  {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelActivationRefresher.AdmitChannelTarget",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness",
@@ -2613,7 +2715,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.observeSessionReadiness",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness",
-    "body_sha256": "3b63cb9f94df1d8b8217de7bba0d0d5e91175253c78a8b14af988017f58e385c"
+    "body_sha256": "c6cafdd4bef9e4715800ba9575a8d82291e9f0da7070baa3f2ebc0cd1f9ede7f"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.observedAt",
@@ -2764,6 +2866,36 @@
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness",
     "body_sha256": "3f88247333a34e264493f5f6b49d4ce532ea7164067ca21c634d50f9b1ad5bd9"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap.go::observeServeChannelSession",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox",
+    "body_sha256": "0237f01ae8a93b182a5ccd243ca7782bdf18963d1c5344e1ea8bf16eacfee9cf"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap.go::serveSessionBootstrapRuntimeSelector",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox",
+    "body_sha256": "809e98603cd3a17b74c91746c5f0cf7dafacab359b8c86447f08b730a7c85f5b"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap.go::serveSessionIncomingSelection",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox",
+    "body_sha256": "e694fb34b1e291429a663bb049618dace98c504434de1b8aa751f40afbacbf8a"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap.go::unavailableServeSessionBootstrap",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox",
+    "body_sha256": "79c42f64d96dca6d59a4d4ca1b1a2b56eb3330d3cc85356204693051cf090e1f"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap.go::validateServeSessionCandidate",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox",
+    "body_sha256": "cb7a38ee9dd5598af74170c4f1a4990abe93a20051e77dd24638511c94214d83"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.AdmitSessionAccount",
@@ -2973,7 +3105,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "8d40b2d0304bf20dbd2acbfd641351241269c2a45bea7f046cab265e4523ccd7"
+    "body_sha256": "bdb36abfec2efefcdb2bfa9ff1c5181f384c159c3bad0b1fd3c804a40aba188e"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",

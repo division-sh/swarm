@@ -29,6 +29,11 @@ type inboundPublicationTransactionStore interface {
 }
 
 func commitOperatorChannelIntentsTx(ctx context.Context, tx *sql.Tx, eventStore eventCommitTxStore, command runtimeinbound.CommitCommand, request runtimeinbound.Request) error {
+	if command.OperatorChannelClaim != nil || command.OperatorChannelAction != nil || command.OperatorChannelText != nil {
+		if err := command.RequireOperatorAdmission(ctx); err != nil {
+			return err
+		}
+	}
 	if command.OperatorChannelAction != nil {
 		_, postgres := any(eventStore).(*EventPostgresOwner)
 		if err := storechanneldelivery.InsertActionIntentTx(ctx, tx, *command.OperatorChannelAction, request.OriginalReceivedAt, postgres); err != nil {

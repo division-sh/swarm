@@ -41,13 +41,13 @@ func TestWhatsAppBusinessReconstructionAuthorityMatrixBothStores(t *testing.T) {
 				f.activate(t)
 				eventBus := f.publicationBus(t)
 				_, admitted := f.receive(t, "original sealed content")
-				prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live)
+				prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live, f.channel)
 				if err != nil {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() { _ = eventBus.AbandonInboundDeliveryPlan(context.Background(), prepared.plan) })
 				_, otherInput := f.receive(t, "different sealed content")
-				other, err := prepareSessionBusinessPublication(f.ctx, otherInput, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live)
+				other, err := prepareSessionBusinessPublication(f.ctx, otherInput, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live, f.channel)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -124,7 +124,7 @@ func TestWhatsAppBusinessCommandReconstructionCannotDropFenceBothStores(t *testi
 				f.activate(t)
 				eventBus := f.publicationBus(t)
 				_, admitted := f.receive(t, "must remain native")
-				prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live)
+				prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", eventBus, f.selected.(sessionBusinessStore), executionposture.Live, f.channel)
 				if err != nil {
 					t.Fatal(err)
 				}

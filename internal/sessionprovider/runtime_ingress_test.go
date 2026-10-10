@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -95,6 +96,51 @@ func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *test
 				t.Fatal("runtime publication retained completed capture", len(rows), err)
 			}
 			assertRuntimeIncomingSetupReceipt(t, f)
+		})
+	}
+}
+
+func TestWhatsAppRuntimeIncomingOperatorIntentAckAndRestartBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newActiveInputFixture(t, backend)
+			f.activate(t)
+			c := openRuntimeIncomingFixture(t, f)
+			connectRuntimeConnectionFixture(t, f, c)
+			id, at := uuid.NewString(), time.Now()
+			content := &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: proto.String("Open inbox"),
+				ContextInfo: &waE2E.ContextInfo{StanzaID: proto.String("summary-delivery"), QuotedMessage: &waE2E.Message{Conversation: proto.String("summary")}}}}
+			sendRuntimeIncomingContentFixture(t, f, c, id, content, at)
+			waitRuntimeIncomingReceipt(t, f, c, id)
+			identity := runtimeIncomingIdentityFixture(t, f, id)
+			record, found, err := f.selected.(sessionBusinessStore).LoadInboundPublicationByIdentity(f.ctx, identity)
+			if err != nil || !found || record.OutputCount != 0 || len(record.Events) != 0 {
+				t.Fatal("SDK operator acknowledgment preceded its zero-business-event commit", found, record, err)
+			}
+			if pending, err := c.captures.pending(f.ctx); err != nil || len(pending) != 0 {
+				t.Fatal("committed operator capture was not retired through its receipt", pending, err)
+			}
+			if err := c.Close(f.ctx); err != nil {
+				t.Fatal(err)
+			}
+			f.republishBusinessStanding(t)
+			f.peer = newSDKPeer(t)
+			reopened := openRuntimeIncomingFixture(t, f)
+			connectRuntimeConnectionFixture(t, f, reopened)
+			sendRuntimeIncomingContentFixture(t, f, reopened, id, content, at)
+			waitRuntimeIncomingReceipt(t, f, reopened, id)
+			repeated, found, err := f.selected.(sessionBusinessStore).LoadInboundPublicationByIdentity(f.ctx, identity)
+			if err != nil || !found || repeated.Request.RequestFingerprint != record.Request.RequestFingerprint ||
+				repeated.Request.ExpectedPublicationSequence != record.Request.ExpectedPublicationSequence || repeated.OutputCount != 0 {
+				t.Fatal("redelivery adopted the successor sequence or changed operator evidence", repeated, err)
+			}
+			texts, err := f.selected.(channeldelivery.Store).ListPendingChannelTexts(f.ctx, "", 10)
+			if err != nil || len(texts) != 1 || texts[0].Fact.ReplyToReference != "summary-delivery" || texts[0].Fact.Text != "Open inbox" {
+				t.Fatal("restart duplicated or changed the operator intent", texts, err)
+			}
+			if pending, err := reopened.captures.pending(f.ctx); err != nil || len(pending) != 0 {
+				t.Fatal("historical operator redelivery did not reconcile before staging", pending, err)
+			}
 		})
 	}
 }
@@ -267,7 +313,7 @@ func TestWhatsAppRuntimeIncomingRecoversOriginalRequestBothStores(t *testing.T) 
 				var frozen []byte
 				if phase != "captured" {
 					h := f.businessHandoff(t)
-					prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", h.bus, h.store, h.posture)
+					prepared, err := prepareSessionBusinessPublication(f.ctx, admitted, f.trigger, "whatsapp", h.bus, h.store, h.posture, f.channel)
 					if err != nil {
 						t.Fatal(err)
 					}
