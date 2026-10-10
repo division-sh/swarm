@@ -211,8 +211,8 @@ func withWorkflowTimerReadbackAttempt(t *testing.T, check func(context.Context, 
 	mock.ExpectBegin()
 	for _, count := range transferReads {
 		for i := 0; i < count; i++ {
-			mock.ExpectQuery(`SELECT accumulator FROM flow_instances WHERE run_id=\$1`).WithArgs(workflowTimerProjectionChildRun).
-				WillReturnRows(sqlmock.NewRows([]string{"accumulator"}))
+			mock.ExpectQuery(`SELECT CAST\(entity_id AS TEXT\), instance_path, flow_template, accumulator FROM flow_instances WHERE run_id=\$1`).WithArgs(workflowTimerProjectionChildRun).
+				WillReturnRows(sqlmock.NewRows([]string{"entity_id", "instance_path", "flow_template", "accumulator"}))
 		}
 	}
 	mock.ExpectRollback()

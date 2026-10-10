@@ -21048,7 +21048,11 @@ run_model:
         delivery when published. Before publication the fact does not invent event membership or discharge the
         existing publication-continuation capability blocker. This distinction survives
         settlement, restart and further forks through complete inventory, native accumulator readback and preparation
-        certificates. Further continuation requires the exact historical unfinished delivery; provenance alone grants
+        certificates. Native readback binds each transferred reference to the containing canonical instance header''s
+        exact entity, instance path and flow template through the stage-entry identity owner before inventory
+        comparison. A retained historical stage need not equal the header''s later current stage or revision.
+        Self-consistent transfer coordinates beneath a different physical owner fail closed. Further continuation
+        requires the exact historical unfinished delivery; provenance alone grants
         neither execution nor rearm. Event history retains the same complete selected-lineage owner relation as live
         readback, including duplicate-owner rejection. No additional timer or history family is created.
         Current selected authority still gates publication, original event/lineage readback precedes duplicate
