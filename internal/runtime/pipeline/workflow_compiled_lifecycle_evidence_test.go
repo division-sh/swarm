@@ -426,7 +426,20 @@ func VerifyNativePipelineCompiledJoinTransitionEvidenceOnBothStoresForTest(t *te
 					schedule = h.armInitial()
 				}
 				schedules := []runtimegenericschedule.Activation{schedule}
-				beforeHistory := len(h.instance().TransitionHistory)
+				before := h.instance()
+				wantPriorRecords := 0
+				if outcome == "loop timeout" {
+					wantPriorRecords = 1
+				}
+				if before.CurrentState != "awaiting" || len(before.TransitionHistory) != wantPriorRecords {
+					t.Fatalf("join precondition = state:%s evidence:%#v", before.CurrentState, before.TransitionHistory)
+				}
+				if outcome == "loop timeout" {
+					prior, ok := before.TransitionHistory[0].Evidence.Compiled()
+					if !ok || prior.Edge().From != "dispatching" || prior.Edge().To != "awaiting" || prior.Edge().LoopID != "revision" || prior.Edge().LoopOperation != runtimecontracts.LoopOperationStart {
+						t.Fatalf("native loop start lost its admitted transition: %#v", before.TransitionHistory[0])
+					}
+				}
 
 				event := workflowJoinScheduleEventForTest(t, uuid.NewString(), schedules[0], runtimecorrelation.RunIDFromContext(ctx), h.envelope(), time.Now().UTC())
 				wantStage, wantContext := "ready", handlerselection.ContextJoinComplete
@@ -459,10 +472,11 @@ func VerifyNativePipelineCompiledJoinTransitionEvidenceOnBothStoresForTest(t *te
 					}
 				}
 				loaded, found, err := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, route.InstancePath))
-				if err != nil || !found || loaded.CurrentState != wantStage || len(loaded.TransitionHistory) != beforeHistory+1 {
+				// The persisted header retains current evidence, not cumulative history.
+				if err != nil || !found || loaded.CurrentState != wantStage || len(loaded.TransitionHistory) != 1 || loaded.Revision <= before.Revision {
 					t.Fatalf("join lifecycle = %s, %#v, %v", loaded.CurrentState, loaded.TransitionHistory, err)
 				}
-				record := loaded.TransitionHistory[beforeHistory]
+				record := loaded.TransitionHistory[0]
 				compiled, ok := record.Evidence.Compiled()
 				if !ok || compiled.FlowID() != "orders" || compiled.Edge().HandlerEvent != "item.completed" || !compiled.Edge().Node.Equal(mustPipelineNode("orders", "join-node")) || record.Evidence.RuleSelection().Context() != wantContext || !record.Evidence.RuleSelection().Ref().Equal(compiled.Edge().RuleRef) || record.TriggerEventID != event.ID() {
 					t.Fatalf("join evidence = %#v", record)
