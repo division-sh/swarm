@@ -194,14 +194,14 @@ func selectedRecoveryActionFor(result runfork.SelectedForkRecoveryResult, entry 
 	if result.RunID != entry.Binding.ForkRunID {
 		return 0, fmt.Errorf("selected recovery result differs from its fork binding")
 	}
+	if err := validateSelectedRecoveryOperation(result, entry); err != nil {
+		return 0, err
+	}
 	if len(result.PendingCancellations) != 0 {
 		return selectedCancellationRecoveryAction(result)
 	}
 	if result.Disposition != runfork.SelectedForkRecoveryResume && result.Disposition != runfork.SelectedForkRecoveryActivate && result.Continuation != nil {
 		return 0, fmt.Errorf("selected recovery non-resume disposition carries executable work")
-	}
-	if err := validateSelectedRecoveryOperation(result, entry); err != nil {
-		return 0, err
 	}
 	switch result.Disposition {
 	case runfork.SelectedForkRecoveryTerminal:
