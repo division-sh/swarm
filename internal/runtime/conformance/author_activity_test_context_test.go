@@ -301,7 +301,6 @@ type conformanceDurableEventBusStore interface {
 	runtimebus.FlowInstanceRouteRecordReader
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimepipeline.WorkflowEmitFeedbackOwner
 	runtimebus.PreparedPublishEventReader

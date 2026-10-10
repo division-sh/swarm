@@ -439,7 +439,7 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 			}.Normalized()
 			seedRuntime := newFanInBarrierRuntime(t, backend, source)
 			seedFanInBarrierPortfolioShell(t, ctx, seedRuntime.bus, seedRuntime.manager, source, selectedOwner)
-			requireSelectedRunTargetOwner(t, ctx, backend, runID, "portfolio/selected-period", selectedOwner)
+			requireSelectedRunTargetOwner(t, ctx, backend, source, runID, "portfolio/selected-period", selectedOwner)
 
 			eventID := uuid.NewString()
 			sourceKey := eventtest.UUID("fan-in-operating-key-" + tc.name)
@@ -751,21 +751,16 @@ func removeFanInBarrierSelectedOwner(t *testing.T, ctx context.Context, backend 
 	}
 }
 
-func requireSelectedRunTargetOwner(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, runID, flowInstance, entityID string) {
+func requireSelectedRunTargetOwner(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, source semanticview.Source, runID, flowInstance, entityID string) {
 	t.Helper()
-	owners, err := backend.ListSelectedRunTargetOwners(ctx, runID)
+	owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute("portfolio", "selected-period", flowInstance)}
+	request, err := runtimepipeline.NewExactFlowInstanceLookup(source, conformanceSourceArtifactFact(t, source), owner)
 	if err != nil {
-		t.Fatalf("list selected-run target owners: %v", err)
+		t.Fatal(err)
 	}
-	matches := make([]runtimebus.ActiveTargetDescriptor, 0, 1)
-	for _, owner := range owners {
-		owner = owner.Normalized()
-		if owner.FlowInstance == flowInstance {
-			matches = append(matches, owner)
-		}
-	}
-	if len(matches) != 1 || matches[0].EntityID != entityID {
-		t.Fatalf("selected-run owner for %s = %#v, want exact entity %s", flowInstance, matches, entityID)
+	observed, found, err := backend.LookupFlowInstance(ctx, request)
+	if err != nil || !found || observed.Owner() != owner || observed.Identity().EntityID != entityID {
+		t.Fatalf("selected-run owner for %s = %#v found=%t err=%v, want exact entity %s", flowInstance, observed, found, err, entityID)
 	}
 }
 

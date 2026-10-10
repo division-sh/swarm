@@ -20,7 +20,6 @@ import (
 type scopedFlowReadOwner interface {
 	ListActiveFlowInstanceDescriptorsForScope(context.Context, string, []string, []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error)
 	ListActiveFlowInstanceDescriptorsForKey(context.Context, string, string, string, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error)
-	ListSelectedRunTargetOwnersForScope(context.Context, string, []string, string) ([]runtimebus.ActiveTargetDescriptor, error)
 }
 
 func TestScopedFlowDescriptorAndTargetReadsBothStores(t *testing.T) {
@@ -69,17 +68,6 @@ func TestScopedFlowDescriptorAndTargetReadsBothStores(t *testing.T) {
 				}
 				return descriptors, nil
 			}
-			listTargets := func(paths []string, sourceEntityID string) ([]string, error) {
-				rows, err := selected.ListSelectedRunTargetOwnersForScope(ctx, runID, paths, sourceEntityID)
-				if err != nil {
-					return nil, err
-				}
-				targets := make([]string, 0, len(rows))
-				for _, row := range rows {
-					targets = append(targets, row.FlowInstance)
-				}
-				return targets, nil
-			}
 
 			for _, tc := range []struct {
 				name      string
@@ -99,30 +87,8 @@ func TestScopedFlowDescriptorAndTargetReadsBothStores(t *testing.T) {
 					}
 				})
 			}
-			if got, err := listTargets([]string{"root", "review/b"}, ""); err != nil || !reflect.DeepEqual(got, []string{"review/b", "root"}) {
-				t.Fatalf("scoped targets = %v, %v", got, err)
-			}
-			var sourceEntityID string
-			if err := db.QueryRowContext(ctx, `SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance='review/a'`, runID).Scan(&sourceEntityID); err != nil {
-				t.Fatal(err)
-			}
-			if got, err := listTargets(nil, sourceEntityID); err != nil || !reflect.DeepEqual(got, []string{"review/a"}) {
-				t.Fatalf("source entity target = %v, %v", got, err)
-			}
-			if got, err := listTargets([]string{"review/b"}, sourceEntityID); err != nil || !reflect.DeepEqual(got, []string{"review/a", "review/b"}) {
-				t.Fatalf("source and connected targets = %v, %v", got, err)
-			}
-			if got, err := listTargets([]string{"missing"}, uuid.NewString()); err != nil || len(got) != 0 {
-				t.Fatalf("absent scoped target = %v, %v", got, err)
-			}
 			if _, err := listFlows(nil, nil); err == nil || !strings.Contains(err.Error(), "graph-owned scope") {
 				t.Fatalf("empty flow scope accepted: %v", err)
-			}
-			if _, err := listTargets(nil, ""); err == nil || !strings.Contains(err.Error(), "graph-owned paths or source entity") {
-				t.Fatalf("empty target scope accepted: %v", err)
-			}
-			if _, err := listTargets(nil, "not-an-entity"); err == nil || !strings.Contains(err.Error(), "canonical UUID") {
-				t.Fatalf("invalid source entity accepted: %v", err)
 			}
 			if _, err := listFlows(nil, []string{"/review/a"}); err == nil || !strings.Contains(err.Error(), "canonical instance path") {
 				t.Fatalf("noncanonical path accepted: %v", err)

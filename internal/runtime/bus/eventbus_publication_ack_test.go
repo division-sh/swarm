@@ -23,12 +23,12 @@ import (
 
 type publicationAcknowledgementProbeStore struct {
 	InMemoryEventStore
+	constructionIndexTestReader
 	acknowledged bool
 	replay       bool
 	err          error
 	cancel       context.CancelFunc
 	commits      int
-	rootOwner    ActiveTargetDescriptor
 	construction runtimepipeline.FlowConstructionPublicationEvidence
 }
 
@@ -40,22 +40,6 @@ func (s *publicationAcknowledgementProbeStore) LoadFlowConstructionPublication(c
 		return runtimepipeline.FlowConstructionPublicationEvidence{}, errors.New("absent acknowledgment-probe root receipt")
 	}
 	return s.construction, nil
-}
-
-func (s *publicationAcknowledgementProbeStore) ListSelectedRunTargetOwners(context.Context, string) ([]ActiveTargetDescriptor, error) {
-	if s.rootOwner.FlowInstance == "" {
-		return nil, nil
-	}
-	return []ActiveTargetDescriptor{s.rootOwner}, nil
-}
-
-func (s *publicationAcknowledgementProbeStore) ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, paths []string, sourceEntityID string) ([]ActiveTargetDescriptor, error) {
-	for _, path := range paths {
-		if path == s.rootOwner.FlowInstance {
-			return s.ListSelectedRunTargetOwners(ctx, runID)
-		}
-	}
-	return nil, nil
 }
 
 type deploymentRunStartProbeStore struct {
@@ -271,8 +255,8 @@ func TestAPIEventReplayReleaseErrorUsesReplayProofWithoutNewAcknowledgement(t *t
 	}
 	eventID := uuid.NewString()
 	event := eventtest.ExistingRunRootIngress(eventID, events.EventType("task.requested"), "provider", "", json.RawMessage(`{}`), 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
-	store.rootOwner = ActiveTargetDescriptor{ID: event.RunID(), FlowInstance: event.RunID(), EntityID: runtimeflowidentity.EntityID(event.RunID())}
 	store.construction = runtimepipeline.FlowConstructionPublicationEvidence{Identity: ConstructedFlowInstanceIdentityFixture(source, ".", event.RunID(), event.RunID())}
+	store.observations = []runtimepipeline.FlowInstanceObservation{constructionIndexObservation(t, source, event.RunID(), store.construction.Identity, "")}
 	completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
 	actual, replayed, err := bus.PublishAPIEventAcknowledged(testAuthorActivityContext(context.Background()), event, &endpoint, apiidempotency.Request{Method: "event.publish"}, completion)
 	if !errors.Is(err, fault) || !replayed || actual.ResourceID != eventID || probe.dispatched.Load() != 0 {
@@ -450,8 +434,8 @@ func TestAPIEventPostCommitErrorRetainsCompletionAndDispatchesAcknowledgedResult
 			}
 			eventID := uuid.NewString()
 			event := eventtest.ExistingRunRootIngress(eventID, events.EventType("task.requested"), "provider", "", json.RawMessage(`{}`), 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
-			store.rootOwner = ActiveTargetDescriptor{ID: event.RunID(), FlowInstance: event.RunID(), EntityID: runtimeflowidentity.EntityID(event.RunID())}
 			store.construction = runtimepipeline.FlowConstructionPublicationEvidence{Identity: ConstructedFlowInstanceIdentityFixture(source, ".", event.RunID(), event.RunID())}
+			store.observations = []runtimepipeline.FlowInstanceObservation{constructionIndexObservation(t, source, event.RunID(), store.construction.Identity, "")}
 			completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
 			actual, replay, err := bus.PublishAPIEventAcknowledged(testAuthorActivityContext(context.Background()), event, &endpoint, apiidempotency.Request{Method: "event.publish"}, completion)
 			if !errors.Is(err, fault) || replay {

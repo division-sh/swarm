@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -417,20 +416,6 @@ func (s *routePersistenceTestStore) setTestConstructionSource(source semanticvie
 func (s *routePersistenceTestStore) setTestSemanticSource(fact runtimecorrelation.SourceArtifactFact, workflowVersion string) {
 	s.sourceArtifactFact = fact
 	s.workflowVersion = workflowVersion
-}
-
-func (s *routePersistenceTestStore) ListSelectedRunTargetOwners(context.Context, string) ([]runtimebus.ActiveTargetDescriptor, error) {
-	return append([]runtimebus.ActiveTargetDescriptor(nil), s.targetOwners...), nil
-}
-
-func (s *routePersistenceTestStore) ListSelectedRunTargetOwnersForScope(_ context.Context, _ string, instancePaths []string, sourceEntityID string) ([]runtimebus.ActiveTargetDescriptor, error) {
-	var selected []runtimebus.ActiveTargetDescriptor
-	for _, owner := range s.targetOwners {
-		if slices.Contains(instancePaths, owner.FlowInstance) || sourceEntityID != "" && owner.EntityID == sourceEntityID {
-			selected = append(selected, owner)
-		}
-	}
-	return selected, nil
 }
 
 func (s *routePersistenceTestStore) ListActiveFlowInstanceDescriptors(_ context.Context, runID string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {

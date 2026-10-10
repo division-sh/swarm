@@ -9,7 +9,6 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -84,24 +83,6 @@ func (s *targetRouteMemoryStore) LoadFlowConstructionPublication(ctx context.Con
 		return runtimepipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("absent exact test construction receipt")
 	}
 	return evidence, nil
-}
-
-func (s *targetRouteMemoryStore) ListSelectedRunTargetOwners(context.Context, string) ([]ActiveTargetDescriptor, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]ActiveTargetDescriptor(nil), s.targetOwners...), nil
-}
-
-func (s *targetRouteMemoryStore) ListSelectedRunTargetOwnersForScope(_ context.Context, _ string, instancePaths []string, sourceEntityID string) ([]ActiveTargetDescriptor, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var selected []ActiveTargetDescriptor
-	for _, owner := range s.targetOwners {
-		if slices.Contains(instancePaths, owner.FlowInstance) || sourceEntityID != "" && owner.EntityID == sourceEntityID {
-			selected = append(selected, owner)
-		}
-	}
-	return selected, nil
 }
 
 func (s *targetRouteMemoryStore) setTargetOwners(owners ...ActiveTargetDescriptor) {
@@ -3471,20 +3452,6 @@ func (s rejectingDeliveryRouteStore) LoadFlowConstructionPublication(ctx context
 		return runtimepipeline.FlowConstructionPublicationEvidence{}, errors.New("absent rejecting-store root receipt")
 	}
 	return s.construction, nil
-}
-
-func (s rejectingDeliveryRouteStore) ListSelectedRunTargetOwners(context.Context, string) ([]ActiveTargetDescriptor, error) {
-	return append([]ActiveTargetDescriptor(nil), s.owners...), nil
-}
-
-func (s rejectingDeliveryRouteStore) ListSelectedRunTargetOwnersForScope(_ context.Context, _ string, paths []string, sourceEntityID string) ([]ActiveTargetDescriptor, error) {
-	var selected []ActiveTargetDescriptor
-	for _, owner := range s.owners {
-		if slices.Contains(paths, owner.FlowInstance) || sourceEntityID != "" && owner.EntityID == sourceEntityID {
-			selected = append(selected, owner)
-		}
-	}
-	return selected, nil
 }
 
 func (rejectingDeliveryRouteStore) CommitPublication(_ context.Context, command PublicationCommand) (CommittedPublication, error) {

@@ -194,7 +194,7 @@ func TestStandingPipelineRecoveryWaitsForOwnerInstallationOnSQLiteAndPostgres(t 
 			if err != nil {
 				t.Fatal(err)
 			}
-			fixture := newCompleteEventDispatchFixtureWithOrigin(t, backend, false, origin)
+			fixture := newCompleteEventDispatchFixtureWithOrigin(t, backend, false, origin, nil)
 			deliveries := fixture.subscribe(t, fixture.event.Type())
 			defer runtimebustest.UnsubscribeIdentity(fixture.bus, fixture.identity)
 

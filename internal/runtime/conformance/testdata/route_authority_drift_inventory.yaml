@@ -1506,6 +1506,18 @@ seam_families:
       The compiler-resolved guard names descriptor and delivery consumers to
       reject their reconstruction of transition authority. It does not create
       or resolve delivery routes.
+  - id: receiver_ownership_constructor_guard
+    layer: conformance_guardrails
+    classification: separate_semantic_concept
+    paths:
+      - internal/runtime/contracts/receiver_ownership_guard_test.go
+    search_dimensions: [descriptor_evidence]
+    notes: >
+      The exact constructor inventory names the admitted-index projection and
+      overlays one hostile extra descriptor construction into that function.
+      The overlay is scanned, not executed as a runtime producer. The guard
+      preserves exact per-function counts; it does not select a receiver,
+      reinterpret stored identity or grant delivery/attachment authority.
   - id: compiled_template_lifecycle_final_consumer_proof
     layer: route_plan_authority
     classification: valid_consumer
