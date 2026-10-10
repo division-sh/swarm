@@ -218,19 +218,22 @@ func (e *Executor) resolveExecutionTool(actor models.AgentConfig, name string) (
 }
 
 func (e *Executor) resolveExecutionToolInContext(ctx context.Context, actor models.AgentConfig, name string) (ExecutionTool, bool, error) {
-	name = normalizeNativeToolName(name)
 	e.mu.RLock()
 	source := e.workflowSource
 	client := e.mcpClient
 	allowInternalLegacy := e.allowInternalLegacyEntityTools
 	e.mu.RUnlock()
-	if lease, pinned := channelRuntimeExecutionLeaseFromContext(ctx, name); pinned {
+	if lease, pinned := channelRuntimeExecutionLeaseFromContext(ctx, normalizeNativeToolName(name)); pinned {
 		var err error
 		source, err = semanticview.WithChannelRuntimeToolProjection(source, lease.ToolEntries())
 		if err != nil {
 			return ExecutionTool{}, false, err
 		}
 	}
+	if err := privateToolRoutingError(source, actor, name); err != nil {
+		return ExecutionTool{}, false, err
+	}
+	name = normalizeNativeToolName(name)
 	var discovered map[string]runtimemcp.DiscoveredTool
 	if client != nil {
 		discovered = client.DiscoveredTools()
@@ -413,7 +416,6 @@ func (e *Executor) ToolCapabilitiesForActorInContext(ctx context.Context, actor 
 }
 
 func (e *Executor) toolAuthorizationDecision(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
-	toolName = normalizeNativeToolName(toolName)
 	e.mu.RLock()
 	source := e.workflowSource
 	allowInternalLegacy := e.allowInternalLegacyEntityTools
@@ -423,6 +425,9 @@ func (e *Executor) toolAuthorizationDecision(actor models.AgentConfig, toolName 
 }
 
 func sourceToolAuthorizationDecision(source semanticview.Source, actor models.AgentConfig, toolName string, emits *EmitRegistry, allowInternalLegacy bool) toolAuthorizationDecision {
+	if privateToolRoutingError(source, actor, toolName) != nil {
+		return toolAuthorizationDecision{ownership: toolOwnershipWorkflowRegistered, class: toolAuthorizationDenied}
+	}
 	toolName = normalizeNativeToolName(toolName)
 	if _, legacy := legacyEntityToolSurfaceNames[toolName]; legacy && !allowInternalLegacy {
 		return toolAuthorizationDecision{
@@ -483,7 +488,6 @@ func (e *Executor) ExecuteOutputEvent(ctx context.Context, name string, input an
 }
 
 func (e *Executor) execute(ctx context.Context, name string, input any, outputIdentity *llm.ToolOutputEventIdentity) (any, error) {
-	name = normalizeNativeToolName(strings.TrimSpace(name))
 	if outputIdentity != nil && !isEmitToolName(name) {
 		return nil, failures.New(failures.ClassAuthorizationDenied, "tool_output_event_kind_invalid", "tool-executor", "execute.output_event", map[string]any{"tool": name})
 	}
@@ -497,6 +501,11 @@ func (e *Executor) execute(ctx context.Context, name string, input any, outputId
 		e.emitToolExecutionEvent(ctx, actor, name, input, nil, err, 0, "admission")
 		return nil, err
 	}
+	if err := e.dispatcher.admitRoutingName(ctx, actor, name); err != nil {
+		e.emitToolExecutionEvent(ctx, actor, name, input, nil, err, 0, "admission")
+		return nil, err
+	}
+	name = normalizeNativeToolName(strings.TrimSpace(name))
 	admittedCtx, channelLease, err := e.admitChannelRuntimeExecution(ctx, name)
 	if err != nil {
 		e.emitToolExecutionEvent(ctx, actor, name, input, nil, err, 0, "admission")
