@@ -535,6 +535,27 @@ func (a Activation) Validate() error {
 	return nil
 }
 
+// EvidenceDigest binds a decoded row without sending a semantic payload through
+// encoding/json. The validated command hash already owns its payload encoding.
+func (a Activation) EvidenceDigest() (string, error) {
+	if err := a.Validate(); err != nil {
+		return "", err
+	}
+	a = a.Canonical()
+	return canonicaljson.Hash(struct {
+		ID, ImmutableHash                          string
+		AdmittedAt, InitialDueAt, CurrentDueAt     time.Time
+		CurrentEventID                             string
+		CurrentEventAdmittedAt                     time.Time
+		Status                                     Status
+		CancelCause                                string
+		CancelledAt, FiredAt, AcceptedAt, FailedAt time.Time
+		Failure                                    Failure
+		ClockSuspension                            *ClockSuspension
+	}{a.ID, a.ImmutableHash, a.AdmittedAt, a.InitialDueAt, a.CurrentDueAt, a.CurrentEventID, a.CurrentEventAdmittedAt,
+		a.Status, a.CancelCause, a.CancelledAt, a.FiredAt, a.AcceptedAt, a.FailedAt, a.Failure, a.ClockSuspension})
+}
+
 func (a Activation) validateCurrentDue() error {
 	if a.CurrentDueAt.Before(a.InitialDueAt) {
 		return errors.New("generic schedule current due coordinate precedes its initial coordinate")

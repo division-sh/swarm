@@ -14,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -23,7 +24,7 @@ import (
 )
 
 type runForkFanOutBarrierOwner interface {
-	MaterializeRunForkFanOutBarrierTx(context.Context, *mutationprotocol.Attempt, string, fanoutbarrier.Barrier, runtimecontracts.FanOutPlanRef, *loopruntime.ForkChildReference, time.Time) error
+	MaterializeRunForkFanOutBarrierTx(context.Context, *mutationprotocol.Attempt, string, fanoutbarrier.Barrier, *genericschedule.Activation, runtimecontracts.FanOutPlanRef, *loopruntime.ForkChildReference, time.Time) error
 	CreateDeploymentFeedTx(context.Context, *sql.Tx, runtimedata.DeploymentFeed) error
 }
 
@@ -306,6 +307,10 @@ func materializeRunForkFanOutObligations(
 	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
 		return 0, err
 	}
+	barrierSchedules, err := loadRunForkPendingBarrierSchedules(ctx, tx, plan)
+	if err != nil {
+		return 0, err
+	}
 	for _, obligation := range plan.FanOutObligations {
 		if obligation.Intent.Request.Deployment != nil {
 			continue
@@ -409,7 +414,11 @@ func materializeRunForkFanOutObligations(
 			if barriers == nil {
 				return 0, fmt.Errorf("fork fan-out barrier requires selected-store pipeline owner")
 			}
-			if err := barriers.MaterializeRunForkFanOutBarrierTx(ctx, attempt, forkRunID, *obligation.Barrier, planRef, generation, now); err != nil {
+			var schedule *genericschedule.Activation
+			if captured, found := barrierSchedules[obligation.Barrier.ScheduleActivationID]; found {
+				schedule = &captured
+			}
+			if err := barriers.MaterializeRunForkFanOutBarrierTx(ctx, attempt, forkRunID, *obligation.Barrier, schedule, planRef, generation, now); err != nil {
 				return 0, err
 			}
 		}

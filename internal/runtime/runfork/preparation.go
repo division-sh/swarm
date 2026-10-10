@@ -150,17 +150,26 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 		coordinates := input.Coordinates()
 		firstTurn = &coordinates
 	}
+	joinSchedules := make([]string, 0, len(plan.JoinSchedules))
+	for _, schedule := range plan.JoinSchedules {
+		digest, err := schedule.EvidenceDigest()
+		if err != nil {
+			return "", fmt.Errorf("selected preparation join schedule: %w", err)
+		}
+		joinSchedules = append(joinSchedules, digest)
+	}
 	raw, err := canonicaljson.Bytes(struct {
-		Plan         RunForkPlan
-		History      []string
-		Inputs       []InputPublicationCoordinates
-		FirstTurn    *InputPublicationCoordinates
-		Replies      []replycontext.Record
-		Timers       []timerobligation.WorkflowTimerActivationRecord
-		Frontier     RunForkContractFrontierAdmission
-		Recipients   RunForkSelectedContractRecipientPlanning
-		Declarations string
-	}{plan, history, plan.HistoricalInputCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, frontier, planning, declarationRevision})
+		Plan          RunForkPlan
+		History       []string
+		Inputs        []InputPublicationCoordinates
+		FirstTurn     *InputPublicationCoordinates
+		Replies       []replycontext.Record
+		Timers        []timerobligation.WorkflowTimerActivationRecord
+		JoinSchedules []string
+		Frontier      RunForkContractFrontierAdmission
+		Recipients    RunForkSelectedContractRecipientPlanning
+		Declarations  string
+	}{plan, history, plan.HistoricalInputCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, frontier, planning, declarationRevision})
 	if err != nil {
 		return "", err
 	}

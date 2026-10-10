@@ -423,7 +423,6 @@ func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Conte
 		if err != nil {
 			return err
 		}
-		command.RunID = runID
 		if workflowLifecycleHasScheduleMutation(plan.Schedules, command.ScheduleKey) {
 			continue
 		}
@@ -685,7 +684,6 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 			if err != nil {
 				return err
 			}
-			command.RunID = runID
 			plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationCancel, Command: command, CancelCause: "join_stage_exit", CancelledAt: occurredAt})
 		}
 		plan.RequestCompletionCandidate = true
@@ -766,7 +764,6 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, runID
 		if err != nil {
 			return err
 		}
-		command.RunID = runID
 		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationUpsert, Command: command})
 	}
 	instance.StateBuckets = carrier.PersistedStateBuckets()
@@ -791,14 +788,12 @@ func (pc *PipelineCoordinator) planPendingJoinContinuations(owner runtimeflowide
 			if err != nil {
 				return err
 			}
-			command.RunID = owner.RunID
 			plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationCancel, Command: command, CancelCause: "join_closed", CancelledAt: occurredAt})
 		}
 		command, err := joinSchedule(pc.SemanticSource(), owner, instance, activation, mode)
 		if err != nil {
 			return err
 		}
-		command.RunID = owner.RunID
 		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationUpsert, Command: command})
 	}
 	return nil

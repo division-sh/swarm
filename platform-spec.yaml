@@ -20989,7 +20989,15 @@ run_model:
         original arming lineage and child birth; terminal source timers are never rearmed. Extra, missing, duplicate,
         corrupt or foreign inherited rows cannot discharge admission. Source certificates alone grant no execution,
         and wakeups/publication require activated current selected authority. Changed delay applies only to newly
-        armed work. Timed-join, pending barrier and dynamic-flow continuation remain gated by #642.'
+        armed work. Arrival-join schedule admission consumes the retained typed stage entry, frozen arm and
+        original due coordinate through the shared generic-schedule projection. Live lifecycle writers and fixed-cut
+        reconstruction consume that same command owner; callers do not supply a separate run identity. The
+        preparation fingerprint binds the exact retained join schedule records. A pending completion retains its
+        completion schedule and the original canceled timeout separately; immutable arm correspondence alone is
+        not child materialization, activation or recovery permission. Pending fan-out barrier materialization
+        validates its exact captured source schedule before writes and retains the admitted absolute due rather
+        than resetting it to child birth. An already published barrier occurrence requires its historical delivery
+        continuation and is never rearmed. Timed-join, pending barrier and dynamic-flow continuation remain gated by #642.'
       3e_selected_contract_route_admission: 'For selected-contract mutating fork execution, selected route/subscription
         admission is evidence-only and non-mutating. It distinguishes frontier recipient admission from historical
         route reconstruction, carries unknown_unversioned as an unresolved requirement, and uses the selected contract
