@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -331,5 +332,99 @@ func newScalarTemplateInstanceParityStore(t *testing.T, backend string, ctx cont
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 		return nil, nil
+	}
+}
+
+func TestParentLocalReturnPersistsExactNativeReceiverBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			repo := canonicalrouting.RepoRoot(t)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyNestedFlowConnect(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := semanticview.Wrap(bundle)
+			runID := uuid.NewString()
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
+			selected, db := newScalarTemplateInstanceParityStore(t, backend, ctx)
+			at := time.Now().UTC()
+			run := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: testSourceArtifactFact(source), Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)}
+			if backend == "postgres" {
+				runlifecyclefixture.RequirePostgres(t, ctx, db, run)
+			} else {
+				runlifecyclefixture.RequireSQLite(t, ctx, db, run)
+			}
+			for _, flowID := range []string{".", "child", "child/grandchild"} {
+				identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, flowID, "", runID)
+				instance := runtimepipeline.WorkflowInstance{
+					InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
+					ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
+					WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), EnteredStageAt: at, CreatedAt: at,
+				}
+				if entity, declared := entityruntime.ResolveForFlow(source, flowID); declared {
+					instance.EntityType = entity.EntityType
+					constructor, err := runtimepipeline.CompileFlowConstructor(source, flowID, "")
+					if err != nil {
+						t.Fatal(err)
+					}
+					instance.Fields, err = constructor.InitialFields(nil, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				seedComponentFlowConstruction(t, ctx, selected, source, instance)
+			}
+			eventBus, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sender := eventtest.StaticFlowRoutingSource("child/grandchild", "child/grandchild", runtimeflowidentity.EntityID("child/grandchild"))
+			event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "child/grandchild/micro.done", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, sender, at)
+			plan, err := eventBus.CheckPublishRecipientPlan(ctx, event)
+			want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "child", FlowInstance: "child", EntityID: runtimeflowidentity.EntityID("child")})
+			if err != nil || plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target != want || plan.DeliveryRoutes[0].ConnectClaim.Empty() {
+				t.Fatalf("parent-local plan=%+v err=%v, want exact admitted receiver %+v", plan, err, want)
+			}
+			node, localEvent, claimed := plan.DeliveryRoutes[0].ConnectClaim.NodeHandlerOwner()
+			if !claimed || node.FlowPath() != "child" || node.NodeID() != "child-aggregator" || localEvent != "micro.done" {
+				t.Fatalf("parent-local claim=%+v event=%q admitted=%t", node, localEvent, claimed)
+			}
+			if err := eventBus.Publish(ctx, event); err != nil {
+				t.Fatal(err)
+			}
+			routes, err := selected.ListEventDeliveryRoutes(ctx, event.ID())
+			if err != nil || len(routes) != 1 || !reflect.DeepEqual(routes[0], plan.DeliveryRoutes[0]) {
+				t.Fatalf("persisted parent-local routes=%+v err=%v", routes, err)
+			}
+			carrier := subscribeInternalDeliveriesForTest(t, eventBus, routes[0].Recipient.ID())
+			selected.setScalarTemplateInstanceDescriptorError(errors.New("committed parent-local replay must not query descriptors"))
+			selected.resetScalarTemplateInstanceDescriptorCalls()
+			if _, err := eventBus.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{Event: event, Scope: runtimepipelineobligation.ScopeSubscribed}, nil); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case delivery := <-carrier:
+				if got := delivery.Event(); got.ID() != event.ID() || got.FlowInstance() != want.Route().FlowInstance || got.EntityID() != want.Route().EntityID || got.Type() != event.Type() {
+					t.Fatalf("parent-local replay crossed receiver or event: %+v", got)
+				}
+				if err := delivery.Complete(); err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("parent-local replay did not reach its committed receiver")
+			}
+			if calls := selected.scalarTemplateInstanceDescriptorCalls(); calls != 0 {
+				t.Fatalf("committed parent-local replay consulted mutable descriptors %d times", calls)
+			}
+			selected.setScalarTemplateInstanceDescriptorError(nil)
+			foreign := eventtest.StaticFlowRoutingSource("child/grandchild", "child/grandchild", uuid.NewString())
+			rejected := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "child/grandchild/micro.done", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, foreign, at)
+			if err := eventBus.Publish(ctx, rejected); err == nil || !strings.Contains(err.Error(), "contradicts") {
+				t.Fatalf("foreign parent-local publication=%v, want exact source-entity refusal", err)
+			}
+			if persisted, found, err := selected.LoadPreparedPublishEvent(ctx, rejected.ID()); err != nil || found || len(persisted.DeliveryRoutes) != 0 {
+				t.Fatalf("rejected parent-local publication mutated store: %+v found=%t err=%v", persisted, found, err)
+			}
+		})
 	}
 }

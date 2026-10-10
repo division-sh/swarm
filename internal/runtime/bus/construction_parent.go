@@ -38,6 +38,9 @@ func (o connectInstanceSelector) constructionParent(ctx context.Context, event e
 	if err != nil {
 		return flowidentity.Instance{}, err
 	}
+	if owner.TemplateID == view.Paths.FlowPath {
+		return o.constructionInstance(ctx, event.RunID(), parentFlow, owner.ParentRoute.FlowInstance, owner.ParentEntityID, instances)
+	}
 	return o.constructedDescendant(ctx, event.RunID(), owner, parentFlow, instances, selected)
 }
 

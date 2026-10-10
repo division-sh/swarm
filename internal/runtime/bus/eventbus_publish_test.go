@@ -662,9 +662,14 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 		})
 	}
 	constructionCtx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+	accountEntity, declared := entityruntime.ResolveForFlow(source, "account")
+	if !declared {
+		t.Fatal("account fixture lacks its declared entity")
+	}
 	initialized, lifecycle, err := pc.PrepareInitialEntryLifecycle(constructionCtx, testRunScopedFlowRoute(instanceRoute), runtimepipeline.WorkflowInstance{
-		InstanceID: "one", StorageRef: instanceRoute.InstancePath, EntityID: runtimeflowidentity.EntityID(instanceRoute.InstancePath),
-		WorkflowName: "account", WorkflowVersion: source.WorkflowVersion(), EntityType: "account", InstanceKind: "template",
+		InstanceID: "one", InstanceKey: "acct-agent", Mode: runtimecontracts.FlowModeTemplate,
+		StorageRef: instanceRoute.InstancePath, EntityID: runtimeflowidentity.EntityID(instanceRoute.InstancePath),
+		WorkflowName: "account", WorkflowVersion: source.WorkflowVersion(), EntityType: accountEntity.EntityType, InstanceKind: "template",
 		ParentFlowID: accountConstruction.ParentRoute.FlowID, ParentFlowInstance: accountConstruction.ParentRoute.FlowInstance, ParentEntityID: accountConstruction.ParentEntityID,
 		CurrentState: "pending", StageDefined: true, Fields: map[string]any{"account_id": "acct-agent"},
 		EnteredStageAt: at, CreatedAt: at, RuntimeReadiness: &readinessOwner,
@@ -744,7 +749,6 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'account-setup-node-one'
 	`, evt.ID()).Scan(&nodeDeliveries); err != nil {
 		t.Fatalf("count node deliveries: %v", err)
 	}
@@ -2751,16 +2755,6 @@ func TestEventBusPublishSQLiteRecordsTargetFailureDeadLetter(t *testing.T) {
 	)
 	eb.RegisterRuntimeActiveAgentDescriptor(testActiveAgentDescriptorForRun(t, runID, "live-other", uuid.NewString(), "other-flow"))
 	ctx := runtimecorrelation.WithInboundEvent(context.Background(), evt)
-	descriptors, err := eb.PinRoutingDescriptors(ctx)
-	if err != nil {
-		t.Fatalf("PinRoutingDescriptors: %v", err)
-	}
-	if len(descriptors) == 0 {
-		t.Fatal("PinRoutingDescriptors returned no runtime descriptors")
-	}
-	if descriptors[0].ID != "live-other" {
-		t.Fatalf("PinRoutingDescriptors[0].ID = %q, want live-other", descriptors[0].ID)
-	}
 	_ = runtimebustest.Subscribe(t, eb, "live-other", events.EventType("task.completed"))
 	if got := eb.ResolveSubscribedRecipients("task.completed"); !slices.Equal(got, []string{"live-other"}) {
 		t.Fatalf("ResolveSubscribedRecipients = %#v, want live-other", got)
@@ -3392,6 +3386,11 @@ func exactEventBusWorkflowFixtures(t *testing.T, source semanticview.Source, ins
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	for i := range instances {
 		instance := &instances[i]
+		schema, found := source.FlowSchemaByID(instance.WorkflowName)
+		if !found {
+			t.Fatalf("fixture lacks declared flow %s", instance.WorkflowName)
+		}
+		instance.Mode = schema.EffectiveMode()
 		instance.WorkflowVersion = source.WorkflowVersion()
 		instances[i].EnteredStageAt = enteredAt
 		instances[i].CreatedAt = enteredAt
@@ -3547,12 +3546,15 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 			CurrentState:       "waiting",
 		},
 		{
-			InstanceID:      "grandchild",
-			StorageRef:      "child/grandchild",
-			EntityID:        grandchildEntityID,
-			WorkflowName:    "child/grandchild",
-			WorkflowVersion: bundle.WorkflowVersion(),
-			CurrentState:    "ready",
+			InstanceID:         "grandchild",
+			StorageRef:         "child/grandchild",
+			EntityID:           grandchildEntityID,
+			ParentFlowID:       "child",
+			ParentFlowInstance: "child",
+			ParentEntityID:     childEntityID,
+			WorkflowName:       "child/grandchild",
+			WorkflowVersion:    bundle.WorkflowVersion(),
+			CurrentState:       "ready",
 		},
 	}) {
 		{
@@ -4562,11 +4564,18 @@ func TestEventBusPublish_RecordsNestedFlowConnectLocalizedEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load nested flow connect fixture: %v", err)
 	}
+	source := semanticview.Wrap(bundle)
+	var observations []runtimepipeline.FlowInstanceObservation
+	for _, flowID := range []string{".", "child", "child/grandchild"} {
+		instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, flowID, "", eventBusTestRunID)
+		observations = append(observations, runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, ""))
+	}
 	selected := newRouteSetEventStore()
 	selected.targetRunID = eventBusTestRunID
 	selected.targetOwners = []runtimebus.ActiveTargetDescriptor{{ID: "child", FlowInstance: "child", EntityID: runtimeflowidentity.EntityID("child")}}
 	eb, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{
-		ContractBundle: semanticview.Wrap(bundle),
+		ContractBundle: source,
+		Durable:        runtimebus.DurableDependencies{Instances: runtimebus.FlowInstanceIndexFixture(observations...)},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -4576,12 +4585,12 @@ func TestEventBusPublish_RecordsNestedFlowConnectLocalizedEvent(t *testing.T) {
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
 	routingSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
-		FlowID: "child/grandchild", FlowInstance: "child/grandchild", EntityID: eventtest.UUID("ent-grandchild"),
+		FlowID: "child/grandchild", FlowInstance: "child/grandchild", EntityID: runtimeflowidentity.EntityID("child/grandchild"),
 	})
 	if err != nil {
 		t.Fatalf("build nested source: %v", err)
 	}
-	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngressWithRoutingSource("", "child/grandchild/micro.done", "", "", nil, 0, eventBusTestRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-grandchild")), routingSource, time.Time{})); err != nil {
+	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngressWithRoutingSource("", "child/grandchild/micro.done", "", "", nil, 0, eventBusTestRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, runtimeflowidentity.EntityID("child/grandchild")), routingSource, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	diags := recorder.SnapshotPublishes()

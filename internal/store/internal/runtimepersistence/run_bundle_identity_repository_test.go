@@ -459,7 +459,6 @@ func eventBusSourceOperationLedger() map[string]string {
 		"FinalizeFanOutPublications":                 operationMutation,
 		"FenceAgentRoute":                            operationMutation,
 		"FinalizeSelectedReceiverAdmission":          operationRetained,
-		"HasFlowInstanceRoute":                       operationPureRead,
 		"LookupAPIEventPublication":                  operationPureRead,
 		"LogRuntime":                                 operationMutation,
 		// This projects an exact already-admitted durable transition, including retained
@@ -467,7 +466,6 @@ func eventBusSourceOperationLedger() map[string]string {
 		"ProjectLifecycleDiagnostic":        operationAdmittedChild,
 		"MarkDeliveryInProgress":            operationMutation,
 		"OutboxSweeperActive":               operationPureRead,
-		"PinRoutingDescriptors":             operationPureRead,
 		"PipelineObligationOwner":           operationRetained,
 		"PipelineWorkPresence":              operationPureRead,
 		"PrepareAgentRoute":                 operationRetained,
