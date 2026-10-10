@@ -78,23 +78,11 @@ func serveSessionIncomingSelection(contextDef runtime.BundleContext, declaration
 		return nil, err
 	}
 	current, found := catalog.FindExactDeclaration(candidate.Provider, candidate.Interface, candidate.Coordinate, candidate.Target.Selector)
-	if !found || current.Posture != channelonboarding.ActivationSessionConnection ||
-		candidate.Target != current.Target || candidate.Posture != current.Posture || candidate.Ceremony != current.Ceremony ||
-		candidate.ProviderCredentialRole != current.ProviderCredentialRole || candidate.SigningCredentialRole != current.SigningCredentialRole ||
-		candidate.ConfirmationOperation != current.ConfirmationOperation || candidate.ConnectionHealth != current.ConnectionHealth {
+	if !found {
 		return nil, channelonboarding.ErrRevisionConflict
 	}
-	generation, err := candidate.Plan.Generation()
-	if err != nil {
+	if err := validateServeSessionCandidate(candidate, current); err != nil {
 		return nil, err
-	}
-	identity, err := candidate.Plan.InterfaceIdentity()
-	if err != nil {
-		return nil, err
-	}
-	if !generation.Equal(current.Coordinate.PlanGeneration) || identity.Normalized() != current.Interface.Normalized() ||
-		candidate.Plan.Transport() != current.Plan.Transport() || candidate.Plan.Provider() != current.Provider {
-		return nil, channelonboarding.ErrRevisionConflict
 	}
 	if contextDef.Runtime == nil || contextDef.Runtime.Bus == nil || !contextDef.Runtime.ExecutionPosture.Valid() {
 		return nil, fmt.Errorf("session incoming selection requires the owning runtime bus and posture")
@@ -119,4 +107,28 @@ func serveSessionIncomingSelection(contextDef runtime.BundleContext, declaration
 		return nil, channelonboarding.ErrRevisionConflict
 	}
 	return incoming, nil
+}
+
+// Catalog identity is not permission to substitute a request's plan or
+// behavior. Validate those fields before projecting the runtime's owners.
+func validateServeSessionCandidate(candidate, current channelonboarding.Candidate) error {
+	if current.Posture != channelonboarding.ActivationSessionConnection ||
+		candidate.Target != current.Target || candidate.Posture != current.Posture || candidate.Ceremony != current.Ceremony ||
+		candidate.ProviderCredentialRole != current.ProviderCredentialRole || candidate.SigningCredentialRole != current.SigningCredentialRole ||
+		candidate.ConfirmationOperation != current.ConfirmationOperation || candidate.ConnectionHealth != current.ConnectionHealth {
+		return channelonboarding.ErrRevisionConflict
+	}
+	generation, err := candidate.Plan.Generation()
+	if err != nil {
+		return err
+	}
+	identity, err := candidate.Plan.InterfaceIdentity()
+	if err != nil {
+		return err
+	}
+	if !generation.Equal(current.Coordinate.PlanGeneration) || identity.Normalized() != current.Interface.Normalized() ||
+		candidate.Plan.Transport() != current.Plan.Transport() || candidate.Plan.Provider() != current.Provider {
+		return channelonboarding.ErrRevisionConflict
+	}
+	return nil
 }
