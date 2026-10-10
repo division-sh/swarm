@@ -35,6 +35,7 @@ type serveNativeProtocolPeer struct {
 	registration *waWa6.ClientPayload_DevicePairingRegistrationData
 	prekeys      []waBinary.Node
 	connections  int
+	disconnected int
 	paired       chan struct{}
 	pairOnce     sync.Once
 	receipts     chan waBinary.Node
@@ -132,6 +133,11 @@ func newServeNativeProtocolPeer(t *testing.T) *serveNativeProtocolPeer {
 }
 
 func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
+	defer func() {
+		p.mu.Lock()
+		p.disconnected++
+		p.mu.Unlock()
+	}()
 	payload := wire.ClientPayload()
 	p.mu.Lock()
 	p.wire = wire
@@ -269,7 +275,7 @@ func (p *serveNativeProtocolPeer) pair(qr string) {
 func (p *serveNativeProtocolPeer) claim(challenge string) types.JID {
 	p.t.Helper()
 	p.mu.Lock()
-	wire, registration := p.wire, p.registration
+	registration := p.registration
 	p.mu.Unlock()
 	from := types.NewJID("15551234568", types.DefaultUserServer)
 	from.Device = 1
@@ -279,19 +285,30 @@ func (p *serveNativeProtocolPeer) claim(challenge string) types.JID {
 	p.mu.Lock()
 	p.sender, p.from, p.fromLID = sender, from, fromLID
 	p.mu.Unlock()
-	message := sender.EncryptText(p.t, challenge, "SERVED_CLAIM")
+	p.text(challenge, "SERVED_CLAIM")
+	return from.ToNonAD()
+}
+
+func (p *serveNativeProtocolPeer) text(text, id string) {
+	p.t.Helper()
+	p.mu.Lock()
+	wire, sender := p.wire, p.sender
+	p.mu.Unlock()
+	if wire == nil || sender == nil {
+		p.t.Fatal("encrypted input requires the original connected sender")
+	}
+	message := sender.EncryptText(p.t, text, id)
 	if err := wire.Send(p.ctx, message); err != nil {
 		p.t.Fatal(err)
 	}
 	select {
 	case receipt := <-p.receipts:
-		if receipt.Attrs["id"] != "SERVED_CLAIM" {
-			p.t.Fatal("SDK acknowledged a different claim", receipt)
+		if receipt.Attrs["id"] != id {
+			p.t.Fatal("SDK acknowledged a different durable input", receipt)
 		}
 	case <-time.After(5 * time.Second):
-		p.t.Fatal("SDK did not acknowledge the durable encrypted claim")
+		p.t.Fatal("SDK did not acknowledge the durable encrypted input", id)
 	}
-	return from.ToNonAD()
 }
 
 func (p *serveNativeProtocolPeer) deviceList(request *waBinary.Node) ([]waBinary.Node, error) {
