@@ -66,6 +66,7 @@ type runForkSelectedContractMaterializationPort struct {
 	materializeEntity   func(context.Context, *sql.Tx, *mutationprotocol.Attempt, activeRunSourceOwnerFunc, string, contracts.BundleIdentity, runfork.RunForkPlan, runfork.RunForkEntityState, runForkEntityMetadata, time.Time) error
 	materializeBarriers runForkFanOutBarrierOwner
 	workflowTimers      runForkWorkflowTimerMaterializationOwner
+	arrivalSchedules    runForkArrivalJoinMaterializationOwner
 	replies             runForkReplyContextOwner
 	now                 func() time.Time
 }
@@ -279,6 +280,10 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			if err != nil {
 				return err
 			}
+			if err := requireMaterializedRunForkArrivalJoinSchedules(runtimecorrelation.WithRunID(txctx, forkRunID), attempt, plan,
+				forkRunID, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), port.arrivalSchedules); err != nil {
+				return err
+			}
 			existing.DataPins = pins
 			existing.MaterializedFanOutCount = len(plan.FanOutObligations) - countRunForkSourceDeploymentFeeds(plan) + len(pins)
 			if routeResolved {
@@ -360,6 +365,12 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			}
 		}
 		if _, err := materializeRunForkWorkflowTimers(forkCtx, attempt, plan, forkRunID, req.Readiness, port.workflowTimers, now); err != nil {
+			return err
+		}
+		if err := materializeRunForkArrivalJoinSchedules(forkCtx, attempt, plan, forkRunID, now, port.arrivalSchedules); err != nil {
+			return err
+		}
+		if err := requireMaterializedRunForkArrivalJoinSchedules(forkCtx, attempt, plan, forkRunID, now, port.arrivalSchedules); err != nil {
 			return err
 		}
 		replayAdmission, err = requireMaterializedRunForkWorkflowTimers(forkCtx, attempt, plan, forkRunID, req.Readiness, port.workflowTimers, now, replayAdmission)
@@ -524,6 +535,7 @@ func postgresRunForkSelectedContractMaterializationPort(s *RunForkPostgresOwner)
 		},
 		materializeBarriers: s.PipelinePostgresOwner,
 		workflowTimers:      s.PipelinePostgresOwner,
+		arrivalSchedules:    s.PipelinePostgresOwner,
 		replies:             s.replies,
 		now:                 func() time.Time { return time.Now().UTC() },
 	}
@@ -577,6 +589,7 @@ func sqliteRunForkSelectedContractMaterializationPort(s *RunForkSQLiteOwner) run
 		},
 		materializeBarriers: s.PipelineSQLiteOwner,
 		workflowTimers:      s.PipelineSQLiteOwner,
+		arrivalSchedules:    s.PipelineSQLiteOwner,
 		replies:             s.replies,
 		now:                 s.now,
 	}
