@@ -6,11 +6,23 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
 
 func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
+	for owner, retired := range map[reflect.Type][]string{
+		reflect.TypeOf(RouteTable{}):           {"templateObservers"},
+		reflect.TypeOf(routePattern{}):         {"SourceInstancePath"},
+		reflect.TypeOf(routeResolvedPattern{}): {"SourceTemplatePath", "SourceLocalEvent"},
+	} {
+		for _, name := range retired {
+			if _, present := owner.FieldByName(name); present {
+				t.Errorf("compiled %s retains retired observer authority %s", owner, name)
+			}
+		}
+	}
 	files := parseBusProductionFiles(t)
 	requiredCalls := map[string]map[string]bool{
 		"appendUniqueSubscriber": {

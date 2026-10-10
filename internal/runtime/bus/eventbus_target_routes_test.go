@@ -1742,8 +1742,11 @@ func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing
 		t.Fatal("Publish succeeded, want missing agent-channel failure")
 	}
 	failure, ok := runtimefailures.As(err)
+	if !ok {
+		t.Fatalf("Publish failure = %v, want missing agent only", err)
+	}
 	missing, _ := failure.Failure.Detail.Attributes["missing_recipients"].([]string)
-	if !ok || failure.Failure.Detail.Code != "authoritative_delivery_incomplete" || len(missing) != 1 || !strings.Contains(missing[0], "agent-missing") {
+	if failure.Failure.Detail.Code != "authoritative_delivery_incomplete" || len(missing) != 1 || !strings.Contains(missing[0], "agent-missing") {
 		t.Fatalf("Publish failure = %#v, want missing agent only", failure)
 	}
 }
