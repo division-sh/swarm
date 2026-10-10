@@ -12,12 +12,6 @@ type FlowInstanceRouteMaterializationRequest struct {
 	ActivationVariables map[string]string
 }
 
-func (r FlowInstanceRouteMaterializationRequest) Normalized() FlowInstanceRouteMaterializationRequest {
-	r.Identity = r.Identity.Normalize()
-	r.ActivationVariables = cloneRouteActivationVariables(r.ActivationVariables)
-	return r
-}
-
 func cloneRouteActivationVariables(in map[string]string) map[string]string {
 	if len(in) == 0 {
 		return nil
