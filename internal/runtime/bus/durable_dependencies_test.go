@@ -55,7 +55,7 @@ func TestCompiledRoutesCannotExportMaterializedMembership(t *testing.T) {
 }
 
 func TestCompiledPubsubBindingsRejectMissingSource(t *testing.T) {
-	for _, table := range []*RouteTable{nil, {}, newRouteTable(nil)} {
+	for _, table := range []*RouteTable{nil, {}, derivedRouteTableFixture(t, nil)} {
 		if got, err := table.PubsubDeclarationDefinitions("scoring", []string{"scoring/result.direct"}); err == nil || len(got) != 0 {
 			t.Fatalf("missing source produced declaration bindings: got=%+v err=%v", got, err)
 		}

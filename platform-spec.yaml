@@ -18342,6 +18342,8 @@ platform_tables:
         acknowledgment belong to their native commit owners, independently of any process route table.
         The compiled source table does not export MaterializedRoutes or stage/rebuild concrete-instance topology;
         recipient definitions bind to exact admitted instance observations without publishing membership.
+        Derivation admits the complete source declaration and subscriber definitions in one operation;
+        a graph-only partial table is not a production source-table constructor.
         Publication preflight consumes the explicitly injected RunLifecycle.RequireActiveRun and PreparedEvents owners;
         discovering run authority from EventStore or the redundant RequirePublicationRunActive alias is unsupported.
         Constructed existence, immutable parent/key selection and terminal occupancy are observed through the native
@@ -18351,6 +18353,8 @@ platform_tables:
         ListActiveFlowInstanceDescriptorsForScope and ListActiveFlowInstanceDescriptorsForKey are unsupported;
         normalized entity-field descriptor matching cannot elect an instance. Bounded compiled declaration or exact
         coordinate lookup consumes immutable construction keys and stored identities, including terminal occupancy.
+        Recipient materialization reloads target evidence only through exact candidate coordinates admitted by that
+        same instance index; it does not regain an unbounded descriptor inventory after returning from planning.
         ListFlowInstanceRouteRecords is unsupported; persisted per-instance route membership cannot elect or validate
         an executable receiver. Instance observation and delivery planning consume their separate canonical owners.
         A selected receiver with proven terminal stage or terminated construction produces the existing target-unreachable

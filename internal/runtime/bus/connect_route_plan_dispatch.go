@@ -587,12 +587,16 @@ func (r connectRoutePlanResolver) targetLookupCoordinates(evt events.Event) ([]r
 	if evt.RoutingSource().Kind() == events.RoutingSourceRoot || evt.RoutingSource().Kind() == events.RoutingSourceDeploymentFeed {
 		routes = append(routes, events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(r.source), FlowInstance: evt.RunID()})
 	}
+	return r.exactLookupCoordinates(evt.RunID(), routes)
+}
+
+func (r connectRoutePlanResolver) exactLookupCoordinates(runID string, routes []events.RouteIdentity) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
 	var owners []runtimeflowidentity.RunScopedFlowInstance
 	for _, route := range routes {
 		if route.FlowInstance == "" {
 			continue
 		}
-		owner, err := runtimeflowidentity.NewRunScopedFlowInstance(evt.RunID(), runtimeflowidentity.StoredRoute(runtimeflowidentity.ScopeKey(r.source, route.FlowID), "", route.FlowInstance))
+		owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.StoredRoute(runtimeflowidentity.ScopeKey(r.source, route.FlowID), "", route.FlowInstance))
 		if err != nil {
 			return nil, err
 		}
