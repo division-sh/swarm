@@ -61,6 +61,9 @@ func TestSnapshotRewritePreservesExplicitStoretestImportWithoutDuplication(t *te
 }
 
 func TestReviewedSnapshotCandidateOverlayTypeChecks(t *testing.T) {
+	// This reviewed candidate includes the explicitly tagged #2413 fixture.
+	// The production preflight still refuses files outside its active build view.
+	t.Setenv("GOFLAGS", "-tags=issue2413")
 	var rows []recipe
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
