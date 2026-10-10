@@ -695,6 +695,10 @@ func TestPackageDiagnosticsConsumeGeneratedWeights(t *testing.T) {
 	if len(result.PackageDiagnostics) != 1 || result.PackageDiagnostics[0].Kind != "stale" {
 		t.Fatalf("diagnostics = %+v, want one stale generated weight", result.PackageDiagnostics)
 	}
+	message := result.PackageDiagnostics[0].Message
+	if !strings.Contains(message, "outside the selected core plan") || strings.Contains(message, "absent from broad and full") || result.Status != BudgetPass {
+		t.Fatalf("out-of-tier diagnostic changed qualification or claims coverage removal: %+v", result)
+	}
 }
 
 func TestBudgetMarkdownDoesNotAskImplementersToRebalance(t *testing.T) {

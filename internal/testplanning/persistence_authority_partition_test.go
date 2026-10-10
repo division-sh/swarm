@@ -53,7 +53,7 @@ func validatePersistenceDebtEnvelopes(policy Policy) error {
 			timeout = ""
 			children = nil
 		}
-		if !ok || !slices.Equal(unit.Packages, packages) || unit.Run != run || unit.Skip != skip || unit.CountMode != "count-1" || unit.EnvironmentID != "ci-postgres-gateway-empty-v1" || unit.BudgetClass != "broad" || unit.GoTimeout != timeout || !reflect.DeepEqual(unit.RequiredChildren, children) {
+		if !ok || !slices.Equal(unit.Packages, packages) || unit.Run != run || unit.Skip != skip || unit.CountMode != "count-1" || unit.EnvironmentID != "" || !reflect.DeepEqual(unit.EnvironmentIDs, managedEnvironmentIDs()) || unit.BudgetClass != "broad" || unit.GoTimeout != timeout || !reflect.DeepEqual(unit.RequiredChildren, children) {
 			return fmt.Errorf("%s changed persistence proof envelope: %+v", id, unit)
 		}
 		for _, tier := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {

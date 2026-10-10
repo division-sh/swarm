@@ -23940,6 +23940,16 @@ test_specification:
         SQLite possession. Every lower-tier omitted root explicitly names its minimum tier and retained full owner;
         it earns no execution credit. New ordinary roots enter core; an unowned special root blocks every tier.
       execution: >-
+        Proof policy resolves each profile shard and named unit's environment from its explicit ci/local recipe
+        declaration before plan hashing, weighting, batching or receipt production. Hosted selection of a local-named
+        unit does not make its execution local; local selection of a CI-named unit does not make its execution hosted.
+        Venue-specific environment_ids must name the selected venue, contain only known venue keys and canonical
+        nonempty identities, and cannot coexist with a fixed venue-invariant environment_id. Missing or ambiguous
+        declarations refuse planning. Local-only projections cannot acquire a hosted recipe by inference.
+        Receipts retain the exact resolved environment, count and build scope. Archived local/CI receipts are never
+        relabeled or aliased; changed recipe identity requires fresh plan-bound proof. The pinned full reference and
+        frozen tier memberships remain unchanged. Historical package weights outside a selected tier are advisory
+        unselected-plan diagnostics, not proof that full coverage was removed or timing savings were earned.
         Logical commands retain their own processes, stores, workspaces, deadlines, backend children and receipts.
         Only explicitly eligible short units with valid measured weights may share a physical runner. Each physical
         job is matched to its exact planned logical units and counted once, while every logical budget and failure

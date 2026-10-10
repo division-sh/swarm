@@ -89,6 +89,16 @@ regression, rate or lag is known.
 
 ## Recorded PR #2595 Qualification Amendment
 
+The #2535 venue-identity repair now gives profiles and units explicit
+`environment_ids: {ci: ..., local: ...}` declarations. The plan owner resolves
+the selected venue before emitting its digest and receipts. Fixed
+`environment_id` is reserved for genuinely venue-invariant recipes; combining
+the two forms, an unknown venue, or an absent selected recipe refuses planning.
+The committed policy uses venue declarations throughout, including its local-only
+explicit-PostgreSQL projection. Unit names never choose a recipe. Historical
+receipts and the pinned test-time reference remain unchanged; the failure below
+is retained and is not converted to passing evidence by relabeling it.
+
 [Reviewer-g's ruling](https://github.com/division-sh/swarm/pull/2595#issuecomment-6090325132)
 requires one ordinary hosted full PR qualification for the unchanged implementation
 at `0ce844da1670b565409295a253d1d3ca8257a570`. Its hosted core run

@@ -48,13 +48,13 @@ func serveappLateSplitEnvelopes() map[string]UnitPolicy {
 				"TestIssue2566ReporterFiniteFixtureCanCloseBothStores": {"sqlite", "postgres"},
 				"TestManagedEmitPublicationExactScopeBothStores":       {"default_sqlite/root", "default_sqlite/imported", "default_sqlite/nested", "default_sqlite/template", "explicit_postgres/root", "explicit_postgres/imported", "explicit_postgres/nested", "explicit_postgres/template"},
 			},
-			CountMode: "count-1", EnvironmentID: "ci-postgres-gateway-empty-v1", BudgetClass: "full",
+			CountMode: "count-1", EnvironmentIDs: managedEnvironmentIDs(), BudgetClass: "full",
 		},
 		"serveapp-delayed-commit-preservation": {
 			Packages:         []string{"github.com/division-sh/swarm/internal/serveapp"},
 			Run:              `^TestIssue2394ServedOne.*$`,
 			RequiredChildren: map[string][]string{"TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores": {"sqlite", "postgres"}},
-			CountMode:        "count-1", EnvironmentID: "ci-postgres-gateway-empty-v1", BudgetClass: "full",
+			CountMode:        "count-1", EnvironmentIDs: managedEnvironmentIDs(), BudgetClass: "full",
 		},
 	}
 }

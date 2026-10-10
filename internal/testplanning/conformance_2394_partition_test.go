@@ -61,7 +61,7 @@ func validateConformance2394Partition(policy Policy, names []string) ([][]string
 	groups := make([][]string, len(patterns))
 	for i, id := range conformance2394Units {
 		u := policy.Units[id]
-		if !reflect.DeepEqual(u.Packages, pkg) || u.CountMode != "count-1" || u.EnvironmentID != "ci-postgres-gateway-empty-v1" || u.BudgetClass != "broad" || u.GoTimeout != "" || u.Skip != "" || strings.Contains(u.Run, "/") {
+		if !reflect.DeepEqual(u.Packages, pkg) || u.CountMode != "count-1" || u.EnvironmentID != "" || !reflect.DeepEqual(u.EnvironmentIDs, managedEnvironmentIDs()) || u.BudgetClass != "broad" || u.GoTimeout != "" || u.Skip != "" || strings.Contains(u.Run, "/") {
 			return nil, fmt.Errorf("%s changed package/count/environment/budget or filtered a root: %+v", id, u)
 		}
 		var err error
@@ -72,7 +72,7 @@ func validateConformance2394Partition(policy Policy, names []string) ([][]string
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		id := "conformance-soak-" + backend
-		want := UnitPolicy{Packages: pkg, Run: "^" + conformance2394Soak + "$/^" + backend + "$", GoTimeout: "22m", CountMode: "count-1", EnvironmentID: "ci-postgres-gateway-empty-v1", BudgetClass: "soak"}
+		want := UnitPolicy{Packages: pkg, Run: "^" + conformance2394Soak + "$/^" + backend + "$", GoTimeout: "22m", CountMode: "count-1", EnvironmentIDs: managedEnvironmentIDs(), BudgetClass: "soak"}
 		if !reflect.DeepEqual(policy.Units[id], want) {
 			return nil, fmt.Errorf("%s changed mandatory original soak: %+v", id, policy.Units[id])
 		}
@@ -127,7 +127,7 @@ func TestConformanceVolumeFanOutProofPartition(t *testing.T) {
 	unit := policy.Units[unitID]
 	want := UnitPolicy{
 		Packages: []string{"github.com/division-sh/swarm/internal/runtime/conformance"},
-		Run:      selection, CountMode: "count-1", EnvironmentID: "ci-postgres-gateway-empty-v1", BudgetClass: "full",
+		Run:      selection, CountMode: "count-1", EnvironmentIDs: managedEnvironmentIDs(), BudgetClass: "full",
 	}
 	if !reflect.DeepEqual(unit, want) {
 		t.Fatalf("heavy fan-out proof envelope changed: %+v", unit)

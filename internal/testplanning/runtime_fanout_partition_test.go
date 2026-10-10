@@ -106,7 +106,7 @@ func validateRuntimeFanOutEnvelopes(policy Policy) error {
 	for _, id := range runtimeFanOutUnits {
 		u := policy.Units[id]
 		if !reflect.DeepEqual(u.Packages, []string{"github.com/division-sh/swarm/internal/store/internal/runtimepersistence"}) ||
-			u.CountMode != "count-1" || u.EnvironmentID != "ci-postgres-gateway-empty-v1" ||
+			u.CountMode != "count-1" || u.EnvironmentID != "" || !reflect.DeepEqual(u.EnvironmentIDs, managedEnvironmentIDs()) ||
 			u.BudgetClass != "broad" || u.GoTimeout != "" || u.Skip != "" || strings.Contains(u.Run, "/") {
 			return fmt.Errorf("%s changed proof envelope: %+v", id, u)
 		}
