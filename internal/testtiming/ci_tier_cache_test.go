@@ -57,7 +57,7 @@ func TestCITierCheckRecordsSameRunSelectionAndOutcome(t *testing.T) {
 			t.Fatalf("summary outcome %q admission: %v", outcome, err)
 		}
 	}
-	for _, wrong := range []string{"run", "attempt", "plan", "source", "selection", "missing"} {
+	for _, wrong := range []string{"run", "attempt", "plan", "source", "selection", "extra-units", "digest", "missing"} {
 		command := tierRecordCommand(t, step.Run, "lifecycle", "success", filepath.Join(t.TempDir(), "summary"), wrong)
 		if raw, err := command.CombinedOutput(); err == nil {
 			t.Fatalf("foreign %s selection metadata admitted: %s", wrong, raw)
@@ -89,9 +89,14 @@ func tierRecordCommand(t *testing.T, script, tier, outcome, output, wrong string
 		report.ExecutionSHA = "foreign"
 	case "selection":
 		report.CheckName = "CI tier: lifecycle"
+	case "extra-units":
+		report.ExtraUnits = []string{"foreign"}
+	case "digest":
+		report.SelectionDigest = strings.Repeat("a", 64)
 	}
 	raw, _ := json.Marshal(report)
-	for name, raw := range map[string][]byte{"ci-selection.json": raw, "ci-selection.md": []byte("plan selection summary\n"), "proof-plan.json": []byte(`{"head_sha":"source"}`)} {
+	plan, _ := json.Marshal(map[string]any{"head_sha": "source", "profile": tier, "digest": "plan", "extra_units": []string{}})
+	for name, raw := range map[string][]byte{"ci-selection.json": raw, "ci-selection.md": []byte("plan selection summary\n"), "proof-plan.json": plan} {
 		if name == "ci-selection.json" && wrong == "missing" {
 			continue
 		}
@@ -101,7 +106,7 @@ func tierRecordCommand(t *testing.T, script, tier, outcome, output, wrong string
 	}
 	command := exec.Command("bash", "-c", script)
 	command.Dir = dir
-	command.Env = append(os.Environ(), "TIER="+tier, "PROOF_RESULT="+outcome, "PLAN_DIGEST=plan", "SELECTION_CHECK="+selection.CheckName(42, 2), "GITHUB_RUN_ID=42", "GITHUB_RUN_ATTEMPT=2", "GITHUB_STEP_SUMMARY="+output)
+	command.Env = append(os.Environ(), "TIER="+tier, "PROOF_RESULT="+outcome, "PLAN_DIGEST=plan", "SELECTION_CHECK="+selection.CheckName(42, 2), "SELECTION_DIGEST="+selection.Digest(), "GITHUB_RUN_ID=42", "GITHUB_RUN_ATTEMPT=2", "GITHUB_STEP_SUMMARY="+output)
 	return command
 }
 

@@ -66,6 +66,7 @@ jobs:
       plan_digest: ${{ steps.plan.outputs.plan_digest }}
       execution_sha: ${{ steps.plan.outputs.execution_sha }}
       selection_check: ${{ steps.plan.outputs.selection_check }}
+      selection_digest: ${{ steps.plan.outputs.selection_digest }}
       master_replay: ${{ steps.merged.outputs.result == 'verified' }}
     steps:
       - name: Checkout
@@ -186,6 +187,7 @@ jobs:
             -workflow-run-id "$GITHUB_RUN_ID" -workflow-attempt "$GITHUB_RUN_ATTEMPT" \
             -result-json test-results/ci-selection.json -markdown test-results/ci-selection.md
           echo "selection_check=$(jq -r .check_name test-results/ci-selection.json)" >> "$GITHUB_OUTPUT"
+          echo "selection_digest=$(jq -r .selection_digest test-results/ci-selection.json)" >> "$GITHUB_OUTPUT"
           echo "proof_matrix=$(jq -c '{include: .include}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
           echo "soak_matrix=$(jq -c '{include: [.include[] | select(.budget_class == "soak")]}' test-results/proof-matrix.json)" >> "$GITHUB_OUTPUT"
           echo "profile=$(jq -r .profile test-results/proof-plan.json)" >> "$GITHUB_OUTPUT"
@@ -743,14 +745,17 @@ jobs:
           TIER: ${{ needs.ci-plan.outputs.profile }}
           PLAN_DIGEST: ${{ needs.ci-plan.outputs.plan_digest }}
           SELECTION_CHECK: ${{ needs.ci-plan.outputs.selection_check }}
+          SELECTION_DIGEST: ${{ needs.ci-plan.outputs.selection_digest }}
           PROOF_RESULT: ${{ needs.required-tests.result }}
         run: |
           set -euo pipefail
           case "$TIER" in core|lifecycle|full) ;; *) exit 1 ;; esac
           case "$PROOF_RESULT" in success|failure|cancelled|skipped) ;; *) exit 1 ;; esac
           jq -e --arg tier "$TIER" --arg plan "$PLAN_DIGEST" --slurpfile source test-results/proof-plan.json \
-            --arg check "$SELECTION_CHECK" --argjson run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg check "$SELECTION_CHECK" --arg selection "$SELECTION_DIGEST" --argjson run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" \
             '.version == 1 and .tier == $tier and .plan_digest == $plan and .execution_sha == $source[0].head_sha and
+             .tier == $source[0].profile and .plan_digest == $source[0].digest and
+             .extra_units == ($source[0].extra_units // []) and .selection_digest == $selection and
              .check_name == $check and .workflow_run_id == $run and .workflow_attempt == $attempt and
              (.selection_digest | test("^[0-9a-f]{64}$")) and (.extra_units | type == "array")' \
             test-results/ci-selection.json >/dev/null
