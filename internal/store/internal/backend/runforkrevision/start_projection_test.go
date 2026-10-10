@@ -8,8 +8,66 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/google/uuid"
 )
+
+func TestRunStartRetainsTypedFanOutCoordinatesWithoutReparsingKeys(t *testing.T) {
+	runID := uuid.NewString()
+	handler := fanoutobligation.IntentKey{RunID: runID, TriggeringDeliveryID: uuid.NewString(),
+		ElementRef: contracts.FanOutElementRef{FlowPath: ".", Family: "fan_out", SemanticPath: "node|with|delimiters"}}
+	deployment := fanoutobligation.IntentKey{RunID: runID, DeploymentFeedID: uuid.NewString()}
+	intent, err := FanOutIntentFact(handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := FanOutOutcomeFact(handler, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	barrier, err := FanOutBarrierFact(handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed, err := FanOutIntentFact(deployment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feedOutcome, err := FanOutOutcomeFact(deployment, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs := []FactRef{intent, outcome, barrier, feed, feedOutcome}
+	effects := NewEffects()
+	if err := effects.DeclareStart(runID, "bundle-v2:sha256:"+strings.Repeat("a", 64), ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := effects.AddStartFacts(runID, refs...); err != nil {
+		t.Fatal(err)
+	}
+	projection, found := effects.DeclaredStart(runID)
+	if !found || len(projection.Facts) != len(refs) {
+		t.Fatalf("lost typed start facts: %+v", projection)
+	}
+	raw, err := json.Marshal(projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeStartProjection(raw)
+	if err != nil || !reflect.DeepEqual(decoded, projection) {
+		t.Fatalf("opaque selection changed: %+v %v", decoded, err)
+	}
+	for _, ref := range refs {
+		if _, err := NewFactRef(FamilyFanOutObligations, ref.key); err == nil {
+			t.Fatal("scalar writer minted composite authority")
+		}
+	}
+	before := cloneStarts(effects.starts)
+	if err := effects.AddStartFacts(uuid.NewString(), refs...); err == nil || !reflect.DeepEqual(before, effects.starts) {
+		t.Fatal("foreign contribution changed start")
+	}
+}
 
 func TestRunStartProjectionHasOnlySemanticCoordinates(t *testing.T) {
 	projection := StartProjection{Version: 1, SourceBundleHash: ("bundle-v2:sha256:" + strings.Repeat("a", 64)),

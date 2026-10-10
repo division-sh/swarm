@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -45,11 +46,16 @@ func (p StartProjection) Validate() error {
 		return fmt.Errorf("run start projection requires an explicit fact set")
 	}
 	for index, fact := range p.Facts {
-		if !startFactFamily(fact.Family) || fact.Key == "" {
+		if !startFactFamily(fact.Family) || fact.Key == "" || !utf8.ValidString(fact.Key) {
 			return fmt.Errorf("run start projection contains an invalid or excluded fact")
 		}
-		if _, err := NewFactRef(fact.Family, fact.Key); err != nil {
-			return fmt.Errorf("run start fact coordinates: %w", err)
+		// Composite keys are opaque selection coordinates. AddStartFacts admits
+		// the typed writer ref; reconstruction revalidates the selected fact body.
+		// Parsing a key here would lose semantic paths containing delimiters.
+		if fact.Family != FamilyFanOutObligations {
+			if _, err := NewFactRef(fact.Family, fact.Key); err != nil {
+				return fmt.Errorf("run start fact coordinates: %w", err)
+			}
 		}
 		if fact.Family == FamilyEvents && fact.Key == p.FirstTurnEventID {
 			return fmt.Errorf("run start projection cannot admit its creating ingress")
