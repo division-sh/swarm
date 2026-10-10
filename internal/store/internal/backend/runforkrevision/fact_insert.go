@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
 // Six parameters per row keep even a full chunk below SQLite's 999-variable
@@ -23,6 +25,7 @@ func insertRevisionFacts(ctx context.Context, tx revisionSQL, postgres bool, run
 		var query strings.Builder
 		query.WriteString(`INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) VALUES `)
 		args := make([]any, 0, 6*len(batch))
+		metadataBytes, metadataCopies := 0, 0
 		for i, fact := range batch {
 			if i != 0 {
 				query.WriteByte(',')
@@ -35,8 +38,15 @@ func insertRevisionFacts(ctx context.Context, tx revisionSQL, postgres bool, run
 			}
 			fmt.Fprintf(&query, "($%d,$%d,$%d,$%d,$%d%s,$%d)", n+1, n+2, n+3, n+4, n+5, cast, n+6)
 			args = append(args, runID, revision, fact.family, fact.key, body, fact.present)
+			if fact.family == FamilyEntityMetadata {
+				metadataBytes += len(fact.fact)
+				metadataCopies++
+			}
 		}
-		if _, err := tx.ExecContext(ctx, query.String(), args...); err != nil {
+		write := transactiontest.BeginEntityMetadataJSON(ctx, metadataBytes, metadataCopies)
+		_, err := tx.ExecContext(ctx, query.String(), args...)
+		write.End(err)
+		if err != nil {
 			if len(batch) == 1 {
 				fact := batch[0]
 				return fmt.Errorf("record run fork %s fact %s at revision %d: %w", fact.family, fact.key, revision, err)

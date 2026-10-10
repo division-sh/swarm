@@ -8,11 +8,97 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
 type factInsertCall struct {
 	query string
 	args  []any
+}
+
+func TestRevisionMetadataSubmittedJSONBothDialects(t *testing.T) {
+	for _, postgres := range []bool{false, true} {
+		for _, fail := range []bool{false, true} {
+			t.Run(fmt.Sprintf("postgres_%v/fail_%v", postgres, fail), func(t *testing.T) {
+				var slot transactiontest.Slot
+				collector, restore, err := slot.Install(transactiontest.Options{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer restore()
+				a := slot.Begin(false, false)
+				a.Begun()
+				ctx := transactiontest.WithAttempt(context.Background(), a)
+				facts := make([]revisionFactInsert, 257)
+				for index := range facts {
+					family := FamilyEvents
+					if index%2 == 0 {
+						family = FamilyEntityMetadata
+					}
+					facts[index] = revisionFactInsert{family, fmt.Sprint(index), []byte(`{ "exact" : "submitted" }`), true}
+				}
+				refusal := errors.New("metadata write refused")
+				recorder := &factInsertRecorder{err: refusal}
+				if fail {
+					recorder.failAt = 2
+				}
+				writeErr := insertRevisionFacts(ctx, recorder, postgres, "run", 9, facts)
+				if fail {
+					if !errors.Is(writeErr, refusal) {
+						t.Fatalf("metadata lost refusal: %v", writeErr)
+					}
+					a.RollbackAttempted()
+				} else {
+					if writeErr != nil {
+						t.Fatal(writeErr)
+					}
+					a.BeforeCommit()
+					a.Committed()
+				}
+				a.Finish(writeErr)
+				want := transactiontest.CopyCounts{}
+				for index, call := range recorder.calls {
+					var bytes, copies uint64
+					for row := 0; row < len(call.args); row += 6 {
+						if call.args[row+2] != FamilyEntityMetadata {
+							continue
+						}
+						copies++
+						// Inspect the actual dialect-specific argument, not JSONB
+						// readback or an inferred fact/row multiplication.
+						switch body := call.args[row+4].(type) {
+						case string:
+							bytes += uint64(len(body))
+						case []byte:
+							bytes += uint64(len(body))
+						default:
+							t.Fatalf("unexpected submitted JSON argument %T", body)
+						}
+					}
+					want.Calls++
+					want.Copies += copies
+					want.SubmittedBytes += bytes
+					if fail && index+1 == recorder.failAt {
+						want.FailedCalls++
+						want.FailedBytes += bytes
+					} else {
+						want.SucceededCalls++
+						want.SucceededBytes += bytes
+					}
+				}
+				if fail {
+					want.UncommittedBytes, want.RollbackAttemptedBytes = want.SucceededBytes, want.SucceededBytes
+				} else {
+					want.CommittedBytes = want.SucceededBytes
+				}
+				got := collector.Snapshot().Total.JSONCopies
+				if got.EntityMetadata != want || got.WorkflowHeader != (transactiontest.CopyCounts{}) {
+					t.Fatalf("metadata receipt=%+v want=%+v", got, want)
+				}
+			})
+		}
+	}
 }
 
 type factInsertRecorder struct {
