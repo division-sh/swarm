@@ -18328,6 +18328,8 @@ platform_tables:
         EventBus.StageFlowInstanceRouteContext and the injected FlowRouteTopology persistence role are unsupported;
         EventBus neither stages nor acknowledges a persisted instance-membership mirror. Construction and attachment
         acknowledgment belong to their native commit owners, independently of any process route table.
+        The compiled source table does not export MaterializedRoutes or stage/rebuild concrete-instance topology;
+        recipient definitions bind to exact admitted instance observations without publishing membership.
         Publication preflight consumes the explicitly injected RunLifecycle.RequireActiveRun and PreparedEvents owners;
         discovering run authority from EventStore or the redundant RequirePublicationRunActive alias is unsupported.
         Constructed existence, immutable parent/key selection and terminal occupancy are observed through the native

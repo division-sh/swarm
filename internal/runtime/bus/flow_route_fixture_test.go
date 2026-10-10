@@ -3,7 +3,6 @@ package bus
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -14,9 +13,9 @@ func (rt *RouteTable) ConstructedRouteRequestFixture(req FlowInstanceRouteMateri
 	if req.Instance != (runtimeflowidentity.Instance{}) {
 		return req
 	}
-	flowID, found := rt.FlowInstanceTemplateID(req.Identity.Route)
+	declaration, found := rt.templates[req.Identity.Route.ScopeKey]
 	if found {
-		req.Instance = ConstructedFlowInstanceIdentityFixture(rt.source, flowID, req.Identity.Route.InstanceID, req.Identity.RunID)
+		req.Instance = ConstructedFlowInstanceIdentityFixture(rt.source, declaration.FlowID, req.Identity.Route.InstanceID, req.Identity.RunID)
 	}
 	return req
 }
@@ -126,15 +125,5 @@ func (eb *EventBus) RemoveFlowInstanceRouteContextFixture(ctx context.Context, i
 	if table == nil {
 		return errors.New("route table is not initialized")
 	}
-	owner, exists, err := table.flowInstanceRouteRemovalOwner(identity)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		owner = identity.Normalize()
-		if owner.Validate() != nil {
-			return fmt.Errorf("flow-instance route removal requires exact identity")
-		}
-	}
-	return table.removeFlowInstanceRouteForContext(ctx, owner)
+	return table.RemoveFlowInstanceRoute(identity)
 }

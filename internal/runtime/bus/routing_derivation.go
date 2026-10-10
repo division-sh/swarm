@@ -1,7 +1,6 @@
 package bus
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -441,24 +440,6 @@ func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 	return nil
 }
 
-// A private staged topology can defer its resolution index rebuild while
-// retaining the ordinary request order and observer materialization.
-func (rt *RouteTable) addFlowInstanceRouteForTopology(req FlowInstanceRouteMaterializationRequest, inputProducers *runtimepinrouting.FlowInputProducerResolver) (bool, error) {
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
-	added, _, err := rt.addFlowInstanceRouteLocked(req, inputProducers)
-	if added {
-		rt.resolutionIndexDirty = true
-	}
-	return added, err
-}
-
-func (rt *RouteTable) rebuildStagedFlowInstanceRoutes() {
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
-	rt.rebuildLocked()
-}
-
 func (rt *RouteTable) addFlowInstanceRouteLocked(req FlowInstanceRouteMaterializationRequest, inputProducers *runtimepinrouting.FlowInputProducerResolver) (bool, []string, error) {
 	req = req.Normalized()
 
@@ -547,33 +528,6 @@ func (rt *RouteTable) HasFlowInstanceRoute(identity runtimeflowidentity.RunScope
 	return exists && owner.Route() == identity.Route
 }
 
-func (rt *RouteTable) FlowInstanceTemplateID(identity runtimeflowidentity.Route) (string, bool) {
-	if rt == nil {
-		return "", false
-	}
-	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
-	if !identity.Valid() {
-		return "", false
-	}
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	template, exists := rt.templates[identity.ScopeKey]
-	return strings.TrimSpace(template.FlowID), exists
-}
-
-func (rt *RouteTable) flowInstanceRouteRemovalOwner(identity runtimeflowidentity.RunScopedFlowInstance) (runtimeflowidentity.RunScopedFlowInstance, bool, error) {
-	if rt == nil {
-		return runtimeflowidentity.RunScopedFlowInstance{}, false, fmt.Errorf("route table is required")
-	}
-	identity, err := normalizeFlowInstanceRouteIdentity(identity)
-	if err != nil {
-		return runtimeflowidentity.RunScopedFlowInstance{}, false, err
-	}
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	return rt.matchFlowInstanceRouteOwnerLocked(identity)
-}
-
 func (rt *RouteTable) RemoveFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
 	if rt == nil {
 		return fmt.Errorf("route table is required")
@@ -612,101 +566,6 @@ func (rt *RouteTable) removeFlowInstanceRoute(identity runtimeflowidentity.RunSc
 	return nil
 }
 
-func (rt *RouteTable) MaterializedRoutes(identity runtimeflowidentity.RunScopedFlowInstance) []FlowInstanceRouteRecord {
-	if rt == nil {
-		return nil
-	}
-	return rt.materializedRouteRecordSets([]runtimeflowidentity.RunScopedFlowInstance{identity})[0].Routes
-}
-
-func (rt *RouteTable) materializedRouteRecordSets(identities []runtimeflowidentity.RunScopedFlowInstance) []FlowInstanceRouteRecordSet {
-	sets := make([]FlowInstanceRouteRecordSet, 0, len(identities))
-	for _, identity := range identities {
-		sets = append(sets, FlowInstanceRouteRecordSet{Identity: identity})
-	}
-	if rt == nil || len(sets) == 0 {
-		return sets
-	}
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	type instanceKey struct{ runID, instancePath string }
-	type materializedRouteIdentity struct {
-		instancePath string
-		eventPattern string
-		recipient    events.DeliveryRecipient
-	}
-	type recordGroup struct {
-		identity runtimeflowidentity.RunScopedFlowInstance
-		seen     map[materializedRouteIdentity]struct{}
-		records  []FlowInstanceRouteRecord
-	}
-	groups := make(map[instanceKey]*recordGroup, len(sets))
-	for _, set := range sets {
-		identity, err := normalizeFlowInstanceRouteIdentity(set.Identity)
-		if err != nil {
-			continue
-		}
-		owner, exists, err := rt.matchFlowInstanceRouteOwnerLocked(identity)
-		if err != nil || !exists || !flowInstanceRouteIdentityEqual(owner, identity) {
-			continue
-		}
-		key := instanceKey{runID: identity.RunID, instancePath: identity.Route.InstancePath}
-		if _, exists := groups[key]; !exists {
-			groups[key] = &recordGroup{
-				identity: identity,
-				seen:     make(map[materializedRouteIdentity]struct{}),
-				records:  make([]FlowInstanceRouteRecord, 0, 8),
-			}
-		}
-	}
-	for _, pattern := range rt.patterns {
-		key := instanceKey{runID: pattern.RunID, instancePath: strings.Trim(strings.TrimSpace(pattern.InstancePath), "/")}
-		group := groups[key]
-		if group == nil {
-			continue
-		}
-		record := FlowInstanceRouteRecord{
-			Identity:       group.identity,
-			EventPattern:   strings.TrimSpace(pattern.EventPattern),
-			SubscriberType: pattern.Subscriber.Recipient.Code(),
-			SubscriberID:   pattern.Subscriber.Recipient.ID(),
-			SourceFlow:     group.identity.Route.ScopeKey,
-		}
-		recordKey := materializedRouteIdentity{
-			instancePath: record.Identity.Route.InstancePath,
-			eventPattern: record.EventPattern,
-			recipient:    pattern.Subscriber.Recipient,
-		}
-		if _, exists := group.seen[recordKey]; exists {
-			continue
-		}
-		group.seen[recordKey] = struct{}{}
-		group.records = append(group.records, record)
-	}
-	for _, group := range groups {
-		sort.Slice(group.records, func(i, j int) bool {
-			if group.records[i].EventPattern != group.records[j].EventPattern {
-				return group.records[i].EventPattern < group.records[j].EventPattern
-			}
-			if group.records[i].SubscriberType != group.records[j].SubscriberType {
-				return group.records[i].SubscriberType < group.records[j].SubscriberType
-			}
-			return group.records[i].SubscriberID < group.records[j].SubscriberID
-		})
-	}
-	for index := range sets {
-		identity, err := normalizeFlowInstanceRouteIdentity(sets[index].Identity)
-		if err != nil {
-			continue
-		}
-		group := groups[instanceKey{runID: identity.RunID, instancePath: identity.Route.InstancePath}]
-		if group != nil && flowInstanceRouteIdentityEqual(group.identity, identity) {
-			sets[index].Routes = append(make([]FlowInstanceRouteRecord, 0, len(group.records)), group.records...)
-		}
-	}
-	return sets
-}
-
 func newRouteTable(source semanticview.Source) *RouteTable {
 	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
 	rt := newRouteTableWithGraph(source, graph)
@@ -729,10 +588,6 @@ func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.
 		instanceEventPath:    make(map[runtimeflowidentity.RunScopedFlowInstance][]string),
 		connectGraph:         graph,
 	}
-}
-
-func (rt *RouteTable) removeFlowInstanceRouteForContext(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	return rt.RemoveFlowInstanceRoute(identity)
 }
 
 func (rt *RouteTable) addEventPathsLocked(basePath string, localEvents map[string]struct{}) ([]string, []string) {
