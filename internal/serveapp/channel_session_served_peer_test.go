@@ -297,9 +297,7 @@ func (p *serveNativeProtocolPeer) pair(qr string) {
 	p.t.Helper()
 	p.mu.Lock()
 	wire := p.wire
-	connections, logins, uploads := p.connections, p.postLogins, p.prekeyUploads
 	p.mu.Unlock()
-	p.t.Logf("encrypted input id=%v connections=%d post_logins=%d uploads=%d", message.Attrs["id"], connections, logins, uploads)
 	if wire == nil {
 		p.t.Fatal("RunServe did not connect the actual SDK")
 	}
@@ -397,7 +395,9 @@ func (p *serveNativeProtocolPeer) sendEncryptedFrame(message waBinary.Node) {
 	p.t.Helper()
 	p.mu.Lock()
 	wire := p.wire
+	connections, logins, uploads := p.connections, p.postLogins, p.prekeyUploads
 	p.mu.Unlock()
+	p.t.Logf("encrypted input id=%v connections=%d post_logins=%d uploads=%d", message.Attrs["id"], connections, logins, uploads)
 	if wire == nil {
 		p.t.Fatal("encrypted input requires the original connected wire")
 	}
