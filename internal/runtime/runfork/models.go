@@ -190,6 +190,7 @@ const (
 )
 
 type RunForkMaterializedEntitySnapshotMetadata struct {
+	InitialMaterialization json.RawMessage `json:"initial_materialization,omitempty"`
 	// FlowConfig is the exact flow_instances.config envelope recorded with
 	// the entity metadata at the selected revision, not current flow state.
 	FlowConfig     json.RawMessage `json:"flow_config,omitempty"`
