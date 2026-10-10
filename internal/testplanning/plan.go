@@ -87,7 +87,11 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 	if !ok {
 		return RunPlan{}, fmt.Errorf("unknown profile %q", profile)
 	}
-	packages, err := canonicalStrings(packages)
+	profileEnvironment, err := environmentForVenue(profilePolicy.EnvironmentID, profilePolicy.EnvironmentIDs, option.Venue)
+	if err != nil {
+		return RunPlan{}, fmt.Errorf("profile %s: %w", profile, err)
+	}
+	packages, err = canonicalStrings(packages)
 	if err != nil {
 		return RunPlan{}, fmt.Errorf("package inventory: %w", err)
 	}
@@ -163,7 +167,7 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 			WorkloadProfile: profile,
 			ExecutionTier:   executionTier(option.Venue, "broad"),
 			CountMode:       profilePolicy.CountMode,
-			EnvironmentID:   profilePolicy.EnvironmentID,
+			EnvironmentID:   profileEnvironment,
 			BudgetClass:     "broad",
 		}
 	}
@@ -185,6 +189,10 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 	unitIDs := append([]string(nil), profilePolicy.Units...)
 	for _, id := range unitIDs {
 		specialUnit := policy.Units[id]
+		unitEnvironment, err := environmentForVenue(specialUnit.EnvironmentID, specialUnit.EnvironmentIDs, option.Venue)
+		if err != nil {
+			return RunPlan{}, fmt.Errorf("unit %s: %w", id, err)
+		}
 		for _, pkg := range specialUnit.Packages {
 			if !discovered[pkg] {
 				return RunPlan{}, fmt.Errorf("unit %s package %s is absent from discovered inventory", id, pkg)
@@ -203,7 +211,7 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 			Skip:             specialUnit.Skip,
 			GoTimeout:        specialUnit.GoTimeout,
 			CountMode:        specialUnit.CountMode,
-			EnvironmentID:    specialUnit.EnvironmentID,
+			EnvironmentID:    unitEnvironment,
 			BudgetClass:      specialUnit.BudgetClass,
 			RequiredChildren: specialUnit.RequiredChildren,
 		}

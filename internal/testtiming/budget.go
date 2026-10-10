@@ -604,7 +604,7 @@ func packageDiagnostics(opts EvaluationOptions, grouped map[string]*evidenceAtte
 				Kind:             "stale",
 				Package:          pkg,
 				ReferenceSeconds: reference,
-				Message:          fmt.Sprintf("stale timing reference %s is absent from broad and full package declarations", pkg),
+				Message:          fmt.Sprintf("timing reference %s is outside the selected %s plan; no coverage removal or timing credit is inferred", pkg, opts.Plan.Profile),
 			})
 		}
 	}

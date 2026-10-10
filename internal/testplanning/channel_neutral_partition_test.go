@@ -17,7 +17,7 @@ func TestChannelNeutralSplitRetainsCompleteProofEnvelopes(t *testing.T) {
 	} {
 		want := UnitPolicy{
 			Packages: []string{policy.Module + "/internal/serveapp"}, Run: run,
-			CountMode: "count-1", EnvironmentID: "ci-postgres-gateway-empty-v1", BudgetClass: "full",
+			CountMode: "count-1", EnvironmentIDs: managedEnvironmentIDs(), BudgetClass: "full",
 		}
 		if !reflect.DeepEqual(policy.Units[id], want) {
 			t.Errorf("%s changed complete-root/backend/count/environment/budget/timeout envelope: %+v", id, policy.Units[id])

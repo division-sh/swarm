@@ -30,9 +30,10 @@ type PlanningPolicy struct {
 }
 
 type ProfilePolicy struct {
-	CountMode     string   `yaml:"count_mode"`
-	EnvironmentID string   `yaml:"environment_id"`
-	Units         []string `yaml:"units"`
+	CountMode      string            `yaml:"count_mode"`
+	EnvironmentID  string            `yaml:"environment_id,omitempty"`
+	EnvironmentIDs map[string]string `yaml:"environment_ids,omitempty"`
+	Units          []string          `yaml:"units"`
 }
 
 type UnitPolicy struct {
@@ -44,6 +45,7 @@ type UnitPolicy struct {
 	GoTimeout        string              `yaml:"go_timeout,omitempty"`
 	CountMode        string              `yaml:"count_mode"`
 	EnvironmentID    string              `yaml:"environment_id"`
+	EnvironmentIDs   map[string]string   `yaml:"environment_ids,omitempty"`
 	BudgetClass      string              `yaml:"budget_class"`
 }
 
@@ -114,8 +116,8 @@ func (p Policy) Validate() error {
 		if !validCountMode(profile.CountMode) {
 			problems = append(problems, fmt.Sprintf("profiles.%s.count_mode %q is unsupported", name, profile.CountMode))
 		}
-		if strings.TrimSpace(profile.EnvironmentID) == "" {
-			problems = append(problems, fmt.Sprintf("profiles.%s.environment_id must be non-empty", name))
+		if err := validateEnvironmentDeclaration(profile.EnvironmentID, profile.EnvironmentIDs); err != nil {
+			problems = append(problems, fmt.Sprintf("profiles.%s: %v", name, err))
 		}
 		if duplicate := duplicateStrings(profile.Units); duplicate != "" {
 			problems = append(problems, fmt.Sprintf("profiles.%s.units duplicates %q", name, duplicate))
@@ -152,8 +154,8 @@ func (p Policy) Validate() error {
 		if !validCountMode(unit.CountMode) {
 			problems = append(problems, fmt.Sprintf("units.%s.count_mode %q is unsupported", name, unit.CountMode))
 		}
-		if strings.TrimSpace(unit.EnvironmentID) == "" {
-			problems = append(problems, fmt.Sprintf("units.%s.environment_id must be non-empty", name))
+		if err := validateEnvironmentDeclaration(unit.EnvironmentID, unit.EnvironmentIDs); err != nil {
+			problems = append(problems, fmt.Sprintf("units.%s: %v", name, err))
 		}
 		if unit.BudgetClass != "broad" && unit.BudgetClass != "full" && unit.BudgetClass != "soak" {
 			problems = append(problems, fmt.Sprintf("units.%s.budget_class %q is unsupported", name, unit.BudgetClass))

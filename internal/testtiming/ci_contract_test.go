@@ -744,7 +744,7 @@ func assertCoreStructuralGuardTimingInventory(t *testing.T, policy testplanning.
 		policy.Module + "/internal/serveapp", policy.Module + "/internal/store/internal/runtimepersistence",
 	}
 	if !exists || !slices.Equal(unit.Packages, wantPackages) || unit.CountMode != "count-1" ||
-		unit.EnvironmentID != "ci-postgres-gateway-empty-v1" || unit.BudgetClass != "broad" ||
+		unit.EnvironmentID != "" || unit.EnvironmentIDs[testplanning.VenueCI] != "ci-postgres-gateway-empty-v1" || unit.EnvironmentIDs[testplanning.VenueLocal] != "local-postgres-gateway-empty-v1" || unit.BudgetClass != "broad" ||
 		unit.Skip != "" || unit.GoTimeout != "" || unit.Packable || len(unit.RequiredChildren) != 0 {
 		t.Fatalf("core structural guard timing envelope changed: %+v", unit)
 	}

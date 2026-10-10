@@ -30,7 +30,7 @@ func validateIssue2564WorkloadPartition(p Policy) error {
 		u := p.Units[id]
 		if !reflect.DeepEqual(u.Packages, []string{p.Module + "/internal/serveapp"}) || u.Run != run ||
 			u.Skip != "" || u.GoTimeout != "" || u.CountMode != "count-1" ||
-			u.EnvironmentID != "ci-postgres-gateway-empty-v1" || u.BudgetClass != "full" {
+			u.EnvironmentID != "" || !reflect.DeepEqual(u.EnvironmentIDs, managedEnvironmentIDs()) || u.BudgetClass != "full" {
 			return fmt.Errorf("%s changed complete workload envelope: %+v", id, u)
 		}
 		want := map[string][]string{"TestIssue2564ServedH1ReconstructedEquivalentBothStores": {"sqlite/overlap", "sqlite/no_overlap", "postgres/overlap", "postgres/no_overlap"}}

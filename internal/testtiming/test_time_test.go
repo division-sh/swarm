@@ -286,6 +286,10 @@ func TestTestTimeAdmissionAndParentChildCount(t *testing.T) {
 	}{
 		{"missing root", func(e *CommandEvidence) { e.Report.Tests = nil; e.Report.Summary.Tests = 0 }},
 		{"wrong head", func(e *CommandEvidence) { e.HeadSHA = "other" }},
+		{"unknown environment", func(e *CommandEvidence) { e.EnvironmentID = "unknown" }},
+		{"local receipt for hosted recipe", func(e *CommandEvidence) { e.EnvironmentID = "local-postgres-gateway-empty-v1" }},
+		{"wrong count", func(e *CommandEvidence) { e.CountMode = "cache-default" }},
+		{"wrong build", func(e *CommandEvidence) { e.BuildContext.CGOEnabled = "0" }},
 		{"foreign attempt", func(e *CommandEvidence) { e.WorkflowAttempt++ }},
 		{"failure", func(e *CommandEvidence) { e.ExitCode = 1 }},
 		{"duplicate child observation", func(e *CommandEvidence) { e.Report.Summary.DuplicateTestEvents++ }},
@@ -319,6 +323,22 @@ func TestTestTimeScopeAndTierProjection(t *testing.T) {
 	result := EvaluateTestTime(reference, rootTimingPolicy(), plan, TestTimeReferenceRunID, 1, []CommandEvidence{evidence})
 	if result.Status != BudgetPass || len(result.Tiers) != 3 {
 		t.Fatalf("%+v", result)
+	}
+	for _, tier := range []string{testplanning.ProfileCore, testplanning.ProfileLifecycle, testplanning.ProfileFull} {
+		candidate := plan
+		candidate.Profile = tier
+		candidate.Units = slices.Clone(plan.Units)
+		candidate.Units[0].WorkloadProfile = tier
+		candidate.Digest = ""
+		raw, _ := json.Marshal(candidate)
+		digest := sha256.Sum256(raw)
+		candidate.Digest = hex.EncodeToString(digest[:])
+		receipt := evidence
+		receipt.Profile, receipt.WorkloadProfile, receipt.PlanDigest = tier, tier, candidate.Digest
+		got := EvaluateTestTime(reference, rootTimingPolicy(), candidate, TestTimeReferenceRunID, 1, []CommandEvidence{receipt})
+		if got.Status != BudgetPass || len(got.Tiers) != testplanning.TierRank(tier) {
+			t.Fatalf("%s source-bound recipe comparison: %+v", tier, got)
+		}
 	}
 	for _, change := range []func(*TestTimeReference){
 		func(ref *TestTimeReference) { ref.BuildContext.CGOEnabled = "0" },
