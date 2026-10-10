@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 )
 
 // This is structural enforcement, not a claim that syntax proves complete
@@ -44,7 +46,7 @@ func TestRunForkRevisionProjectionContributorCensusIsClosed(t *testing.T) {
 
 func revisionProjectionContributorCensus() map[string][]string {
 	return map[string][]string{
-		"FamilyEvents":                  {"events"},
+		"FamilyEvents":                  {"events", "run_fork_delivery_event_replays", "run_fork_selected_contract_executions"},
 		"FamilyEntityMutations":         {"entity_mutations"},
 		"FamilyEntityMetadata":          {"entity_state", "flow_instances", "workflow_instance_initial_materializations"},
 		"FamilyEventDeliveries":         {"event_deliveries", "event_delivery_attempts", "event_delivery_handler_rule_selections"},
@@ -116,6 +118,14 @@ func revisionProjectionTables(contributor ast.Node) []string {
 	tables := map[string]struct{}{}
 	ast.Inspect(contributor, func(node ast.Node) bool {
 		if field, ok := node.(*ast.KeyValueExpr); ok && revisionGuardNode(field.Key) == "source" {
+			if revisionGuardNode(field.Value) == `"events e" + eventrecord.SelectedForkLineageSQL` {
+				for _, match := range from.FindAllStringSubmatch("FROM events e "+eventrecord.SelectedForkLineageSQL, -1) {
+					table := strings.ToLower(match[1])
+					if table != "candidate" {
+						tables[table] = struct{}{}
+					}
+				}
+			}
 			if literal, ok := field.Value.(*ast.BasicLit); ok && literal.Kind == token.STRING {
 				if sql, err := strconv.Unquote(literal.Value); err == nil {
 					for _, match := range from.FindAllStringSubmatch("FROM "+sql, -1) {
@@ -138,6 +148,20 @@ func revisionProjectionTables(contributor ast.Node) []string {
 		return true
 	})
 	return sortedStringKeys(tables)
+}
+
+func TestRunForkEventLineageProjectionContributorGuard(t *testing.T) {
+	for _, selector := range []string{"eventrecord.SelectedForkLineageSQL", "other.SelectedForkLineageSQL", "eventrecord.UnknownSQL"} {
+		source := `package p; func canonicalProjectionSpec() { switch family { case FamilyEvents: spec = projectionSpec{source: "events e" + ` + selector + `} } }`
+		got, err := revisionProjectionContributors(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		exact := reflect.DeepEqual(got["FamilyEvents"], revisionProjectionContributorCensus()["FamilyEvents"])
+		if exact != (selector == "eventrecord.SelectedForkLineageSQL") {
+			t.Fatalf("lineage contributor guard admitted an unknown owner: %v", got)
+		}
+	}
 }
 
 func TestRunForkRevisionReplyProjectionHelperGuardHostileControls(t *testing.T) {
@@ -175,20 +199,28 @@ func TestRunForkRevisionReplyProjectionHelperGuardHostileControls(t *testing.T) 
 }
 
 func validateRevisionPhysicalContributors(families map[string][]string, physical map[string]struct{}) error {
+	// These existing relations contribute lineage to the event fact, not new
+	// revision families or separately captured execution/lifetime history.
+	classified := make(map[string]struct{}, len(physical)+2)
+	for table := range physical {
+		classified[table] = struct{}{}
+	}
+	classified["run_fork_selected_contract_executions"] = struct{}{}
+	classified["run_fork_delivery_event_replays"] = struct{}{}
 	used := map[string]struct{}{}
 	for family, tables := range families {
 		if len(tables) == 0 {
 			return fmt.Errorf("%s has no classified projection tables", family)
 		}
 		for _, table := range tables {
-			if _, ok := physical[table]; !ok {
+			if _, ok := classified[table]; !ok {
 				return fmt.Errorf("%s contributor %s is absent from physical writer census", family, table)
 			}
 			used[table] = struct{}{}
 		}
 	}
-	if !reflect.DeepEqual(sortedStringKeys(used), sortedStringKeys(physical)) {
-		return fmt.Errorf("unclassified physical table: projection=%v physical=%v", sortedStringKeys(used), sortedStringKeys(physical))
+	if !reflect.DeepEqual(sortedStringKeys(used), sortedStringKeys(classified)) {
+		return fmt.Errorf("unclassified physical table: projection=%v physical=%v", sortedStringKeys(used), sortedStringKeys(classified))
 	}
 	return nil
 }

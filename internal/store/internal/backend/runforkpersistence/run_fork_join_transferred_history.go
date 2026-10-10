@@ -84,3 +84,15 @@ func transferredArrivalPublications(snapshot *runForkRevisionSnapshot, sources [
 	}
 	return publications, nil
 }
+
+func runForkAllArrivalPublications(snapshot *runForkRevisionSnapshot, plan runfork.RunForkPlan) ([]runfork.PublishedArrival, error) {
+	publications, err := historicalArrivalPublications(snapshot, plan.JoinSchedules)
+	if err != nil {
+		return nil, err
+	}
+	transferred, err := transferredArrivalPublications(snapshot, plan.TransferredJoins)
+	if err != nil {
+		return nil, err
+	}
+	return append(publications, transferred...), nil
+}
