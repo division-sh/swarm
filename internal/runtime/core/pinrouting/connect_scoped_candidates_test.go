@@ -2,7 +2,6 @@ package pinrouting
 
 import (
 	"reflect"
-	"slices"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
