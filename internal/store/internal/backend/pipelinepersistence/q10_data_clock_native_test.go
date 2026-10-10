@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -81,6 +82,11 @@ func TestQ10DataClockWriteTriggersBothStores(t *testing.T) {
 				{"integer_to_double", `{"count":1.0}`, true},
 				{"absent_to_null", `{"count":1.0,"note":null}`, true},
 				{"gate_only", `{"count":1.0,"note":null}`, false},
+				{"representation_only", `{"note":null,"count":1.000}`, false},
+				{"slug_only", `{"count":1.0,"note":null}`, true},
+				{"name_only", `{"count":1.0,"note":null}`, true},
+				{"bookkeeping_only", `{"count":1.0,"note":null}`, false},
+				{"clear_last_fields", `{}`, true},
 			} {
 				t.Run(change.name, func(t *testing.T) {
 					before := read()
@@ -91,6 +97,15 @@ func TestQ10DataClockWriteTriggersBothStores(t *testing.T) {
 					if change.name == "gate_only" {
 						record.Gates = []byte(`{"approved":true}`)
 					}
+					if change.name == "slug_only" {
+						record.Slug = "renamed-task"
+					}
+					if change.name == "name_only" {
+						record.Name = "Renamed task"
+					}
+					if change.name == "bookkeeping_only" {
+						record.Bookkeeping = []byte(`{"processed":true}`)
+					}
 					commit(false)
 					after := read()
 					wantUpdate := before.State.UpdatedAt
@@ -100,6 +115,42 @@ func TestQ10DataClockWriteTriggersBothStores(t *testing.T) {
 					if !after.State.CreatedAt.Equal(at) || !after.State.UpdatedAt.Equal(wantUpdate) || after.Lifecycle.State.Revision != before.Lifecycle.State.Revision+1 || !after.Lifecycle.State.UpdatedAt.Equal(record.UpdatedAt) {
 						t.Fatalf("data/lifecycle clock trigger: before=%+v after=%+v", before, after)
 					}
+					if after.State.Slug != record.Slug || after.State.Name != record.Name || !after.Lifecycle.State.EnteredStageAt.Equal(at) {
+						t.Fatalf("display/entry preservation: %+v", after)
+					}
+				})
+			}
+			for _, refusal := range []string{"stale_revision", "wrong_stage", "backwards_data_clock"} {
+				t.Run(refusal, func(t *testing.T) {
+					before, original := read(), record
+					record.ExpectedRevision, record.ExpectedState = before.Lifecycle.State.Revision, record.CurrentState
+					switch refusal {
+					case "stale_revision":
+						record.ExpectedRevision--
+					case "wrong_stage":
+						record.ExpectedState = "not-the-current-stage"
+					case "backwards_data_clock":
+						record.UpdatedAt = before.State.UpdatedAt.Add(-time.Second)
+						record.Fields = []byte(`{"count":2}`)
+					}
+					tx, err := db.BeginTx(ctx, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, mutationErr := commitWorkflowHeaderAndFields(ctx, tx, postgres, record, workflowEngineStateDecision{})
+					if err := tx.Rollback(); err != nil {
+						t.Fatal(err)
+					}
+					if mutationErr == nil || !reflect.DeepEqual(before, read()) {
+						t.Fatalf("refusal changed the committed pair: %v", mutationErr)
+					}
+					if refusal != "backwards_data_clock" {
+						failure, ok := failures.As(mutationErr)
+						if !ok || failure.Failure.Detail.Code != "workflow_engine_state_revision_conflict" || !failure.Failure.Retryable {
+							t.Fatalf("CAS refusal lost retryable identity: %v", mutationErr)
+						}
+					}
+					record = original
 				})
 			}
 			for _, hostile := range []string{"missing", "foreign_type", "foreign_run", "foreign_entity", "foreign_path", "null_fields", "array_fields", "zero_creation_clock", "zero_update_clock", "reversed_data_clocks"} {
