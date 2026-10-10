@@ -2803,7 +2803,7 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 		}
 		letter := view.DeadLetters[0]
 		wantTarget := map[string]any{"flow_id": target.FlowID, "flow_instance": target.FlowInstance, "entity_id": target.EntityID}
-		if letter.HandlerNode != "pin_routing" || letter.Failure.Class != "platform.target_unreachable" || letter.Failure.Detail.Code != "target_unreachable_terminated" || !reflect.DeepEqual(letter.Failure.Detail.Attributes["target"], wantTarget) {
+		if letter.DeadLetterID == "" || letter.HandlerNode != "pin_routing" || letter.Failure.Class != "platform.target_unreachable" || letter.Failure.Detail.Code != "target_unreachable_terminated" || !reflect.DeepEqual(letter.Failure.Detail.Attributes["target"], wantTarget) {
 			t.Fatalf("terminal target diagnostic=%+v, want exact target %+v", letter, wantTarget)
 		}
 		evidence := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, evt.ID())
@@ -2817,6 +2817,10 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 		if !reflect.DeepEqual(evidence, replayed) {
 			t.Fatalf("terminal replay mutated evidence: before=%+v after=%+v", evidence, replayed)
 		}
+		exactDiagnostic, err := selected.LoadOperatorEvent(ctx, evt.ID())
+		if err != nil || len(exactDiagnostic.DeadLetters) != 1 || !reflect.DeepEqual(view.DeadLetters, exactDiagnostic.DeadLetters) {
+			t.Fatalf("exact replay changed terminal diagnostic: before=%+v after=%+v err=%v", view.DeadLetters, exactDiagnostic.DeadLetters, err)
+		}
 		foreign := target
 		foreign.EntityID = uuid.NewString()
 		changed, err := events.ResolveEnvelope(evt, events.EnvelopeForTargetRoute(evt.NormalizedEnvelope(), foreign))
@@ -2828,6 +2832,10 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 		}
 		if rejected := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, evt.ID()); !reflect.DeepEqual(evidence, rejected) {
 			t.Fatalf("foreign terminal replay mutated evidence: before=%+v after=%+v", evidence, rejected)
+		}
+		hostileDiagnostic, err := selected.LoadOperatorEvent(ctx, evt.ID())
+		if err != nil || len(hostileDiagnostic.DeadLetters) != 1 || !reflect.DeepEqual(view.DeadLetters, hostileDiagnostic.DeadLetters) {
+			t.Fatalf("hostile replay changed terminal diagnostic: before=%+v after=%+v err=%v", view.DeadLetters, hostileDiagnostic.DeadLetters, err)
 		}
 	})
 	select {
