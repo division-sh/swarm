@@ -17,7 +17,7 @@ import (
 func TestConstructedRootAgentPreparationUsesExactReadinessOwner(t *testing.T) {
 	for _, variant := range []string{"exact", "foreign_run", "foreign_route", "wrong_agent_route", "undeclared", "changed_attempt", "running_cell", "running_mode", "foreign_source"} {
 		t.Run(variant, func(t *testing.T) {
-			am, instances, bus, req := prepareConstructedRootAgentForTest(t)
+			am, instances, _, req := prepareConstructedRootAgentForTest(t)
 			identity := am.lifecycle.executionIdentities()[0]
 			key := flowActivationReadinessKey(req.TriggerEvent.RunID(), req.Instance.InstancePath)
 			wantError := ""
@@ -84,8 +84,8 @@ func TestConstructedRootAgentPreparationUsesExactReadinessOwner(t *testing.T) {
 					t.Fatalf("refused preparation mutated durable readiness: %s -> %s, err=%v", before, after, encodeErr)
 				}
 			}
-			if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) || len(instances.armedEntries) != 0 {
-				t.Fatal("stopped root preparation published executable route or timer work")
+			if flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) || len(instances.armedEntries) != 0 {
+				t.Fatal("stopped root preparation acquired executable activation or timer work")
 			}
 		})
 	}
@@ -130,7 +130,7 @@ func TestStandingPreparationDefersRunningPredecessor(t *testing.T) {
 	if err != nil || string(before) != string(after) || len(agents.terminated) != 0 {
 		t.Fatalf("pre-admission preparation mutated predecessor: %s -> %s, err=%v", before, after, err)
 	}
-	if len(next.lifecycle.executionIdentities()) != 0 || bus.HasFlowInstanceRoute(owner) || len(instances.armedEntries) != 0 {
+	if len(next.lifecycle.executionIdentities()) != 0 || flowActivationAttemptReadyForTest(next, ctx, req) || len(instances.armedEntries) != 0 {
 		t.Fatal("pre-admission preparation projected a running predecessor")
 	}
 }

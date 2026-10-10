@@ -51,6 +51,7 @@ func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
 		},
 	}
 	forbiddenIdentifiers := map[string]struct{}{
+		"FlowInstanceRouteMaterializationRequest":  {},
 		"FlowInstanceRouteTopologyResult":          {},
 		"EffectiveSystemNodeSubscriptions":         {},
 		"templateObservers":                        {},

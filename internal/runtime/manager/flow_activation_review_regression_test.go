@@ -67,8 +67,8 @@ func TestFlowActivationFinalizerRefusesUnacknowledgedEvidence(t *testing.T) {
 	if err := am.FinalizeCommittedFlowInstanceActivation(ctx, evidence); err == nil || !strings.Contains(err.Error(), "not acknowledged") {
 		t.Fatalf("unacknowledged evidence reached finalization: %v", err)
 	}
-	if instances.finalizations != 0 || instances.readinessLoads != 0 || len(bus.addedPaths) != 0 {
-		t.Fatalf("unacknowledged evidence acquired lifecycle/topology: finalizations=%d loads=%d routes=%v", instances.finalizations, instances.readinessLoads, bus.addedPaths)
+	if instances.finalizations != 0 || instances.readinessLoads != 0 || len(am.lifecycle.executionIdentities()) != 0 {
+		t.Fatalf("unacknowledged evidence acquired lifecycle/topology: finalizations=%d loads=%d executions=%v", instances.finalizations, instances.readinessLoads, am.lifecycle.executionIdentities())
 	}
 }
 

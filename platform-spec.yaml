@@ -6015,20 +6015,19 @@ engine:
           cannot establish constructed existence, attachment readiness or retirement
           authority. Manager owns the exact activation attempt and its agent/timer
           resources; predecessor cleanup cannot acquire successor authority.
-        canonical_template_source: Dynamic flow-instance routes MUST materialize only from the exact template registered by
-          the EventBus semantic source. FlowInstanceRouteMaterializationRequest carries the complete constructor-owned
-          Instance including its exact parent identity, the matching typed run-scoped route, and activation variables;
-          selected descriptor restoration retains that same validated readiness identity. Missing, crossed or malformed
-          construction identity fails before route mutation; scope/local-ID path reconstruction is not an admission owner.
-          Cached publication, removal and record projection consume the exactly admitted constructor identity and cannot
-          substitute another scope, parent or successor attempt. Parent identity is construction context, never routing permission.
-          Exact handler application, execution and node producer-source admission consume the constructed header and its
-          parent identity too. Compiled connections select a receiver declaration first and then bind its already-installed
-          child to the exact construction parent; neither declaration-prefix reconstruction nor parent context may create
-          a connection. Selected lookup retains the same concrete child coordinate before final receiver admission.
-          The request MUST NOT carry a request-local node/template contract or any compatibility fallback that
-          fabricates routes when the registry lacks that scope. An unknown template fails before in-memory or durable route
-          mutation.
+        canonical_template_source: >-
+          Source-only route definitions bind only to the exact declaration registered by the EventBus semantic source.
+          The canonical instance-index observation carries the complete constructor-owned Instance, its exact parent and
+          typed run-scoped coordinate. Missing, crossed or malformed construction identity fails closed; scope/local-ID
+          path reconstruction is not an admission owner. A construction proposal is not existence evidence until its
+          canonical commit owner acknowledges it. Native or admitted fixed-revision observations cannot substitute
+          another scope or parent, and no observation grants a successor activation attempt. Parent identity is
+          construction context, never routing permission. Exact handler application, execution and node producer-source
+          admission consume the same constructed header and parent identity. Compiled connections select a receiver
+          declaration first and bind it to the exact construction parent; neither declaration-prefix reconstruction nor
+          parent context creates a connection. Selected lookup retains that concrete coordinate before final receiver
+          admission. Request-local node/template contracts, mutable route materialization requests, publication maps and
+          compatibility fallbacks cannot fabricate receivers when the compiled source lacks their declaration.
         subscriber_identity_variables: Dynamic flow-instance route subscribers MUST render from the same activation variable
           set used to materialize the child instance's agents. That set contains runtime built-ins only,
           `instance_id`, `template_id`, `flow_scope_key`, and `flow_instance_path`; built-ins remain authoritative for their
