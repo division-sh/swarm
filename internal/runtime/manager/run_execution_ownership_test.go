@@ -110,6 +110,7 @@ func TestDynamicReadinessRunOwnershipBeforeEnqueueAndAfterAdmission(t *testing.T
 				if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 					t.Fatal(err)
 				}
+				beforeExecutions := am.lifecycle.executionIdentities()
 				before, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
 				if err != nil || !found {
 					t.Fatalf("load readiness: %v %v", found, err)
@@ -155,8 +156,8 @@ func TestDynamicReadinessRunOwnershipBeforeEnqueueAndAfterAdmission(t *testing.T
 				if err != nil || !found || !reflect.DeepEqual(before, after) {
 					t.Fatalf("rejected callback changed durable readiness: %v %v", found, err)
 				}
-				if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-					t.Fatal("rejected callback retired another owner's published route")
+				if !reflect.DeepEqual(beforeExecutions, am.lifecycle.executionIdentities()) {
+					t.Fatal("rejected callback retired another owner's executable agent")
 				}
 				if len(instances.terminatedPaths) != 0 || len(instances.retiredTimerEntries) != 0 {
 					t.Fatal("rejected callback performed terminal cleanup")

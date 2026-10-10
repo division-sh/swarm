@@ -288,20 +288,11 @@ func TestCompiledConnectValuesExposeNoMutableSemanticFields(t *testing.T) {
 }
 
 func TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority(t *testing.T) {
-	request := reflect.TypeOf(runtimebus.FlowInstanceRouteMaterializationRequest{})
-	if _, exists := request.FieldByName("Template"); exists {
-		t.Fatal("route materialization request regained request-local template authority")
-	}
-	if request.NumField() != 3 {
-		t.Fatalf("route materialization request fields = %d, want exact run identity, constructed instance, and activation variables", request.NumField())
-	}
-	for name, want := range map[string]reflect.Type{
-		"Identity":            reflect.TypeOf(runtimeflowidentity.RunScopedFlowInstance{}),
-		"Instance":            reflect.TypeOf(runtimeflowidentity.Instance{}),
-		"ActivationVariables": reflect.TypeOf(map[string]string{}),
-	} {
-		if field, exists := request.FieldByName(name); !exists || field.Type != want {
-			t.Fatalf("route materialization %s = %#v, want %v", name, field, want)
+	for _, owner := range []reflect.Type{reflect.TypeOf((*runtimebus.EventBus)(nil)), reflect.TypeOf((*runtimebus.RouteTable)(nil))} {
+		for _, name := range []string{"AddFlowInstanceRoute", "AddFlowInstanceRouteContext", "StageFlowInstanceRouteContext", "HasFlowInstanceRoute", "RemoveFlowInstanceRouteContext"} {
+			if _, exists := owner.MethodByName(name); exists {
+				t.Fatalf("%s regained mutable route membership authority %s", owner, name)
+			}
 		}
 	}
 

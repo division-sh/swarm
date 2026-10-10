@@ -108,8 +108,9 @@ func TestEventBusRoutePersistenceDependenciesAreExplicit(t *testing.T) {
 	root := persistenceOwnershipRepoRoot(t)
 	assertOwnershipStructFields(t, root, "internal/runtime/bus/eventbus.go", "DurableDependencies", map[string]string{
 		"ActiveAgents": "ActiveAgentDescriptorLister",
-		"ActiveFlows":  "ActiveFlowInstanceDescriptorLister",
+		"Instances":    "runtimepipeline.FlowInstanceIndexReader",
 	})
+	assertOwnershipSourceExcludes(t, readOwnershipSource(t, root, "internal/runtime/bus/eventbus.go"), "ActiveFlows", "ActiveFlowInstanceDescriptorLister")
 }
 
 func assertOwnershipStructFields(t *testing.T, root, path, owner string, required map[string]string) {
