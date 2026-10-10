@@ -47,7 +47,8 @@ func prepareRunForkArrivalJoinRequests(plan runfork.RunForkPlan, childRunID stri
 		}
 		request := storegenericschedule.ForkJoinRequest{
 			Source: row.source, Child: row.command, BornAt: bornAt,
-			PointKind: forkpoint.Kind(plan.ForkPoint.Kind), PointRevision: plan.ForkPoint.Revision, PointEventID: plan.ForkPoint.EventID,
+			Disposition: genericschedule.ForkJoinRetained,
+			PointKind:   forkpoint.Kind(plan.ForkPoint.Kind), PointRevision: plan.ForkPoint.Revision, PointEventID: plan.ForkPoint.EventID,
 		}
 		if err := request.Validate(); err != nil {
 			return nil, err
@@ -57,8 +58,28 @@ func prepareRunForkArrivalJoinRequests(plan runfork.RunForkPlan, childRunID stri
 	return requests, nil
 }
 
-func materializeRunForkArrivalJoinSchedules(ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan, childRunID string, bornAt time.Time, owner runForkArrivalJoinMaterializationOwner) error {
+func selectRunForkArrivalJoinRequests(plan runfork.RunForkPlan, childRunID string, bornAt time.Time, selection runfork.InheritedScheduleSelection) ([]storegenericschedule.ForkJoinRequest, error) {
 	requests, err := prepareRunForkArrivalJoinRequests(plan, childRunID, bornAt)
+	if err != nil {
+		return nil, err
+	}
+	if len(requests) != 0 && selection == nil {
+		return nil, fmt.Errorf("arrival join restoration requires sealed selected admission")
+	}
+	for index := range requests {
+		requests[index].Disposition, err = selection.SelectInheritedArrivalJoin(requests[index].Source)
+		if err != nil {
+			return nil, err
+		}
+		if err := requests[index].Validate(); err != nil {
+			return nil, err
+		}
+	}
+	return requests, nil
+}
+
+func materializeRunForkArrivalJoinSchedules(ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan, childRunID string, bornAt time.Time, selection runfork.InheritedScheduleSelection, owner runForkArrivalJoinMaterializationOwner) error {
+	requests, err := selectRunForkArrivalJoinRequests(plan, childRunID, bornAt, selection)
 	if err != nil {
 		return err
 	}
@@ -75,14 +96,14 @@ func materializeRunForkArrivalJoinSchedules(ctx context.Context, attempt *mutati
 
 // Complete readback creates no work and does not discharge source admission or
 // grant execution. Ordinary child schedules are not inherited inventory.
-func readRunForkArrivalJoinInventory(ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan, childRunID string, bornAt time.Time, owner runForkArrivalJoinMaterializationOwner, phase runForkArrivalScheduleReadbackPhase) ([]genericschedule.Activation, error) {
+func readRunForkArrivalJoinInventory(ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan, childRunID string, bornAt time.Time, selection runfork.InheritedScheduleSelection, owner runForkArrivalJoinMaterializationOwner, phase runForkArrivalScheduleReadbackPhase) ([]genericschedule.Activation, error) {
 	if phase != runForkArrivalScheduleAtCut && phase != runForkArrivalScheduleContinuing {
 		return nil, fmt.Errorf("arrival schedule readback requires an exact lifecycle phase")
 	}
 	if err := requireRunForkWorkflowTimerReadbackFrame(ctx, attempt, plan, childRunID, bornAt); err != nil {
 		return nil, err
 	}
-	requests, err := prepareRunForkArrivalJoinRequests(plan, childRunID, bornAt)
+	requests, err := selectRunForkArrivalJoinRequests(plan, childRunID, bornAt, selection)
 	if err != nil {
 		return nil, err
 	}
@@ -94,6 +115,9 @@ func readRunForkArrivalJoinInventory(ctx context.Context, attempt *mutationproto
 		return nil, err
 	}
 	if err := requireExactRunForkArrivalJoinInventory(requests, actual, phase); err != nil {
+		return nil, err
+	}
+	if err := requireRunForkRemovedArrivalDependents(ctx, attempt, plan, childRunID, requests); err != nil {
 		return nil, err
 	}
 	byKey, err := indexRunForkArrivalJoinInventory(actual)

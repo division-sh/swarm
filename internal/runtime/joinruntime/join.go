@@ -27,10 +27,11 @@ const (
 type CloseReason string
 
 const (
-	CloseReasonComplete  CloseReason = "complete"
-	CloseReasonDeadline  CloseReason = "deadline"
-	CloseReasonUntil     CloseReason = "until"
-	CloseReasonStageExit CloseReason = "stage_exit"
+	CloseReasonComplete    CloseReason = "complete"
+	CloseReasonDeadline    CloseReason = "deadline"
+	CloseReasonUntil       CloseReason = "until"
+	CloseReasonStageExit   CloseReason = "stage_exit"
+	CloseReasonRuleRemoved CloseReason = "rule_removed"
 )
 
 type MemberOutput struct {
@@ -162,6 +163,9 @@ func (a Activation) validateOutputEvidence() error {
 }
 
 func (a Activation) validateClosureEvidence() error {
+	if a.CloseReason == CloseReasonRuleRemoved && !a.TimerCancelled {
+		return fmt.Errorf("removed join rule requires canceled dependent timer evidence")
+	}
 	if a.Status == StatusOpen && a.CloseReason != "" {
 		return fmt.Errorf("open join activation has close reason %q", a.CloseReason)
 	}
@@ -173,12 +177,12 @@ func (a Activation) validateClosureEvidence() error {
 	}
 	if a.Status == StatusClosed {
 		switch a.CloseReason {
-		case CloseReasonComplete, CloseReasonUntil, CloseReasonDeadline, CloseReasonStageExit:
+		case CloseReasonComplete, CloseReasonUntil, CloseReasonDeadline, CloseReasonStageExit, CloseReasonRuleRemoved:
 		default:
 			return fmt.Errorf("join activation has invalid close reason %q", a.CloseReason)
 		}
 	}
-	if a.OutcomePending && a.OutcomeFired || (a.OutcomePending || a.OutcomeFired) && (a.Status != StatusClosed || a.CloseReason == CloseReasonStageExit) {
+	if a.OutcomePending && a.OutcomeFired || (a.OutcomePending || a.OutcomeFired) && (a.Status != StatusClosed || a.CloseReason == CloseReasonStageExit || a.CloseReason == CloseReasonRuleRemoved) {
 		return fmt.Errorf("join outcome evidence contradicts its lifecycle")
 	}
 	return nil
@@ -417,6 +421,23 @@ func (a *Activation) CloseForStageExit() bool {
 	a.CloseReason = CloseReasonStageExit
 	a.OutcomePending = false
 	return true
+}
+
+func (a *Activation) CancelForRuleRemoval() error {
+	if a == nil || a.OutcomeFired || a.Status == StatusClosed && !a.OutcomePending {
+		return fmt.Errorf("rule removal cannot replace a settled join outcome")
+	}
+	if err := a.Validate(); err != nil {
+		return err
+	}
+	canceled := *a
+	canceled.Status, canceled.CloseReason = StatusClosed, CloseReasonRuleRemoved
+	canceled.OutcomePending, canceled.OutcomeFired, canceled.TimerCancelled = false, false, true
+	if err := canceled.Validate(); err != nil {
+		return err
+	}
+	*a = canceled
+	return nil
 }
 
 func Load(stateBuckets map[string]map[string]any, nodeRef runtimeidentity.ExecutableNode, key string) (Activation, bool, error) {
