@@ -26,50 +26,50 @@ func requireRunForkRemovedArrivalDependents(ctx context.Context, attempt *mutati
 		if !ok {
 			return fmt.Errorf("removed arrival lacks its exact child dependent")
 		}
-		expected, err := projectedRemovedArrivalArm(plan, childRunID, ref)
+		expected, entityType, err := projectedRemovedArrivalArm(plan, childRunID, ref)
 		if err != nil {
 			return err
 		}
-		if err := requireRunForkRemovedArrivalArm(ctx, attempt, ref, expected); err != nil {
+		if err := requireRunForkRemovedArrivalArm(ctx, attempt, ref, entityType, expected); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func projectedRemovedArrivalArm(plan runfork.RunForkPlan, childRunID string, ref timeridentity.JoinRef) (joinruntime.Activation, error) {
+func projectedRemovedArrivalArm(plan runfork.RunForkPlan, childRunID string, ref timeridentity.JoinRef) (joinruntime.Activation, string, error) {
 	for _, entity := range plan.Entities {
 		if entity.MaterializationMetadata == nil {
-			return joinruntime.Activation{}, fmt.Errorf("removed arrival lacks fixed-cut construction evidence")
+			return joinruntime.Activation{}, "", fmt.Errorf("removed arrival lacks fixed-cut construction evidence")
 		}
 		projection, err := projectRunForkEntityOwnership(plan.SourceRunID, childRunID, entity.EntityID, entity.MaterializationMetadata.FlowInstance)
 		if err != nil {
-			return joinruntime.Activation{}, err
+			return joinruntime.Activation{}, "", err
 		}
 		if projection.Fork.EntityID != ref.StageEntry().EntityID {
 			continue
 		}
 		_, accumulator, _, err := projectRunForkEntityExecutionState(entity, plan.SourceRunID, childRunID, projection)
 		if err != nil {
-			return joinruntime.Activation{}, err
+			return joinruntime.Activation{}, "", err
 		}
 		if err := cancelRunForkRemovedArrivalState(accumulator, []timeridentity.JoinRef{ref}); err != nil {
-			return joinruntime.Activation{}, err
+			return joinruntime.Activation{}, "", err
 		}
 		buckets, err := joinruntime.PersistedBuckets(accumulator)
 		if err != nil {
-			return joinruntime.Activation{}, err
+			return joinruntime.Activation{}, "", err
 		}
 		arm, found, err := joinruntime.Load(buckets, ref.Node(), ref.Key())
 		if err != nil || !found {
-			return joinruntime.Activation{}, fmt.Errorf("removed arrival lacks its projected dependent: %w", err)
+			return joinruntime.Activation{}, "", fmt.Errorf("removed arrival lacks its projected dependent: %w", err)
 		}
-		return arm, nil
+		return arm, entity.MaterializationMetadata.EntityType, nil
 	}
-	return joinruntime.Activation{}, fmt.Errorf("removed arrival lacks fixed-cut construction ownership")
+	return joinruntime.Activation{}, "", fmt.Errorf("removed arrival lacks fixed-cut construction ownership")
 }
 
-func requireRunForkRemovedArrivalArm(ctx context.Context, attempt *mutationprotocol.Attempt, ref timeridentity.JoinRef, expected joinruntime.Activation) error {
+func requireRunForkRemovedArrivalArm(ctx context.Context, attempt *mutationprotocol.Attempt, ref timeridentity.JoinRef, expectedEntityType string, expected joinruntime.Activation) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		entry := ref.StageEntry()
 		var instancePath, template string
@@ -80,6 +80,9 @@ func requireRunForkRemovedArrivalArm(ctx context.Context, attempt *mutationproto
 			return err
 		}
 		route := flowidentity.StoredRoute(template, "", instancePath)
+		if entityType.String != expectedEntityType || entityType.Valid != (expectedEntityType != "") {
+			return fmt.Errorf("removed arrival dependent changed its canonical entity type")
+		}
 		if err := entry.RequireOwner(entry.RunID, route.ScopeKey, route.InstanceID, route.InstancePath, entry.EntityID, entry.Stage); err != nil {
 			return fmt.Errorf("removed arrival dependent belongs to another constructed owner: %w", err)
 		}

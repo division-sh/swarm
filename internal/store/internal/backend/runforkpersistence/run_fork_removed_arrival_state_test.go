@@ -30,7 +30,7 @@ func TestForkRemovedArrivalDependentsPreserveExactCutAndRejectDrift(t *testing.T
 					if !valid {
 						t.Fatal("fixture lost its admitted child reference")
 					}
-					expected, err := projectedRemovedArrivalArm(plan, workflowTimerProjectionChildRun, ref)
+					expected, _, err := projectedRemovedArrivalArm(plan, workflowTimerProjectionChildRun, ref)
 					if err != nil || expected.CloseReason != joinruntime.CloseReasonRuleRemoved || !expected.TimerCancelled ||
 						expected.OutcomePending || expected.OutcomeFired {
 						t.Fatalf("removed dependent projection = %+v, %v", expected, err)
