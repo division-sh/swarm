@@ -20,3 +20,11 @@ func CorruptRegistryVerdict(ctx context.Context, selected any, run, entity, verd
 func ReadRunEntityMutationHistoryStorage(ctx context.Context, selected any, run string) ([]operatorread.RunDebugMutation, error) {
 	return private.ReadRunEntityMutationHistoryStorageForTest(ctx, selected, run)
 }
+
+func RemoveMutationLogForRollbackProof(ctx context.Context, selected any) error {
+	return private.RemoveMutationLogForRollbackProofForTest(ctx, selected)
+}
+
+func TryInvalidAccumulatorMutationPath(ctx context.Context, selected any, run, entity string) error {
+	return private.TryInvalidAccumulatorMutationPathForTest(ctx, selected, run, entity)
+}

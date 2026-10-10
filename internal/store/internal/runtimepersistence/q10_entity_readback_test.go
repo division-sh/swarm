@@ -63,6 +63,18 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 			if err != nil || !result.Acknowledged {
 				t.Fatalf("native setup: %+v %v", result, err)
 			}
+			constructed, err := f.store.(pipeline.WorkflowInstancePersistenceReader).ListWorkflowInstances(ctx, runID)
+			if err != nil || len(constructed) != 3 {
+				t.Fatalf("native constructed membership: %+v err=%v", constructed, err)
+			}
+			for _, instance := range constructed {
+				want := "pending"
+				if instance.EntityID == runID {
+					want = "unknown"
+				}
+				assertQ10NativeInternalHistory(t, ctx, f.store, runID, instance.EntityID, &want)
+			}
+			assertQ10NativeInternalHistory(t, ctx, f.store, runID, importID, nil)
 			operator := f.store.(interface {
 				ListOperatorEntities(context.Context, operatorread.OperatorEntityListOptions) (operatorread.OperatorEntityListResult, error)
 				LoadOperatorEntity(context.Context, string, string) (operatorread.OperatorEntityFull, error)

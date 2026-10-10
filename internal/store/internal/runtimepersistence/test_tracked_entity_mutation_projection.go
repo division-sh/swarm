@@ -13,8 +13,9 @@ import (
 )
 
 type TrackedProjectionMutationStorage struct {
-	Domain, Path string
-	NewValue     json.RawMessage
+	Domain, Path                      string
+	OldValue, NewValue                json.RawMessage
+	WriterType, WriterID, HandlerStep string
 }
 
 type TrackedEntityMutationProjectionStorage struct {
@@ -45,18 +46,19 @@ func ReadTrackedEntityMutationProjectionStorageForTest(ctx context.Context, sele
 		if err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT domain,path,new_value FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 ORDER BY created_at ASC,mutation_id ASC`, run, entity)
+		rows, err := tx.QueryContext(ctx, `SELECT domain,path,old_value,new_value,writer_type,writer_id,COALESCE(handler_step,'') FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 ORDER BY created_at ASC,mutation_id ASC`, run, entity)
 		if err != nil {
 			return fmt.Errorf("query mutations: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var row TrackedProjectionMutationStorage
-			var value []byte
-			if err := rows.Scan(&row.Domain, &row.Path, &value); err != nil {
+			var oldValue, value []byte
+			if err := rows.Scan(&row.Domain, &row.Path, &oldValue, &value, &row.WriterType, &row.WriterID, &row.HandlerStep); err != nil {
 				return fmt.Errorf("scan mutation: %w", err)
 			}
 			row.NewValue = append(json.RawMessage(nil), value...)
+			row.OldValue = append(json.RawMessage(nil), oldValue...)
 			evidence.Mutations = append(evidence.Mutations, row)
 		}
 		if err := rows.Err(); err != nil {
