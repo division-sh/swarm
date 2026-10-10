@@ -319,3 +319,13 @@ func effectiveTriggerSubject(status string) Subject {
 		Capabilities:     []Capability{{Code: CapabilityReceiveHTTPSRoute, Target: "/webhooks/chat/telegram"}},
 	}
 }
+
+func TestSessionRequiredBlockReasonCannotAuthorizeWebhook(t *testing.T) {
+	subject := effectiveTriggerSubject(RequirementStatusUnbound)
+	disabled := false
+	subject.TriggerAdmission.BindingEnabled = &disabled
+	subject.TriggerAdmission.BindingBlockReason = "session_admission_required"
+	if _, err := NormalizeSubjects([]Subject{subject}); err == nil {
+		t.Fatal("session-only dormancy admitted on webhook transport")
+	}
+}

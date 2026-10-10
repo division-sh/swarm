@@ -227,7 +227,8 @@ func (rt *Runtime) standingBindingCredentialRoles(selector string, binding Stand
 
 func (rt *Runtime) observeStandingBindingCredentials(ctx context.Context, projection *runtimecredentials.SecretBindingProjection, declaration StandingTargetDeclaration, binding StandingIngressBinding, learned map[string]standingLearnedCredentials) (standingBindingCredentials, error) {
 	if binding.AdmissionPlan.Transport() == packs.ChannelTransportSession {
-		return standingBindingCredentials{}, &operatorchannel.SessionProviderUnavailableError{Provider: binding.Provider}
+		return standingBindingCredentials{alias: declaration.Alias, plan: binding.AdmissionPlan,
+			blockReason: runtimerunlifecycle.StandingBindingSessionRequired}, nil
 	}
 	selector := standingIngressSelector(declaration.FlowPath, binding.Provider)
 	keys, signingRole, err := rt.standingBindingCredentialRoles(selector, binding)

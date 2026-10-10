@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -254,6 +255,19 @@ func startServePublicIngressRenewal(
 	return nil
 }
 
+func sessionIngressFact(fact serveLifecycleIngressFact) bool {
+	return fact.Subject.TriggerAdmission != nil && fact.Subject.TriggerAdmission.Transport == packs.ChannelTransportSession
+}
+
+func requiresPublicIngressPresentation(facts []serveLifecycleIngressFact) bool {
+	for _, fact := range facts {
+		if !sessionIngressFact(fact) {
+			return true
+		}
+	}
+	return false
+}
+
 func publicIngressPresentation(facts []serveLifecycleIngressFact, snapshot runtimepublicingress.Snapshot) []serveLifecycleIngressFact {
 	result := append([]serveLifecycleIngressFact(nil), facts...)
 	registrationURLs := make(map[string]string, len(snapshot.Registrations))
@@ -265,6 +279,10 @@ func publicIngressPresentation(facts []serveLifecycleIngressFact, snapshot runti
 		origin = strings.TrimRight(strings.TrimSpace(snapshot.Exposure.PublicOrigin), "/")
 	}
 	for index := range result {
+		if sessionIngressFact(result[index]) {
+			result[index].URL = "in-process session"
+			continue
+		}
 		key := result[index].Alias + "\x00" + strings.TrimSpace(result[index].Provider)
 		if callback := registrationURLs[key]; callback != "" {
 			result[index].URL = callback
