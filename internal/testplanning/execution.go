@@ -405,6 +405,9 @@ func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof,
 		}
 	}
 	if full != nil {
+		if err := bindExtraUnitObligations(plan, *full); err != nil {
+			return err
+		}
 		if err := bindTierDeferrals(plan, *full, policy); err != nil {
 			return err
 		}

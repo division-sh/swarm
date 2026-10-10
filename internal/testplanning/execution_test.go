@@ -48,11 +48,14 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A full-only registry child must survive lower-tier supplemental admission.
+	proofs = append(proofs, ParityProof{ID: "supplement-contract-fixture", Kind: "go_test", Name: "TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration1", Path: "internal/releasee2e/golden_agent_workload_test.go", Profile: ProfileFull, Children: []string{"registry-only-child"}})
 	packages := make([]string, 0, len(inventory.Packages))
 	for pkg := range inventory.Packages {
 		packages = append(packages, pkg)
 	}
 	sort.Strings(packages)
+	var fullPlan RunPlan
 	for _, selection := range []struct {
 		name, profile string
 		extras        []string
@@ -60,6 +63,10 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 		{ProfileCore, ProfileCore, nil}, {ProfileLifecycle, ProfileLifecycle, nil}, {ProfileFull, ProfileFull, nil},
 		{"core-plus-soaks", ProfileCore, []string{"conformance-soak-sqlite", "conformance-soak-postgres"}},
 		{"lifecycle-plus-soaks", ProfileLifecycle, []string{"conformance-soak-sqlite", "conformance-soak-postgres"}},
+		{"core-plus-burst", ProfileCore, []string{"hitl-releasee2e-burst-1"}},
+		{"lifecycle-plus-bursts", ProfileLifecycle, []string{"hitl-releasee2e-burst-1", "hitl-releasee2e-burst-2"}},
+		{"lifecycle-plus-invocation", ProfileLifecycle, []string{"hitl-releasee2e-invocation-1"}},
+		{"lifecycle-overlapping-catalog", ProfileLifecycle, []string{"catalog-replay-1", "catalog-runtime"}},
 	} {
 		t.Run(selection.name, func(t *testing.T) {
 			profile := selection.profile
@@ -67,8 +74,18 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := BindExecution(&plan, inventory, proofs, policy); err != nil {
-				t.Fatal(err)
+			bindErr := BindExecution(&plan, inventory, proofs, policy)
+			if selection.name == "lifecycle-overlapping-catalog" {
+				if bindErr == nil || !strings.Contains(bindErr.Error(), "primary owners") {
+					t.Fatalf("overlapping full units did not refuse: %v", bindErr)
+				}
+				return
+			}
+			if bindErr != nil {
+				t.Fatal(bindErr)
+			}
+			if profile == ProfileFull {
+				fullPlan = plan
 			}
 			if plan.BuildContext.GOOS == "" || len(plan.Units) == 0 {
 				t.Fatalf("unbound plan: %+v", plan)
@@ -78,11 +95,15 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 			for _, id := range selection.extras {
 				unit, err := plan.Unit(id)
 				declared := policy.Units[id]
+				original, originalErr := fullPlan.Unit(id)
+				if originalErr != nil || unit.WorkloadProfile != ProfileFull || !reflect.DeepEqual(unit.RequiredTests, original.RequiredTests) || !reflect.DeepEqual(unit.DeferredTests, original.DeferredTests) {
+					t.Fatalf("supplement lost full workload/proof obligations: %s workload=%s required=%v deferred=%v; want required=%v deferred=%v: %v", id, unit.WorkloadProfile, unit.RequiredTests, unit.DeferredTests, original.RequiredTests, original.DeferredTests, originalErr)
+				}
 				if err != nil || unit.CountMode != declared.CountMode || unit.Run != declared.Run || unit.Skip != declared.Skip || unit.GoTimeout != declared.GoTimeout || unit.EnvironmentID != declared.EnvironmentIDs[VenueCI] {
 					t.Fatalf("supplement changed its original execution contract: %+v %v", unit, err)
 				}
-				backend, _ := SoakBackend(unit.Run)
-				if len(unit.SelectedRoots) != 1 || len(unit.RequiredTests) != 1 || !unitRequires(unit, SoakTest) || !slices.Equal(unit.RequiredTests[0].Children, []string{backend}) {
+				backend, soak := SoakBackend(unit.Run)
+				if soak && (len(unit.SelectedRoots) != 1 || len(unit.RequiredTests) != 1 || !unitRequires(unit, SoakTest) || !slices.Equal(unit.RequiredTests[0].Children, []string{backend})) {
 					t.Fatalf("supplement lost backend/child proof: %+v", unit)
 				}
 			}
