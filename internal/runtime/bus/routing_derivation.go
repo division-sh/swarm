@@ -596,14 +596,6 @@ func routeInputProducerPatterns(resolution runtimecontracts.FlowInputAutoWireRes
 	return out
 }
 
-func routeEventIdentityScope(basePath string, localEvents map[string]struct{}, inputEvents []string) eventidentity.Scope {
-	return eventidentity.Scope{
-		Path:        strings.Trim(strings.TrimSpace(basePath), "/"),
-		LocalEvents: sortedStringKeys(localEvents),
-		InputEvents: append([]string{}, inputEvents...),
-	}
-}
-
 type resolvedSubscriberRoleIdentity struct {
 	recipient      events.DeliveryRecipient
 	path           string
