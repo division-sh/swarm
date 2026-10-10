@@ -22,6 +22,7 @@ var ErrSessionAccount = errors.New("WhatsApp private state does not match its ex
 type Owner struct {
 	db        *sql.DB
 	container *sqlstore.Container
+	sdkTxn    chan struct{}
 }
 
 func Open(ctx context.Context, path, expectedAccount string, nonempty bool) (*Owner, error) {
@@ -54,7 +55,7 @@ func openDatabase(path string) (*Owner, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	return &Owner{db: db, container: sqlstore.NewWithDB(db, "sqlite", waLog.Noop)}, nil
+	return &Owner{db: db, container: sqlstore.NewWithDB(db, "sqlite", waLog.Noop), sdkTxn: make(chan struct{}, 1)}, nil
 }
 
 func (o *Owner) Close() error { return o.db.Close() }
@@ -103,7 +104,7 @@ type deviceContainer struct{ owner *Owner }
 
 func (o *Owner) wrapDevice(device *store.Device) *store.Device {
 	if inner, raw := device.Identities.(*sqlstore.SQLStore); raw {
-		device.SetAllStores(&sdkStorage{session: inner})
+		device.SetAllStores(&sdkStorage{session: inner, owner: o})
 	}
 	if _, raw := device.LIDs.(*sqlstore.CachedLIDMap); raw {
 		device.LIDs = o.LIDMap()
@@ -117,9 +118,10 @@ func (o *Owner) wrapDevice(device *store.Device) *store.Device {
 //go:generate go run ./generate
 type sdkStorage struct {
 	session store.AllSessionSpecificStores
+	owner   *Owner
 }
 type sdkLIDStorage struct {
-	lids    store.LIDStore
+	lids store.LIDStore
 }
 
 func (c deviceContainer) PutDevice(ctx context.Context, device *store.Device) error {

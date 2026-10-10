@@ -46,6 +46,10 @@ func main() {
 		lids[method.Names[0].Name] = true
 	}
 	for _, name := range names {
+		switch name {
+		case "DoDecryptionTxn", "GetOrGenPreKeys", "GenOnePreKey":
+			continue
+		}
 		writeMethod(&output, fset, name, methods[name], lids[name])
 	}
 	formatted, err := format.Source([]byte(output.String()))

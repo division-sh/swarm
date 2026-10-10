@@ -5,9 +5,67 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/division-sh/swarm/internal/sessioncapture"
 )
+
+type SDKPreKeyState struct {
+	ID       uint32
+	Uploaded bool
+	Digest   [32]byte
+}
+
+func (o *Owner) SDKPreKeyInventory(ctx context.Context, account string) ([]SDKPreKeyState, error) {
+	if account == "" {
+		return nil, ErrSessionAccount
+	}
+	if _, err := o.CurrentDevice(ctx, account); err != nil {
+		return nil, err
+	}
+	rows, err := o.db.QueryContext(ctx, `SELECT key_id,uploaded,key FROM whatsmeow_pre_keys WHERE jid=? ORDER BY key_id`, account)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var inventory []SDKPreKeyState
+	for rows.Next() {
+		var state SDKPreKeyState
+		var key []byte
+		if err := rows.Scan(&state.ID, &state.Uploaded, &key); err != nil {
+			return nil, err
+		}
+		state.Digest = sha256.Sum256(key)
+		inventory = append(inventory, state)
+	}
+	return inventory, rows.Err()
+}
+
+func (o *Owner) SetSDKPreKeyInsertFailure(ctx context.Context, keyID uint32) error {
+	if _, err := o.db.ExecContext(ctx, `DROP TRIGGER IF EXISTS sdk_prekey_insert_cut`); err != nil || keyID == 0 {
+		return err
+	}
+	_, err := o.db.ExecContext(ctx, `CREATE TRIGGER sdk_prekey_insert_cut BEFORE INSERT ON whatsmeow_pre_keys
+		WHEN NEW.key_id=`+strconv.FormatUint(uint64(keyID), 10)+`
+		BEGIN SELECT RAISE(ABORT,'private prekey fixture write failure'); END`)
+	return err
+}
+
+func (o *Owner) SetSDKPreKeyCommitFailure(ctx context.Context, enabled bool) error {
+	if _, err := o.db.ExecContext(ctx, `DROP TRIGGER IF EXISTS sdk_prekey_commit_cut`); err != nil || !enabled {
+		return err
+	}
+	for _, query := range []string{
+		`CREATE TABLE IF NOT EXISTS sdk_prekey_commit_parent(id INTEGER PRIMARY KEY)`,
+		`CREATE TABLE IF NOT EXISTS sdk_prekey_commit_child(id INTEGER REFERENCES sdk_prekey_commit_parent(id) DEFERRABLE INITIALLY DEFERRED)`,
+		`CREATE TRIGGER sdk_prekey_commit_cut AFTER INSERT ON whatsmeow_pre_keys BEGIN INSERT INTO sdk_prekey_commit_child(id) VALUES(1); END`,
+	} {
+		if _, err := o.db.ExecContext(ctx, query); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 type CaptureCorruption string
 type CaptureFault string

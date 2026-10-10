@@ -146,6 +146,20 @@ func (f *Fixture) CaptureRawRows(ctx context.Context) ([][]byte, error) {
 func (f *Fixture) CaptureStoredRows(ctx context.Context) ([]string, error) {
 	return f.owner.owner.CaptureStoredRows(ctx)
 }
+
+type SDKPreKeyState = private.SDKPreKeyState
+
+func (f *Fixture) SDKPreKeyInventory(ctx context.Context, account string) ([]SDKPreKeyState, error) {
+	return f.owner.owner.SDKPreKeyInventory(ctx, account)
+}
+
+func (f *Fixture) SetSDKPreKeyInsertFailure(ctx context.Context, keyID uint32) error {
+	return f.owner.owner.SetSDKPreKeyInsertFailure(ctx, keyID)
+}
+
+func (f *Fixture) SetSDKPreKeyCommitFailure(ctx context.Context, enabled bool) error {
+	return f.owner.owner.SetSDKPreKeyCommitFailure(ctx, enabled)
+}
 func (f *Fixture) SeedCaptureQuota(ctx context.Context, event sessioncapture.Event, count int) error {
 	return f.owner.owner.SeedCaptureQuota(ctx, event, count)
 }
