@@ -57,11 +57,11 @@ func evaluateCICondition(t *testing.T, expression string, facts map[string]strin
 	if expression == "" {
 		return needsSucceeded
 	}
-	explicitStatus := strings.Contains(expression, "always()") || strings.Contains(expression, "success()")
+	explicitStatus := strings.Contains(expression, "always()") || strings.Contains(expression, "success()") || strings.Contains(expression, "cancelled()")
 	expression = regexp.MustCompile(`'([^']*)'`).ReplaceAllStringFunc(expression, func(value string) string {
 		return strconv.Quote(value[1 : len(value)-1])
 	})
-	expression = regexp.MustCompile(`github\.[a-z_.]+|needs\.[a-z_.-]+|always\(\)|success\(\)`).ReplaceAllStringFunc(expression, func(key string) string {
+	expression = regexp.MustCompile(`github\.[a-z_.]+|needs\.[a-z_.-]+|always\(\)|success\(\)|cancelled\(\)`).ReplaceAllStringFunc(expression, func(key string) string {
 		switch key {
 		case "always()":
 			return "true"
@@ -80,6 +80,28 @@ func evaluateCICondition(t *testing.T, expression string, facts map[string]strin
 		t.Fatalf("condition %q: %v", expression, err)
 	}
 	return constant.BoolVal(value.Value) && (explicitStatus || needsSucceeded)
+}
+
+func TestCIConditionStatusFunctions(t *testing.T) {
+	for _, tc := range []struct {
+		name, expression               string
+		needsSucceeded, canceled, want bool
+	}{
+		{"implicit-success", "true", true, false, true},
+		{"implicit-skip", "true", false, false, false},
+		{"explicit-success-skip", "success()", false, false, false},
+		{"explicit-always-skip", "always()", false, false, true},
+		{"not-canceled-skip", "!cancelled()", false, false, true},
+		{"canceled-skip", "!cancelled()", false, true, false},
+		{"canceled-success", "!cancelled()", true, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			facts := map[string]string{"cancelled()": strconv.FormatBool(tc.canceled)}
+			if got := evaluateCICondition(t, tc.expression, facts, tc.needsSucceeded); got != tc.want {
+				t.Fatalf("condition admitted=%v want=%v", got, tc.want)
+			}
+		})
+	}
 }
 
 func ciEventFacts(event string, draft bool, soak string) map[string]string {

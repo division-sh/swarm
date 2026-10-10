@@ -761,7 +761,7 @@ jobs:
   publish-debt-analysis:
     name: Publish protected-master immutable debt analysis
     needs: [ci-plan, required-tests]
-    if: ${{ github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'schedule') && needs.required-tests.result == 'success' }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'schedule') && needs.ci-plan.result == 'success' && needs.required-tests.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
