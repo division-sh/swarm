@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -107,9 +106,8 @@ type DurableDependencies struct {
 	RunLifecycle             runtimerunlifecycle.OperationOwner
 	DeliveryLifecycle        runtimedelivery.Store
 
-	ActiveAgents          ActiveAgentDescriptorLister
-	ActiveFlows           ActiveFlowInstanceDescriptorLister
-	TargetOwners          SelectedRunTargetOwnerLister
+	ActiveAgents ActiveAgentDescriptorLister
+
 	PreparedEvents        PreparedPublishEventReader
 	TargetFailureRecorder TargetFailureDeadLetterRecorder
 	RunOrigins            RunOriginReader
@@ -126,8 +124,6 @@ func (d DurableDependencies) validate() error {
 		{"run lifecycle owner", d.RunLifecycle},
 		{"delivery lifecycle owner", d.DeliveryLifecycle},
 		{"active agent descriptor reader", d.ActiveAgents},
-		{"active flow descriptor reader", d.ActiveFlows},
-		{"selected-run target owner reader", d.TargetOwners},
 		{"prepared event settlement reader", d.PreparedEvents},
 		{"target failure recorder", d.TargetFailureRecorder},
 		{"run origin reader", d.RunOrigins},
@@ -692,67 +688,6 @@ func (eb *EventBus) RouteTable() *RouteTable {
 	eb.mu.RLock()
 	defer eb.mu.RUnlock()
 	return eb.routeTable
-}
-
-func (eb *EventBus) HasFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) bool {
-	table := eb.RouteTable()
-	return table != nil && table.HasFlowInstanceRoute(identity)
-}
-
-func (eb *EventBus) activeFlowInstanceDescriptorsForSemanticSource(
-	ctx context.Context,
-	lister ActiveFlowInstanceDescriptorLister,
-	runID string,
-) ([]ActiveFlowInstanceDescriptor, error) {
-	if eb == nil || lister == nil {
-		return nil, errors.New("event bus and active flow-instance descriptor owner are required")
-	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return nil, errors.New("active flow-instance descriptors require exact run_id")
-	}
-	descriptors, err := lister.ListActiveFlowInstanceDescriptors(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	return eb.validateActiveFlowInstanceDescriptorsForSemanticSource(runID, descriptors)
-}
-
-func (eb *EventBus) validateActiveFlowInstanceDescriptorsForSemanticSource(runID string, descriptors []ActiveFlowInstanceDescriptor) ([]ActiveFlowInstanceDescriptor, error) {
-	if eb == nil || strings.TrimSpace(runID) == "" {
-		return nil, errors.New("active flow-instance descriptors require exact EventBus and run identity")
-	}
-	if len(descriptors) == 0 {
-		return nil, nil
-	}
-	eb.mu.RLock()
-	source := eb.semanticSource
-	sourceFact := eb.sourceArtifactFact
-	eb.mu.RUnlock()
-	bundleHash := sourceFact.BundleHash()
-	if bundleHash == "" || source == nil || strings.TrimSpace(source.WorkflowVersion()) == "" {
-		return nil, errors.New("flow-instance route topology requires exact EventBus semantic source")
-	}
-	workflowVersion := strings.TrimSpace(source.WorkflowVersion())
-	out := make([]ActiveFlowInstanceDescriptor, 0, len(descriptors))
-	for _, descriptor := range descriptors {
-		descriptor = descriptor.Normalized()
-		if descriptor.RunID != runID {
-			return nil, fmt.Errorf("active flow-instance descriptor %s for run %s escaped selected run %s", descriptor.FlowInstance, descriptor.RunID, runID)
-		}
-		if !descriptor.HasSemanticSource() {
-			return nil, fmt.Errorf("active flow-instance descriptor %s is missing exact semantic source", descriptor.FlowInstance)
-		}
-		if descriptor.BundleHash != bundleHash ||
-			descriptor.WorkflowVersion != workflowVersion {
-			return nil, fmt.Errorf(
-				"active flow-instance descriptor %s semantic source does not match the current EventBus source",
-				descriptor.FlowInstance,
-			)
-		}
-		out = append(out, descriptor)
-	}
-	return out, nil
 }
 
 func (eb *EventBus) SetLoggerHook(logger LoggerHook) {

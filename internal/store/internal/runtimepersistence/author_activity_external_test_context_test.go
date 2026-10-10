@@ -93,11 +93,8 @@ type externalStoreTestDurableEventBusStore interface {
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
-	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteTopologyPersistence
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
@@ -154,7 +151,7 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 		ConstructionPublications: selected,
 		ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
-		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+		ActiveAgents: selected, PreparedEvents: selected,
 		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 	}
 	if feedback, ok := selected.(runtimepipeline.WorkflowEmitFeedbackOwner); ok {

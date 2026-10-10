@@ -17,16 +17,17 @@ import (
 // Executing the hostile overlays below is part of the guard's proof.
 func receiverOwnerConstructorBudget() map[string]int {
 	return map[string]int{
-		"runtime/bus::selectedRunTargetOwnerProjection.resolveActiveAgentTarget":               2,
-		"runtime/bus::selectedRunTargetOwnerProjection.resolveSelectedRoute":                   2,
-		"runtime/bus::selectedRunTargetOwnerProjection.resolveSelectedRoute [descriptor]":      1,
-		"runtime/bus::deliveryTargetOwnershipFromDescriptor":                                   2,
-		"runtime/pipeline::ClassifyDeliveryTargetOwnership":                                    2,
-		"runtime/bus::selectedRunTargetOwnerProjection.withActivationPlans [descriptor]":       1,
-		"runtime/bus::ActiveAgentDescriptor.TargetDescriptor [descriptor]":                     1,
-		"runtime/bus::ActiveFlowInstanceDescriptor.TargetDescriptor [descriptor]":              1,
-		"runtime/bus::ActiveTargetDescriptor.Normalized [descriptor]":                          1,
-		"store/internal/backend/pipelinepersistence::scanSelectedRunTargetOwners [descriptor]": 1,
+		"runtime/bus::selectedRunTargetOwnerProjection.resolveActiveAgentTarget":          2,
+		"runtime/bus::selectedRunTargetOwnerProjection.resolveSelectedRoute":              2,
+		"runtime/bus::selectedRunTargetOwnerProjection.resolveSelectedRoute [descriptor]": 1,
+		"runtime/bus::deliveryTargetOwnershipFromDescriptor":                              2,
+		"runtime/pipeline::ClassifyDeliveryTargetOwnership":                               2,
+		"runtime/bus::selectedRunTargetOwnerProjection.withActivationPlans [descriptor]":  1,
+		"runtime/bus::ActiveAgentDescriptor.TargetDescriptor [descriptor]":                1,
+		"runtime/bus::ActiveFlowInstanceDescriptor.TargetDescriptor [descriptor]":         1,
+		"runtime/bus::ActiveTargetDescriptor.Normalized [descriptor]":                     1,
+		// #2594 projects only the exact scope's already admitted observations.
+		"runtime/bus::EventBus.activeTargetDescriptors [descriptor]": 1,
 		// Approved #2433 fork projection preserves the three admitted target kinds;
 		// it does not elect a new receiver from producer context.
 		"store/internal/backend/runforkpersistence::projectRunForkFanOutExecutionOwnership": 3,
@@ -39,6 +40,24 @@ func receiverOwnerConstructorBudget() map[string]int {
 func TestReceiverCompositionOwnershipGuard(t *testing.T) {
 	if violations := receiverOwnerConstructorViolations(t, nil); len(violations) != 0 {
 		t.Fatalf("receiver ownership construction escaped audited semantic functions: %v", violations)
+	}
+}
+
+func TestReceiverCompositionOwnershipGuardHostileIndexProjection(t *testing.T) {
+	root := handlerRuleIdentityGuardRepoRoot(t)
+	path := filepath.Join(root, "internal/runtime/bus/eventbus_routing.go")
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := "owners = append(owners, ActiveTargetDescriptor{"
+	if strings.Count(string(original), from) != 1 {
+		t.Fatal("exact admitted-index projection site moved")
+	}
+	hostile := strings.Replace(string(original), from, "owners = append(owners, ActiveTargetDescriptor{})\n"+from, 1)
+	violations := receiverOwnerConstructorViolations(t, map[string][]byte{path: []byte(hostile)})
+	if len(violations) != 1 || !strings.Contains(violations[0], "EventBus.activeTargetDescriptors [descriptor] has 2 constructors; audited 1") {
+		t.Fatalf("index projection admitted another descriptor owner: %v", violations)
 	}
 }
 

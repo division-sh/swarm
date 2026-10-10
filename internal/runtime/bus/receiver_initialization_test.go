@@ -53,16 +53,16 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 				store.flowInstances = []ActiveFlowInstanceDescriptor{{InstanceID: instance.InstanceID, EntityID: instance.EntityID, FlowInstance: instance.InstancePath, FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-1"}}}
 			}
 			owner := newTestFlowInstanceActivationOwner(store.Activate)
-			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstancePlanner: owner})
+			bus, err := newScopedTestEventBus(store, EventBusOptions{
+				ContractBundle: source, TemplateInstancePlanner: owner,
+				Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			store.bus = bus
 			for _, construction := range []flowidentity.Instance{root, producer} {
 				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, construction, ""))
-				if err := bus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(construction.Route()), Instance: construction}); err != nil {
-					t.Fatal(err)
-				}
+				store.installConstructionReceipt(testRunScopedFlowRoute(construction.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: construction})
 			}
 			if tc.reuse {
 				if tc.descriptor {
@@ -74,9 +74,7 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 					StorageRef: instance.InstancePath, EntityType: "account_state", CurrentState: "active", Status: "active",
 					Fields: map[string]any{"account_id": "acct-1"},
 				}}
-				if err := bus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(instance.Route()), Instance: instance}); err != nil {
-					t.Fatal(err)
-				}
+				store.installConstructionReceipt(testRunScopedFlowRoute(instance.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: instance})
 			}
 			eventID := eventtest.UUID("initialize-" + tc.name)
 			event := connectRoutePlanStaticProducerEvent(eventID, events.EventType("producer/account.ready"), "", "", json.RawMessage(tc.payload), 0, busInternalTestRunID, "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: producer.TemplateID, FlowInstance: producer.InstancePath, EntityID: producer.EntityID}}, time.Now().UTC())

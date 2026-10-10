@@ -8,6 +8,15 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
+func derivedRouteTableFixture(t testing.TB, source semanticview.Source) *RouteTable {
+	t.Helper()
+	table, err := DeriveRouteTable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return table
+}
+
 // These wrappers require explicit declaration/instance data and delegate only
 // to the compiled owners. They do not observe existence or grant readiness.
 func (rt *RouteTable) PubsubDeclarationDefinitionsFixture(t testing.TB, flowID string, keys ...string) []Subscriber {

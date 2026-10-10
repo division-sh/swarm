@@ -26,6 +26,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -693,23 +694,63 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 }
 
 type sqliteFlowActivationBus struct {
-	mu             sync.Mutex
-	runtimeLog     []runtimepipeline.RuntimeLogEntry
-	stagedRequests []runtimebus.FlowInstanceRouteMaterializationRequest
-	routeRequests  []runtimebus.FlowInstanceRouteMaterializationRequest
-	published      []events.Event
+	mu                   sync.Mutex
+	runtimeLog           []runtimepipeline.RuntimeLogEntry
+	preparedAgentRoutes  []runtimeeffects.LifecycleToken
+	publishedAgentRoutes map[runtimeeffects.LifecycleToken]struct{}
+	published            []events.Event
+}
+
+func TestNativeFlowActivationFixtureObservesPublishedAgentCarriersBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newReceiverConfigActivationFixture(t, backend)
+			f.constructKeylessRoot(t)
+			binding, err := f.grant.ProcessExecutionBinding()
+			if err != nil {
+				t.Fatal(err)
+			}
+			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, binding.RuntimeInstanceID, binding.RuntimeGeneration, "", "native-carrier-observation", binding.BundleHash, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.manager.Run(managedexecution.WithAdmission(f.ctx, admission)); err != nil {
+				t.Fatal(err)
+			}
+			req := f.request("business-key", "carrier-proof", "state")
+			if err := f.manager.ActivateFlowInstance(f.ctx, req); err != nil {
+				t.Fatal(err)
+			}
+			paths := f.bus.routePaths()
+			if len(paths) != 1 || paths[0] != req.Instance.InstancePath {
+				t.Fatalf("actual published agent carriers = %v, want exactly %s", paths, req.Instance.InstancePath)
+			}
+			f.bus.mu.Lock()
+			prepared := append([]runtimeeffects.LifecycleToken(nil), f.bus.preparedAgentRoutes...)
+			f.bus.mu.Unlock()
+			if len(prepared) != 1 || prepared[0].Identity.RunID != runtimecorrelation.RunIDFromContext(f.ctx) || prepared[0].Identity.Route.InstancePath != req.Instance.InstancePath {
+				t.Fatalf("actual prepared agent carriers = %+v, want exact run/receiver", prepared)
+			}
+			f.bus.RemoveAgentRoute(prepared[0])
+			if paths := f.bus.routePaths(); len(paths) != 0 {
+				t.Fatalf("exact agent-carrier cleanup retained publication: %v", paths)
+			}
+		})
+	}
 }
 
 type sqliteFlowActivationRoutePreparation struct {
 	deliveries chan *worklifetime.EventDelivery
+	publish    func() error
+	discard    func() error
 }
 
 func (p *sqliteFlowActivationRoutePreparation) Deliveries() <-chan *worklifetime.EventDelivery {
 	return p.deliveries
 }
 
-func (*sqliteFlowActivationRoutePreparation) Publish() error { return nil }
-func (*sqliteFlowActivationRoutePreparation) Discard() error { return nil }
+func (p *sqliteFlowActivationRoutePreparation) Publish() error { return p.publish() }
+func (p *sqliteFlowActivationRoutePreparation) Discard() error { return p.discard() }
 
 func (*sqliteFlowActivationBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
 	return ctx, nil
@@ -808,79 +849,46 @@ func (*sqliteFlowActivationBus) Store() runtimebus.EventStore { return nil }
 
 func (*sqliteFlowActivationBus) ResetInMemoryState() error { return nil }
 
-func (*sqliteFlowActivationBus) PrepareAgentRoute(
-	runtimeeffects.LifecycleToken,
-	semanticview.FlowOwnedAgentSubscriptionAdmission,
+func (b *sqliteFlowActivationBus) PrepareAgentRoute(
+	token runtimeeffects.LifecycleToken,
+	_ semanticview.FlowOwnedAgentSubscriptionAdmission,
 ) runtimebus.AgentRoutePreparation {
+	b.mu.Lock()
+	b.preparedAgentRoutes = append(b.preparedAgentRoutes, token)
+	b.mu.Unlock()
 	return &sqliteFlowActivationRoutePreparation{
 		deliveries: make(chan *worklifetime.EventDelivery),
+		publish: func() error {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			if b.publishedAgentRoutes == nil {
+				b.publishedAgentRoutes = make(map[runtimeeffects.LifecycleToken]struct{})
+			}
+			b.publishedAgentRoutes[token] = struct{}{}
+			return nil
+		},
+		discard: func() error {
+			b.RemoveAgentRoute(token)
+			return nil
+		},
 	}
 }
 
-func (*sqliteFlowActivationBus) FenceAgentRoute(runtimeeffects.LifecycleToken)  {}
-func (*sqliteFlowActivationBus) RemoveAgentRoute(runtimeeffects.LifecycleToken) {}
-func (*sqliteFlowActivationBus) SignalDeliveryContinuations()                   {}
+func (b *sqliteFlowActivationBus) FenceAgentRoute(token runtimeeffects.LifecycleToken) {
+	b.RemoveAgentRoute(token)
+}
+func (b *sqliteFlowActivationBus) RemoveAgentRoute(token runtimeeffects.LifecycleToken) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.publishedAgentRoutes, token)
+}
+func (*sqliteFlowActivationBus) SignalDeliveryContinuations() {}
 
 func (b *sqliteFlowActivationBus) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.runtimeLog = append(b.runtimeLog, entry)
 	return nil
-}
-
-func (b *sqliteFlowActivationBus) AddFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
-	return b.AddFlowInstanceRouteContext(context.Background(), req)
-}
-
-func (b *sqliteFlowActivationBus) StageFlowInstanceRouteContext(_ context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) (runtimebus.FlowInstanceRouteTopologyResult, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.stagedRequests = append(b.stagedRequests, req.Normalized())
-	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
-}
-
-func (b *sqliteFlowActivationBus) PublishPersistedFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	req = req.Normalized()
-	for _, existing := range b.routeRequests {
-		if existing.Identity == req.Identity {
-			return nil
-		}
-	}
-	b.routeRequests = append(b.routeRequests, req)
-	return nil
-}
-
-func (b *sqliteFlowActivationBus) RetirePublishedFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	filtered := b.routeRequests[:0]
-	for _, req := range b.routeRequests {
-		if req.Identity != identity {
-			filtered = append(filtered, req)
-		}
-	}
-	b.routeRequests = filtered
-	return nil
-}
-
-func (b *sqliteFlowActivationBus) AddFlowInstanceRouteContext(_ context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) error {
-	if _, err := b.StageFlowInstanceRouteContext(context.Background(), req); err != nil {
-		return err
-	}
-	return b.PublishPersistedFlowInstanceRoute(req)
-}
-
-func (b *sqliteFlowActivationBus) HasFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, req := range b.routeRequests {
-		if req.Identity == identity {
-			return true
-		}
-	}
-	return false
 }
 
 func (b *sqliteFlowActivationBus) runtimeLogEntries() []runtimepipeline.RuntimeLogEntry {
@@ -894,9 +902,9 @@ func (b *sqliteFlowActivationBus) runtimeLogEntries() []runtimepipeline.RuntimeL
 func (b *sqliteFlowActivationBus) routePaths() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	out := make([]string, 0, len(b.routeRequests))
-	for _, req := range b.routeRequests {
-		out = append(out, strings.TrimSpace(req.Identity.Route.InstancePath))
+	out := make([]string, 0, len(b.publishedAgentRoutes))
+	for token := range b.publishedAgentRoutes {
+		out = append(out, token.Identity.Route.InstancePath)
 	}
 	return out
 }
