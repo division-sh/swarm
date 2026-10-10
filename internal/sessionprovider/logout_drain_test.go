@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +44,129 @@ func TestWhatsAppExplicitLogoutDrainsOriginalWorkBeforeUnlink(t *testing.T) {
 	case duplicate := <-peer.frames:
 		t.Fatal("logout launched more than once", duplicate.node)
 	default:
+	}
+}
+
+func TestWhatsAppExplicitLogoutDrainsSDKTransactionBeforeUnlink(t *testing.T) {
+	peer := newSDKPeer(t)
+	_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
+	device := newSDKDeviceFixture(t, container)
+	if _, err := device.PreKeys.GetOrGenPreKeys(peer.ctx, 812); err != nil {
+		t.Fatal("prepare genuine SDK private-state fixture", err)
+	}
+	o := newOccurrenceFixture(t, peer, device, container, uuid.NewString(), nil)
+	entered, finish := make(chan struct{}), make(chan struct{})
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(finish) }) })
+	transaction := make(chan error, 1)
+	go func() {
+		transaction <- device.EventBuffer.DoDecryptionTxn(peer.ctx, func(ctx context.Context) error {
+			close(entered)
+			<-finish
+			return device.Sessions.PutSession(ctx, "admitted_before_logout.0", []byte("completed"))
+		})
+	}()
+	<-entered
+	loggedOut := make(chan error, 1)
+	go func() { loggedOut <- o.logout(peer.ctx) }()
+	requireLogoutAdmissionFenced(t, peer, o)
+	select {
+	case frame := <-peer.frames:
+		t.Fatal("unlink preceded admitted SDK transaction completion", frame.node)
+	case <-time.After(200 * time.Millisecond):
+	}
+	if device.Deleted || !o.client.IsConnected() {
+		t.Fatal("SDK drain lost original pairing or transport")
+	}
+	release.Do(func() { close(finish) })
+	if err := awaitOccurrenceProbe(t, peer.ctx, transaction); err != nil {
+		t.Fatal("logout interrupted its previously admitted SDK transaction", err)
+	}
+	unlink := peer.next(t)
+	peer.acknowledge(t, unlink)
+	if err := awaitOccurrenceProbe(t, peer.ctx, loggedOut); err != nil || !device.Deleted {
+		t.Fatal("SDK-drained unlink failed", err, device.Deleted)
+	}
+}
+
+func TestWhatsAppExplicitLogoutDrainsCallbacksBeforeUnlink(t *testing.T) {
+	peer := newSDKPeer(t)
+	_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
+	device := newSDKDeviceFixture(t, container)
+	if _, err := device.PreKeys.GetOrGenPreKeys(peer.ctx, 812); err != nil {
+		t.Fatal(err)
+	}
+	o, err := newClientOccurrence(peer.ctx, uuid.NewString(), uuid.NewString(), device, container.LIDMap(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := o.join(peer.ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	entered, finish := make(chan struct{}), make(chan struct{})
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(finish) }) })
+	callbacks, err := o.bindCallbacks(func(_ context.Context, event any) error {
+		if marker, ok := event.(string); ok && marker == "held callback" {
+			close(entered)
+			<-finish
+		}
+		return nil
+	}, func(context.Context, callbackFailure) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer.attach(t, o.client)
+	if err := o.connect(peer.ctx); err != nil || !o.client.WaitForConnection(5*time.Second) {
+		t.Fatal("SDK callback fixture did not connect", err)
+	}
+	_, releaseOutbound, err := o.acquire(peer.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var outbound sync.Once
+	t.Cleanup(func() { outbound.Do(releaseOutbound) })
+	captured := make(chan bool, 1)
+	go func() { captured <- callbacks.receive("held callback") }()
+	<-entered
+	loggedOut := make(chan error, 1)
+	go func() { loggedOut <- o.logout(peer.ctx) }()
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for {
+		callbacks.mu.Lock()
+		fenced := callbacks.fenced
+		callbacks.mu.Unlock()
+		if fenced {
+			break
+		}
+		select {
+		case frame := <-peer.frames:
+			t.Fatal("unlink preceded admitted callback completion", frame.node)
+		case <-deadline.C:
+			t.Fatal("logout did not fence callback admission")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if callbacks.receive("late callback") || device.Deleted || !o.client.IsConnected() {
+		t.Fatal("logout admitted a new callback or discarded original transport/state")
+	}
+	outbound.Do(releaseOutbound)
+	release.Do(func() { close(finish) })
+	select {
+	case success := <-captured:
+		if success {
+			t.Fatal("callback completed after fencing but reported SDK success")
+		}
+	case <-peer.ctx.Done():
+		t.Fatal("original callback did not join")
+	}
+	unlink := peer.next(t)
+	peer.acknowledge(t, unlink)
+	if err := awaitOccurrenceProbe(t, peer.ctx, loggedOut); err != nil || !device.Deleted {
+		t.Fatal("callback-drained unlink failed", err, device.Deleted)
 	}
 }
 
