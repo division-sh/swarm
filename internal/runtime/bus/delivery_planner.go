@@ -513,11 +513,11 @@ func (p deliveryPlanner) PlanExactDirect(ctx context.Context, evt events.Event, 
 		return RoutePlan{}, errors.New("exact direct delivery routes are required")
 	}
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
-	projection, err := p.recipientPolicy.loadSelectedRunTargetOwnerProjection(ctx)
+	agents, agentsAvailable, err := p.recipientPolicy.loadActiveAgentDescriptors(ctx)
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	manifest := exactDirectRecipientManifest(candidates, projection.agents, projection.agentsAvailable)
+	manifest := exactDirectRecipientManifest(candidates, agents, agentsAvailable)
 	available := make(map[agentidentity.Identity]struct{}, len(manifest.LiveRecipients))
 	for _, recipient := range manifest.LiveRecipients {
 		if !recipient.AgentIdentity.IsZero() {
@@ -541,7 +541,7 @@ func (p deliveryPlanner) PlanExactDirect(ctx context.Context, evt events.Event, 
 		"exact_routes":          true,
 		"requested_route_count": len(routes),
 	}
-	return projection.resolveRoutePlan(routePlan)
+	return routePlan.Normalized(), nil
 }
 
 // Exact direct delivery consumes caller-supplied routes as its sole route and

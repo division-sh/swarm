@@ -1440,7 +1440,7 @@ contract_formats:
         publications continue to compile their own evidence at the original classification boundary.
 
         SQLite may retain named, fixed read-statement handles for canonical single-event lookup,
-        active flow-instance descriptors, and selected-run target owners under its existing pool owner.
+        and active flow-instance descriptors under its existing pool owner.
         These handles retain no rows, absence decisions, snapshots, or execution authority. Every call
         executes its unchanged read and strict decoding at the original observation boundary. Failed or
         canceled preparation is not retained; pool shutdown closes all owned handles and cannot reopen
@@ -18346,7 +18346,14 @@ platform_tables:
         discovering run authority from EventStore or the redundant RequirePublicationRunActive alias is unsupported.
         Constructed existence, immutable parent/key selection and terminal occupancy are observed through the native
         FlowInstanceIndexReader, never through persisted route membership. Fixed-revision observations consume admitted
-        historical construction evidence; missing native receipt or readiness evidence is corruption, not an absent route.'
+        historical construction evidence; missing native receipt or readiness evidence is corruption, not an absent route.
+        ListSelectedRunTargetOwners and ListSelectedRunTargetOwnersForScope are unsupported orphan inventories.
+        Receiver observations consume exact admitted coordinates or compiled declaration scopes, including actual
+        structural parents and typed keys; source-entity scans cannot substitute for that selection.
+        A non-executable receiver remains occupied and historically readable; availability is not instance absence.
+        Exact direct delivery consumes its already admitted route/target without electing or reinterpreting a receiver
+        through current instance inventories. Its current exact agent availability check remains mandatory and preserves
+        independent lookup failures; receiver selection and exact committed-route consumption are distinct operations.'
       reply_origin_availability: 'Reply recipient binding consumes the admitted native origin header or the exact
         operation-private constructor proposal, not process route membership. A terminated or final-state origin remains
         occupied but has no fresh reply carrier; classify the existing stale-arrival outcome without claiming its reply

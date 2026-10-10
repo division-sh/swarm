@@ -645,20 +645,6 @@ func (d ActiveTargetDescriptor) Normalized() ActiveTargetDescriptor {
 	}
 }
 
-// SelectedRunTargetOwnerLister exposes exact receiver ownership rows from the
-// selected run. It is deliberately separate from template route descriptors:
-// static and root owners come from entity_state, while template descriptors
-// additionally carry readiness and address evidence.
-type SelectedRunTargetOwnerLister interface {
-	ListSelectedRunTargetOwners(ctx context.Context, runID string) ([]ActiveTargetDescriptor, error)
-}
-
-// ScopedSelectedRunTargetOwnerLister consumes exact graph-selected instance
-// paths. It does not decide which receiver or entity owns an event.
-type ScopedSelectedRunTargetOwnerLister interface {
-	ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, instancePaths []string, sourceEntityID string) ([]ActiveTargetDescriptor, error)
-}
-
 func normalizeDescriptorAddressFields(in map[string]string) map[string]string {
 	if len(in) == 0 {
 		return nil

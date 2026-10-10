@@ -17,6 +17,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -1112,30 +1113,8 @@ type descriptorAwareEventStore struct {
 
 type routeSetEventStore struct {
 	runtimebus.InMemoryEventStore
-	mu           sync.Mutex
-	routes       map[string][]events.DeliveryRoute
-	targetOwners []runtimebus.ActiveTargetDescriptor
-	targetRunID  string
-}
-
-func (s *routeSetEventStore) ListSelectedRunTargetOwners(_ context.Context, runID string) ([]runtimebus.ActiveTargetDescriptor, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if runID != s.targetRunID {
-		return nil, nil
-	}
-	return slices.Clone(s.targetOwners), nil
-}
-
-func (s *routeSetEventStore) ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, paths []string, sourceEntityID string) ([]runtimebus.ActiveTargetDescriptor, error) {
-	owners, err := s.ListSelectedRunTargetOwners(ctx, runID)
-	var selected []runtimebus.ActiveTargetDescriptor
-	for _, owner := range owners {
-		if slices.Contains(paths, owner.FlowInstance) || sourceEntityID != "" && owner.EntityID == sourceEntityID {
-			selected = append(selected, owner)
-		}
-	}
-	return selected, err
+	mu     sync.Mutex
+	routes map[string][]events.DeliveryRoute
 }
 
 func (s *routeSetEventStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
@@ -4607,8 +4586,6 @@ func TestEventBusPublish_RecordsNestedFlowConnectLocalizedEvent(t *testing.T) {
 		observations = append(observations, runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, ""))
 	}
 	selected := newRouteSetEventStore()
-	selected.targetRunID = eventBusTestRunID
-	selected.targetOwners = []runtimebus.ActiveTargetDescriptor{{ID: "child", FlowInstance: "child", EntityID: runtimeflowidentity.EntityID("child")}}
 	eb, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		Durable:        runtimebus.DurableDependencies{Instances: runtimebus.FlowInstanceIndexFixture(observations...)},
@@ -4679,15 +4656,22 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 			},
 		},
 	}
+	bundle.SourceArtifact = sourceartifactfixture.Artifact()
 	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "child/grandchild"))
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatal(err)
 	}
+	bundle.Semantics.Version = "1.0.0"
+	source := semanticview.Wrap(bundle)
+	var observations []runtimepipeline.FlowInstanceObservation
+	for _, owner := range []struct{ flow, instance string }{{".", ""}, {"child", ""}, {"child/grandchild", "inst-1"}} {
+		identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, owner.flow, owner.instance, eventBusTestRunID)
+		observations = append(observations, runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, identity, owner.instance))
+	}
 	selected := newRouteSetEventStore()
-	selected.targetRunID = eventBusTestRunID
-	selected.targetOwners = []runtimebus.ActiveTargetDescriptor{{ID: "child/grandchild", FlowInstance: "child/grandchild/inst-1", EntityID: runtimeflowidentity.EntityID("child/grandchild/inst-1")}}
 	eb, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{
-		ContractBundle: semanticview.Wrap(bundle),
+		ContractBundle: source,
+		Durable:        runtimebus.DurableDependencies{Instances: runtimebus.FlowInstanceIndexFixture(observations...)},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -4702,7 +4686,7 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 	if err != nil {
 		t.Fatalf("concrete grandchild routing source: %v", err)
 	}
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngressWithRoutingSource(
+	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngressWithRoutingSource(
 		"",
 		"child/grandchild/inst-1/micro.done",
 		"",
@@ -4710,7 +4694,6 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 		nil,
 		0,
 		eventBusTestRunID,
-		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, runtimeflowidentity.EntityID("child/grandchild/inst-1")),
 		routingSource,
 		time.Time{},

@@ -647,11 +647,16 @@ func TestDeliveryPlanner_DirectSameSlugUsesTargetRouteBeforeAmbiguity(t *testing
 
 func TestDeliveryPlanner_ExactDirectRoutePreservesCommittedTargetWithoutDescriptorReinterpretation(t *testing.T) {
 	descriptor := testActiveAgentDescriptor(t, "replay-agent", "", "")
+	var targetReads int
 	planner := newDeliveryPlannerWithHandlers(t,
 		deliveryRouteResolver{},
 		deliveryRecipientPolicy{
 			loadActiveAgentDescriptors: func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 				return testActiveAgentDescriptors(descriptor), true, nil
+			},
+			loadActiveTargetDescriptors: func(context.Context) ([]ActiveTargetDescriptor, bool, error) {
+				targetReads++
+				return nil, false, errors.New("exact direct target was reinterpreted")
 			},
 		},
 	)
@@ -675,6 +680,9 @@ func TestDeliveryPlanner_ExactDirectRoutePreservesCommittedTargetWithoutDescript
 	if got := plan.DeliveryRoutes(); len(got) != 1 || !reflect.DeepEqual(got[0].Normalized(), route.Normalized()) {
 		t.Fatalf("exact delivery routes = %#v, want committed route %#v", got, route)
 	}
+	if targetReads != 0 {
+		t.Fatalf("exact direct planning consulted target election %d times", targetReads)
+	}
 
 	missing := testActiveAgentDescriptor(t, "replay-agent", "", "other/instance")
 	missingRoute := route
@@ -682,6 +690,13 @@ func TestDeliveryPlanner_ExactDirectRoutePreservesCommittedTargetWithoutDescript
 	_, err = planner.PlanExactDirect(context.Background(), evt, []events.DeliveryRoute{missingRoute})
 	if !errors.Is(err, ErrExactDirectRecipientUnavailable) {
 		t.Fatalf("PlanExactDirect missing exact identity error = %v, want %v", err, ErrExactDirectRecipientUnavailable)
+	}
+	storeFailure := errors.New("independent exact-agent availability failure")
+	planner.recipientPolicy.loadActiveAgentDescriptors = func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+		return nil, false, storeFailure
+	}
+	if _, err := planner.PlanExactDirect(context.Background(), evt, []events.DeliveryRoute{route}); !errors.Is(err, storeFailure) || targetReads != 0 {
+		t.Fatalf("exact agent failure lost: err=%v target reads=%d", err, targetReads)
 	}
 }
 

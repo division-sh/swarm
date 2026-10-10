@@ -94,7 +94,7 @@ func TestOriginSQLLockObserverPostgres(t *testing.T) {
 		{name: "origin_and_unrelated", origin: true, unrelated: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newCompleteEventDispatchFixtureWithOrigin(t, "postgres", false, runlifecycle.ScenarioSetupRunOrigin())
+			f := newCompleteEventDispatchFixtureWithOrigin(t, "postgres", false, runlifecycle.ScenarioSetupRunOrigin(), nil)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			lock, err := f.db.BeginTx(ctx, nil)
@@ -160,7 +160,7 @@ func TestContinuationOriginReadPostgresCancellationCausality(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			reader := &blockedOriginReader{entered: make(chan context.Context, 1), release: make(chan struct{}), returned: make(chan error, 1)}
-			f := newCompleteEventDispatchFixtureWithOrigin(t, "postgres", false, runlifecycle.ScenarioSetupRunOrigin(), func(store completeEventDispatchStore) runtimebus.RunOriginReader {
+			f := newCompleteEventDispatchFixtureWithOrigin(t, "postgres", false, runlifecycle.ScenarioSetupRunOrigin(), nil, func(store completeEventDispatchStore) runtimebus.RunOriginReader {
 				reader.completeEventDispatchStore = store
 				reader.origins = store.(interface {
 					LoadRunOrigin(context.Context, string) (runlifecycle.RunOrigin, error)
