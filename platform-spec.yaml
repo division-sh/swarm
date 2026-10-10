@@ -11342,7 +11342,13 @@ tool_model:
         and checks the concrete original connection's current lifetime; failed, fenced or closed attempts refuse
         without another Connect, changed connection identity or premature cleanup/possession release. Cancellation
         after runtime selection is checked before construction and again at Connect; retained partial owners join
-        cleanup before relinquishing responsibility. Only the private connection owner may checkpoint the exact
+        cleanup before relinquishing responsibility. Selection acquires counted construction work before the
+        original retained attempt begins storage/SDK construction. Individual caller expiration releases only
+        its wait, including native onboarding error/unpaired readback; it cannot erase that attempt or its
+        cleanup evidence. Construction publishes its cached result after settling the original selection use,
+        and retirement joins that same attempt before releasing connection possession. Durable post-reservation
+        settlement keeps its existing lifetime; canceled native readback cannot re-enter an uncancelable wait.
+        Only the private connection owner may checkpoint the exact
         persisted SDK account while its original reserved occurrence is authenticated. It freezes account provenance
         and advances to awaiting_external_identity under the selected operation revision, without claiming a human
         binding or executable target. A successful selected commit updates the original verified account projection
