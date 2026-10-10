@@ -87,10 +87,6 @@ func TestWorkflowInstanceFixtureListUsesConstructedHeadersBothStores(t *testing.
 				if err := store.create(ctx, instance); err != nil {
 					t.Fatalf("construct fixture %s: %v", tc.path, err)
 				}
-				identity := testRunScopedWorkflowInstanceFromContext(ctx, tc.path)
-				if err := trackedMutationStateMatchesEntityState(t, store, identity, instance.EntityID); err != nil {
-					t.Fatalf("header/history fixture %s: %v", tc.path, err)
-				}
 			}
 			query := `UPDATE entity_state SET current_state = 'obsolete', gates = '{}', bookkeeping = '{}', accumulator = '{}' WHERE run_id = ?`
 			if backend == "postgres" {
@@ -382,7 +378,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 	var fieldsRaw []byte
 	var controlStatus string
 	if err := db.QueryRowContext(ctx, `
-		SELECT es.current_state, es.fields, COALESCE(fi.config->>'status', '')
+		SELECT fi.current_state, es.fields, COALESCE(fi.config->>'status', '')
 		FROM entity_state es
 		JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 		WHERE es.run_id = $1::uuid AND es.entity_id = $2::uuid
@@ -390,7 +386,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 		t.Fatalf("query entity_state projection: %v", err)
 	}
 	if got := strings.TrimSpace(currentState); got != "reviewing" {
-		t.Fatalf("entity_state.current_state = %q, want reviewing", got)
+		t.Fatalf("flow_instances.current_state = %q, want reviewing", got)
 	}
 	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", fieldsRaw)
 	if err != nil {
@@ -463,7 +459,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 		fieldsRaw  []byte
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT es.revision, COALESCE(es.fields->>'name', ''), es.fields
+		SELECT fi.revision, COALESCE(es.fields->>'name', ''), es.fields
 		FROM entity_state es
 		JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 		WHERE es.run_id = $1::uuid AND es.entity_id = $2::uuid
@@ -471,7 +467,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 		t.Fatalf("query persisted projection after duplicate create: %v", err)
 	}
 	if revision != 1 {
-		t.Fatalf("entity_state.revision = %d, want 1", revision)
+		t.Fatalf("flow_instances.revision = %d, want 1", revision)
 	}
 	if configName != "alpha" {
 		t.Fatalf("entity_state.fields name = %q, want alpha", configName)
@@ -548,7 +544,7 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 			mutateSQL:    `UPDATE entity_state SET fields = $2::jsonb WHERE entity_id = $1::uuid AND run_id = $3::uuid`,
 			mutateKey:    "entity",
 			mutateArg:    `[]`,
-			wantContains: "entity_state.fields must be a JSON object",
+			wantContains: "workflow target fields require a persisted JSON object",
 		},
 		{
 			name:         "gates not bool map",

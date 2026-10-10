@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
@@ -69,6 +70,42 @@ func oldValueOrNil(value any, ok bool) any {
 	return value
 }
 
+func loadTrackedEntityStateProjection(ctx context.Context, tx *sql.Tx, runID, entityID string) (runtimemutationlog.EntityStateProjection, error) {
+	if tx == nil || strings.TrimSpace(entityID) == "" {
+		return runtimemutationlog.EntityStateProjection{}, nil
+	}
+	var currentState sql.NullString
+	var fieldsRaw, bookkeepingRaw, gatesRaw, accRaw []byte
+	err := tx.QueryRowContext(ctx, `SELECT fi.current_state,es.fields,fi.bookkeeping,fi.gates,fi.accumulator
+		FROM flow_instances fi LEFT JOIN entity_state es
+		ON es.run_id=fi.run_id AND es.entity_id=fi.entity_id AND es.flow_instance=fi.instance_path
+		WHERE fi.run_id=$1::uuid AND fi.entity_id=$2::uuid FOR UPDATE OF fi`, runID, entityID).Scan(&currentState, &fieldsRaw, &bookkeepingRaw, &gatesRaw, &accRaw)
+	if err == sql.ErrNoRows {
+		return runtimemutationlog.EntityStateProjection{}, nil
+	}
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", fieldsRaw)
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	bookkeeping, err := decodeWorkflowInstanceJSONMap("flow_instances.bookkeeping", bookkeepingRaw)
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	gates, err := decodeWorkflowInstanceJSONBoolMap("flow_instances.gates", gatesRaw)
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	accumulator, err := decodeWorkflowInstanceJSONMap("flow_instances.accumulator", accRaw)
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	return runtimemutationlog.EntityStateProjection{CurrentState: runtimemutationlog.PresentLifecycleState(currentState.String), Fields: fields,
+		Bookkeeping: bookkeeping, Gates: workflowBoolGatesAsMap(gates), Accumulator: accumulator}, nil
+}
+
 func trackedWorkflowTargetProjectionForTest(record WorkflowTargetPersistenceRecord) (runtimemutationlog.EntityStateProjection, error) {
 	projection := runtimemutationlog.EntityStateProjection{Fields: map[string]any{}}
 	if record.Presence.HasState() {
@@ -82,9 +119,7 @@ func trackedWorkflowTargetProjectionForTest(record WorkflowTargetPersistenceReco
 		return projection, nil
 	}
 	header := record.Lifecycle.State
-	if record.Lifecycle.StageDefined {
-		projection.CurrentState = runtimemutationlog.PresentLifecycleState(header.CurrentState)
-	}
+	projection.CurrentState = runtimemutationlog.PresentLifecycleState(header.CurrentState)
 	var err error
 	if projection.Bookkeeping, err = decodeWorkflowInstanceJSONMap("flow_instances.bookkeeping", header.Bookkeeping); err != nil {
 		return runtimemutationlog.EntityStateProjection{}, err

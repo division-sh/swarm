@@ -17,6 +17,42 @@ import (
 	"github.com/google/uuid"
 )
 
+func (s *workflowInstanceStore) loadTrackedEntityStateProjectionSQLite(ctx context.Context, tx *sql.Tx, runID, entityID string) (runtimemutationlog.EntityStateProjection, error) {
+	if tx == nil || strings.TrimSpace(entityID) == "" {
+		return runtimemutationlog.EntityStateProjection{}, nil
+	}
+	var currentState sql.NullString
+	var fieldsRaw, bookkeepingRaw, gatesRaw, accRaw any
+	err := tx.QueryRowContext(ctx, `SELECT fi.current_state,es.fields,fi.bookkeeping,fi.gates,fi.accumulator
+		FROM flow_instances fi LEFT JOIN entity_state es
+		ON es.run_id=fi.run_id AND es.entity_id=fi.entity_id AND es.flow_instance=fi.instance_path
+		WHERE fi.run_id=? AND fi.entity_id=?`, runID, entityID).Scan(&currentState, &fieldsRaw, &bookkeepingRaw, &gatesRaw, &accRaw)
+	if err == sql.ErrNoRows {
+		return runtimemutationlog.EntityStateProjection{}, nil
+	}
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", sqliteWorkflowJSONBytes(fieldsRaw))
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	bookkeeping, err := decodeWorkflowInstanceJSONMap("flow_instances.bookkeeping", sqliteWorkflowJSONBytes(bookkeepingRaw))
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	gates, err := decodeWorkflowInstanceJSONBoolMap("flow_instances.gates", sqliteWorkflowJSONBytes(gatesRaw))
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	accumulator, err := decodeWorkflowInstanceJSONMap("flow_instances.accumulator", sqliteWorkflowJSONBytes(accRaw))
+	if err != nil {
+		return runtimemutationlog.EntityStateProjection{}, err
+	}
+	return runtimemutationlog.EntityStateProjection{CurrentState: runtimemutationlog.PresentLifecycleState(currentState.String), Fields: fields,
+		Bookkeeping: bookkeeping, Gates: workflowBoolGatesAsMap(gates), Accumulator: accumulator}, nil
+}
+
 func insertSQLiteWorkflowCreateEntityInitialValueMutations(
 	ctx context.Context,
 	tx *sql.Tx,

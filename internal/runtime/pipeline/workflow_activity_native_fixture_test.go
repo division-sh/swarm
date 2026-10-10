@@ -1,6 +1,13 @@
 package pipeline
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+)
 
 // Component proofs consume the original native semantic owner, never a pool
 // or a test transaction runner reconstructed around the selected database.
@@ -17,6 +24,22 @@ type WorkflowActivityNativeFixtureForTest struct {
 	Construct                 func(context.Context, WorkflowInstance) error
 	ClaimReplyLossCoordinator func(context.Context, Bus, PipelineCoordinatorOptions, string, string, error) (*PipelineCoordinator, func() int32)
 	ReadAttemptStatuses       func(context.Context) ([]string, error)
+	ReadMutationProjection    func(context.Context, string, string) (WorkflowMutationProjectionForTest, error)
+	RemoveMutationLog         func(context.Context) error
+	TryInvalidMutationPath    func(context.Context, string, string) error
+	PersistEvent              func(context.Context, events.Event)
+	AdmitDelivery             func(context.Context, events.Event, events.DeliveryRoute) (deliverylifecycle.Snapshot, error)
+}
+
+type WorkflowMutationProjectionForTest struct {
+	Current   mutationlog.EntityStateProjection
+	Mutations []WorkflowMutationRowForTest
+}
+
+type WorkflowMutationRowForTest struct {
+	Domain                                  mutationlog.Domain
+	Path, WriterType, WriterID, HandlerStep string
+	OldValue, NewValue                      json.RawMessage
 }
 
 type WorkflowJournalStorageForTest struct {

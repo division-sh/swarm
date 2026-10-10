@@ -11,7 +11,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
 type pipelineTestWorkflowInstanceReader struct {
@@ -51,12 +50,7 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowTargetPersistence(ctx co
 	if err := identity.Validate(); err != nil || entityID.IsZero() {
 		return WorkflowTargetPersistenceRecord{}, fmt.Errorf("workflow target persistence lookup requires exact route and entity identity")
 	}
-	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
-		if !authoractivityfixture.InMutation(ctx, tx) {
-			return WorkflowTargetPersistenceRecord{}, fmt.Errorf("pipeline fixture read requires its transaction owner")
-		}
-		return r.loadWorkflowTargetPersistence(ctx, tx, identity, entityID)
-	}
+	route, runID := identity.Route, identity.RunID
 	txOptions := &sql.TxOptions{ReadOnly: true}
 	if r.dialect == workflowStoreDialectPostgres {
 		txOptions.Isolation = sql.LevelRepeatableRead
@@ -66,27 +60,9 @@ func (r pipelineTestWorkflowInstanceReader) LoadWorkflowTargetPersistence(ctx co
 		return WorkflowTargetPersistenceRecord{}, err
 	}
 	defer tx.Rollback()
-	record, err := r.loadWorkflowTargetPersistence(ctx, tx, identity, entityID)
-	if err != nil {
-		return WorkflowTargetPersistenceRecord{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return WorkflowTargetPersistenceRecord{}, err
-	}
-	return record, nil
-}
-
-func (r pipelineTestWorkflowInstanceReader) loadWorkflowTargetPersistence(ctx context.Context, tx *sql.Tx, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (WorkflowTargetPersistenceRecord, error) {
-	if err := identity.Validate(); err != nil || entityID.IsZero() || tx == nil {
-		return WorkflowTargetPersistenceRecord{}, fmt.Errorf("workflow target persistence requires an exact identity and transaction")
-	}
-	route, runID := identity.Route, identity.RunID
 	stateQuery := `SELECT entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
 	if r.dialect == workflowStoreDialectPostgres {
 		stateQuery = `SELECT entity_id::text, flow_instance, entity_type, slug, name, fields, created_at, updated_at FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3`
-		if authoractivityfixture.InMutation(ctx, tx) {
-			stateQuery += ` FOR UPDATE`
-		}
 	}
 	state, stateErr := scanPipelineTestWorkflowEntityState(tx.QueryRowContext(ctx, stateQuery, runID, entityID.String(), route.InstancePath))
 	stateExists := stateErr == nil
@@ -104,11 +80,8 @@ func (r pipelineTestWorkflowInstanceReader) loadWorkflowTargetPersistence(ctx co
 		headerQuery = `SELECT instance_path, flow_template, config->>'workflow_version', mode, status, config, terminated_at, created_at,
 			entity_id::text, entity_type, slug, name, current_state, revision, entered_state_at, updated_at, stage_defined, gates, bookkeeping, accumulator
 			FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2`
-		if authoractivityfixture.InMutation(ctx, tx) {
-			headerQuery += ` FOR UPDATE`
-		}
 	}
-	err := tx.QueryRowContext(ctx, headerQuery, runID, route.InstancePath).Scan(
+	err = tx.QueryRowContext(ctx, headerQuery, runID, route.InstancePath).Scan(
 		&companion.FlowInstance, &companion.WorkflowName, &workflowVersion, &companion.Mode,
 		&companion.Status, &config, &terminatedAt, &createdAt,
 		&companion.State.EntityID, &headerType, &headerSlug, &headerName,
@@ -145,6 +118,9 @@ func (r pipelineTestWorkflowInstanceReader) loadWorkflowTargetPersistence(ctx co
 		} else if present {
 			companion.TerminatedAt = terminated
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return WorkflowTargetPersistenceRecord{}, err
 	}
 	companion.WorkflowVersion = workflowVersion.String
 	record := WorkflowTargetPersistenceRecord{State: state, Lifecycle: companion}

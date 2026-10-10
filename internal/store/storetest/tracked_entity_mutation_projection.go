@@ -15,3 +15,11 @@ func ReadTrackedEntityMutationProjectionStorage(ctx context.Context, selected an
 func CorruptRegistryVerdict(ctx context.Context, selected any, run, entity, verdict string) error {
 	return private.CorruptRegistryVerdictForTest(ctx, selected, run, entity, verdict)
 }
+
+func RemoveMutationLogForRollbackProof(ctx context.Context, selected any) error {
+	return private.RemoveMutationLogForRollbackProofForTest(ctx, selected)
+}
+
+func TryInvalidAccumulatorMutationPath(ctx context.Context, selected any, run, entity string) error {
+	return private.TryInvalidAccumulatorMutationPathForTest(ctx, selected, run, entity)
+}
