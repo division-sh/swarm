@@ -118,10 +118,9 @@ type connectRoutePlanConcurrentLifecycleStore struct {
 	mu sync.Mutex
 }
 
-type connectRoutePlanStaleSnapshotStore struct {
+type connectRoutePlanForbiddenDescriptorStore struct {
 	*connectRoutePlanLifecycleStore
-	mutations int
-	mutating  bool
+	descriptorReads int
 }
 
 type apiEventPublicationMemoryStore struct {
@@ -979,35 +978,19 @@ func (s *connectRoutePlanConcurrentLifecycleStore) ListActiveFlowInstanceDescrip
 	), nil
 }
 
-func (s *connectRoutePlanStaleSnapshotStore) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]ActiveFlowInstanceDescriptor, error) {
-	descriptors, err := s.connectRoutePlanLifecycleStore.ListActiveFlowInstanceDescriptors(ctx, runID)
-	return s.afterDescriptorRead(descriptors, err)
+func (s *connectRoutePlanForbiddenDescriptorStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]ActiveFlowInstanceDescriptor, error) {
+	s.descriptorReads++
+	return nil, errors.New("retired descriptor membership read")
 }
 
-func (s *connectRoutePlanStaleSnapshotStore) ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs, instancePaths []string) ([]ActiveFlowInstanceDescriptor, error) {
-	descriptors, err := s.connectRoutePlanLifecycleStore.ListActiveFlowInstanceDescriptorsForScope(ctx, runID, templateIDs, instancePaths)
-	return s.afterDescriptorRead(descriptors, err)
+func (s *connectRoutePlanForbiddenDescriptorStore) ListActiveFlowInstanceDescriptorsForScope(context.Context, string, []string, []string) ([]ActiveFlowInstanceDescriptor, error) {
+	s.descriptorReads++
+	return nil, errors.New("retired scoped descriptor membership read")
 }
 
-func (s *connectRoutePlanStaleSnapshotStore) ListActiveFlowInstanceDescriptorsForKey(ctx context.Context, runID, templateID, keyField, keyValue string) ([]ActiveFlowInstanceDescriptor, error) {
-	descriptors, err := s.connectRoutePlanLifecycleStore.ListActiveFlowInstanceDescriptorsForKey(ctx, runID, templateID, keyField, keyValue)
-	return s.afterDescriptorRead(descriptors, err)
-}
-
-func (s *connectRoutePlanStaleSnapshotStore) afterDescriptorRead(descriptors []ActiveFlowInstanceDescriptor, err error) ([]ActiveFlowInstanceDescriptor, error) {
-	if err != nil || s.mutations <= 0 || s.bus == nil || s.mutating {
-		return descriptors, err
-	}
-	ordinal := s.mutations
-	s.mutations--
-	s.mutating = true
-	defer func() { s.mutating = false }()
-	if err := s.bus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{
-		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", fmt.Sprintf("stale-%d", ordinal))),
-	}); err != nil {
-		return nil, err
-	}
-	return descriptors, nil
+func (s *connectRoutePlanForbiddenDescriptorStore) ListActiveFlowInstanceDescriptorsForKey(context.Context, string, string, string, string) ([]ActiveFlowInstanceDescriptor, error) {
+	s.descriptorReads++
+	return nil, errors.New("retired keyed descriptor membership read")
 }
 
 func (s *connectRoutePlanConcurrentLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -1966,7 +1949,7 @@ func TestConnectRecipientEvaluationRejectsUnrelatedTemplateSameLeaf(t *testing.T
 
 func TestCompiledRoutingProducerKindMatrix(t *testing.T) {
 	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"})
-	route := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-kind-matrix")}
+	route := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")}
 	staticSource, err := events.NewStaticFlowRoutingSource(route)
 	if err != nil {
 		t.Fatal(err)
@@ -2012,10 +1995,15 @@ func TestCompiledRoutingProducerKindMatrix(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newConnectRoutePlanStaticStore()
-			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
+				Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
+			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
+			installConnectionSourceConstructionForRun(t, eb, source, "producer", runID)
+			store.installIndexObservation(constructionIndexObservation(t, source, runID,
+				StoredFlowInstanceIdentityFixture(source, "consumer", "", runID, connectRoutePlanStaticOwner().EntityID), ""))
 			event := tc.event()
 			if err := eb.Publish(context.Background(), event); err != nil {
 				t.Fatalf("Publish: %v", err)
@@ -2554,33 +2542,38 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	}
 }
 
-func TestCompiledConnectEvaluationIgnoresDescriptorGenerationBeforeMutation(t *testing.T) {
+func TestCompiledConnectEvaluationDoesNotRequireLegacyFlowDescriptors(t *testing.T) {
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, false)
-	store := &connectRoutePlanStaleSnapshotStore{
+	store := &connectRoutePlanForbiddenDescriptorStore{
 		connectRoutePlanLifecycleStore: &connectRoutePlanLifecycleStore{
 			connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 				targetRouteMemoryStore: newTargetRouteMemoryStore(),
 			},
 		},
-		mutations: 1,
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle:          source,
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
+		Durable: DurableDependencies{
+			RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID},
+			Instances:    store.targetRouteMemoryStore,
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	// Target-policy field projections are a separate optional role, not
+	// construction or connect-recipient evidence.
+	eb.durable.ActiveFlows = nil
 	installConnectionSourceConstruction(t, eb, source, "producer")
-	store.bus = eb
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-stale"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	if store.mutations != 0 {
-		t.Fatal("route generation churn did not execute during the remaining mirror work")
+	if store.descriptorReads != 0 {
+		t.Fatalf("native selection read retired descriptor membership %d times", store.descriptorReads)
 	}
 	if got := len(store.activations); got != 1 {
 		t.Fatalf("activations = %d, want exactly one post-fence mutation", got)
@@ -2588,45 +2581,6 @@ func TestCompiledConnectEvaluationIgnoresDescriptorGenerationBeforeMutation(t *t
 	routes := store.routes[evt.ID()]
 	if len(routes) != 1 || routes[0].ConnectClaim.Empty() {
 		t.Fatalf("persisted routes = %#v, want one stamped connect route", routes)
-	}
-}
-
-func TestCompiledConnectEvaluationIgnoresRepeatedDescriptorGenerationChurn(t *testing.T) {
-	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, false)
-	store := &connectRoutePlanStaleSnapshotStore{
-		connectRoutePlanLifecycleStore: &connectRoutePlanLifecycleStore{
-			connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
-				targetRouteMemoryStore: newTargetRouteMemoryStore(),
-			},
-		},
-		mutations: 10,
-	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:          source,
-		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	installConnectionSourceConstruction(t, eb, source, "producer")
-	store.bus = eb
-	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
-		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-stale"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
-
-	if err := eb.Publish(context.Background(), evt); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	if store.mutations == 10 {
-		t.Fatal("route generation churn did not execute during the remaining mirror work")
-	}
-	if got := len(store.activations); got != 1 {
-		t.Fatalf("activations = %d, want exactly one native select-or-create mutation", got)
-	}
-	if _, ok := store.events[evt.ID()]; !ok {
-		t.Fatalf("event %s was not persisted", evt.ID())
-	}
-	if routes := store.routes[evt.ID()]; len(routes) != 1 || routes[0].ConnectClaim.Empty() {
-		t.Fatalf("persisted routes = %#v, want exactly one claimed route", routes)
 	}
 }
 
