@@ -40,6 +40,61 @@ func seedServePairedDevice(t *testing.T, f *serveBootstrapTestFixture) string {
 	return account
 }
 
+// Permanent form of reviewer-f's 850c57200 publication-rebind probe. The SDK
+// and selected store are real; runtime selection remains a component fixture.
+func TestServeSessionResumePublicationRebindBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newServeBootstrapTestFixture(t, backend)
+			serveBootstrapWireFixture(t, "paired", f.owner)
+			seedServePairedDevice(t, f)
+			if err := f.adapter.ResumeSession(f.ctx, f.op, f.candidate); err != nil {
+				t.Fatal(err)
+			}
+			paired, ok, err := f.adapter.CheckpointSessionPairing(f.ctx, f.op)
+			if err != nil || !ok {
+				t.Fatal(paired, ok, err)
+			}
+			previous := f.adapter.connection(paired.OperationID)
+			coordinate := paired.Coordinate
+			coordinate.ContextPublicationGeneration++
+			rebound, err := f.adapter.store.AdvanceChannelOnboarding(f.ctx, channelonboarding.AdvanceRequest{
+				OperationID: paired.OperationID, ExpectedRevision: paired.Revision,
+				Phase: paired.Phase, RebindCoordinate: &coordinate, Now: time.Now().UTC()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.adapter.ResumeSession(f.ctx, rebound, f.candidate); err == nil {
+				t.Fatal("stale candidate admitted restoration")
+			}
+			if f.adapter.connection(paired.OperationID) != previous || f.selections.Load() != 2 {
+				t.Fatal("invalid candidate replaced the original owner")
+			}
+			candidate := f.candidate
+			candidate.Coordinate = coordinate
+			if err := f.adapter.ResumeSession(f.ctx, rebound, candidate); err != nil {
+				t.Fatal("exact publication rebind failed", err)
+			}
+			current := f.adapter.connection(paired.OperationID)
+			if current == previous || f.selections.Load() != 3 || previous.CheckBootstrap(f.ctx) == nil {
+				t.Fatal("publication rebind retained stale execution or constructed twice")
+			}
+			admission, err := current.AdmitSessionAccount(f.ctx, paired.SessionAccount)
+			if err != nil {
+				t.Fatal("rebound occurrence lost the original account", err)
+			}
+			id, revision := admission.Parent()
+			admission.Close()
+			if id != rebound.OperationID || revision != rebound.Revision {
+				t.Fatal("rebound occurrence adopted another selected parent", id, revision)
+			}
+			if err := f.adapter.ResumeSession(f.ctx, rebound, candidate); err != nil || f.adapter.connection(id) != current || f.selections.Load() != 3 {
+				t.Fatal("healthy rebound occurrence was reopened", err)
+			}
+		})
+	}
+}
+
 func TestServeSessionExplicitResumeRetainsPairedIdentityBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

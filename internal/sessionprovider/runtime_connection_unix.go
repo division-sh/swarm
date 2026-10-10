@@ -294,6 +294,31 @@ func (c *RuntimeConnection) CurrentValueMatchesSeal(ctx context.Context, expecte
 	return c.credentials.CurrentValueMatchesSeal(ctx, expected)
 }
 
+func (c *RuntimeConnection) AwaitSessionAccount(ctx context.Context) (err error) {
+	work, err := c.begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, work.Done()) }()
+	op, err := c.currentOperation(work.Context())
+	if err != nil {
+		return err
+	}
+	if op.SessionAccount == (operatorchannel.SessionAccountAdmission{}) {
+		return errRuntimeConnection
+	}
+	occurrence := c.state.currentOccurrence()
+	if occurrence == nil {
+		return errClientOccurrenceFenced
+	}
+	if err := occurrence.awaitConnected(work.Context()); err != nil {
+		return err
+	}
+	admission, err := c.AdmitSessionAccount(work.Context(), op.SessionAccount)
+	admission.Close()
+	return err
+}
+
 func (c *RuntimeConnection) ConnectionID() string {
 	if c == nil {
 		return ""

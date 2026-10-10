@@ -73,17 +73,27 @@ func (s *Service) ReplaceInterfaces(admittedInterfaces []InterfaceIdentity) erro
 	return nil
 }
 
-func (s *Service) Bootstrap(ctx context.Context, now time.Time) (Principal, []Binding, error) {
+// PreparePrincipal establishes local human authority without admitting retained
+// provider proofs. Native sessions must be restored before Bootstrap uses them.
+func (s *Service) PreparePrincipal(ctx context.Context, now time.Time) (Principal, error) {
 	if s == nil {
-		return Principal{}, nil, fmt.Errorf("operator channel service is required")
+		return Principal{}, fmt.Errorf("operator channel service is required")
 	}
 	principal, err := s.store.EnsureOperatorPrincipal(ctx, now)
 	if err != nil {
-		return Principal{}, nil, err
+		return Principal{}, err
 	}
 	s.mu.Lock()
 	s.principal = principal
 	s.mu.Unlock()
+	return principal, nil
+}
+
+func (s *Service) Bootstrap(ctx context.Context, now time.Time) (Principal, []Binding, error) {
+	principal, err := s.PreparePrincipal(ctx, now)
+	if err != nil {
+		return Principal{}, nil, err
+	}
 	if err := s.RecoverProofResponsibilities(ctx, now); err != nil {
 		return Principal{}, nil, err
 	}

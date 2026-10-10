@@ -417,6 +417,9 @@ func TestEmbeddedPlatformPackInventoryOwnsEveryBodyKind(t *testing.T) {
 		"provider.telegram":              TypeTrigger,
 		"provider.telegram.connector":    TypeConnector,
 		"provider.telegram.hitl_channel": TypeChannel,
+		"provider.whatsapp":              TypeTrigger,
+		"provider.whatsapp.connector":    TypeConnector,
+		"provider.whatsapp.hitl_channel": TypeChannel,
 	}
 	for id, packType := range want {
 		entry, ok := inventory.Lookup(id)
