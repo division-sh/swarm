@@ -2,12 +2,17 @@ package serveapp
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
@@ -92,6 +97,10 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 			if len(history) != 1 || !accepted[history[0].TriggerEventID] {
 				t.Fatalf("race committed extra/missing cause=%#v", history)
 			}
+			mutations := storetest.ObserveEntityMutationHistory(t, t.Context(), rt.ReceiverStateReader, seed.RunID)
+			if err := lifecycleLoopRaceMutationEvidence(mutations, entityID, accepted, history[0]); err != nil {
+				t.Fatal(err)
+			}
 			compiled, ok := history[0].Evidence.Compiled()
 			if !ok || compiled.FlowID() != "." || compiled.Edge().LoopID != "revision" {
 				t.Fatalf("race selected owner=%#v", compiled)
@@ -116,6 +125,68 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 				t.Fatal("closed replay reminted work or changed evidence")
 			}
 			t.Logf("cap/close winner=%s accepted_public_contenders=%d", closed.CloseReason, len(accepted))
+		})
+	}
+}
+
+func lifecycleLoopRaceMutationEvidence(rows []storetest.EntityMutationEvidence, entityID string, accepted map[string]bool, winner pipeline.WorkflowTransitionRecord) error {
+	if !accepted[winner.TriggerEventID] || winner.From != "review" {
+		return fmt.Errorf("loop winner lacks an accepted review contender: %+v", winner)
+	}
+	exits := 0
+	for _, row := range rows {
+		// Event IDs pin this loop attempt, excluding earlier review exits.
+		if row.EntityID != entityID || row.Domain != string(mutationlog.DomainLifecycleState) || !accepted[row.CausedByEvent] {
+			continue
+		}
+		exits++
+		var from, to string
+		if err := json.Unmarshal(row.OldValue, &from); err != nil {
+			return fmt.Errorf("decode loop race source: %w", err)
+		}
+		if err := json.Unmarshal(row.NewValue, &to); err != nil {
+			return fmt.Errorf("decode loop race target: %w", err)
+		}
+		if row.Path != "" || from != winner.From || to != winner.To || row.CausedByEvent != winner.TriggerEventID {
+			return fmt.Errorf("losing or unattributed loop race mutation: %+v; winner=%+v", row, winner)
+		}
+	}
+	if exits != 1 {
+		return fmt.Errorf("loop attempt committed %d exits, want exactly one", exits)
+	}
+	return nil
+}
+
+func TestLifecycleLoopRaceMutationEvidenceRequiresOneWinner(t *testing.T) {
+	winner := pipeline.WorkflowTransitionRecord{From: "review", To: "escaped", TriggerEventID: "escape"}
+	row := storetest.EntityMutationEvidence{RunDebugMutation: operatorread.RunDebugMutation{
+		EntityID: "receiver", Domain: string(mutationlog.DomainLifecycleState),
+		OldValue: json.RawMessage(`"review"`), NewValue: json.RawMessage(`"escaped"`), CausedByEvent: "escape",
+	}}
+	close, earlier, foreign, afterClose, wrongPath := row, row, row, row, row
+	close.NewValue, close.CausedByEvent = json.RawMessage(`"done"`), "close"
+	earlier.CausedByEvent = "previous-attempt"
+	foreign.EntityID = "other"
+	afterClose.OldValue = json.RawMessage(`"done"`)
+	wrongPath.Path = "not-state"
+	for _, test := range []struct {
+		name string
+		rows []storetest.EntityMutationEvidence
+		ok   bool
+	}{
+		{"one", []storetest.EntityMutationEvidence{row}, true},
+		{"earlier_attempt", []storetest.EntityMutationEvidence{earlier, row}, true},
+		{"foreign", []storetest.EntityMutationEvidence{foreign, row}, true},
+		{"missing", nil, false},
+		{"duplicate", []storetest.EntityMutationEvidence{row, row}, false},
+		{"two_commits_latest_looks_correct", []storetest.EntityMutationEvidence{close, row}, false},
+		{"escape_after_close_latest_looks_correct", []storetest.EntityMutationEvidence{close, afterClose}, false},
+		{"wrong_path", []storetest.EntityMutationEvidence{wrongPath}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := lifecycleLoopRaceMutationEvidence(test.rows, "receiver", map[string]bool{"escape": true, "close": true}, winner); (err == nil) != test.ok {
+				t.Fatalf("loop race evidence error=%v, want accepted=%v", err, test.ok)
+			}
 		})
 	}
 }
