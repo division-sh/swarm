@@ -1115,6 +1115,7 @@ func TestIssue2564ReconstructedEquivalentH2BothStores(t *testing.T) {
 				rt.waitDeliveries(t, seed.RunID)
 				before := issue2564H2WaitAccounting(t, rt, seed.RunID, false, keys)
 				issue2564H2Deliveries(t, rt, seed.RunID, accepted, workload.bumps+6)
+				issue2353H2ObserveCommitStages(t, rt, seed.RunID, accepted)
 				issue2564H2CounterEvidence(t, rt, seed.RunID, accepted, before)
 				if _, err := arm.Write([]byte{1}); err != nil {
 					t.Fatal(err)
