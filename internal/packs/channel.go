@@ -740,6 +740,7 @@ type compiledChannelMapping struct {
 type compiledChannelOperation struct {
 	name          channelPlanIdentity
 	tool          channelPlanIdentity
+	declaration   runtimecontracts.ToolSchemaEntry
 	toolSchema    runtimecontracts.ToolSchemaEntry
 	effect        runtimecontracts.ActivityEffectClass
 	inputSchema   runtimecontracts.ToolInputSchema
@@ -993,6 +994,19 @@ func (p SatisfactionPlan) ConnectorOperation(name string) (string, runtimecontra
 	return operation.tool.String(), operation.toolSchema, nil
 }
 
+// ConnectorDeclaration preserves the admitted connector before the channel
+// compiler adds its result mapping. It grants no execution authority.
+func (p SatisfactionPlan) ConnectorDeclaration(name string) (string, runtimecontracts.ToolSchemaEntry, error) {
+	if err := p.requireOperation(strings.TrimSpace(name)); err != nil {
+		return "", runtimecontracts.ToolSchemaEntry{}, err
+	}
+	operation, ok := p.operations[strings.TrimSpace(name)]
+	if !ok {
+		return "", runtimecontracts.ToolSchemaEntry{}, fmt.Errorf("channel operation %q is not compiled", name)
+	}
+	return operation.tool.String(), operation.declaration, nil
+}
+
 func (p SatisfactionPlan) OperationEffectClass(name string) (runtimecontracts.ActivityEffectClass, error) {
 	if err := p.requireOperation(strings.TrimSpace(name)); err != nil {
 		return "", err
@@ -1137,6 +1151,10 @@ func (p OutboundBindingPlan) RuntimeTools() (map[string]runtimecontracts.ToolSch
 // bound channel write. Runtime execution does not reconstruct this from YAML.
 func (p OutboundBindingPlan) ConnectorOperation(operation string) (string, runtimecontracts.ToolSchemaEntry, error) {
 	return p.structural.ConnectorOperation(operation)
+}
+
+func (p OutboundBindingPlan) ConnectorDeclaration(operation string) (string, runtimecontracts.ToolSchemaEntry, error) {
+	return p.structural.ConnectorDeclaration(operation)
 }
 
 func (p OutboundBindingPlan) PrepareOperation(operation string, input any) (string, map[string]any, error) {
@@ -1974,7 +1992,7 @@ func compileAdmittedChannelOperation(draft channelOperationDraft, inputTopology,
 		}
 	}
 	return compiledChannelOperation{
-		name: draft.name, tool: draft.tool, toolSchema: tool, effect: draft.effect,
+		name: draft.name, tool: draft.tool, declaration: draft.toolSchema, toolSchema: tool, effect: draft.effect,
 		inputSchema: inputSchema, contextSchema: contextSchema, outputSchema: outputSchema,
 		hasContext: len(draft.interfaceValue.Context) > 0,
 		input:      inputMappings, output: outputMappings,

@@ -70,7 +70,7 @@ func (d pipelineActivityDispatcher) executeNativeChannelActivity(ctx context.Con
 	if err != nil {
 		return nil, err
 	}
-	if projection, compiled := tool.CompiledResultExecution(); compiled {
+	if projection, compiled := tool.CompiledResultExecution(); compiled && intent.NativeSessionTarget == "" {
 		result, err = projection.Project(result)
 		if err != nil {
 			return nil, runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "native_activity_result_projection_invalid", "activity-runtime", "project_native_channel_result", nil, err)

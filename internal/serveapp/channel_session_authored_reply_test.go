@@ -4,6 +4,7 @@ package serveapp
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,12 +55,56 @@ func requireServedNativeAuthoredCustomerReply(t *testing.T, endpoint string, pee
 			if sent.Body.GetConversation() != text || sent.ID == "" {
 				t.Fatal("authored activity changed the admitted customer input", sent.ID, sent.Body)
 			}
+			requireServedNativeActivityResult(t, endpoint, sent.ID, customer.String(), text)
 			return
 		case <-deadline:
 			logServedNativeActivityFailure(t, endpoint)
 			t.Fatal("enabled authored native activity did not produce a genuine encrypted customer reply")
 		}
 	}
+}
+
+func requireServedNativeActivityResult(t *testing.T, endpoint, messageID, destination, text string) {
+	t.Helper()
+	var runs struct {
+		Runs []operatorread.RunHeader `json:"runs"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"limit": 10}, &runs)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, run := range runs.Runs {
+			var requests operatorread.OperatorEventListResult
+			requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
+				"filter": map[string]any{"run_id": run.RunID, "event_name": "platform.activity_requested"}, "limit": 10}, &requests)
+			for _, request := range requests.Events {
+				if request.Payload["tool"] != "whatsapp.send_text" {
+					continue
+				}
+				target, _ := request.Payload["native_session_target"].(string)
+				input, _ := request.Payload["input"].(map[string]any)
+				if !strings.HasPrefix(target, contracts.PrivateChannelActivityPrefix) || request.Payload["plan_generation"] == nil ||
+					request.Payload["channel_activation_generation"] == nil || request.Payload["bundle_hash"] == "" ||
+					request.Payload["workflow_version"] == "" || input["destination"] != destination || input["text"] != text {
+					t.Fatal("served native request lost its immutable source/target/input", request.Payload)
+				}
+				var results operatorread.OperatorEventListResult
+				requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
+					"filter": map[string]any{"run_id": run.RunID, "event_name": request.Payload["success_event"]}, "limit": 10}, &results)
+				for _, result := range results.Events {
+					if result.Payload["activity_id"] != request.Payload["activity_id"] {
+						continue
+					}
+					value, _ := result.Payload["result"].(map[string]any)
+					if len(value) != 1 || value["id"] != messageID || result.Payload["tool"] != "whatsapp.send_text" {
+						t.Fatal("authored result adopted channel receipt semantics or changed the observed acknowledgment", result.Payload)
+					}
+					return
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("genuine native reply did not settle its original activity request/result")
 }
 
 func logServedNativeActivityFailure(t *testing.T, endpoint string) {
@@ -70,7 +115,11 @@ func logServedNativeActivityFailure(t *testing.T, endpoint string) {
 	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"limit": 10}, &runs)
 	for _, run := range runs.Runs {
 		for _, method := range []string{"event.list", "runtime.logs"} {
-			response := requestServedJSONRPC(t, endpoint, method, map[string]any{"filter": map[string]any{"run_id": run.RunID}, "limit": 50})
+			params := map[string]any{"filter": map[string]any{"run_id": run.RunID}, "limit": 50}
+			if method == "runtime.logs" {
+				params = map[string]any{"run_id": run.RunID, "level": "error", "limit": 10}
+			}
+			response := requestServedJSONRPC(t, endpoint, method, params)
 			t.Logf("authored native %s run=%s error=%v result=%s", method, run.RunID, response.Error, response.Result)
 		}
 	}

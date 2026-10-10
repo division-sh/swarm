@@ -255,7 +255,7 @@
     "owner": "internal/channelonboarding/session_activity.go::matchSessionActivityConnector",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "b7e974a125dc075b0dcbad1e263a2885c62ab73e39860cef79710a49a08ce9f9"
+    "body_sha256": "2182b59dd0f984abba474e4b1e8f857933f3475cd77d4ad586f5fd6e53e0f5dc"
   },
   {
     "owner": "internal/channelonboarding/session_activity.go::sessionActivitySiteDeclared",
@@ -963,7 +963,13 @@
     "owner": "internal/runtime/activity_validation.go::validateActivitySpec",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "fccdf924e926d928385f49fe24a504265809a221e4966f4d085c5cd0ce8635cd"
+    "body_sha256": "613b3a05a0c310297153fef9cec35116063db5e576e4371e07aa4e66de856cb7"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::validateActivityToolTransport",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "742397b14c9903473595a7780736830572f6e57b53c50f175052b9605d7b9585"
   },
   {
     "owner": "internal/runtime/activity_validation.go::validateDurableActivitySurface",

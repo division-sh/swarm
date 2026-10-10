@@ -1929,6 +1929,44 @@ func TestToolExecutionContractHasOneAuthorityAcrossPublicConnectorAndPrivateTarg
 	}
 }
 
+func TestChannelCompilerRetainsExactConnectorDeclaration(t *testing.T) {
+	registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+	plan, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := packs.NewOutboundBindingPlan("ops", plan, "42", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, declaration, err := binding.ConnectorDeclaration("deliver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, found := connector.Tools[id]
+	if !found {
+		t.Fatal("declaration is absent from the admitted connector")
+	}
+	want, err := original.CanonicalHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := declaration.CanonicalHash()
+	if err != nil || got != want {
+		t.Fatal("channel compilation mutated the connector declaration", err, got, want)
+	}
+	executable, err := binding.OperationTool("deliver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, compiled := executable.CompiledResultExecution(); !compiled {
+		t.Fatal("preserving declaration evidence removed channel result execution")
+	}
+	if _, _, err := binding.ConnectorDeclaration("missing"); err == nil {
+		t.Fatal("undeclared operation acquired connector evidence")
+	}
+}
+
 func TestChannelCompilerZoneHasNoProviderSpecificRuntimeBranch(t *testing.T) {
 	body, err := os.ReadFile("channel.go")
 	if err != nil {
