@@ -196,7 +196,7 @@ func runForkTimerHistoryMaterializable(plan runfork.RunForkPlan) (bool, error) {
 			}
 			continue
 		}
-		if err := schedule.ValidateForkJoinRestorationSource(); err != nil {
+		if err := requireRunForkArrivalRestorationEvidence(plan, schedule); err != nil {
 			return false, nil
 		}
 	}

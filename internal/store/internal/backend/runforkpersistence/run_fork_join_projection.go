@@ -2,6 +2,7 @@ package runforkpersistence
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -25,6 +26,11 @@ func prepareRunForkArrivalJoinSchedules(plan runfork.RunForkPlan, childRunID str
 		}
 		if schedule.Command.RunID != plan.SourceRunID {
 			return nil, fmt.Errorf("retained arrival schedule belongs to another source run")
+		}
+		if schedule.Status != genericschedule.StatusFired {
+			if err := requireRunForkArrivalRestorationEvidence(plan, schedule); err != nil {
+				return nil, err
+			}
 		}
 		scope, err := schedule.Command.ScopeKey()
 		if err != nil {
@@ -80,6 +86,25 @@ func prepareRunForkArrivalJoinSchedules(plan runfork.RunForkPlan, childRunID str
 	}
 	sort.Slice(projected, func(i, j int) bool { return projected[i].source.ID < projected[j].source.ID })
 	return projected, nil
+}
+
+// Preparation reserves an occurrence; only the complete fixed-cut event owner
+// can establish that it is still unpublished. Source stamps grant no execution.
+func requireRunForkArrivalRestorationEvidence(plan runfork.RunForkPlan, source genericschedule.Activation) error {
+	if source.Command.RunID != plan.SourceRunID {
+		return fmt.Errorf("arrival restoration source belongs to another run")
+	}
+	if err := source.ValidateForkJoinRestorationSource(); err != nil {
+		return err
+	}
+	if source.CurrentEventID == "" {
+		return nil
+	}
+	history, complete := plan.HistoricalEventIDs(plan.ForkPoint.Revision)
+	if !complete || slices.Contains(history, source.CurrentEventID) {
+		return fmt.Errorf("prepared arrival requires complete fixed-cut evidence of no committed publication")
+	}
+	return nil
 }
 
 func projectRunForkArrivalJoinSchedule(plan runfork.RunForkPlan, childRunID string, join joinruntime.Activation, source genericschedule.Activation) (genericschedule.AdmissionCommand, error) {
