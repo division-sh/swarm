@@ -19,11 +19,12 @@ const (
 	TeardownProofRevoke         TeardownKind = "proof_revoke"
 	TeardownInterfaceRetirement TeardownKind = "interface_retirement"
 	TeardownContextRetirement   TeardownKind = "context_retirement"
+	TeardownLogout              TeardownKind = "logout"
 )
 
 func (k TeardownKind) Valid() bool {
 	switch k {
-	case TeardownUnbind, TeardownProofRevoke, TeardownInterfaceRetirement, TeardownContextRetirement:
+	case TeardownUnbind, TeardownProofRevoke, TeardownInterfaceRetirement, TeardownContextRetirement, TeardownLogout:
 		return true
 	default:
 		return false
@@ -41,20 +42,24 @@ const (
 
 func (p TeardownPhase) Terminal() bool { return p == TeardownSucceeded || p == TeardownFailed }
 
+func (p TeardownPhase) Valid() bool {
+	return p == TeardownReserved || p == TeardownAuthorityRetired || p.Terminal()
+}
+
 type TeardownScope struct {
 	Interface                    operatorchannel.InterfaceIdentity `json:"interface"`
 	BundleHash                   string                            `json:"bundle_hash,omitempty"`
 	ContextPublicationGeneration uint64                            `json:"context_publication_generation,omitempty"`
 }
 
-func (s TeardownScope) normalized() TeardownScope {
+func (s TeardownScope) Normalized() TeardownScope {
 	s.Interface = s.Interface.Normalized()
 	s.BundleHash = strings.TrimSpace(s.BundleHash)
 	return s
 }
 
 func (s TeardownScope) Validate(kind TeardownKind) error {
-	s = s.normalized()
+	s = s.Normalized()
 	if kind == TeardownContextRetirement {
 		if s.BundleHash == "" || s.ContextPublicationGeneration == 0 {
 			return fmt.Errorf("%w: context retirement requires exact source artifact and publication identity", ErrInvalidRequest)
@@ -80,6 +85,7 @@ type ReserveTeardownRequest struct {
 	ExpectedBindingRevision int64
 	ExpectedProofRevision   int64
 	RequestedAt             time.Time
+	Logout                  *SessionLogoutTarget
 }
 
 func (r ReserveTeardownRequest) Validate() error {
@@ -88,6 +94,9 @@ func (r ReserveTeardownRequest) Validate() error {
 	}
 	if err := r.Scope.Validate(r.Kind); err != nil {
 		return err
+	}
+	if r.Kind != TeardownLogout && r.Logout != nil {
+		return fmt.Errorf("%w: only logout accepts a session target", ErrInvalidRequest)
 	}
 	switch r.Kind {
 	case TeardownUnbind:
@@ -102,28 +111,36 @@ func (r ReserveTeardownRequest) Validate() error {
 		if r.ExpectedBindingRevision != 0 || r.ExpectedProofRevision != 0 {
 			return fmt.Errorf("%w: source retirement does not accept identity revisions", ErrInvalidRequest)
 		}
+	case TeardownLogout:
+		if r.ExpectedBindingRevision != 0 || r.ExpectedProofRevision != 0 || r.Logout == nil || r.Scope.BundleHash != "" || r.Scope.ContextPublicationGeneration != 0 {
+			return fmt.Errorf("%w: logout requires one exact session target, not binding or proof revisions", ErrInvalidRequest)
+		}
+		if err := r.Logout.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 type TeardownOperation struct {
-	TeardownID              string        `json:"teardown_id"`
-	RequestKeyHash          string        `json:"-"`
-	RequestHash             string        `json:"-"`
-	Kind                    TeardownKind  `json:"kind"`
-	PrincipalID             string        `json:"principal_id"`
-	Scope                   TeardownScope `json:"scope"`
-	ExpectedBindingRevision int64         `json:"expected_binding_revision,omitempty"`
-	ExpectedProofRevision   int64         `json:"expected_proof_revision,omitempty"`
-	Phase                   TeardownPhase `json:"phase"`
-	Revision                int64         `json:"revision"`
-	RetiredOperations       int           `json:"retired_operations"`
-	RetiredActivations      int           `json:"retired_activations"`
-	FailureCode             string        `json:"failure_code,omitempty"`
-	FailureMessage          string        `json:"failure_message,omitempty"`
-	RequestedAt             time.Time     `json:"requested_at"`
-	UpdatedAt               time.Time     `json:"updated_at"`
-	CompletedAt             time.Time     `json:"completed_at,omitzero"`
+	TeardownID              string               `json:"teardown_id"`
+	RequestKeyHash          string               `json:"-"`
+	RequestHash             string               `json:"-"`
+	Kind                    TeardownKind         `json:"kind"`
+	PrincipalID             string               `json:"principal_id"`
+	Scope                   TeardownScope        `json:"scope"`
+	ExpectedBindingRevision int64                `json:"expected_binding_revision,omitempty"`
+	ExpectedProofRevision   int64                `json:"expected_proof_revision,omitempty"`
+	Phase                   TeardownPhase        `json:"phase"`
+	Revision                int64                `json:"revision"`
+	RetiredOperations       int                  `json:"retired_operations"`
+	RetiredActivations      int                  `json:"retired_activations"`
+	FailureCode             string               `json:"failure_code,omitempty"`
+	FailureMessage          string               `json:"failure_message,omitempty"`
+	RequestedAt             time.Time            `json:"requested_at"`
+	UpdatedAt               time.Time            `json:"updated_at"`
+	CompletedAt             time.Time            `json:"completed_at,omitzero"`
+	Logout                  *SessionLogoutTarget `json:"-"`
 }
 
 type RetireTeardownAuthorityRequest struct {
@@ -173,18 +190,19 @@ type DestructiveService struct {
 	identities  DestructiveIdentityLifecycle
 	credentials OperationCredentialReleaser
 	activations ActivationAuthorityRefresher
+	logout      SessionLogoutLifecycle
 	now         func() time.Time
 	testBarrier TestLifecycleBarrier
 }
 
-func NewDestructiveService(store DestructiveStore, identities DestructiveIdentityLifecycle, credentials OperationCredentialReleaser, activations ActivationAuthorityRefresher, now func() time.Time, testBarrier TestLifecycleBarrier) (*DestructiveService, error) {
+func NewDestructiveService(store DestructiveStore, identities DestructiveIdentityLifecycle, credentials OperationCredentialReleaser, activations ActivationAuthorityRefresher, now func() time.Time, testBarrier TestLifecycleBarrier, logout SessionLogoutLifecycle) (*DestructiveService, error) {
 	if store == nil || identities == nil || credentials == nil || activations == nil {
 		return nil, fmt.Errorf("channel destructive lifecycle requires teardown, identity, credential, and activation owners")
 	}
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	return &DestructiveService{store: store, identities: identities, credentials: credentials, activations: activations, now: now, testBarrier: testBarrier}, nil
+	return &DestructiveService{store: store, identities: identities, credentials: credentials, activations: activations, now: now, testBarrier: testBarrier, logout: logout}, nil
 }
 
 func (s *DestructiveService) Unbind(ctx context.Context, selector string, expectedRevision int64, requestKey, requestHash string) (operatorchannel.Operation, operatorchannel.Binding, error) {
@@ -359,6 +377,8 @@ func (s *DestructiveService) Recover(ctx context.Context) error {
 			_, err = s.RetireInterface(resumeCtx, op.Scope.Interface, op.RequestKeyHash, op.RequestHash, "interface_retired")
 		case TeardownContextRetirement:
 			_, err = s.RetireContext(resumeCtx, op.Scope.BundleHash, op.Scope.ContextPublicationGeneration, op.RequestKeyHash, op.RequestHash, "runtime_context_retired")
+		case TeardownLogout:
+			_, err = s.driveSessionLogout(ctx, op)
 		default:
 			err = fmt.Errorf("%w: unsupported teardown kind %q", ErrConflict, op.Kind)
 		}
@@ -417,7 +437,7 @@ func (s *DestructiveService) releaseScopedCredentials(ctx context.Context, scope
 }
 
 func (s *DestructiveService) retainedCredentialEvidence(ctx context.Context, scope TeardownScope, operation Operation) ([]runtimecredentials.ValueEvidence, error) {
-	if scope.normalized().Interface.Validate() == nil {
+	if scope.Normalized().Interface.Validate() == nil {
 		return nil, nil
 	}
 	binding, err := s.identities.CurrentBinding(ctx, operation.Interface)
@@ -434,7 +454,7 @@ func (s *DestructiveService) retainedCredentialEvidence(ctx context.Context, sco
 }
 
 func teardownScopeMatchesOperation(scope TeardownScope, operation Operation) bool {
-	scope = scope.normalized()
+	scope = scope.Normalized()
 	if scope.Interface.Validate() == nil {
 		return scope.Interface.Normalized() == operation.Interface.Normalized()
 	}
