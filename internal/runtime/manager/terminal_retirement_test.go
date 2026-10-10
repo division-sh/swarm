@@ -628,7 +628,7 @@ func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 func TestTerminalReadinessReplacementReleasesDependentCaller(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
-	am := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
+	am := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
 	bundle := testFlowBundle(t, "")
 	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
