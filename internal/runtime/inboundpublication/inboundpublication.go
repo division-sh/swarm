@@ -266,7 +266,9 @@ func (c CommitCommand) PublicationSequence() int64 {
 	return c.Request.ExpectedPublicationSequence
 }
 
-func (c CommitCommand) validateNativeRequest() error {
+// RequireNativePublicationRequest is pure and may be repeated by the selected
+// mutation owner after acquiring its locks, before persisting receipt evidence.
+func (c CommitCommand) RequireNativePublicationRequest() error {
 	input, native := c.Admission.NativeInput()
 	if !native {
 		return nil
@@ -274,18 +276,18 @@ func (c CommitCommand) validateNativeRequest() error {
 	if input.PublicationSequence() < 1 {
 		return fmt.Errorf("native publication requires its sealed occurrence")
 	}
+	actual, err := c.Request.CanonicalBytes()
+	if err != nil {
+		return err
+	}
 	if original := input.OriginalPublicationRequest(); len(original) > 0 {
-		actual, err := c.Request.CanonicalBytes()
-		if err != nil {
-			return err
-		}
 		if !bytes.Equal(original, actual) {
 			return ErrRequestIdentityConflict
 		}
 	} else if c.Request.ExpectedPublicationSequence != input.PublicationSequence() {
 		return fmt.Errorf("native publication changed its admitted occurrence")
 	}
-	return nil
+	return input.RequireCapturedPublicationRequest(actual)
 }
 
 // WithNativeLifetime preserves the mutation caller's context values while
@@ -323,7 +325,7 @@ func (c CommitCommand) Validate() error {
 	if err := c.Request.Validate(); err != nil {
 		return err
 	}
-	if err := c.validateNativeRequest(); err != nil {
+	if err := c.RequireNativePublicationRequest(); err != nil {
 		return err
 	}
 	request := c.Request.Normalized()
