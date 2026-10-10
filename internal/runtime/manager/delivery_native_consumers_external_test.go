@@ -6,6 +6,96 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 )
 
+func TestManagerWatcherAndExplicitShutdownJoinOneTransition(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			manager.ProveNativeManagerWatcherAndExplicitShutdownJoinOneTransition(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeDelivery(t, backend)
+			})
+		})
+	}
+}
+
+func TestManagerResetSerializesAfterSharedShutdown(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			manager.ProveNativeManagerResetSerializesAfterSharedShutdown(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeDelivery(t, backend)
+			})
+		})
+	}
+}
+
+func TestManagerConcurrentResetsJoinOneResetTransition(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			manager.ProveNativeManagerConcurrentResetsJoinOneResetTransition(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeDelivery(t, backend)
+			})
+		})
+	}
+}
+
+func TestManagerSharedShutdownPreservesCallerGraceResults(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			manager.ProveNativeManagerSharedShutdownPreservesCallerGraceResults(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeDelivery(t, backend)
+			})
+		})
+	}
+}
+
+func TestManagerAuthBreakerAndExplicitShutdownJoinOneTransition(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			manager.ProveNativeManagerAuthBreakerAndExplicitShutdownJoinOneTransition(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeDelivery(t, backend)
+			})
+		})
+	}
+}
+
+func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			manager.ProveNativeShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeDelivery(t, backend)
+			})
+		})
+	}
+}
+
+func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			manager.ProveNativeShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeDelivery(t, backend)
+			})
+		})
+	}
+}
+
+func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			manager.ProveNativeShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeDelivery(t, backend)
+			})
+		})
+	}
+}
+
+func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			manager.ProveNativeShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeDelivery(t, backend)
+			})
+		})
+	}
+}
+
 func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

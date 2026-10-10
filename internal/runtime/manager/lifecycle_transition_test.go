@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -66,14 +67,15 @@ type blockedManagerLifecycleFixture struct {
 	manager   *AgentManager
 	bus       *runtimebus.EventBus
 	inbound   events.Event
-	release   chan struct{}
+	unblock   func()
 	cancelRun context.CancelFunc
 }
 
-func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *runtimebus.EventBus) blockedManagerLifecycleFixture {
+func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *runtimebus.EventBus, native *ManagerDeliveryNativeFixture) blockedManagerLifecycleFixture {
 	t.Helper()
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
 	agent := shutdownTestAgent{
 		id:            "agent-transition",
 		subscriptions: []events.EventType{"test.transition"},
@@ -87,20 +89,25 @@ func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *r
 			return nil, ctx.Err()
 		},
 	}
-	manager := newTestAgentManager(t, managerBus, func(runtimeactors.AgentConfig) (Agent, error) {
+	manager := newTestAgentManagerWithOptions(t, managerBus, func(runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	})
+	}, AgentManagerOptions{DeliveryStore: native})
 	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: managerRootAgentConfig(agent.id, "test.transition"), Topology: managerTestEphemeralTopologyAdmission(t),
 	}, false); err != nil {
 		t.Fatalf("spawnAgentInternal: %v", err)
 	}
 	runCtx, cancelRun := context.WithCancel(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	t.Cleanup(func() {
+		cancelRun()
+		unblock()
+	})
 	if err := manager.Run(runCtx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-transition"), events.EventType("test.transition"),
-		"tester", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	native.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
 	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -109,7 +116,8 @@ func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *r
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for blocked manager work")
 	}
-	return blockedManagerLifecycleFixture{manager: manager, bus: eventBus, inbound: inbound, release: release, cancelRun: cancelRun}
+	requireManagerNativeBlockedClaim(t, native, inbound, agent.id)
+	return blockedManagerLifecycleFixture{manager: manager, bus: eventBus, inbound: inbound, unblock: unblock, cancelRun: cancelRun}
 }
 
 func newLifecycleTransitionEventBus(t *testing.T) *runtimebus.EventBus {
@@ -142,23 +150,25 @@ func awaitLifecycleCall(t *testing.T, result <-chan error, operation string) {
 	}
 }
 
-func TestManagerWatcherAndExplicitShutdownJoinOneTransition(t *testing.T) {
+func ProveNativeManagerWatcherAndExplicitShutdownJoinOneTransition(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+	native := newNativeDelivery(t)
 	eventBus := newLifecycleTransitionEventBus(t)
-	fixture := newBlockedManagerLifecycleFixture(t, eventBus, eventBus)
+	fixture := newBlockedManagerLifecycleFixture(t, eventBus, eventBus, native)
 	fixture.cancelRun()
 	waitForManagerShuttingDown(t, fixture.manager)
 
 	shutdown := make(chan error, 1)
 	go func() { shutdown <- fixture.manager.Shutdown() }()
 	assertLifecycleCallBlocked(t, shutdown, "explicit shutdown")
-	close(fixture.release)
+	fixture.unblock()
 	awaitLifecycleCall(t, shutdown, "explicit shutdown")
 }
 
-func TestManagerResetSerializesAfterSharedShutdown(t *testing.T) {
+func ProveNativeManagerResetSerializesAfterSharedShutdown(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+	native := newNativeDelivery(t)
 	eventBus := newLifecycleTransitionEventBus(t)
 	trackingBus := &lifecycleTransitionTrackingBus{EventBus: eventBus, resetStarted: make(chan struct{}, 1)}
-	fixture := newBlockedManagerLifecycleFixture(t, trackingBus, eventBus)
+	fixture := newBlockedManagerLifecycleFixture(t, trackingBus, eventBus, native)
 
 	shutdown := make(chan error, 1)
 	go func() { shutdown <- fixture.manager.Shutdown() }()
@@ -173,7 +183,7 @@ func TestManagerResetSerializesAfterSharedShutdown(t *testing.T) {
 	default:
 	}
 
-	close(fixture.release)
+	fixture.unblock()
 	awaitLifecycleCall(t, shutdown, "shutdown")
 	awaitLifecycleCall(t, reset, "reset")
 	if got := trackingBus.resetCalls.Load(); got != 1 {
@@ -181,10 +191,11 @@ func TestManagerResetSerializesAfterSharedShutdown(t *testing.T) {
 	}
 }
 
-func TestManagerConcurrentResetsJoinOneResetTransition(t *testing.T) {
+func ProveNativeManagerConcurrentResetsJoinOneResetTransition(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+	native := newNativeDelivery(t)
 	eventBus := newLifecycleTransitionEventBus(t)
 	trackingBus := &lifecycleTransitionTrackingBus{EventBus: eventBus, resetStarted: make(chan struct{}, 1)}
-	fixture := newBlockedManagerLifecycleFixture(t, trackingBus, eventBus)
+	fixture := newBlockedManagerLifecycleFixture(t, trackingBus, eventBus, native)
 
 	first := make(chan error, 1)
 	second := make(chan error, 1)
@@ -199,7 +210,7 @@ func TestManagerConcurrentResetsJoinOneResetTransition(t *testing.T) {
 	default:
 	}
 
-	close(fixture.release)
+	fixture.unblock()
 	awaitLifecycleCall(t, first, "first reset")
 	awaitLifecycleCall(t, second, "second reset")
 	if got := trackingBus.resetCalls.Load(); got != 1 {
@@ -231,9 +242,10 @@ func TestManagerShutdownDuringResetJoinsResetTransition(t *testing.T) {
 	awaitLifecycleCall(t, shutdown, "shutdown during reset")
 }
 
-func TestManagerSharedShutdownPreservesCallerGraceResults(t *testing.T) {
+func ProveNativeManagerSharedShutdownPreservesCallerGraceResults(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+	native := newNativeDelivery(t)
 	eventBus := newLifecycleTransitionEventBus(t)
-	fixture := newBlockedManagerLifecycleFixture(t, eventBus, eventBus)
+	fixture := newBlockedManagerLifecycleFixture(t, eventBus, eventBus, native)
 	short := make(chan error, 1)
 	long := make(chan error, 1)
 	go func() { short <- fixture.manager.ShutdownWithOptions(ShutdownOptions{Grace: 10 * time.Millisecond}) }()
@@ -242,7 +254,7 @@ func TestManagerSharedShutdownPreservesCallerGraceResults(t *testing.T) {
 	assertLifecycleCallBlocked(t, short, "short-grace shutdown")
 	assertLifecycleCallBlocked(t, long, "long-grace shutdown")
 
-	close(fixture.release)
+	fixture.unblock()
 	select {
 	case err := <-short:
 		if err == nil {
@@ -254,11 +266,12 @@ func TestManagerSharedShutdownPreservesCallerGraceResults(t *testing.T) {
 	awaitLifecycleCall(t, long, "long-grace shutdown")
 }
 
-func TestManagerAuthBreakerAndExplicitShutdownJoinOneTransition(t *testing.T) {
+func ProveNativeManagerAuthBreakerAndExplicitShutdownJoinOneTransition(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+	native := newNativeDelivery(t)
 	runtimebus.ResumeRuntimeIngress()
 	defer runtimebus.ResumeRuntimeIngress()
 	eventBus := newLifecycleTransitionEventBus(t)
-	fixture := newBlockedManagerLifecycleFixture(t, eventBus, eventBus)
+	fixture := newBlockedManagerLifecycleFixture(t, eventBus, eventBus, native)
 
 	identity := testAgentIdentity(t, fixture.manager, "agent-transition", "")
 	if !fixture.manager.maybeTripAuthCircuitBreaker(testAuthorActivityContext(context.Background()), identity, fixture.inbound, testAuthFailure()) {
@@ -270,6 +283,6 @@ func TestManagerAuthBreakerAndExplicitShutdownJoinOneTransition(t *testing.T) {
 	go func() { shutdown <- fixture.manager.Shutdown() }()
 	assertLifecycleCallBlocked(t, shutdown, "auth-breaker shared shutdown")
 
-	close(fixture.release)
+	fixture.unblock()
 	awaitLifecycleCall(t, shutdown, "auth-breaker shared shutdown")
 }
