@@ -1,10 +1,12 @@
 package runtimepersistence
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +17,104 @@ import (
 type SelectedForkStorageTableSnapshot struct {
 	Columns []string
 	Rows    []string
+}
+
+type SelectedForkSnapshotCell struct {
+	Column string
+	Type   string
+	Value  json.RawMessage
+}
+
+func (c SelectedForkSnapshotCell) Text() (string, error) {
+	if string(c.Value) == "null" {
+		return "", nil
+	}
+	switch c.Type {
+	case "string":
+		var value string
+		err := json.Unmarshal(c.Value, &value)
+		return value, err
+	case "[]uint8":
+		var value []byte
+		err := json.Unmarshal(c.Value, &value)
+		return string(value), err
+	default:
+		return "", fmt.Errorf("physical column %s has non-text storage type %s", c.Column, c.Type)
+	}
+}
+
+func EncodeSelectedForkSnapshotValuesForTest(columns []string, values []any) (string, error) {
+	return encodeSelectedForkSnapshotValues(columns, values)
+}
+
+func validateSelectedForkSnapshotCell(cell SelectedForkSnapshotCell) error {
+	var target any
+	switch cell.Type {
+	case "<nil>":
+		if string(cell.Value) != "null" {
+			return fmt.Errorf("physical NULL cell %s has a non-NULL value", cell.Column)
+		}
+		return nil
+	case "string":
+		target = new(string)
+	case "[]uint8":
+		target = new([]byte)
+	case "bool":
+		target = new(bool)
+	case "int64":
+		target = new(int64)
+	case "float64":
+		target = new(float64)
+	case "time.Time":
+		target = new(time.Time)
+	default:
+		return fmt.Errorf("physical column %s has unsupported storage type %s", cell.Column, cell.Type)
+	}
+	if string(cell.Value) == "null" && cell.Type != "[]uint8" {
+		return fmt.Errorf("physical column %s has an untyped NULL value", cell.Column)
+	}
+	return json.Unmarshal(cell.Value, target)
+}
+
+func DecodeSelectedForkSnapshotRowsForTest(table SelectedForkStorageTableSnapshot) ([]map[string]SelectedForkSnapshotCell, error) {
+	if len(table.Columns) == 0 {
+		return nil, fmt.Errorf("physical snapshot is missing its column inventory")
+	}
+	seen := map[string]bool{}
+	for _, column := range table.Columns {
+		if column == "" || seen[column] {
+			return nil, fmt.Errorf("physical snapshot has an empty or duplicate column %q", column)
+		}
+		seen[column] = true
+	}
+	var out []map[string]SelectedForkSnapshotCell
+	for _, encoded := range table.Rows {
+		var cells []SelectedForkSnapshotCell
+		decoder := json.NewDecoder(bytes.NewReader([]byte(encoded)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&cells); err != nil {
+			return nil, err
+		}
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			return nil, fmt.Errorf("physical snapshot has trailing row data: %v", err)
+		}
+		if len(cells) != len(table.Columns) {
+			return nil, fmt.Errorf("physical snapshot row width=%d, want %d", len(cells), len(table.Columns))
+		}
+		row := make(map[string]SelectedForkSnapshotCell, len(cells))
+		for index, cell := range cells {
+			if cell.Column != table.Columns[index] || cell.Type == "" || !json.Valid(cell.Value) {
+				return nil, fmt.Errorf("physical snapshot cell %d lost its original column/type/value", index)
+			}
+			if err := validateSelectedForkSnapshotCell(cell); err != nil {
+				return nil, err
+			}
+			row[cell.Column] = cell
+		}
+		out = append(out, row)
+	}
+	return out, nil
 }
 
 // Recovery refusal compares all physical columns in these four exact-run

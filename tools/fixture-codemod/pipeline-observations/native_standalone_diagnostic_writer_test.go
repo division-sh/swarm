@@ -19,7 +19,11 @@ func TestNativeStandaloneDiagnosticWriterAndAllExternalCallsAreClosed(t *testing
 		}
 		matched++
 		actual := selectedCausalObservationBody(t, row.File, row.Function)
-		want, err := canonicalFunction(row.After)
+		current := row.After
+		if row.Successor != "" {
+			current = row.Successor
+		}
+		want, err := canonicalFunction(current)
 		got, sourceErr := canonicalFunction(actual)
 		if err != nil || sourceErr != nil || want != got {
 			t.Fatalf("diagnostic source differs: %s", row.Function)
@@ -48,11 +52,11 @@ func TestNativeStandaloneDiagnosticWriterAndAllExternalCallsAreClosed(t *testing
 				t.Fatalf("diagnostic helper escaped named writer: %s", raw)
 			}
 		}
-		for _, cut := range []string{"eventtest.DiagnosticDirect(eventID, events.EventTypePlatformRuntimeLog, \"runtime\", \"\"", "events.EventEnvelope{Scope: events.EventScopeGlobal}, createdAt", "eventfixture.BindPayload(event)", "bound.PayloadAdmission()", "var writer runtimepkg.RuntimeLogPersistence", "case *private.PostgresStore:", "case *private.SQLiteRuntimeStore:", "if owner != nil", "if writer == nil", "writer.PersistRuntimeLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{", "EventID: eventID, Payload: payload, PayloadAdmission: admission, CreatedAt: createdAt, ExecutionMode: executionmode.Live", "t.Fatalf("} {
+		for _, cut := range []string{"eventtest.DiagnosticDirect(eventID, events.EventTypePlatformRuntimeLog, \"runtime\", \"\"", "events.EventEnvelope{Scope: events.EventScopeGlobal}, createdAt", "eventfixture.BindPayload(event)", "bound.PayloadAdmission()", "var writer runtimepkg.RuntimeLogPersistence", "case *private.PostgresStore:", "case *private.SQLiteRuntimeStore:", "if owner != nil", "if writer == nil", "writer.PersistRuntimeLog(ctx, runtimepkg.RuntimeLogPersistenceRecord{", "EventID: eventID, Payload: payload, PayloadAdmission: admission, CreatedAt: createdAt, ExecutionMode: bound.ExecutionMode()", "t.Fatalf("} {
 			if !strings.Contains(actual, cut) {
 				t.Fatalf("diagnostic writer lost %s", cut)
 			}
-			mutant := strings.Replace(row.After, cut, "unreviewedDiagnosticCut", 1)
+			mutant := strings.Replace(current, cut, "unreviewedDiagnosticCut", 1)
 			changed, mutantErr := canonicalFunction(mutant)
 			if mutantErr == nil && changed == want {
 				t.Fatalf("diagnostic mutation accepted: %s", cut)

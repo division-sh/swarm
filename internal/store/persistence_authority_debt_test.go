@@ -33,6 +33,7 @@ const debtRunFixtureCollectorFrom = "4ab44a86253d3b09474c20463ca1a4e5c6296f4a469
 
 // The reviewed, unlanded bootstrap cannot move when its guard PR is rebased.
 const debtBootstrapSource = "52b954ec26c85a47605cefb8d7030f2a842f8c24"
+const debtFixtureRoleCollectorFrom = "dd36814075a0641f1085eb8fe8d74ae1cd61d8fba3b6047a8514b175ddbfa53e"
 
 type authorityDebtSite struct {
 	Kind, File, Declaration, Operation, Resolved, Family, Replacement string
@@ -338,6 +339,20 @@ func debtCollectorDigest(root string) (string, error) {
 		}
 		fmt.Fprintf(hash, "%s\x00%s\x00", path, canonical.Bytes())
 	}
+	legacy := hex.EncodeToString(hash.Sum(nil))
+	const rolePath = "internal/checkoutsource/fixture_role.go"
+	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, rolePath), nil, parser.AllErrors)
+	if os.IsNotExist(err) && (legacy == debtFixtureRoleCollectorFrom || legacy == debtRunFixtureCollectorFrom || legacy == debtQuiescenceCollectorFrom || legacy == debtG01CollectorFrom || legacy == debtCacheCollectorFrom) {
+		return legacy, nil // Exact immutable policies predating the shared role owner.
+	}
+	if err != nil {
+		return "", err
+	}
+	var canonical bytes.Buffer
+	if err := format.Node(&canonical, token.NewFileSet(), file); err != nil {
+		return "", err
+	}
+	fmt.Fprintf(hash, "%s\x00%s\x00", rolePath, canonical.Bytes())
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
@@ -690,6 +705,21 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
+	}
+	if current == debtFixtureRoleCollectorTo && head.Collector == current {
+		if base == debtFixtureRoleCollectorFrom {
+			if trusted.Collector == base && debtSitesEqual(head.Sites, trusted.Sites) {
+				return nil
+			}
+		} else {
+			// Compose only the already-approved chain into the exact old policy;
+			// the final extraction changes metadata, never its intermediate rows.
+			intermediate := head
+			intermediate.Collector = debtFixtureRoleCollectorFrom
+			if debtValidateCollectorIdentity(base, debtFixtureRoleCollectorFrom, trusted, intermediate, "") == nil {
+				return nil
+			}
+		}
 	}
 	if base == debtG01CollectorFrom && trusted.Collector == debtG01CollectorFrom &&
 		current == debtG01CollectorTo && head.Collector == debtG01CollectorTo &&

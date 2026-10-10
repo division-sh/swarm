@@ -22,6 +22,18 @@ func TestUnitManagerConstructionDoesNotInventDeliveryPersistence(t *testing.T) {
 			}
 		})
 	}
+	t.Run("projection", func(t *testing.T) {
+		bus := newProjectionTestBus()
+		manager := newProjectionTestManager(t, bus, (&projectionTestFactory{}).Build)
+		if manager.deliveryStore != nil || bus.continuations != nil || bus.authority.Validate() == nil {
+			t.Fatal("unit projection construction invented persistence or executable-delivery authority")
+		}
+		if provider := manager.roles.DeliveryRuntime; provider != nil {
+			if _, err := provider.DeliveryAuthority(); err == nil {
+				t.Fatal("unit projection provider returned live authority without an explicit native owner")
+			}
+		}
+	})
 }
 
 func TestUnitManagerConstructionRetainsExplicitDeliveryOwner(t *testing.T) {

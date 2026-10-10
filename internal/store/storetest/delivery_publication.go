@@ -8,7 +8,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"testing"
 )
 
@@ -21,19 +20,9 @@ type DeliveryPublicationFixtureStore interface {
 
 // CommitNativeDeliveryPublication uses the original publication owner and exact
 // authority. Publication finishes before any claim or process-local dispatch.
-func CommitNativeDeliveryPublication(t *testing.T, ctx context.Context, selected DeliveryPublicationFixtureStore, event events.Event, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority, root *runtimebus.FlowInstanceActivationCommand) {
+func CommitNativeDeliveryPublication(t *testing.T, ctx context.Context, selected DeliveryPublicationFixtureStore, admitted events.AdmittedEvent, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority, root *runtimebus.FlowInstanceActivationCommand) {
 	t.Helper()
-	var err error
-	if _, bound := event.PayloadAdmission(); !bound {
-		event, err = eventfixture.BindPayload(event)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	event := admitted.Event()
 	if err := EnsureRunForAdmittedEvent(ctx, selected, admitted, event.CreatedAt()); err != nil {
 		t.Fatal(err)
 	}

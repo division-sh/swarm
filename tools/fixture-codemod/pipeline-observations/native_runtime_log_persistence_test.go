@@ -77,7 +77,11 @@ func TestNativeRuntimeLogRecipesPreserveLoggingAndRecoveryContracts(t *testing.T
 			continue
 		}
 		actual := selectedCausalObservationBody(t, row.File, projectionShapeFunction(t, row.After).Name.Name)
-		want, err := canonicalFunction(row.After)
+		current := row.After
+		if row.Successor != "" {
+			current = row.Successor
+		}
+		want, err := canonicalFunction(current)
 		got, actualErr := canonicalFunction(actual)
 		if err != nil || actualErr != nil || want != got {
 			t.Fatalf("native logger consumer diverged from finite recipe: %s", row.Function)

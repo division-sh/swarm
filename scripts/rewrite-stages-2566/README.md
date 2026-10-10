@@ -38,6 +38,18 @@ this guard. Later intentional entry
 changes must update the affected golden explicitly; this does not freeze other
 fixture bytes or require maintaining the historical rewrite hashes forever.
 
+Fixture migrations may move a reviewed Go source without changing its decision.
+Such rows retain their original file/function/literal identity and independent
+entry/order/final facts, and carry an explicit `current_selector` for the exact
+live source. There is no search or historical-source fallback. Closed constructor
+rows also execute that constructor and compare its actual materialized schema.
+The deleted duplicate authored-rule diagnostic remains an independently accounted
+row bound to the surviving native retry source and its same three consumer cases.
+Current-selector validation refuses missing or ambiguous destinations; extraction
+from reviewed history preserves the explicit selectors and refuses unmatched,
+duplicate or changed historical decisions. Do not refresh `intent.json` or infer
+expected stage facts from the current source to repair a moved fixture.
+
 Parameterized source generators need actual branch execution as well as literal
 goldens. `TestEntityToolFixtureInitialStageBranches` calls the real
 `loadWave1EntityToolBundleWithInitialStage` for `queued` and `marginal_review`,

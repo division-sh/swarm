@@ -70,6 +70,7 @@ func TestProviderIngressProofRoleRegistryRejectsHiddenAuthorityFromSupportedProo
 			"runtimecorrelation.WithRunID(",
 			".WithContext(",
 			"seedActivityRun",
+			"WorkflowActivityNativeFixtureForTest",
 			"acceptedTelegramInboundDeliveryEvent",
 		} {
 			if strings.Contains(text, forbidden) {
@@ -82,7 +83,7 @@ func TestProviderIngressProofRoleRegistryRejectsHiddenAuthorityFromSupportedProo
 	if err != nil {
 		t.Fatalf("read bounded activity proof: %v", err)
 	}
-	for _, marker := range []string{"seedActivityRun", "acceptedTelegramInboundDeliveryEvent"} {
+	for _, marker := range []string{"WorkflowActivityNativeFixtureForTest", "fixture.RequireRun(ctx, runID)", "acceptedTelegramInboundDeliveryEvent"} {
 		if !strings.Contains(string(activityBody), marker) {
 			t.Fatalf("bounded activity proof no longer contains tracked marker %q; update the proof-role disposition", marker)
 		}

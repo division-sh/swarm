@@ -92,11 +92,11 @@ func (b *receiptOutcomeBus) ReleaseDeliveryContinuation(deliveryID string) error
 // Real SQLite delivery-adapter COMMIT precedes the injected owner return error.
 // This tests the exact manager consumer, not driver cleanup or wire failure.
 func ProveNativeWriteReceiptPreservesCommittedSettlementAndContinuation(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
-	for _, status := // Real SQLite delivery-adapter COMMIT precedes the injected owner return error.
+	for _, status := range // Real SQLite delivery-adapter COMMIT precedes the injected owner return error.
 	// This tests the exact manager consumer, not driver cleanup or wire failure.
 	// Real SQLite delivery-adapter COMMIT precedes the injected owner return error.
 	// This tests the exact manager consumer, not driver cleanup or wire failure.
-	range []ReceiptStatus{ReceiptStatusProcessed, ReceiptStatusError, ReceiptStatusDeadLetter, ReceiptStatusTerminal} {
+	[]ReceiptStatus{ReceiptStatusProcessed, ReceiptStatusError, ReceiptStatusDeadLetter, ReceiptStatusTerminal} {
 		for _, phase := range []string{"healthy", "commit_error", "continuation_error", "both_errors", "uncommitted", "foreign_snapshot"} {
 			t.Run(string(status)+"/"+phase, func(t *testing.T) {
 				failure, cleanup := errors.New("postcommit owner failure"), errors.New("continuation cleanup failure")

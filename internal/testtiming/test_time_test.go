@@ -46,7 +46,7 @@ func TestTestTimeGrowthRequiresBothBounds(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			base := timingReferenceRoots(t, []RootTime{timingRoot("TestOld", test.base)}, rootTimingPolicy())
-			row, problems := compareTimingTier(base, []RootTime{timingRoot("TestOld", test.base+test.growth)}, rootTimingPolicy(), "core")
+			row, problems := compareTimingTier(base, []RootTime{timingRoot("TestOld", test.base+test.growth)}, rootTimingPolicy(), "core", TestTimeStrict)
 			if (len(problems) != 0) != test.fail || math.Abs(row.Growth-test.growth) > 1e-8 {
 				t.Fatalf("row=%+v problems=%v", row, problems)
 			}
@@ -57,12 +57,12 @@ func TestTestTimeGrowthRequiresBothBounds(t *testing.T) {
 func TestTestTimePopulationChangesCannotHideGrowth(t *testing.T) {
 	base := timingReferenceRoots(t, []RootTime{timingRoot("TestOld", 100), timingRoot("TestRemoved", 3000)}, rootTimingPolicy())
 	candidate := []RootTime{timingRoot("TestOld", 101), timingRoot("TestNew", 30.001)}
-	row, problems := compareTimingTier(base, candidate, rootTimingPolicy(), "core")
+	row, problems := compareTimingTier(base, candidate, rootTimingPolicy(), "core", TestTimeStrict)
 	if row.Retained != 1 || len(row.Added) != 1 || len(row.Removed) != 1 || math.Abs(row.Growth-31.001) > 1e-8 || len(problems) != 1 || !strings.Contains(problems[0], "independent placement approval") {
 		t.Fatalf("row=%+v problems=%v", row, problems)
 	}
 	// A rename cannot be inferred as cheaper retained work or offset other cost.
-	row, _ = compareTimingTier(base, []RootTime{timingRoot("TestRenamed", 1)}, rootTimingPolicy(), "core")
+	row, _ = compareTimingTier(base, []RootTime{timingRoot("TestRenamed", 1)}, rootTimingPolicy(), "core", TestTimeStrict)
 	if row.Retained != 0 || len(row.Added) != 1 || len(row.Removed) != 2 || row.Growth != 1 {
 		t.Fatalf("renamed population=%+v", row)
 	}
@@ -105,12 +105,12 @@ func TestTestTimeTierChangesCannotReprojectPinnedBaseline(t *testing.T) {
 			base := timingReferenceRoots(t, roots, timingTierChangePolicy(test.referenceSlow, test.referenceSpecial))
 			current := timingTierChangePolicy(test.currentSlow, test.currentSpecial)
 			for _, tier := range []string{"core", "lifecycle"} {
-				row, problems := compareTimingTier(base, roots, current, tier)
+				row, problems := compareTimingTier(base, roots, current, tier, TestTimeStrict)
 				if row.Baseline != test.baseline || row.Growth != test.growth || len(row.Added) != test.added || len(row.Removed) != test.removed || row.Allowance != test.baseline*0.05 || (len(problems) != 0) != (test.growth > 0) {
 					t.Fatalf("%s: row=%+v problems=%v", tier, row, problems)
 				}
 			}
-			row, problems := compareTimingTier(base, roots, current, "full")
+			row, problems := compareTimingTier(base, roots, current, "full", TestTimeStrict)
 			if row.Baseline != 600 || row.Growth != 0 || row.Retained != 2 || len(problems) != 0 {
 				t.Fatalf("unchanged full cost: row=%+v problems=%v", row, problems)
 			}
@@ -320,7 +320,7 @@ func TestTestTimeScopeAndTierProjection(t *testing.T) {
 	if _, err := CaptureTestTimeReference(plan, []CommandEvidence{evidence}, []byte("version: 2\n")); err == nil || !strings.Contains(err.Error(), "exact policy") {
 		t.Fatalf("capture admitted another policy: %v", err)
 	}
-	result := EvaluateTestTime(reference, rootTimingPolicy(), plan, TestTimeReferenceRunID, 1, []CommandEvidence{evidence})
+	result := EvaluateTestTime(reference, rootTimingPolicy(), plan, TestTimeReferenceRunID, 1, []CommandEvidence{evidence}, TestTimeStrict)
 	if result.Status != BudgetPass || len(result.Tiers) != 3 {
 		t.Fatalf("%+v", result)
 	}
@@ -335,7 +335,7 @@ func TestTestTimeScopeAndTierProjection(t *testing.T) {
 		candidate.Digest = hex.EncodeToString(digest[:])
 		receipt := evidence
 		receipt.Profile, receipt.WorkloadProfile, receipt.PlanDigest = tier, tier, candidate.Digest
-		got := EvaluateTestTime(reference, rootTimingPolicy(), candidate, TestTimeReferenceRunID, 1, []CommandEvidence{receipt})
+		got := EvaluateTestTime(reference, rootTimingPolicy(), candidate, TestTimeReferenceRunID, 1, []CommandEvidence{receipt}, TestTimePR)
 		if got.Status != BudgetPass || len(got.Tiers) != testplanning.TierRank(tier) {
 			t.Fatalf("%s source-bound recipe comparison: %+v", tier, got)
 		}
@@ -349,7 +349,7 @@ func TestTestTimeScopeAndTierProjection(t *testing.T) {
 		raw, _ := json.Marshal(reference)
 		_ = json.Unmarshal(raw, &fresh)
 		change(&fresh)
-		if got := EvaluateTestTime(fresh, rootTimingPolicy(), plan, TestTimeReferenceRunID, 1, []CommandEvidence{evidence}); got.Status != BudgetIncomplete {
+		if got := EvaluateTestTime(fresh, rootTimingPolicy(), plan, TestTimeReferenceRunID, 1, []CommandEvidence{evidence}, TestTimeStrict); got.Status != BudgetIncomplete {
 			t.Fatalf("scope admitted %+v", got)
 		}
 	}

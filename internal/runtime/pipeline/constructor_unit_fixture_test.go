@@ -71,7 +71,6 @@ func materializedWorkflowInstanceForSource(t testing.TB, source semanticview.Sou
 	return instance
 }
 
-
 func constructedScenarioInstanceForTest(t *testing.T, source semanticview.Source, ctx context.Context, flowID string) WorkflowInstance {
 	t.Helper()
 	constructor, err := CompileFlowConstructor(source, flowID, "")

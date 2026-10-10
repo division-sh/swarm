@@ -93,3 +93,18 @@ Predicates, ordering, NULL/error behavior and public fixtures remain unchanged.
 No guard allowance, generic query selector or raw capability is introduced.
 Existing raw findings move with those bodies; the fixed H1 projection and its
 caller are classified `private-domain-adapter`, not debt exemptions.
+
+## H2 Committed-Stage Observation (#2353)
+
+The H2 oracle repair adds 13 exact findings, classified individually in the
+existing registry; it does not change the debt baseline or collector policy.
+
+| Symbol / findings | Disposition and owning boundary |
+| --- | --- |
+| `backend/runforkrevision/test_timer_fact_observation.go:ObserveH2CounterCommitsForTest` (9) | `private-backend`: the transaction parameter, local rows, fixed mutation/revision query, scan, iteration and error/close operations remain inside the canonical physical revision owner. The run is UUID-validated; the query binds only the existing authored count/c1/c2 mutations to their immutable commit coordinates. It returns detached evidence, not SQL handles, ledger bodies or execution authority. |
+| `runtimepersistence/issue2564_workload_evidence.go:ObserveH2CounterCommitsForTest` (4) | `private-runtime-adapter`: the local read closure, PostgreSQL/SQLite read-transaction calls and delegation to the canonical revision owner stay private. Both selected owners require the current schema; unsupported owners fail closed. No caller callback, pool reconstruction, write capability or partial evidence escapes. |
+
+Regeneration preserves every pre-existing classification and adds only these
+13 signatures. Qualification runs with registry update mode disabled; exact
+registry agreement, hostile raw-authority controls and real both-store H2
+execution are distinct obligations, not substitutes for each other.

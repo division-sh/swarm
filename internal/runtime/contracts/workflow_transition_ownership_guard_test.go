@@ -708,8 +708,8 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.DeliveryTargetAvailability.Validate::graph metadata":                                                                                1,
 		"internal/runtime/pipeline.terminalStateHandlerRejected::call internal/runtime/semanticview.WorkflowStageTopology":                                             1,
 		"internal/runtime/pipeline.terminalStateHandlerRejected::graph metadata":                                                                                       1,
-		"internal/runtime/pipeline.workflowInitialStateForFlow::call internal/runtime/semanticview.WorkflowStageTopology":                                              1,
-		"internal/runtime/pipeline.workflowInitialStateForFlow::graph metadata":                                                                                        1,
+		"internal/runtime/pipeline.workflowInitialStoredStageForFlow::call internal/runtime/semanticview.WorkflowStageTopology":                                        1,
+		"internal/runtime/pipeline.workflowInitialStoredStageForFlow::graph metadata":                                                                                  1,
 
 		// New timer arms and finite-start admission consume the same catalog;
 		// neither changes accepted work or supplies transition evidence.

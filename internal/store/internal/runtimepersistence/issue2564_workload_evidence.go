@@ -315,11 +315,40 @@ func ObserveH2NodeDeliveriesForTest(ctx context.Context, selected any, runID str
 
 type H2TimersEvidence = storepipeline.H2TimersEvidence
 type H2TransitionCutsEvidence = storerevision.WorkflowMetadataRevisionEvidence
+type H2CounterCommitEvidence = storerevision.H2CounterCommitEvidence
 type H2WorkloadSnapshotEvidence struct {
 	Hubs           []H2HubsEvidence
 	Timers         []H2TimersEvidence
 	Events         []H2OccurrencesEvidence
 	TransitionCuts []H2TransitionCutsEvidence
+}
+
+func ObserveH2CounterCommitsForTest(ctx context.Context, selected any, runID string) ([]H2CounterCommitEvidence, error) {
+	var out []H2CounterCommitEvidence
+	read := func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = storerevision.ObserveH2CounterCommitsForTest(ctx, tx, runID)
+		return err
+	}
+	var err error
+	switch s := selected.(type) {
+	case *PostgresStore:
+		if err := s.requireCurrentSchema(); err != nil {
+			return nil, err
+		}
+		err = s.backend.RunReadTransaction(ctx, read)
+	case *SQLiteRuntimeStore:
+		if err := s.requireCurrentSchema(); err != nil {
+			return nil, err
+		}
+		err = s.backend.RunReadTransaction(ctx, read)
+	default:
+		return nil, fmt.Errorf("H2 counter commits require exact selected owner, got %T", selected)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // Current state, timer occurrences and immutable transition cuts must share

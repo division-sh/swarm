@@ -764,6 +764,11 @@ func (result BudgetResult) ExitCode() int {
 	return 1
 }
 
+func (result *BudgetResult) AttachTestTime(ratchet TestTimeResult) {
+	result.TestTime = &ratchet
+	result.Status = mergeStatus(result.Status, ratchet.Status)
+}
+
 func (policy BudgetPolicy) budgetForClass(class string) (CommandBudget, error) {
 	if class == "soak" {
 		if !finitePositive(policy.Hard.MandatorySoakCommandSeconds.LimitSeconds) {

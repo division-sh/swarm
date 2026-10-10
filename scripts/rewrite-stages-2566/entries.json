@@ -1623,7 +1623,12 @@
       "done"
     ],
     "function": "TestAuthoredRuleReceiverPreparationRetryBothStores",
-    "literal": 6
+    "literal": 6,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/authored_rule_receiver_retry_test.go",
+      "function": "VerifyNativeAuthoredRuleReceiverPreparationRetryBothStoresForTest",
+      "literal": 8
+    }
   },
   {
     "file": "internal/runtime/pipeline/authored_selection_changed_state_retry_test.go",
@@ -1638,7 +1643,12 @@
       "done"
     ],
     "function": "TestAuthoredSelectionRetryReloadsCurrentStateBothStores",
-    "literal": 12
+    "literal": 12,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/authored_selection_changed_state_retry_test.go",
+      "function": "VerifyNativeAuthoredSelectionRetryReloadsCurrentStateBothStoresForTest",
+      "literal": 12
+    }
   },
   {
     "file": "internal/runtime/pipeline/composition_receiver_business_test.go",
@@ -1653,7 +1663,12 @@
       "done"
     ],
     "function": "TestCompositionReceiverInitializationAndRepeatedBusinessWritesBothStores",
-    "literal": 4
+    "literal": 4,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/composition_receiver_business_test.go",
+      "function": "VerifyCompositionReceiverInitializationAndRepeatedBusinessWritesBothStoresForTest",
+      "literal": 2
+    }
   },
   {
     "file": "internal/runtime/pipeline/constructed_source_journey_external_test.go",
@@ -1690,7 +1705,12 @@
     ],
     "finals": [],
     "function": "TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/engine_adapter_test.go",
+      "function": "VerifyPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowIDForTest",
+      "literal": 2
+    }
   },
   {
     "file": "internal/runtime/pipeline/engine_adapter_test.go",
@@ -1702,7 +1722,12 @@
     ],
     "finals": [],
     "function": "TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID",
-    "literal": 4
+    "literal": 4,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/engine_adapter_test.go",
+      "function": "VerifyPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowIDForTest",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/pipeline/engine_adapter_test.go",
@@ -1714,7 +1739,12 @@
     ],
     "finals": [],
     "function": "TestPipelineEngineStateRepoLoadStateMissingEntityDoesNotMaterializeDefaults",
-    "literal": 4
+    "literal": 4,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/engine_adapter_test.go",
+      "function": "VerifyPipelineEngineStateRepoLoadStateMissingEntityDoesNotMaterializeDefaultsForTest",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/pipeline/engine_adapter_test.go",
@@ -1888,7 +1918,12 @@
     ],
     "finals": [],
     "function": "TestEntityLastFieldClearAndColdReloadBothStores",
-    "literal": 4
+    "literal": 4,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/entity_complete_snapshot_test.go",
+      "function": "VerifyEntityLastFieldClearAndColdReloadBothStoresForTest",
+      "literal": 2
+    }
   },
   {
     "file": "internal/runtime/pipeline/entity_complete_snapshot_test.go",
@@ -1900,7 +1935,12 @@
     ],
     "finals": [],
     "function": "TestSelectedHandlerSparsePresenceWriteAndEmitBothStores",
-    "literal": 4
+    "literal": 4,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/entity_complete_snapshot_test.go",
+      "function": "VerifySelectedHandlerSparsePresenceWriteAndEmitBothStoresForTest",
+      "literal": 2
+    }
   },
   {
     "file": "internal/runtime/pipeline/entity_complete_snapshot_test.go",
@@ -1912,7 +1952,12 @@
     ],
     "finals": [],
     "function": "TestSelectedHandlerSparseEqualityMutationsBothStores",
-    "literal": 12
+    "literal": 12,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/entity_complete_snapshot_test.go",
+      "function": "VerifySelectedHandlerSparseEqualityMutationsBothStoresForTest",
+      "literal": 10
+    }
   },
   {
     "file": "internal/runtime/pipeline/handler_committed_cleanup_test.go",
@@ -1927,7 +1972,12 @@
       "done"
     ],
     "function": "TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/handler_committed_cleanup_test.go",
+      "function": "VerifyNativeHandlerCommittedCleanupErrorRetainsExactOutcomeBothStoresForTest",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/pipeline/handler_committed_cleanup_test.go",
@@ -1942,7 +1992,12 @@
       "done"
     ],
     "function": "TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/handler_committed_cleanup_test.go",
+      "function": "VerifyNativeGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStoresForTest",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
@@ -1966,7 +2021,12 @@
     ],
     "finals": [],
     "function": "TestExecuteNodeContractHandlerUsesConstructedEntityIdentityForWritesAndEmit",
-    "literal": 4
+    "literal": 4,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+      "function": "VerifyExecuteNodeContractHandlerUsesConstructedEntityIdentityForWritesAndEmitForTest",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
@@ -1991,7 +2051,12 @@
     ],
     "finals": [],
     "function": "newEmitPersistenceTestCoordinator",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/constructor_handler_native_fixture_test.go",
+      "function": "nativeEmitPersistenceBundleForTest",
+      "literal": 2
+    }
   },
   {
     "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
@@ -2003,7 +2068,12 @@
     ],
     "finals": [],
     "function": "TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReads",
-    "literal": 4
+    "literal": 4,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+      "function": "VerifyNativeExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReadsForTest",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
@@ -2015,7 +2085,12 @@
     ],
     "finals": [],
     "function": "TestExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContext",
-    "literal": 4
+    "literal": 4,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+      "function": "VerifyNativeExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContextForTest",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
@@ -2027,7 +2102,12 @@
     ],
     "finals": [],
     "function": "TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentity",
-    "literal": 4
+    "literal": 4,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+      "function": "VerifyNativeExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIdentityForTest",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
@@ -2039,7 +2119,12 @@
     ],
     "finals": [],
     "function": "TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValue",
-    "literal": 4
+    "literal": 4,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+      "function": "VerifyNativeExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValueForTest",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
@@ -2054,7 +2139,12 @@
       "done"
     ],
     "function": "TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
+      "function": "VerifyNativeExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntityForTest",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/pipeline/handler_engine_transaction_test.go",
@@ -2090,7 +2180,12 @@
     ],
     "finals": [],
     "function": "declarativeEmitContractTestBundleWithEntry",
-    "literal": 9
+    "literal": 9,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/workflow_handler_native_fixture_test.go",
+      "function": "declarativeEmitContractSourceForTest",
+      "literal": 2
+    }
   },
   {
     "file": "internal/runtime/pipeline/handler_entity_requirement_execution_test.go",
@@ -2102,7 +2197,12 @@
     ],
     "finals": [],
     "function": "TestEntitylessNodeContractEmissionDoesNotMaterializeWorkflowStateOnSQLiteAndPostgres",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/handler_entity_requirement_execution_test.go",
+      "function": "VerifyNativeEntitylessNodeContractEmissionDoesNotMaterializeWorkflowStateOnSQLiteAndPostgresForTest",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/pipeline/handler_entity_requirement_execution_test.go",
@@ -2114,7 +2214,12 @@
     ],
     "finals": [],
     "function": "TestEntitylessPayloadGuardDoesNotPublishOrMaterializeOnBothStores",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/handler_entity_requirement_execution_test.go",
+      "function": "VerifyNativeEntitylessPayloadGuardDoesNotPublishOrMaterializeOnBothStoresForTest",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/pipeline/issue2564_activity_result_retry_test.go",
@@ -2169,7 +2274,12 @@
       "done"
     ],
     "function": "TestCommittedAttemptFailureNotificationKeepsRetryContinuationBothStores",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/reviewer_2460_finalization_test.go",
+      "function": "VerifyNativeCommittedAttemptFailureNotificationKeepsRetryContinuationBothStoresForTest",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/pipeline/reviewer_2460_finalization_test.go",
@@ -2184,7 +2294,12 @@
       "done"
     ],
     "function": "TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/reviewer_2460_finalization_test.go",
+      "function": "VerifyNativeReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStoresForTest",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/pipeline/sqlite_dynamic_activation_test.go",
@@ -2211,7 +2326,12 @@
       "done"
     ],
     "function": "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
-    "literal": 8
+    "literal": 8,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/supported_handler_effects_test.go",
+      "function": "VerifySupportedHandlerAppendEmitReadbackAndRollbackBothStoresForTest",
+      "literal": 8
+    }
   },
   {
     "file": "internal/runtime/pipeline/testdata/diagnostics/authored_rule_receiver_retry_test.go",
@@ -2226,7 +2346,12 @@
       "done"
     ],
     "function": "TestAuthoredRuleReceiverPreparationRetryDiagnosticBothStores",
-    "literal": 6
+    "literal": 6,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/authored_rule_receiver_retry_test.go",
+      "function": "VerifyNativeAuthoredRuleReceiverPreparationRetryBothStoresForTest",
+      "literal": 8
+    }
   },
   {
     "file": "internal/runtime/pipeline/testdata/entity-requirement-execution/schema.yaml",
@@ -2295,7 +2420,12 @@
       "escaped"
     ],
     "function": "TestCompiledTransitionPreviewExecutionAgreementOnBothStores",
-    "literal": 88
+    "literal": 88,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/workflow_compiled_adapter_test.go",
+      "function": "VerifyNativeCompiledTransitionPreviewExecutionAgreementOnBothStoresForTest",
+      "literal": 88
+    }
   },
   {
     "file": "internal/runtime/pipeline/workflow_compiled_lifecycle_evidence_test.go",
@@ -2308,7 +2438,12 @@
     ],
     "finals": [],
     "function": "TestAcceptedLifecycleConsumerRejectsUnownedTransitionOnBothStores",
-    "literal": 37
+    "literal": 37,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/workflow_compiled_lifecycle_evidence_test.go",
+      "function": "VerifyAcceptedLifecycleConsumerRejectsUnownedTransitionOnBothStoresForTest",
+      "literal": 43
+    }
   },
   {
     "file": "internal/runtime/pipeline/workflow_compiled_loop_evidence_test.go",
@@ -2339,7 +2474,12 @@
     ],
     "finals": [],
     "function": "TestPipelineExpressionPreservesExactExecutionFlowOnBothStores",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/workflow_expression_flow_identity_test.go",
+      "function": "VerifyPipelineExpressionPreservesExactExecutionFlowOnBothStoresForTest",
+      "literal": 2
+    }
   },
   {
     "file": "internal/runtime/pipeline/workflow_expression_flow_identity_test.go",
@@ -2351,7 +2491,12 @@
     ],
     "finals": [],
     "function": "TestPipelineExpressionPreservesExactExecutionFlowOnBothStores",
-    "literal": 8
+    "literal": 8,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/workflow_expression_flow_identity_test.go",
+      "function": "VerifyPipelineExpressionPreservesExactExecutionFlowOnBothStoresForTest",
+      "literal": 8
+    }
   },
   {
     "file": "internal/runtime/pipeline/workflow_first_event_materialization_test.go",
@@ -2366,7 +2511,12 @@
       "done"
     ],
     "function": "TestNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStores",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/workflow_first_event_materialization_test.go",
+      "function": "VerifyNativeNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStoresForTest",
+      "literal": 2
+    }
   },
   {
     "file": "internal/runtime/pipeline/workflow_gate_lifecycle_test.go",
@@ -2409,7 +2559,12 @@
       "killed"
     ],
     "function": "TestPipelineRejectsFabricatedGuardCauseOnBothStores",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/workflow_guard_cause_hostility_test.go",
+      "function": "VerifyNativePipelineRejectsFabricatedGuardCauseOnBothStoresForTest",
+      "literal": 2
+    }
   },
   {
     "file": "internal/runtime/pipeline/workflow_guard_reachability_proof_test.go",
@@ -2421,7 +2576,12 @@
     ],
     "finals": [],
     "function": "TestGuardTerminationVerifiedExecutionAndRestartBothStores",
-    "literal": 39
+    "literal": 39,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/workflow_guard_reachability_proof_test.go",
+      "function": "VerifyNativeGuardTerminationVerifiedExecutionAndRestartBothStoresForTest",
+      "literal": 39
+    }
   },
   {
     "file": "internal/runtime/pipeline/workflow_instance_activation_test.go",
@@ -2436,7 +2596,12 @@
       "ready"
     ],
     "function": "TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey",
-    "literal": 4
+    "literal": 4,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/workflow_instance_activation_test.go",
+      "function": "VerifyNativeTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKeyForTest",
+      "literal": 6
+    }
   },
   {
     "file": "internal/runtime/pipeline/workflow_join_constructor_identity_external_test.go",
@@ -2498,7 +2663,13 @@
       "done"
     ],
     "function": "TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/testfixtures/canonicalrouting/pipeline_delivery_authority.go",
+      "function": "CopyPipelineDeliveryRetry",
+      "literal": 2,
+      "materialize": true
+    }
   },
   {
     "file": "internal/runtime/pipeline/workflow_node_delivery_authority_test.go",
@@ -2513,7 +2684,13 @@
       "done"
     ],
     "function": "newDeliveryAuthorityCoordinator",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/testfixtures/canonicalrouting/pipeline_delivery_authority.go",
+      "function": "CopyPipelineDeliveryAuthority",
+      "literal": 2,
+      "materialize": true
+    }
   },
   {
     "file": "internal/runtime/pipeline/workflow_terminal_test.go",
@@ -2717,7 +2894,12 @@
       "done"
     ],
     "function": "TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/workflow_transition_hydration_proof_test.go",
+      "function": "VerifyNativeCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStoresForTest",
+      "literal": 2
+    }
   },
   {
     "file": "internal/runtime/pipeline/workflow_transition_mutation_test.go",
