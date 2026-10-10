@@ -23,7 +23,6 @@ const (
 	rawSQLOptionalProductBoundary   rawSQLBoundaryClassification = "optional_product_boundary"
 	rawSQLWorkspaceProcessBoundary  rawSQLBoundaryClassification = "workspace_process_boundary"
 	rawSQLTestSupportBoundary       rawSQLBoundaryClassification = "test_support_boundary"
-	rawSQLProviderStateBoundary     rawSQLBoundaryClassification = "provider_private_state_boundary"
 )
 
 type rawSQLBoundaryEntry struct {
@@ -103,30 +102,6 @@ func unclassifiedConcreteStoreProducer(pg *store.PostgresStore) *pipeline.Pipeli
 
 func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 	return map[string]rawSQLBoundaryEntry{
-		"internal/sessionprovider/capture.go": {
-			Classification: rawSQLProviderStateBoundary,
-			Issue:          2577,
-			SpecRef:        "platform-spec.yaml#tool_model.hitl_channel_pack_interface.capability_model.session_incoming_capture",
-			Reason:         "connection-private bounded provider handoff owns only incoming capture and callback failure evidence; it is not a selected-store execution or effect journal",
-		},
-		"internal/sessionprovider/publication.go": {
-			Classification: rawSQLProviderStateBoundary,
-			Issue:          2577,
-			SpecRef:        "platform-spec.yaml#tool_model.hitl_channel_pack_interface.capability_model.session_capture_publication",
-			Reason:         "connection-private capture staging and retirement mutate only whatsapp_incoming_capture; executable publication and committed receipt verification remain selected-store owner calls",
-		},
-		"internal/sessionprovider/claim_recovery.go": {
-			Classification: rawSQLProviderStateBoundary,
-			Issue:          2577,
-			SpecRef:        "platform-spec.yaml#tool_model.hitl_channel_pack_interface.capability_model.session_operator_claim",
-			Reason:         "connection-private setup capture retirement deletes only the validated original spool row after exact selected-store claim receipt verification; it grants no fresh or recovery execution authority",
-		},
-		"internal/sessionprovider/session_state_unix.go": {
-			Classification: rawSQLProviderStateBoundary,
-			Issue:          2577,
-			SpecRef:        "platform-spec.yaml#tool_model.hitl_channel_pack_interface.capability_model.session_provider_state_lifetime",
-			Reason:         "exclusive provider.db ownership supplies only the SDK device/session store, with complete occurrence/store-write joining before release; it grants no selected-store execution or account admission",
-		},
 		"internal/testutil/runtimepipelinefixture/context.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          2148,
@@ -169,6 +144,27 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1943,
 			Reason:         "runner-owned service verification reads canonical Postgres settings through the typed test connection",
 		},
+	}
+}
+
+func TestSelectedRawSQLBoundaryRejectsRetiredSessionProviderProducers(t *testing.T) {
+	for _, path := range []string{"internal/sessionprovider/capture.go", "internal/sessionprovider/publication.go", "internal/sessionprovider/claim_recovery.go", "internal/sessionprovider/session_state_unix.go"} {
+		t.Run(path, func(t *testing.T) {
+			matches, err := rawSQLBoundaryMatchesFromSources(map[string]string{path: `package sessionprovider
+import ("context"; "database/sql")
+func forbidden(ctx context.Context, db *sql.DB) error {
+ _, err := db.ExecContext(ctx, "DELETE FROM whatsapp_incoming_capture")
+ return err
+}
+`})
+			if err != nil {
+				t.Fatal(err)
+			}
+			failures := classifyRawSQLBoundaryMatches(matches, selectedRawSQLBoundaryLedger())
+			if len(failures) == 0 || !strings.Contains(strings.Join(failures, "\n"), path) {
+				t.Fatalf("retired public SQL producer regained an allowance: %v", failures)
+			}
+		})
 	}
 }
 

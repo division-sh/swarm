@@ -26,21 +26,28 @@ func TestInProcessCanonicalAliasCannotResurrectBuiltin(t *testing.T) {
 				t.Fatal(err)
 			}
 			entries, err := contracts.AdmitToolDeclarationsValue(snapshot.Document("tools.yaml").Root())
-			if err != nil {
-				t.Fatal(err)
+			if err == nil || !strings.Contains(err.Error(), pair[0]) || !strings.Contains(err.Error(), "private tool declaration") {
+				t.Fatalf("ambiguous private source reached routing instead of exact admission refusal: %v", err)
 			}
+			// A typed reconstruction cannot bypass the same declaration owner.
+			entries = map[string]contracts.ToolSchemaEntry{pair[0]: inProcessSendEntry()}
 			bundle := &contracts.WorkflowContractBundle{Tools: entries}
 			toolTestDeclareAgent(t, bundle, "caller", ".")
 			bundle.FlowTree.Root.Tools = bundle.Tools
 			source := semanticview.Wrap(bundle)
+			if _, err := ValidateToolImplementations(source); err == nil || !strings.Contains(err.Error(), pair[0]) || !strings.Contains(err.Error(), "private tool declaration") {
+				t.Fatalf("runtime qualification lost exact private-name admission: %v", err)
+			}
 			actor := actors.AgentConfig{ID: "caller", FlowID: ".", NativeTools: actors.NativeToolConfig{FileIO: true, Bash: true, WebSearch: true}}
 			calls := 0
 			d := NewToolDispatcher(func(context.Context, actors.AgentConfig, string, any) (any, error) { calls++; return nil, nil }, func(_ context.Context, actor actors.AgentConfig, name string) (ExecutionTool, bool, error) {
 				return resolveExecutionToolForActor(source, actor, name, nil)
 			}, nil, nil, nil, nil, map[string]ToolHandler{pair[1]: func(context.Context, actors.AgentConfig, any) (any, error) { calls++; return nil, nil }})
-			_, err = d.Dispatch(context.Background(), actor, pair[0], map[string]any{})
-			if err == nil || calls != 0 {
-				t.Fatalf("private declared name %q dispatched alternate handler %q: calls=%d err=%v", pair[0], pair[1], calls, err)
+			for _, requested := range []string{pair[0], pair[1]} {
+				_, err = d.Dispatch(context.Background(), actor, requested, map[string]any{})
+				if err == nil || calls != 0 {
+					t.Fatalf("private declared name %q dispatched alternate handler %q via %q: calls=%d err=%v", pair[0], pair[1], requested, calls, err)
+				}
 			}
 		})
 	}

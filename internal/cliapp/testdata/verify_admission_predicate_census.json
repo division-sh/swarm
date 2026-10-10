@@ -2595,7 +2595,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelConfirmationDispatcher.DispatchChannelConfirmation",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21",
-    "body_sha256": "be24567a9ca61f5dd63885bfa75a62775baa4ffaba9687c39e57722797e58ef2"
+    "body_sha256": "307231fcdf6e15312b32e55a3886d77a479bac2b80027093f597bda6880f3c1a"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveChannelConfirmationDispatcher.ReconcileChannelEffectsBeforeRebind",

@@ -14,6 +14,9 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 	if source == nil {
 		return nil, nil
 	}
+	if err := semanticview.ValidateToolDeclarationNames(source); err != nil {
+		return nil, err
+	}
 	authoredErrors := append(ValidateRetiredDynamicAgentToolReferences(source), ValidateHITLIdentityLifecycleReferences(source)...)
 	if len(authoredErrors) > 0 {
 		return nil, errors.Join(authoredErrors...)

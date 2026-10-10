@@ -11367,6 +11367,15 @@ tool_model:
         SDK retirement without reissuing execution authority. This does not make unfinished recovery, provider
         installation, served operator controls or physical interoperability implicit in a component fixture.
       session_outbound_tool_target: >
+        The shared tool declaration owner binds each ID to its handler kind. Private native and compute-module
+        declarations must use exact canonical IDs whose meaning does not change through supported tool aliases
+        or runtime-tools wrappers, including repeated wrappers, and must not select the reserved emit route.
+        Ambiguous private IDs are rejected with the exact declaration, source evidence and a teaching diagnostic,
+        never silently renamed. Workflow/connector grammar, scoped and generated typed maps, runtime overlays,
+        source reconstruction and executable qualification consume this same invariant before publication or
+        dispatch. Public alias behavior and CLI observation/executable continuation normalization remain unchanged;
+        they cannot resurrect a private alias because that source is not admissible. Completed/observed provider
+        calls remain distinct from executable continuations and cannot be locally replayed.
         The canonical ToolSchemaEntry owner admits handler_type in_process with one exact in_process target.
         Initial targets are whatsapp.read_account (provider_registration, read_only) and whatsapp.send_text
         (provider_connector, non_idempotent_write). These select shipped provider operations, not Go functions,
