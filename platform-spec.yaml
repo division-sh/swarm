@@ -18023,7 +18023,9 @@ platform_tables:
         supplies fields; slug and name retain their authored display meaning. This table is not construction, lifecycle,
         stage, gate, bookkeeping, accumulator, stage-entry or lifecycle-revision authority. Those facts belong to
         flow_instances. A required field companion must be admitted even when its data is unchanged and its UPDATE is
-        skipped. Fieldless constructed instances have no invented row; data-only imports retain fields and identity but
+        skipped. Data clocks must be present and nonzero, with updated_at not before created_at; unchanged-data
+        write elision does not exempt this admission. Fieldless constructed instances have no invented row;
+        data-only imports retain fields and identity but
         never acquire a header or execution permission. Platform lifecycle input presence on an import fails before
         effects. Declared fields with lifecycle-like names remain business data, not platform facts.
         created_at records the authored-data origin; updated_at advances only when admitted fields or authored display
@@ -32039,25 +32041,21 @@ api_specification:
           entity_type:
             type: string
           stage_defined:
-            type: [boolean, 'null']
+            oneOf: [{type: boolean}, {type: 'null'}]
           current_state:
-            type: [string, 'null']
+            oneOf: [{type: string}, {type: 'null'}]
           slug:
             type: string
           name:
             type: string
           revision:
-            type: [integer, 'null']
-            minimum: 1
+            oneOf: [{type: integer, minimum: 1}, {type: 'null'}]
           entered_state_at:
-            type: [string, 'null']
-            format: date-time
+            oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
           lifecycle_created_at:
-            type: [string, 'null']
-            format: date-time
+            oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
           lifecycle_updated_at:
-            type: [string, 'null']
-            format: date-time
+            oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
           created_at:
             $ref: '#/components/schemas/Timestamp'
           updated_at:
@@ -32081,24 +32079,28 @@ api_specification:
             description: Typed entity fields per the entity contract. Shape depends on entity_type.
             additionalProperties: true
           bookkeeping:
-            type: [object, 'null']
             description: Platform bookkeeping facts selected by explicit producers. Keys never classify authored fields.
-            additionalProperties: true
+            oneOf:
+            - {type: object, additionalProperties: true}
+            - {type: 'null'}
           gates:
-            type: [object, 'null']
             description: "Gate state. Map of gate_name \u2192 boolean."
-            additionalProperties:
-              type: boolean
+            oneOf:
+            - {type: object, additionalProperties: {type: boolean}}
+            - {type: 'null'}
           accumulated:
-            type: [object, 'null']
             description: "Accumulator state. Map of accumulator key \u2192 JSON value; values may be scalars, objects, or\
               \ arrays depending on accumulate, data_accumulation, compute, or projection writers."
-            additionalProperties: true
+            oneOf:
+            - {type: object, additionalProperties: true}
+            - {type: 'null'}
           loops:
-            type: [array, 'null']
             description: Typed bounded-loop runtime projection. The reserved mutable control bucket is never returned.
-            items:
-              $ref: '#/components/schemas/BoundedLoopActivation'
+            oneOf:
+            - type: array
+              items:
+                $ref: '#/components/schemas/BoundedLoopActivation'
+            - {type: 'null'}
       BoundedLoopActivation:
         type: object
         additionalProperties: false
