@@ -22,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/sessionprovider/execution"
 	"github.com/division-sh/swarm/internal/sessionprovider/internal/executionfact"
 	"github.com/google/uuid"
-	"go.mau.fi/whatsmeow/types/events"
 )
 
 var errRuntimeConnection = errors.New("WhatsApp connection requires its retained operation and live runtime source")
@@ -34,6 +33,7 @@ type RuntimeConnectionOptions struct {
 	Store       channelonboarding.Store
 	Credentials operatorchannel.CredentialCurrentness
 	Plan        packs.SatisfactionPlan
+	Incoming    *RuntimeIncomingOptions
 }
 
 // RuntimeConnection owns the actual SDK state and socket, not a registration
@@ -52,6 +52,7 @@ type RuntimeConnection struct {
 	store       channelonboarding.Store
 	operation   channelonboarding.Operation
 	account     atomic.Pointer[operatorchannel.SessionAccountAdmission]
+	incoming    *runtimeIncoming
 	plan        packs.SatisfactionPlan
 	credentials operatorchannel.CredentialCurrentness
 }
@@ -92,7 +93,7 @@ func openRuntimeConnection(ctx context.Context, opts RuntimeConnectionOptions, b
 		store: opts.Store, operation: op, plan: opts.Plan, credentials: opts.Credentials, directory: opts.Directory}
 	c.account.Store(&op.SessionAccount)
 	go c.joinRetirement()
-	if err := c.open(); err != nil {
+	if err := c.open(opts.Incoming); err != nil {
 		return c, errors.Join(err, c.Close(context.WithoutCancel(ctx)))
 	}
 	return c, nil
@@ -123,6 +124,9 @@ func runtimeConnectionReservation(ctx context.Context, opts RuntimeConnectionOpt
 		return nil, empty, errRuntimeConnection
 	}
 	if err := validateRuntimeConnectionPlan(opts.Plan, op); err != nil {
+		return nil, empty, err
+	}
+	if err := validateRuntimeIncoming(ctx, opts.Incoming, opts.Store, op); err != nil {
 		return nil, empty, err
 	}
 	return parent, op, nil
@@ -163,7 +167,7 @@ func QualifyBootstrapPlan(plan packs.SatisfactionPlan) error {
 	return nil
 }
 
-func (c *RuntimeConnection) open() error {
+func (c *RuntimeConnection) open(incoming *RuntimeIncomingOptions) error {
 	if err := c.lockLifecycle(c.ctx); err != nil {
 		return err
 	}
@@ -180,6 +184,12 @@ func (c *RuntimeConnection) open() error {
 	if err != nil {
 		return err
 	}
+	if incoming != nil {
+		c.incoming, err = newRuntimeIncoming(c, *incoming)
+		if err != nil {
+			return err
+		}
+	}
 	occurrence, err := c.state.newOccurrence(c.ctx, uuid.NewString())
 	if err != nil {
 		return err
@@ -191,12 +201,7 @@ func (c *RuntimeConnection) open() error {
 			return err
 		}
 	}
-	_, err = occurrence.bindCallbacks(func(_ context.Context, event any) error {
-		if _, message := event.(*events.Message); message {
-			return errRuntimeIngressUnavailable
-		}
-		return nil
-	}, c.captures.recordFailure)
+	_, err = occurrence.bindCallbacks(c.receive, c.captures.recordFailure)
 	return err
 }
 

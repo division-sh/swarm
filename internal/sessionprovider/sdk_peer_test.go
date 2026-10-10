@@ -2,6 +2,7 @@ package sessionprovider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -151,6 +152,9 @@ func (p *sdkPeer) serve(w http.ResponseWriter, r *http.Request) {
 	for {
 		node, err := peer.wire.Read(p.ctx)
 		if err != nil {
+			if errors.Is(err, whatsappfixture.ErrMalformedNode) {
+				p.fail(err)
+			}
 			return // Test-owned disconnects deliberately interrupt pending effects.
 		}
 		if node.Tag == "message" || node.Tag == "iq" && node.AttrGetter().OptionalString("xmlns") == "md" {

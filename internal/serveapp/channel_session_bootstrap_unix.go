@@ -31,6 +31,37 @@ type serveSessionBootstrapAttempt struct {
 	err        error
 }
 
+func (a *serveSessionBootstrapAttempt) current(ctx context.Context) (*sessionprovider.RuntimeConnection, error) {
+	if ctx == nil {
+		return nil, channelonboarding.ErrInvalidRequest
+	}
+	select {
+	case <-a.done:
+		if a.err != nil {
+			return nil, a.err
+		}
+		if a.connection == nil {
+			return nil, channelonboarding.ErrRevisionConflict
+		}
+		if err := a.connection.CheckBootstrap(ctx); err != nil {
+			return nil, err
+		}
+		return a.connection, nil
+	case <-ctx.Done():
+		return nil, context.Cause(ctx)
+	}
+}
+
+func (s *serveSessionBootstrap) currentConnection(ctx context.Context, operationID string) (*sessionprovider.RuntimeConnection, error) {
+	s.mu.Lock()
+	attempt := s.connections[operationID]
+	s.mu.Unlock()
+	if attempt == nil {
+		return nil, channelonboarding.ErrNotFound
+	}
+	return attempt.current(ctx)
+}
+
 func init() {
 	newServeSessionBootstrap = newNativeServeSessionBootstrap
 }
@@ -86,15 +117,8 @@ func (s *serveSessionBootstrap) BootstrapSession(ctx context.Context, op channel
 	}
 	s.mu.Unlock()
 	if reused {
-		select {
-		case <-attempt.done:
-			if attempt.err != nil {
-				return attempt.err
-			}
-			return attempt.connection.CheckBootstrap(ctx)
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		}
+		_, err := attempt.current(ctx)
+		return err
 	}
 	// The retained entry owns partial construction and cleanup even when the
 	// caller stops waiting. It is never an instruction to retry Connect.
@@ -128,9 +152,9 @@ func (s *serveSessionBootstrap) BootstrapSession(ctx context.Context, op channel
 }
 
 func (s *serveSessionBootstrap) CheckpointSessionPairing(ctx context.Context, op channelonboarding.Operation) (channelonboarding.Operation, bool, error) {
-	connection := s.connection(op.OperationID)
-	if connection == nil {
-		return op, false, channelonboarding.ErrNotFound
+	connection, err := s.currentConnection(ctx, op.OperationID)
+	if err != nil {
+		return op, false, err
 	}
 	return connection.CheckpointPairing(ctx, op.Revision)
 }
@@ -140,7 +164,7 @@ func (s *serveSessionBootstrap) AdmitSessionAccount(ctx context.Context, account
 		return authority.Admission{}, channelonboarding.ErrInvalidRequest
 	}
 	s.mu.Lock()
-	var selected *sessionprovider.RuntimeConnection
+	var selected *serveSessionBootstrapAttempt
 	for _, attempt := range s.connections {
 		connection := attempt.connection
 		if connection != nil && connection.ConnectionID() == account.ConnectionID {
@@ -148,23 +172,30 @@ func (s *serveSessionBootstrap) AdmitSessionAccount(ctx context.Context, account
 				s.mu.Unlock()
 				return authority.Admission{}, channelonboarding.ErrConflict
 			}
-			selected = connection
+			selected = attempt
 		}
 	}
 	s.mu.Unlock()
 	if selected == nil {
 		return authority.Admission{}, &operatorchannel.SessionProviderUnavailableError{Provider: account.Provider}
 	}
-	return selected.AdmitSessionAccount(ctx, account)
+	connection, err := selected.current(ctx)
+	if err != nil {
+		return authority.Admission{}, err
+	}
+	return connection.AdmitSessionAccount(ctx, account)
 }
 
 func (s *serveSessionBootstrap) ReadSessionPairing(ctx context.Context, op channelonboarding.Operation, principal operatorchannel.Principal) (channelonboarding.PairingReadback, error) {
 	if s == nil || ctx == nil || ctx.Err() != nil || principal.Validate() != nil || principal.ID != op.PrincipalID {
 		return channelonboarding.PairingReadback{}, channelonboarding.ErrInvalidRequest
 	}
-	connection := s.connection(op.OperationID)
-	if connection == nil {
+	connection, err := s.currentConnection(ctx, op.OperationID)
+	if errors.Is(err, channelonboarding.ErrNotFound) {
 		return channelonboarding.PairingReadback{Status: "not_started"}, nil
+	}
+	if err != nil {
+		return channelonboarding.PairingReadback{}, err
 	}
 	return connection.PairingReadback(ctx, principal)
 }
