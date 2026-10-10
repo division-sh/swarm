@@ -22,7 +22,7 @@ import (
 
 // Audit-only controls on current master, not runtime remediation or a retry of
 // the frozen three-anchor race batch.
-func TestAudit1930PublicationFinalizationBoundaryBothStores(t *testing.T) {
+func TestAudit1930PublicationHeldOriginalDeadlineBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			probe := installPublicationCompletionAudit(t, true)
@@ -49,7 +49,6 @@ func TestAudit1930PublicationFinalizationBoundaryBothStores(t *testing.T) {
 			if err != nil || !found {
 				t.Fatalf("completion at post-ACK cut: found=%t err=%v", found, err)
 			}
-			cancel()
 			result := <-done
 			probe.releaseOnce.Do(func() { close(probe.release) })
 			if result.err == nil || len(result.result) != 0 {
