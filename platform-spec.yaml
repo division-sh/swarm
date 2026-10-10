@@ -21046,6 +21046,10 @@ run_model:
         materialization eligibility and native projection share that evidence gate. The child keeps the original
         due and stage-entry relation, does not copy the source candidate/claim, and admits its own occurrence only
         under current selected authority after child birth. Source preparation cannot postdate that birth.
+        A canceled source occurrence may retain its earlier reservation when the same complete fixed-cut event
+        inventory proves it was never published. Its child remains canceled with the original cause and due,
+        no copied candidate and no wakeup; cancellation must precede child birth. Unknown or present publication
+        still refuses, and failed or fired sources do not use this canceled-restoration branch.
         Already-published sources still use exact event/delivery continuation, never this restoration path. A canceled
         source arm records a canceled child disposition atomically at child birth, with its source admission and
         typed cut retained separately; no wakeup is installed by persistence. The sealed selected readiness owner

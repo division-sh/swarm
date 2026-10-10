@@ -37,7 +37,7 @@ func (a Activation) ValidateForkJoinRestorationSource() error {
 		return err
 	}
 	if a.Status != StatusActive && a.Status != StatusCancelled ||
-		a.CurrentEventID != "" && (a.Status != StatusActive || a.CurrentEventAdmittedAt.Before(a.CurrentDueAt)) {
+		a.CurrentEventID != "" && a.CurrentEventAdmittedAt.Before(a.CurrentDueAt) {
 		return fmt.Errorf("published or otherwise terminal join requires historical occurrence continuation, not schedule restoration")
 	}
 	return nil
