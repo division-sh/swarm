@@ -133,6 +133,9 @@ func (o connectInstanceSelector) Materialize(ctx context.Context, event events.E
 		if _, conflict := pipeline.IsolatedFlowInstanceActivationConflict(err); conflict {
 			return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureInstanceConflict}, connectInstanceSelection{}, true, nil
 		}
+		if isolatedReceiverAvailabilityRefusal(err, lookup.FlowID()) {
+			return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureTargetUnresolved}, connectInstanceSelection{}, true, nil
+		}
 		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, true, err
 	}
 	selection.FlowInstanceSelection, selection.identity = selected, selected.Identity()
@@ -151,6 +154,32 @@ func isolatedInstanceLookupMiss(err error) bool {
 	for err != nil {
 		if _, missing := err.(*pipeline.WorkflowInstanceLookupMiss); missing {
 			return true
+		}
+		switch wrapped := err.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(children) != 1 {
+				return false
+			}
+			err = children[0]
+		case interface{ Unwrap() error }:
+			err = wrapped.Unwrap()
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func isolatedReceiverAvailabilityRefusal(err error, flowID string) bool {
+	for err != nil {
+		switch refusal := err.(type) {
+		case *pipeline.TerminalReceiverError:
+			return refusal != nil && refusal.FlowID == flowID
+		case *pipeline.TerminatedReceiverError:
+			return refusal != nil && refusal.FlowID == flowID
+		case *pipeline.FlowInstanceConstructionCorruption:
+			return false
 		}
 		switch wrapped := err.(type) {
 		case interface{ Unwrap() []error }:

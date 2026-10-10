@@ -18351,6 +18351,9 @@ platform_tables:
         ListActiveFlowInstanceDescriptorsForScope and ListActiveFlowInstanceDescriptorsForKey are unsupported;
         normalized entity-field descriptor matching cannot elect an instance. Bounded compiled declaration or exact
         coordinate lookup consumes immutable construction keys and stored identities, including terminal occupancy.
+        A selected receiver with proven terminal stage or terminated construction produces the existing target-unreachable
+        publication outcome without creating a replacement. Unknown lifecycle, corruption, foreign-owner and independent
+        joined failures remain errors; they cannot be converted to absence or a benign target refusal.
         Receiver observations consume exact admitted coordinates or compiled declaration scopes, including actual
         structural parents and typed keys; source-entity scans cannot substitute for that selection.
         A non-executable receiver remains occupied and historically readable; availability is not instance absence.

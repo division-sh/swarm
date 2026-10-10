@@ -514,6 +514,10 @@ func TestDeliveryTargetWorkflowInstanceAvailabilityIsActiveOnly(t *testing.T) {
 			if errors.As(err, &terminal) != (testCase.state == "killed") {
 				t.Fatalf("terminal receiver classification=%#v err=%v", terminal, err)
 			}
+			var terminated *TerminatedReceiverError
+			if errors.As(err, &terminated) != (testCase.status == "terminated" || !testCase.terminated.IsZero()) {
+				t.Fatalf("terminated receiver classification=%#v err=%v", terminated, err)
+			}
 		})
 	}
 }

@@ -25,8 +25,9 @@ type DeliveryTargetOwnerCandidate struct {
 // receiver-selection policy. Missing companion rows are admitted by the reader
 // as active state-only ownership; an existing inactive companion is not absent.
 type DeliveryTargetAvailability struct {
-	stage    string
-	inactive bool
+	stage      string
+	inactive   bool
+	terminated bool
 }
 
 // TerminalReceiverError is a proven receiver-state refusal, not an inactive
@@ -40,12 +41,28 @@ func (e *TerminalReceiverError) Error() string {
 	return fmt.Sprintf("receiver target owner is unavailable: terminal state %q in flow %q", e.Stage, e.FlowID)
 }
 
+// TerminatedReceiverError proves occupied, non-executable construction.
+// Unknown lifecycle spellings remain independent admission errors.
+type TerminatedReceiverError struct {
+	FlowID string
+}
+
+func (e *TerminatedReceiverError) Error() string {
+	return fmt.Sprintf("receiver target owner is unavailable: lifecycle is terminated in flow %q", e.FlowID)
+}
+
 func NewDeliveryTargetAvailability(stage, status string, terminated bool) DeliveryTargetAvailability {
-	return DeliveryTargetAvailability{stage: strings.TrimSpace(stage), inactive: terminated || !strings.EqualFold(strings.TrimSpace(status), "active")}
+	return DeliveryTargetAvailability{
+		stage: strings.TrimSpace(stage), inactive: terminated || !strings.EqualFold(strings.TrimSpace(status), "active"),
+		terminated: terminated || status == "terminated",
+	}
 }
 
 func (a DeliveryTargetAvailability) Validate(source semanticview.Source, flowID string) error {
 	if a.inactive {
+		if a.terminated {
+			return &TerminatedReceiverError{FlowID: flowID}
+		}
 		return fmt.Errorf("receiver target owner is unavailable: lifecycle is not active")
 	}
 	if a.stage != "" {
