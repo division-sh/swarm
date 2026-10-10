@@ -19,14 +19,21 @@ import (
 type publicationRunPreflightTestStore struct {
 	InMemoryEventStore
 	runlifecycle.OperationOwner
+	runID string
 	fault error
 }
 
-func (s *publicationRunPreflightTestStore) RequireActiveRun(ctx context.Context, _ string) error {
+func (s *publicationRunPreflightTestStore) RequireActiveRun(ctx context.Context, runID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return s.fault
+	if s.fault != nil {
+		return s.fault
+	}
+	if runID == "" || runID != s.runID {
+		return &runlifecycle.RunNotFoundError{RunID: runID}
+	}
+	return nil
 }
 
 func admitRunProposalEvent(t testing.TB, creating bool) events.AdmittedEvent {
@@ -44,6 +51,24 @@ func admitRunProposalEvent(t testing.TB, creating bool) events.AdmittedEvent {
 		t.Fatal(err)
 	}
 	return admitted
+}
+
+func TestPublicationRunFixtureRequiresExactKnownRun(t *testing.T) {
+	owner := &publicationRunPreflightTestStore{runID: busInternalTestRunID}
+	if err := owner.RequireActiveRun(context.Background(), busInternalTestRunID); err != nil {
+		t.Fatal(err)
+	}
+	for _, runID := range []string{"", eventtest.UUID("foreign-fixture-run")} {
+		var missing *runlifecycle.RunNotFoundError
+		if err := owner.RequireActiveRun(context.Background(), runID); !errors.As(err, &missing) || missing.RunID != runID {
+			t.Fatalf("unknown run accepted by fixture owner: run=%q err=%v", runID, err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := owner.RequireActiveRun(ctx, busInternalTestRunID); !errors.Is(err, context.Canceled) {
+		t.Fatalf("fixture owner lost cancellation: %v", err)
+	}
 }
 
 func TestPublicationRunProposalRequiresExactIsolatedNativeAbsence(t *testing.T) {
@@ -67,7 +92,7 @@ func TestPublicationRunProposalRequiresExactIsolatedNativeAbsence(t *testing.T) 
 		{"joined cancellation", true, errors.Join(missing, context.Canceled), false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			owner := &publicationRunPreflightTestStore{fault: test.fault}
+			owner := &publicationRunPreflightTestStore{runID: busInternalTestRunID, fault: test.fault}
 			bus := &EventBus{store: &InMemoryEventStore{}, durable: DurableDependencies{RunLifecycle: owner}}
 			proposed, err := bus.requireExistingRunActive(context.Background(), admitRunProposalEvent(t, test.creating))
 			if proposed != test.proposed {

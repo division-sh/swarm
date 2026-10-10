@@ -78,12 +78,14 @@ func TestMixedPubsubConnectCompositionMultiBoundary(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			source := mixedFanoutToFanoutSource(t, reverse)
-			owners := mixedStaticOwners("producer", "left", "right", "left-sink", "right-sink")
+			owners := mixedStaticOwners(t, source, "producer", "left", "right", "left-sink", "right-sink")
 			store := newTargetRouteMemoryStore()
 			store.setTargetOwners(owners...)
+			installMixedStaticConstructionFixture(t, store, source, owners)
 			interceptor := &connectRoutePlanNodeInterceptor{}
 			eb, err := newScopedTestEventBus(store, EventBusOptions{
 				ContractBundle: source, Interceptors: []EventInterceptor{interceptor},
+				Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -124,11 +126,14 @@ func TestMixedPubsubConnectCompositionMultiBoundary(t *testing.T) {
 
 func TestMixedPubsubConnectCompositionConcurrentSources(t *testing.T) {
 	source := mixedFanoutToFanoutSource(t, false)
-	owners := mixedStaticOwners("producer", "left", "right", "left-sink", "right-sink")
+	owners := mixedStaticOwners(t, source, "producer", "left", "right", "left-sink", "right-sink")
 	ownerByFlow := mixedOwnerMap(owners)
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwners(owners...)
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	installMixedStaticConstructionFixture(t, store, source, owners)
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -187,11 +192,14 @@ func TestMixedPubsubConnectCompositionNodeAgentConnect(t *testing.T) {
 			},
 		},
 	}, []runtimecontracts.FlowConnect{{Event: eventName, From: "producer", To: "consumer", Rename: "deploy.accepted"}}))
-	owners := mixedStaticOwners("producer", "consumer")
+	owners := mixedStaticOwners(t, source, "producer", "consumer")
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwners(owners...)
+	installMixedStaticConstructionFixture(t, store, source, owners)
 	interceptor := &connectRoutePlanNodeInterceptor{}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Interceptors: []EventInterceptor{interceptor}})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Interceptors: []EventInterceptor{interceptor},
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -336,12 +344,30 @@ func mixedFanoutToFanoutSource(t testing.TB, reverse bool) semanticview.Source {
 	return semanticview.Wrap(connectRoutePlanTestBundle(t, flows, connects))
 }
 
-func mixedStaticOwners(flowIDs ...string) []ActiveTargetDescriptor {
+func mixedStaticOwners(t testing.TB, source semanticview.Source, flowIDs ...string) []ActiveTargetDescriptor {
+	t.Helper()
 	out := make([]ActiveTargetDescriptor, 0, len(flowIDs))
 	for _, flowID := range flowIDs {
-		out = append(out, testSelectedRunTargetOwner(flowID+"-owner", flowID, flowID+"-entity"))
+		instance := ConstructedFlowInstanceIdentityFixture(source, flowID, "", busInternalTestRunID)
+		out = append(out, ActiveTargetDescriptor{ID: flowID + "-owner", FlowInstance: instance.InstancePath, EntityID: instance.EntityID})
 	}
 	return out
+}
+
+func installMixedStaticConstructionFixture(t testing.TB, store *targetRouteMemoryStore, source semanticview.Source, owners []ActiveTargetDescriptor) {
+	t.Helper()
+	root := ConstructedFlowInstanceIdentityFixture(source, semanticview.RootExecutionFlowID(source), "", busInternalTestRunID)
+	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, root, ""))
+	for _, owner := range owners {
+		instance := StoredFlowInstanceIdentityFixture(source, owner.FlowInstance, "", busInternalTestRunID, owner.EntityID)
+		observed := constructionIndexObservation(t, source, busInternalTestRunID, instance, "")
+		store.installIndexObservation(observed)
+		receipt, native, err := observed.NativeConstruction()
+		if err != nil || !native {
+			t.Fatalf("mixed fixture lacks native construction: native=%v err=%v", native, err)
+		}
+		store.installConstructionReceipt(observed.Owner(), receipt)
+	}
 }
 
 func mixedOwnerMap(owners []ActiveTargetDescriptor) map[string]ActiveTargetDescriptor {
@@ -409,10 +435,13 @@ func TestMixedPubsubConnectCompositionReplayUsesCommittedRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	owners := mixedStaticOwners("producer", "consumer")
+	owners := mixedStaticOwners(t, source, "producer", "consumer")
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwners(owners...)
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: routeTable})
+	installMixedStaticConstructionFixture(t, store, source, owners)
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: routeTable,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -429,7 +458,9 @@ func TestMixedPubsubConnectCompositionReplayUsesCommittedRoutes(t *testing.T) {
 	routeTable.connectGraph = runtimepinrouting.CompiledConnectGraph{}
 	routeTable.mu.Unlock()
 
-	restarted, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: routeTable})
+	restarted, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: routeTable,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+	})
 	if err != nil {
 		t.Fatalf("restart EventBus: %v", err)
 	}
