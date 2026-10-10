@@ -9,8 +9,12 @@ import (
 	"time"
 )
 
-func TestWorkflowTimerReceiverDeadlineHeldReadsPreserveRecoveryBothStores(t *testing.T) {
-	verifyWorkflowTimerPublishedOccurrenceRecovery(t, []string{"receiver_deadline_held_activation", "receiver_deadline_held_target"})
+func TestWorkflowTimerReceiverCancellationCauseHeldReadsPreserveRecoveryBothStores(t *testing.T) {
+	verifyWorkflowTimerPublishedOccurrenceRecovery(t, []string{"receiver_cancellation_cause_held_activation", "receiver_cancellation_cause_held_target"})
+}
+
+func TestWorkflowTimerReceiverCancellationCauseDelayedEntryPreservesRecoveryBothStores(t *testing.T) {
+	verifyWorkflowTimerPublishedOccurrenceRecovery(t, []string{"receiver_cancellation_cause_held_activation_delayed_entry", "receiver_cancellation_cause_held_target_delayed_entry"})
 }
 
 type timerReceiverReadFacts struct {
@@ -43,15 +47,31 @@ type timerReceiverReadCut struct {
 	entry           timerReceiverReadFacts
 	returned        timerReceiverReadFacts
 	returnedError   error
+	delayEntry      bool
+	legacyEntryErr  error
+	cancelReceiver  context.CancelCauseFunc
 }
 
 func (p *timerReceiverReadCut) beginReceiver(ctx context.Context) context.Context {
 	p.inReceiver = true
-	// A receiver-local deadline cannot be evidence that the publisher expired.
-	receiver, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
-	p.test.Cleanup(cancel)
+	receiver, cancel := context.WithCancelCause(ctx)
+	p.cancelReceiver = cancel
+	p.test.Cleanup(func() { cancel(context.Canceled) })
 	p.owner.holdActivationRead = p.read == "activation"
 	p.owner.holdTargetRead = p.read == "target"
+	if p.delayEntry {
+		// Only the old oracle's deadline expires here, not the actual receiver.
+		legacy, stop := context.WithTimeout(ctx, 250*time.Millisecond)
+		defer stop()
+		if err := joinTimerTestInterruption(nil, legacy); err != nil {
+			p.test.Fatal(err)
+		}
+		p.legacyEntryErr = legacy.Err()
+		if !errors.Is(p.legacyEntryErr, context.DeadlineExceeded) || receiver.Err() != nil || p.publisher.Err() != nil {
+			p.test.Fatalf("delayed entry did not preserve the actual lifetimes: legacy=%v receiver=%v publisher=%v", p.legacyEntryErr, receiver.Err(), p.publisher.Err())
+		}
+		p.test.Logf("M09_DELAYED_ENTRY legacy_deadline=%v receiver=%v publisher=%v", p.legacyEntryErr, receiver.Err(), p.publisher.Err())
+	}
 	return receiver
 }
 
@@ -59,9 +79,12 @@ func (p *timerReceiverReadCut) enterRead(read string, ctx context.Context) {
 	p.readEntries++
 	p.entry = p.observe("held_read_entered", ctx, nil)
 	if !p.inReceiver || read != p.read || p.readEntries != 1 ||
-		p.entry.PublisherError != "<nil>" || p.entry.PublisherErrorAfter != "<nil>" || p.entry.ReceiverError != "<nil>" {
-		p.test.Fatalf("invalid discriminator: intended read was not reached with live lifetimes: %+v", p.entry)
+		p.entry.PublisherError != "<nil>" || p.entry.PublisherErrorAfter != "<nil>" || p.entry.ReceiverError != "<nil>" ||
+		p.entry.ReceiverCause != "<nil>" || !p.entry.PublisherDeadline.IsZero() || !p.entry.ReceiverDeadline.IsZero() || p.cancelReceiver == nil {
+		p.test.Fatalf("intended read was not reached with independently live lifetimes: %+v", p.entry)
 	}
+	// Cause is deadline-shaped; Err is Canceled. This is not deadline expiry.
+	p.cancelReceiver(context.DeadlineExceeded)
 }
 
 func (p *timerReceiverReadCut) returnRead(read string, ctx context.Context, err error) {
@@ -103,16 +126,19 @@ func (p *timerReceiverReadCut) observe(phase string, ctx context.Context, err er
 func (p *timerReceiverReadCut) validate(capture *timerTransitionOutcomeCapture, publisherReturnErr error) {
 	cut := p.returned
 	if p.readEntries != 1 || p.readReturns != 1 || cut.PublisherError != "<nil>" || cut.PublisherErrorAfter != "<nil>" ||
-		cut.ReceiverError != context.DeadlineExceeded.Error() || cut.ReceiverCause != context.DeadlineExceeded.Error() ||
-		!errors.Is(p.returnedError, context.DeadlineExceeded) || !cut.ReceiverDeadline.Before(cut.PublisherDeadline) ||
-		cut.At.Before(cut.ReceiverDeadline) || !p.entry.At.Before(p.entry.ReceiverDeadline) || cut.MutationCalls != 0 || cut.MutationAcknowledged != 0 ||
-		publisherReturnErr != nil || capture.entryErr != nil || !errors.Is(capture.exitErr, context.DeadlineExceeded) {
-		p.test.Fatalf("invalid discriminator: read did not hold the exact receiver deadline while publisher remained live: entry=%+v return=%+v publisher_return=%v receiver_entry=%v receiver_exit=%v", p.entry, cut, publisherReturnErr, capture.entryErr, capture.exitErr)
+		cut.ReceiverError != context.Canceled.Error() || cut.ReceiverCause != context.DeadlineExceeded.Error() ||
+		!errors.Is(p.returnedError, context.Canceled) || errors.Is(p.returnedError, context.DeadlineExceeded) ||
+		!cut.ReceiverDeadline.IsZero() || !cut.PublisherDeadline.IsZero() || cut.MutationCalls != 0 || cut.MutationAcknowledged != 0 ||
+		publisherReturnErr != nil || capture.entryErr != nil || !errors.Is(capture.exitErr, context.Canceled) {
+		p.test.Fatalf("read did not prove coordinated receiver cancellation while publisher remained live: entry=%+v return=%+v publisher_return=%v receiver_entry=%v receiver_exit=%v", p.entry, cut, publisherReturnErr, capture.entryErr, capture.exitErr)
+	}
+	if p.delayEntry && !errors.Is(p.legacyEntryErr, context.DeadlineExceeded) {
+		p.test.Fatal("delayed entry did not cross the old oracle's deadline")
 	}
 	if cut.AuthorizationCompleted != (p.read == "target") ||
 		(p.read == "activation" && (cut.ActivationReads != 0 || p.owner.interruptedActivationReads != 1)) ||
 		(p.read == "target" && (cut.ActivationReads != 1 || p.owner.interruptedActivationReads != 0)) {
-		p.test.Fatalf("invalid discriminator: authorization phase not proven: %+v interrupted_reads=%d", cut, p.owner.interruptedActivationReads)
+		p.test.Fatalf("receiver cancellation authorization phase not proven: %+v interrupted_reads=%d", cut, p.owner.interruptedActivationReads)
 	}
-	p.test.Logf("M09_ORACLE read=%s outer_deadline_predicate=false publisher_return=%v receiver_exit=%v authorization_completed=%t mutation_entered=false", p.read, publisherReturnErr, capture.exitErr, cut.AuthorizationCompleted)
+	p.test.Logf("M09_ORACLE read=%s outer_deadline_predicate=false publisher_return=%v receiver_exit=%v receiver_cause=%s authorization_completed=%t mutation_entered=false", p.read, publisherReturnErr, capture.exitErr, cut.ReceiverCause, cut.AuthorizationCompleted)
 }
