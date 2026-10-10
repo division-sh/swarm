@@ -65,7 +65,7 @@ func newSelectedContractExecutionOwnerForTest(t testing.TB, selected *store.Post
 	workflow := runtimepipeline.NewWorkflowPersistence(selected)
 	durable := runtimebus.DurableDependencies{
 		EmitFeedback: selected,
-		Instances: workflow, ConstructionPublications: workflow,
+		Instances:    workflow, ConstructionPublications: workflow,
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
 		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
@@ -104,7 +104,7 @@ func newSelectedContractSQLiteExecutionOwnerForTest(t testing.TB, selected *stor
 	workflow := runtimepipeline.NewWorkflowPersistence(selected)
 	durable := runtimebus.DurableDependencies{
 		EmitFeedback: selected,
-		Instances: workflow, ConstructionPublications: workflow,
+		Instances:    workflow, ConstructionPublications: workflow,
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
 		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
