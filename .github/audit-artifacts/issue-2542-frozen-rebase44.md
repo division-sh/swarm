@@ -117,7 +117,8 @@ ED25519 Git signature. Its complexity check identified only the new finite
 reconciler main (cognitive35), increasing30-level hotspots557 ->558. Factoring
 the frozen lookup and current-function lookup preserves all twelve transition
 bodies, output and digest byte-for-byte; no matcher/policy/budget change.
-The follow-up signed checkpoint must pass independent complexity against44.
+The follow-up signed checkpoint1b0720a43 passes independent complexity against44:
+cognitive30-level hotspots557 ->557; cyclomatic30-level hotspots259 ->259.
 
 ## Admission disposition implemented
 
@@ -153,10 +154,14 @@ unchanged source-bound receipts carry. No invented Local-Tier/CI-Units parser
 value, duplicated named unit, local core/lifecycle/full, timeout increase,
 skip or retry-until-green is introduced.
 
-## Landing hold
+## Historical Landing Hold (Superseded)
 
 The orchestrator's subsequent file-overlap instruction requires this landing
 strictly after both2600 and2599. This candidate is a signed local checkpoint,
 not a pushed/hosted-qualified head or review-ready PR. No push or PR until
 the explicit both-merged instruction; then one rebase, normal regeneration,
 focused material-delta checks and one qualification push with CI full.
+
+Ordering amendment6094116363 supersedes this hold: land before2599, after2600
+and2601, on336e69353. The current integration and qualification disposition is
+recorded in issue-2542-frozen-rebase336.md. No2599 code or proof is imported.
