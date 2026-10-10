@@ -12157,6 +12157,18 @@ tool_model:
         Compilation consumes those durable activation facts rather than rereading mutable current identity, so an activation remains reconstructable while a
         rebind advances identity and until the successor process publication is exact-current. Missing or contradictory
         activation-owned conversation, exact plan/relation generation, coordinate, credential, or revision facts fail closed.
+        A learned session activation additionally retains its exact selected provider, connection, account,
+        account-admission ID and revision in the canonical compiled projection and activation-publication generation.
+        The compiler rejects missing, contradictory or declared-only session account provenance. Serve reconstruction
+        and runtime publication admission consume the same typed complete responsibility projection; neither can drop
+        session evidence or adopt an account from current readback. This is durable responsibility, not SDK possession
+        or executable health. A session deployment selector remains exact target scope, not a webhook registration:
+        public webhook registration selection excludes session activations without clearing their native publication.
+        The runtime-context manager binds the platform's original session-admission owner once before publication,
+        including later loaded/reconstructed runtimes. Session publication and each borrowed execution lease require
+        that owner to supply fresh opaque SDK admission for the exact projected account and onboarding parent.
+        Plain construction/replacement without deployment admission refuses session providers. Copied account fields,
+        an uninstalled provider or a callback returning no genuine SDK authority cannot clear runtime admission.
         Serve prepares the exact runtime-context occurrence and required standing/topology facts before reconstructing
         connected state and publishing the complete executable activation catalog. Destructive-effect reconciliation and
         publication must succeed before recovered or new business work, delivery continuations, autonomous producers,

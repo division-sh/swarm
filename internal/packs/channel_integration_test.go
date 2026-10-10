@@ -440,6 +440,11 @@ func TestChannelActivationPublicationGenerationRetainsCompleteNonSecretProvenanc
 	if err != nil {
 		t.Fatal(err)
 	}
+	contradictory := base
+	contradictory.SessionAccount = operatorchannel.SessionAccountAdmission{Provider: "whatsapp"}
+	if _, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{contradictory}); err == nil {
+		t.Fatal("webhook publication accepted native session authority")
+	}
 	declaredOnly, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication([]packs.OutboundBindingPlan{base.Plan})
 	if err != nil {
 		t.Fatal(err)

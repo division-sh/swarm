@@ -72,6 +72,9 @@ func resolveServeRegistrationPairs(snapshot serveChannelActivationSnapshot, mana
 	}
 	for _, activation := range activations {
 		binding := activation.Plan
+		if binding.Transport() == packs.ChannelTransportSession {
+			continue
+		}
 		rawSelector := binding.RegistrationTarget()
 		if rawSelector == "" {
 			continue
