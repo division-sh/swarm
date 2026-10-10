@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 )
 
 type queryer interface {
@@ -332,12 +333,14 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				e.idempotency_key, CAST(e.source_event_id AS TEXT), e.created_at,
 				CAST(e.run_id AS TEXT), e.event_class, e.execution_mode, e.task_id, e.inherited_fan_out_origin,
 				e.payload_schema_bundle_hash, e.payload_schema_flow_id, e.payload_schema_event_key,
-				e.payload_schema_digest, e.payload_schema_class, CAST(e.operator_reference_event_id AS TEXT)`,
-			source: "events e", runAlias: "e",
+				e.payload_schema_digest, e.payload_schema_class, CAST(e.operator_reference_event_id AS TEXT),
+				COALESCE(CAST(sf.source_run_id AS TEXT), ''), COALESCE(CAST(sf.source_event_id AS TEXT), ''),
+				COALESCE(sf.selection_authority, ''), COALESCE(sf.lineage_owner_count, 0)`,
+			source: "events e " + eventrecord.SelectedForkLineageSQL, runAlias: "e",
 			columns: typedColumns(map[string]valueKind{
 				"source_route": valueJSON, "target_route": valueJSON, "target_set": valueJSON, "route_settlement": valueJSON,
 				"payload_base64": valueBytesBase64, "created_at": valueTime, "inherited_fan_out_origin": valueJSON,
-			}, "event_id", "event_name", "entity_id", "flow_instance", "routing_source_kind", "source_route", "routing_source_authority", "target_route", "target_set", "route_settlement", "scope", "payload_base64", "chain_depth", "produced_by", "produced_by_type", "handler_node", "idempotency_key", "source_event_id", "created_at", "run_id", "event_class", "execution_mode", "task_id", "inherited_fan_out_origin", "payload_schema_bundle_hash", "payload_schema_flow_id", "payload_schema_event_key", "payload_schema_digest", "payload_schema_class", "operator_reference_event_id"),
+			}, "event_id", "event_name", "entity_id", "flow_instance", "routing_source_kind", "source_route", "routing_source_authority", "target_route", "target_set", "route_settlement", "scope", "payload_base64", "chain_depth", "produced_by", "produced_by_type", "handler_node", "idempotency_key", "source_event_id", "created_at", "run_id", "event_class", "execution_mode", "task_id", "inherited_fan_out_origin", "payload_schema_bundle_hash", "payload_schema_flow_id", "payload_schema_event_key", "payload_schema_digest", "payload_schema_class", "operator_reference_event_id", "selected_fork_source_run_id", "selected_fork_source_event_id", "selected_fork_authority_stamp", "selected_fork_lineage_owners"),
 			build: func(values map[string]any) map[string]any {
 				values["routing_source"] = map[string]any{
 					"kind": values["routing_source_kind"], "route": values["source_route"], "authority": values["routing_source_authority"],

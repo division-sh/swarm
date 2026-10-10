@@ -563,13 +563,7 @@ func (l *Lifecycle) admitOccurrencePreparation(ctx context.Context, wakeup Wakeu
 }
 
 func occurrenceEvent(activation Activation, occurrence Occurrence, payload []byte) (events.Event, error) {
-	facts := events.EventFacts{
-		ID: occurrence.EventID, Type: events.EventType(activation.Command.EventType),
-		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: occurrenceProducerID},
-		TaskID:   activation.Command.TaskID, Payload: json.RawMessage(append([]byte(nil), payload...)),
-		Envelope:      events.EventEnvelope{EntityID: activation.Command.EntityID, FlowInstance: activation.Command.FlowInstance},
-		RoutingSource: activation.Command.RoutingSource, CreatedAt: occurrence.DueAt, ExecutionMode: activation.Command.ExecutionMode,
-	}
+	facts := occurrenceEventFacts(activation.Command, occurrence.EventID, occurrence.DueAt, payload)
 	if activation.Command.OwnerKind == OwnerInstance {
 		facts.Producer = events.ProducerClaim{Type: events.EventProducerInstance, ID: activation.Command.OwnerID}
 		return events.NewInstancePublicationEvent(events.InstancePublicationEventInput{Facts: facts, RunID: activation.Command.RunID})
@@ -578,6 +572,16 @@ func occurrenceEvent(activation Activation, occurrence Occurrence, payload []byt
 		return events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: facts})
 	}
 	return events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: activation.Command.RunID})
+}
+
+func occurrenceEventFacts(command AdmissionCommand, eventID string, dueAt time.Time, payload []byte) events.EventFacts {
+	return events.EventFacts{
+		ID: eventID, Type: events.EventType(command.EventType),
+		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: occurrenceProducerID},
+		TaskID:   command.TaskID, Payload: json.RawMessage(append([]byte(nil), payload...)),
+		Envelope:      events.EventEnvelope{EntityID: command.EntityID, FlowInstance: command.FlowInstance},
+		RoutingSource: command.RoutingSource, CreatedAt: dueAt, ExecutionMode: command.ExecutionMode,
+	}
 }
 
 // ReconcileWakeupWithRecovery attempts the exact process projection once and,

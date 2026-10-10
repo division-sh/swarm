@@ -39,33 +39,35 @@ type MemberOutput struct {
 }
 
 type Activation struct {
-	handle         timeridentity.TimerHandle
-	Members        []string                `json:"members"`
-	MemberCount    *int                    `json:"member_count,omitempty"`
-	Outputs        map[string]MemberOutput `json:"outputs"`
-	Status         Status                  `json:"status"`
-	CloseReason    CloseReason             `json:"close_reason,omitempty"`
-	ArmedAt        time.Time               `json:"armed_at"`
-	FireAt         time.Time               `json:"fire_at"`
-	DeadlineAt     time.Time               `json:"deadline_at,omitempty"`
-	TimerCancelled bool                    `json:"timer_cancelled,omitempty"`
-	OutcomePending bool                    `json:"outcome_pending,omitempty"`
-	OutcomeFired   bool                    `json:"outcome_fired,omitempty"`
+	handle                 timeridentity.TimerHandle
+	Members                []string                `json:"members"`
+	MemberCount            *int                    `json:"member_count,omitempty"`
+	Outputs                map[string]MemberOutput `json:"outputs"`
+	Status                 Status                  `json:"status"`
+	CloseReason            CloseReason             `json:"close_reason,omitempty"`
+	ArmedAt                time.Time               `json:"armed_at"`
+	FireAt                 time.Time               `json:"fire_at"`
+	DeadlineAt             time.Time               `json:"deadline_at,omitempty"`
+	TimerCancelled         bool                    `json:"timer_cancelled,omitempty"`
+	OutcomePending         bool                    `json:"outcome_pending,omitempty"`
+	OutcomeFired           bool                    `json:"outcome_fired,omitempty"`
+	TransferredPublication *TransferredPublication `json:"transferred_publication,omitempty"`
 }
 
 type activationJSON struct {
-	Handle         timeridentity.TimerHandle `json:"timer_handle"`
-	Members        []string                  `json:"members"`
-	MemberCount    *int                      `json:"member_count,omitempty"`
-	Outputs        map[string]MemberOutput   `json:"outputs"`
-	Status         Status                    `json:"status"`
-	CloseReason    CloseReason               `json:"close_reason,omitempty"`
-	ArmedAt        time.Time                 `json:"armed_at"`
-	FireAt         time.Time                 `json:"fire_at"`
-	DeadlineAt     time.Time                 `json:"deadline_at,omitempty"`
-	TimerCancelled bool                      `json:"timer_cancelled,omitempty"`
-	OutcomePending bool                      `json:"outcome_pending,omitempty"`
-	OutcomeFired   bool                      `json:"outcome_fired,omitempty"`
+	Handle                 timeridentity.TimerHandle `json:"timer_handle"`
+	Members                []string                  `json:"members"`
+	MemberCount            *int                      `json:"member_count,omitempty"`
+	Outputs                map[string]MemberOutput   `json:"outputs"`
+	Status                 Status                    `json:"status"`
+	CloseReason            CloseReason               `json:"close_reason,omitempty"`
+	ArmedAt                time.Time                 `json:"armed_at"`
+	FireAt                 time.Time                 `json:"fire_at"`
+	DeadlineAt             time.Time                 `json:"deadline_at,omitempty"`
+	TimerCancelled         bool                      `json:"timer_cancelled,omitempty"`
+	OutcomePending         bool                      `json:"outcome_pending,omitempty"`
+	OutcomeFired           bool                      `json:"outcome_fired,omitempty"`
+	TransferredPublication *TransferredPublication   `json:"transferred_publication,omitempty"`
 }
 
 type AddDisposition string
@@ -112,6 +114,11 @@ func NewActivation(ref timeridentity.JoinRef, members []string, count *int, arme
 func (a Activation) Validate() error {
 	if !a.handle.Valid() || a.handle.Kind() != timeridentity.TimerHandleJoinTimeout && a.handle.Kind() != timeridentity.TimerHandleJoinComplete {
 		return fmt.Errorf("join activation requires one valid typed timer handle")
+	}
+	if a.TransferredPublication != nil {
+		if err := a.TransferredPublication.Validate(a.JoinRef()); err != nil {
+			return err
+		}
 	}
 	if a.Status != StatusOpen && a.Status != StatusClosed {
 		return fmt.Errorf("join activation status %q is invalid", a.Status)
@@ -471,7 +478,7 @@ func (a Activation) MarshalJSON() ([]byte, error) {
 		Handle: a.handle, Members: a.Members, MemberCount: a.MemberCount, Outputs: a.Outputs, Status: a.Status,
 		CloseReason: a.CloseReason, ArmedAt: a.ArmedAt, FireAt: a.FireAt, DeadlineAt: a.DeadlineAt,
 		TimerCancelled: a.TimerCancelled, OutcomePending: a.OutcomePending,
-		OutcomeFired: a.OutcomeFired,
+		OutcomeFired: a.OutcomeFired, TransferredPublication: a.TransferredPublication,
 	})
 }
 
@@ -488,7 +495,7 @@ func (a *Activation) UnmarshalJSON(raw []byte) error {
 		Status: persisted.Status, CloseReason: persisted.CloseReason,
 		ArmedAt: persisted.ArmedAt, FireAt: persisted.FireAt, DeadlineAt: persisted.DeadlineAt,
 		TimerCancelled: persisted.TimerCancelled, OutcomePending: persisted.OutcomePending,
-		OutcomeFired: persisted.OutcomeFired,
+		OutcomeFired: persisted.OutcomeFired, TransferredPublication: persisted.TransferredPublication,
 	}
 	return nil
 }
