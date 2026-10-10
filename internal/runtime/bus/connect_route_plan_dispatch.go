@@ -95,6 +95,10 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	if err != nil {
 		return connectRoutePlanDispatch{}, err
 	}
+	terminal, err := r.explicitReceiverTerminated(ctx, evt)
+	if err != nil {
+		return connectRoutePlanDispatch{}, err
+	}
 	if len(r.graph.Plans()) == 0 && len(r.issues) == 0 {
 		return connectRoutePlanDispatch{Evaluation: emptyEvaluation}, nil
 	}
@@ -122,10 +126,33 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	if err != nil {
 		return connectRoutePlanDispatch{}, err
 	}
+	if terminal && terminalDiagnosticPlans(matched) {
+		out := connectRoutePlanDispatch{Matched: true, Failure: runtimepinrouting.FailureTargetUnreachableTerminated, Evaluation: emptyEvaluation}
+		for _, plan := range matched {
+			if err := r.appendBlockedPlanEvaluation(&out, plan, []events.RouteIdentity{explicitRootPublicationTarget(evt)}); err != nil {
+				return connectRoutePlanDispatch{}, err
+			}
+		}
+		return out, nil
+	}
 	evaluationCtx := runtimecorrelation.WithInboundEvent(ctx, evt)
 	evaluationCtx = withConnectPlanningPreview(evaluationCtx)
 	evaluationCtx = withConnectRoutePlanPreview(evaluationCtx)
 	return r.planMatched(evaluationCtx, evt, matched, connectRoutePlanMatchValues(evt), replyRecord)
+}
+
+func terminalDiagnosticPlans(plans []runtimepinrouting.ConnectRoutePlan) bool {
+	if len(plans) == 0 {
+		return false
+	}
+	for _, plan := range plans {
+		// These owners must still admit correlation or report an exact create
+		// conflict; terminal existence cannot replace either decision.
+		if plan.ReplyResolution() != nil || plan.InstanceKey() != nil && plan.InstanceKey().Mode() == runtimecontracts.FlowInputResolutionModeCreate {
+			return false
+		}
+	}
+	return true
 }
 
 // A paired response resumes retained return authority, not every ordinary edge

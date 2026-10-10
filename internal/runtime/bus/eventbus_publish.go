@@ -684,7 +684,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		}
 		if found {
 			if !publication.direct {
-				admitted, evt, err = reuseDurableSubscribedEventRouteFacts(admitted, durable.Event)
+				admitted, evt, err = reuseDurableSubscribedEventRouteFacts(admitted, durable)
 				if err != nil {
 					return releaseFailure(err)
 				}
@@ -710,7 +710,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	if err != nil {
 		return releaseFailure(err)
 	}
-	if eb.semanticSource != nil && !explicitRootPublicationTarget(evt).Empty() && len(routePlan.DeliveryRoutes()) == 0 {
+	if eb.semanticSource != nil && !explicitRootPublicationTarget(evt).Empty() && len(routePlan.DeliveryRoutes()) == 0 && !routePlan.authorizesTerminalTargetDiagnostic(evt) {
 		return releaseFailure(fmt.Errorf("explicit root target %s has no selected root-local or compiled-connection delivery", evt.TargetRoute().FlowInstance))
 	}
 	targetFailureInput := evt
@@ -1215,14 +1215,22 @@ func (eb *EventBus) admitPublicationEventFacts(ctx context.Context, evt events.E
 	return ictx, admitted, nil
 }
 
-func reuseDurableSubscribedEventRouteFacts(admitted, durable events.AdmittedEvent) (events.AdmittedEvent, events.Event, error) {
+func reuseDurableSubscribedEventRouteFacts(admitted events.AdmittedEvent, durable PreparedPublishEvent) (events.AdmittedEvent, events.Event, error) {
 	evt := admitted.Event()
-	durableEvent := durable.Event()
+	durableEvent := durable.Event.Event()
 	if evt.ID() == "" || durableEvent.ID() != evt.ID() {
 		return admitted, evt, errors.New("durable event route facts do not match the admitted event identity")
 	}
 	durableTargets := eventDeliveryTargetRoutes(durableEvent)
 	existingTargets := eventDeliveryTargetRoutes(evt)
+	if len(existingTargets) > 0 && len(durableTargets) == 0 && durable.Settlement.NoDelivery() && durable.Settlement.Reason() == events.NoDeliveryResolutionBlocked && blockedConnectTargetsMatch(durable.Settlement.Ledger(), existingTargets) {
+		resolved, _, err := ResolvePreparedPublishEventTargetProjection(evt, durable.DeliveryRoutes)
+		if err != nil {
+			return admitted, evt, err
+		}
+		replayed, err := events.AdmitForPersistence(resolved, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+		return replayed, replayed.Event(), err
+	}
 	if len(existingTargets) > 0 && !sameRouteIdentities(existingTargets, durableTargets) && !routeIdentitiesCanBeExactlyCompleted(existingTargets, durableTargets) {
 		return admitted, evt, errors.New("durable event route facts conflict with the admitted event target")
 	}
@@ -2672,7 +2680,7 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 			return PublishRecipientPlan{}, fmt.Errorf("load durable event before recipient preflight: %w", err)
 		}
 		if found {
-			admitted, evt, err = reuseDurableSubscribedEventRouteFacts(admitted, durable.Event)
+			admitted, evt, err = reuseDurableSubscribedEventRouteFacts(admitted, durable)
 			if err != nil {
 				return PublishRecipientPlan{}, err
 			}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -2690,117 +2692,148 @@ func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecord
 }
 
 func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
-	eventID := uuid.NewString()
-	targetEntityID := uuid.NewString()
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
-		eventID,
-		events.EventType("child/output.done"),
-		"",
-		"",
-		[]byte(`{}`),
-		0,
-		"",
-		"",
-		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: targetEntityID, FlowInstance: "missing-flow"}),
-		time.Now().UTC(),
-	)); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-
-	var reason, targetContext string
-	if err := db.QueryRowContext(ctx, `
-		SELECT failure->'detail'->>'code', COALESCE((failure->'detail'->'attributes'->'target')::text, '')
-		FROM dead_letters
-		WHERE original_event_id = $1::uuid
-		  AND failure->>'class' = 'platform.target_unreachable'
-		  AND handler_node = 'pin_routing'
-	`, eventID).Scan(&reason, &targetContext); err != nil {
-		t.Fatalf("query dead_letters: %v", err)
-	}
-	if reason != "target_unreachable_terminated" {
-		t.Fatalf("target failure reason = %q, want target_unreachable_terminated", reason)
-	}
-	if !strings.Contains(targetContext, "missing-flow") {
-		t.Fatalf("target context = %s, want missing-flow", targetContext)
-	}
+	proveConstructedTargetFailurePublication(t, "postgres")
 }
 
 func TestEventBusPublishSQLiteRecordsTargetFailureDeadLetter(t *testing.T) {
-	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
-	eb, err := newScopedTestEventBus(sqliteStore, runtimebus.EventBusOptions{})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	runID := runtimebustest.DefaultRunID
-	eventID := uuid.NewString()
-	targetEntityID := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngress(
-		eventID,
-		events.EventType("task.completed"),
-		"",
-		"",
-		[]byte(`{}`),
-		0,
-		runID,
-		"",
-		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: targetEntityID, FlowInstance: "missing-flow"}),
-		time.Now().UTC(),
-	)
-	eb.RegisterRuntimeActiveAgentDescriptor(testActiveAgentDescriptorForRun(t, runID, "live-other", uuid.NewString(), "other-flow"))
-	ctx := runtimecorrelation.WithInboundEvent(context.Background(), evt)
-	_ = runtimebustest.Subscribe(t, eb, "live-other", events.EventType("task.completed"))
-	if got := eb.ResolveSubscribedRecipients("task.completed"); !slices.Equal(got, []string{"live-other"}) {
-		t.Fatalf("ResolveSubscribedRecipients = %#v, want live-other", got)
-	}
-	if !evt.HasTargetRoute() {
-		t.Fatalf("event target route missing after construction: envelope=%#v", evt.NormalizedEnvelope())
-	}
-	plan, err := eb.CheckPublishRecipientPlan(ctx, evt)
-	if err != nil {
-		t.Fatalf("CheckPublishRecipientPlan: %v", err)
-	}
-	if plan.TargetFailure != "target_unreachable_terminated" {
-		t.Fatalf("target failure = %q, want target_unreachable_terminated: plan=%#v", plan.TargetFailure, plan)
-	}
-	if err := eb.Publish(ctx, evt); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
+	proveConstructedTargetFailurePublication(t, "sqlite")
+}
 
-	var reason, targetContext string
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
-		SELECT COALESCE(json_extract(failure, '$.detail.code'), ''), COALESCE(json_extract(failure, '$.detail.attributes.target'), '')
-		FROM dead_letters
-		WHERE original_event_id = ?
-		  AND json_extract(failure, '$.class') = 'platform.target_unreachable'
-		  AND handler_node = 'pin_routing'
-	`, eventID).Scan(&reason, &targetContext); err != nil {
-		t.Fatalf("query sqlite dead_letters: %v", err)
+type targetFailurePublicationStore interface {
+	componentFlowConstructionStore
+	storetest.RunFixtureStore
+	LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+}
+
+func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
+	t.Helper()
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyRootOutputSingletonConnect(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if reason != "target_unreachable_terminated" {
-		t.Fatalf("target failure reason = %q, want target_unreachable_terminated", reason)
+	source := semanticview.Wrap(bundle)
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
+	var selected targetFailurePublicationStore
+	if backend == "postgres" {
+		selected = storetest.StartPostgresRuntimeStore(t)
+	} else {
+		selected = storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	}
-	if !strings.Contains(targetContext, "missing-flow") {
-		t.Fatalf("target context = %s, want missing-flow", targetContext)
+	at := time.Now().UTC()
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: at})
+	for _, flowID := range []string{".", "consumer"} {
+		identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, flowID, "", runID)
+		seedComponentFlowConstruction(t, ctx, selected, source, runtimepipeline.WorkflowInstance{
+			InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
+			ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
+			WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), EnteredStageAt: at, CreatedAt: at,
+		})
 	}
-	var pipelineReceipts int
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_receipts
-		WHERE event_id = ?
-		  AND subscriber_type = 'platform'
-		  AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&pipelineReceipts); err != nil {
-		t.Fatalf("query sqlite pipeline receipt: %v", err)
+	eb, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if pipelineReceipts != 1 {
-		t.Fatalf("sqlite pipeline receipts = %d, want 1", pipelineReceipts)
+	eb.RegisterRuntimeActiveAgentDescriptor(testActiveAgentDescriptorForRun(t, runID, "live-other", runtimeflowidentity.EntityID(runID), ""))
+	decoy := runtimebustest.SubscribeForRun(t, eb, runID, "live-other", "root.ready")
+	if got := eb.ResolveSubscribedRecipients("root.ready"); !slices.Equal(got, []string{"live-other"}) {
+		t.Fatalf("live decoy recipients=%v", got)
+	}
+	publication := func(target events.RouteIdentity) events.Event {
+		return eventtest.ExistingRunRootIngress(uuid.NewString(), "root.ready", "test", "", []byte(`{}`), 0, runID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), at)
+	}
+	localControl := publication(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: runtimeflowidentity.EntityID(runID)})
+	if plan, err := eb.CheckPublishRecipientPlan(ctx, localControl); err != nil || !slices.Contains(plan.Recipients, "live-other") {
+		t.Fatalf("root-local publication cannot reach live decoy: plan=%+v err=%v", plan, err)
+	}
+	t.Run("absent_receiver_refuses_without_mutation", func(t *testing.T) {
+		evt := publication(events.RouteIdentity{FlowID: "consumer", FlowInstance: "missing-flow", EntityID: uuid.NewString()})
+		before := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, evt.ID())
+		if _, err := eb.CheckPublishRecipientPlan(ctx, evt); err == nil {
+			t.Fatal("absent receiver passed preflight")
+		}
+		if err := eb.Publish(ctx, evt); err == nil {
+			t.Fatal("absent receiver publication was accepted")
+		}
+		after := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, evt.ID())
+		if !reflect.DeepEqual(before, after) {
+			t.Fatalf("absent receiver mutated durable evidence: before=%+v after=%+v", before, after)
+		}
+		letters, err := storetest.ObserveH1DeadLetters(ctx, selected, runID)
+		if err != nil || len(letters) != 0 {
+			t.Fatalf("absent receiver dead letters=%+v err=%v", letters, err)
+		}
+	})
+	t.Run("foreign_receiver_entity_refuses_without_mutation", func(t *testing.T) {
+		evt := publication(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: uuid.NewString()})
+		before := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, evt.ID())
+		if _, err := eb.CheckPublishRecipientPlan(ctx, evt); err == nil {
+			t.Fatal("foreign entity passed preflight")
+		}
+		if err := eb.Publish(ctx, evt); err == nil {
+			t.Fatal("foreign entity publication was accepted")
+		}
+		if after := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, evt.ID()); !reflect.DeepEqual(before, after) {
+			t.Fatalf("foreign entity mutated durable evidence: before=%+v after=%+v", before, after)
+		}
+		letters, err := storetest.ObserveH1DeadLetters(ctx, selected, runID)
+		if err != nil || len(letters) != 0 {
+			t.Fatalf("foreign entity dead letters=%+v err=%v", letters, err)
+		}
+	})
+	t.Run("authorized_terminal_receiver_records_diagnostic", func(t *testing.T) {
+		target := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: runtimeflowidentity.EntityID("consumer")}
+		coordinator := newEventBusWorkflowCoordinator(eb, nil, selected, newFixtureWorkflowModule(t, bundle))
+		owner := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "consumer", "", runID)
+		if err := coordinator.MarkTerminated(ctx, testRunScopedFlowRouteForRun(runID, owner.Route()), runtimeidentity.NormalizeEntityID(target.EntityID), at.Add(time.Second)); err != nil {
+			t.Fatalf("terminate admitted receiver: %v", err)
+		}
+		evt := publication(target)
+		plan, err := eb.CheckPublishRecipientPlan(ctx, evt)
+		if err != nil || plan.TargetFailure != "target_unreachable_terminated" || len(plan.DeliveryRoutes) != 0 {
+			t.Fatalf("authorized terminal plan=%+v err=%v", plan, err)
+		}
+		if err := eb.Publish(ctx, evt); err != nil {
+			t.Fatalf("publish authorized terminal diagnostic: %v", err)
+		}
+		view, err := selected.LoadOperatorEvent(ctx, evt.ID())
+		if err != nil || len(view.Deliveries) != 0 || len(view.DeadLetters) != 1 {
+			t.Fatalf("terminal publication readback=%+v err=%v", view, err)
+		}
+		letter := view.DeadLetters[0]
+		wantTarget := map[string]any{"flow_id": target.FlowID, "flow_instance": target.FlowInstance, "entity_id": target.EntityID}
+		if letter.HandlerNode != "pin_routing" || letter.Failure.Class != "platform.target_unreachable" || letter.Failure.Detail.Code != "target_unreachable_terminated" || !reflect.DeepEqual(letter.Failure.Detail.Attributes["target"], wantTarget) {
+			t.Fatalf("terminal target diagnostic=%+v, want exact target %+v", letter, wantTarget)
+		}
+		evidence := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, evt.ID())
+		if !evidence.RecordFound || evidence.PipelineReceiptCount != 1 || evidence.NonPlatformReceiptCount != 0 || len(evidence.DeliveryProjections) != 0 {
+			t.Fatalf("terminal publication settlement=%+v", evidence)
+		}
+		if err := eb.Publish(ctx, evt); err != nil {
+			t.Fatalf("repeat terminal publication: %v", err)
+		}
+		replayed := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, evt.ID())
+		if !reflect.DeepEqual(evidence, replayed) {
+			t.Fatalf("terminal replay mutated evidence: before=%+v after=%+v", evidence, replayed)
+		}
+		foreign := target
+		foreign.EntityID = uuid.NewString()
+		changed, err := events.ResolveEnvelope(evt, events.EnvelopeForTargetRoute(evt.NormalizedEnvelope(), foreign))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := eb.Publish(ctx, changed); err == nil {
+			t.Fatal("terminal replay accepted a different target")
+		}
+		if rejected := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, evt.ID()); !reflect.DeepEqual(evidence, rejected) {
+			t.Fatalf("foreign terminal replay mutated evidence: before=%+v after=%+v", evidence, rejected)
+		}
+	})
+	select {
+	case got := <-decoy:
+		t.Fatalf("unrelated recipient received targeted publication: %+v", got)
+	default:
 	}
 }
 

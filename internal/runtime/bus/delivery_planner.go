@@ -393,6 +393,28 @@ func explicitRootPublicationTarget(evt events.Event) events.RouteIdentity {
 	}
 }
 
+func (p RoutePlan) authorizesTerminalTargetDiagnostic(event events.Event) bool {
+	if p.TargetFailure != runtimepinrouting.FailureTargetUnreachableTerminated || p.AuthorityOwner != routePlanSourceConnectRoutePlan || p.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed {
+		return false
+	}
+	target := explicitRootPublicationTarget(event)
+	if target.Empty() {
+		return false
+	}
+	return blockedConnectTargetsMatch(p.ConnectEvaluation, []events.RouteIdentity{target})
+}
+
+func blockedConnectTargetsMatch(ledger events.ConnectEvaluationLedger, targets []events.RouteIdentity) bool {
+	var selected []events.RouteIdentity
+	for _, plan := range ledger.Plans() {
+		if plan.Resolution() != events.ConnectPlanResolutionBlocked {
+			return false
+		}
+		selected = append(selected, plan.Targets()...)
+	}
+	return len(selected) > 0 && sameRouteIdentities(selected, targets)
+}
+
 func composeIndependentPubsubBranch(connectPlan, localPlan RoutePlan) RoutePlan {
 	connectPlan = connectPlan.Normalized()
 	localPlan = localPlan.Normalized()

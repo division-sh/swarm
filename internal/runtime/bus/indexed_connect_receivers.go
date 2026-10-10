@@ -11,7 +11,52 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+// Existence and publication authority precede executable receiver selection.
+// A terminal receiver can produce a diagnostic, never a construction proposal.
+func (r connectRoutePlanResolver) explicitReceiverTerminated(ctx context.Context, event events.Event) (bool, error) {
+	target := explicitRootPublicationTarget(event)
+	if target.Empty() || r.source == nil || target.FlowID == semanticview.RootExecutionFlowID(r.source) {
+		return false, nil
+	}
+	fact, present := correlation.SourceArtifactFactFromContext(ctx)
+	if !present || r.lifecycle.index == nil {
+		return false, fmt.Errorf("explicit receiver requires its admitted source and native index")
+	}
+	owner, err := flowidentity.NewRunScopedFlowInstance(event.RunID(), flowidentity.StoredRoute(flowidentity.ScopeKey(r.source, target.FlowID), "", target.FlowInstance))
+	if err != nil {
+		return false, err
+	}
+	request, err := pipeline.NewExactFlowInstanceLookup(r.source, fact, owner)
+	if err != nil {
+		return false, err
+	}
+	instance, found, err := r.indexedReceiverWorkflowInstance(ctx, request)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, fmt.Errorf("explicit receiver is not constructed in the selected run")
+	}
+	if target.EntityID != "" && target.EntityID != instance.EntityID {
+		return false, fmt.Errorf("explicit receiver contradicts its stored entity identity")
+	}
+	if instance.Status == "terminated" || !instance.TerminatedAt.IsZero() {
+		return true, nil
+	}
+	stage := ""
+	if instance.StageDefined {
+		stage = instance.CurrentState
+	}
+	err = pipeline.NewDeliveryTargetAvailability(stage, instance.Status, false).Validate(r.source, instance.WorkflowName)
+	var terminal *pipeline.TerminalReceiverError
+	if errors.As(err, &terminal) {
+		return true, nil
+	}
+	return false, err
+}
 
 func (r connectRoutePlanResolver) replyOriginAvailable(ctx context.Context, runID string, plan pinrouting.ConnectRoutePlan, target events.RouteIdentity) (bool, error) {
 	if plan.ReplyRole() != pinrouting.ConnectReplyRoleResponse {
@@ -29,7 +74,7 @@ func (r connectRoutePlanResolver) replyOriginAvailable(ctx context.Context, runI
 	if err != nil {
 		return false, err
 	}
-	instance, found, err := r.replyOriginWorkflowInstance(ctx, request)
+	instance, found, err := r.indexedReceiverWorkflowInstance(ctx, request)
 	if err != nil || !found {
 		return false, err
 	}
@@ -51,7 +96,7 @@ func (r connectRoutePlanResolver) replyOriginAvailable(ctx context.Context, runI
 	return err == nil, err
 }
 
-func (r connectRoutePlanResolver) replyOriginWorkflowInstance(ctx context.Context, request pipeline.FlowInstanceLookupRequest) (pipeline.WorkflowInstance, bool, error) {
+func (r connectRoutePlanResolver) indexedReceiverWorkflowInstance(ctx context.Context, request pipeline.FlowInstanceLookupRequest) (pipeline.WorkflowInstance, bool, error) {
 	if _, err := r.prospectiveConnectInstances(ctx, request.RunID(), request.SourceFact()); err != nil {
 		return pipeline.WorkflowInstance{}, false, err
 	}
