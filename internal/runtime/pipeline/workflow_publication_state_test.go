@@ -79,12 +79,24 @@ func TestProspectivePublicationStateBindsCompleteMutationAndSource(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	entityID := eventtest.UUID("prospective-entity")
+	config, err := WorkflowInstanceHeaderPayloadForIdentity(flowidentity.Instance{
+		TemplateID: "review", ScopeKey: "review", InstanceID: "one", InstancePath: owner.Route.InstancePath, EntityID: entityID, HasStoredPath: true,
+		ParentRoute: flowidentity.ParentRoute{FlowID: ".", FlowInstance: runID, EntityID: runID}, ParentEntityID: runID,
+	}, "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawConfig, err := canonicaljson.Bytes(config)
+	if err != nil {
+		t.Fatal(err)
+	}
 	record := WorkflowEngineStateRecord{
-		Identity: owner, EntityID: eventtest.UUID("prospective-entity"), WorkflowName: "review", WorkflowVersion: "v1",
+		Identity: owner, EntityID: entityID, WorkflowName: "review", WorkflowVersion: "v1",
 		Mode: "template", Status: "active", CurrentState: "review", EntityType: "work",
-		InstanceKey: "exact",
-		Fields:      json.RawMessage(`{"case_id":"exact"}`), Bookkeeping: json.RawMessage(`{}`), Gates: json.RawMessage(`{}`),
-		Accumulator: json.RawMessage(`{}`), Config: json.RawMessage(`{}`), InitialFields: json.RawMessage(`{}`),
+		InstanceKey: "exact", ParentInstance: runID,
+		Fields: json.RawMessage(`{"case_id":"exact"}`), Bookkeeping: json.RawMessage(`{}`), Gates: json.RawMessage(`{}`),
+		Accumulator: json.RawMessage(`{}`), Config: rawConfig, InitialFields: json.RawMessage(`{}`),
 		EnteredStageAt: at, CreatedAt: at, UpdatedAt: at, Transition: WorkflowEngineStateTransitionCreateStateAndCompanion,
 	}
 	fact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
