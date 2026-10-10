@@ -216,18 +216,7 @@ const selectRecord = `
 		COALESCE(sf.source_run_id::text, ''), COALESCE(sf.source_event_id::text, ''),
 		COALESCE(sf.selection_authority, ''), COALESCE(sf.lineage_owner_count, 0), COALESCE(e.inherited_fan_out_origin::text, '')
 	FROM events e
-	LEFT JOIN (
-		SELECT candidate.*,
-			COUNT(*) OVER (PARTITION BY candidate.fork_event_id) AS lineage_owner_count
-		FROM (
-			SELECT fork_event_id, source_run_id, source_event_id, selection_authority
-			FROM run_fork_selected_contract_executions
-			UNION ALL
-			SELECT fork_event_id, source_run_id, source_event_id, selection_authority
-			FROM run_fork_delivery_event_replays
-			GROUP BY fork_event_id, source_run_id, source_event_id, selection_authority
-		) candidate
-	) sf ON sf.fork_event_id = e.event_id`
+	` + eventrecord.SelectedForkLineageSQL
 
 func scanTargets(record *eventrecord.Record) []any {
 	return []any{

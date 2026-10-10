@@ -158,6 +158,14 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 		}
 		joinSchedules = append(joinSchedules, digest)
 	}
+	transferred := make([]string, 0, len(plan.TransferredJoins))
+	for _, source := range plan.TransferredJoins {
+		digest, err := source.EvidenceDigest()
+		if err != nil {
+			return "", err
+		}
+		transferred = append(transferred, digest)
+	}
 	raw, err := canonicaljson.Bytes(struct {
 		Plan          RunForkPlan
 		History       []string
@@ -167,10 +175,11 @@ func SelectedPreparationPlanFingerprint(plan RunForkPlan, frontier RunForkContra
 		Replies       []replycontext.Record
 		Timers        []timerobligation.WorkflowTimerActivationRecord
 		JoinSchedules []string
+		Transferred   []string
 		Frontier      RunForkContractFrontierAdmission
 		Recipients    RunForkSelectedContractRecipientPlanning
 		Declarations  string
-	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalArrivalCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, frontier, planning, declarationRevision})
+	}{plan, history, plan.HistoricalInputCoordinates(), plan.HistoricalArrivalCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers, joinSchedules, transferred, frontier, planning, declarationRevision})
 	if err != nil {
 		return "", err
 	}

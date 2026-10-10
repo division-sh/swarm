@@ -2,18 +2,18 @@ package genericschedule
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/google/uuid"
 )
 
 // PublishedJoinContinuation retains publication evidence, not fixed-cut,
 // delivery, schedule admission, or current execution authority.
 type PublishedJoinContinuation struct {
-	source   Activation
+	source   AdmissionCommand
 	original events.Event
 	child    AdmissionCommand
 }
@@ -21,40 +21,60 @@ type PublishedJoinContinuation struct {
 // ProjectPublishedJoinContinuation consumes the caller's canonical entity and
 // generation correspondence; it does not reconstruct either correspondence.
 func ProjectPublishedJoinContinuation(source Activation, original events.Event, child AdmissionCommand) (PublishedJoinContinuation, error) {
-	if err := validatePublishedJoinContinuationFrame(source, original, child); err != nil {
+	if _, err := source.ValidatePublishedOccurrence(original); err != nil {
 		return PublishedJoinContinuation{}, err
 	}
+	if source.ClockSuspension != nil {
+		return PublishedJoinContinuation{}, fmt.Errorf("published join continuation cannot carry clock authority")
+	}
+	return projectPublishedJoinContinuation(source.Command, original, child)
+}
+
+func ProjectTransferredJoinContinuation(source TransferredJoinOccurrence, original events.Event, child AdmissionCommand) (PublishedJoinContinuation, error) {
+	if err := source.ValidateEvent(original); err != nil {
+		return PublishedJoinContinuation{}, err
+	}
+	return projectPublishedJoinContinuation(source.Command, original, child)
+}
+
+func projectPublishedJoinContinuation(source AdmissionCommand, original events.Event, child AdmissionCommand) (PublishedJoinContinuation, error) {
 	source, child = source.Canonical(), child.Canonical()
-	sourceRef, childRef, err := publishedJoinContinuationRefs(source.Command, child)
-	if err != nil {
-		return PublishedJoinContinuation{}, err
-	}
-	if err := validatePublishedJoinContinuationSemantics(source.Command, child, sourceRef, childRef); err != nil {
+	if err := validatePublishedJoinContinuationProjection(source, child); err != nil {
 		return PublishedJoinContinuation{}, err
 	}
 	return PublishedJoinContinuation{source: source, original: original.Clone(), child: child}, nil
 }
 
-func validatePublishedJoinContinuationFrame(source Activation, original events.Event, child AdmissionCommand) error {
-	if _, err := source.ValidatePublishedOccurrence(original); err != nil {
+func validatePublishedJoinContinuationProjection(source, child AdmissionCommand) error {
+	if err := validatePublishedJoinContinuationFrame(source, child); err != nil {
+		return err
+	}
+	sourceRef, childRef, err := publishedJoinContinuationRefs(source, child)
+	if err != nil {
+		return err
+	}
+	return validatePublishedJoinContinuationSemantics(source, child, sourceRef, childRef)
+}
+
+func validatePublishedJoinContinuationFrame(source, child AdmissionCommand) error {
+	if err := source.Validate(); err != nil {
 		return err
 	}
 	if err := child.Validate(); err != nil {
 		return err
 	}
 	source, child = source.Canonical(), child.Canonical()
-	for _, runID := range []string{source.Command.RunID, child.RunID} {
+	for _, runID := range []string{source.RunID, child.RunID} {
 		id, err := uuid.Parse(runID)
 		if err != nil || id == uuid.Nil || id.String() != runID {
 			return fmt.Errorf("published join continuation requires canonical source and child runs")
 		}
 	}
-	if source.Command.OwnerKind != OwnerSystem || child.OwnerKind != source.Command.OwnerKind ||
-		child.OwnerID != source.Command.OwnerID || source.ClockSuspension != nil ||
-		source.Command.ReplyContext != "" || child.ReplyContext != "" ||
-		child.RunID == source.Command.RunID ||
-		child.Due.Kind != DueAbsolute || !child.Due.Absolute.Equal(source.CurrentDueAt) ||
-		child.ExecutionMode != source.Command.ExecutionMode {
+	if source.OwnerKind != OwnerSystem || child.OwnerKind != source.OwnerKind ||
+		child.OwnerID != source.OwnerID || source.ReplyContext != "" || child.ReplyContext != "" ||
+		child.RunID == source.RunID || source.Due.Kind != DueAbsolute ||
+		child.Due.Kind != DueAbsolute || !child.Due.Absolute.Equal(source.Due.Absolute) ||
+		child.ExecutionMode != source.ExecutionMode {
 		return fmt.Errorf("published join continuation must preserve owner, due and mode with distinct child identity and no reply or clock authority")
 	}
 	return nil
@@ -71,6 +91,12 @@ func publishedJoinContinuationRefs(source, child AdmissionCommand) (timeridentit
 	if !sourceOK || !childOK || sourceRef.Mode() != timeridentity.JoinRefModeArrival || childRef.Mode() != timeridentity.JoinRefModeArrival ||
 		sourceHandle.Kind() != childHandle.Kind() || !sourceRef.Declaration().Equal(childRef.Declaration()) {
 		return timeridentity.JoinRef{}, timeridentity.JoinRef{}, fmt.Errorf("published join continuation requires the same exact arrival declaration and handle kind")
+	}
+	if err := validateExactWorkflowJoinAdmissionCommand(source, sourceHandle); err != nil {
+		return timeridentity.JoinRef{}, timeridentity.JoinRef{}, err
+	}
+	if err := validateExactWorkflowJoinAdmissionCommand(child, childHandle); err != nil {
+		return timeridentity.JoinRef{}, timeridentity.JoinRef{}, err
 	}
 	return sourceRef, childRef, nil
 }
@@ -95,7 +121,7 @@ func validatePublishedJoinContinuationSemantics(source, child AdmissionCommand, 
 	return nil
 }
 
-func (p PublishedJoinContinuation) Present() bool { return p.source.ID != "" }
+func (p PublishedJoinContinuation) Present() bool { return p.source.RunID != "" }
 
 func (p PublishedJoinContinuation) SourceEvent() events.Event {
 	if !p.Present() {
@@ -106,32 +132,34 @@ func (p PublishedJoinContinuation) SourceEvent() events.Event {
 
 func (p PublishedJoinContinuation) ChildCommand() AdmissionCommand { return p.child }
 
+// RetainedPublication binds the child's immediate source, without claiming that
+// the child event has been durably published.
+func (p PublishedJoinContinuation) RetainedPublication(authorityStamp string) (joinruntime.TransferredPublication, error) {
+	if !p.Present() {
+		return joinruntime.TransferredPublication{}, fmt.Errorf("published join continuation is absent")
+	}
+	publication := joinruntime.TransferredPublication{
+		EventID:     activityidentity.ForkLineageEventID(p.child.RunID, p.original.ID()),
+		SourceRunID: p.original.RunID(), SourceEventID: p.original.ID(),
+		AuthorityStamp: authorityStamp, ExecutionMode: p.original.ExecutionMode(),
+	}
+	if err := (TransferredJoinOccurrence{Command: p.child, Publication: publication}).Validate(); err != nil {
+		return joinruntime.TransferredPublication{}, err
+	}
+	return publication, nil
+}
+
 // Event projects the published cause into the child. It admits no new timer
 // occurrence and deliberately keeps producer identity separate from fork authority.
 func (p PublishedJoinContinuation) Event(forkEventID, authorityStamp string) (events.Event, error) {
-	if !p.Present() || forkEventID != activityidentity.ForkLineageEventID(p.child.RunID, p.original.ID()) ||
-		strings.TrimSpace(authorityStamp) == "" {
-		return events.Event{}, fmt.Errorf("published join continuation requires its deterministic child event and selection authority stamp")
-	}
-	lineage, err := events.NewSelectedForkLineage(p.child.RunID, p.source.Command.RunID, p.original.ID(), authorityStamp, p.child.TaskID, p.child.ExecutionMode)
+	publication, err := p.RetainedPublication(authorityStamp)
 	if err != nil {
 		return events.Event{}, err
 	}
-	// Reuse the generic occurrence's numeric and envelope emission projection,
-	// without constructing or admitting a child activation row.
-	projected, err := occurrencePublicationEvent(Activation{Command: p.child}, Occurrence{EventID: forkEventID, DueAt: p.original.CreatedAt()})
-	if err != nil {
-		return events.Event{}, err
+	if forkEventID != publication.EventID {
+		return events.Event{}, fmt.Errorf("published join continuation requires its deterministic child event")
 	}
-	return events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{
-		Facts: events.EventFacts{
-			ID: forkEventID, Type: projected.Type(),
-			Producer: events.ProducerClaim{Type: p.original.Producer().Type(), ID: p.original.Producer().ID()},
-			TaskID:   p.child.TaskID, Payload: projected.Payload(), Envelope: projected.Envelope(),
-			RoutingSource: p.child.RoutingSource, CreatedAt: p.original.CreatedAt(), ExecutionMode: p.child.ExecutionMode,
-		},
-		Lineage: lineage,
-	})
+	return (TransferredJoinOccurrence{Command: p.child, Publication: publication}).Event()
 }
 
 // ValidateEvent checks the sealed child publication frame. Prepared targets,
@@ -141,13 +169,5 @@ func (p PublishedJoinContinuation) ValidateEvent(event events.Event, authoritySt
 	if err != nil {
 		return err
 	}
-	actualLineage, found := event.SelectedForkLineage()
-	expectedLineage, _ := expected.SelectedForkLineage()
-	if !found || actualLineage.DestinationRunID() != expectedLineage.DestinationRunID() ||
-		actualLineage.SourceRunID() != expectedLineage.SourceRunID() || actualLineage.SourceEventID() != expectedLineage.SourceEventID() ||
-		actualLineage.AuthorityStamp() != expectedLineage.AuthorityStamp() || actualLineage.TaskID() != expectedLineage.TaskID() ||
-		actualLineage.ExecutionMode() != expectedLineage.ExecutionMode() {
-		return fmt.Errorf("published join continuation event contradicts its exact selected lineage")
-	}
-	return validateOccurrencePublicationEvent(event, expected)
+	return validateTransferredJoinPublicationEvent(event, expected)
 }

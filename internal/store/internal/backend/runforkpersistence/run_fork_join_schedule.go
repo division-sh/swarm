@@ -21,7 +21,9 @@ func loadRunForkArrivalJoinSchedules(snapshot *runForkRevisionSnapshot, entities
 	}
 	var schedules []genericschedule.Activation
 	owned := make(map[string]struct{})
-	for _, entity := range entities {
+	for index := range entities {
+		entity := &entities[index]
+		entity.PublishedArrivals, entity.TransferredJoins = nil, nil
 		buckets, err := joinruntime.PersistedBuckets(entity.Accumulator)
 		if err != nil {
 			return nil, err
@@ -31,8 +33,18 @@ func loadRunForkArrivalJoinSchedules(snapshot *runForkRevisionSnapshot, entities
 			return nil, err
 		}
 		for _, join := range joins {
-			if err := requireRunForkJoinSourceOwner(snapshot.RunID, entity, join); err != nil {
+			if err := requireRunForkJoinSourceOwner(snapshot.RunID, *entity, join); err != nil {
 				return nil, err
+			}
+			if join.TransferredPublication != nil {
+				transferred, err := genericschedule.NewTransferredJoinOccurrence(join, *join.TransferredPublication)
+				if err != nil {
+					return nil, err
+				}
+				if err := requireRunForkTransferredJoinHistory(snapshot, join, transferred, timers); err != nil {
+					return nil, err
+				}
+				entity.TransferredJoins = append(entity.TransferredJoins, transferred)
 			}
 			rows, err := loadRunForkArrivalArmSchedules(join, timers, owned)
 			if err != nil {
@@ -73,6 +85,9 @@ func loadRunForkArrivalArmSchedules(join joinruntime.Activation, timers map[runF
 	}
 	var schedules []genericschedule.Activation
 	for _, key := range keys {
+		if join.TransferredPublication != nil && key.schedule == join.TimerTaskID() {
+			continue
+		}
 		timer, found := timers[key]
 		if !found {
 			return nil, fmt.Errorf("fixed-revision arrival arm lacks schedule %s", key.schedule)

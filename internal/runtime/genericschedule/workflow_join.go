@@ -2,6 +2,7 @@ package genericschedule
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -16,9 +17,13 @@ func WorkflowJoinAdmission(activation joinruntime.Activation, mode executionmode
 	if err := activation.Validate(); err != nil {
 		return AdmissionCommand{}, err
 	}
-	ref := activation.JoinRef()
+	return workflowJoinAdmissionCommand(activation.TimerHandle(), activation.FireAt, mode)
+}
+
+func workflowJoinAdmissionCommand(handle timeridentity.TimerHandle, fireAt time.Time, mode executionmode.Mode) (AdmissionCommand, error) {
+	ref, valid := handle.JoinRef()
 	entry := ref.StageEntry()
-	if ref.Mode() != timeridentity.JoinRefModeArrival || entry.Empty() || entry.FlowScope != ref.FlowPath() || activation.FireAt.IsZero() {
+	if !valid || !handle.Valid() || ref.Mode() != timeridentity.JoinRefModeArrival || entry.Empty() || entry.FlowScope != ref.FlowPath() || fireAt.IsZero() {
 		return AdmissionCommand{}, fmt.Errorf("arrival join schedule requires its exact lifecycle entry and due coordinate")
 	}
 	var source events.RoutingSource
@@ -35,7 +40,6 @@ func WorkflowJoinAdmission(activation joinruntime.Activation, mode executionmode
 	if err != nil {
 		return AdmissionCommand{}, err
 	}
-	handle := activation.TimerHandle()
 	payload, err := canonicaljson.FromGo(handle.PayloadMetadata())
 	if err != nil {
 		return AdmissionCommand{}, err
@@ -43,9 +47,25 @@ func WorkflowJoinAdmission(activation joinruntime.Activation, mode executionmode
 	command := AdmissionCommand{
 		ScheduleKey: handle.TaskID(), RunID: entry.RunID, EntityID: entry.EntityID, FlowInstance: flowInstance,
 		OwnerKind: OwnerSystem, OwnerID: "workflow-runtime", EventType: handle.EventType(), Payload: payload,
-		RoutingSource: source, ExecutionMode: mode, Due: AbsoluteDue(activation.FireAt), TaskID: handle.TaskID(),
+		RoutingSource: source, ExecutionMode: mode, Due: AbsoluteDue(fireAt), TaskID: handle.TaskID(),
 	}
 	return command, command.Validate()
+}
+
+func validateExactWorkflowJoinAdmissionCommand(command AdmissionCommand, handle timeridentity.TimerHandle) error {
+	expected, err := workflowJoinAdmissionCommand(handle, command.Due.Absolute, command.ExecutionMode)
+	if err != nil {
+		return err
+	}
+	want, err := expected.ImmutableHash()
+	if err != nil {
+		return err
+	}
+	got, err := command.ImmutableHash()
+	if err != nil || got != want {
+		return fmt.Errorf("arrival command contradicts its exact owner, handle, payload or due coordinate")
+	}
+	return nil
 }
 
 // ValidateWorkflowJoinScheduleRelation proves immutable correspondence, not

@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -42,17 +43,79 @@ func prepareRunForkPublishedArrivalTransfer(snapshot *runForkRevisionSnapshot, p
 			return genericschedule.PublishedJoinContinuation{}, err
 		}
 	}
+	for _, source := range plan.TransferredJoins {
+		if source.Publication.EventID != sourceEventID {
+			continue
+		}
+		if continuation.Present() {
+			return genericschedule.PublishedJoinContinuation{}, fmt.Errorf("published arrival transfer repeats a source event")
+		}
+		original, found, err := runForkTransferredJoinEvent(snapshot, source)
+		if err != nil || !found {
+			return genericschedule.PublishedJoinContinuation{}, fmt.Errorf("transferred arrival lacks its exact committed publication: %w", err)
+		}
+		if _, err := requireRunForkPublishedJoinDelivery(snapshot, source.Command, original, true); err != nil {
+			return genericschedule.PublishedJoinContinuation{}, err
+		}
+		command, err := projectRunForkTransferredJoinCommand(plan, childRunID, source)
+		if err != nil {
+			return genericschedule.PublishedJoinContinuation{}, err
+		}
+		continuation, err = genericschedule.ProjectTransferredJoinContinuation(source, original, command)
+		if err != nil {
+			return genericschedule.PublishedJoinContinuation{}, err
+		}
+	}
 	if !continuation.Present() {
 		return genericschedule.PublishedJoinContinuation{}, fmt.Errorf("published arrival transfer lacks its retained source occurrence")
 	}
 	return continuation, nil
 }
 
+func projectRunForkTransferredJoinCommand(plan runfork.RunForkPlan, childRunID string, source genericschedule.TransferredJoinOccurrence) (genericschedule.AdmissionCommand, error) {
+	for _, entity := range plan.Entities {
+		buckets, err := joinruntime.PersistedBuckets(entity.Accumulator)
+		if err != nil {
+			return genericschedule.AdmissionCommand{}, err
+		}
+		joins, err := joinruntime.List(buckets)
+		if err != nil {
+			return genericschedule.AdmissionCommand{}, err
+		}
+		for _, join := range joins {
+			if join.TransferredPublication == nil || join.TransferredPublication.EventID != source.Publication.EventID {
+				continue
+			}
+			current, err := genericschedule.NewTransferredJoinOccurrence(join, *join.TransferredPublication)
+			if err != nil {
+				return genericschedule.AdmissionCommand{}, err
+			}
+			want, err := source.EvidenceDigest()
+			if err != nil {
+				return genericschedule.AdmissionCommand{}, err
+			}
+			got, err := current.EvidenceDigest()
+			if err != nil || want != got {
+				return genericschedule.AdmissionCommand{}, fmt.Errorf("transferred arrival contradicts its exact retained arm")
+			}
+			return projectRunForkArrivalJoinCommand(plan, childRunID, join, source.Command)
+		}
+	}
+	return genericschedule.AdmissionCommand{}, fmt.Errorf("transferred arrival lacks its exact retained arm")
+}
+
 func requireRunForkPublishedArrivalDelivery(snapshot *runForkRevisionSnapshot, activation genericschedule.Activation, event events.Event) (events.DeliveryRoute, error) {
 	if snapshot == nil || snapshot.RunID != activation.Command.RunID || event.RunID() != snapshot.RunID || event.ID() != activation.CurrentEventID {
 		return events.DeliveryRoute{}, fmt.Errorf("published arrival delivery requires its exact source occurrence")
 	}
-	payload, object := activation.Command.Payload.Interface().(map[string]any)
+	return requireRunForkPublishedJoinDelivery(snapshot, activation.Command, event, true)
+}
+
+func requireRunForkPublishedJoinDelivery(snapshot *runForkRevisionSnapshot, command genericschedule.AdmissionCommand, event events.Event, unfinished bool) (events.DeliveryRoute, error) {
+	if snapshot == nil || snapshot.RunID != command.RunID || event.RunID() != snapshot.RunID {
+		return events.DeliveryRoute{}, fmt.Errorf("published join requires exact source ownership")
+	}
+	payload, object := command.Payload.Interface().(map[string]any)
 	if !object {
 		return events.DeliveryRoute{}, fmt.Errorf("published arrival delivery requires an object handle")
 	}
@@ -69,7 +132,7 @@ func requireRunForkPublishedArrivalDelivery(snapshot *runForkRevisionSnapshot, a
 		if row.EventID != event.ID() {
 			continue
 		}
-		if err := validateRunForkPublishedArrivalDelivery(snapshot, delivery, event, ref, want); err != nil {
+		if err := validateRunForkPublishedArrivalDelivery(snapshot, delivery, event, ref, want, unfinished); err != nil {
 			return events.DeliveryRoute{}, err
 		}
 		if found {
@@ -84,13 +147,13 @@ func requireRunForkPublishedArrivalDelivery(snapshot *runForkRevisionSnapshot, a
 	return original, nil
 }
 
-func validateRunForkPublishedArrivalDelivery(snapshot *runForkRevisionSnapshot, delivery runForkRevisionDelivery, event events.Event, ref timeridentity.JoinRef, want events.RouteIdentity) error {
+func validateRunForkPublishedArrivalDelivery(snapshot *runForkRevisionSnapshot, delivery runForkRevisionDelivery, event events.Event, ref timeridentity.JoinRef, want events.RouteIdentity, unfinished bool) error {
 	row := delivery.Snapshot
 	if row.RunID != snapshot.RunID || row.DeliveryID == "" || delivery.FirstRevision <= 0 ||
 		delivery.Revision < delivery.FirstRevision || delivery.Revision > snapshot.Revision {
 		return fmt.Errorf("published arrival delivery contradicts its fixed cut")
 	}
-	if row.Status != deliverylifecycle.StatusPending && row.Status != deliverylifecycle.StatusInProgress && row.Status != deliverylifecycle.StatusFailed {
+	if unfinished && row.Status != deliverylifecycle.StatusPending && row.Status != deliverylifecycle.StatusInProgress && row.Status != deliverylifecycle.StatusFailed {
 		return fmt.Errorf("published arrival transfer requires unfinished source work")
 	}
 	route := row.Route
@@ -126,8 +189,11 @@ func (a runForkSourceStateAdmission) publishedArrival(event runfork.RunForkSelec
 	if err != nil {
 		return event, err
 	}
+	if err := attachRunForkPublishedArrivals(a.snapshot, entities, arrivals); err != nil {
+		return event, err
+	}
 	plan := runfork.RunForkPlan{SourceRunID: a.snapshot.RunID, Entities: entities,
-		JoinSchedules: arrivals, ForkPoint: runfork.RunForkPoint{Revision: a.snapshot.Revision}}
+		JoinSchedules: arrivals, TransferredJoins: runForkTransferredJoins(entities), ForkPoint: runfork.RunForkPoint{Revision: a.snapshot.Revision}}
 	for _, reply := range a.snapshot.ReplyContexts {
 		plan.ReplyContexts = append(plan.ReplyContexts, reply.Record)
 	}
@@ -148,13 +214,18 @@ func (a runForkSourceStateAdmission) publishedArrival(event runfork.RunForkSelec
 	if event.RoutingSource != projected.RoutingSource() {
 		return event, fmt.Errorf("selected arrival producer disagrees with its exact child projection")
 	}
-	var activation genericschedule.Activation
+	var command genericschedule.AdmissionCommand
 	for _, arrival := range arrivals {
 		if arrival.CurrentEventID == event.SourceEventID {
-			activation = arrival
+			command = arrival.Command
 		}
 	}
-	route, err := requireRunForkPublishedArrivalDelivery(a.snapshot, activation, original)
+	for _, source := range plan.TransferredJoins {
+		if source.Publication.EventID == event.SourceEventID {
+			command = source.Command
+		}
+	}
+	route, err := requireRunForkPublishedJoinDelivery(a.snapshot, command, original, true)
 	if err != nil {
 		return event, err
 	}

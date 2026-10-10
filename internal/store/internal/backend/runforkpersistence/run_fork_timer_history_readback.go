@@ -54,7 +54,7 @@ func requireRunForkTimerHistory(ctx context.Context, attempt *mutationprotocol.A
 	if !materializable {
 		return admission, nil
 	}
-	inventory, err := runForkTimerRecordInventory(plan.SourceRunID, plan.WorkflowTimers, plan.JoinSchedules)
+	inventory, err := runForkTimerRecordInventory(plan.SourceRunID, plan.WorkflowTimers, plan.JoinSchedules, plan.TransferredJoins...)
 	if err != nil {
 		return admission, err
 	}
@@ -64,21 +64,25 @@ func requireRunForkTimerHistory(ctx context.Context, attempt *mutationprotocol.A
 		return admission, err
 	}
 	published := plan.HistoricalArrivalCoordinates()
-	if len(projected) != len(inventory.ActiveTimerIDs) || len(arrivals)+len(published) != len(inventory.ArrivalScheduleIDs) {
+	transferred, err := readRunForkTransferredJoinInventory(ctx, attempt, plan, childRunID)
+	if err != nil {
+		return admission, err
+	}
+	if len(projected) != len(inventory.ActiveTimerIDs) || len(arrivals)+len(transferred) != len(inventory.ArrivalScheduleIDs)+len(inventory.TransferredPublicationIDs) {
 		return admission, fmt.Errorf("timer history readback omitted an inherited family")
 	}
-	applied, err := runForkTimerAppliedCertificate(pending, childRunID, bornAt, projected, arrivals, published)
+	applied, err := runForkTimerAppliedCertificate(pending, childRunID, bornAt, projected, arrivals, published, transferred...)
 	if err != nil {
 		return admission, err
 	}
 	if err := attempt.RequireExistingSQLFrame(ctx); err != nil {
 		return admission, err
 	}
-	return dischargeMaterializedRunForkTimerAdmission(admission, pending, applied, len(projected)+len(arrivals)+len(published))
+	return dischargeMaterializedRunForkTimerAdmission(admission, pending, applied, len(projected)+len(arrivals)+len(transferred))
 }
 
 func hasRunForkTimerHistory(plan runfork.RunForkPlan, admission runfork.RunForkReplayResumeAdmission) bool {
-	if len(plan.WorkflowTimers)+len(plan.JoinSchedules) != 0 {
+	if len(plan.WorkflowTimers)+len(plan.JoinSchedules)+len(plan.TransferredJoins) != 0 {
 		return true
 	}
 	for _, blocker := range admission.UnsupportedBlockers {

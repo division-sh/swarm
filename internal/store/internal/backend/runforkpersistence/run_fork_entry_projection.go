@@ -6,6 +6,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -120,6 +121,10 @@ func projectRunForkEntityExecutionState(entity runfork.RunForkEntityState, sourc
 		if err != nil {
 			return nil, nil, nil, err
 		}
+		child, err = projectRunForkJoinPublication(entity, source, child)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		nodeBucket := buckets["handler_joins:"+source.JoinRef().Node().Key()]
 		stored := nodeBucket["handler_joins"].(map[string]any)
 		if _, occupied := stored[child.Key()]; occupied {
@@ -131,4 +136,44 @@ func projectRunForkEntityExecutionState(entity runfork.RunForkEntityState, sourc
 		delete(stored, source.Key())
 	}
 	return bookkeeping, accumulator, correspondence, nil
+}
+
+func projectRunForkJoinPublication(entity runfork.RunForkEntityState, source, child joinruntime.Activation) (joinruntime.Activation, error) {
+	if source.TransferredPublication != nil {
+		retained, err := genericschedule.NewTransferredJoinOccurrence(source, *source.TransferredPublication)
+		if err != nil {
+			return child, err
+		}
+		command, err := genericschedule.WorkflowJoinAdmission(child, retained.Command.ExecutionMode)
+		if err != nil {
+			return child, err
+		}
+		projected, err := retained.Project(command, runfork.RunForkSelectedContractExecutionOwner)
+		if err != nil {
+			return child, err
+		}
+		child.TransferredPublication = &projected.Publication
+	}
+	for _, publication := range entity.PublishedArrivals {
+		if publication.Command().TaskID != source.TimerTaskID() {
+			continue
+		}
+		if child.TransferredPublication != nil {
+			return child, fmt.Errorf("join has competing physical and transferred publication evidence")
+		}
+		command, err := genericschedule.WorkflowJoinAdmission(child, publication.Command().ExecutionMode)
+		if err != nil {
+			return child, err
+		}
+		continuation, err := publication.Continuation(command)
+		if err != nil {
+			return child, err
+		}
+		retained, err := continuation.RetainedPublication(runfork.RunForkSelectedContractExecutionOwner)
+		if err != nil {
+			return child, err
+		}
+		child.TransferredPublication = &retained
+	}
+	return child, child.Validate()
 }

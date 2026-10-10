@@ -133,7 +133,11 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	if err != nil {
 		return runForkAdmissionEvidence{}, err
 	}
-	timerHistory, err := loadRunForkTimerHistoryInventory(snapshot, facts, ownedSchedules, arrivals)
+	if err := attachRunForkPublishedArrivals(snapshot, entities, arrivals); err != nil {
+		return runForkAdmissionEvidence{}, err
+	}
+	transferred := runForkTransferredJoins(entities)
+	timerHistory, err := loadRunForkTimerHistoryInventory(snapshot, facts, ownedSchedules, arrivals, transferred...)
 	if err != nil {
 		return runForkAdmissionEvidence{}, err
 	}
@@ -166,9 +170,10 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	}
 	return runForkAdmissionEvidence{
 		Pending:                 pending,
-		RelevantTimer:           len(timerHistory.WorkflowTimerIDs)+len(timerHistory.ArrivalScheduleIDs)+len(timerHistory.UnresolvedTimerIDs) != 0,
+		RelevantTimer:           len(timerHistory.WorkflowTimerIDs)+len(timerHistory.ArrivalScheduleIDs)+len(timerHistory.TransferredPublicationIDs)+len(timerHistory.UnresolvedTimerIDs) != 0,
 		TimerHistory:            timerHistory,
 		JoinSchedules:           arrivals,
+		TransferredJoins:        transferred,
 		RouteHistory:            runfork.RunForkRouteHistoryProjection{State: routeState},
 		ActiveSession:           activeSession,
 		ActiveConversationAudit: len(snapshot.ConversationAudits) > 0,
@@ -177,7 +182,7 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	}, nil
 }
 
-func loadRunForkTimerHistoryInventory(snapshot *runForkRevisionSnapshot, facts runForkSourceFacts, ownedSchedules map[string]struct{}, arrivals []genericschedule.Activation) (runForkTimerHistoryInventory, error) {
+func loadRunForkTimerHistoryInventory(snapshot *runForkRevisionSnapshot, facts runForkSourceFacts, ownedSchedules map[string]struct{}, arrivals []genericschedule.Activation, transferred ...genericschedule.TransferredJoinOccurrence) (runForkTimerHistoryInventory, error) {
 	entityIDs, flowInstances := stringSliceSet(facts.EntityIDs), stringSliceSet(facts.FlowInstances)
 	seen := make(map[string]struct{}, len(snapshot.Timers))
 	var records []pipeline.WorkflowTimerActivationPersistenceRecord
@@ -225,7 +230,7 @@ func loadRunForkTimerHistoryInventory(snapshot *runForkRevisionSnapshot, facts r
 	if len(arrivalByID) != 0 {
 		return runForkTimerHistoryInventory{}, fmt.Errorf("arrival inventory omits its physical source row")
 	}
-	inventory, err := runForkTimerRecordInventory(snapshot.RunID, records, arrivals)
+	inventory, err := runForkTimerRecordInventory(snapshot.RunID, records, arrivals, transferred...)
 	if err != nil {
 		return runForkTimerHistoryInventory{}, err
 	}

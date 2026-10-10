@@ -21042,6 +21042,15 @@ run_model:
         construction-context projection; no new return destination or arm is inferred. Source publication evidence
         and complete native inventory do not authorize execution or establish delivery settlement. Prepared-only
         occurrence stamps cannot take this branch, and accepted source occurrences never enter ForkJoinRequest.
+        The child accumulator retains a distinct non-executable transferred-publication fact with deterministic child
+        event identity, immediate source run/event, selection stamp and mode. Historical reconstruction requires either
+        the exact physical arm or that transferred fact, never both, and validates the actual revisioned event and durable
+        delivery when published. Before publication the fact does not invent event membership or discharge the
+        existing publication-continuation capability blocker. This distinction survives
+        settlement, restart and further forks through complete inventory, native accumulator readback and preparation
+        certificates. Further continuation requires the exact historical unfinished delivery; provenance alone grants
+        neither execution nor rearm. Event history retains the same complete selected-lineage owner relation as live
+        readback, including duplicate-owner rejection. No additional timer or history family is created.
         Current selected authority still gates publication, original event/lineage readback precedes duplicate
         receiver preflight on successor recovery, and terminal completion requires the exact child delivery outcome.
         Generic live reads and fixed-cut reconstruction share the typed origin decoder and reject partial or

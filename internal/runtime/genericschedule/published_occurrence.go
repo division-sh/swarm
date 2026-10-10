@@ -10,15 +10,19 @@ import (
 )
 
 func occurrencePublicationEvent(activation Activation, occurrence Occurrence) (events.Event, error) {
-	projected, err := workflowexpr.ProjectSemanticValue(activation.Command.Payload)
-	if err != nil {
-		return events.Event{}, err
-	}
-	payload, err := canonicaljson.MarshalPreservingNumberKinds(projected)
+	payload, err := occurrencePublicationPayload(activation.Command)
 	if err != nil {
 		return events.Event{}, err
 	}
 	return occurrenceEvent(activation, occurrence, payload)
+}
+
+func occurrencePublicationPayload(command AdmissionCommand) ([]byte, error) {
+	projected, err := workflowexpr.ProjectSemanticValue(command.Payload)
+	if err != nil {
+		return nil, err
+	}
+	return canonicaljson.MarshalPreservingNumberKinds(projected)
 }
 
 // ValidatePublishedOccurrence proves retained publication evidence, never a

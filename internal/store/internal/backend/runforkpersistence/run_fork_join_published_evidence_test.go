@@ -18,6 +18,8 @@ func genericPublicationRevisionEvent(record eventrecord.Record, event events.Eve
 		RoutingSource: event.RoutingSource(), TargetRoute: record.TargetRoute, TargetSet: record.TargetSet,
 		RouteSettlement: record.RouteSettlement, Payload: record.Payload, ChainDepth: record.ChainDepth,
 		ProducedBy: record.ProducedBy, ProducedByType: string(record.ProducedByType), SourceEventID: record.SourceEventID,
+		SelectedForkSourceRunID: record.SelectedForkSourceRunID, SelectedForkSourceEventID: record.SelectedForkSourceEventID,
+		SelectedForkAuthorityStamp: record.SelectedForkAuthorityStamp, SelectedForkLineageOwners: record.SelectedForkLineageOwners,
 		CreatedAt: record.CreatedAt, PayloadSchemaBundleHash: record.PayloadSchemaBundleHash,
 		PayloadSchemaFlowID: record.PayloadSchemaFlowID, PayloadSchemaEventKey: record.PayloadSchemaEventKey,
 		PayloadSchemaDigest: record.PayloadSchemaDigest, PayloadSchemaClass: record.PayloadSchemaClass,

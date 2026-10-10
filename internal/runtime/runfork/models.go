@@ -274,6 +274,7 @@ type RunForkPlan struct {
 	ReplyContexts             []replycontext.Record                           `json:"-"`
 	WorkflowTimers            []timerobligation.WorkflowTimerActivationRecord `json:"-"`
 	JoinSchedules             []genericschedule.Activation                    `json:"-"`
+	TransferredJoins          []genericschedule.TransferredJoinOccurrence     `json:"-"`
 	EventCountAtFork          int                                             `json:"event_count_at_fork"`
 	ReconstructedEntityCount  int                                             `json:"reconstructed_entity_count"`
 	PendingWorkCount          int                                             `json:"pending_work_count"`
@@ -554,14 +555,16 @@ type RunForkRouteHistoryProjection struct {
 }
 
 type RunForkEntityState struct {
-	EntityID                string                                     `json:"entity_id"`
-	CurrentState            string                                     `json:"current_state,omitempty"`
-	EnteredStateAt          *time.Time                                 `json:"entered_state_at,omitempty"`
-	Fields                  map[string]any                             `json:"fields,omitempty"`
-	Bookkeeping             map[string]any                             `json:"bookkeeping,omitempty"`
-	Gates                   map[string]any                             `json:"gates,omitempty"`
-	Accumulator             map[string]any                             `json:"accumulator,omitempty"`
-	MaterializationMetadata *RunForkMaterializedEntitySnapshotMetadata `json:"materialization_metadata,omitempty"`
+	EntityID                string                                      `json:"entity_id"`
+	CurrentState            string                                      `json:"current_state,omitempty"`
+	EnteredStateAt          *time.Time                                  `json:"entered_state_at,omitempty"`
+	Fields                  map[string]any                              `json:"fields,omitempty"`
+	Bookkeeping             map[string]any                              `json:"bookkeeping,omitempty"`
+	Gates                   map[string]any                              `json:"gates,omitempty"`
+	Accumulator             map[string]any                              `json:"accumulator,omitempty"`
+	PublishedArrivals       []PublishedArrival                          `json:"-"`
+	TransferredJoins        []genericschedule.TransferredJoinOccurrence `json:"-"`
+	MaterializationMetadata *RunForkMaterializedEntitySnapshotMetadata  `json:"materialization_metadata,omitempty"`
 }
 
 type RunForkPendingWork struct {

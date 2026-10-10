@@ -56,6 +56,9 @@ func prepareRunForkArrivalJoinSchedules(plan runfork.RunForkPlan, childRunID str
 				return nil, err
 			}
 			for _, key := range keys {
+				if join.TransferredPublication != nil && key.schedule == join.TimerTaskID() {
+					continue
+				}
 				source, found := byKey[key]
 				if !found {
 					return nil, fmt.Errorf("retained arrival arm lacks its exact source schedule")
@@ -83,6 +86,10 @@ func projectRunForkArrivalJoinSchedule(plan runfork.RunForkPlan, childRunID stri
 	if err := genericschedule.ValidateWorkflowJoinScheduleRelation(join, source); err != nil {
 		return genericschedule.AdmissionCommand{}, err
 	}
+	return projectRunForkArrivalJoinCommand(plan, childRunID, join, source.Command)
+}
+
+func projectRunForkArrivalJoinCommand(plan runfork.RunForkPlan, childRunID string, join joinruntime.Activation, source genericschedule.AdmissionCommand) (genericschedule.AdmissionCommand, error) {
 	ref, err := projectConstructionReturnAtCut(plan, childRunID, join.JoinRef())
 	if err != nil {
 		return genericschedule.AdmissionCommand{}, err
@@ -91,7 +98,7 @@ func projectRunForkArrivalJoinSchedule(plan runfork.RunForkPlan, childRunID stri
 	if err != nil {
 		return genericschedule.AdmissionCommand{}, err
 	}
-	if source.Command.TaskID != join.TimerTaskID() {
+	if source.TaskID != join.TimerTaskID() {
 		handle, err := timeridentity.JoinTimeoutHandle(ref)
 		if err != nil {
 			return genericschedule.AdmissionCommand{}, err
@@ -101,5 +108,5 @@ func projectRunForkArrivalJoinSchedule(plan runfork.RunForkPlan, childRunID stri
 			return genericschedule.AdmissionCommand{}, err
 		}
 	}
-	return genericschedule.WorkflowJoinAdmission(child, source.Command.ExecutionMode)
+	return genericschedule.WorkflowJoinAdmission(child, source.ExecutionMode)
 }
