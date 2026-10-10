@@ -187,20 +187,6 @@ type processIngressOwner struct {
 
 type processIngressTargetOwners []processIngressOwner
 
-type processIngressNoFlowDescriptors struct{}
-
-func (processIngressNoFlowDescriptors) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-
-func (processIngressNoFlowDescriptors) ListActiveFlowInstanceDescriptorsForScope(context.Context, string, []string, []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-
-func (processIngressNoFlowDescriptors) ListActiveFlowInstanceDescriptorsForKey(context.Context, string, string, string, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-
 func TestProcessIngressTargetOwnersRespectSelectedScope(t *testing.T) {
 	owners := processIngressTargetOwners{
 		{RunID: "run-a", FlowInstance: "ingress-a", EntityID: "entity-a"},

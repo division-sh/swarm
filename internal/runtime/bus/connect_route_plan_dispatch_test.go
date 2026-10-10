@@ -795,19 +795,6 @@ func connectRoutePlanRootProducerEvent(id string, eventType events.EventType, so
 	return eventtest.RunCreatingRootIngressWithRoutingSource(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, source, createdAt)
 }
 
-func connectRoutePlanConcreteProducerEvent(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	if strings.TrimSpace(runID) == "" {
-		runID = busInternalTestRunID
-	}
-	source, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
-		FlowID: "child", FlowInstance: "child/inst-9", EntityID: eventtest.UUID("child-source-entity"),
-	})
-	if err != nil {
-		panic(err)
-	}
-	return eventtest.RunCreatingRootIngressWithRoutingSource(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, source, createdAt)
-}
-
 func connectReceiverPinCollisionSource(t testing.TB, producerMode string, rootReceiver bool, subscriberType string, mixed bool) semanticview.Source {
 	inputs := []runtimecontracts.FlowInputEventPin{
 		{Event: "work.accepted"},
