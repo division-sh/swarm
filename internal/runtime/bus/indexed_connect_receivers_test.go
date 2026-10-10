@@ -42,10 +42,14 @@ func TestTargetOwnerProjectionConsumesOnlyScopedIndexObservations(t *testing.T) 
 	if err != nil || !available || len(owners) != 2 {
 		t.Fatalf("target projection consulted a parallel descriptor reader: %+v available=%t err=%v", owners, available, err)
 	}
+	candidates := (selectedRunTargetOwnerProjection{descriptors: owners}).targetOwnerCandidates()
 	for i, observed := range scope.observations {
 		identity := observed.Identity()
 		if owners[i].FlowID != identity.TemplateID || owners[i].FlowInstance != identity.InstancePath || owners[i].EntityID != identity.EntityID {
 			t.Fatalf("target owner lost its admitted declaration/coordinate: %+v != %+v", owners[i], identity)
+		}
+		if candidates[i].Route.FlowID != identity.TemplateID || candidates[i].Route.FlowInstance != identity.InstancePath || candidates[i].Route.EntityID != identity.EntityID {
+			t.Fatalf("target candidate reinterpreted its stored path as a declaration: %+v != %+v", candidates[i], identity)
 		}
 	}
 	index.observations = nil
