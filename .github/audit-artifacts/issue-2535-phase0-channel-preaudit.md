@@ -1484,3 +1484,45 @@ pushed head. No Local-Tier core claim, new server2 qualification, receipt waiver
 deadline/assertion change, guard exception, baseline increase or new owner.
 Hosted exact-head full/900s soak success, final proof audit and review still
 precede merge;2535/2353/2394/2250 remain open.
+
+## Mailbox Projection Fault Overlay Signature And Master Integration
+
+Hosted full38019551719 at0aea FAILS serveapp-mailbox-p-q with a deterministic
+compiler error, not a flaky transaction or an E2E-13/native uncertainty red.
+The compiler-only projection fault overlay injects two-value error returns
+into acknowledgeNoticeTx, whose notice-change fact now makes its result
+(Completion,bool,error). The public mailbox methods already expose completion/
+replay/error; the added inner bool is the domain changed fact, not replay.
+Normal production acknowledgment callers already consume all three values.
+At exact master44c4047f0 the inner acknowledgeNoticeTx STILL returns two values;
+the public completion/replayed/error methods are three-value on both trees.
+This PR adds the INNER changed fact and failed to update its old compiler
+overlay consumer. The fault fixture is unchanged from master, but its target
+signature is NOT identical. Therefore this is PR-owned fixture integration
+debt, not an inherited failure; do not conflate the two distinct boolean facts.
+
+Rebase all21 signed linear commits onto current master44c4047f0; it applies
+without textual conflict. The production mailbox/decision/fork/publication
+delta is unchanged by that integration. Preserve master's verify-run selectors,
+inspection ownership/outcomes, artifact inventory and spec sections. No manual
+merge of generated artifacts, new semantic owner, compatibility or vendor path.
+
+Correct only the compile-time fixture's explicit return values at its two
+existing projection sites: card projection returns zero completion/error;
+notice projection returns zero completion/false changed/error. Keep actual
+domain transaction owners, exact witness, rollback/notified/completion checks,
+all anchor kinds, both stores and subsequent public successful control. No new
+runtime hook, fault-cut relocation, raw observer site, retry, budget or assertion
+change. The old full remains RED and source approval6093176234 is SHA-specific;
+it cannot transfer through rebase without reviewer-G's pinned delta verdict.
+
+Run the real mailbox projection-overlay fault proof and affected notice/card
+completion, public channel acknowledgment and both-store predecessor crash
+controls at the integrated head, plus affected authority/debt/spec/planner
+guards. Publish their exact receipts and the rebase delta before one push.
+LOCAL remains focused-only; no duplicate tier or server2 reservation. Hosted
+full at the new SHA remains required; prior passing channel/soak jobs are
+historical evidence, not new-head CI credit. The timing job's failure must be
+read directly rather than assumed independent growth or an assertion waiver.
+Its actual log reports INCOMPLETE, after the failed overlay receipt and
+fail-fast missing/canceled units; no independent elapsed-growth red is reported.
