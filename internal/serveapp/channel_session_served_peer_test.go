@@ -298,6 +298,28 @@ func (p *serveNativeProtocolPeer) text(text, id string) {
 		p.t.Fatal("encrypted input requires the original connected sender")
 	}
 	message := sender.EncryptText(p.t, text, id)
+	p.sendEncrypted(message, id)
+}
+
+func (p *serveNativeProtocolPeer) reply(text, id string, original servedNativeMessage) {
+	p.t.Helper()
+	p.mu.Lock()
+	sender := p.sender
+	p.mu.Unlock()
+	if sender == nil {
+		p.t.Fatal("encrypted reply requires the original sender")
+	}
+	p.sendEncrypted(sender.EncryptReply(p.t, text, id, original.ID, original.Body.GetConversation()), id)
+}
+
+func (p *serveNativeProtocolPeer) sendEncrypted(message waBinary.Node, id string) {
+	p.t.Helper()
+	p.mu.Lock()
+	wire := p.wire
+	p.mu.Unlock()
+	if wire == nil {
+		p.t.Fatal("encrypted input requires the original connected wire")
+	}
 	if err := wire.Send(p.ctx, message); err != nil {
 		p.t.Fatal(err)
 	}

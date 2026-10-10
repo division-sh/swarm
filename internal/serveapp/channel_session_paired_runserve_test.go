@@ -23,6 +23,15 @@ import (
 )
 
 func TestRunServeWhatsAppSignedPairingBothStores(t *testing.T) {
+	testRunServeWhatsAppSignedPairing(t, false)
+}
+
+func TestRunServeWhatsAppQuotedCardDecisionBothStores(t *testing.T) {
+	testRunServeWhatsAppSignedPairing(t, true)
+}
+
+func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool) {
+	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
@@ -169,12 +178,23 @@ func TestRunServeWhatsAppSignedPairingBothStores(t *testing.T) {
 					t.Error(err)
 				}
 			})
+			if quotedRetirement {
+				peer.text("Please review the service", "SERVED_RETIRE_TRIGGER")
+				waitServedNativePendingCard(t, endpoint)
+			}
 			peer.text("/inbox", "SERVED_INBOX")
 			observation := render.IntentObservationQuery{Kind: render.IntentText, Provider: "whatsapp",
 				MessageReference: "SERVED_INBOX", ConversationReference: from.String(), InterfaceKey: result.Operation.Interface.Key()}
 			waitTextReplyIntent(t, reader, observation, "entry")
 			requireNativeIntentObservationScope(t, reader, observation)
-			requireServedNativeInboxReply(t, endpoint, peer, reader)
+			cards := requireServedNativeInboxReply(t, endpoint, peer, reader)
+			if quotedRetirement {
+				requireServedNativeQuotedRetirement(t, endpoint, peer, reader, observation, cards)
+				if code := process.stop(); code != 0 {
+					t.Fatal("quoted retirement RunServe did not join", code, process.outputString())
+				}
+				return
+			}
 			pairingFiles, err := filepath.Glob(filepath.Join(opts.SwarmDir, "*", "session.json"))
 			if err != nil || len(pairingFiles) != 1 {
 				t.Fatal("single actual pairing owner has no exact retained header", pairingFiles, err)
@@ -289,7 +309,7 @@ func requireServedNativeDisconnect(t *testing.T, peer *serveNativeProtocolPeer) 
 	return 0
 }
 
-func requireServedNativeInboxReply(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, reader storetest.ChannelObservation) {
+func requireServedNativeInboxReply(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, reader storetest.ChannelObservation) []servedNativeMessage {
 	t.Helper()
 	var sent servedNativeMessage
 	var cards []servedNativeMessage
@@ -373,9 +393,91 @@ waiting:
 			if sent.Body.GetConversation() != want || sent.ID != strings.ReplaceAll(receipt.OperationID, "-", "") {
 				t.Fatal("decrypted native Inbox differs from canonical public list/exact journal", sent.Body.GetConversation(), want, receipt)
 			}
-			return
+			return cards
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("decrypted native Inbox had no exact settled delivery receipt", sent.ID, sent.Body.GetConversation(), last)
+	return nil
+}
+
+func requireServedNativeQuotedRetirement(t *testing.T, endpoint string, peer *serveNativeProtocolPeer,
+	reader storetest.ChannelObservation, observation render.IntentObservationQuery, cards []servedNativeMessage,
+) {
+	t.Helper()
+	cardID := waitServedNativePendingCard(t, endpoint)
+	var selected servedNativeMessage
+	for _, card := range cards {
+		if strings.Contains(card.Body.GetConversation(), "\nReference: "+cardID+"\n") {
+			if selected.ID != "" {
+				t.Fatal("served baseline has multiple retirement cards")
+			}
+			selected = card
+		}
+	}
+	if selected.ID == "" {
+		select {
+		case selected = <-peer.sent:
+		case <-time.After(5 * time.Second):
+			plans, err := reader.ListCurrentChannelDeliveryPlans(context.Background(), "", 200)
+			t.Fatal("served native retirement card was not delivered", plans, err)
+		}
+	}
+	retirementChoice := false
+	for _, line := range strings.Split(selected.Body.GetConversation(), "\n") {
+		if label, action := strings.CutPrefix(line, "Action: "); action && render.MatchesTextControl(label, "Retire") {
+			retirementChoice = true
+		}
+	}
+	if !strings.Contains(selected.Body.GetConversation(), "\nReference: "+cardID+"\n") || !retirementChoice {
+		t.Fatal("served peer did not receive the actual retirement choice", selected.Body.GetConversation())
+	}
+	var detail struct {
+		Card struct {
+			ID      string `json:"card_id"`
+			Status  string `json:"status"`
+			Verdict string `json:"verdict"`
+		} `json:"decision_card"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, &detail)
+	if detail.Card.ID != cardID || detail.Card.Status == "decided" {
+		t.Fatal("delivered retirement card was not publicly pending", detail)
+	}
+	peer.reply("Retire", "SERVED_QUOTED_RETIRE", selected)
+	observation.MessageReference = "SERVED_QUOTED_RETIRE"
+	waitTextReplyIntent(t, reader, observation, "control")
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		requireServedJSONRPCResult(t, endpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, &detail)
+		if detail.Card.ID == cardID && detail.Card.Status == "decided" && detail.Card.Verdict == "retire" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("durable encrypted reply did not decide the exact public retirement card", detail)
+}
+
+func waitServedNativePendingCard(t *testing.T, endpoint string) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var page struct {
+			Items []struct {
+				Kind string `json:"kind"`
+				Card struct {
+					ID string `json:"card_id"`
+				} `json:"decision_card"`
+			} `json:"items"`
+		}
+		requireServedJSONRPCResult(t, endpoint, "mailbox.list", map[string]any{"status": "pending", "limit": 200}, &page)
+		if len(page.Items) == 1 && page.Items[0].Kind == "decision_card" && page.Items[0].Card.ID != "" {
+			return page.Items[0].Card.ID
+		}
+		if len(page.Items) > 1 {
+			t.Fatal("native quoted-action proof has ambiguous pending cards", page)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("genuine encrypted business input did not reach its authored stage gate")
+	return ""
 }
