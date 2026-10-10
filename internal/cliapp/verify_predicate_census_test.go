@@ -36,6 +36,8 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/channelonboarding/compiler.go", "A10,A27", "2577-native-publication,P08,P10,P21"},
 	{"internal/channelonboarding/session_activity.go", "A10,A27", "2577-authored-session-activity,P08,P10,P21"},
 	{"internal/runtime/pipeline/channel_session_activity.go", "A10,A27", "2577-authored-session-activity,P08,P10,P21"},
+	{"internal/runtime/activity_validation.go", "A10,A27", "2577-authored-session-activity,P08,P10,P21"},
+	{"internal/runtime/tools/validation.go", "A10,A27", "2577-authored-session-activity,P08,P10,P21"},
 	{"internal/channelonboarding/publication.go", "A10,A27", "2577-native-publication,P08,P10,P21"},
 	{"internal/runtime/channel_activation_admission.go", "A10,A27", "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21"},
 	{"internal/runtime/channelactivation/owner.go", "A10,A27", "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21"},

@@ -214,7 +214,7 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, quotedRetirement bool, rese
 				}
 			})
 			if authoredReply {
-				requireServedNativeAuthoredCustomerReply(t, peer)
+				requireServedNativeAuthoredCustomerReply(t, endpoint, peer)
 			}
 			if quotedRetirement {
 				peer.text("Please review the service", "SERVED_RETIRE_TRIGGER")

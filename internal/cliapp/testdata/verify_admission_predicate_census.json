@@ -201,7 +201,7 @@
     "owner": "internal/channelonboarding/session_activity.go::CompileSessionActivityTarget",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "1f658878b1126d9770b75754facf6654a22187fc8d2e7c02f363278a6ba60ea2"
+    "body_sha256": "8fcce620ea8e02226e2a8c02bd5a3a8b09f331870fb6efcb8edbf5e73a5237db"
   },
   {
     "owner": "internal/channelonboarding/session_activity.go::CompiledSessionActivityTarget.Activation",
@@ -234,10 +234,28 @@
     "body_sha256": "ef1d6c10a735b5cf137c591cccbe14eb4fcc77bb337716ba1aa7f421112b96d1"
   },
   {
+    "owner": "internal/channelonboarding/session_activity.go::QualifySessionActivityDeclaration",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "6e90c905dd51a3e3e46a1aec396741706d1b1c61ca3b882dfffe09b48f6aeda2"
+  },
+  {
+    "owner": "internal/channelonboarding/session_activity.go::ResolveSessionActivitySite",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "fbc8f33a3bb18d00b6bff7cd92c4850026dcd688e9d8c0de363014af5d97767a"
+  },
+  {
     "owner": "internal/channelonboarding/session_activity.go::compileSessionActivityDeclaration",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
     "body_sha256": "fe8fdf85b52e9067813125d52d5bd6a349fee894f638943f4ac5b5f96dc324b6"
+  },
+  {
+    "owner": "internal/channelonboarding/session_activity.go::matchSessionActivityConnector",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "b7e974a125dc075b0dcbad1e263a2885c62ab73e39860cef79710a49a08ce9f9"
   },
   {
     "owner": "internal/channelonboarding/session_activity.go::sessionActivitySiteDeclared",
@@ -904,6 +922,60 @@
     "audit_rows": "A15,A18",
     "proof_families": "P13,P15",
     "body_sha256": "fe0a225422a51fb9ca92bd47d025d9ab8f6a9704fa6e27e827cd177f701bce18"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::activityRevisionConsumerExists",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "69e32ee7e714ea66725dae6db649564fa7f86c8ea0b4f3300f16ef92e0a87075"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::activitySiteContext",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "95148d842e3288244e198a03f4dba12ddf8db00e96413d3caa47895552aba258"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::normalizeStrings",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "2f182d36db5de5c76f37a85dc0c8b82cfa7d8e366d3ad366f9e35e97796e146f"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::rejectUnsupportedNestedActivityContexts",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "0cb126c21378d17b75425fb204488de7fd9e07f84e51ee594fa11311862ba73d"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::validateActivityInputAgainstToolSchema",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "924cdd384abc34a36cc17d7ceb88429cdfe4175305bea53959568426f7e03717"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::validateActivityResultEventNameCollisions",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "f7b8816e2c672cd13c2f3ff4ae586683b708a4149de13acac1c636523efe70d0"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::validateActivitySpec",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "fccdf924e926d928385f49fe24a504265809a221e4966f4d085c5cd0ce8635cd"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::validateDurableActivitySurface",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "3659e81b78d54c301a39fa32dbf0914fff5d8aa9e319865b3abda4c44b79d135"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::validateHandlerActivitySurface",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "953a7b88a317defad6b6dd6847475ff4293fb25aa6dde2b4da6c3f05581f1eef"
   },
   {
     "owner": "internal/runtime/bootverify/admission_report.go::AdmissionExecutionObligation.validIdentity",
@@ -1965,13 +2037,19 @@
     "owner": "internal/runtime/pipeline/channel_session_activity.go::*PipelineCoordinator.compileAuthoredSessionActivity",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "38ce6216f5c8905420b4fce86c8985738e9fb211303e35684c13166fac324927"
+    "body_sha256": "a27c3423e0e30de90e207bca9b16a8437c6b7c0062eefa477690c68fa4fd9cc3"
+  },
+  {
+    "owner": "internal/runtime/pipeline/channel_session_activity.go::*PipelineCoordinator.prepareSessionActivityIntent",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "1a163127c8edb4337b465399d3b902fd3ceec3d80f13f51398039fc60cad8a1e"
   },
   {
     "owner": "internal/runtime/pipeline/channel_session_activity.go::*PipelineCoordinator.prepareSessionActivityIntents",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "f121b4ef18a9ef9dfa444a049611fde49074e5ed0ac7dd450a662b4b959fff42"
+    "body_sha256": "f16e25e1072a547f2801730a3471b18b767979d91bd9038dd9fd64d3a73af301"
   },
   {
     "owner": "internal/runtime/pipeline/channel_session_activity.go::*PipelineCoordinator.validateAuthoredSessionActivity",
@@ -3054,6 +3132,18 @@
     "body_sha256": "47d9ef90d1cf5cc3aa08de428be00e84ff352565743b71ba0744dfe96c7be7ee"
   },
   {
+    "owner": "internal/runtime/tools/validation.go::ValidateToolImplementations",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "0e633bf18a34f5f43ac081c3bc2fdae1dcdee31e7bf0c682b8544ed344509b0a"
+  },
+  {
+    "owner": "internal/runtime/tools/validation.go::qualifyNativeActivityImplementation",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "aec144403a08137f78ae8ad1e2168b150ddf7e1723d51e4f070d0b76435102c9"
+  },
+  {
     "owner": "internal/runtime/workflow_validation.go::DefaultWorkflowContractValidationOptions",
     "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
     "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
@@ -3633,7 +3723,7 @@
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.RetireInactiveSessions",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
-    "body_sha256": "c2547e29b18d9da04c2e1168282af2b90310a68a6b64028149cc0aca542f9d70"
+    "body_sha256": "b2be89cfa49464c8bb866786c857e2103fd70558cecbe5780dfb379733dc1b72"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.connection",
@@ -3646,6 +3736,12 @@
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
     "body_sha256": "e8b4cda72ac559543c0e06c2ea0d5481a866b46d5cd1828d4dfcb28080837af0"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.observeSessionRetirement",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
+    "body_sha256": "f9ee9a461a6e68a36f25f00f5dcd9b8488f97f23a80598360d4be402bbe69704"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.openSessionAttempt",
