@@ -109,6 +109,29 @@ func TestRunForkStartSnapshotRefusesMissingOrForeignInitialFacts(t *testing.T) {
 	}
 }
 
+func TestRunForkStartCompositeSelectionRequiresItsAdmittedBody(t *testing.T) {
+	for _, present := range []bool{false, true} {
+		t.Run(map[bool]string{false: "missing", true: "mismatched_body"}[present], func(t *testing.T) {
+			tx, mock := startSnapshotTransaction(t)
+			runID := uuid.NewString()
+			key := "intent|deployment|" + uuid.NewString()
+			projection := runforkrevision.StartProjection{Version: 1, SourceBundleHash: "bundle-v2:sha256:" + strings.Repeat("c", 64),
+				Facts: []runforkrevision.StartFact{{Family: runforkrevision.FamilyFanOutObligations, Key: key}}}
+			expectOriginalStart(t, mock, runID, projection)
+			rows := sqlmock.NewRows([]string{"run_id", "family", "fact_key", "first_revision", "revision", "fact"})
+			if present {
+				rows.AddRow(runID, "fan_out_obligations", key, 1, 1,
+					`{"run_id":"`+runID+`","fact_kind":"intent","origin_kind":"deployment","deployment_feed_id":"`+uuid.NewString()+`"}`)
+			}
+			mock.ExpectQuery(`WITH bounded AS`).WithArgs(runID, int64(1), "fan_out_obligations", key).WillReturnRows(rows)
+			if snapshot, err := loadRunForkPointSnapshot(context.Background(), tx, runID,
+				runfork.RunForkPoint{Kind: runfork.RunForkPointRunStart, Revision: 1}); err == nil || snapshot != nil {
+				t.Fatalf("opaque membership became historical authority: snapshot=%+v err=%v", snapshot, err)
+			}
+		})
+	}
+}
+
 func TestRunForkStartPointNeverResolvesLatestOrInventsAnEvent(t *testing.T) {
 	tx, mock := startSnapshotTransaction(t)
 	runID := uuid.NewString()
