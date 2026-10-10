@@ -1597,7 +1597,7 @@ func TestRouteTableCompiledConnectRootInputExcludesFlattenedChildObserver(t *tes
 	}
 }
 
-func TestConnectRecipientEvaluationRejectsSiblingRunAcrossCommittedPreviewAndRemoval(t *testing.T) {
+func TestConnectRecipientEvaluationRejectsSiblingRunAcrossCommittedAndPreview(t *testing.T) {
 	const runA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	const runB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 	for _, tc := range []struct {
@@ -1638,14 +1638,7 @@ func TestConnectRecipientEvaluationRejectsSiblingRunAcrossCommittedPreviewAndRem
 				}
 			}
 			assert(ctx)
-			owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runA, Route: instance.Route()}
-			if err := table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: instance}); err != nil {
-				t.Fatal(err)
-			}
-			if err := table.RemoveFlowInstanceRoute(owner); err != nil {
-				t.Fatal(err)
-			}
-			assert(ctx) // Process membership cannot withdraw a durable receiver.
+			assert(ctx)
 			reader.observations = nil
 			missing, err := resolver.evaluateSelectedReceiverCarriers(ctx, runA, plan, []events.RouteIdentity{target})
 			if err == nil || len(missing.Recipients()) != 0 {

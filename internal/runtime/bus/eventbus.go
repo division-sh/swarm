@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -692,11 +691,6 @@ func (eb *EventBus) RouteTable() *RouteTable {
 	eb.mu.RLock()
 	defer eb.mu.RUnlock()
 	return eb.routeTable
-}
-
-func (eb *EventBus) HasFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) bool {
-	table := eb.RouteTable()
-	return table != nil && table.HasFlowInstanceRoute(identity)
 }
 
 func (eb *EventBus) activeFlowInstanceDescriptorsForSemanticSource(
