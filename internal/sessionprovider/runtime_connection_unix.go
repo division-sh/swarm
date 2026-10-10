@@ -58,9 +58,26 @@ type RuntimeConnection struct {
 // operation and runtime source are verified. Unpaired bootstrap has a separate
 // reservation/QR path; this constructor cannot adopt a new provider account.
 func OpenRuntimeConnection(ctx context.Context, opts RuntimeConnectionOptions) (*RuntimeConnection, error) {
+	return openRuntimeConnection(ctx, opts, false)
+}
+
+// OpenRuntimeBootstrap opens only the existing reserved pairing responsibility.
+// It cannot resume an admitted account or manufacture an enabled business run.
+func OpenRuntimeBootstrap(ctx context.Context, opts RuntimeConnectionOptions) (*RuntimeConnection, error) {
+	return openRuntimeConnection(ctx, opts, true)
+}
+
+func openRuntimeConnection(ctx context.Context, opts RuntimeConnectionOptions, bootstrap bool) (*RuntimeConnection, error) {
 	parent, op, err := runtimeConnectionReservation(ctx, opts)
 	if err != nil {
 		return nil, err
+	}
+	if bootstrap {
+		if op.Phase != channelonboarding.PhaseActivatingProvider || op.SessionAccount != (operatorchannel.SessionAccountAdmission{}) {
+			return nil, errRuntimeConnection
+		}
+	} else if op.SessionAccount.Validate() != nil {
+		return nil, errRuntimeConnection
 	}
 	// This is a non-transient process-control lease, not a standing service or
 	// enabled business binding. Runtime retirement still joins the whole owner.
@@ -96,7 +113,7 @@ func runtimeConnectionReservation(ctx context.Context, opts RuntimeConnectionOpt
 	if ctx.Err() != nil || op.OperationID != opts.OperationID || op.Provider != "whatsapp" ||
 		op.Posture != channelonboarding.ActivationSessionConnection || op.Revision < 1 ||
 		op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired ||
-		op.SessionAccount.Validate() != nil || op.ValidateSessionAccount() != nil ||
+		op.ValidateSessionAccount() != nil ||
 		op.Coordinate.ValidateContext() != nil || op.Interface.Validate() != nil || uuid.Validate(op.PrincipalID) != nil ||
 		op.Coordinate.RuntimeInstanceID != identity.RuntimeInstanceID || op.Coordinate.BundleHash != identity.BundleHash ||
 		source.BundleHash() != identity.BundleHash {
@@ -121,6 +138,15 @@ func validateRuntimeConnectionPlan(plan packs.SatisfactionPlan, op channelonboar
 		!generation.Equal(op.Coordinate.PlanGeneration) || identity.Normalized() != op.Interface.Normalized() {
 		return errRuntimeConnection
 	}
+	return QualifyBootstrapPlan(plan)
+}
+
+// QualifyBootstrapPlan checks the concrete shipped SDK implementation for
+// pairing only. It grants no native account, output seal or business readiness.
+func QualifyBootstrapPlan(plan packs.SatisfactionPlan) error {
+	if plan.Transport() != packs.ChannelTransportSession || plan.Provider() != "whatsapp" || len(plan.OperationNames()) == 0 {
+		return errRuntimeConnection
+	}
 	for _, name := range plan.OperationNames() {
 		id, tool, err := plan.ConnectorOperation(name)
 		if err != nil {
@@ -143,17 +169,24 @@ func (c *RuntimeConnection) open() error {
 		return errRuntimeConnection
 	}
 	var err error
-	c.state, err = openSessionState(c.ctx, c.directory, c.operation.SessionAccount.ConnectionID, c.operation.SessionAccount.AccountRef)
+	c.state, err = openSessionState(c.ctx, c.directory, c.operation.SessionConnectionID, c.operation.SessionAccount.AccountRef)
 	if err != nil {
 		return err
 	}
-	c.captures, err = newCaptureStore(c.ctx, c.state.database, c.operation.SessionAccount.ConnectionID)
+	c.captures, err = newCaptureStore(c.ctx, c.state.database, c.operation.SessionConnectionID)
 	if err != nil {
 		return err
 	}
 	occurrence, err := c.state.newOccurrence(c.ctx, uuid.NewString())
 	if err != nil {
 		return err
+	}
+	if c.operation.SessionAccount == (operatorchannel.SessionAccountAdmission{}) && occurrence.client.Store.ID == nil {
+		if _, err := occurrence.bindPairing(pairingQRScope{PrincipalID: c.operation.PrincipalID,
+			OperationID: c.operation.OperationID, ConnectionID: c.operation.SessionConnectionID,
+			OccurrenceID: occurrence.occurrenceID, Coordinate: c.operation.Coordinate}); err != nil {
+			return err
+		}
 	}
 	_, err = occurrence.bindCallbacks(func(_ context.Context, event any) error {
 		if _, message := event.(*events.Message); message {
@@ -181,6 +214,7 @@ func (c *RuntimeConnection) currentOperation(ctx context.Context) (channelonboar
 		op.Provider != c.operation.Provider || op.Posture != c.operation.Posture ||
 		op.PrincipalID != c.operation.PrincipalID || op.Interface.Normalized() != c.operation.Interface.Normalized() ||
 		op.TargetSelector != c.operation.TargetSelector || op.SessionAccount != c.operation.SessionAccount ||
+		op.SessionConnectionID != c.operation.SessionConnectionID ||
 		!op.Coordinate.MatchesDurableIdentity(c.operation.Coordinate) ||
 		op.Coordinate.RuntimeInstanceID != c.operation.Coordinate.RuntimeInstanceID ||
 		op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired || op.ValidateSessionAccount() != nil {

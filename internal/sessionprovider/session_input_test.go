@@ -78,14 +78,10 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 			if err != nil {
 				t.Fatal(err)
 			}
-			base, connectionID := t.TempDir(), uuid.NewString()
+			base := t.TempDir()
 			if err := os.Chmod(base, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			state := sessionStateFixture(t, base, connectionID, "")
-			device := newSDKDeviceFixture(t, state.database)
-			account := operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: connectionID,
-				AccountRef: device.ID.ToNonAD().String(), AdmissionID: uuid.NewString(), Revision: 1}
 			generation, err := plangeneration.FromCanonicalValue(map[string]string{"native": "session-input"})
 			if err != nil {
 				t.Fatal(err)
@@ -103,6 +99,11 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 			if err != nil {
 				t.Fatal(err)
 			}
+			connectionID := op.SessionConnectionID
+			state := sessionStateFixture(t, base, connectionID, "")
+			device := newSDKDeviceFixture(t, state.database)
+			account := operatorchannel.SessionAccountAdmission{Provider: "whatsapp", ConnectionID: connectionID,
+				AccountRef: device.ID.ToNonAD().String(), AdmissionID: uuid.NewString(), Revision: 1}
 			for _, nextPhase := range []channelonboarding.Phase{channelonboarding.PhaseCredentialsAdmitted, channelonboarding.PhaseActivatingProvider, channelonboarding.PhaseAwaitingExternalIdentity} {
 				if phase == channelonboarding.PhaseActivatingProvider && nextPhase == channelonboarding.PhaseAwaitingExternalIdentity {
 					break

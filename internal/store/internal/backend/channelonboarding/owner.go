@@ -146,18 +146,22 @@ func reserve(ctx context.Context, r runner, req domain.StartRequest) (domain.Ope
 		if err != nil {
 			return err
 		}
+		var connectionID string
+		if req.Posture == domain.ActivationSessionConnection {
+			connectionID = uuid.NewString()
+		}
 		_, err = tx.ExecContext(txctx, r.dialect().bind(`INSERT INTO channel_onboarding_operations (
 			operation_id,request_key_hash,request_hash,slot_key,principal_id,verb,provider,
 			interface_key,interface_ref,channel_pack_id,channel_pack_version,channel_manifest_hash,semantic_generation,
 			bundle_hash,bundle_identity,pack_inventory_generation,runtime_instance_id,context_publication_generation,plan_generation,
 			target_selector,target_generation,activation_posture,identity_ceremony,phase,operation_revision,save_proof,client_language,client_locale_revision,
-			credential_reservations,credential_admissions,requested_at,updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,1,?,'[]',?,?)`),
+			credential_reservations,credential_admissions,session_connection_id,requested_at,updated_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,1,?,'[]',?,?,?)`),
 			req.OperationID, req.RequestKeyHash, req.RequestHash, req.SlotKey(), req.PrincipalID, string(req.Verb), req.Provider,
 			i.Key(), i.InterfaceRef, i.ChannelPackID, i.ChannelPackVersion, i.ChannelManifestHash, i.SemanticGeneration,
 			c.BundleHash, c.BundleIdentity, c.PackInventoryGeneration, c.RuntimeInstanceID, c.ContextPublicationGeneration, c.PlanGeneration.Diagnostic(),
 			req.TargetSelector, c.TargetGeneration, string(req.Posture), string(req.Ceremony), string(domain.PhasePreparing), req.SaveProof, req.ClientLanguage, string(reservations),
-			req.RequestedAt, req.RequestedAt)
+			nullable(connectionID), req.RequestedAt, req.RequestedAt)
 		if err != nil {
 			return fmt.Errorf("insert channel onboarding operation: %w", err)
 		}
@@ -298,6 +302,9 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			op.CredentialAdmissions = append([]domain.CredentialAdmission(nil), req.CredentialAdmissions...)
 		}
 		if req.SessionAccount != nil {
+			if op.Posture != domain.ActivationSessionConnection || req.SessionAccount.ConnectionID != op.SessionConnectionID {
+				return domain.ErrConflict
+			}
 			if op.SessionAccount != (operatorchannel.SessionAccountAdmission{}) && op.SessionAccount != *req.SessionAccount {
 				return domain.ErrConflict
 			}
@@ -837,7 +844,7 @@ const operationSelect = `SELECT operation_id,request_key_hash,request_hash,slot_
 	interface_ref,channel_pack_id,channel_pack_version,channel_manifest_hash,semantic_generation,
 	bundle_hash,bundle_identity,pack_inventory_generation,runtime_instance_id,context_publication_generation,plan_generation,
 	target_selector,target_generation,activation_posture,identity_ceremony,phase,operation_revision,save_proof,client_language,client_locale_revision,
-	credential_reservations,credential_admissions,session_account_admission,identity_operation_id,binding_revision,activation_revision,confirmation_operation_id,
+	credential_reservations,credential_admissions,session_connection_id,session_account_admission,identity_operation_id,binding_revision,activation_revision,confirmation_operation_id,
 	failure_code,failure_message,requested_at,updated_at,completed_at FROM channel_onboarding_operations`
 
 func loadOperationByRequestKey(ctx context.Context, q queryer, d dialect, key string, lock bool) (domain.Operation, bool, error) {
@@ -874,7 +881,7 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 	var verb, posture, ceremony, phase string
 	var planGeneration string
 	var reservations, admissions string
-	var identityOp, confirmationOp, failureCode, failureMessage, session sql.NullString
+	var identityOp, confirmationOp, failureCode, failureMessage, connection, session sql.NullString
 	var bindingRevision, activationRevision sql.NullInt64
 	var completed any
 	var requested, updated any
@@ -882,7 +889,7 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 		&op.Interface.InterfaceRef, &op.Interface.ChannelPackID, &op.Interface.ChannelPackVersion, &op.Interface.ChannelManifestHash, &op.Interface.SemanticGeneration,
 		&op.Coordinate.BundleHash, &op.Coordinate.BundleIdentity, &op.Coordinate.PackInventoryGeneration, &op.Coordinate.RuntimeInstanceID, &op.Coordinate.ContextPublicationGeneration, &planGeneration,
 		&op.TargetSelector, &op.Coordinate.TargetGeneration, &posture, &ceremony, &phase, &op.Revision, &op.SaveProof, &op.ClientLanguage, &op.ClientLocaleRevision,
-		&reservations, &admissions, &session, &identityOp, &bindingRevision, &activationRevision, &confirmationOp, &failureCode, &failureMessage, &requested, &updated, &completed)
+		&reservations, &admissions, &connection, &session, &identityOp, &bindingRevision, &activationRevision, &confirmationOp, &failureCode, &failureMessage, &requested, &updated, &completed)
 	if err == sql.ErrNoRows {
 		return domain.Operation{}, false, nil
 	}
@@ -907,6 +914,7 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 	if op.SessionAccount, err = unmarshalSessionAccount(session); err != nil {
 		return domain.Operation{}, false, err
 	}
+	op.SessionConnectionID = connection.String
 	if err := op.ValidateSessionAccount(); err != nil {
 		return domain.Operation{}, false, err
 	}

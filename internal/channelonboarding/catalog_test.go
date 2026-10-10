@@ -84,6 +84,62 @@ func TestCandidateCatalogDiscoversDeclarationWithoutExecutableGeneration(t *test
 	}
 }
 
+func TestSessionCandidateRequiresDeclarationNotExecutableTarget(t *testing.T) {
+	candidate := testCandidate(strings.Repeat("a", 64), "support")
+	candidate.Provider, candidate.Target.Provider = "whatsapp", "whatsapp"
+	candidate.Target.Selector = "ingress:support:whatsapp"
+	candidate.Posture = ActivationSessionConnection
+	candidate.ProviderCredentialRole, candidate.SigningCredentialRole, candidate.Target.SigningCredentialKey = "", "", ""
+	candidate.ConnectionHealth = "provider_connection"
+	candidate.Target.Generation, candidate.Target.PublicationSequence, candidate.Coordinate.TargetGeneration = 0, 0, 0
+	if _, err := NewCandidateCatalog([]Candidate{candidate}); err != nil {
+		t.Fatal("unpaired declaration is undiscoverable", err)
+	}
+	if candidate.Validate() == nil {
+		t.Fatal("unpaired declaration granted executable target authority")
+	}
+	for _, cell := range []string{"missing", "alias", "signing", "generation"} {
+		t.Run(cell, func(t *testing.T) {
+			changed := candidate
+			switch cell {
+			case "missing":
+				changed.Target = CandidateTarget{}
+			case "alias":
+				changed.Target.Alias = ""
+			case "signing":
+				changed.Target.SigningCredentialKey = "not-a-session-credential"
+			case "generation":
+				changed.Target.Generation = 1
+			}
+			if _, err := NewCandidateCatalog([]Candidate{changed}); err == nil {
+				t.Fatal("session discovery accepted contradictory target evidence")
+			}
+		})
+	}
+}
+
+func TestCredentialReservationsFollowDeclaredRoles(t *testing.T) {
+	candidate := testCandidate(strings.Repeat("a", 64), "support")
+	for _, roles := range [][2]string{{"bot_token", "webhook_signing"}, {"session_secret", ""}, {"", ""}} {
+		candidate.ProviderCredentialRole, candidate.SigningCredentialRole = roles[0], roles[1]
+		reservations := credentialReservations(candidate)
+		var wanted []string
+		for _, role := range roles {
+			if role != "" {
+				wanted = append(wanted, role)
+			}
+		}
+		if len(reservations) != len(wanted) {
+			t.Fatal("reservation count contradicts declared credential roles", roles, reservations)
+		}
+		for i, reservation := range reservations {
+			if reservation.Validate() != nil || reservation.Role != wanted[i] {
+				t.Fatal("reservation invented or reordered a credential role", reservations)
+			}
+		}
+	}
+}
+
 func TestCandidateCatalogRejectsDuplicateExactCoordinate(t *testing.T) {
 	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
 	if _, err := NewCandidateCatalog([]Candidate{candidate, candidate}); err == nil || !strings.Contains(err.Error(), "duplicate") {

@@ -94,7 +94,7 @@ func TestRetainedSessionAccountIsProvenanceNotExecutableAuthority(t *testing.T) 
 		{PhaseDeliveringConfirmation, false, true}, {PhaseSucceeded, false, true}, {PhaseFailed, true, true}, {PhaseRetired, true, true},
 	} {
 		for _, present := range []bool{false, true} {
-			op := Operation{Posture: ActivationSessionConnection, Provider: "whatsapp", Phase: row.phase}
+			op := Operation{Posture: ActivationSessionConnection, Provider: "whatsapp", Phase: row.phase, SessionConnectionID: account.ConnectionID}
 			want := row.absent
 			if present {
 				op.SessionAccount, want = account, row.present
@@ -109,8 +109,10 @@ func TestRetainedSessionAccountIsProvenanceNotExecutableAuthority(t *testing.T) 
 		func(o *Operation) { o.SessionAccount.Provider = "other" },
 		func(o *Operation) { o.SessionAccount.Revision = 0 },
 		func(o *Operation) { o.SessionAccount.ConnectionID = "" },
+		func(o *Operation) { o.SessionConnectionID = "" },
+		func(o *Operation) { o.SessionConnectionID = uuid.NewString() },
 	} {
-		op := Operation{Posture: ActivationSessionConnection, Provider: "whatsapp", Phase: PhaseAwaitingExternalIdentity, SessionAccount: account}
+		op := Operation{Posture: ActivationSessionConnection, Provider: "whatsapp", Phase: PhaseAwaitingExternalIdentity, SessionConnectionID: account.ConnectionID, SessionAccount: account}
 		mutate(&op)
 		if err := op.ValidateSessionAccount(); err == nil {
 			t.Fatal("contradictory retained account admitted")
@@ -120,9 +122,9 @@ func TestRetainedSessionAccountIsProvenanceNotExecutableAuthority(t *testing.T) 
 	if err := authority.RequireExecutable(); err == nil {
 		t.Fatal("retained DTO acquired executable authority")
 	}
-	for _, value := range []any{Operation{Coordinate: testCoordinate(), SessionAccount: account}, ConnectedChannelActivation{Coordinate: testCoordinate(), SessionAccount: account}} {
+	for _, value := range []any{Operation{Coordinate: testCoordinate(), SessionConnectionID: account.ConnectionID, SessionAccount: account}, ConnectedChannelActivation{Coordinate: testCoordinate(), SessionAccount: account}} {
 		encoded, err := json.Marshal(value)
-		if err != nil || strings.Contains(string(encoded), account.AccountRef) {
+		if err != nil || strings.Contains(string(encoded), account.AccountRef) || strings.Contains(string(encoded), account.ConnectionID) {
 			t.Fatalf("private account leaked through public record: %s %v", encoded, err)
 		}
 	}

@@ -25,6 +25,7 @@ func TestSessionActiveResponsibilityUsesFrozenActivationRevision(t *testing.T) {
 				AccountRef: "100000000001@s.whatsapp.net", AdmissionID: uuid.NewString(), Revision: 1}
 			activation := testCurrentActivation(op, nil, now)
 			activation.SessionAccount = op.SessionAccount
+			op.SessionConnectionID = op.SessionAccount.ConnectionID
 			expected := AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
 				ActivationRevision: activation.Revision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
 				Provider: op.Provider, SessionAccount: op.SessionAccount}

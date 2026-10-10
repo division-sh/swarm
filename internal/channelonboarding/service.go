@@ -119,6 +119,12 @@ type ReadinessProjector interface {
 	ProjectConnectedChannelReadiness(context.Context, Operation, Candidate) (ConnectedChannelReadiness, bool, error)
 }
 
+type SessionBootstrapOwner interface {
+	QualifySessionPlan(Candidate) error
+	BootstrapSession(context.Context, Operation, Candidate) error
+	ReadSessionPairing(context.Context, Operation, operatorchannel.Principal) (PairingReadback, error)
+}
+
 type CredentialRequiredError struct {
 	OperationID string
 	Role        string
@@ -162,6 +168,7 @@ type ServiceOptions struct {
 	Activations     ActivationRefresher
 	Confirmation    ConfirmationDispatcher
 	Readiness       ReadinessProjector
+	Sessions        SessionBootstrapOwner
 	Now             func() time.Time
 	Secret          func() (string, error)
 	TestBarrier     TestLifecycleBarrier
@@ -177,6 +184,7 @@ type Service struct {
 	confirmation    ConfirmationDispatcher
 	effects         EffectRebindReconciler
 	readiness       ReadinessProjector
+	sessions        SessionBootstrapOwner
 	now             func() time.Time
 	secret          func() (string, error)
 	driveMu         sync.Mutex
@@ -211,6 +219,7 @@ type Result struct {
 	IdentityOperation *operatorchannel.Operation `json:"identity_operation,omitempty"`
 	Binding           *operatorchannel.Binding   `json:"binding,omitempty"`
 	Readiness         *ConnectedChannelReadiness `json:"readiness,omitempty"`
+	Pairing           *PairingReadback           `json:"pairing,omitempty"`
 }
 
 func NewService(opts ServiceOptions) (*Service, error) {
@@ -231,6 +240,7 @@ func NewService(opts ServiceOptions) (*Service, error) {
 		sourceArtifacts: opts.SourceArtifacts,
 		store:           opts.Store, identities: opts.Identities, credentials: opts.Credentials, catalog: opts.Catalog,
 		activations: opts.Activations, confirmation: opts.Confirmation, effects: effects, readiness: opts.Readiness, now: opts.Now, secret: opts.Secret,
+		sessions:    opts.Sessions,
 		testBarrier: opts.TestBarrier,
 	}, nil
 }
@@ -251,7 +261,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if err := candidate.Plan.RequireExecutableProvider(); err != nil {
+	if err := s.qualifyProvider(candidate); err != nil {
 		return Result{}, err
 	}
 	if input.ClientLanguage != "" {
@@ -832,7 +842,7 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 }
 
 func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candidate, providerCredential string) (Result, error) {
-	if err := candidate.Plan.RequireExecutableProvider(); err != nil {
+	if err := s.qualifyProvider(candidate); err != nil {
 		return Result{Operation: op, Candidate: &candidate}, err
 	}
 	current, err := s.store.GetChannelOnboarding(ctx, op.OperationID)
@@ -878,6 +888,15 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				op, resetErr = s.resetRejectedCredentialAdmissions(context.WithoutCancel(ctx), op)
 				return s.blockedResult(ctx, op, candidate, errors.Join(err, resetErr))
 			}
+			if op.Posture == ActivationSessionConnection {
+				next, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID,
+					ExpectedRevision: op.Revision, Phase: PhaseActivatingProvider, Now: s.now().UTC()})
+				if err != nil {
+					return Result{}, err
+				}
+				op = next
+				continue
+			}
 			promoted, err := s.activations.AdmitChannelTarget(ctx, op, candidate)
 			if err != nil {
 				return s.blockedResult(ctx, op, candidate, fmt.Errorf("admit channel target: %w", err))
@@ -920,6 +939,12 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			}
 			op = next
 		case PhaseActivatingProvider:
+			if op.Posture == ActivationSessionConnection {
+				if err := s.sessions.BootstrapSession(ctx, op, candidate); err != nil {
+					return s.blockedResult(ctx, op, candidate, err)
+				}
+				return s.result(ctx, op, &candidate)
+			}
 			if err := s.activations.RefreshChannelActivationCandidates(ctx); err != nil {
 				if terminal, ok := AsTerminalActivationError(err); ok {
 					failed, failErr := s.failOperation(ctx, op, terminal.Code, terminal.Error())
@@ -1804,7 +1829,7 @@ func (s *Service) bindCurrentCandidate(ctx context.Context, op Operation) (Opera
 	if err != nil {
 		return op, Candidate{}, err
 	}
-	if err := candidate.Plan.RequireExecutableProvider(); err != nil {
+	if err := s.qualifyProvider(candidate); err != nil {
 		return op, candidate, err
 	}
 	disposition := EffectRebindDisposition{RetryAllowed: true}
@@ -1866,6 +1891,17 @@ func historicalCandidate(op Operation) Candidate {
 
 func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate) (Result, error) {
 	result := Result{Operation: op, Candidate: candidate}
+	if op.Posture == ActivationSessionConnection && op.Phase == PhaseActivatingProvider && s.sessions != nil {
+		principal, err := s.identities.Principal()
+		if err != nil {
+			return result, err
+		}
+		pairing, err := s.sessions.ReadSessionPairing(ctx, op, principal)
+		if err != nil {
+			return result, err
+		}
+		result.Pairing = &pairing
+	}
 	if op.IdentityOperationID != "" {
 		identityOp, err := s.identities.GetOperation(ctx, op.IdentityOperationID)
 		if err != nil {
@@ -1891,6 +1927,13 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 	return result, nil
 }
 
+func (s *Service) qualifyProvider(candidate Candidate) error {
+	if candidate.Posture == ActivationSessionConnection && s.sessions != nil {
+		return s.sessions.QualifySessionPlan(candidate)
+	}
+	return candidate.Plan.RequireExecutableProvider()
+}
+
 func (s *Service) blockedResult(ctx context.Context, op Operation, candidate Candidate, cause error) (Result, error) {
 	result, err := s.result(ctx, op, &candidate)
 	return result, errors.Join(cause, err)
@@ -1910,7 +1953,10 @@ func findOperationByRequestKey(ctx context.Context, store Store, key string) (Op
 }
 
 func credentialReservations(candidate Candidate) []CredentialReservation {
-	roles := []string{candidate.ProviderCredentialRole}
+	roles := make([]string, 0, 2)
+	if candidate.ProviderCredentialRole != "" {
+		roles = append(roles, candidate.ProviderCredentialRole)
+	}
 	if candidate.SigningCredentialRole != "" {
 		roles = append(roles, candidate.SigningCredentialRole)
 	}
