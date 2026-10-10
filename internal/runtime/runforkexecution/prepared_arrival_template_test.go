@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -30,6 +31,19 @@ import (
 )
 
 func TestIssue642PreparedTemplateArrivalTimeoutContinuesExactDeliveryBothStores(t *testing.T) {
+	testPreparedTemplateArrivalTimeoutBothStores(t, "")
+}
+
+func TestIssue642PreparedTemplateArrivalRetainsDueAcrossSelectedDelayChangeBothStores(t *testing.T) {
+	for _, delay := range []string{"1ms", "24h"} {
+		t.Run(delay, func(t *testing.T) {
+			testPreparedTemplateArrivalTimeoutBothStores(t, delay)
+		})
+	}
+}
+
+func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay string) {
+	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			t.Setenv(publishedJoinFlowEnv, "orders")
@@ -85,7 +99,7 @@ func TestIssue642PreparedTemplateArrivalTimeoutContinuesExactDeliveryBothStores(
 			sourceWorkflow := flowidentity.RunScopedFlowInstance{RunID: sourceRun,
 				Route: flowidentity.StoredRoute(originalEntry.FlowScope, originalEntry.InstanceID, originalEntry.InstancePath)}
 			sourceHeader, found, err := owner.ports.workflow.LoadWorkflowInstance(ctx, sourceWorkflow)
-			if err != nil || !found || sourceHeader.WorkflowName != "orders" || sourceHeader.EntityID != originalEntry.EntityID ||
+			if err != nil || !found || sourceHeader.WorkflowName != "orders" || sourceHeader.WorkflowVersion != loaded.Source.WorkflowVersion() || sourceHeader.EntityID != originalEntry.EntityID ||
 				sourceHeader.InstanceID != originalEntry.InstanceID || sourceHeader.StorageRef != originalEntry.InstancePath || sourceHeader.CurrentState != "awaiting" ||
 				sourceHeader.ParentFlowID != "." || sourceHeader.ParentFlowInstance != sourceRun || sourceHeader.ParentEntityID != sourceRun {
 				t.Fatalf("prepared orders receiver lost its exact existing parent: %+v found=%v err=%v", sourceHeader, found, err)
@@ -139,10 +153,41 @@ func TestIssue642PreparedTemplateArrivalTimeoutContinuesExactDeliveryBothStores(
 			if err != nil {
 				t.Fatal(err)
 			}
-			selection := runforkadmission.SelectedContractSelection(loaded.Source)
+			target := loaded
+			if selectedDelay != "" {
+				path := filepath.Join(loader.SourceRoot, "orders", "nodes.yaml")
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				const original = "deadline: {after: 1h, from: stage_entry}"
+				if strings.Count(string(raw), original) != 1 {
+					t.Fatal("selected delay fixture lost its exact source declaration")
+				}
+				raw = []byte(strings.Replace(string(raw), original, "deadline: {after: "+selectedDelay+", from: stage_entry}", 1))
+				if err := os.WriteFile(path, raw, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				target, err = loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				joins := target.Source.WorkflowJoins()
+				if target.SourceArtifactFact.BundleHash() == loaded.SourceArtifactFact.BundleHash() || len(joins) != 1 ||
+					joins[0].Spec.Deadline == nil || joins[0].Spec.Deadline.After != selectedDelay {
+					t.Fatal("selected source did not compile its genuinely changed deadline")
+				}
+				bundle, found := semanticview.Bundle(target.Source)
+				if !found || bundle.SourceArtifact == nil {
+					t.Fatal("selected delay requires its actual loader-owned source artifact")
+				}
+				storetest.RequireBundleDataCatalog(t, correlation.WithSourceArtifactFact(ctx, target.SourceArtifactFact),
+					selected.(storetest.DurableDataCatalogStore), bundle)
+			}
+			selection := runforkadmission.SelectedContractSelection(target.Source)
 			operation := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "prepared-template-arrival", IdempotencyKey: "fixed-cut",
 				TransportHash: "prepared-template-arrival-transport", SourceRunID: sourceRun, ForkEventID: marker,
-				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
+				TargetBundleHash: target.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: marker, AllowSourceFreeze: true, Owner: owner, ForkOperation: &operation,
 				SourceLoader: loader, ContractSelection: selection,
@@ -160,7 +205,8 @@ func TestIssue642PreparedTemplateArrivalTimeoutContinuesExactDeliveryBothStores(
 				LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 			})
 			acknowledged, found, err := operations.LoadForkOperation(ctx, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
-			if err != nil || !found || acknowledged.Status != runfork.ForkOperationActivated || acknowledged.ForkRunID != child || acknowledged.Result == nil || acknowledged.Request.ResolvedPoint == nil {
+			if err != nil || !found || acknowledged.Status != runfork.ForkOperationActivated || acknowledged.ForkRunID != child || acknowledged.Result == nil ||
+				acknowledged.Request.ResolvedPoint == nil || acknowledged.Request.TargetBundleHash != target.SourceArtifactFact.BundleHash() {
 				t.Fatalf("prepared orders arrival lost its permanent activation acknowledgment: %+v found=%v err=%v", acknowledged, found, err)
 			}
 			wait, cancel := context.WithTimeout(t.Context(), 15*time.Second)
@@ -172,6 +218,9 @@ func TestIssue642PreparedTemplateArrivalTimeoutContinuesExactDeliveryBothStores(
 				header, err := reader.LoadRunHeader(wait, child)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if header.BundleHash != target.SourceArtifactFact.BundleHash() {
+					t.Fatal("prepared child did not retain the exact selected contract artifact")
 				}
 				if header.Failure != nil {
 					t.Fatalf("selected prepared template arrival failed: %+v", *header.Failure)
@@ -195,9 +244,9 @@ func TestIssue642PreparedTemplateArrivalTimeoutContinuesExactDeliveryBothStores(
 				header.ParentFlowID != projected.ParentRoute.FlowID || header.ParentFlowInstance != projected.ParentRoute.FlowInstance || header.ParentEntityID != projected.ParentEntityID {
 				t.Fatalf("exact prepared orders timeout receiver lost its template/path/projected parent: want=%+v actual=%+v found=%v err=%v", projected, header, found, err)
 			}
-			if header.InstanceKind != sourceHeader.InstanceKind || header.TemplateVersion != sourceHeader.TemplateVersion || header.WorkflowVersion != sourceHeader.WorkflowVersion {
-				t.Fatalf("orders descriptor changed: source kind=%q template version=%q workflow version=%q; child kind=%q template version=%q workflow version=%q",
-					sourceHeader.InstanceKind, sourceHeader.TemplateVersion, sourceHeader.WorkflowVersion, header.InstanceKind, header.TemplateVersion, header.WorkflowVersion)
+			if header.InstanceKind != sourceHeader.InstanceKind || header.TemplateVersion != sourceHeader.TemplateVersion || header.WorkflowVersion != target.Source.WorkflowVersion() {
+				t.Fatalf("orders descriptor changed: source kind=%q template version=%q; selected workflow version=%q; child kind=%q template version=%q workflow version=%q",
+					sourceHeader.InstanceKind, sourceHeader.TemplateVersion, target.Source.WorkflowVersion(), header.InstanceKind, header.TemplateVersion, header.WorkflowVersion)
 			}
 			buckets, err := joinruntime.PersistedBuckets(header.StateBuckets)
 			if err != nil {
@@ -259,11 +308,11 @@ func TestIssue642PreparedTemplateArrivalTimeoutContinuesExactDeliveryBothStores(
 			if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, child, "platform.join_complete"); err != nil || count != 0 {
 				t.Fatalf("orders incomplete membership acquired completion: count=%d err=%v", count, err)
 			}
-			target := events.RouteIdentity{FlowID: projected.ScopeKey, FlowInstance: projected.InstancePath, EntityID: projected.EntityID}
-			if !events.SameRouteIdentity(event.RoutingSource().Route(), target) {
+			receiver := events.RouteIdentity{FlowID: projected.ScopeKey, FlowInstance: projected.InstancePath, EntityID: projected.EntityID}
+			if !events.SameRouteIdentity(event.RoutingSource().Route(), receiver) {
 				t.Fatalf("orders timeout publication has another receiver source: %+v", event.RoutingSource())
 			}
-			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(ref.Node()), Target: events.MustExistingEntityTarget(target)}
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(ref.Node()), Target: events.MustExistingEntityTarget(receiver)}
 			deliveryID, err := deliverylifecycle.DeliveryID(event.ID(), route)
 			if err != nil {
 				t.Fatal(err)
@@ -271,7 +320,7 @@ func TestIssue642PreparedTemplateArrivalTimeoutContinuesExactDeliveryBothStores(
 			delivery, err := owner.ports.busDurable.DeliveryLifecycle.Snapshot(wait, deliveryID)
 			if err != nil || delivery.Status != deliverylifecycle.StatusDelivered || delivery.EventID != event.ID() || delivery.RunID != child ||
 				delivery.SubscriberClass != deliverylifecycle.SubscriberNode || delivery.SubscriberID != ref.Node().Key() ||
-				delivery.Route.Recipient != route.Recipient || !delivery.Route.Target.ExistingEntity() || !events.SameRouteIdentity(delivery.Route.Target.Route(), target) {
+				delivery.Route.Recipient != route.Recipient || !delivery.Route.Target.ExistingEntity() || !events.SameRouteIdentity(delivery.Route.Target.Route(), receiver) {
 				t.Fatalf("exact existing orders timeout delivery did not settle: %+v err=%v", delivery, err)
 			}
 			settlement, err := owner.ports.busDurable.DeliveryLifecycle.SummarizeRun(wait, child)
