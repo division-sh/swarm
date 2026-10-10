@@ -24,7 +24,6 @@ func receiverOwnerConstructorBudget() map[string]int {
 		"runtime/pipeline::ClassifyDeliveryTargetOwnership":                               2,
 		"runtime/bus::selectedRunTargetOwnerProjection.withActivationPlans [descriptor]":  1,
 		"runtime/bus::ActiveAgentDescriptor.TargetDescriptor [descriptor]":                1,
-		"runtime/bus::ActiveFlowInstanceDescriptor.TargetDescriptor [descriptor]":         1,
 		"runtime/bus::ActiveTargetDescriptor.Normalized [descriptor]":                     1,
 		// #2594 projects only the exact scope's already admitted observations.
 		"runtime/bus::EventBus.activeTargetDescriptors [descriptor]": 1,
@@ -58,6 +57,24 @@ func TestReceiverCompositionOwnershipGuardHostileIndexProjection(t *testing.T) {
 	violations := receiverOwnerConstructorViolations(t, map[string][]byte{path: []byte(hostile)})
 	if len(violations) != 1 || !strings.Contains(violations[0], "EventBus.activeTargetDescriptors [descriptor] has 2 constructors; audited 1") {
 		t.Fatalf("index projection admitted another descriptor owner: %v", violations)
+	}
+}
+
+func TestReceiverCompositionOwnershipGuardHostileRetiredFlowDescriptor(t *testing.T) {
+	root := handlerRuleIdentityGuardRepoRoot(t)
+	path := filepath.Join(root, "internal/runtime/bus/store.go")
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostile := append(append([]byte(nil), original...), []byte(`
+func (unfamiliar ActiveFlowInstanceDescriptor) TargetDescriptor() ActiveTargetDescriptor {
+    return ActiveTargetDescriptor{FlowID: unfamiliar.FlowTemplate, ID: unfamiliar.InstanceID, EntityID: unfamiliar.EntityID, FlowInstance: unfamiliar.FlowInstance}
+}
+`)...)
+	violations := receiverOwnerConstructorViolations(t, map[string][]byte{path: hostile})
+	if len(violations) != 1 || !strings.Contains(violations[0], "ActiveFlowInstanceDescriptor.TargetDescriptor [descriptor] has 1 constructors; audited 0") {
+		t.Fatalf("retired descriptor regained target authority: %v", violations)
 	}
 }
 
