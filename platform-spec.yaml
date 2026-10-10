@@ -18355,6 +18355,9 @@ platform_tables:
         coordinate lookup consumes immutable construction keys and stored identities, including terminal occupancy.
         Recipient materialization reloads target evidence only through exact candidate coordinates admitted by that
         same instance index; it does not regain an unbounded descriptor inventory after returning from planning.
+        Node lookup candidates carry the admitted handler declaration, not a declaration inferred from a stored path.
+        Root path-only and empty targets bind to the canonical selected run coordinate; contradictory explicit flow
+        or run coordinates are rejected. Non-root lookup still requires its exact concrete instance path.
         ListFlowInstanceRouteRecords is unsupported; persisted per-instance route membership cannot elect or validate
         an executable receiver. Instance observation and delivery planning consume their separate canonical owners.
         A selected receiver with proven terminal stage or terminated construction produces the existing target-unreachable

@@ -459,7 +459,17 @@ func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, 
 	if p.connectPlanner.source != nil {
 		var targets []events.RouteIdentity
 		for _, intent := range plan.DeliveryIntents {
-			targets = append(targets, intent.TargetBlueprint)
+			target := intent.TargetBlueprint
+			if intent.Recipient.IsNode() {
+				var err error
+				target, err = runtimepipeline.AdmitDeliveryTargetLookupCoordinate(runtimepipeline.DeliveryTargetOwnershipRequest{
+					Source: p.connectPlanner.source, Event: evt, Recipient: intent.Recipient, Blueprint: target, Handler: intent.Handler,
+				})
+				if err != nil {
+					return selectedRunTargetOwnerProjection{}, err
+				}
+			}
+			targets = append(targets, target)
 		}
 		owners, err := p.connectPlanner.exactLookupCoordinates(evt.RunID(), targets)
 		if err != nil {

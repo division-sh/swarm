@@ -224,6 +224,21 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 		Blueprint: events.RouteIdentity{FlowID: ".", FlowInstance: runID},
 		Handler:   handler.ForEvent("timer.cancel"),
 	}
+	for _, blueprint := range []events.RouteIdentity{{}, {FlowInstance: runID}, {FlowID: ".", FlowInstance: runID}} {
+		lookup := request
+		lookup.Blueprint = blueprint
+		got, err := AdmitDeliveryTargetLookupCoordinate(lookup)
+		if err != nil || got.FlowID != "." || got.FlowInstance != runID {
+			t.Fatalf("root lookup lost its handler/run coordinate: blueprint=%+v got=%+v err=%v", blueprint, got, err)
+		}
+	}
+	for _, blueprint := range []events.RouteIdentity{{FlowID: "review", FlowInstance: runID}, {FlowInstance: eventtest.UUID("foreign-root-coordinate")}} {
+		lookup := request
+		lookup.Blueprint = blueprint
+		if _, err := AdmitDeliveryTargetLookupCoordinate(lookup); err == nil {
+			t.Fatalf("contradictory root lookup admitted: %+v", blueprint)
+		}
+	}
 
 	request.Candidates = []DeliveryTargetOwnerCandidate{{Route: events.RouteIdentity{FlowInstance: runID, EntityID: existingEntityID}}}
 	owner, err := ClassifyDeliveryTargetOwnership(request)
@@ -248,6 +263,29 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 	}
 	if !owner.MaterializingEntity() || owner.Route() != wantMaterializing {
 		t.Fatalf("materializing owner = %#v, want %#v", owner, wantMaterializing)
+	}
+}
+
+func TestTargetLookupCoordinatePreservesDeclaredNonRootAndHandlerIdentity(t *testing.T) {
+	source := deliveryTargetOwnershipSource(t)
+	node := pipelineNode(t, "review", "existing")
+	event := eventtest.RuntimeControl(eventtest.UUID("lookup-nested-handler"), "work.ready", "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{})
+	request := DeliveryTargetOwnershipRequest{Source: source, Event: event, Recipient: events.MustNodeDeliveryRecipient(node),
+		Handler: MustDeliveryTargetHandler(node).ForEvent("work.ready"), Blueprint: events.RouteIdentity{FlowInstance: "review/one"}}
+	coordinate, err := AdmitDeliveryTargetLookupCoordinate(request)
+	if err != nil || coordinate.FlowID != "review" || coordinate.FlowInstance != "review/one" {
+		t.Fatalf("path-only nested lookup lost its declaration: %+v err=%v", coordinate, err)
+	}
+	for _, blueprint := range []events.RouteIdentity{{}, {FlowID: ".", FlowInstance: "review/one"}} {
+		wrong := request
+		wrong.Blueprint = blueprint
+		if _, err := AdmitDeliveryTargetLookupCoordinate(wrong); err == nil {
+			t.Fatalf("missing or contradictory nested coordinate admitted: %+v", blueprint)
+		}
+	}
+	request.Recipient = events.MustNodeDeliveryRecipient(pipelineNode(t, "review", "materializer"))
+	if _, err := AdmitDeliveryTargetLookupCoordinate(request); err == nil {
+		t.Fatal("lookup borrowed a different recipient's handler declaration")
 	}
 }
 

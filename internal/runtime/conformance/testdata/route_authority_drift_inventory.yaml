@@ -1038,12 +1038,19 @@ seam_families:
     classification: valid_consumer
     paths:
       - internal/runtime/bus/indexed_connect_receivers_test.go
+      - internal/runtime/runforkexecution/materialized_target_lookup_test.go
     search_dimensions: [route_plan_source_reason]
     notes: >
       Test-only route-intent candidates exercise the existing exact native
       instance lookup and target projection. The proof rejects foreign or
       unselected observations and preserves absence and independent failures;
-      it does not introduce a route producer or execution permission.
+      it does not introduce a route producer or execution permission. The real
+      selected-fork producer carries its admitted handler declaration into
+      root/path-only and nested/keyed native target preparation on both stores.
+      Empty-root binding remains a positive control; contradictory declaration,
+      run and source coordinates are rejected without changing native headers.
+      This producer-to-preparation proof does not claim fork execution or replace
+      fixed-cut historical construction and receipt authority with current index.
   - id: fan_out_publication_route_plan_consumer
     layer: route_plan_authority
     classification: valid_consumer
