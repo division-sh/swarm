@@ -679,6 +679,23 @@ func (e *Executor) CompletionWakeups() <-chan struct{} {
 	return e.completionWake
 }
 
+type completionJoinDiagnostic struct {
+	cause error
+}
+
+func (e *completionJoinDiagnostic) Error() string { return e.cause.Error() }
+func (e *completionJoinDiagnostic) Unwrap() error { return e.cause }
+
+// CompletionJoinSucceeded classifies only the owner's exact Wait result, not
+// an independently wrapped or joined error that may include incomplete work.
+func CompletionJoinSucceeded(err error) bool {
+	if err == nil {
+		return true
+	}
+	_, joined := err.(*completionJoinDiagnostic)
+	return joined
+}
+
 func (e *Executor) Wait(ctx context.Context) error {
 	if e == nil {
 		return nil
@@ -696,6 +713,12 @@ func (e *Executor) Wait(ctx context.Context) error {
 	}()
 	select {
 	case <-done:
+		e.mu.Lock()
+		diagnostic := e.settlementErr
+		e.mu.Unlock()
+		if diagnostic != nil {
+			return &completionJoinDiagnostic{cause: diagnostic}
+		}
 		return nil
 	case <-ctx.Done():
 		return context.Cause(ctx)

@@ -9,6 +9,7 @@ import (
 	goruntime "runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -124,6 +125,26 @@ func (s *runtimeShutdownCompletionStore) ExecuteCompletionCandidate(
 	}
 	close(s.completed)
 	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeAwaitMutation}, nil
+}
+
+type runtimeShutdownLateCommitCompletionStore struct {
+	runtimeShutdownCompletionStore
+	executions atomic.Int32
+	diagnostic error
+}
+
+func (s *runtimeShutdownLateCommitCompletionStore) ExecuteCompletionCandidate(
+	_ context.Context,
+	_ runtimerunlifecycle.Candidate,
+	_ runtimerunlifecycle.FinalCatalog,
+) (runtimerunlifecycle.CompletionResult, error) {
+	if s.executions.Add(1) == 1 {
+		close(s.started)
+	}
+	<-s.release
+	return runtimerunlifecycle.CompletionResult{
+		Committed: true, Outcome: runtimerunlifecycle.OutcomeTerminallyEligible,
+	}, s.diagnostic
 }
 
 type runtimeShutdownDeliveryStore struct {
@@ -899,6 +920,105 @@ func TestRuntimeShutdownRetiresGrantAfterCompletionPersistenceSettles(t *testing
 	case <-grantRetired:
 	default:
 		t.Fatal("generation grant was not retired after completion persistence settled")
+	}
+}
+
+func TestRuntimeShutdownPreservesLateCompletionCommitDiagnostic(t *testing.T) {
+	diagnostic := errors.New("acknowledged completion cleanup after retirement")
+	store := &runtimeShutdownLateCommitCompletionStore{
+		runtimeShutdownCompletionStore: runtimeShutdownCompletionStore{
+			started: make(chan struct{}), release: make(chan struct{}),
+		},
+		diagnostic: diagnostic,
+	}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(store.release) }) }
+	defer release()
+	occurrence := runtimeTestOccurrence(t, runtimeTestBundleHash)
+	baseline := occurrence.ActiveCount()
+	if baseline != 0 {
+		t.Fatalf("runtime occurrence baseline = %d, want zero", baseline)
+	}
+	executor, err := runtimerunlifecycle.NewExecutor(
+		store,
+		runtimerunlifecycle.CandidateScope{BundleHash: runtimeTestBundleHash},
+		runtimerunlifecycle.FinalCatalog{},
+		occurrence,
+		runtimerunlifecycle.ExecutorOptions{},
+	)
+	if err != nil {
+		t.Fatalf("create run lifecycle executor: %v", err)
+	}
+	t.Cleanup(func() {
+		release()
+		_ = executor.Retire(context.Background())
+		_ = executor.Wait(context.Background())
+	})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start run lifecycle executor: %v", err)
+	}
+	probe, err := occurrence.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("begin retirement progress probe: %v", err)
+	}
+	defer probe.Done()
+	candidate := runtimerunlifecycle.Candidate{
+		RunID:      "11111111-1111-4111-8111-111111111111",
+		BundleHash: runtimeTestBundleHash,
+		Revision:   1,
+		DueAt:      runtimerunlifecycle.CanonicalTimestamp(time.Now().UTC().Add(-time.Second)),
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit completion candidate: %v", err)
+	}
+	select {
+	case <-store.started:
+	case <-time.After(time.Second):
+		t.Fatal("completion persistence did not start")
+	}
+	rt := &Runtime{workOccurrence: occurrence, runLifecycleExecutor: executor}
+	shutdown := make(chan error, 1)
+	go func() { shutdown <- rt.Shutdown() }()
+	// Occurrence retirement follows executor.Retire, whose diagnostic snapshot
+	// is still empty while the acknowledged persistence operation is blocked.
+	select {
+	case <-probe.Context().Done():
+		if cause := context.Cause(probe.Context()); !errors.Is(cause, worklifetime.ErrRetired) {
+			t.Fatalf("retirement progress probe cause = %v", cause)
+		}
+	case err := <-shutdown:
+		t.Fatalf("shutdown returned before completion persistence settled: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not reach occurrence retirement")
+	}
+	select {
+	case err := <-shutdown:
+		t.Fatalf("shutdown abandoned blocked completion persistence: %v", err)
+	default:
+	}
+	if err := probe.Done(); err != nil {
+		t.Fatalf("settle retirement progress probe: %v", err)
+	}
+	release()
+	select {
+	case err := <-shutdown:
+		if !errors.Is(err, diagnostic) {
+			t.Fatalf("shutdown lost the late acknowledged commit diagnostic: %v", err)
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("shutdown exhausted its grace instead of joining the committed candidate: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not join the acknowledged completion")
+	}
+	if got := store.executions.Load(); got != 1 {
+		t.Fatalf("completion executed %d times, want one acknowledged commit", got)
+	}
+	if active := executor.ActiveCandidates(); active != 0 {
+		t.Fatalf("shutdown retained %d completion candidates", active)
+	}
+	if active := occurrence.ActiveCount(); active != baseline {
+		t.Fatalf("shutdown occurrence leases = %d, want baseline %d", active, baseline)
 	}
 }
 

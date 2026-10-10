@@ -1011,12 +1011,13 @@ func (r *selectedContractAgentRuntime) stopExecutionWork() error {
 	}
 	if r.completionExecutor != nil {
 		retireErr := r.completionExecutor.Retire(context.Background())
-		if err := r.completionExecutor.Wait(context.Background()); err != nil {
-			return errors.Join(retireErr, err)
+		joined := r.completionExecutor.Wait(context.Background())
+		if !runlifecycle.CompletionJoinSucceeded(joined) {
+			return errors.Join(retireErr, joined)
 		}
 		r.completionExecutor = nil
 		if r.completionDiagnostics != nil {
-			r.completionDiagnostics.add(retireErr)
+			r.completionDiagnostics.add(joined)
 		}
 	}
 	if r.completionRegistration != nil {
