@@ -192,6 +192,9 @@ func validateSatisfactionPlanGenerationInputs(plan SatisfactionPlan) error {
 		}
 	}
 	for name, operation := range plan.operations {
+		if err := operation.toolSchema.ValidateDeclarationName(operation.tool.String()); err != nil {
+			return fmt.Errorf("channel generation operation %q: %w", name, err)
+		}
 		if err := operation.toolSchema.Validate(); err != nil {
 			return fmt.Errorf("channel generation operation %q tool: %w", name, err)
 		}
@@ -210,11 +213,19 @@ func validateSatisfactionPlanGenerationInputs(plan SatisfactionPlan) error {
 			}
 		}
 	}
-	if plan.registration != nil {
-		for _, operation := range []compiledRegistrationOperation{plan.registration.identify, plan.registration.apply, plan.registration.readback} {
-			if err := operation.tool.Validate(); err != nil {
-				return fmt.Errorf("channel generation registration %q tool: %w", operation.name, err)
-			}
+	return validateRegistrationGenerationInputs(plan.registration)
+}
+
+func validateRegistrationGenerationInputs(registration *CompiledChannelRegistration) error {
+	if registration == nil {
+		return nil
+	}
+	for _, operation := range []compiledRegistrationOperation{registration.identify, registration.apply, registration.readback} {
+		if err := operation.tool.ValidateDeclarationName(operation.toolID.String()); err != nil {
+			return fmt.Errorf("channel generation registration %q: %w", operation.name, err)
+		}
+		if err := operation.tool.Validate(); err != nil {
+			return fmt.Errorf("channel generation registration %q tool: %w", operation.name, err)
 		}
 	}
 	return nil

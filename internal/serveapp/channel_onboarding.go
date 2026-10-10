@@ -41,24 +41,33 @@ func serveChannelOnboardingCatalog(manager *runtime.RuntimeContextManager) (*cha
 	}
 	candidates := []channelonboarding.Candidate{}
 	for _, contextDef := range manager.LoadedContexts() {
-		bundleHash := contextDef.SourceArtifactFact.BundleHash()
-		bundleIdentity := fmt.Sprintf("%s@%s#%s", strings.TrimSpace(contextDef.BundleIdentity.WorkflowName), strings.TrimSpace(contextDef.BundleIdentity.WorkflowVersion), strings.TrimSpace(contextDef.BundleIdentity.BundleHash))
-		if strings.Trim(bundleIdentity, "@#") == "" {
-			return nil, fmt.Errorf("runtime context %s has no exact bundle identity", bundleHash)
-		}
 		declarations, err := runtime.ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog)
 		if err != nil {
 			return nil, err
 		}
-		for _, plan := range contextDef.ChannelPlans {
-			planned, err := serveChannelCandidatesForPlan(contextDef, bundleIdentity, declarations, plan)
-			if err != nil {
-				return nil, err
-			}
-			candidates = append(candidates, planned...)
+		planned, err := serveChannelContextCandidates(contextDef, declarations)
+		if err != nil {
+			return nil, err
 		}
+		candidates = append(candidates, planned...)
 	}
 	return channelonboarding.NewCandidateCatalog(candidates)
+}
+
+func serveChannelContextCandidates(contextDef runtime.BundleContext, declarations []runtime.StandingTargetDeclaration) ([]channelonboarding.Candidate, error) {
+	bundleIdentity := fmt.Sprintf("%s@%s#%s", strings.TrimSpace(contextDef.BundleIdentity.WorkflowName), strings.TrimSpace(contextDef.BundleIdentity.WorkflowVersion), strings.TrimSpace(contextDef.BundleIdentity.BundleHash))
+	if strings.Trim(bundleIdentity, "@#") == "" {
+		return nil, fmt.Errorf("runtime context %s has no exact bundle identity", contextDef.BundleHash())
+	}
+	var candidates []channelonboarding.Candidate
+	for _, plan := range contextDef.ChannelPlans {
+		planned, err := serveChannelCandidatesForPlan(contextDef, bundleIdentity, declarations, plan)
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, planned...)
+	}
+	return candidates, nil
 }
 
 func serveChannelCandidatesForPlan(contextDef runtime.BundleContext, bundleIdentity string, declarations []runtime.StandingTargetDeclaration, plan packs.SatisfactionPlan) ([]channelonboarding.Candidate, error) {
@@ -76,18 +85,6 @@ func serveChannelCandidatesForPlan(contextDef runtime.BundleContext, bundleIdent
 	}
 	posture := channelonboarding.ActivationPosture(profile.ActivationPosture())
 	ceremony := channelonboarding.IdentityCeremony(profile.IdentityCeremony())
-	if posture == channelonboarding.ActivationSessionConnection {
-		return []channelonboarding.Candidate{{
-			SourceLabel: contextDef.BundleIdentity.SourceLabel, Provider: profile.Provider(), Interface: identity,
-			Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
-				BundleHash: contextDef.BundleHash(), BundleIdentity: bundleIdentity,
-				PackInventoryGeneration: contextDef.PackInventoryDigest, RuntimeInstanceID: contextDef.RuntimeInstanceID,
-				ContextPublicationGeneration: contextDef.PublicationGeneration, PlanGeneration: generation,
-			},
-			Posture: posture, Ceremony: ceremony, ProviderCredentialRole: profile.ProviderCredential(),
-			ConfirmationOperation: profile.ConfirmationOperation(), ConnectionHealth: profile.ConnectionHealth(), Plan: plan,
-		}}, nil
-	}
 	var candidates []channelonboarding.Candidate
 	for _, declaration := range declarations {
 		for _, binding := range declaration.Ingress {
@@ -210,11 +207,11 @@ func compileServeLearnedChannelActivations(ctx context.Context, store channelonb
 		if err != nil {
 			return nil, err
 		}
-		current, err = channelonboarding.AdmissionResponsibilityCurrent(ctx, store, channelonboarding.AdmissionResponsibility{
-			OperationID: compiled.OnboardingOperationID, OperationRevision: compiled.OnboardingRevision,
-			ActivationRevision: compiled.ActivationRevision, Coordinate: compiled.Coordinate,
-			TargetSelector: candidate.Target.Selector, Provider: candidate.Provider, Credentials: compiled.CredentialAdmissions,
-		}, true)
+		responsibility, err := compiled.AdmissionResponsibility()
+		if err != nil {
+			return nil, err
+		}
+		current, err = channelonboarding.AdmissionResponsibilityCurrent(ctx, store, responsibility, true)
 		if err != nil {
 			return nil, err
 		}
@@ -447,6 +444,7 @@ func declaredActivationCoordinate(contextDef runtime.BundleContext, binding pack
 
 type serveChannelActivationRefresher struct {
 	manager     *runtime.RuntimeContextManager
+	sessions    serveSessionBootstrapOwner
 	store       channelonboarding.Store
 	identities  *operatorchannel.Service
 	credentials *runtimecredentials.SnapshotOwner
@@ -518,7 +516,26 @@ func (r *serveChannelActivationRefresher) AdmitChannelTarget(ctx context.Context
 	if r == nil || r.manager == nil {
 		return channelonboarding.Candidate{}, fmt.Errorf("channel target admission requires runtime context ownership")
 	}
-	if err := r.manager.AdmitChannelStandingTarget(ctx, op, candidate, r.testBarrier); err != nil {
+	if op.Posture != candidate.Posture || op.Provider != candidate.Provider || op.Interface.Normalized() != candidate.Interface.Normalized() {
+		return channelonboarding.Candidate{}, channelonboarding.ErrRevisionConflict
+	}
+	var provider operatorchannel.ProviderAuthority
+	if op.Posture == channelonboarding.ActivationSessionConnection {
+		if r.sessions == nil {
+			return channelonboarding.Candidate{}, &operatorchannel.SessionProviderUnavailableError{Provider: op.Provider}
+		}
+		var observed operatorchannel.SessionConnectionObservation
+		var current bool
+		var err error
+		provider, observed, current, err = r.sessions.ObserveSession(ctx, op)
+		defer provider.CloseExecution()
+		parentID, revision := provider.SessionParent()
+		if err != nil || !current || observed.Validate() != nil || !observed.Connected || observed.Admission != op.SessionAccount ||
+			parentID != op.OperationID || revision != op.Revision || provider.RequireExecutable() != nil {
+			return channelonboarding.Candidate{}, errors.Join(channelonboarding.ErrRevisionConflict, err)
+		}
+	}
+	if err := r.manager.AdmitChannelStandingTarget(ctx, op, candidate, provider, r.testBarrier); err != nil {
 		return channelonboarding.Candidate{}, err
 	}
 	catalog, err := serveChannelOnboardingCatalog(r.manager)
@@ -594,11 +611,12 @@ type serveConnectedChannelReadiness struct {
 	credentials *runtimecredentials.SnapshotOwner
 	effects     runtimeeffects.OutcomeStore
 	ingress     *runtimepublicingress.ReadinessOwner
+	sessions    serveSessionBootstrapOwner
 	now         func() time.Time
 }
 
 func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) (channelonboarding.ConnectedChannelReadiness, bool, error) {
-	if o == nil || o.manager == nil || o.store == nil || o.identities == nil || o.credentials == nil || o.effects == nil || o.ingress == nil {
+	if o == nil || o.manager == nil || o.store == nil || o.identities == nil || o.credentials == nil || o.effects == nil {
 		return channelonboarding.ConnectedChannelReadiness{}, false, fmt.Errorf("connected channel readiness dependencies are incomplete")
 	}
 	activation, err := o.store.GetConnectedChannelActivation(ctx, op.SlotKey)
@@ -644,6 +662,18 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 	if !planCurrent {
 		facts.PlanGeneration = plangeneration.Generation{}
 	}
+	if activation.Posture == channelonboarding.ActivationSessionConnection {
+		current, err := o.observeSessionReadiness(ctx, op, activation, &facts)
+		if err != nil {
+			return channelonboarding.ConnectedChannelReadiness{}, false, err
+		}
+		defer facts.SessionAuthority.CloseExecution()
+		if !current {
+			return channelonboarding.ConnectedChannelReadiness{Reason: channelonboarding.ReadinessSessionUnavailable,
+				Coordinate: activation.Coordinate, ActivationRevision: activation.Revision, BindingRevision: activation.BindingRevision,
+				ActivationGeneration: facts.ActivationGeneration.Diagnostic(), ObservedAt: facts.ObservedAt}, true, nil
+		}
+	}
 
 	binding, proofCurrent, bindingErr := o.identities.CurrentBindingReadiness(ctx, activation.Interface)
 	if bindingErr != nil {
@@ -655,6 +685,11 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 		facts.ExpectedBindingRevision = binding.Revision
 		facts.ProofCurrent = proofCurrent
 		facts.ExpectedProofRevision = binding.ProofRevision
+		if activation.Posture == channelonboarding.ActivationSessionConnection &&
+			(binding.PrincipalID != activation.PrincipalID || binding.ProviderAuthority.Kind != operatorchannel.ProviderAuthoritySession ||
+				binding.ProviderAuthority.Session != activation.SessionAccount) {
+			facts.ExpectedBindingRevision = 0
+		}
 	}
 
 	credentialProjection := o.credentials.BeginSecretBindingProjection()
@@ -679,6 +714,9 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 
 	switch activation.Posture {
 	case channelonboarding.ActivationWebhookRegistration:
+		if o.ingress == nil {
+			return channelonboarding.ConnectedChannelReadiness{}, false, fmt.Errorf("webhook channel readiness requires its ingress owner")
+		}
 		registration, found := o.ingress.ChannelRegistrationCurrent(ctx, now, planID, activation.TargetSelector, activation.Provider)
 		if found && registration.Exposure != nil {
 			facts.ExposureGeneration = registration.Exposure.GenerationID
@@ -686,8 +724,6 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 			facts.RegistrationActivationGeneration = registration.ActivationGeneration
 			facts.RegistrationCurrent = registration.Current && registration.ActivationGeneration.Equal(facts.ActivationGeneration)
 		}
-	case channelonboarding.ActivationSessionConnection:
-		return channelonboarding.ConnectedChannelReadiness{Reason: channelonboarding.ReadinessSessionUnavailable, Coordinate: activation.Coordinate, ObservedAt: now}, true, nil
 	}
 	projection := channelonboarding.ProjectReadiness(facts)
 	projection.NativeInboxRequired = nativeRequired
@@ -703,6 +739,18 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 	}
 	projection.NativeInbox = &qualification
 	return projection, true, nil
+}
+
+func (o *serveConnectedChannelReadiness) observeSessionReadiness(ctx context.Context, op channelonboarding.Operation,
+	activation channelonboarding.ConnectedChannelActivation, facts *channelonboarding.ReadinessFacts,
+) (bool, error) {
+	provider, observed, current, err := observeServeChannelSession(ctx, o.sessions, op, activation)
+	if err != nil || !current {
+		return false, err
+	}
+	facts.SessionAuthority, facts.SessionObservation = provider, &observed
+	facts.ObservedAt = observed.ObservedAt
+	return true, nil
 }
 
 func (o *serveConnectedChannelReadiness) observedAt() time.Time {
@@ -724,6 +772,7 @@ type serveChannelConfirmationDispatcher struct {
 	posture           executionposture.Posture
 	runtimeInstanceID string
 	httpClient        *http.Client
+	sessions          serveSessionBootstrapOwner
 	now               func() time.Time
 }
 
@@ -836,9 +885,6 @@ func channelEffectTerminal(outcome runtimeeffects.ChannelOnboardingEffectOutcome
 }
 
 func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx context.Context, request channelonboarding.ConfirmationRequest) (channelonboarding.ConfirmationResult, error) {
-	if err := request.Candidate.Plan.RequireExecutableProvider(); err != nil {
-		return channelonboarding.ConfirmationResult{}, err
-	}
 	if d == nil || d.effects == nil || d.credentials == nil {
 		return channelonboarding.ConfirmationResult{}, fmt.Errorf("channel confirmation dispatcher is unavailable")
 	}
@@ -876,6 +922,10 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 		}
 	}
 
+	nativeExecutor, err := selectServeChannelWrite(ctx, d.sessions, op, compiled.Plan)
+	if err != nil {
+		return channelonboarding.ConfirmationResult{}, err
+	}
 	confirmationText := "Swarm channel connected."
 	if binding.ConversationScope == operatorchannel.ConversationScopeShared {
 		confirmationText += " Future notices, decision cards, and updates sent here will be visible to this group."
@@ -921,8 +971,8 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 	effectCtx = runtimeeffects.WithController(effectCtx, runtimeeffects.NewController(d.effects).WithExecutionPosture(d.posture))
 	effectCtx = runtimeeffects.WithAuthority(effectCtx, authority)
 	effectCtx = runtimeauthoractivity.WithScope(effectCtx, runtimeauthoractivity.BundleScope(d.runtimeInstanceID, op.Coordinate.BundleHash))
-	delivery, err := channelCredentialHTTPExecutor(d.httpClient, d.credentials, compiled.Plan, activation.CredentialAdmissions, tool).DeliverChannelConfirmation(
-		effectCtx, toolID, tool, providerInput, credentials,
+	delivery, err := executeChannelWrite(
+		effectCtx, activation.OperationID, request.Candidate.ConfirmationOperation, toolID, tool, providerInput, credentials,
 		map[string]string{
 			"onboarding_operation_id": op.OperationID,
 			"activation_id":           activation.ActivationID,
@@ -930,6 +980,8 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 			"bundle_hash":             op.Coordinate.BundleHash,
 			"plan_generation":         op.Coordinate.PlanGeneration.Diagnostic(),
 		},
+		nativeExecutor,
+		channelCredentialHTTPExecutor(d.httpClient, d.credentials, compiled.Plan, activation.CredentialAdmissions, tool),
 	)
 	if err != nil {
 		return channelonboarding.ConfirmationResult{OperationID: operationID}, err
@@ -943,6 +995,11 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 func (r *serveChannelActivationRefresher) RefreshChannelActivations(ctx context.Context) error {
 	if r == nil {
 		return fmt.Errorf("serve channel activation refresher is required")
+	}
+	if r.sessions != nil {
+		if err := r.sessions.RetireInactiveSessions(ctx); err != nil {
+			return err
+		}
 	}
 	if err := r.publishChannelActivations(ctx); err != nil {
 		return err

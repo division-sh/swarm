@@ -296,6 +296,12 @@ func (p *serveLifecyclePresenter) recordIneligibleIngress(bindings []runtime.Sta
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, binding := range bindings {
+		if binding.BlockReason == runtimerunlifecycle.StandingBindingSessionRequired {
+			p.operatorWarnings = append(p.operatorWarnings, fmt.Sprintf(
+				"DORMANT ingress %s/%s (%s): session admission required; no business target, route or standing retention. Run swarm channel connect %s and complete pairing and the authenticated operator ceremony, or resume the exact pending operation.",
+				binding.FlowPath, binding.Provider, binding.SourcePath, binding.Provider))
+			continue
+		}
 		if binding.BlockReason == runtimerunlifecycle.StandingBindingRecoveryRequired {
 			missing := ""
 			if len(binding.MissingCredentials) > 0 {
@@ -772,7 +778,11 @@ func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecy
 		return sorted[i].BundleHash < sorted[j].BundleHash
 	})
 	for _, fact := range sorted {
-		fmt.Fprintf(p.out, "  %-27s %s\n", strings.TrimSpace(fact.Provider)+" webhook", strings.TrimSpace(fact.URL))
+		label := " webhook"
+		if sessionIngressFact(fact) {
+			label = " session"
+		}
+		fmt.Fprintf(p.out, "  %-27s %s\n", strings.TrimSpace(fact.Provider)+label, strings.TrimSpace(fact.URL))
 		fmt.Fprintf(p.out, "  %-27s %s\n", "capability", packs.RenderEffectiveTriggerReadiness(fact.Subject))
 	}
 }

@@ -208,6 +208,11 @@ func beginBinding(ctx context.Context, runner transactionRunner, req domain.Begi
 			out = existing
 			return nil
 		}
+		if req.ProviderAuthority.Kind == domain.ProviderAuthoritySession {
+			if err := requireSessionParent(txctx, tx, runner.dialect(), req.OnboardingOperationID, req.ProviderAuthority); err != nil {
+				return err
+			}
+		}
 		binding, bindingFound, err := loadBinding(txctx, tx, runner.dialect(), req.Interface.Key(), true)
 		if err != nil {
 			return err
@@ -371,7 +376,7 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 		if op.PrincipalID != req.PrincipalID {
 			return domain.ErrRevisionConflict
 		}
-		if err := op.ProviderAuthority.RequireExecutable(); err != nil {
+		if err := op.ProviderAuthority.Validate(); err != nil {
 			return err
 		}
 		if op.State.Terminal() {
@@ -429,6 +434,14 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 			}
 			out = op
 			return nil
+		}
+		if op.ProviderAuthority.Kind == domain.ProviderAuthoritySession {
+			if err := req.ProviderAuthorityAdmission.RequireExecutableFor(op.ProviderAuthority); err != nil {
+				return err
+			}
+			if err := requireSessionParent(txctx, tx, runner.dialect(), op.OnboardingOperationID, req.ProviderAuthorityAdmission); err != nil {
+				return err
+			}
 		}
 		if !req.ProviderAuthorityCurrent {
 			op.State, op.Revision, op.CompletedAt = domain.StateCredentialStale, op.Revision+1, now
@@ -623,7 +636,7 @@ func bindFromProof(ctx context.Context, runner transactionRunner, req domain.Boo
 			if current.Status == domain.BindingUnbound {
 				return fmt.Errorf("%w: explicit unbind fence blocks proof reuse", domain.ErrConflict)
 			}
-			if current.Status != domain.BindingCurrent || current.ProviderAuthority != req.Proof.ProviderAuthority ||
+			if current.Status != domain.BindingCurrent || !current.ProviderAuthority.SameProvenance(req.Proof.ProviderAuthority) ||
 				current.ExternalAccountRef != req.Proof.ExternalAccountRef || current.ConversationRef != req.Proof.ConversationRef ||
 				current.ConversationScope != req.Proof.ConversationScope || current.ProofID != req.Proof.ProofID || current.ProofRevision != req.Proof.Revision {
 				return fmt.Errorf("%w: current binding contradicts the verified proof", domain.ErrConflict)
@@ -1086,7 +1099,7 @@ func decodeProviderAuthority(raw sql.NullString, allowNone bool) (domain.Provide
 }
 
 func insertClaimReceipt(ctx context.Context, tx *sql.Tx, d dialect, claim domain.InboundClaim, op domain.Operation, disposition, reason string, now time.Time) error {
-	_, err := tx.ExecContext(ctx, d.bind(`INSERT INTO operator_channel_claim_receipts (publication_id, provider, provider_event_id, interface_key, challenge, operation_id, disposition, reason, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (publication_id) DO NOTHING`), claim.PublicationID, claim.Provider, claim.ProviderEventID, claim.Interface.Key(), claim.Challenge, nullable(op.OperationID), disposition, reason, now)
+	_, err := tx.ExecContext(ctx, d.bind(`INSERT INTO operator_channel_claim_receipts (publication_id, provider, provider_event_id, interface_key, challenge, operation_id, disposition, reason, provider_authorization, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (publication_id) DO NOTHING`), claim.PublicationID, claim.Provider, claim.ProviderEventID, claim.Interface.Key(), claim.Challenge, nullable(op.OperationID), disposition, reason, claim.ProviderAuthorization, now)
 	return err
 }
 

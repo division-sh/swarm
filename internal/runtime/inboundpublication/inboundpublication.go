@@ -15,13 +15,16 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	nativeinput "github.com/division-sh/swarm/internal/sessionprovider/input"
 	"github.com/google/uuid"
 )
 
@@ -48,14 +51,41 @@ type Identity struct {
 	ProviderEventID string `json:"provider_event_id"`
 }
 
-func (i Identity) Validate() error {
-	for field, value := range map[string]string{"service_id": i.ServiceID, "run_id": i.RunID} {
+// BindingGeneration is the admitted receipt namespace before a provider
+// delivery arrives. It carries no concrete receiver or delivery authority.
+type BindingGeneration struct {
+	ServiceID  string `json:"service_id"`
+	RunID      string `json:"run_id"`
+	Generation int64  `json:"generation"`
+}
+
+func (b BindingGeneration) Validate() error {
+	for field, value := range map[string]string{"service_id": b.ServiceID, "run_id": b.RunID} {
 		parsed, err := uuid.Parse(value)
 		if err != nil || parsed == uuid.Nil || parsed.String() != value {
 			return fmt.Errorf("inbound identity %s requires an exact UUID", field)
 		}
 	}
-	if i.Generation <= 0 || i.Provider == "" || i.Provider != strings.ToLower(strings.TrimSpace(i.Provider)) ||
+	if b.Generation <= 0 {
+		return fmt.Errorf("inbound identity requires its exact generation, provider and provider delivery")
+	}
+	return nil
+}
+
+func (i Identity) BindingGeneration() BindingGeneration {
+	return BindingGeneration{ServiceID: i.ServiceID, RunID: i.RunID, Generation: i.Generation}
+}
+
+func (b BindingGeneration) Identity(provider, providerEventID string) Identity {
+	return Identity{ServiceID: b.ServiceID, RunID: b.RunID, Generation: b.Generation,
+		Provider: provider, ProviderEventID: providerEventID}
+}
+
+func (i Identity) Validate() error {
+	if err := i.BindingGeneration().Validate(); err != nil {
+		return err
+	}
+	if i.Provider == "" || i.Provider != strings.ToLower(strings.TrimSpace(i.Provider)) ||
 		i.ProviderEventID == "" || i.ProviderEventID != strings.TrimSpace(i.ProviderEventID) {
 		return fmt.Errorf("inbound identity requires its exact generation, provider and provider delivery")
 	}
@@ -181,6 +211,23 @@ func (r Request) Identity() Identity {
 		Provider: r.Provider, ProviderEventID: r.ProviderEventID}
 }
 
+// CanonicalBytes is immutable request evidence, not a current execution fence.
+func (r Request) CanonicalBytes() ([]byte, error) {
+	r = r.Normalized()
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(r)
+	if err != nil {
+		return nil, err
+	}
+	value, err := canonicaljson.Decode(raw)
+	if err != nil {
+		return nil, err
+	}
+	return canonicaljson.Encode(value)
+}
+
 type EventFinalization struct {
 	Ordinal           int
 	Event             events.Event
@@ -198,6 +245,7 @@ type Finalization struct {
 // every event before entering storage; the selected store owns the one atomic
 // transaction and cannot call back into runtime or borrow transaction context.
 type CommitCommand struct {
+	Admission             providertriggers.PublicationAdmission
 	Request               Request
 	Finalization          Finalization
 	Publications          []runtimebus.PublicationCommand
@@ -206,10 +254,78 @@ type CommitCommand struct {
 	OperatorChannelAction *operatorchannel.InboundAction
 	OperatorChannelText   *operatorchannel.InboundText
 	PotentialBareText     *operatorchannel.InboundText
+	operator              *operatorCommitProof
+}
+
+// PublicationSequence projects the sealed current native occurrence separately
+// from its retained original request. Webhook admission keeps its request fence.
+func (c CommitCommand) PublicationSequence() int64 {
+	if input, native := c.Admission.NativeInput(); native {
+		return input.PublicationSequence()
+	}
+	return c.Request.ExpectedPublicationSequence
+}
+
+// RequireNativePublicationRequest is pure and may be repeated by the selected
+// mutation owner after acquiring its locks, before persisting receipt evidence.
+func (c CommitCommand) RequireNativePublicationRequest() error {
+	input, native := c.Admission.NativeInput()
+	if !native {
+		return nil
+	}
+	if input.PublicationSequence() < 1 {
+		return fmt.Errorf("native publication requires its sealed occurrence")
+	}
+	actual, err := c.Request.CanonicalBytes()
+	if err != nil {
+		return err
+	}
+	if original := input.OriginalPublicationRequest(); len(original) > 0 {
+		if !bytes.Equal(original, actual) {
+			return ErrRequestIdentityConflict
+		}
+	} else if c.Request.ExpectedPublicationSequence != input.PublicationSequence() {
+		return fmt.Errorf("native publication changed its admitted occurrence")
+	}
+	return input.RequireCapturedPublicationRequest(actual)
+}
+
+// WithNativeLifetime preserves the mutation caller's context values while
+// making owner retirement cancel SQL lock waits and the transaction itself.
+func (c CommitCommand) WithNativeLifetime(ctx context.Context) (context.Context, func()) {
+	input, native := c.Admission.NativeInput()
+	if !native {
+		return ctx, func() {}
+	}
+	owned, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(input.Context(), cancel)
+	if !input.LifetimeCurrent(ctx) {
+		cancel()
+	}
+	return nativeCommitContext{Context: owned, parent: ctx, input: input, cancel: cancel}, func() { stop(); cancel() }
+}
+
+type nativeCommitContext struct {
+	context.Context
+	parent context.Context
+	input  nativeinput.Admission
+	cancel context.CancelFunc
+}
+
+// Native transaction owners check Err immediately before COMMIT admission.
+// Observe the original lifetime synchronously, not a scheduled AfterFunc alone.
+func (c nativeCommitContext) Err() error {
+	if !c.input.LifetimeCurrent(c.parent) {
+		c.cancel()
+	}
+	return c.Context.Err()
 }
 
 func (c CommitCommand) Validate() error {
 	if err := c.Request.Validate(); err != nil {
+		return err
+	}
+	if err := c.RequireNativePublicationRequest(); err != nil {
 		return err
 	}
 	request := c.Request.Normalized()
@@ -238,6 +354,9 @@ func (c CommitCommand) Validate() error {
 		}
 	}
 	if len(c.Finalization.Events) == 0 {
+		if err := c.validateOperatorProof(); err != nil {
+			return err
+		}
 		switch {
 		case c.OperatorChannelClaim != nil:
 			if err := c.OperatorChannelClaim.Validate(); err != nil {
@@ -265,6 +384,8 @@ func (c CommitCommand) Validate() error {
 		}
 	} else if operatorKinds != 0 {
 		return fmt.Errorf("operator channel publication must contain zero business events")
+	} else if c.operator != nil {
+		return fmt.Errorf("operator projection cannot authorize business events")
 	}
 	if len(c.Publications) != len(c.Finalization.Events) {
 		return fmt.Errorf("inbound publication event and publication command counts differ")
@@ -314,7 +435,7 @@ func (c CommitCommand) Validate() error {
 			return err
 		}
 		publication := c.Publications[index]
-		if err := publication.Validate(); err != nil {
+		if err := publication.ValidateInbound(c.Admission); err != nil {
 			return fmt.Errorf("inbound publication command %d: %w", index, err)
 		}
 		if publication.Commit.Event.ID() != item.Event.ID() || publication.Commit.Event.Event().Type() != item.Event.Type() {
