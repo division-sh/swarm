@@ -5,21 +5,28 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -159,10 +166,10 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testing.T) {
 	source := templateflowpilot.LoadSource(t, templateflowpilot.Options{})
 	tests := []struct {
-		name          string
-		payload       json.RawMessage
-		flowInstances []runtimebus.ActiveFlowInstanceDescriptor
-		wantFailure   string
+		name        string
+		payload     json.RawMessage
+		duplicate   bool
+		wantFailure string
 	}{
 		{
 			name:        "missing producer key",
@@ -170,35 +177,39 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 			wantFailure: runtimepinrouting.ConnectFailureInstanceSourceValueMissing.Code(),
 		},
 		{
-			name:    "ambiguous receiver key",
-			payload: json.RawMessage(`{"account_id":"acct-1","score":"91","decision":"approved"}`),
-			flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
-				{RunID: templateInstanceDeliveryRunID, InstanceID: "one", EntityID: "11111111-1111-4111-8111-111111111111", FlowInstance: "account/one", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
-				{RunID: templateInstanceDeliveryRunID, InstanceID: "two", EntityID: "22222222-2222-4222-8222-222222222222", FlowInstance: "account/two", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
-			},
-			wantFailure: runtimepinrouting.ConnectFailureTargetAmbiguous.Code(),
+			name:      "ambiguous receiver key",
+			payload:   json.RawMessage(`{"account_id":"acct-1","score":"91","decision":"approved"}`),
+			duplicate: true,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			store := &templateFlowPilotMemoryStore{source: source, flowInstances: tc.flowInstances}
+			store := &templateFlowPilotMemoryStore{}
 			root := runtimeflowidentity.Stored(source, ".", templateInstanceDeliveryRunID, templateInstanceDeliveryRunID, runtimeflowidentity.EntityID(templateInstanceDeliveryRunID), "")
 			producer, err := runtimeflowidentity.KeylessChild(source, root, "producer")
 			if err != nil {
 				t.Fatal(err)
 			}
 			store.constructions = []runtimeflowidentity.Instance{root, producer}
-			for _, descriptor := range tc.flowInstances {
-				instance, err := runtimeflowidentity.KeyedChild(source, root, descriptor.FlowTemplate, descriptor.InstanceID)
-				if err != nil {
-					t.Fatal(err)
+			store.addObservation(t, source, root, "")
+			store.addObservation(t, source, producer, "")
+			if tc.duplicate {
+				for _, id := range []string{"one", "two"} {
+					instance, err := runtimeflowidentity.KeyedChild(source, root, "account", id)
+					if err != nil {
+						t.Fatal(err)
+					}
+					store.constructions = append(store.constructions, instance)
+					store.addObservation(t, source, instance, "acct-1")
 				}
-				instance.EntityID = descriptor.EntityID
-				store.constructions = append(store.constructions, instance)
 			}
+			fact := runtimeTestSourceArtifactFact(t, source)
+			ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), fact)
+			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 			bus, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
-				ContractBundle: source,
-				Durable:        runtimebus.DurableDependencies{ConstructionPublications: store},
+				ContractBundle: source, SourceArtifactFact: fact,
+				Durable: runtimebus.DurableDependencies{ConstructionPublications: store, RunLifecycle: store,
+					Instances: store},
 				TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 					t.Fatal("fail-closed route must not plan a template instance")
 					return runtimepipeline.FlowInstanceActivationPlan{}, nil
@@ -221,8 +232,12 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 				eventtest.StaticFlowRoutingSource(producer.TemplateID, producer.InstancePath, producer.EntityID),
 				time.Now().UTC(),
 			)
-			plan, err := bus.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt)
-			if err != nil {
+			plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
+			var corruption *runtimepipeline.FlowInstanceConstructionCorruption
+			if tc.duplicate && !errors.As(err, &corruption) {
+				t.Fatalf("duplicate native selector was not typed construction corruption: %v", err)
+			}
+			if !tc.duplicate && err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
 			}
 			if plan.TargetFailure != tc.wantFailure {
@@ -233,8 +248,16 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 				t.Fatalf("fail-closed route exposed executable plan: recipients=%#v persisted=%#v routed=%#v subscriptions=%#v routes=%#v",
 					plan.Recipients, plan.PersistedRecipients, plan.RoutedRecipients, plan.SubscriptionRecipients, plan.DeliveryRoutes)
 			}
-			if err := bus.Publish(testAuthorActivityContext(context.Background()), evt); err != nil {
+			before := len(store.constructions)
+			err = bus.Publish(ctx, evt)
+			if tc.duplicate && (!errors.As(err, &corruption) || store.commits != 0) {
+				t.Fatalf("corrupt selector reached publication: err=%v commits=%d", err, store.commits)
+			}
+			if !tc.duplicate && err != nil {
 				t.Fatalf("Publish: %v", err)
+			}
+			if len(store.constructions) != before {
+				t.Fatal("refused publication changed construction evidence")
 			}
 			if routes := store.deliveryRoutes[evt.ID()]; len(routes) != 0 {
 				t.Fatalf("persisted delivery routes = %#v, want none", routes)
@@ -245,10 +268,104 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 
 type templateFlowPilotMemoryStore struct {
 	runtimebus.InMemoryEventStore
-	source         semanticview.Source
+	runtimerunlifecycle.OperationOwner
 	constructions  []runtimeflowidentity.Instance
-	flowInstances  []runtimebus.ActiveFlowInstanceDescriptor
+	observations   []runtimepipeline.FlowInstanceObservation
 	deliveryRoutes map[string][]events.DeliveryRoute
+	commits        int
+}
+
+func (s *templateFlowPilotMemoryStore) addObservation(t testing.TB, source semanticview.Source, identity runtimeflowidentity.Instance, key string) {
+	t.Helper()
+	fact := runtimeTestSourceArtifactFact(t, source)
+	owner := runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: identity.Route()}
+	lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, fact, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, found := source.FlowSchemaByID(identity.TemplateID)
+	if !found {
+		t.Fatal("pilot observation requires its declaration")
+	}
+	at := time.Unix(1700000000, 0).UTC()
+	header := runtimepipeline.WorkflowInstance{
+		WorkflowName: identity.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: schema.EffectiveMode(), Status: "active",
+		InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID, InstanceKey: key,
+		ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
+		CurrentState: "active", Revision: 1, CreatedAt: at, UpdatedAt: at,
+	}
+	if entity, declared := entityruntime.ResolveForFlow(source, identity.TemplateID); declared {
+		header.EntityType = entity.EntityType
+	}
+	run := runtimerunlifecycle.Snapshot{RunID: owner.RunID, State: runtimerunlifecycle.StateRunning, Origin: runtimerunlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), StartedAt: at}
+	receipt := runtimepipeline.FlowConstructionPublicationEvidence{Identity: identity, InstanceKey: key}
+	readiness := runtimepipeline.DynamicFlowRuntimeReadiness{
+		Plan:            runtimepipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: owner.RunID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},
+		OwningRunSource: fact, RunStatus: "running", InstanceStatus: "active",
+	}
+	observed, err := runtimepipeline.AdmitNativeFlowInstanceObservation(lookup, header, run, 1, receipt, readiness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.observations = append(s.observations, observed)
+}
+
+func (s *templateFlowPilotMemoryStore) LookupFlowInstance(ctx context.Context, request runtimepipeline.FlowInstanceLookupRequest) (runtimepipeline.FlowInstanceObservation, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimepipeline.FlowInstanceObservation{}, false, err
+	}
+	var selected runtimepipeline.FlowInstanceObservation
+	for _, observed := range s.observations {
+		identity := observed.Identity()
+		if observed.Owner().RunID != request.RunID() || identity.TemplateID != request.FlowID() ||
+			(request.ExactPath() != "" && request.ExactPath() != identity.InstancePath) ||
+			(request.DeclaredSelection() && (identity.ParentRoute.FlowInstance != request.ParentInstance() || observed.InstanceKey() != request.InstanceKey())) {
+			continue
+		}
+		if err := observed.ValidateSelection(request); err != nil {
+			return runtimepipeline.FlowInstanceObservation{}, false, err
+		}
+		if selected.Valid() {
+			return runtimepipeline.FlowInstanceObservation{}, false, &runtimepipeline.FlowInstanceConstructionCorruption{RunID: request.RunID(), FlowID: request.FlowID(), Cause: fmt.Errorf("duplicate native pilot selector")}
+		}
+		selected = observed
+	}
+	return selected, selected.Valid(), nil
+}
+
+func (s *templateFlowPilotMemoryStore) ListFlowInstances(ctx context.Context, scope runtimepipeline.FlowInstanceLookupScope) ([]runtimepipeline.FlowInstanceObservation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var selected []runtimepipeline.FlowInstanceObservation
+	for _, observed := range s.observations {
+		if observed.Owner().RunID != scope.RunID() {
+			continue
+		}
+		included := slices.Contains(scope.FlowIDs(), observed.Identity().TemplateID)
+		for _, coordinate := range scope.Coordinates() {
+			included = included || coordinate.Key() == observed.Owner().Key()
+		}
+		if included {
+			selected = append(selected, observed)
+		}
+	}
+	return selected, nil
+}
+
+func (s *templateFlowPilotMemoryStore) RequireActiveRun(ctx context.Context, runID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if runID != templateInstanceDeliveryRunID {
+		return &runtimerunlifecycle.RunNotFoundError{RunID: runID}
+	}
+	return nil
+}
+
+func (s *templateFlowPilotMemoryStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	s.commits++
+	return s.InMemoryEventStore.CommitPublication(ctx, command)
 }
 
 func (s *templateFlowPilotMemoryStore) LoadFlowConstructionPublication(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entity string) (runtimepipeline.FlowConstructionPublicationEvidence, error) {
@@ -261,16 +378,6 @@ func (s *templateFlowPilotMemoryStore) LoadFlowConstructionPublication(ctx conte
 		}
 	}
 	return runtimepipeline.FlowConstructionPublicationEvidence{}, errors.New("absent exact template pilot fixture receipt")
-}
-
-func (s *templateFlowPilotMemoryStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
-	descriptors := append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...)
-	for i := range descriptors {
-		descriptors[i].BundleHash = bundleHash
-		descriptors[i].WorkflowVersion = s.source.WorkflowVersion()
-	}
-	return descriptors, nil
 }
 
 func (s *templateFlowPilotMemoryStore) InsertEventDeliveryRoutes(_ context.Context, eventID string, routes []events.DeliveryRoute) error {
