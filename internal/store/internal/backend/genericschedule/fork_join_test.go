@@ -252,7 +252,10 @@ func TestForkJoinRequestRejectsSelfConsistentForeignEvidence(t *testing.T) {
 				forkJoinDeliveryEntries(t, r)
 				forkJoinEditEntry(t, &r.Child, func(e *timeridentity.StageEntryRef) { e.TransitionID = "another-transition" })
 			}},
-			{"prepared_source", func(t *testing.T, r *ForkJoinRequest) { forkJoinStampPreparedSource(r) }},
+			{"preparation_after_child_birth", func(t *testing.T, r *ForkJoinRequest) {
+				forkJoinStampPreparedSource(r)
+				r.Source.CurrentEventAdmittedAt = r.BornAt.Add(time.Minute)
+			}},
 			{"cancelled_prepared_source", func(t *testing.T, r *ForkJoinRequest) {
 				r.Source.Status, r.Source.CancelCause, r.Source.CancelledAt = runtimegenericschedule.StatusCancelled, "join_stage_exit", r.Source.AdmittedAt.Add(time.Minute)
 				forkJoinStampPreparedSource(r)

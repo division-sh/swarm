@@ -21038,7 +21038,14 @@ run_model:
         not child materialization, activation or recovery permission. Unpublished arrival-schedule restoration
         composes the existing generic admission, exact source/cut provenance and require-only child readback in the
         same native mutation attempt. Canonical child run/source admission is fresh; an ordinary same-key row cannot
-        acquire inherited provenance on reuse. Original absolute due and execution mode are retained. A canceled
+        acquire inherited provenance on reuse. Original absolute due and execution mode are retained.
+        An active prepared-but-unpublished source occurrence remains an owed arm only when the complete exact-cut
+        event inventory proves its reserved occurrence has no committed publication. Unknown/different-revision
+        inventory or a present source event fails closed; a reservation stamp alone grants nothing. Source shape,
+        materialization eligibility and native projection share that evidence gate. The child keeps the original
+        due and stage-entry relation, does not copy the source candidate/claim, and admits its own occurrence only
+        under current selected authority after child birth. Source preparation cannot postdate that birth.
+        Already-published sources still use exact event/delivery continuation, never this restoration path. A canceled
         source arm records a canceled child disposition atomically at child birth, with its source admission and
         typed cut retained separately; no wakeup is installed by persistence. Generic live reads and fixed-cut
         reconstruction retain already accepted arrival publications in a separate complete fixed-cut event census,

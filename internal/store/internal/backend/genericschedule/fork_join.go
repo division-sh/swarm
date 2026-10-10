@@ -46,6 +46,9 @@ func (r ForkJoinRequest) Validate() error {
 	if r.Source.Command.RunID == r.Child.RunID || r.BornAt.IsZero() || r.BornAt != canonicalTime(r.BornAt) || r.BornAt.Before(r.Source.AdmittedAt) {
 		return fmt.Errorf("fork join requires distinct runs and canonical child birth after source admission")
 	}
+	if r.Source.CurrentEventID != "" && r.BornAt.Before(r.Source.CurrentEventAdmittedAt) {
+		return fmt.Errorf("fork join child birth precedes retained occurrence preparation")
+	}
 	if r.Source.Status == runtimegenericschedule.StatusCancelled && r.BornAt.Before(r.Source.CancelledAt) {
 		return fmt.Errorf("fork join child birth precedes retained cancellation")
 	}

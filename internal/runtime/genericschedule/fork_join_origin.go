@@ -11,12 +11,14 @@ import (
 
 const ForkJoinReconstructionOwner = "store.run_fork.arrival_join_schedule"
 
+// This validates source shape, not fixed-cut publication absence or authority.
 // Published occurrences require exact event/delivery continuation, not rearming.
 func (a Activation) ValidateForkJoinRestorationSource() error {
 	if err := a.Validate(); err != nil {
 		return err
 	}
-	if a.CurrentEventID != "" || a.Status != StatusActive && a.Status != StatusCancelled {
+	if a.Status != StatusActive && a.Status != StatusCancelled ||
+		a.CurrentEventID != "" && (a.Status != StatusActive || a.CurrentEventAdmittedAt.Before(a.CurrentDueAt)) {
 		return fmt.Errorf("published or otherwise terminal join requires historical occurrence continuation, not schedule restoration")
 	}
 	return nil

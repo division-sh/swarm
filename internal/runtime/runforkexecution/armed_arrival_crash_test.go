@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -24,6 +25,8 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
+
+const armedArrivalPreparationEnv = "SWARM_ARMED_ARRIVAL_TEST_PREPARATION"
 
 type armedArrivalCrashScheduleStore struct {
 	genericschedule.Store
@@ -103,14 +106,28 @@ func seedArmedArrivalCrashSource(t *testing.T, ctx context.Context, selected any
 		t.Fatal(err)
 	}
 	t.Cleanup(catalog.Release)
-	marker, _, _ := seedArmedArrivalSource(t, ctx, selected, owner, loaded, sourceRun)
+	marker, armed, originalJoin := seedArmedArrivalSource(t, ctx, selected, owner, loaded, sourceRun)
+	if os.Getenv(armedArrivalPreparationEnv) == "prepared" {
+		marker, _ = prepareArmedArrivalSourceAtCut(t, ctx, selected, owner, loaded, sourceRun, marker, armed, originalJoin)
+	}
 	return marker
 }
 
 func TestIssue642ArmedArrivalTimeoutCrashRestartBothStores(t *testing.T) {
+	testArmedArrivalTimeoutCrashRestartBothStores(t, "")
+}
+
+func TestIssue642PreparedArrivalTimeoutCrashRestartBothStores(t *testing.T) {
+	testArmedArrivalTimeoutCrashRestartBothStores(t, "prepared")
+}
+
+func testArmedArrivalTimeoutCrashRestartBothStores(t *testing.T, phase string) {
+	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, cut := range []string{"retained_armed_join_after_activation", "retained_armed_join_occurrence_committed"} {
 			t.Run(backend+"/"+cut, func(t *testing.T) {
+				t.Setenv(publishedJoinFlowEnv, "")
+				t.Setenv(armedArrivalPreparationEnv, phase)
 				var selected startupownership.Store
 				var construct func() SelectedContractExecutionOwner
 				var dsn string
@@ -136,10 +153,22 @@ func TestIssue642ArmedArrivalTimeoutCrashRestartBothStores(t *testing.T) {
 				plan, err := lifecycle.PlanRunFork(t.Context(), runfork.RunForkPlanRequest{
 					SourceRunID: checkpoint.SourceRun, ResolvedPoint: acknowledged.Request.ResolvedPoint,
 				})
-				if err != nil || len(plan.JoinSchedules) != 1 || plan.JoinSchedules[0].Status != genericschedule.StatusActive || plan.JoinSchedules[0].CurrentEventID != "" || len(plan.TransferredJoins) != 0 || len(plan.PendingWork) != 0 {
+				if err != nil || len(plan.JoinSchedules) != 1 || plan.JoinSchedules[0].Status != genericschedule.StatusActive || len(plan.TransferredJoins) != 0 || len(plan.PendingWork) != 0 {
 					t.Fatalf("crash lost its exact unpublished source deadline: %+v err=%v", plan, err)
 				}
 				source := plan.JoinSchedules[0]
+				if phase == "prepared" {
+					if source.CurrentEventID != genericschedule.OccurrenceEventID(source.ID, source.CurrentDueAt) || source.CurrentEventAdmittedAt.IsZero() ||
+						!source.CurrentDueAt.Before(source.CurrentEventAdmittedAt) {
+						t.Fatalf("crash lost its prepared, unpublished native source candidate: %+v", source)
+					}
+					marker := storetest.LoadCanonicalEventRecord(t, t.Context(), selected, plan.ForkPoint.EventID)
+					if marker.Type() != "item.completed" || marker.RunID() != checkpoint.SourceRun || !marker.CreatedAt().Equal(source.CurrentEventAdmittedAt) {
+						t.Fatalf("prepared crash cut lost its canonical native occurrence admission timestamp: %+v", marker)
+					}
+				} else if source.CurrentEventID != "" || !source.CurrentEventAdmittedAt.IsZero() {
+					t.Fatalf("unprepared crash source acquired an occurrence candidate: %+v", source)
+				}
 				var originalJoin joinruntime.Activation
 				for _, entity := range plan.Entities {
 					if entity.EntityID != checkpoint.SourceRun {
@@ -169,6 +198,13 @@ func TestIssue642ArmedArrivalTimeoutCrashRestartBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if count, err := storetest.ReadLifecycleEventCardinality(t.Context(), selected, checkpoint.SourceRun, "platform.join_timeout"); err != nil || count != 0 {
+					t.Fatalf("crash published the source timeout: count=%d err=%v", count, err)
+				}
+				sourceSettlement, err := selected.(deliverylifecycle.Store).SummarizeRun(t.Context(), checkpoint.SourceRun)
+				if err != nil || sourceSettlement.Total != 0 {
+					t.Fatalf("crash created a source timeout obligation: %+v err=%v", sourceSettlement, err)
+				}
 				before, err := storetest.ReadSelectedForkSourceDomain(t.Context(), selected, checkpoint.SourceRun)
 				if err != nil {
 					t.Fatal(err)
@@ -178,10 +214,13 @@ func TestIssue642ArmedArrivalTimeoutCrashRestartBothStores(t *testing.T) {
 				// The exact-row reader grants no execution authority and does not
 				// invent an event cut before the child's first publication.
 				atCrash, found, err := selected.(genericschedule.Store).LoadGenericScheduleActivation(t.Context(), checkpoint.ScheduleID)
-				if err != nil || !found || checkpoint.ScheduleID == "" || atCrash.Command.RunID != child || atCrash.ForkJoinOrigin == nil {
+				if err != nil || !found || checkpoint.ScheduleID == "" || atCrash.ID == source.ID || atCrash.Command.RunID != child || atCrash.ForkJoinOrigin == nil {
 					t.Fatalf("crash lost its exact native inherited deadline: %+v found=%v err=%v", atCrash, found, err)
 				}
 				eventID := genericschedule.OccurrenceEventID(atCrash.ID, source.CurrentDueAt)
+				if eventID == genericschedule.OccurrenceEventID(source.ID, source.CurrentDueAt) || eventID == source.CurrentEventID {
+					t.Fatal("child deadline reused the source occurrence candidate identity")
+				}
 				wantPublications := 0
 				if published {
 					wantPublications = 1
@@ -329,11 +368,16 @@ func TestIssue642ArmedArrivalTimeoutCrashRestartBothStores(t *testing.T) {
 					t.Fatalf("source deadline disappeared: found=%v err=%v", found, err)
 				}
 				afterDigest, err := original.EvidenceDigest()
-				if err != nil || afterDigest != sourceDigest || original.Status != genericschedule.StatusActive || original.CurrentEventID != "" {
+				if err != nil || afterDigest != sourceDigest || original.Status != genericschedule.StatusActive || original.CurrentEventID != source.CurrentEventID ||
+					!original.CurrentEventAdmittedAt.Equal(source.CurrentEventAdmittedAt) {
 					t.Fatalf("recovery changed or published its source deadline: %+v err=%v", original, err)
 				}
 				if count, err := storetest.ReadLifecycleEventCardinality(wait, selected, checkpoint.SourceRun, "platform.join_timeout"); err != nil || count != 0 {
 					t.Fatalf("source timeout was published: count=%d err=%v", count, err)
+				}
+				sourceSettlement, err = owner.ports.busDurable.DeliveryLifecycle.SummarizeRun(wait, checkpoint.SourceRun)
+				if err != nil || sourceSettlement.Total != 0 {
+					t.Fatalf("timeout recovery created a source delivery obligation: %+v err=%v", sourceSettlement, err)
 				}
 				after, err := storetest.ReadSelectedForkSourceDomain(wait, selected, checkpoint.SourceRun)
 				if err != nil || !reflect.DeepEqual(before, after) {
