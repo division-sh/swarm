@@ -519,10 +519,6 @@ type FlowInstanceRouteRecord struct {
 	SourceFlow     string
 }
 
-type FlowInstanceRouteTopologyResult struct {
-	Acknowledged bool
-}
-
 type ActiveAgentDescriptor struct {
 	Identity agentidentity.Identity
 	EntityID string

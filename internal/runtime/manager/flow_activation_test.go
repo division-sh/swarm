@@ -139,9 +139,7 @@ func TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSc
 }
 
 type flowActivationRouteStore interface {
-	UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error
 	DeleteFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error
-	ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error)
 }
 
 type flowActivationTestBus struct {
@@ -154,11 +152,20 @@ type flowActivationTestBus struct {
 	unsubscribed       []string
 	removeErr          error
 	removeAgentRoute   func(runtimeeffects.LifecycleToken)
-	addErr             error
-	stageRoute         func(runtimebus.FlowInstanceRouteMaterializationRequest) error
 	publishErr         error
 	routeStore         flowActivationRouteStore
 	creationStore      *flowActivationTestInstanceStore
+}
+
+func TestFlowActivationFixtureCannotStageInstanceRoutes(t *testing.T) {
+	for _, value := range []any{(*flowActivationTestBus)(nil), (*runtimebus.EventBus)(nil), (*flowActivationTestRouteStore)(nil)} {
+		owner := reflect.TypeOf(value)
+		for _, name := range []string{"AddFlowInstanceRoute", "AddFlowInstanceRouteContext", "StageFlowInstanceRouteContext", "PublishPersistedFlowInstanceRoute", "RetirePublishedFlowInstanceRoute", "UpsertFlowInstanceRoute", "ListFlowInstanceRoutes"} {
+			if _, present := owner.MethodByName(name); present {
+				t.Errorf("%s retains retired instance-route staging API %s", owner, name)
+			}
+		}
+	}
 }
 
 type flowActivationTestAgentRoutePreparation struct {
@@ -469,39 +476,12 @@ func withFlowActivationPostCommit(ctx context.Context, actions *[]runtimepipelin
 	return runtimepipelinefixture.WithRollbackActions(ctx, &rollback)
 }
 
-func (s *flowActivationTestRouteStore) UpsertFlowInstanceRoute(_ context.Context, route runtimebus.FlowInstanceRouteRecord) error {
-	if s.statusByPath == nil {
-		s.statusByPath = map[string]string{}
-	}
-	s.statusByPath[route.Identity.Key()] = "active"
-	return nil
-}
-
 func (s *flowActivationTestRouteStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	if s.statusByPath == nil {
 		s.statusByPath = map[string]string{}
 	}
 	s.statusByPath[identity.Key()] = "inactive"
 	return nil
-}
-
-func (s *flowActivationTestRouteStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	var routes []runtimeflowidentity.RunScopedFlowInstance
-	for key, status := range s.statusByPath {
-		if status != "active" {
-			continue
-		}
-		partsByRun := strings.SplitN(key, "\x00", 2)
-		if len(partsByRun) != 2 {
-			continue
-		}
-		path := partsByRun[1]
-		parts := strings.SplitN(path, "/", 2)
-		if len(parts) == 2 {
-			routes = append(routes, runtimeflowidentity.RunScopedFlowInstance{RunID: partsByRun[0], Route: runtimeflowidentity.StoredRoute(parts[0], parts[1], path)})
-		}
-	}
-	return routes, nil
 }
 
 func (s *flowActivationTestInstanceStore) Upsert(_ context.Context, instance runtimepipeline.WorkflowInstance) error {
@@ -1402,92 +1382,6 @@ func (b *flowActivationTestBus) LogRuntime(_ context.Context, entry runtimepipel
 	return nil
 }
 
-func (b *flowActivationTestBus) AddFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
-	return b.AddFlowInstanceRouteContext(context.Background(), req)
-}
-
-func (b *flowActivationTestBus) StageFlowInstanceRouteContext(ctx context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) (runtimebus.FlowInstanceRouteTopologyResult, error) {
-	req = req.Normalized()
-	if b.addErr != nil {
-		return runtimebus.FlowInstanceRouteTopologyResult{}, b.addErr
-	}
-	if b.stageRoute != nil {
-		if err := b.stageRoute(req); err != nil {
-			return runtimebus.FlowInstanceRouteTopologyResult{}, err
-		}
-	}
-	if b.routeStore == nil {
-		return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
-	}
-	identity := req.Identity
-	err := b.routeStore.UpsertFlowInstanceRoute(ctx, runtimebus.FlowInstanceRouteRecord{
-		Identity:       identity,
-		EventPattern:   identity.Route.InstancePath + "/task.started",
-		SubscriberType: "agent",
-		SubscriberID:   "reviewer-" + identity.Route.InstanceID,
-		SourceFlow:     identity.Route.ScopeKey,
-	})
-	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: err == nil}, err
-}
-
-func (b *flowActivationTestBus) PublishPersistedFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
-	req = req.Normalized()
-	if b.HasFlowInstanceRoute(req.Identity) {
-		return nil
-	}
-	if b.addErr != nil {
-		return b.addErr
-	}
-	b.addedPaths = append(b.addedPaths, req.Identity.Route.InstancePath)
-	b.addedRouteRequests = append(b.addedRouteRequests, req)
-	return nil
-}
-
-func (b *flowActivationTestBus) RetirePublishedFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
-	keptPaths := b.addedPaths[:0]
-	keptRequests := b.addedRouteRequests[:0]
-	for idx, req := range b.addedRouteRequests {
-		if req.Identity == identity {
-			continue
-		}
-		keptRequests = append(keptRequests, req)
-		if idx < len(b.addedPaths) {
-			keptPaths = append(keptPaths, b.addedPaths[idx])
-		}
-	}
-	b.addedPaths = keptPaths
-	b.addedRouteRequests = keptRequests
-	return nil
-}
-
-func (b *flowActivationTestBus) AddFlowInstanceRouteContext(ctx context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) error {
-	req = req.Normalized()
-	identity := req.Identity
-	if b.HasFlowInstanceRoute(identity) {
-		return nil
-	}
-	if b.addErr != nil {
-		return b.addErr
-	}
-	if _, transactional := runtimepipelinefixture.SQLTx(ctx); transactional {
-		staged, err := b.StageFlowInstanceRouteContext(ctx, req)
-		if !staged.Acknowledged || err != nil {
-			return err
-		}
-		if !runtimepipelinefixture.QueuePostCommitAction(ctx, func(context.Context) {
-			_ = b.PublishPersistedFlowInstanceRoute(req)
-		}) {
-			return errors.New("transactional route requires post-commit process publication")
-		}
-		return nil
-	}
-	staged, err := b.StageFlowInstanceRouteContext(ctx, req)
-	if !staged.Acknowledged || err != nil {
-		return err
-	}
-	return b.PublishPersistedFlowInstanceRoute(req)
-}
-
 func (b *flowActivationTestBus) HasFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) bool {
 	for _, req := range b.addedRouteRequests {
 		if req.Identity == identity {
@@ -2243,7 +2137,6 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 			}
 
 			agentStore.failAgentID = ""
-			bus.addErr = nil
 			instances.armInitialEntry = nil
 			instances.topologyMarkErr = nil
 			instances.readyAcknowledgementErr = nil
