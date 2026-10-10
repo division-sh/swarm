@@ -223,19 +223,6 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			for _, flowID := range []string{".", "producer"} {
-				constructed := runtimebus.ConstructedFlowInstanceIdentityFixture(source, flowID, "", runID)
-				if err := eventBus.AddFlowInstanceRouteContextFixture(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
-					Identity: testRunScopedFlowRouteForRun(runID, constructed.Route()), Instance: constructed,
-				}); err != nil {
-					t.Fatalf("publish constructed source %s: %v", flowID, err)
-				}
-			}
-			if err := eventBus.AddFlowInstanceRouteContextFixture(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
-				Identity: testRunScopedFlowRouteForRun(runID, runtimeflowidentity.DeriveRoute("account", "one")),
-			}); err != nil {
-				t.Fatalf("AddFlowInstanceRouteContext: %v", err)
-			}
 
 			eventID := uuid.NewString()
 			eventTime := time.Now().UTC()

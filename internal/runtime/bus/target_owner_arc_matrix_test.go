@@ -15,6 +15,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -99,18 +100,17 @@ func TestNestedChildToConcreteTemplateReceiverUsesSelectedOwner(t *testing.T) {
 		},
 	}
 	interceptor := &connectRoutePlanNodeInterceptor{}
+	runID := uuid.NewString()
 	eventBus, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate), Interceptors: []EventInterceptor{interceptor},
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
 	})
 	if err != nil {
 		t.Fatalf("create EventBus: %v", err)
 	}
-	store.bus = eventBus
-	runID := uuid.NewString()
 	constructedSource := installConnectionSourceConstructionForRun(t, eventBus, source, "left/child/producer", runID)
-	if err := eventBus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRouteForRun(runID, runtimeflowidentity.DeriveRoute("account", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "account", "one", runID, selectedEntityID)}); err != nil {
-		t.Fatalf("add selected template route: %v", err)
-	}
+	store.installIndexObservation(constructionIndexObservation(t, source, runID, StoredFlowInstanceIdentityFixture(source, "account", "one", runID, selectedEntityID), "acct-1"))
+	store.installConstructionReceipt(testRunScopedFlowRouteForRun(runID, runtimeflowidentity.DeriveRoute("account", "one")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "account", "one", runID, selectedEntityID)})
 	sourceRoute := events.RouteIdentity{
 		FlowID: "left/child/producer", FlowInstance: constructedSource.InstancePath, EntityID: constructedSource.EntityID,
 	}.Normalized()
@@ -734,17 +734,34 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	eventBus, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate), Interceptors: []EventInterceptor{interceptor},
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
 	})
 	if err != nil {
 		t.Fatalf("create diamond EventBus: %v", err)
 	}
-	store.bus = eventBus
 	for _, identity := range []runtimeflowidentity.Route{
 		runtimeflowidentity.DeriveRoute("branch", "left"),
 		runtimeflowidentity.DeriveRoute("branch", "right"),
 	} {
-		if err := eventBus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRouteForRun(runID, identity)}); err != nil {
-			t.Fatalf("materialize diamond branch route %s: %v", identity.InstancePath, err)
+		instance := ConstructedFlowInstanceIdentityFixture(source, "branch", identity.InstanceID, runID)
+		store.installIndexObservation(constructionIndexObservation(t, source, runID, instance, identity.InstanceID))
+		store.installConstructionReceipt(testRunScopedFlowRouteForRun(runID, instance.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: instance, InstanceKey: identity.InstanceID})
+		worker, err := runtimeflowidentity.KeylessChild(source, instance, "branch/worker")
+		if err != nil {
+			t.Fatal(err)
+		}
+		store.installIndexObservation(constructionIndexObservation(t, source, runID, worker, ""))
+		store.installConstructionReceipt(testRunScopedFlowRouteForRun(runID, worker.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: worker})
+		for _, flowID := range []string{"branch/worker/result-static", "branch/worker/result"} {
+			child, err := runtimeflowidentity.KeylessChild(source, worker, flowID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store.installIndexObservation(constructionIndexObservation(t, source, runID, child, ""))
+			store.installConstructionReceipt(testRunScopedFlowRouteForRun(runID, child.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: child})
+			store.targetOwners = append(store.targetOwners, targetOwnerDescriptors(events.RouteIdentity{
+				FlowID: child.TemplateID, FlowInstance: child.InstancePath, EntityID: child.EntityID,
+			})...)
 		}
 	}
 	installConnectionSourceConstructionForRun(t, eventBus, source, ".", runID)
@@ -815,12 +832,14 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 			}
 			if strings.Contains(route.Recipient.LocalID(), "static-result") {
 				staticSeen = true
-				if !route.Target.ExistingEntity() || route.Target.Route() != staticRoute || route.Target.Route().EntityID == parent.route.EntityID {
-					t.Fatalf("%s nested static target = %s %#v, want exact receiver-owned state %#v", parent.name, route.Target.Code(), route.Target.Route(), staticRoute)
+				wantPath := parent.route.FlowInstance + "/worker/result-static"
+				want := events.RouteIdentity{FlowID: staticRoute.FlowID, FlowInstance: wantPath, EntityID: runtimeflowidentity.EntityID(wantPath)}
+				if !route.Target.ExistingEntity() || route.Target.Route() != want || route.Target.Route().EntityID == parent.route.EntityID {
+					t.Fatalf("%s nested static target = %s %#v, want exact receiver-owned state %#v", parent.name, route.Target.Code(), route.Target.Route(), want)
 				}
 			} else if strings.Contains(route.Recipient.LocalID(), "singleton-result") {
 				singletonSeen = true
-				wantPath := "branch/worker/result"
+				wantPath := parent.route.FlowInstance + "/worker/result"
 				if !route.Target.ExistingEntity() || route.Target.Route().FlowInstance != wantPath || route.Target.Route().EntityID != runtimeflowidentity.EntityID(wantPath) {
 					t.Fatalf("%s nested singleton target = %s %#v, want constructed %q", parent.name, route.Target.Code(), route.Target.Route(), wantPath)
 				}

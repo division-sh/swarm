@@ -13825,7 +13825,8 @@ flow_model:
             Pubsub planning and connect-recipient evaluation consume the exact admitted run_id and canonical
             flowidentity.RunScopedFlowInstance through the selected-store index and existing constructor proposal owner.
             Declaration-only bindings are not evidence of native existence or execution readiness. Resolve/ResolveForRun,
-            HasFlowInstanceRoute/RemoveFlowInstanceRoute, mutable exact/wildcard resolution caches and cache rebuild/indexing
+            AddFlowInstanceRoute/HasFlowInstanceRoute/RemoveFlowInstanceRoute, instance-owner and authored-path collision
+            maps, mutable exact/wildcard resolution caches and cache rebuild/indexing
             are retired; source-only bindings never
             authorize runless execution. Another run at the same path is an independent owner, never fallback authority.
             because low-level event.publish can publish a declared event without an authored static producer endpoint. The
