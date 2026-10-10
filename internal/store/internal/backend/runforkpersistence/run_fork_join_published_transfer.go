@@ -69,37 +69,45 @@ func requireRunForkPublishedArrivalDelivery(snapshot *runForkRevisionSnapshot, a
 		if row.EventID != event.ID() {
 			continue
 		}
-		if row.RunID != snapshot.RunID || row.DeliveryID == "" || delivery.FirstRevision <= 0 ||
-			delivery.Revision < delivery.FirstRevision || delivery.Revision > snapshot.Revision {
-			return events.DeliveryRoute{}, fmt.Errorf("published arrival delivery contradicts its fixed cut")
-		}
-		if row.Status != deliverylifecycle.StatusPending && row.Status != deliverylifecycle.StatusInProgress && row.Status != deliverylifecycle.StatusFailed {
-			return events.DeliveryRoute{}, fmt.Errorf("published arrival transfer requires unfinished source work")
-		}
-		route := row.Route
-		node, exact := route.Recipient.Node()
-		if !exact || !node.Equal(ref.Node()) || !route.Target.ExistingEntity() ||
-			!events.SameRouteIdentity(route.Target.Route(), want) || !route.ConnectClaim.Empty() || !route.AgentIdentity.IsZero() {
-			return events.DeliveryRoute{}, fmt.Errorf("published arrival delivery contradicts its original exact join owner")
-		}
-		identity, err := route.Identity()
-		if err != nil || identity != row.RouteIdentity || row.SubscriberClass != deliverylifecycle.SubscriberNode || row.SubscriberID != ref.Node().Key() {
-			return events.DeliveryRoute{}, fmt.Errorf("published arrival delivery contradicts its retained identity")
-		}
-		id, err := deliverylifecycle.DeliveryID(event.ID(), route)
-		if err != nil || id != row.DeliveryID {
-			return events.DeliveryRoute{}, fmt.Errorf("published arrival delivery changed its exact obligation identity")
+		if err := validateRunForkPublishedArrivalDelivery(snapshot, delivery, event, ref, want); err != nil {
+			return events.DeliveryRoute{}, err
 		}
 		if found {
 			return events.DeliveryRoute{}, fmt.Errorf("published arrival repeats its original delivery")
 		}
 		found = true
-		original = route.Normalized()
+		original = row.Route.Normalized()
 	}
 	if !found {
 		return events.DeliveryRoute{}, fmt.Errorf("published arrival lacks its original durable delivery")
 	}
 	return original, nil
+}
+
+func validateRunForkPublishedArrivalDelivery(snapshot *runForkRevisionSnapshot, delivery runForkRevisionDelivery, event events.Event, ref timeridentity.JoinRef, want events.RouteIdentity) error {
+	row := delivery.Snapshot
+	if row.RunID != snapshot.RunID || row.DeliveryID == "" || delivery.FirstRevision <= 0 ||
+		delivery.Revision < delivery.FirstRevision || delivery.Revision > snapshot.Revision {
+		return fmt.Errorf("published arrival delivery contradicts its fixed cut")
+	}
+	if row.Status != deliverylifecycle.StatusPending && row.Status != deliverylifecycle.StatusInProgress && row.Status != deliverylifecycle.StatusFailed {
+		return fmt.Errorf("published arrival transfer requires unfinished source work")
+	}
+	route := row.Route
+	node, exact := route.Recipient.Node()
+	if !exact || !node.Equal(ref.Node()) || !route.Target.ExistingEntity() ||
+		!events.SameRouteIdentity(route.Target.Route(), want) || !route.ConnectClaim.Empty() || !route.AgentIdentity.IsZero() {
+		return fmt.Errorf("published arrival delivery contradicts its original exact join owner")
+	}
+	identity, err := route.Identity()
+	if err != nil || identity != row.RouteIdentity || row.SubscriberClass != deliverylifecycle.SubscriberNode || row.SubscriberID != ref.Node().Key() {
+		return fmt.Errorf("published arrival delivery contradicts its retained identity")
+	}
+	id, err := deliverylifecycle.DeliveryID(event.ID(), route)
+	if err != nil || id != row.DeliveryID {
+		return fmt.Errorf("published arrival delivery changed its exact obligation identity")
+	}
+	return nil
 }
 
 func (a runForkSourceStateAdmission) publishedArrival(event runfork.RunForkSelectedContractSourceEvent, state *runForkProjectedSourceState) (runfork.RunForkSelectedContractSourceEvent, error) {
@@ -150,22 +158,30 @@ func (a runForkSourceStateAdmission) publishedArrival(event runfork.RunForkSelec
 	if err != nil {
 		return event, err
 	}
-	route.Context, err = projectRunForkConstructionContext(plan, a.forkRunID, route.Context)
+	route, err = projectRunForkPublishedArrivalRoute(plan, continuation.ChildCommand(), route)
 	if err != nil {
 		return event, err
 	}
-	command := continuation.ChildCommand()
+	event.PublishedArrival, event.PublishedArrivalRoute, event.Payload = continuation, route, projected.Payload()
+	return event, nil
+}
+
+func projectRunForkPublishedArrivalRoute(plan runfork.RunForkPlan, command genericschedule.AdmissionCommand, route events.DeliveryRoute) (events.DeliveryRoute, error) {
+	var err error
+	route.Context, err = projectRunForkConstructionContext(plan, command.RunID, route.Context)
+	if err != nil {
+		return events.DeliveryRoute{}, err
+	}
 	target := command.RoutingSource.Route()
 	if command.RoutingSource.Kind() == events.RoutingSourceRoot {
-		target.FlowID, target.FlowInstance = ".", a.forkRunID
+		target.FlowID, target.FlowInstance = ".", command.RunID
 	}
 	route.Target, err = events.NewExistingEntityTarget(target)
 	if err != nil {
-		return event, err
+		return events.DeliveryRoute{}, err
 	}
 	// Source construction initialization is retained in source history; the
 	// child already owns its separately admitted exact materialization.
 	route.Initialization = events.ReceiverInitialization{}
-	event.PublishedArrival, event.PublishedArrivalRoute, event.Payload = continuation, route, projected.Payload()
-	return event, nil
+	return route, nil
 }

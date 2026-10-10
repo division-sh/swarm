@@ -214,26 +214,7 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		}
 	}
 	if strings.TrimSpace(event.EventName) != runForkActivityRequestEvent {
-		if event.EventName == "platform.join_complete" || event.EventName == "platform.join_timeout" {
-			return admission.publishedArrival(event, state)
-		}
-		role, found, err := admission.eventRole(sourceEvent.SourceEventID)
-		if err != nil {
-			return event, err
-		}
-		if !found {
-			event.Payload = append(json.RawMessage(nil), sourceEvent.Payload...)
-			return event, nil
-		}
-		if state == nil {
-			return event, fmt.Errorf("declared revision event requires exact source state")
-		}
-		payload, err := projectDeclaredForkPayload(sourceEvent.Payload, role, state.correspondence, actual)
-		if err != nil {
-			return event, fmt.Errorf("project original event %s: %w", event.SourceEventID, err)
-		}
-		event.Payload = payload
-		return event, nil
+		return admission.prepareNonActivitySourceEvent(sourceEvent, event, state, actual)
 	}
 	var sourceRequest runForkActivityRequestPayload
 	if err := json.Unmarshal(sourceEvent.Payload, &sourceRequest); err != nil {
@@ -353,6 +334,29 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		return event, err
 	}
 	return event, nil
+}
+
+func (a runForkSourceStateAdmission) prepareNonActivitySourceEvent(source, projected runfork.RunForkSelectedContractSourceEvent, state *runForkProjectedSourceState, actual []loopruntime.Activation) (runfork.RunForkSelectedContractSourceEvent, error) {
+	if projected.EventName == "platform.join_complete" || projected.EventName == "platform.join_timeout" {
+		return a.publishedArrival(projected, state)
+	}
+	role, found, err := a.eventRole(source.SourceEventID)
+	if err != nil {
+		return projected, err
+	}
+	if !found {
+		projected.Payload = append(json.RawMessage(nil), source.Payload...)
+		return projected, nil
+	}
+	if state == nil {
+		return projected, fmt.Errorf("declared revision event requires exact source state")
+	}
+	payload, err := projectDeclaredForkPayload(source.Payload, role, state.correspondence, actual)
+	if err != nil {
+		return projected, fmt.Errorf("project original event %s: %w", projected.SourceEventID, err)
+	}
+	projected.Payload = payload
+	return projected, nil
 }
 
 func loadRunForkProposedEffectAuthority(ctx context.Context, tx *sql.Tx, requestEventID string) (bool, error) {
