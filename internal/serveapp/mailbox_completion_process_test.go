@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -160,13 +161,16 @@ func mailboxCompletionProcessHarnessWithSelectionCut(t *testing.T, backend, root
 	unsetStoreSelectorEnv(t)
 	var db *sql.DB
 	var config string
+	var location string
 	if backend == "postgres" {
 		dsn, connection, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		db = connection
+		location = dsn
 		config = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 	} else {
 		path := filepath.Join(t.TempDir(), "mailbox.sqlite")
+		location = path
 		config = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, backend, path, channelOnboardingHostWorkspaceFields())
 		var err error
 		db, err = sql.Open("sqlite", path)
@@ -193,7 +197,17 @@ func mailboxCompletionProcessHarnessWithSelectionCut(t *testing.T, backend, root
 			t.Fatal(err)
 		}
 		p := startServedCrashProcess(t, "TestMailboxCompletionServeProcessHelper", []string{"SWARM_TEST_MAILBOX_COMPLETION_CHILD=" + string(raw)}, readyW, releaseR)
-		return p, servedControlProofRuntime{Endpoint: p.endpoint(t) + "/v1/rpc", DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root)}
+		endpoint := p.endpoint(t) + "/v1/rpc"
+		observer, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := observer.Close(); err != nil {
+				t.Errorf("close mailbox process inspection: %v", err)
+			}
+		})
+		return p, servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, root), ReceiverStateReader: requireReceiverProofStateReader(t, observer)}
 	}
 	return start, readyR, releaseW
 }
