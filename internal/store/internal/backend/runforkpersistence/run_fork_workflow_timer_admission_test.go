@@ -197,7 +197,7 @@ func TestRunForkWorkflowTimerHistoryProspectiveCertificateIsExactAndStillBlocked
 }
 
 // This is a SQLmock frame proof, not native PostgreSQL/SQLite timer persistence.
-func withWorkflowTimerReadbackAttempt(t *testing.T, check func(context.Context, *mutationprotocol.Attempt)) {
+func withWorkflowTimerReadbackAttempt(t *testing.T, check func(context.Context, *mutationprotocol.Attempt), transferReads ...int) {
 	t.Helper()
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -209,6 +209,12 @@ func withWorkflowTimerReadbackAttempt(t *testing.T, check func(context.Context, 
 		t.Fatal(err)
 	}
 	mock.ExpectBegin()
+	for _, count := range transferReads {
+		for i := 0; i < count; i++ {
+			mock.ExpectQuery(`SELECT accumulator FROM flow_instances WHERE run_id=\$1`).WithArgs(workflowTimerProjectionChildRun).
+				WillReturnRows(sqlmock.NewRows([]string{"accumulator"}))
+		}
+	}
 	mock.ExpectRollback()
 	rollback := errors.New("workflow timer readback unit rollback")
 	ctx := correlation.WithRunID(context.Background(), workflowTimerProjectionChildRun)
@@ -263,7 +269,7 @@ func TestRunForkWorkflowTimerAdmissionReadbackIsRequireOnlyAndComplete(t *testin
 					owner.inserts != 1 || owner.cancels != cancels || owner.writes != writes {
 					t.Fatalf("complete inventory reuse repaired a missing timer or cancellation: owner=%+v err=%v", owner, err)
 				}
-			})
+			}, 2)
 			after, _ := json.Marshal(plan.ReplayResumeAdmission)
 			if owner.writes != writes || owner.cancels != cancels || owner.inserts != 1 || owner.reads != 3 || string(before) != string(after) {
 				t.Fatal("require-only admission wrote, skipped a readback, or aliased source admission")
@@ -299,7 +305,7 @@ func TestRunForkWorkflowTimerAdmissionTerminalOnlyNeverRearms(t *testing.T) {
 			t.Fatalf("terminal-only admission=%+v err=%v", admitted, err)
 		}
 		assertWorkflowTimerAppliedDisposition(t, admitted, runfork.RunForkReplayResumeDispositionNoHistoricalAction)
-	})
+	}, 1)
 	if owner.reads != 1 || owner.writes != 0 || len(owner.rows) != 0 {
 		t.Fatal("terminal-only history created or required a child activation")
 	}
@@ -329,7 +335,7 @@ func TestRunForkWorkflowTimerAdmissionReadbackRequiresEveryActiveSourceRow(t *te
 		if err != nil || len(got.UnsupportedBlockers) != 0 || owner.reads != 2 || owner.writes != 0 {
 			t.Fatalf("complete require-only inventory failed: admission=%+v owner=%+v err=%v", got, owner, err)
 		}
-	})
+	}, 1)
 }
 
 func TestRunForkWorkflowTimerAdmissionReadbackRefusesCorruptionAndPreservesOtherBlockers(t *testing.T) {
@@ -387,7 +393,7 @@ func TestRunForkWorkflowTimerAdmissionReadbackRefusesCorruptionAndPreservesOther
 		if err != nil || len(got.UnsupportedBlockers) != 1 || got.UnsupportedBlockers[0].Code != runfork.RunForkBlockerOpenReplyContextUnsupported || got.StateOnlyExecutionReady {
 			t.Fatalf("timer discharge changed unrelated reply refusal: %+v err=%v", got, err)
 		}
-	})
+	}, 1)
 }
 
 func TestRunForkWorkflowTimerAdmissionRequiresExactLiveFrameIncludingTerminalOnly(t *testing.T) {

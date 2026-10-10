@@ -1,6 +1,7 @@
 package runforkpersistence
 
 import (
+	"context"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -10,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -161,6 +163,9 @@ func TestTransferredJoinInventoryBindsCompleteEvidence(t *testing.T) {
 	if err := requireRunForkTransferredJoinInventory(snapshot.RunID, []genericschedule.TransferredJoinOccurrence{source}, nil); err == nil {
 		t.Fatal("missing native transfer evidence discharged history")
 	}
+	if err := requireRunForkTransferredJoinInventory(snapshot.RunID, nil, []genericschedule.TransferredJoinOccurrence{source}); err == nil {
+		t.Fatal("unexpected native transfer discharged an empty expected inventory")
+	}
 	if err := requireRunForkTransferredJoinInventory(snapshot.RunID, []genericschedule.TransferredJoinOccurrence{source}, []genericschedule.TransferredJoinOccurrence{source, source}); err == nil {
 		t.Fatal("extra native transfer evidence discharged history")
 	}
@@ -187,4 +192,13 @@ func TestTransferredJoinInventoryBindsCompleteEvidence(t *testing.T) {
 	if fingerprint(plan) == want {
 		t.Fatal("preparation omitted transferred lineage evidence")
 	}
+}
+
+func TestTransferredJoinEmptyInventoryReadsCanonicalOwner(t *testing.T) {
+	withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
+		rows, err := readRunForkTransferredJoinInventory(ctx, attempt, runfork.RunForkPlan{}, workflowTimerProjectionChildRun)
+		if err != nil || len(rows) != 0 {
+			t.Fatalf("empty require-only native inventory: rows=%d err=%v", len(rows), err)
+		}
+	}, 1)
 }

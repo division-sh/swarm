@@ -106,7 +106,7 @@ func TestRunForkWorkflowTimerReadbackPreservesCompletedOneShot(t *testing.T) {
 			t.Fatalf("unified continuing readback rearmed or rejected completed one-shot: admission=%+v err=%v", continuing, err)
 		}
 		assertWorkflowTimerAppliedDisposition(t, continuing, runfork.RunForkReplayResumeDispositionReconstruct)
-	})
+	}, 1)
 	if owner.reads != 2 || owner.writes != 0 || owner.cancels != 0 || arrivals.reads == 0 {
 		t.Fatal("unified phase readback skipped inventory or mutated completed timer history")
 	}

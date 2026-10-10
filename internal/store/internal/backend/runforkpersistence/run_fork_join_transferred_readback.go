@@ -57,9 +57,6 @@ func readRunForkTransferredJoinInventory(ctx context.Context, attempt *mutationp
 		}
 		expected = append(expected, rows...)
 	}
-	if len(expected) == 0 {
-		return nil, nil
-	}
 	actual, err := loadRunForkTransferredJoinInventory(ctx, attempt, childRunID)
 	if err != nil {
 		return nil, err

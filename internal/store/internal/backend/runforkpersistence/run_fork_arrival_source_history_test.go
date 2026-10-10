@@ -104,6 +104,10 @@ func TestRunForkTimerHistoryDischargeRequiresBothCompleteInventories(t *testing.
 				arrivalOwner = nil
 			}
 			before, _ := json.Marshal(plan.ReplayResumeAdmission)
+			transferReads := 0
+			if name == "exact" {
+				transferReads = 2
+			}
 			withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
 				for _, phase := range []runForkWorkflowTimerReadbackPhase{runForkWorkflowTimerAtCut, runForkWorkflowTimerContinuing} {
 					got, err := requireRunForkTimerHistory(ctx, attempt, plan, workflowTimerProjectionChildRun, workflowTimerMaterializerSelection{}, workflow, arrivalOwner, bornAt, plan.ReplayResumeAdmission, phase)
@@ -118,7 +122,7 @@ func TestRunForkTimerHistoryDischargeRequiresBothCompleteInventories(t *testing.
 					}
 					assertWorkflowTimerAppliedDisposition(t, got, runfork.RunForkReplayResumeDispositionReconstruct)
 				}
-			})
+			}, transferReads)
 			after, _ := json.Marshal(plan.ReplayResumeAdmission)
 			if string(before) != string(after) || workflow.writes != 0 || workflow.inserts != 0 || workflow.cancels != 0 {
 				t.Fatal("require-only discharge changed source admission or wrote business state")
@@ -155,7 +159,7 @@ func TestRunForkTimerHistoryContinuationUsesStableImmutableEvidence(t *testing.T
 		if err != nil || !reflect.DeepEqual(cut, continued) {
 			t.Fatalf("lawful progress changed fixed-cut discharge: cut=%+v continued=%+v err=%v", cut, continued, err)
 		}
-	})
+	}, 2)
 }
 
 func TestRunForkArrivalHistoryRetainsPublishedAndTerminalRefusals(t *testing.T) {
