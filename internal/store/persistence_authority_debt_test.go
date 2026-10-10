@@ -28,6 +28,7 @@ import (
 const debtBaselinePath = "internal/store/testdata/persistence_authority_debt_baseline.tsv"
 const debtRefreshEnv = "SWARM_REFRESH_PERSISTENCE_AUTHORITY_DEBT"
 const debtG01CollectorFrom = "494fd3b6300c4163241395ef9e3aa59ce58eb32f45e9f5d8bc5a5078401303d5"
+const debtQ10CollectorFrom = "65fe2e66c01eb0e19ce2b44d53f545cc76dd823f5f8b58562e139a362cc9c267"
 
 // The reviewed, unlanded bootstrap cannot move when its guard PR is rebased.
 const debtBootstrapSource = "52b954ec26c85a47605cefb8d7030f2a842f8c24"
@@ -131,10 +132,54 @@ func authorityDebtSubset(actual, allowed map[string]authorityDebtSite, label str
 }
 
 func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDebtSite) []string {
+	old, current := debtQ10NullableUncertaintyTransition()
+	for _, state := range []map[string]authorityDebtSite{actual, head, base, baseActual} {
+		if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
+			return []string{"both reviewed Q10 uncertainty identities survive; owner=exact nullable lifecycle assertion"}
+		}
+	}
+	// Preserve this one debt occurrence across the reviewed assertion change.
+	// Once the trusted source has landed it, the substitution is inert.
+	if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
+		base[old.identity()] == old && base[current.identity()].Multiplicity == 0 &&
+		baseActual[old.identity()] == old && baseActual[current.identity()].Multiplicity == 0 {
+		head = debtForwardQ10NullableUncertainty(head, old, current)
+		base = debtForwardQ10NullableUncertainty(base, old, current)
+		baseActual = debtForwardQ10NullableUncertainty(baseActual, old, current)
+	}
 	failures := authorityDebtSubset(actual, head, "actual -> head baseline")
 	failures = append(failures, authorityDebtSubset(head, base, "head -> trusted baseline")...)
 	failures = append(failures, authorityDebtSubset(actual, baseActual, "actual -> trusted source (resurrection)")...)
 	return failures
+}
+
+// #2593 reviewer-D option (a): only the nil refusal/dereference changes.
+// Imports, issue2413 build context, calls, SQL and remaining assertions stay debt.
+func debtQ10NullableUncertaintyTransition() (authorityDebtSite, authorityDebtSite) {
+	old := authorityDebtSite{
+		Kind: "unresolved-excluded-source", File: "internal/serveapp/a2_nested_portfolio_isolation_test.go",
+		Declaration: "TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores",
+		Operation:   "declaration:facfe2d5f45cc0bfd4df3a8a37eddc3609a5f880fd001b91a277966bf6d9a802",
+		Resolved:    "unresolved|source-context:4b4e4348dc36ff1ca795a129d908f43ec58f41675314b93feca26224afffc5b4",
+		Family:      "excluded-source-uncertainty", Replacement: "existing canonical owner or narrow source-evidenced classification; never a file exemption or baseline increase",
+		Multiplicity: 1,
+	}
+	current := old
+	current.Operation = "declaration:b9e2f01931d72033aac00ef317973659046ecc7115efffb11328fc09d94cd1ff"
+	return old, current
+}
+
+func debtForwardQ10NullableUncertainty(sites map[string]authorityDebtSite, old, current authorityDebtSite) map[string]authorityDebtSite {
+	if sites[old.identity()] != old || sites[current.identity()].Multiplicity != 0 {
+		return sites
+	}
+	forward := make(map[string]authorityDebtSite, len(sites))
+	for key, site := range sites {
+		forward[key] = site
+	}
+	delete(forward, old.identity())
+	forward[current.identity()] = current
+	return forward
 }
 
 func parseAuthorityDebtBaseline(data []byte) (authorityDebtBaseline, error) {
@@ -594,6 +639,14 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return fmt.Errorf("debt baseline bootstrap source changed")
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
+		return nil
+	}
+	old, forward := debtQ10NullableUncertaintyTransition()
+	if base == debtQ10CollectorFrom && trusted.Collector == debtQ10CollectorFrom &&
+		current == debtQ10CollectorTo && head.Collector == debtQ10CollectorTo &&
+		trusted.Sites[old.identity()] == old && trusted.Sites[forward.identity()].Multiplicity == 0 &&
+		(head.Sites[old.identity()] == old || head.Sites[forward.identity()] == forward) &&
+		len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0 {
 		return nil
 	}
 	if base == debtG01CollectorFrom && trusted.Collector == debtG01CollectorFrom &&
