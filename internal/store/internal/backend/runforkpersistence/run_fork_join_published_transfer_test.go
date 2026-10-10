@@ -206,7 +206,7 @@ func TestPublishedArrivalTransferConsumesExactUnfinishedSourceAtCut(t *testing.T
 
 func TestPublishedArrivalTransferRefusesUnprovenCutPublicationAndDelivery(t *testing.T) {
 	for _, fault := range []string{"wrong_key", "wrong_cut", "foreign_cut", "missing_source", "duplicate_source", "missing_event", "duplicate_event", "foreign_event", "future_event", "unversioned_event", "wrong_task", "wrong_payload", "missing_schema", "prepared_only",
-		"missing_delivery", "duplicate_delivery", "foreign_delivery", "future_delivery", "unversioned_delivery", "backwards_delivery", "missing_delivery_id", "wrong_node", "wrong_target", "materializing_target", "route_identity", "subscriber_class", "subscriber_id", "invalid_context", "foreign_context_owner", "context_identity", "delivered", "canceled", "dead_letter"} {
+		"missing_delivery", "duplicate_delivery", "foreign_delivery", "future_delivery", "unversioned_delivery", "backwards_delivery", "missing_delivery_id", "wrong_delivery_id", "wrong_node", "wrong_target", "materializing_target", "route_identity", "subscriber_class", "subscriber_id", "invalid_context", "foreign_context_owner", "context_identity", "delivered", "canceled", "dead_letter"} {
 		t.Run(fault, func(t *testing.T) {
 			snapshot, plan, source, original, childRun := publishedArrivalTransferFixture(t, true, true, deliverylifecycle.StatusPending)
 			key := original.ID()
@@ -263,6 +263,8 @@ func TestPublishedArrivalTransferRefusesUnprovenCutPublicationAndDelivery(t *tes
 					row.Revision = row.FirstRevision - 1
 				case "missing_delivery_id":
 					row.Snapshot.DeliveryID = ""
+				case "wrong_delivery_id":
+					row.Snapshot.DeliveryID = uuid.NewString()
 				case "wrong_node":
 					node, err := runtimeidentity.ParseExecutableNode(".", "unrelated-node")
 					if err != nil {
@@ -342,8 +344,18 @@ func TestPublishedArrivalTransferRetainsOriginalDeliveryContext(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(route, row.Route.Normalized()) || len(route.Context.Joins) != 1 {
 				t.Fatalf("original route context replaced or discarded: %+v err=%v", route, err)
 			}
-			if _, err := prepareRunForkPublishedArrivalTransfer(snapshot, plan, childRun, original.ID()); err != nil {
+			continuation, err := prepareRunForkPublishedArrivalTransfer(snapshot, plan, childRun, original.ID())
+			if err != nil {
 				t.Fatalf("exact context-bearing transfer refused: %v", err)
+			}
+			projected, err := projectRunForkPublishedArrivalRoute(plan, continuation.ChildCommand(), route)
+			if err != nil || len(projected.Context.Joins) != 1 || projected.Context.Joins[0].Disposition != events.JoinAdmissionBound {
+				t.Fatalf("projected route lost its immutable binding: %+v err=%v", projected, err)
+			}
+			childRef := projected.Context.Joins[0].Ref
+			if childRef.StageEntry().RunID != childRun || childRef.StageEntry().OriginRunID != ref.StageEntry().RunID ||
+				childRef.StageEntry().EventID != ref.StageEntry().EventID || childRef.Declaration() != ref.Declaration() {
+				t.Fatalf("projected route rebound the original return: %+v", childRef)
 			}
 			if after := publishedArrivalTransferState(t, snapshot, plan); after != before {
 				t.Fatal("context readback changed its original source evidence")
