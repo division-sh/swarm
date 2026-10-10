@@ -36,7 +36,7 @@ func TestReleaseBinaryUsesEmbeddedPackInventoryWithoutAdjacentPackTree(t *testin
 	if inventory.BaseMode != "embedded" || inventory.EffectiveDigest == "" {
 		t.Fatalf("release pack inventory = %#v\n%s", inventory, output)
 	}
-	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"} {
+	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform", "whatsapp"} {
 		entry, ok := inventory.Packs["provider."+provider]
 		if !ok || entry.Source != "embedded" || entry.ManifestHash == "" {
 			t.Fatalf("release pack inventory provider.%s = %#v, present=%t", provider, entry, ok)
@@ -56,7 +56,7 @@ func TestReleaseBinaryUsesEmbeddedPackInventoryWithoutAdjacentPackTree(t *testin
 	if inventory.BaseMode != "embedded" || !strings.HasPrefix(inventory.EffectiveDigest, "sha256:") {
 		t.Fatalf("relocated release pack inventory = %#v", inventory)
 	}
-	for _, id := range []string{"provider.telegram", "provider.telegram.connector", "provider.telegram.hitl_channel"} {
+	for _, id := range []string{"provider.telegram", "provider.telegram.connector", "provider.telegram.hitl_channel", "provider.whatsapp", "provider.whatsapp.connector", "provider.whatsapp.hitl_channel"} {
 		entry, ok := inventory.Packs[id]
 		if !ok || entry.Source != "embedded" || !strings.HasPrefix(entry.ManifestHash, "sha256:") {
 			t.Fatalf("relocated release pack inventory %s = %#v, present=%t", id, entry, ok)

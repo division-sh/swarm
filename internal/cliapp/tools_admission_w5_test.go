@@ -51,6 +51,20 @@ func TestW5ToolsVerifyAndDescribeSupportedSurface(t *testing.T) {
 			}
 		})
 	}
+	for _, name := range []string{"Read", "mcp__runtime-tools__renderer", "mcp__runtime-tools__mcp__runtime-tools__renderer", "emit_probe"} {
+		t.Run("private_name/"+name, func(t *testing.T) {
+			writeDescribeTestFile(t, filepath.Join(root, "tools.yaml"), strings.Replace(module, "renderer:", name+":", 1))
+			for _, command := range [][]string{{"verify", root, "--portable", "--config", config, "--json"}, {"describe", root, "--json"}} {
+				stdout.Reset()
+				stderr.Reset()
+				code := executeRootCommandWithOptions(context.Background(), RepoRoot(), command, &stdout, &stderr, defaultRootCommandOptions())
+				message := stdout.String() + stderr.String()
+				if code == 0 || !strings.Contains(message, "tools.yaml") || !strings.Contains(message, name) || !strings.Contains(message, "private tool declaration") {
+					t.Fatalf("%s lost private-name admission: code=%d stdout=%s stderr=%s", command[0], code, &stdout, &stderr)
+				}
+			}
+		})
+	}
 	writeDescribeTestFile(t, filepath.Join(root, "tools.yaml"), module)
 	writeDescribeTestFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  intent: {inline: business intent}\n  tools: [renderer]\n")
 	stdout.Reset()

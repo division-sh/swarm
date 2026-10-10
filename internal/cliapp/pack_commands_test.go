@@ -24,7 +24,7 @@ func TestPacksListAndShowUseEmbeddedInventoryOutsideProject(t *testing.T) {
 		t.Fatalf("packs list code=%d stderr=%q stdout=%s", code, stderr, stdout)
 	}
 	list := decodeOutputJSON[packInventoryReadback](t, stdout)
-	if list.BaseMode != "embedded" || len(list.Packs) != 14 || list.BaseDigest == "" || list.EffectiveDigest == "" {
+	if list.BaseMode != "embedded" || len(list.Packs) != 17 || list.BaseDigest == "" || list.EffectiveDigest == "" {
 		t.Fatalf("bare embedded list = %#v", list)
 	}
 
@@ -60,7 +60,7 @@ func TestPacksListDoesNotRequireRuntimeExecutionPosture(t *testing.T) {
 		t.Fatalf("packs list without runtime posture code=%d stderr=%q stdout=%s", code, stderr, stdout)
 	}
 	list := decodeOutputJSON[packInventoryReadback](t, stdout)
-	if list.BaseMode != "embedded" || len(list.Packs) != 14 {
+	if list.BaseMode != "embedded" || len(list.Packs) != 17 {
 		t.Fatalf("bare embedded list = %#v", list)
 	}
 }
