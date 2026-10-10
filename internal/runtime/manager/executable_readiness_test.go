@@ -712,8 +712,8 @@ func TestDynamicReadinessRejectsRegisteredStoppedAsProcessReady(t *testing.T) {
 	if err := restarted.verifyDynamicFlowAgents(ctx, testActivationFlowIdentity(req), persisted, rec.Topology); err == nil || !strings.Contains(err.Error(), "agent_execution_not_ready") {
 		t.Fatalf("partial readiness error = %v", err)
 	}
-	if restartBus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-		t.Fatal("partial executable projection published a process flow route")
+	if flowActivationAttemptReadyForTest(restarted, ctx, req) {
+		t.Fatal("partial executable projection acquired an executable activation receipt")
 	}
 }
 
@@ -752,8 +752,8 @@ func TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence(t *t
 	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestSourceArtifactFact, false); err != nil {
 		t.Fatalf("ReconstructDynamicFlowRuntimeStartupTopology: %v", err)
 	}
-	if !restartBus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-		t.Fatal("completed topology did not publish its persisted process route")
+	if !flowActivationAttemptReadyForTest(restarted, ctx, req) {
+		t.Fatal("completed topology did not acquire its exact executable activation receipt")
 	}
 	if len(instances.armedEntries) != armedBefore+1 || len(restartBus.published) != 0 || len(instances.creates) != constructedBefore {
 		t.Fatalf("successor reconstruction repeated construction/creation or missed timer reconciliation: timers=%d/%d events=%d construction=%d/%d", len(instances.armedEntries), armedBefore, len(restartBus.published), len(instances.creates), constructedBefore)
@@ -834,8 +834,9 @@ func TestSourceScopedStartupPreparesEverySiblingBeforeFirstPendingFinalizer(t *t
 			t.Fatalf("first startup finalizer observed %d timer arms after baseline %d", len(instances.armedEntries), armsBefore)
 		}
 		for _, req := range requests {
-			if !restartBus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-				t.Fatalf("flow route %s was absent before the first pending finalizer", req.Instance.InstancePath)
+			instance, found, err := instances.Load(ctx, testActivationFlowIdentity(req))
+			if err != nil || !found || instance.StorageRef != req.Instance.InstancePath || instance.EntityID != req.Instance.EntityID || instance.Status != "active" {
+				t.Fatalf("constructed receiver %s was absent or invalid before the first pending finalizer: found=%v instance=%+v err=%v", req.Instance.InstancePath, found, instance, err)
 			}
 			for _, agentID := range []string{"reviewer", "writer"} {
 				cfg, ok := testAgentConfigForRun(t, restarted, req.TriggerEvent.RunID(), agentID, req.Instance.InstancePath)

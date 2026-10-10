@@ -139,28 +139,28 @@ func TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSc
 }
 
 type flowActivationTestBus struct {
-	addedPaths         []string
-	addedRouteRequests []runtimebus.FlowInstanceRouteMaterializationRequest
-	published          []events.Event
-	publishedContexts  []events.DeliveryContext
-	runtimeLogs        []runtimepipeline.RuntimeLogEntry
-	unsubscribed       []string
-	removeAgentRoute   func(runtimeeffects.LifecycleToken)
-	publishErr         error
-	creationStore      *flowActivationTestInstanceStore
+	published         []events.Event
+	publishedContexts []events.DeliveryContext
+	runtimeLogs       []runtimepipeline.RuntimeLogEntry
+	unsubscribed      []string
+	removeAgentRoute  func(runtimeeffects.LifecycleToken)
+	publishErr        error
+	creationStore     *flowActivationTestInstanceStore
 }
 
 func TestFlowActivationFixtureCannotStageInstanceRoutes(t *testing.T) {
 	for _, value := range []any{(*flowActivationTestBus)(nil), (*runtimebus.EventBus)(nil)} {
 		owner := reflect.TypeOf(value)
-		for _, name := range []string{"AddFlowInstanceRoute", "AddFlowInstanceRouteContext", "StageFlowInstanceRouteContext", "PublishPersistedFlowInstanceRoute", "RetirePublishedFlowInstanceRoute", "UpsertFlowInstanceRoute", "ListFlowInstanceRoutes", "RemoveFlowInstanceRoute", "RemoveFlowInstanceRouteContext"} {
+		for _, name := range []string{"AddFlowInstanceRoute", "AddFlowInstanceRouteContext", "StageFlowInstanceRouteContext", "PublishPersistedFlowInstanceRoute", "RetirePublishedFlowInstanceRoute", "UpsertFlowInstanceRoute", "ListFlowInstanceRoutes", "RemoveFlowInstanceRoute", "RemoveFlowInstanceRouteContext", "HasFlowInstanceRoute"} {
 			if _, present := owner.MethodByName(name); present {
 				t.Errorf("%s retains retired instance-route staging API %s", owner, name)
 			}
 		}
 	}
-	if _, present := reflect.TypeOf(flowActivationTestBus{}).FieldByName("routeStore"); present {
-		t.Fatal("Manager fixture retains a separate mutable instance-route store")
+	for _, name := range []string{"routeStore", "addedPaths", "addedRouteRequests"} {
+		if _, present := reflect.TypeOf(flowActivationTestBus{}).FieldByName(name); present {
+			t.Errorf("Manager fixture retains separate mutable instance-route field %s", name)
+		}
 	}
 }
 
@@ -1361,15 +1361,6 @@ func (b *flowActivationTestBus) LogRuntime(_ context.Context, entry runtimepipel
 	return nil
 }
 
-func (b *flowActivationTestBus) HasFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) bool {
-	for _, req := range b.addedRouteRequests {
-		if req.Identity == identity {
-			return true
-		}
-	}
-	return false
-}
-
 func flowActivationRunContext() context.Context {
 	return runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), flowActivationTestRunID)
 }
@@ -1841,8 +1832,8 @@ func TestActivateFlowInstanceUsesConstructedAttachmentEvidence(t *testing.T) {
 	if err != nil || !found || readiness.Phase != runtimepipeline.FlowAttachmentReady || readiness.Plan.Identity != req.Instance {
 		t.Fatalf("exact attachment evidence = %+v found=%t err=%v", readiness, found, err)
 	}
-	if len(bus.addedPaths) != 0 {
-		t.Fatalf("activation published non-authoritative route membership: %#v", bus.addedPaths)
+	if !flowActivationAttemptReadyForTest(am, flowActivationRunContext(), req) {
+		t.Fatal("constructed receiver did not acquire its exact ready activation attempt")
 	}
 	if len(instances.creates) != 1 || instances.creates[0].EntityType != "review_entity" {
 		t.Fatalf("activation entity contract = %#v, want canonical review_entity and no schema.Entity interpretation", instances.creates)
@@ -1910,8 +1901,8 @@ func TestActivateFlowInstanceRejectsMissingCanonicalEntityContract(t *testing.T)
 	if err == nil || !strings.Contains(err.Error(), "flow review has no entity assignment contract") {
 		t.Fatalf("missing canonical entity error = %v", err)
 	}
-	if len(instances.creates) != 0 || len(bus.addedPaths) != 0 {
-		t.Fatalf("missing entity activation mutated runtime: instances=%#v routes=%#v", instances.creates, bus.addedPaths)
+	if len(instances.creates) != 0 || len(am.ListAgentConfigs()) != 0 {
+		t.Fatalf("missing entity activation mutated runtime: instances=%#v agents=%#v", instances.creates, am.ListAgentConfigs())
 	}
 }
 
@@ -1934,8 +1925,8 @@ func TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority(t *testin
 	if err != nil || !found || readiness.Phase != runtimepipeline.FlowAttachmentReady {
 		t.Fatalf("committed attachment evidence = %+v found=%t err=%v", readiness, found, err)
 	}
-	if len(bus.addedPaths) != 0 {
-		t.Fatalf("activation published non-authoritative route membership: %#v", bus.addedPaths)
+	if len(am.lifecycle.executionIdentities()) != 1 {
+		t.Fatalf("closed activation installed %d executable agents, want one", len(am.lifecycle.executionIdentities()))
 	}
 	if len(postCommit) != 0 {
 		t.Fatalf("ambient post-commit actions = %d, want zero", len(postCommit))
@@ -1990,6 +1981,7 @@ func TestFlowAttachmentReadyReplayDoesNotRepeatInstallation(t *testing.T) {
 	if initialWrites != 4 {
 		t.Fatalf("initial attachment phase writes = %d, want four", initialWrites)
 	}
+	initialExecutions := am.lifecycle.executionIdentities()
 	for range 3 {
 		if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, before.Plan.RunID, before.InstancePath); err != nil {
 			t.Fatalf("exact ready replay: %v", err)
@@ -2005,8 +1997,8 @@ func TestFlowAttachmentReadyReplayDoesNotRepeatInstallation(t *testing.T) {
 	if !flowActivationAttemptReadyForTest(am, ctx, req) {
 		t.Fatal("ready replay lost the exact owned activation attempt")
 	}
-	if len(bus.addedPaths) != 0 || len(bus.addedRouteRequests) != 0 {
-		t.Fatal("ready replay published a non-authoritative route resource")
+	if !reflect.DeepEqual(initialExecutions, am.lifecycle.executionIdentities()) {
+		t.Fatal("ready replay changed the installed executable agent identities")
 	}
 	instances.readinessMu.Lock()
 	replayWrites := instances.attachmentPhaseWrites - initialWrites
@@ -2068,8 +2060,8 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 					0,
 				)
 			}
-			if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-				t.Fatal("failed readiness attempt left the route process-visible")
+			if flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) {
+				t.Fatal("failed readiness attempt retained an executable activation receipt")
 			}
 			wantTimerRetirements := 0
 			switch boundary {
@@ -2540,8 +2532,8 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 		!readiness.Pending() {
 		t.Fatalf("concurrently revised readiness was falsely completed: %#v", readiness)
 	}
-	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-		t.Fatal("stale topology attempt left its process route published")
+	if flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) {
+		t.Fatal("stale topology attempt retained an executable activation receipt")
 	}
 }
 
@@ -2753,7 +2745,7 @@ func TestFlowActivationRejectsForeignSemanticSourceBeforeAnyMutation(t *testing.
 				upserts := len(agents.upserts)
 				armed := len(instances.armedEntries)
 				published := len(bus.published)
-				addedPaths := len(bus.addedPaths)
+				executions := len(manager.lifecycle.executionIdentities())
 				postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 				attemptCtx := ctx
 				if transactional {
@@ -2784,10 +2776,10 @@ func TestFlowActivationRejectsForeignSemanticSourceBeforeAnyMutation(t *testing.
 					len(agents.upserts) != upserts ||
 					len(instances.armedEntries) != armed ||
 					len(bus.published) != published ||
-					len(bus.addedPaths) != addedPaths ||
+					len(manager.lifecycle.executionIdentities()) != executions ||
 					len(postCommit) != 0 {
 					t.Fatalf(
-						"foreign source crossed mutation boundary: creates=%d/%d readiness=%d/%d upserts=%d/%d arms=%d/%d events=%d/%d routes=%d/%d post_commit=%d",
+						"foreign source crossed mutation boundary: creates=%d/%d readiness=%d/%d upserts=%d/%d arms=%d/%d events=%d/%d executions=%d/%d post_commit=%d",
 						len(instances.creates),
 						creates,
 						len(instances.readiness),
@@ -2798,8 +2790,8 @@ func TestFlowActivationRejectsForeignSemanticSourceBeforeAnyMutation(t *testing.
 						armed,
 						len(bus.published),
 						published,
-						len(bus.addedPaths),
-						addedPaths,
+						len(manager.lifecycle.executionIdentities()),
+						executions,
 						len(postCommit),
 					)
 				}
@@ -3390,8 +3382,8 @@ func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureConvergesAfterMissedSign
 	if err != nil || !found || !readiness.Pending() || (readiness.Phase == runtimepipeline.FlowAttachmentReady) {
 		t.Fatalf("failed no-auto readiness: found=%v readiness=%#v err=%v", found, readiness, err)
 	}
-	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-		t.Fatal("failed no-auto readiness left process route published")
+	if flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) {
+		t.Fatal("failed no-auto readiness retained an executable activation receipt")
 	}
 	for {
 		select {
@@ -3648,8 +3640,8 @@ func TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMateriali
 	if err != nil {
 		t.Fatalf("terminal creation reconciliation: %v", err)
 	}
-	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-		t.Fatal("terminal creation boundary left a process-visible route")
+	if flowActivationAttemptReadyForTest(am, ctx, req) {
+		t.Fatal("terminal creation boundary retained an executable activation receipt")
 	}
 	if len(bus.published) != 0 {
 		t.Fatalf("terminal creation boundary published events: %#v", bus.published)
@@ -4015,8 +4007,8 @@ func TestMockOnlyPostureRejectsLiveDynamicReadinessBeforeTopologyMutation(t *tes
 	if err := restarted.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 		t.Fatalf("readiness reconciliation error = %v, want live-plan rejection", err)
 	}
-	if len(agents.upserts) != baselineAgents || len(restartBus.addedPaths) != 0 || len(restartBus.published) != 0 || len(instances.armedEntries) != 0 {
-		t.Fatalf("readiness mutations agents=%d/%d routes=%d events=%d timers=%d", len(agents.upserts), baselineAgents, len(restartBus.addedPaths), len(restartBus.published), len(instances.armedEntries))
+	if len(agents.upserts) != baselineAgents || len(restarted.lifecycle.executionIdentities()) != 0 || len(restartBus.published) != 0 || len(instances.armedEntries) != 0 {
+		t.Fatalf("readiness mutations agents=%d/%d executions=%d events=%d timers=%d", len(agents.upserts), baselineAgents, len(restarted.lifecycle.executionIdentities()), len(restartBus.published), len(instances.armedEntries))
 	}
 	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
 	if err != nil || !found || !readiness.Pending() || readiness.Plan.ExecutionMode != executionmode.Live {
@@ -4087,8 +4079,8 @@ func TestSourceScopedStartupExcludesTerminalDynamicFlowTopology(t *testing.T) {
 	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("terminal readiness retained a process agent")
 	}
-	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-		t.Fatal("terminal readiness retained or restored a process route")
+	if flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) {
+		t.Fatal("terminal readiness retained or restored an executable activation receipt")
 	}
 	if len(instances.armedEntries) != 0 || len(bus.published) != 0 {
 		t.Fatalf("terminal startup side effects: armed=%#v published=%#v", instances.armedEntries, bus.published)
@@ -4309,7 +4301,7 @@ func TestActivateFlowInstanceRouteMaterializationExcludesBusinessState(t *testin
 	if len(instances.creates) != 1 || instances.creates[0].Fields["vertical_id"] != "11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("constructed business state = %+v, want one admitted receiver with its supplied field", instances.creates)
 	}
-	if !flowActivationAttemptReadyForTest(am, ctx, req) || len(bus.addedRouteRequests) != 0 {
+	if !flowActivationAttemptReadyForTest(am, ctx, req) {
 		t.Fatal("activation requires exact attachment without materializing route membership")
 	}
 }
@@ -4340,8 +4332,8 @@ func TestActivateFlowInstanceRejectsAgentNameInterpolationBeforeMutation(t *test
 	if err == nil || !strings.Contains(err.Error(), "contains interpolation") || !strings.Contains(err.Error(), "instance.by") {
 		t.Fatalf("ActivateFlowInstance error = %v, want agent-name interpolation teaching error", err)
 	}
-	if len(bus.addedRouteRequests) != 0 || len(am.ListAgentConfigs()) != 0 {
-		t.Fatalf("rejected interpolation mutated activation: routes=%#v agents=%#v", bus.addedRouteRequests, am.ListAgentConfigs())
+	if len(am.lifecycle.executionIdentities()) != 0 || len(am.ListAgentConfigs()) != 0 {
+		t.Fatalf("rejected interpolation mutated activation: executions=%#v agents=%#v", am.lifecycle.executionIdentities(), am.ListAgentConfigs())
 	}
 }
 
@@ -4621,7 +4613,7 @@ func TestActivateFlowInstanceFinalizesIdenticalReplayWithoutDuplicateCreationSid
 		t.Fatalf("first ActivateFlowInstance: %v", err)
 	}
 	firstCreates := len(instances.creates)
-	firstRoutes := len(bus.addedPaths)
+	firstExecutions := am.lifecycle.executionIdentities()
 	firstPublished := len(bus.published)
 	firstAgents := len(store.upserts)
 
@@ -4632,8 +4624,8 @@ func TestActivateFlowInstanceFinalizesIdenticalReplayWithoutDuplicateCreationSid
 	if len(instances.creates) != firstCreates {
 		t.Fatalf("creates = %d, want unchanged %d", len(instances.creates), firstCreates)
 	}
-	if len(bus.addedPaths) != firstRoutes {
-		t.Fatalf("added paths = %#v, want unchanged route side effects", bus.addedPaths)
+	if !reflect.DeepEqual(am.lifecycle.executionIdentities(), firstExecutions) {
+		t.Fatalf("installed execution identities = %#v, want unchanged %#v", am.lifecycle.executionIdentities(), firstExecutions)
 	}
 	if len(bus.published) != firstPublished {
 		t.Fatalf("published events = %#v, want unchanged auto-emit side effects", bus.published)
@@ -4669,8 +4661,8 @@ func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testin
 	if len(instances.creates) != 0 {
 		t.Fatalf("instance creates = %#v, want none", instances.creates)
 	}
-	if len(bus.addedPaths) != 0 {
-		t.Fatalf("added paths = %#v, want none", bus.addedPaths)
+	if len(am.lifecycle.executionIdentities()) != 0 {
+		t.Fatalf("installed execution identities = %#v, want none", am.lifecycle.executionIdentities())
 	}
 	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("unexpected activated agent config after auto-emit schema failure")
@@ -4704,8 +4696,8 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 	if len(instances.creates) != 0 {
 		t.Fatalf("instance creates = %#v, want none", instances.creates)
 	}
-	if len(bus.addedPaths) != 0 {
-		t.Fatalf("added paths = %#v, want none", bus.addedPaths)
+	if len(am.lifecycle.executionIdentities()) != 0 {
+		t.Fatalf("installed execution identities = %#v, want none", am.lifecycle.executionIdentities())
 	}
 	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("unexpected activated agent config after queued auto-emit schema failure")

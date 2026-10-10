@@ -1,16 +1,6 @@
 package bus
 
-import (
-	"strings"
-
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-)
-
-type FlowInstanceRouteMaterializationRequest struct {
-	Identity            runtimeflowidentity.RunScopedFlowInstance
-	Instance            runtimeflowidentity.Instance
-	ActivationVariables map[string]string
-}
+import "strings"
 
 func cloneRouteActivationVariables(in map[string]string) map[string]string {
 	if len(in) == 0 {
