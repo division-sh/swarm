@@ -84,7 +84,7 @@ accounts:
 		},
 	})
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
-		UPDATE entity_state
+		UPDATE flow_instances
 		SET bookkeeping = '{"private_fact":"must-not-leak"}'
 		WHERE run_id = ? AND entity_id = ?
 	`, entityToolTestRunID, entityID); err != nil {
@@ -250,7 +250,7 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 		"fields":        map[string]any{"status": "open", "business_brief": map[string]any{"summary": "before", "confidence": int64(1)}},
 	})
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
-		UPDATE entity_state
+		UPDATE flow_instances
 		SET bookkeeping = '{"private_fact":"must-not-leak"}'
 		WHERE run_id = ? AND entity_id = ?
 	`, entityToolTestRunID, entityID); err != nil {
