@@ -28,6 +28,20 @@ func (s *PipelineSQLiteOwner) LoadWorkflowTimerActivation(ctx context.Context, a
 	return loadWorkflowTimerActivation(ctx, s.backend, true, activationID)
 }
 
+func (s *PipelinePostgresOwner) ReadWorkflowTimerActivationTx(ctx context.Context, tx *sql.Tx, activationID string) (runtimepipeline.WorkflowTimerActivation, bool, error) {
+	if s == nil || s.backend == nil || tx == nil {
+		return runtimepipeline.WorkflowTimerActivation{}, false, fmt.Errorf("native workflow timer readback owner and transaction are required")
+	}
+	return loadWorkflowTimerActivation(ctx, tx, false, activationID)
+}
+
+func (s *PipelineSQLiteOwner) ReadWorkflowTimerActivationTx(ctx context.Context, tx *sql.Tx, activationID string) (runtimepipeline.WorkflowTimerActivation, bool, error) {
+	if s == nil || s.backend == nil || tx == nil {
+		return runtimepipeline.WorkflowTimerActivation{}, false, fmt.Errorf("native workflow timer readback owner and transaction are required")
+	}
+	return loadWorkflowTimerActivation(ctx, tx, true, activationID)
+}
+
 func loadWorkflowTimerActivation(ctx context.Context, db dynamicFlowReadinessQueryer, sqlite bool, activationID string) (runtimepipeline.WorkflowTimerActivation, bool, error) {
 	activationID = strings.TrimSpace(activationID)
 	if activationID == "" {
