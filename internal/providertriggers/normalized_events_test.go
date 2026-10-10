@@ -222,7 +222,7 @@ func TestAdmittedSemanticDigestRetainsRedactedConsumedValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AdmitRequest(second): %v", err)
 	}
-	if first.SemanticContentDigest == second.SemanticContentDigest {
+	if first.SemanticContentDigest() == second.SemanticContentDigest() {
 		t.Fatal("semantic digest collapsed a changed redacted value consumed by normalized projection")
 	}
 }
