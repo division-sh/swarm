@@ -42,24 +42,33 @@ func serveChannelOnboardingCatalog(manager *runtime.RuntimeContextManager) (*cha
 	}
 	candidates := []channelonboarding.Candidate{}
 	for _, contextDef := range manager.LoadedContexts() {
-		bundleHash := contextDef.SourceArtifactFact.BundleHash()
-		bundleIdentity := fmt.Sprintf("%s@%s#%s", strings.TrimSpace(contextDef.BundleIdentity.WorkflowName), strings.TrimSpace(contextDef.BundleIdentity.WorkflowVersion), strings.TrimSpace(contextDef.BundleIdentity.BundleHash))
-		if strings.Trim(bundleIdentity, "@#") == "" {
-			return nil, fmt.Errorf("runtime context %s has no exact bundle identity", bundleHash)
-		}
 		declarations, err := runtime.ResolveStandingTargetDeclarations(contextDef.Source, contextDef.ProviderTriggerCatalog)
 		if err != nil {
 			return nil, err
 		}
-		for _, plan := range contextDef.ChannelPlans {
-			planned, err := serveChannelCandidatesForPlan(contextDef, bundleIdentity, declarations, plan)
-			if err != nil {
-				return nil, err
-			}
-			candidates = append(candidates, planned...)
+		planned, err := serveChannelContextCandidates(contextDef, declarations)
+		if err != nil {
+			return nil, err
 		}
+		candidates = append(candidates, planned...)
 	}
 	return channelonboarding.NewCandidateCatalog(candidates)
+}
+
+func serveChannelContextCandidates(contextDef runtime.BundleContext, declarations []runtime.StandingTargetDeclaration) ([]channelonboarding.Candidate, error) {
+	bundleIdentity := fmt.Sprintf("%s@%s#%s", strings.TrimSpace(contextDef.BundleIdentity.WorkflowName), strings.TrimSpace(contextDef.BundleIdentity.WorkflowVersion), strings.TrimSpace(contextDef.BundleIdentity.BundleHash))
+	if strings.Trim(bundleIdentity, "@#") == "" {
+		return nil, fmt.Errorf("runtime context %s has no exact bundle identity", contextDef.BundleHash())
+	}
+	var candidates []channelonboarding.Candidate
+	for _, plan := range contextDef.ChannelPlans {
+		planned, err := serveChannelCandidatesForPlan(contextDef, bundleIdentity, declarations, plan)
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, planned...)
+	}
+	return candidates, nil
 }
 
 func serveChannelCandidatesForPlan(contextDef runtime.BundleContext, bundleIdentity string, declarations []runtime.StandingTargetDeclaration, plan packs.SatisfactionPlan) ([]channelonboarding.Candidate, error) {

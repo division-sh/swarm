@@ -84,6 +84,42 @@ func TestCandidateCatalogDiscoversDeclarationWithoutExecutableGeneration(t *test
 	}
 }
 
+func TestCandidateCatalogExactDeclarationLookupKeepsExecutionFence(t *testing.T) {
+	for _, executable := range []bool{false, true} {
+		candidate := testCandidate(strings.Repeat("a", 64), "support")
+		if !executable {
+			candidate.Coordinate.TargetGeneration, candidate.Target.Generation, candidate.Target.PublicationSequence = 0, 0, 0
+		}
+		catalog, err := NewCandidateCatalog([]Candidate{candidate})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, found := catalog.FindExactDeclaration(candidate.Provider, candidate.Interface, candidate.Coordinate, candidate.Target.Selector); !found {
+			t.Fatal("exact declaration lookup refused its own candidate")
+		}
+		if _, found := catalog.FindExact(candidate.Provider, candidate.Interface, candidate.Coordinate, candidate.Target.Selector); found != executable {
+			t.Fatal("executable lookup changed its generation requirement", executable, found)
+		}
+		for _, mutate := range []func(*ChannelRuntimeContextCoordinate){
+			func(c *ChannelRuntimeContextCoordinate) { c.BundleHash = "bundle-v2:sha256:" + strings.Repeat("b", 64) },
+			func(c *ChannelRuntimeContextCoordinate) { c.BundleIdentity = "foreign" },
+			func(c *ChannelRuntimeContextCoordinate) { c.PackInventoryGeneration = "foreign" },
+			func(c *ChannelRuntimeContextCoordinate) { c.RuntimeInstanceID = "foreign" },
+			func(c *ChannelRuntimeContextCoordinate) { c.ContextPublicationGeneration++ },
+			func(c *ChannelRuntimeContextCoordinate) { c.TargetGeneration++ },
+		} {
+			changed := candidate.Coordinate
+			mutate(&changed)
+			if _, found := catalog.FindExactDeclaration(candidate.Provider, candidate.Interface, changed, candidate.Target.Selector); found {
+				t.Fatal("declaration lookup adopted a foreign occurrence", changed)
+			}
+		}
+		if _, found := catalog.FindExactDeclaration(candidate.Provider, candidate.Interface, candidate.Coordinate, "ingress:other:telegram"); found {
+			t.Fatal("declaration lookup guessed an alternate target")
+		}
+	}
+}
+
 func TestSessionCandidateRequiresDeclarationNotExecutableTarget(t *testing.T) {
 	candidate := testCandidate(strings.Repeat("a", 64), "support")
 	candidate.Provider, candidate.Target.Provider = "whatsapp", "whatsapp"

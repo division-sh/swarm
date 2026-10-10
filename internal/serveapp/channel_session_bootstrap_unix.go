@@ -126,7 +126,7 @@ func (s *serveSessionBootstrap) BootstrapSession(ctx context.Context, op channel
 		attempt.err = err
 		close(attempt.done)
 	}()
-	owned, release, err := s.selectRuntime(ctx, op.Coordinate)
+	owned, incoming, release, err := s.selectRuntime(ctx, candidate)
 	if err != nil {
 		return err
 	}
@@ -135,7 +135,7 @@ func (s *serveSessionBootstrap) BootstrapSession(ctx context.Context, op channel
 		return context.Cause(ctx)
 	}
 	connection, err := sessionprovider.OpenRuntimeBootstrap(owned, sessionprovider.RuntimeConnectionOptions{
-		Directory: s.directory, OperationID: op.OperationID, Store: s.store, Credentials: s.credentials, Plan: candidate.Plan})
+		Directory: s.directory, OperationID: op.OperationID, Store: s.store, Credentials: s.credentials, Plan: candidate.Plan, Incoming: incoming})
 	s.mu.Lock()
 	attempt.connection = connection
 	s.mu.Unlock()

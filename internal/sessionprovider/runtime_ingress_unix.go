@@ -12,26 +12,14 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providertriggers"
-	"github.com/division-sh/swarm/internal/runtime/bus"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"go.mau.fi/whatsmeow/types/events"
 )
-
-// RuntimeIncomingOptions supplies existing runtime owners, not raw capture,
-// a connected flag or a caller-defined authority issuer.
-type RuntimeIncomingOptions struct {
-	Alias   string
-	Trigger providertriggers.InboundAdmissionPlan
-	Bus     *bus.EventBus
-	Posture executionposture.Posture
-}
 
 type runtimeIncomingStore interface {
 	channelonboarding.Store
