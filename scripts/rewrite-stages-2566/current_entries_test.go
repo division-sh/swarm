@@ -159,8 +159,8 @@ func TestRewrite2566CurrentSelectorsPreserveHistoricalDecisionsAndRegeneration(t
 			count++
 		}
 	}
-	if count != 36 {
-		t.Fatalf("current source remaps=%d, want all36 classified historical rows", count)
+	if count != 38 {
+		t.Fatalf("current source remaps=%d, want all38 classified historical rows", count)
 	}
 }
 
