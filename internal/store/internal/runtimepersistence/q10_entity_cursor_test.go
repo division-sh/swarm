@@ -31,12 +31,15 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 				"entities.yaml":         "cursor_item:\n  count: integer?\n",
 				"imports/schema.yaml":   "name: imports\ninstance: item_id\n",
 				"imports/entities.yaml": "cursor_item:\n  item_id: text\n  count: integer?\n",
+				"others/schema.yaml":    "name: others\ninstance: item_id\n",
+				"others/entities.yaml":  "other_item:\n  item_id: text\n",
 			}, nil)
 			const (
 				runA   = "91000000-0000-4000-8000-000000000001"
 				runB   = "91000000-0000-4000-8000-000000000002"
 				shared = "91000000-0000-4000-8000-000000000003"
 				tail   = "91000000-0000-4000-8000-000000000004"
+				other  = "91000000-0000-4000-8000-000000000005"
 			)
 			at := time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
 			source := semanticview.Wrap(f.bundle)
@@ -56,6 +59,7 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 				}
 				entities := []pipeline.ScenarioSetupEntityRequest{
 					seed, {Alias: "shared", EntityID: shared, FlowInstance: "imports/shared", EntityType: "cursor_item", Fields: map[string]any{"item_id": "shared", "count": int64(3)}},
+					{Alias: "other", EntityID: other, FlowInstance: "others/other", EntityType: "other_item", Fields: map[string]any{"item_id": "other"}},
 				}
 				if withTail {
 					entities = append(entities, pipeline.ScenarioSetupEntityRequest{Alias: "tail", EntityID: tail, FlowInstance: "imports/tail", EntityType: "cursor_item", Fields: map[string]any{"item_id": "tail", "count": int64(4)}})
@@ -162,7 +166,7 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 					if !row.CreatedAt.Equal(at) {
 						t.Fatalf("data origin changed: %+v", row)
 					}
-					if row.EntityID == shared || row.EntityID == tail {
+					if row.EntityID == shared || row.EntityID == tail || row.EntityID == other {
 						if row.StageDefined != nil || row.CurrentState != nil || row.Revision != nil || row.EnteredStateAt != nil || row.LifecycleCreatedAt != nil || row.LifecycleUpdatedAt != nil || !row.UpdatedAt.Equal(at) {
 							t.Fatalf("import acquired lifecycle or moved data clock: %+v", row)
 						}
@@ -174,6 +178,13 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 			}
 			initialOrder := [][2]string{{runA, runA}, {runB, runB}, {shared, runA}, {shared, runB}, {tail, runA}}
 			assertRows(page(operatorread.OperatorEntityListOptions{}).Entities, initialOrder)
+			// Prove the excluded type is really stored and publicly readable;
+			// the item-only pages below must not leak it into either cursor.
+			assertRows(publicPage(map[string]any{"type": "other_item", "run_id": runB}).Entities, [][2]string{{other, runB}})
+			unfiltered, err := f.store.(apiv1.EntityReadStore).ListOperatorEntities(f.ctx, operatorread.OperatorEntityListOptions{RunID: runB})
+			if err != nil || len(unfiltered.Entities) != 3 || unfiltered.Entities[2].EntityID != other || unfiltered.Entities[2].EntityType != "other_item" {
+				t.Fatalf("mixed-type exclusion control is missing: %+v %v", unfiltered, err)
+			}
 			first := page(operatorread.OperatorEntityListOptions{Limit: 1})
 			assertRows(first.Entities, initialOrder[:1])
 			if first.NextCursor == "" {
