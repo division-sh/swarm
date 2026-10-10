@@ -59,12 +59,25 @@ func (e ToolSchemaEntry) Module() (PolicyModule, bool) {
 }
 
 func (e ToolSchemaEntry) AgentExposable() bool {
-	return e.Handler() != ToolHandlerWasm && e.Handler() != ToolHandlerPython
+	return e.Handler().AgentExposable()
+}
+
+func (h ToolHandlerKind) AgentExposable() bool {
+	return !h.isComputeModule() && h != ToolHandlerInProcess
+}
+
+func (h ToolHandlerKind) isComputeModule() bool {
+	switch h {
+	case ToolHandlerWasm, ToolHandlerPython:
+		return true
+	default:
+		return false
+	}
 }
 
 func (e ToolSchemaEntry) validateModule() error {
 	module, present := e.Module()
-	if e.AgentExposable() {
+	if !e.Handler().isComputeModule() {
 		if present {
 			return fmt.Errorf("module requires handler_type wasm or python")
 		}
