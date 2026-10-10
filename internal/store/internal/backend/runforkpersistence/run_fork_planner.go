@@ -32,6 +32,7 @@ type runForkAdmissionEvidence struct {
 	RelevantTimer           bool
 	TimerHistory            runForkTimerHistoryInventory
 	JoinSchedules           []genericschedule.Activation
+	TransferredJoins        []genericschedule.TransferredJoinOccurrence
 	RelevantRoute           bool
 	RouteHistory            runfork.RunForkRouteHistoryProjection
 	ActiveSession           bool
@@ -255,10 +256,16 @@ func planRunForkSnapshot(
 	}
 	evidence.TimerHistory.Point = plan.ForkPoint
 	plan.JoinSchedules = evidence.JoinSchedules
+	plan.TransferredJoins = evidence.TransferredJoins
 	publications, err := historicalArrivalPublications(snapshot, plan.JoinSchedules)
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}
+	transferred, err := transferredArrivalPublications(snapshot, plan.TransferredJoins)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
+	publications = append(publications, transferred...)
 	plan, err = plan.WithHistoricalArrivalPublications(snapshot.Revision, publications)
 	if err != nil {
 		return runfork.RunForkPlan{}, err

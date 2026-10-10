@@ -57,3 +57,27 @@ func historicalArrivalPublications(snapshot *runForkRevisionSnapshot, arrivals [
 	}
 	return publications, nil
 }
+
+func attachRunForkPublishedArrivals(snapshot *runForkRevisionSnapshot, entities []runfork.RunForkEntityState, arrivals []genericschedule.Activation) error {
+	publications, err := historicalArrivalPublications(snapshot, arrivals)
+	if err != nil {
+		return err
+	}
+	for _, publication := range publications {
+		found := false
+		for index := range entities {
+			if entities[index].EntityID != publication.Command().EntityID {
+				continue
+			}
+			if found {
+				return fmt.Errorf("published arrival has multiple historical entity owners")
+			}
+			found = true
+			entities[index].PublishedArrivals = append(entities[index].PublishedArrivals, publication)
+		}
+		if !found {
+			return fmt.Errorf("published arrival lacks its historical entity owner")
+		}
+	}
+	return nil
+}
