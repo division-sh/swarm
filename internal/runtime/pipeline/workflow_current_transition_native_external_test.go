@@ -2,7 +2,9 @@ package pipeline_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -53,7 +55,7 @@ func TestWorkflowCurrentTransitionNativeBytesAndHistoricalCutsBothStores(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			coordinator := newTimerReplayCoordinator(t, bus, selected, pipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}})
+			coordinator := newTimerReplayCoordinator(t, bus, selected, pipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}}, authorActivityTestSourceArtifactFact)
 			bus.SetInterceptors(coordinator)
 			owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute(".", runID, runID)}
 			entityID := flowidentity.EntityID(runID)
@@ -209,17 +211,29 @@ func currentTransitionMetadataFactBytes(t *testing.T, table storetest.SelectedFo
 	}
 	var bytes int
 	for _, row := range table.Rows {
-		var values []any
+		var values []currentTransitionPhysicalCell
 		if err := json.Unmarshal([]byte(row), &values); err != nil {
 			t.Fatal(err)
 		}
-		if values[columns["run_id"]] != runID || values[columns["family"]] != "entity_metadata" || values[columns["fact_key"]] != entityID {
+		if len(values) != len(table.Columns) {
+			t.Fatal("physical metadata witness changed column cardinality")
+		}
+		text := map[string]string{}
+		for _, name := range []string{"run_id", "family", "fact_key", "fact"} {
+			cell := values[columns[name]]
+			if cell.Column != name {
+				t.Fatalf("physical metadata witness changed column identity: %+v", cell)
+			}
+			value, err := currentTransitionPhysicalText(cell)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text[name] = value
+		}
+		if text["run_id"] != runID || text["family"] != "entity_metadata" || text["fact_key"] != entityID {
 			continue
 		}
-		raw, ok := values[columns["fact"]].(string)
-		if !ok {
-			t.Fatalf("physical metadata bytes unavailable: %s", row)
-		}
+		raw := text["fact"]
 		var fact struct {
 			Config struct {
 				History []pipeline.WorkflowTransitionRecord `json:"transition_history"`
@@ -233,7 +247,51 @@ func currentTransitionMetadataFactBytes(t *testing.T, table storetest.SelectedFo
 		}
 	}
 	if bytes == 0 {
-		t.Fatalf("no exact native metadata byte witness for %d current records", len(history))
+		t.Fatalf("no exact native metadata byte witness for %d current records: columns=%v rows=%v", len(history), table.Columns, table.Rows)
 	}
 	return bytes
+}
+
+type currentTransitionPhysicalCell struct {
+	Column, Type string
+	Value        any
+}
+
+func currentTransitionPhysicalText(cell currentTransitionPhysicalCell) (string, error) {
+	value, ok := cell.Value.(string)
+	if !ok {
+		return "", fmt.Errorf("physical metadata text unavailable: %+v", cell)
+	}
+	switch cell.Type {
+	case "string":
+		return value, nil
+	case "[]uint8":
+		decoded, err := base64.StdEncoding.DecodeString(value)
+		return string(decoded), err
+	default:
+		return "", fmt.Errorf("physical metadata text has foreign driver type: %+v", cell)
+	}
+}
+
+func TestWorkflowCurrentTransitionPhysicalTextPreservesExactBytes(t *testing.T) {
+	for _, driver := range []string{"string", "[]uint8"} {
+		value := `{ "number": 1.00, "history": [] }`
+		encoded := value
+		if driver == "[]uint8" {
+			encoded = base64.StdEncoding.EncodeToString([]byte(value))
+		}
+		got, err := currentTransitionPhysicalText(currentTransitionPhysicalCell{Column: "fact", Type: driver, Value: encoded})
+		if err != nil || got != value {
+			t.Fatalf("physical bytes changed for %s: %q %v", driver, got, err)
+		}
+	}
+	for _, cell := range []currentTransitionPhysicalCell{
+		{Column: "fact", Type: "[]uint8", Value: "%%%"},
+		{Column: "fact", Type: "string", Value: nil},
+		{Column: "fact", Type: "int64", Value: "1"},
+	} {
+		if _, err := currentTransitionPhysicalText(cell); err == nil {
+			t.Fatalf("foreign physical byte witness accepted: %+v", cell)
+		}
+	}
 }
