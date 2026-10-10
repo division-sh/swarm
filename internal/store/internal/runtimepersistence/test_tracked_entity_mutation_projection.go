@@ -41,42 +41,9 @@ func ReadTrackedEntityMutationProjectionStorageForTest(ctx context.Context, sele
 		if err != nil {
 			return fmt.Errorf("load current header/data projection: %w", err)
 		}
-		found := false
-		for index, member := range append(inventory.Constructed, inventory.StateOnly...) {
-			if member.EntityID != entity {
-				continue
-			}
-			if found {
-				return fmt.Errorf("current projection has multiple owners for entity %s", entity)
-			}
-			found = true
-			evidence.EntityType = member.EntityType
-			if index < len(inventory.Constructed) {
-				evidence.CurrentState = mutationlog.PresentLifecycleState(member.Stage)
-				revision := member.Revision
-				evidence.Revision = &revision
-			}
-			// Keep private control/loop facts intact; public entity projections
-			// intentionally hide them and cannot serve as reconstruction operands.
-			for _, bucket := range []struct {
-				raw any
-				dst *json.RawMessage
-			}{{member.Fields, &evidence.Fields}, {member.Bookkeeping, &evidence.Bookkeeping}, {member.Gates, &evidence.Gates}, {member.Accumulator, &evidence.Accumulator}} {
-				switch raw := bucket.raw.(type) {
-				case nil:
-				case string:
-					*bucket.dst = append(json.RawMessage(nil), raw...)
-				case []byte:
-					*bucket.dst = append(json.RawMessage(nil), raw...)
-				case json.RawMessage:
-					*bucket.dst = append(json.RawMessage(nil), raw...)
-				default:
-					return fmt.Errorf("unexpected admitted projection transport %T", raw)
-				}
-			}
-		}
-		if !found {
-			return fmt.Errorf("load current entity projection: %w", sql.ErrNoRows)
+		evidence, err = trackedProjectionStorageFromInventory(inventory, entity)
+		if err != nil {
+			return err
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT domain,path,new_value FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 ORDER BY created_at ASC,mutation_id ASC`, run, entity)
 		if err != nil {
@@ -99,6 +66,48 @@ func ReadTrackedEntityMutationProjectionStorageForTest(ctx context.Context, sele
 	})
 	if err != nil {
 		return TrackedEntityMutationProjectionStorage{}, err
+	}
+	return evidence, nil
+}
+
+func trackedProjectionStorageFromInventory(inventory workflowheader.ReadInventory, entity string) (TrackedEntityMutationProjectionStorage, error) {
+	var evidence TrackedEntityMutationProjectionStorage
+	found := false
+	for index, member := range append(inventory.Constructed, inventory.StateOnly...) {
+		if member.EntityID != entity {
+			continue
+		}
+		if found {
+			return TrackedEntityMutationProjectionStorage{}, fmt.Errorf("current projection has multiple owners for entity %s", entity)
+		}
+		found = true
+		evidence.EntityType = member.EntityType
+		if index < len(inventory.Constructed) {
+			evidence.CurrentState = mutationlog.PresentLifecycleState(member.Stage)
+			revision := member.Revision
+			evidence.Revision = &revision
+		}
+		// Keep private control/loop facts intact; public entity projections
+		// intentionally hide them and cannot serve as reconstruction operands.
+		for _, bucket := range []struct {
+			raw any
+			dst *json.RawMessage
+		}{{member.Fields, &evidence.Fields}, {member.Bookkeeping, &evidence.Bookkeeping}, {member.Gates, &evidence.Gates}, {member.Accumulator, &evidence.Accumulator}} {
+			switch raw := bucket.raw.(type) {
+			case nil:
+			case string:
+				*bucket.dst = append(json.RawMessage(nil), raw...)
+			case []byte:
+				*bucket.dst = append(json.RawMessage(nil), raw...)
+			case json.RawMessage:
+				*bucket.dst = append(json.RawMessage(nil), raw...)
+			default:
+				return TrackedEntityMutationProjectionStorage{}, fmt.Errorf("unexpected admitted projection transport %T", raw)
+			}
+		}
+	}
+	if !found {
+		return TrackedEntityMutationProjectionStorage{}, fmt.Errorf("load current entity projection: %w", sql.ErrNoRows)
 	}
 	return evidence, nil
 }
