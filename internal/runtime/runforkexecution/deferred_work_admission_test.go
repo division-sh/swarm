@@ -38,7 +38,7 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 			source: selectedDeferredWorkTestSource(nil, nil),
 		},
 		{
-			name: "revision timer history",
+			name: "revision timer history retains native admission responsibility",
 			plan: runfork.RunForkPlan{
 				SourceRunID: basePlan.SourceRunID,
 				ForkPoint:   basePlan.ForkPoint,
@@ -46,9 +46,7 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 					Code: runfork.RunForkBlockerTimerHistoryUnproven,
 				}},
 			},
-			source:     selectedDeferredWorkTestSource(nil, nil),
-			wantCode:   runfork.RunForkBlockerTimerHistoryUnproven,
-			capability: selectedContractDeferredWorkRevisionTimerHistory,
+			source: selectedDeferredWorkTestSource(nil, nil),
 		},
 		{
 			name: "workflow timer declaration",
@@ -56,8 +54,6 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 			source: selectedDeferredWorkTestSource([]runtimecontracts.WorkflowTimerContract{{
 				ID: "deadline",
 			}}, nil),
-			wantCode:   selectedContractDeferredWorkOwnerUnavailable,
-			capability: selectedContractDeferredWorkWorkflowTimer,
 		},
 		{
 			name: "workflow join deadline retains timeout capability",
@@ -93,6 +89,9 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 				}
 				if admission.owner != runfork.RunForkSelectedContractDeferredWorkAdmissionOwner {
 					t.Fatalf("admission = %#v", admission)
+				}
+				if len(tc.plan.UnsupportedBlockers) != 0 && tc.plan.UnsupportedBlockers[0].Code != runfork.RunForkBlockerTimerHistoryUnproven {
+					t.Fatal("owner availability rewrote the native timer evidence blocker")
 				}
 				return
 			}
@@ -288,13 +287,20 @@ func TestSelectedContractDeferredWorkAdmissionProductionConsumersStatic(t *testi
 		})
 	}
 	for function, want := range map[string]int{
-		"admitSelectedContractDeferredWork":              3, // initial execution, activation gate, recovered finite feed
-		"BuildSelectedContractExecutionAdmission":        3, // initial execution, activation gate, recovered finite feed
+		"admitSelectedContractDeferredWork":              2, // preparation (including recovery), staged activation
+		"BuildSelectedContractExecutionAdmission":        2, // common execution (including recovery), staged activation
 		"buildSelectedContractForkLocalRuntimeContainer": 2,
 	} {
 		if got := counts[function]; got != want {
 			t.Fatalf("production %s call count = %d, want %d exact admitted entry points", function, got, want)
 		}
+	}
+	recoverySource, err := os.ReadFile("execution.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(recoverySource), "return ExecuteSelectedContractRunFork(ctx, admitted.request)") {
+		t.Fatal("recovery bypasses the common selected admission/execution sequence")
 	}
 	if imperativeCalls != 0 {
 		t.Fatalf("imperative activation consumers = %d, want none", imperativeCalls)

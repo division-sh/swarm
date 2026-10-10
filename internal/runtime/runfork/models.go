@@ -1215,16 +1215,17 @@ type RunForkSelectedContractAgentTopology struct {
 }
 
 type RunForkSelectedContractExecutionActivateRequest struct {
-	ForkOperation         *ForkOperationRequest
-	ExecutedEventCount    int
-	DataPins              []durabledata.Pin
-	ExecutionSource       semanticview.Source
-	ForkRunID             string
-	AllowSourceFreeze     bool
-	AllowedSourceEventIDs []string
-	FrontierAdmission     RunForkContractFrontierAdmission
-	RouteTopology         RunForkSelectedContractRouteTopology
-	RecipientPlanning     RunForkSelectedContractRecipientPlanning
+	InheritedWorkflowTimers InheritedWorkflowTimerSelection `json:"-"`
+	ForkOperation           *ForkOperationRequest
+	ExecutedEventCount      int
+	DataPins                []durabledata.Pin
+	ExecutionSource         semanticview.Source
+	ForkRunID               string
+	AllowSourceFreeze       bool
+	AllowedSourceEventIDs   []string
+	FrontierAdmission       RunForkContractFrontierAdmission
+	RouteTopology           RunForkSelectedContractRouteTopology
+	RecipientPlanning       RunForkSelectedContractRecipientPlanning
 }
 
 type RunForkSelectedContractSourceEvent struct {
@@ -1402,6 +1403,7 @@ func (e *RunForkSourceFreezeBusyError) Unwrap() error {
 }
 
 type SelectedContractRuntimeExecutionIssueRequest struct {
+	InheritedWorkflowTimers    InheritedWorkflowTimerSelection `json:"-"`
 	Preparation                SelectedForkPreparationBinding
 	DeclarationPlan            agenttopology.SelectedDeclarationPlan
 	Admission                  RunForkSelectedContractExecutionAdmission

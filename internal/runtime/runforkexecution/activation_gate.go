@@ -166,6 +166,10 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if !sameSelectedForkPointIdentity(plan.ForkPoint, binding.ForkPoint) {
 		return SelectedContractActivationGateResult{}, errors.New("selected-contract activation plan differs from durable fork point")
 	}
+	// Native preparation fingerprints the fixed plan, not resolved diagnostics.
+	fixedPlan := plan
+	plan.ReplayResumeAdmission.Dispositions = append([]runfork.RunForkReplayResumeDisposition(nil), plan.ReplayResumeAdmission.Dispositions...)
+	plan.ReplayResumeAdmission.UnsupportedBlockers = append([]runfork.RunForkUnsupportedBlocker(nil), plan.ReplayResumeAdmission.UnsupportedBlockers...)
 	deferredWorkAdmission, err := admitSelectedContractDeferredWork(plan, loadedSource.Source)
 	if err != nil {
 		return SelectedContractActivationGateResult{Owner: runfork.RunForkSelectedContractExecutionActivationGateOwner}, err
@@ -263,56 +267,97 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		ContractSwapBootResumeAdmission:    &contractSwapAdmission,
 		HistoricalReplayExecutionAdmission: &historicalReplayAdmission,
 	}
-	if replayAdmission.DeliveryEventReplayReady && routeRecovery == nil {
+	timerReadbackPending := selectedContractStagedTimerReadbackPending(replayAdmission)
+	if (replayAdmission.DeliveryEventReplayReady || timerReadbackPending && frontier.FrontierEventCount > 0) && routeRecovery == nil {
 		return result, fmt.Errorf("selected-contract activation gate requires persisted route recovery before delivery replay")
 	}
-	if !plan.ExecutionReady {
+	if !plan.ExecutionReady && !timerReadbackPending {
 		return result, fmt.Errorf("selected-contract activation gate requires execution-ready plan before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))
 	}
 	if err := req.ExecutionOwner.requirePreparationProcess(ctx, req.AgentRuntime.ProcessCapability); err != nil {
 		return result, err
 	}
-	if plan.ReplayResumeAdmission.DeliveryEventReplayReady {
+	timerRuntimeRequired := len(plan.WorkflowTimers) > 0 || len(loadedSource.Source.WorkflowTimers()) > 0
+	if replayAdmission.DeliveryEventReplayReady || timerReadbackPending || timerRuntimeRequired {
 		executionPorts, err := req.ExecutionOwner.require()
 		if err != nil {
 			return result, fmt.Errorf("%s: %w", runfork.RunForkHistoricalReplayContractSwapBootResumeOwner, err)
 		}
-		historicalReplayExecution, err := BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
-			Admission:             historicalReplayAdmission,
-			ReplayResumeAdmission: plan.ReplayResumeAdmission,
-			PendingWork:           plan.PendingWork,
-		})
-		if err != nil {
-			return result, err
+		sourceEventIDs := selectedContractExecutionFrontierEventIDs(frontier.FrontierEvents)
+		executionOwner := runfork.RunForkSelectedContractExecutionOwner
+		if replayAdmission.DeliveryEventReplayReady {
+			historicalReplayExecution, err := BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
+				Admission:             historicalReplayAdmission,
+				ReplayResumeAdmission: plan.ReplayResumeAdmission,
+				PendingWork:           plan.PendingWork,
+			})
+			if err != nil {
+				return result, err
+			}
+			contractSwapExecution, err := BuildHistoricalReplayContractSwapBootResumeExecution(HistoricalReplayContractSwapBootResumeRequest{
+				SelectedExecutionAdmission: admission,
+				ContractSwapAdmission:      contractSwapAdmission,
+				HistoricalReplayAdmission:  historicalReplayAdmission,
+				HistoricalReplayExecution:  historicalReplayExecution,
+				RouteRecovery:              routeRecovery,
+			})
+			if err != nil {
+				return result, err
+			}
+			result.ContractSwapBootResumeExecution = &contractSwapExecution
+			sourceEventIDs = contractSwapBootResumeSourceEvents(contractSwapExecution)
+			executionOwner = runfork.RunForkHistoricalReplayContractSwapBootResumeOwner
 		}
-		contractSwapExecution, err := BuildHistoricalReplayContractSwapBootResumeExecution(HistoricalReplayContractSwapBootResumeRequest{
-			SelectedExecutionAdmission: admission,
-			ContractSwapAdmission:      contractSwapAdmission,
-			HistoricalReplayAdmission:  historicalReplayAdmission,
-			HistoricalReplayExecution:  historicalReplayExecution,
-			RouteRecovery:              routeRecovery,
-		})
-		if err != nil {
-			return result, err
-		}
-		result.ContractSwapBootResumeExecution = &contractSwapExecution
-		sourceEventIDs := contractSwapBootResumeSourceEvents(contractSwapExecution)
 		agentRuntime, readiness, err := prepareSelectedContractWorkflowReadiness(
-			ctx, executionPorts.replay, loadedSource, *model.RecipientPlanning, plan, frontier, sourceEventIDs, req.AgentRuntime,
+			ctx, executionPorts.replay, loadedSource, *model.RecipientPlanning, fixedPlan, frontier, sourceEventIDs, req.AgentRuntime,
 		)
 		if err != nil {
 			return result, err
 		}
 		resources.agentRuntime = agentRuntime
-		preparation, err := prepareSelectedFork(ctx, operation, executionPorts, loadedSource, plan, frontier, *model.RecipientPlanning, agentRuntime)
+		preparation, err := prepareSelectedFork(ctx, operation, executionPorts, loadedSource, fixedPlan, frontier, *model.RecipientPlanning, agentRuntime)
 		if err != nil {
 			return result, err
 		}
 		preparation.loadedSource, preparation.descriptorLease, preparation.agentRuntime = loadedSource, lease, agentRuntime
 		preparation.originalSource = resources.originalSource
 		preparation.owner = req.ExecutionOwner
+		preparation.readiness = readiness
 		preparation.originalLoopCarriage = original
+		preparation.plan, preparation.frontier, preparation.routeAdmission = fixedPlan, frontier, routeAdmission
+		preparation.routeTopology, preparation.model = routeTopology, model
+		preparation.agentRuntime, preparation.deferredWorkAdmission = agentRuntime, deferredWorkAdmission
 		resources = preparation
+		materializationRequest, err := preparation.MaterializationRequest()
+		if err != nil {
+			return result, err
+		}
+		materialization, err := executionPorts.fork.RequireMaterializedRunForkForSelectedContractExecution(ctx, forkRunID, materializationRequest)
+		if err != nil {
+			return result, err
+		}
+		replayAdmission, err = selectedContractStagedMaterializationAdmission(materialization, forkRunID, binding.SourceRunID, binding.ForkPoint)
+		if err != nil {
+			return result, err
+		}
+		plan.ReplayResumeAdmission = replayAdmission
+		plan.UnsupportedBlockers = replayAdmission.UnsupportedBlockers
+		plan.UnsupportedBlockerCount = len(replayAdmission.UnsupportedBlockers)
+		contractSwapAdmission, err = BuildContractSwapBootResumeAdmission(ContractSwapBootResumeAdmissionRequest{
+			SelectedExecutionAdmission: admission, ReplayResumeAdmission: replayAdmission, RouteRecovery: routeRecovery,
+		})
+		if err != nil {
+			return result, err
+		}
+		historicalReplayAdmission, err = BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
+			ReplayResumeAdmission: replayAdmission, SelectedExecutionAdmission: admission,
+			ContractSwapAdmission: contractSwapAdmission, RouteRecovery: routeRecovery,
+		})
+		if err != nil {
+			return result, err
+		}
+		result.ContractSwapBootResumeAdmission = &contractSwapAdmission
+		result.HistoricalReplayExecutionAdmission = &historicalReplayAdmission
 		prepared, err := readiness.Projection()
 		if err != nil {
 			return result, err
@@ -340,7 +385,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			ForkRunID:             forkRunID,
 			ForkEventID:           plan.ForkPoint.EventID,
 			SourceEvents:          sourceEventIDs,
-			ExecutionOwner:        runfork.RunForkHistoricalReplayContractSwapBootResumeOwner,
+			ExecutionOwner:        executionOwner,
 			DeferredWorkAdmission: deferredWorkAdmission,
 			SourcePlan:            plan,
 			AgentRuntime:          agentRuntime,
@@ -366,13 +411,14 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		}
 		ctx = runtimeeffects.WithAuthority(ctx, container.authority)
 		activation, err := executionPorts.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-			ExecutionSource:       loadedSource.Source,
-			ForkRunID:             forkRunID,
-			AllowSourceFreeze:     req.AllowSourceFreeze,
-			AllowedSourceEventIDs: sourceEventIDs,
-			FrontierAdmission:     frontier,
-			RouteTopology:         routeTopology,
-			RecipientPlanning:     *model.RecipientPlanning,
+			InheritedWorkflowTimers: readiness,
+			ExecutionSource:         loadedSource.Source,
+			ForkRunID:               forkRunID,
+			AllowSourceFreeze:       req.AllowSourceFreeze,
+			AllowedSourceEventIDs:   sourceEventIDs,
+			FrontierAdmission:       frontier,
+			RouteTopology:           routeTopology,
+			RecipientPlanning:       *model.RecipientPlanning,
 		})
 		result.RunForkActivation = activation
 		if activation.Activated {
@@ -408,6 +454,56 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	})
 	result.RunForkActivation = activation
 	return result, err
+}
+
+func selectedContractStagedMaterializationAdmission(materialization runfork.RunForkMaterialization, forkRunID, sourceRunID string, point runfork.RunForkPoint) (runfork.RunForkReplayResumeAdmission, error) {
+	if materialization.ForkRunID != forkRunID || materialization.SourceRunID != sourceRunID ||
+		!sameSelectedForkPointIdentity(materialization.ForkPoint, point) {
+		return runfork.RunForkReplayResumeAdmission{}, errors.New("selected staged materialization readback differs from the exact child and cut")
+	}
+	admission := materialization.ReplayResumeAdmission
+	if admission.Owner != runfork.RunForkReplayResumeAdmissionOwner {
+		return runfork.RunForkReplayResumeAdmission{}, errors.New("selected staged materialization readback lacks canonical replay admission")
+	}
+	if len(materialization.UnsupportedBlockers) != 0 {
+		return runfork.RunForkReplayResumeAdmission{}, fmt.Errorf("selected staged materialization remains blocked before issuance: %s", selectedContractBlockerCodes(materialization.UnsupportedBlockers))
+	}
+	if len(admission.UnsupportedBlockers) != 0 {
+		return runfork.RunForkReplayResumeAdmission{}, fmt.Errorf("selected staged replay admission remains blocked before issuance: %s", selectedContractBlockerCodes(admission.UnsupportedBlockers))
+	}
+	return admission, nil
+}
+
+// This permits reaching the native proof, not executing or discharging history.
+// Generic/uncertified timer history remains blocked by that canonical readback.
+func selectedContractStagedTimerReadbackPending(admission runfork.RunForkReplayResumeAdmission) bool {
+	if admission.Owner != runfork.RunForkReplayResumeAdmissionOwner || !admission.ReplayResumeFactsPresent {
+		return false
+	}
+	blockers := 0
+	for _, blocker := range admission.UnsupportedBlockers {
+		if blocker.Code != runfork.RunForkBlockerTimerHistoryUnproven {
+			return false
+		}
+		blockers++
+	}
+	if blockers != 1 {
+		return false
+	}
+	facts := 0
+	for _, disposition := range admission.Dispositions {
+		if disposition.Fact == runfork.RunForkReplayResumeFactTimerHistory {
+			if disposition.Disposition != runfork.RunForkReplayResumeDispositionFailClosedBlocker || disposition.BlockerCode != runfork.RunForkBlockerTimerHistoryUnproven {
+				return false
+			}
+			facts++
+			continue
+		}
+		if disposition.Disposition == runfork.RunForkReplayResumeDispositionFailClosedBlocker || disposition.BlockerCode != "" {
+			return false
+		}
+	}
+	return facts == 1
 }
 
 func selectedContractBlockerCodes(blockers []runfork.RunForkUnsupportedBlocker) string {

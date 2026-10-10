@@ -15,19 +15,24 @@ import (
 	"github.com/google/uuid"
 )
 
-type runForkWorkflowTimerSelectionOwner interface {
-	SelectInheritedWorkflowTimer(pipeline.WorkflowTimerActivation) (*pipeline.WorkflowTimerActivation, error)
-}
+type runForkWorkflowTimerSelectionOwner = runfork.InheritedWorkflowTimerSelection
 
 type runForkWorkflowTimerMaterializationOwner interface {
 	MaterializeRunForkWorkflowTimerTx(context.Context, *mutationprotocol.Attempt, pipeline.WorkflowTimerActivation, bool) error
-	RequireRunForkWorkflowTimerTx(context.Context, *mutationprotocol.Attempt, pipeline.WorkflowTimerActivation, bool) error
+	ReadRunForkWorkflowTimerInventoryTx(context.Context, *mutationprotocol.Attempt, string) ([]pipeline.WorkflowTimerActivation, error)
 }
 
 type runForkWorkflowTimerProjection struct {
 	activation pipeline.WorkflowTimerActivation
 	removed    bool
 }
+
+type runForkWorkflowTimerReadbackPhase uint8
+
+const (
+	runForkWorkflowTimerAtCut runForkWorkflowTimerReadbackPhase = iota + 1
+	runForkWorkflowTimerContinuing
+)
 
 // Require-only readback is also used on reuse/recovery. It cannot create a
 // missing timer or settle an unrelated dependent obligation.
@@ -41,18 +46,68 @@ func requireMaterializedRunForkWorkflowTimers(
 	bornAt time.Time,
 	admission runfork.RunForkReplayResumeAdmission,
 ) (runfork.RunForkReplayResumeAdmission, error) {
+	return requireRunForkWorkflowTimerInventory(ctx, attempt, plan, forkRunID, selection, owner, bornAt, admission, runForkWorkflowTimerAtCut)
+}
+
+func requireContinuingRunForkWorkflowTimers(
+	ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan,
+	forkRunID string, selection runForkWorkflowTimerSelectionOwner,
+	owner runForkWorkflowTimerMaterializationOwner, bornAt time.Time,
+	admission runfork.RunForkReplayResumeAdmission,
+) (runfork.RunForkReplayResumeAdmission, error) {
+	return requireRunForkWorkflowTimerInventory(ctx, attempt, plan, forkRunID, selection, owner, bornAt, admission, runForkWorkflowTimerContinuing)
+}
+
+func requireRunForkWorkflowTimerInventory(
+	ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan,
+	forkRunID string, selection runForkWorkflowTimerSelectionOwner,
+	owner runForkWorkflowTimerMaterializationOwner, bornAt time.Time,
+	admission runfork.RunForkReplayResumeAdmission, phase runForkWorkflowTimerReadbackPhase,
+) (runfork.RunForkReplayResumeAdmission, error) {
+	if phase != runForkWorkflowTimerAtCut && phase != runForkWorkflowTimerContinuing {
+		return admission, fmt.Errorf("workflow timer readback requires an exact lifecycle phase")
+	}
 	materializable, err := runForkWorkflowTimerHistoryMaterializable(plan)
 	if err != nil {
 		return admission, err
 	}
-	if !materializable {
+	if !materializable && len(plan.WorkflowTimers) != 0 {
 		return admission, fmt.Errorf("workflow timer readback requires complete exact source inventory admission")
+	}
+	if !materializable {
+		for _, blocker := range admission.UnsupportedBlockers {
+			if blocker.Code == runfork.RunForkBlockerTimerHistoryUnproven {
+				return admission, fmt.Errorf("workflow timer readback cannot omit blocked source history")
+			}
+		}
+		for _, fact := range admission.Dispositions {
+			if fact.Fact == runfork.RunForkReplayResumeFactTimerHistory {
+				return admission, fmt.Errorf("workflow timer readback cannot omit relevant source history")
+			}
+		}
 	}
 	if err := requireRunForkWorkflowTimerReadbackFrame(ctx, attempt, plan, forkRunID, bornAt); err != nil {
 		return admission, err
 	}
 	if owner == nil {
 		return admission, fmt.Errorf("workflow timer readback requires its canonical timer owner")
+	}
+	actual, err := owner.ReadRunForkWorkflowTimerInventoryTx(ctx, attempt, forkRunID)
+	if err != nil {
+		return admission, err
+	}
+	projected, err := prepareRunForkWorkflowTimers(plan, forkRunID, selection, bornAt)
+	if err != nil {
+		return admission, err
+	}
+	if err := requireExactRunForkWorkflowTimerInventory(projected, actual, phase); err != nil {
+		return admission, err
+	}
+	if err := attempt.RequireExistingSQLFrame(ctx); err != nil {
+		return admission, err
+	}
+	if !materializable {
+		return admission, nil
 	}
 	inventory, err := runForkWorkflowTimerRecordInventory(plan.SourceRunID, plan.WorkflowTimers)
 	if err != nil {
@@ -63,26 +118,47 @@ func requireMaterializedRunForkWorkflowTimers(
 	if err != nil {
 		return admission, err
 	}
-	projected, err := prepareRunForkWorkflowTimers(plan, forkRunID, selection, bornAt)
-	if err != nil {
-		return admission, err
-	}
 	if len(projected) != len(inventory.ActiveTimerIDs) {
 		return admission, fmt.Errorf("workflow timer readback does not cover the complete active source inventory")
-	}
-	for _, timer := range projected {
-		if err := owner.RequireRunForkWorkflowTimerTx(ctx, attempt, timer.activation, timer.removed); err != nil {
-			return admission, fmt.Errorf("read back fork workflow timer %s: %w", timer.activation.SourceTimerID, err)
-		}
-	}
-	if err := attempt.RequireExistingSQLFrame(ctx); err != nil {
-		return admission, err
 	}
 	applied, err := runForkWorkflowTimerAppliedCertificate(pending, forkRunID, bornAt, projected)
 	if err != nil {
 		return admission, err
 	}
 	return dischargeMaterializedRunForkWorkflowTimerAdmission(admission, pending, applied, len(projected))
+}
+
+func requireExactRunForkWorkflowTimerInventory(expected []runForkWorkflowTimerProjection, actual []pipeline.WorkflowTimerActivation, phase runForkWorkflowTimerReadbackPhase) error {
+	if len(actual) != len(expected) {
+		return fmt.Errorf("inherited workflow timer inventory differs from the fixed-cut projection")
+	}
+	byID := make(map[string]pipeline.WorkflowTimerActivation, len(actual))
+	for _, timer := range actual {
+		if err := timer.Validate(); err != nil {
+			return err
+		}
+		if _, duplicate := byID[timer.Ref.ActivationID]; duplicate {
+			return fmt.Errorf("inherited workflow timer inventory repeats an activation")
+		}
+		byID[timer.Ref.ActivationID] = timer
+	}
+	for _, projection := range expected {
+		timer, found := byID[projection.activation.Ref.ActivationID]
+		if !found {
+			return fmt.Errorf("expected inherited workflow timer is absent")
+		}
+		if err := timer.ValidateCauseReplay(projection.activation); err != nil {
+			return err
+		}
+		if projection.removed {
+			if timer.Status != "cancelled" || timer.CancelCause != pipeline.WorkflowTimerCancelCauseRuleRemoved || !timer.CancelledAt.Equal(projection.activation.CreatedAt) {
+				return fmt.Errorf("inherited workflow timer lost its exact rule-removal disposition")
+			}
+		} else if phase == runForkWorkflowTimerAtCut && (timer.Status != "active" || !timer.FireAt.Equal(projection.activation.FireAt) || !timer.FiredAt.IsZero() || !timer.CancelledAt.IsZero() || timer.CancelCause != "") {
+			return fmt.Errorf("unactivated inherited workflow timer already progressed beyond its materialized cut")
+		}
+	}
+	return nil
 }
 
 func requireRunForkWorkflowTimerReadbackFrame(ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan, forkRunID string, bornAt time.Time) error {
@@ -110,8 +186,8 @@ func requireRunForkWorkflowTimerReadbackFrame(ctx context.Context, attempt *muta
 }
 
 // The plan is already fixed-cut admitted. This adapter never reads source rows,
-// installs wakeups, or grants execution. Returned removals require the caller's
-// named dependent-settlement operation in this same materialization attempt.
+// installs wakeups, or grants execution. The canonical timer writer settles
+// ordinary removal here; join and barrier deadlines have distinct owners.
 func materializeRunForkWorkflowTimers(
 	ctx context.Context,
 	attempt *mutationprotocol.Attempt,
@@ -120,7 +196,6 @@ func materializeRunForkWorkflowTimers(
 	selection runForkWorkflowTimerSelectionOwner,
 	owner runForkWorkflowTimerMaterializationOwner,
 	bornAt time.Time,
-	reuse bool,
 ) ([]pipeline.WorkflowTimerActivation, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -137,12 +212,7 @@ func materializeRunForkWorkflowTimers(
 	}
 	var removed []pipeline.WorkflowTimerActivation
 	for _, timer := range projected {
-		if reuse {
-			err = owner.RequireRunForkWorkflowTimerTx(ctx, attempt, timer.activation, timer.removed)
-		} else {
-			err = owner.MaterializeRunForkWorkflowTimerTx(ctx, attempt, timer.activation, timer.removed)
-		}
-		if err != nil {
+		if err := owner.MaterializeRunForkWorkflowTimerTx(ctx, attempt, timer.activation, timer.removed); err != nil {
 			return nil, fmt.Errorf("materialize fork workflow timer %s: %w", timer.activation.SourceTimerID, err)
 		}
 		if timer.removed {
@@ -193,9 +263,17 @@ func prepareRunForkWorkflowTimers(plan runfork.RunForkPlan, forkRunID string, se
 		if err != nil {
 			return nil, err
 		}
-		selected, err := selection.SelectInheritedWorkflowTimer(projected)
+		selectedRecord, err := selection.SelectInheritedWorkflowTimerRecord(projected.PersistenceRecord())
 		if err != nil {
 			return nil, fmt.Errorf("admit selected workflow timer %s: %w", source.Ref.DeclarationKey, err)
+		}
+		var selected *pipeline.WorkflowTimerActivation
+		if selectedRecord != nil {
+			value, err := pipeline.DecodeWorkflowTimerActivationPersistenceRecord(*selectedRecord)
+			if err != nil {
+				return nil, err
+			}
+			selected = &value
 		}
 		projected, removed, err := projectRunForkWorkflowTimer(raw, plan.SourceRunID, forkRunID, plan.ForkPoint, selected, correspondence, bornAt)
 		if err != nil {

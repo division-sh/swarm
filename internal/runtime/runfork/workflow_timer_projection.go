@@ -16,6 +16,12 @@ import (
 
 const WorkflowTimerForkReconstructionOwner = "run_fork_workflow_timer"
 
+// InheritedWorkflowTimerSelection is supplied by the sealed selected readiness
+// owner. Consumers cannot select inherited effects from mutable current state.
+type InheritedWorkflowTimerSelection interface {
+	SelectInheritedWorkflowTimerRecord(timerobligation.WorkflowTimerActivationRecord) (*timerobligation.WorkflowTimerActivationRecord, error)
+}
+
 // ProjectWorkflowTimerRecord projects a pipeline-admitted record and its exact
 // typed ref. It grants neither activation admission nor permission to execute.
 func ProjectWorkflowTimerRecord(

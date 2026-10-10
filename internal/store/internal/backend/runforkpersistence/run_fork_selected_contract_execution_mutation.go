@@ -119,14 +119,28 @@ func (s *RunForkPostgresOwner) MaterializeRunForkForSelectedContractExecution(ct
 	if s == nil || s.backend == nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("postgres store is required")
 	}
-	return materializeRunForkForSelectedContractExecution(ctx, req, postgresRunForkSelectedContractMaterializationPort(s))
+	return materializeRunForkForSelectedContractExecution(ctx, req, postgresRunForkSelectedContractMaterializationPort(s), runForkSelectedContractMaterialize, "")
 }
 
 func (s *RunForkSQLiteOwner) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest) (materialization runfork.RunForkMaterialization, err error) {
 	if s == nil || s.backend == nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("sqlite store is required")
 	}
-	return materializeRunForkForSelectedContractExecution(ctx, req, sqliteRunForkSelectedContractMaterializationPort(s))
+	return materializeRunForkForSelectedContractExecution(ctx, req, sqliteRunForkSelectedContractMaterializationPort(s), runForkSelectedContractMaterialize, "")
+}
+
+func (s *RunForkPostgresOwner) RequireMaterializedRunForkForSelectedContractExecution(ctx context.Context, forkRunID string, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
+	if s == nil || s.backend == nil {
+		return runfork.RunForkMaterialization{}, fmt.Errorf("postgres store is required")
+	}
+	return materializeRunForkForSelectedContractExecution(ctx, req, postgresRunForkSelectedContractMaterializationPort(s), runForkSelectedContractRequireExisting, forkRunID)
+}
+
+func (s *RunForkSQLiteOwner) RequireMaterializedRunForkForSelectedContractExecution(ctx context.Context, forkRunID string, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
+	if s == nil || s.backend == nil {
+		return runfork.RunForkMaterialization{}, fmt.Errorf("sqlite store is required")
+	}
+	return materializeRunForkForSelectedContractExecution(ctx, req, sqliteRunForkSelectedContractMaterializationPort(s), runForkSelectedContractRequireExisting, forkRunID)
 }
 
 type selectedContractWorkflowState struct {
@@ -960,50 +974,9 @@ func runForkSelectedContractAdmissionBlockerForPendingWork(admission runfork.Run
 	return runfork.RunForkUnsupportedBlocker{}, false
 }
 
-func (s *RunForkPostgresOwner) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID, forkEventID string) error {
-	if s == nil || s.backend == nil {
-		return fmt.Errorf("postgres store is required")
-	}
-	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := runforkrevision.ValidateCompletePostgres(ctx, tx, sourceRunID); err != nil {
-		return err
-	}
-	point, err := resolveRunForkRevisionPoint(ctx, tx, sourceRunID, forkEventID)
-	if err != nil {
-		return fmt.Errorf("resolve committed replay-scope fork revision: %w", err)
-	}
-	return ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(ctx, tx, sourceRunID, point.Revision)
-}
-
 type selectedContractExecutionQueryer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
-
-func ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(ctx context.Context, q selectedContractExecutionQueryer, sourceRunID string, forkRevision int64) error {
-	var exists bool
-	query := `
-		SELECT EXISTS (
-			SELECT 1
-			FROM run_fork_fact_revisions
-			WHERE run_id = $1
-			  AND family = 'committed_replay_scopes'
-			  AND revision > $2
-			  AND present
-		)
-	`
-	if err := q.QueryRowContext(ctx, query, sourceRunID, forkRevision).Scan(&exists); err != nil {
-		return fmt.Errorf("check selected-contract source_committed_replay_scope_advanced_after_fork_point: %w", err)
-	}
-	if exists {
-		code := "source_committed_replay_scope_advanced_after_fork_point"
-		return runForkReplayResumeError(code, runfork.RunForkReplayResumeFactSourceAdvanced, fmt.Sprintf("selected-contract committed replay-scope marker policy blocked: %s", code))
-	}
-	return nil
 }
 
 func runForkSelectedContractConversationAdvancedFacts(facts []string) []string {

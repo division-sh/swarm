@@ -15,8 +15,8 @@ func TestRunForkWorkflowTimerBridgeRequiresExistingNativeFrame(t *testing.T) {
 			if err := materializeRunForkWorkflowTimer(ctx, attempt, nil, postgres, pipeline.WorkflowTimerActivation{}, false); err == nil {
 				t.Fatal("timer materialization borrowed or fabricated native frame")
 			}
-			if err := requireRunForkWorkflowTimer(ctx, attempt, nil, postgres, pipeline.WorkflowTimerActivation{}, true); err == nil {
-				t.Fatal("timer reuse borrowed or fabricated native frame")
+			if inventory, err := readRunForkWorkflowTimerInventory(ctx, attempt, nil, postgres, "11111111-1111-4111-8111-111111111111"); err == nil || inventory != nil {
+				t.Fatal("timer inventory borrowed or fabricated native frame")
 			}
 		}
 	}

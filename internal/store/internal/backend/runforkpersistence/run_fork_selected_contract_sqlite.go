@@ -149,22 +149,6 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 	return out, result.Err()
 }
 
-func (s *RunForkSQLiteOwner) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID, forkEventID string) error {
-	if s == nil || s.backend == nil {
-		return fmt.Errorf("sqlite store is required")
-	}
-	return s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := runforkrevision.ValidateCompleteSQLite(txctx, tx, sourceRunID); err != nil {
-			return err
-		}
-		point, err := resolveRunForkRevisionPoint(txctx, tx, sourceRunID, forkEventID)
-		if err != nil {
-			return fmt.Errorf("resolve committed replay-scope fork revision: %w", err)
-		}
-		return ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(txctx, tx, sourceRunID, point.Revision)
-	})
-}
-
 func (s *RunForkSQLiteOwner) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (result runfork.RunForkActivation, err error) {
 	if s == nil || s.backend == nil {
 		return runfork.RunForkActivation{}, fmt.Errorf("sqlite store is required")

@@ -229,6 +229,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
 	issued, err := ports.runtimeExecution.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
+		InheritedWorkflowTimers: req.Prepared.readiness,
 		Preparation:             preparation,
 		RecoveryFromExecutionID: req.Prepared.recoveryFromExecutionID,
 		DeclarationPlan:         req.AgentRuntime.Declarations,
@@ -314,11 +315,6 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 		return fmt.Errorf("construct selected-contract receiver execution: %w", err)
 	}
 	req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution = receiverExecution
-	if req.SourcePlan.ForkPoint.Kind == runfork.RunForkPointEvent {
-		if err := c.ports.replay.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, req.SourceRunID, req.SourcePlan.ForkPoint.EventID); err != nil {
-			return err
-		}
-	}
 	sourceEvents, err := c.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, req.SourceRunID, req.ForkRunID, req.SourceEvents, req.OriginalLoopCarriage)
 	if err != nil {
 		sourceRunID, forkRunID, committed, ok := isolatedSelectedForkSourceEventsCommit(err)

@@ -31,6 +31,19 @@ type inheritedTimerAdmission struct {
 	eventType    string
 }
 
+func (a Admission) SelectInheritedWorkflowTimerRecord(record pipeline.WorkflowTimerActivationPersistenceRecord) (*pipeline.WorkflowTimerActivationPersistenceRecord, error) {
+	activation, err := pipeline.DecodeWorkflowTimerActivationPersistenceRecord(record)
+	if err != nil {
+		return nil, err
+	}
+	selected, err := a.SelectInheritedWorkflowTimer(activation)
+	if err != nil || selected == nil {
+		return nil, err
+	}
+	projected := selected.PersistenceRecord()
+	return &projected, nil
+}
+
 func admitInheritedWorkflowTimers(source semanticview.Source, plan runfork.RunForkPlan) (map[inheritedTimerAdmissionKey]inheritedTimerAdmission, error) {
 	out := make(map[inheritedTimerAdmissionKey]inheritedTimerAdmission, len(plan.WorkflowTimers))
 	for _, record := range plan.WorkflowTimers {
