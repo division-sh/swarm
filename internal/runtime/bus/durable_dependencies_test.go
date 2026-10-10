@@ -154,25 +154,7 @@ func (unexpectedDurableTestRoles) SummarizeRun(context.Context, string) (runtime
 func (unexpectedDurableTestRoles) TerminalizeRun(context.Context, string, string) ([]runtimedelivery.Terminalization, error) {
 	return nil, errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) ReplaceFlowInstanceRouteTopology(context.Context, []FlowInstanceRouteRecordSet) (FlowInstanceRouteTopologyResult, error) {
-	return FlowInstanceRouteTopologyResult{}, errUnexpectedDurableTestRole
-}
 func (unexpectedDurableTestRoles) ListActiveAgentDescriptors(context.Context, string) ([]ActiveAgentDescriptor, error) {
-	return nil, nil
-}
-func (unexpectedDurableTestRoles) ListActiveFlowInstanceDescriptors(context.Context, string) ([]ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-func (unexpectedDurableTestRoles) ListActiveFlowInstanceDescriptorsForScope(context.Context, string, []string, []string) ([]ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-func (unexpectedDurableTestRoles) ListActiveFlowInstanceDescriptorsForKey(context.Context, string, string, string, string) ([]ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-func (unexpectedDurableTestRoles) ListSelectedRunTargetOwners(context.Context, string) ([]ActiveTargetDescriptor, error) {
-	return nil, nil
-}
-func (unexpectedDurableTestRoles) ListSelectedRunTargetOwnersForScope(context.Context, string, []string, string) ([]ActiveTargetDescriptor, error) {
 	return nil, nil
 }
 func (unexpectedDurableTestRoles) LoadWorkflowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error) {

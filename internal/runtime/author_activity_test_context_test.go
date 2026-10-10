@@ -481,11 +481,7 @@ type runtimeTestDurableEventStore interface {
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
-	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteTopologyPersistence
 	runtimebus.ActiveAgentDescriptorLister
-	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder

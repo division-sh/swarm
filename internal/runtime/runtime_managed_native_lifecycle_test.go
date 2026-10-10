@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -35,6 +36,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -113,6 +115,27 @@ type managedNativeRecoveryDeliveryStore struct {
 
 type managedNativeDurableRoles struct {
 	runtimerunlifecycle.OperationOwner
+	session *runtimeTestRetainedSession
+}
+
+func (r managedNativeDurableRoles) RequireActiveRun(ctx context.Context, runID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if r.session == nil {
+		return &runtimerunlifecycle.RunNotFoundError{RunID: runID}
+	}
+	r.session.mu.Lock()
+	source, found := r.session.runs[runID]
+	r.session.mu.Unlock()
+	if !found {
+		return &runtimerunlifecycle.RunNotFoundError{RunID: runID}
+	}
+	selected, present := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !present || !selected.Matches(source) {
+		return fmt.Errorf("managed-native fixture run requires its exact admitted source")
+	}
+	return nil
 }
 
 func (managedNativeDurableRoles) LookupFlowInstance(context.Context, runtimepipeline.FlowInstanceLookupRequest) (runtimepipeline.FlowInstanceObservation, bool, error) {
@@ -136,6 +159,41 @@ func TestRuntimeSyntheticInstanceIndexFailsClosed(t *testing.T) {
 	}
 }
 
+func TestManagedNativeLifecycleRunRequiresAdmittedSource(t *testing.T) {
+	store := newManagedNativeLifecycleStore(t)
+	source := testSourceArtifactFact(t, runtimeTestBundleHash)
+	ctx := runtimecorrelation.WithSourceArtifactFact(t.Context(), source)
+	owner := managedNativeDurableRoles{session: store.runtimeTestRetainedSession}
+	var missing *runtimerunlifecycle.RunNotFoundError
+	if err := owner.RequireActiveRun(ctx, runtimeTestManagedLifecycleRunID); !errors.As(err, &missing) {
+		t.Fatalf("fixture accepted unadmitted run: %v", err)
+	}
+	store.admitRun(t, runtimeTestManagedLifecycleRunID, source)
+	if err := owner.RequireActiveRun(ctx, runtimeTestManagedLifecycleRunID); err != nil {
+		t.Fatal(err)
+	}
+	for _, absent := range []string{"", uuid.NewString()} {
+		if err := owner.RequireActiveRun(ctx, absent); !errors.As(err, &missing) || missing.RunID != absent {
+			t.Fatalf("fixture borrowed another run: run=%q err=%v", absent, err)
+		}
+	}
+	if err := owner.RequireActiveRun(t.Context(), runtimeTestManagedLifecycleRunID); err == nil {
+		t.Fatal("fixture accepted run without its source")
+	}
+	foreign := sourceartifactfixture.FactFor(sourceartifactfixture.New("schema.yaml", []byte("name: foreign-lifecycle-source\n")))
+	if err := owner.RequireActiveRun(runtimecorrelation.WithSourceArtifactFact(t.Context(), foreign), runtimeTestManagedLifecycleRunID); err == nil {
+		t.Fatal("fixture accepted run with a different source")
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := owner.RequireActiveRun(canceled, runtimeTestManagedLifecycleRunID); !errors.Is(err, context.Canceled) {
+		t.Fatalf("fixture lost cancellation: %v", err)
+	}
+	if err := (managedNativeDurableRoles{}).RequireActiveRun(ctx, runtimeTestManagedLifecycleRunID); !errors.As(err, &missing) {
+		t.Fatalf("unbound component owner accepted run: %v", err)
+	}
+}
+
 func (managedNativeDurableRoles) LoadFlowConstructionPublication(context.Context, runtimeflowidentity.RunScopedFlowInstance, string) (runtimepipeline.FlowConstructionPublicationEvidence, error) {
 	return runtimepipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("unexpected managed-native construction receipt read")
 }
@@ -152,28 +210,7 @@ func (managedNativeDurableRoles) TransitionActiveRun(context.Context, runtimerun
 func (managedNativeDurableRoles) MarkTerminalRun(context.Context, runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf("unexpected managed-native terminal run transition")
 }
-func (managedNativeDurableRoles) UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error {
-	return nil
-}
-func (managedNativeDurableRoles) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
-	return nil
-}
-func (managedNativeDurableRoles) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	return nil, nil
-}
-func (managedNativeDurableRoles) ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) (runtimebus.FlowInstanceRouteTopologyResult, error) {
-	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
-}
-func (managedNativeDurableRoles) ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error) {
-	return nil, nil
-}
 func (managedNativeDurableRoles) ListActiveAgentDescriptors(context.Context, string) ([]runtimebus.ActiveAgentDescriptor, error) {
-	return nil, nil
-}
-func (managedNativeDurableRoles) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-func (managedNativeDurableRoles) ListSelectedRunTargetOwners(context.Context, string) ([]runtimebus.ActiveTargetDescriptor, error) {
 	return nil, nil
 }
 func (managedNativeDurableRoles) LoadWorkflowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error) {
@@ -516,9 +553,11 @@ func managedNativeLifecycleDeps(
 	delivery runtimedelivery.Store,
 ) RuntimeDeps {
 	eventStore := startupRecoveryMinimalEventStore{}
+	durable := runtimeTestSyntheticDurableDependencies(delivery)
+	durable.RunLifecycle = managedNativeDurableRoles{session: managerStore.runtimeTestRetainedSession}
 	return RuntimeDeps{
 		EventStore:               eventStore,
-		EventBusDurable:          runtimeTestSyntheticDurableDependencies(delivery),
+		EventBusDurable:          durable,
 		PipelineObligations:      eventStore.PipelineObligations(),
 		DeliveryStore:            delivery,
 		ManagerStore:             managerStore,
