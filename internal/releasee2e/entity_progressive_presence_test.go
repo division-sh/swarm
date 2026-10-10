@@ -235,7 +235,7 @@ func waitForPresenceEntity(t *testing.T, process *releaseServeProcess, runID, st
 		if len(list.Entities) == 1 {
 			var entity struct {
 				Entity struct {
-					CurrentState string `json:"current_state"`
+					CurrentState *string `json:"current_state"`
 				} `json:"entity"`
 				Fields map[string]any `json:"fields"`
 			}
