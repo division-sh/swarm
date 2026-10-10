@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -464,7 +465,7 @@ func TestExplicitStandingAdmissionCannotRefreshSiblingAuthority(t *testing.T) {
 					t.Fatalf("sibling preflight reached standing mutation: %v", recovered)
 				}
 			}()
-			if _, _, err := rt.AdmitChannelStandingTarget(ctx, operation, candidate); err == nil {
+			if _, _, err := rt.AdmitChannelStandingTarget(ctx, operation, candidate, operatorchannel.ProviderAuthority{}); err == nil {
 				t.Fatal("explicit admission adopted unrequested sibling authority")
 			}
 			if rt.standingCredentialAdmission != frozen {

@@ -76,3 +76,15 @@ func (rt *Runtime) validateStandingSessionBinding(ctx context.Context, binding s
 	}
 	return nil
 }
+
+func (rt *Runtime) validateStandingSessionBindings(ctx context.Context, bindings map[string]standingBindingCredentials, except string) error {
+	for selector, binding := range bindings {
+		if selector == except {
+			continue
+		}
+		if err := rt.validateStandingSessionBinding(ctx, binding); err != nil {
+			return err
+		}
+	}
+	return nil
+}

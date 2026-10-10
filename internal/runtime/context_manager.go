@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -2133,7 +2134,7 @@ func (m *RuntimeContextManager) PublishStandingServiceTargets(serviceID string, 
 
 // Admission and publication share source-set ownership. Alias refusal must
 // precede the durable standing mutation, not merely route publication.
-func (m *RuntimeContextManager) AdmitChannelStandingTarget(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, barrier channelonboarding.TestLifecycleBarrier) error {
+func (m *RuntimeContextManager) AdmitChannelStandingTarget(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, session operatorchannel.ProviderAuthority, barrier channelonboarding.TestLifecycleBarrier) error {
 	if m == nil {
 		return errors.New("runtime context manager is required")
 	}
@@ -2179,7 +2180,7 @@ func (m *RuntimeContextManager) AdmitChannelStandingTarget(ctx context.Context, 
 		return err
 	}
 	defer func() { _ = use.Done() }()
-	targets, activations, err := use.Runtime().AdmitChannelStandingTarget(use.WorkContext(), op, candidate)
+	targets, activations, err := use.Runtime().AdmitChannelStandingTarget(use.WorkContext(), op, candidate, session)
 	if err != nil {
 		return err
 	}

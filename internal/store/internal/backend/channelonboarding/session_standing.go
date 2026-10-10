@@ -60,22 +60,27 @@ func sessionStandingBindingCurrent(ctx context.Context, r runner, expected domai
 			}
 			return err
 		}
-		if op.Phase.RequiresExecutableTarget(op.Posture) && op.Phase != domain.PhasePublishingActivation {
-			activation, found, err := loadActivationBySlot(ctx, tx, r.dialect(), op.SlotKey, true)
-			if err != nil || !found {
-				return err
-			}
-			responsibility := domain.AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
-				ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
-				Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
-			if !responsibility.MatchesBusinessBinding(op, activation, binding, op.BindingRevision) {
-				return nil
-			}
-		}
-		current = true
-		return nil
+		current, err = sessionStandingActivationCurrent(ctx, tx, r.dialect(), op, binding)
+		return err
 	})
-	return current, err
+	if err != nil {
+		return false, err
+	}
+	return current, nil
+}
+
+func sessionStandingActivationCurrent(ctx context.Context, tx *sql.Tx, d dialect, op domain.Operation, binding operatorchannel.Binding) (bool, error) {
+	if !op.Phase.RequiresExecutableTarget(op.Posture) || op.Phase == domain.PhasePublishingActivation {
+		return true, nil
+	}
+	activation, found, err := loadActivationBySlot(ctx, tx, d, op.SlotKey, true)
+	if err != nil || !found {
+		return false, err
+	}
+	responsibility := domain.AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
+		ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
+		Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
+	return responsibility.MatchesBusinessBinding(op, activation, binding, op.BindingRevision), nil
 }
 
 func sessionStandingOperationMatches(expected, op domain.Operation) bool {
