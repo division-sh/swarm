@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -114,8 +115,24 @@ func requireLifecycleFlowEntity(t *testing.T, rt servedControlProofRuntime, runI
 
 func readLifecycleTransitionHistory(t *testing.T, reader receiverProofStateReader, runID, entityID string) []pipeline.WorkflowTransitionRecord {
 	t.Helper()
-	observed := storetest.ObserveWriterFlow(t, t.Context(), reader, runID, entityID)
-	return decodeLifecycleTransitionHistory(t, observed.Config)
+	var history []pipeline.WorkflowTransitionRecord
+	err := reader.InspectSnapshot(t.Context(), func(ctx context.Context) error {
+		instances, err := reader.ListWorkflowInstances(ctx, runID)
+		if err != nil {
+			return err
+		}
+		for _, instance := range instances {
+			if instance.EntityID == entityID {
+				history = instance.TransitionHistory
+				return nil
+			}
+		}
+		return fmt.Errorf("current header lacks receiver %s", entityID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return history
 }
 
 func decodeLifecycleTransitionHistory(t *testing.T, raw []byte) []pipeline.WorkflowTransitionRecord {
@@ -152,7 +169,12 @@ func readLifecycleTransitionAtCut(t *testing.T, reader receiverProofStateReader,
 	if reader == nil || eventID == "" {
 		t.Fatal("transition proof requires its selected fixed-cut reader and exact event")
 	}
-	entity, err := storetest.ReadReceiverEntityAtEventCut(t.Context(), reader, runID, entityID, eventID)
+	var entity runfork.RunForkEntityState
+	err := reader.InspectSnapshot(t.Context(), func(ctx context.Context) error {
+		var err error
+		entity, err = storetest.ReadReceiverEntityAtEventCut(ctx, reader, runID, entityID, eventID)
+		return err
+	})
 	if err != nil {
 		t.Fatalf("read exact transition cut %s: %v", eventID, err)
 	}

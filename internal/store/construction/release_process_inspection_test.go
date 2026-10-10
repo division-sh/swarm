@@ -13,6 +13,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/construction"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -72,6 +73,9 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 			if snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(retained, observer); err == nil || snapshot != nil {
 				t.Fatalf("retired snapshot returned physical evidence: %v %v", snapshot, err)
 			}
+			if cut, err := storetest.ReadReceiverEntityAtEventCut(retained, observer, identity.RunID, entityID.String(), "b3c04b72-07f1-4097-a1f0-779955000005"); err == nil || !reflect.DeepEqual(cut, runfork.RunForkEntityState{}) {
+				t.Fatalf("retired inspection snapshot returned historical evidence: %+v %v", cut, err)
+			}
 			requireReleaseInspectionUnaccepted(t, ctx, observer)
 			after, err := readReleaseInspectionStorageSnapshot(ctx, observer)
 			if err != nil || !reflect.DeepEqual(before, after) {
@@ -95,6 +99,9 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 			}
 			if target, err := readReleaseInspectionTarget(ctx, observer, identity, entityID); err == nil || !reflect.DeepEqual(target, pipeline.WorkflowTargetPersistenceRecord{}) {
 				t.Fatalf("closed observer returned target evidence: %+v %v", target, err)
+			}
+			if cut, err := storetest.ReadReceiverEntityAtEventCut(ctx, observer, identity.RunID, entityID.String(), "b3c04b72-07f1-4097-a1f0-779955000005"); err == nil || !reflect.DeepEqual(cut, runfork.RunForkEntityState{}) {
+				t.Fatalf("closed inspection returned historical evidence: %+v %v", cut, err)
 			}
 			unchanged, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, writer)
 			if err != nil || !reflect.DeepEqual(before, unchanged) {

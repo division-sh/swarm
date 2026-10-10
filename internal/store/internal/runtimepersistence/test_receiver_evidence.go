@@ -15,27 +15,13 @@ func ReadReceiverEntityAtEventCutForTest(ctx context.Context, selected any, runI
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return runfork.RunForkEntityState{}, err
 	}
-	request := runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID}
-	var plan runfork.RunForkPlan
-	var err error
 	switch owner := selected.(type) {
 	case *PostgresStore:
-		plan, err = owner.PlanRunFork(ctx, request)
+		return owner.runForkPostgresOwner.ReadEntityAtEventCutForTest(ctx, runID, entityID, eventID)
 	case *SQLiteRuntimeStore:
-		plan, err = owner.PlanRunFork(ctx, request)
+		return owner.runForkSQLiteOwner.ReadEntityAtEventCutForTest(ctx, runID, entityID, eventID)
 	}
-	if err != nil {
-		return runfork.RunForkEntityState{}, err
-	}
-	if eventID == "" || plan.ForkPoint.EventID != eventID {
-		return runfork.RunForkEntityState{}, fmt.Errorf("receiver witness requires the exact selected event cut")
-	}
-	for _, entity := range plan.Entities {
-		if entity.EntityID == entityID {
-			return entity, nil
-		}
-	}
-	return runfork.RunForkEntityState{}, fmt.Errorf("event cut %s lacks receiver %s", eventID, entityID)
+	return runfork.RunForkEntityState{}, fmt.Errorf("receiver witness requires its original selected read owner")
 }
 
 func ReadReceiverHistoricalEntityStateForTest(ctx context.Context, selected any, owner flowidentity.RunScopedFlowInstance, entityID string, revision int64) (runfork.RunForkEntityState, error) {
