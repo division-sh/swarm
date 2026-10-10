@@ -275,9 +275,6 @@ func newBranchPointDeploymentFixture(t *testing.T, backend eventRecordContractBa
 		Idempotency: apiidempotency.Request{Method: "run.start", Actor: apiidempotency.BearerActor("operator"), Now: at, TTL: time.Hour},
 		Root:        runtimebus.FlowInstanceActivationCommand{Plan: plan},
 	}
-	for _, child := range plan.ConstructionPlans() {
-		command.Root.RouteTopology = append(command.Root.RouteTopology, runtimebus.FlowInstanceRouteRecordSet{Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: child.Identity.Route()}})
-	}
 	result, err := opened.store.(runtimebus.DeploymentRunCreationCommitOwner).CommitDeploymentRunCreation(ctx, command)
 	if err != nil || !result.Acknowledged {
 		t.Fatalf("create real deployment fixture: %+v err=%v", result, err)

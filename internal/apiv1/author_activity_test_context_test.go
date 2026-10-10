@@ -71,6 +71,7 @@ type apiTestRuntimeMutationOwner interface {
 }
 
 type apiTestDurableEventStore interface {
+	runtimepipeline.FlowInstanceIndexReader
 	runtimepipeline.FlowConstructionPublicationReader
 	runtimebus.EventStore
 	runtimereplycontext.Store
@@ -209,6 +210,7 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 			return nil, fmt.Errorf("API durable event-store fixture %T lacks exact durable roles", eventStore)
 		}
 		opts.Durable = runtimebus.DurableDependencies{
+			Instances:                durable,
 			ConstructionPublications: durable,
 			ReplyContext:             durable,
 			RunLifecycle:             durable,

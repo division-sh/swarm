@@ -153,6 +153,7 @@ type testAuthorActivityCatalogRegistrar interface {
 }
 
 type scopedTestDurableStore interface {
+	runtimepipeline.FlowInstanceIndexReader
 	runtimepipeline.FlowConstructionPublicationReader
 	runtimebus.EventStore
 	testAuthorActivityCatalogRegistrar
@@ -207,6 +208,7 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 		opts.PipelineObligations = eventStore.PipelineObligations()
 	}
 	opts.Durable = runtimebus.DurableDependencies{
+		Instances:                eventStore,
 		ConstructionPublications: eventStore,
 		ReplyContext:             eventStore,
 		RunLifecycle:             eventStore,

@@ -37,7 +37,8 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 	if err != nil {
 		return runfork.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract fork routes: %w", err)
 	}
-	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Source, req.Plan); err != nil {
+	instances, err := ConstructedInstances(req.Source, req.Plan)
+	if err != nil {
 		return runfork.RunForkContractFrontierAdmission{}, err
 	}
 	workflowNodes, err := runtimepipeline.LoadWorkflowNodes(req.Source)
@@ -64,13 +65,16 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 			runtimeOwners = append(runtimeOwners, owner)
 		}
 		source := contractFrontierRoutingSource(req.Plan.PendingWork, frontier[i].SourceEventID)
-		evaluation, err := contractFrontierRouteEvaluation(routeTable, req.Source, connectGraph, req.Plan.SourceRunID, eventName, source)
+		evaluation, err := contractFrontierRouteEvaluation(routeTable, req.Source, connectGraph, req.Plan.SourceRunID, eventName, source, instances)
 		if err != nil {
 			return runfork.RunForkContractFrontierAdmission{}, err
 		}
 		incompleteRoutes[frontier[i].SourceEventID] = incompleteRoutes[frontier[i].SourceEventID] || evaluation.requiresRuntimeResolution
 		frontier[i].RuntimeEventOwners = sortedUnique(runtimeOwners)
-		localSubscribers := routeTable.ResolveIndependentPubsubFromSource(req.Plan.SourceRunID, events.EventType(eventName), source)
+		localSubscribers, err := contractFrontierPubsubDefinitions(routeTable, req.Source, req.Plan.SourceRunID, events.EventType(eventName), source, instances)
+		if err != nil {
+			return runfork.RunForkContractFrontierAdmission{}, err
+		}
 		if publication, ok := req.Plan.HistoricalInputPublication(frontier[i].SourceEventID); ok {
 			original, _ := publication.Event()
 			input, err := runtimebus.RevalidateSelectedInput(req.Source, original)
@@ -317,21 +321,47 @@ func runForkFrontierEvents(pending []runfork.RunForkPendingWork) ([]runfork.RunF
 	return out, lineage
 }
 
-func installContractFrontierFlowInstanceRoutes(routeTable *runtimebus.RouteTable, source semanticview.Source, plan runfork.RunForkPlan) error {
-	instances, err := ConstructedInstances(source, plan)
-	if err != nil {
-		return err
+func contractFrontierPubsubDefinitions(table *runtimebus.RouteTable, source semanticview.Source, runID string, name events.EventType, routing events.RoutingSource, instances []runtimeflowidentity.Instance) ([]runtimebus.Subscriber, error) {
+	keys := runtimebus.SourceEventRouteKeys(name, routing)
+	var out []runtimebus.Subscriber
+	for _, scope := range semanticview.FlowScopes(source) {
+		// Static/root roles are source-only, non-executing description, chosen
+		// before construction reads. They are never a missing-header fallback.
+		declarationRole, err := selectedContractPubsubDeclarationRole(source, scope.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !declarationRole {
+			continue
+		}
+		definitions, err := table.PubsubDeclarationDefinitions(scope.ID, keys)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, definitions...)
 	}
 	for _, instance := range instances {
-		identity, err := runtimeflowidentity.NewRunScopedFlowInstance(plan.SourceRunID, instance.Route())
+		declarationRole, err := selectedContractPubsubDeclarationRole(source, instance.TemplateID)
 		if err != nil {
-			return fmt.Errorf("derive selected-contract flow-instance identity %s: %w", instance.InstancePath, err)
+			return nil, err
 		}
-		if err := routeTable.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: instance}); err != nil {
-			return fmt.Errorf("derive selected-contract flow-instance route %s: %w", instance.InstancePath, err)
+		if declarationRole {
+			continue
 		}
+		definitions, err := table.PubsubReceiverDefinitions(runID, instance, keys)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, definitions...)
 	}
-	return nil
+	return out, nil
+}
+
+func selectedContractPubsubDeclarationRole(source semanticview.Source, flowID string) (bool, error) {
+	if flowID == semanticview.RootExecutionFlowID(source) {
+		return true, nil
+	}
+	return runtimepipeline.StandingConstructionIsKeyless(source, flowID)
 }
 
 func contractFrontierExactFlowInstances(runID string, item runfork.RunForkPendingWork) ([]string, error) {
@@ -388,7 +418,7 @@ type contractFrontierEvaluatedRoute struct {
 	nodeIDs                   []string
 }
 
-func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selectedSource semanticview.Source, graph runtimepinrouting.CompiledConnectGraph, runID, eventName string, source events.RoutingSource) (contractFrontierEvaluatedRoute, error) {
+func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selectedSource semanticview.Source, graph runtimepinrouting.CompiledConnectGraph, runID, eventName string, source events.RoutingSource, instances []runtimeflowidentity.Instance) (contractFrontierEvaluatedRoute, error) {
 	runID = strings.TrimSpace(runID)
 	eventName = strings.Trim(strings.TrimSpace(eventName), "/")
 	if routeTable == nil || runID == "" || eventName == "" {
@@ -426,7 +456,11 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selected
 				targets = append(targets, materialized.Target)
 			}
 		}
-		evaluation := routeTable.EvaluateConnectPlan(runID, plan, targets)
+		definitions, err := selectedContractConnectDefinitions(routeTable, plan, runID, instances)
+		if err != nil {
+			return contractFrontierEvaluatedRoute{}, err
+		}
+		evaluation := graph.EvaluateMaterializedRecipients(plan, targets, definitions)
 		if _, err := evaluation.Ledger(); err != nil {
 			return contractFrontierEvaluatedRoute{}, err
 		}
@@ -453,6 +487,27 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selected
 	out.nodeIDs = sortedSet(seenNodes)
 	out.recipients, err = forkrecipient.CanonicalSet(out.recipients)
 	return out, err
+}
+
+func selectedContractConnectDefinitions(table *runtimebus.RouteTable, plan runtimepinrouting.ConnectRoutePlan, runID string, instances []runtimeflowidentity.Instance) ([]runtimepinrouting.ConnectRecipientRegistration, error) {
+	flowID := plan.ReceiverEndpoint().Readback().FlowID
+	if plan.ReceiverEndpoint().IsRoot() || !plan.RequiresRuntimeResolution() {
+		// Non-executing selected-contract projection describes static roles.
+		// It neither observes construction nor authorizes their execution.
+		return table.ConnectDeclarationDefinitions(flowID), nil
+	}
+	var definitions []runtimepinrouting.ConnectRecipientRegistration
+	for _, instance := range instances {
+		if instance.TemplateID != flowID {
+			continue
+		}
+		bound, err := table.ConnectReceiverDefinitions(runID, instance)
+		if err != nil {
+			return nil, err
+		}
+		definitions = append(definitions, bound...)
+	}
+	return definitions, nil
 }
 
 func workflowNodeSubscribers(nodes []runtimepipeline.WorkflowNode, eventNames ...string) []string {

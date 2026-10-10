@@ -44,7 +44,7 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 			keys := []runtimecontracts.TemplateInstanceKeyValue{{Field: mustBusTemplateInstanceField(t, "account_id"), Value: "acct-1"}}
 			root := ConstructedFlowInstanceIdentityFixture(source, ".", busInternalTestRunID, busInternalTestRunID)
 			producer := ConstructedFlowInstanceIdentityFixture(source, "producer", "", busInternalTestRunID)
-			instance, err := flowidentity.KeyedChild(source, root, "account", templateInstanceLifecycleInstanceID(plan, keys))
+			instance, err := flowidentity.KeyedChild(source, root, "account", connectMissingInstanceID(plan, keys))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -59,11 +59,15 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 			}
 			store.bus = bus
 			for _, construction := range []flowidentity.Instance{root, producer} {
+				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, construction, ""))
 				if err := bus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(construction.Route()), Instance: construction}); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if tc.reuse {
+				if tc.descriptor {
+					store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, instance, "acct-1"))
+				}
 				store.setTargetOwnerRoutes(plan.ReceiverRoute(instance.InstancePath, instance.EntityID))
 				store.workflowInstances = []runtimepipeline.WorkflowInstance{{
 					EntityID: instance.EntityID, WorkflowName: "account", InstanceID: instance.InstanceID,
@@ -138,7 +142,7 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 }
 
 func TestReceiverInitializationPreviewUsesOnlyPreparedActivationVariables(t *testing.T) {
-	decision := TemplateInstanceLifecycleDecision{InstanceID: "must-not-derive", EntityID: "must-not-derive"}
+	decision := connectInstanceSelection{identity: flowidentity.Instance{InstanceID: "must-not-derive", EntityID: "must-not-derive"}}
 	if got := decision.ActivationVariables(); got != nil {
 		t.Fatalf("unprepared decision synthesized activation variables: %#v", got)
 	}

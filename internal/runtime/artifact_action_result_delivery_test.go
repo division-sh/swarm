@@ -80,7 +80,6 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 				RunLifecycle:        pg,
 				PipelineObligations: pg.PipelineObligations(),
 				DeliveryStore:       pg,
-				FlowRoutes:          bus,
 				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
 					if strings.TrimSpace(nodeID) == repoNodeID && strings.TrimSpace(string(evt.Type())) == resultEventType {
 						select {
@@ -236,7 +235,6 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 				RunLifecycle:        pg,
 				PipelineObligations: pg.PipelineObligations(),
 				DeliveryStore:       pg,
-				FlowRoutes:          bus,
 				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
 					if strings.TrimSpace(nodeID) == repoNodeID && strings.TrimSpace(string(evt.Type())) == resultEventType {
 						select {

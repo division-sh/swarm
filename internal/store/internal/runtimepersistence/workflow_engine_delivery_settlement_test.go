@@ -37,6 +37,7 @@ func constructWorkflowMutationFixture(t *testing.T, backend, flowID string, at t
 		flowID + "/events.yaml":   "construct.requested:\n",
 	}, nil)
 	runID := correlation.RunIDFromContext(f.ctx)
+	activateFixtureStructuralRoot(t, f.ctx, f.manager, f.bundle, at)
 	req := sqliteFlowActivationRequest(f.bundle, flowID, "receiver", "", flowID+"/receiver")
 	parent := runtimeflowidentity.Stored(req.ContractBundle, semanticview.RootExecutionFlowID(req.ContractBundle), runID, runID, "", "")
 	child, err := runtimeflowidentity.KeyedChild(req.ContractBundle, parent, flowID, "receiver")

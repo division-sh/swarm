@@ -129,6 +129,9 @@ func validateObservedInstanceSelection(request FlowInstanceLookupRequest, identi
 		request.declared && (instance.ParentFlowInstance != request.parent || instance.InstanceKey != request.key) {
 		return fmt.Errorf("instance observation contradicts its exact selection")
 	}
+	if request.declared && request.parent != "" && identity.ParentRoute != (flowidentity.ParentRoute{FlowID: request.parentIdentity.TemplateID, FlowInstance: request.parentIdentity.InstancePath, EntityID: request.parentIdentity.EntityID}) {
+		return fmt.Errorf("instance observation contradicts its actual selected parent")
+	}
 	return nil
 }
 

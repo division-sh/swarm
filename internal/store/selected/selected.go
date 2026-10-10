@@ -337,6 +337,7 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 		core: runtime.RuntimeDeps{
 			EventStore: selected,
 			EventBusDurable: runtimebus.DurableDependencies{
+				Instances:                workflow,
 				ConstructionPublications: workflow,
 				EmitFeedback:             selected,
 				ScenarioSetup:            selected,
@@ -394,6 +395,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 		core: runtime.RuntimeDeps{
 			EventStore: selected,
 			EventBusDurable: runtimebus.DurableDependencies{
+				Instances:                workflow,
 				ConstructionPublications: workflow,
 				EmitFeedback:             selected,
 				ScenarioSetup:            selected,
@@ -458,6 +460,7 @@ func sqliteManagerRoles(selected *private.SQLiteRuntimeStore) runtimemanager.Per
 
 func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipeline.WorkflowPersistence) (RunFork, error) {
 	durable := runtimebus.DurableDependencies{
+		Instances:                workflow,
 		ConstructionPublications: workflow,
 		EmitFeedback:             selected,
 		ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
@@ -479,6 +482,7 @@ func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipelin
 
 func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipeline.WorkflowPersistence) (RunFork, error) {
 	durable := runtimebus.DurableDependencies{
+		Instances:                workflow,
 		ConstructionPublications: workflow,
 		EmitFeedback:             selected,
 		ReplyContext:             selected, RunLifecycle: selected, DeliveryLifecycle: selected,
