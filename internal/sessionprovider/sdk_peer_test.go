@@ -1,14 +1,8 @@
 package sessionprovider
 
 import (
-	"bytes"
 	"context"
-	"crypto/cipher"
-	"crypto/sha256"
-	"encoding/binary"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,18 +11,11 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"go.mau.fi/libsignal/ecc"
+	"github.com/division-sh/swarm/internal/testutil/whatsappfixture"
 	"go.mau.fi/whatsmeow"
 	waBinary "go.mau.fi/whatsmeow/binary"
-	"go.mau.fi/whatsmeow/proto/waCert"
-	"go.mau.fi/whatsmeow/proto/waWa6"
 	"go.mau.fi/whatsmeow/socket"
 	"go.mau.fi/whatsmeow/types"
-	"go.mau.fi/whatsmeow/util/gcmutil"
-	"go.mau.fi/whatsmeow/util/keys"
-	"golang.org/x/crypto/curve25519"
-	"golang.org/x/crypto/hkdf"
-	"google.golang.org/protobuf/proto"
 )
 
 // This finite peer exercises the unmodified SDK over TLS, its certificate check,
@@ -38,8 +25,7 @@ type sdkPeer struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	server   *httptest.Server
-	static   *keys.KeyPair
-	cert     []byte
+	noise    *whatsappfixture.NoiseServer
 	frames   chan sdkPeerFrame
 	protocol chan sdkPeerFrame
 	failures chan error
@@ -53,23 +39,9 @@ type sdkPeer struct {
 }
 
 type sdkPeerSocket struct {
-	conn  *websocket.Conn
-	read  sdkPeerCipher
-	write sdkPeerCipher
-	mu    sync.Mutex
-	done  chan struct{}
-}
-
-type sdkPeerCipher struct {
-	key     cipher.AEAD
-	counter uint32
-}
-
-func (c *sdkPeerCipher) nonce() []byte {
-	var nonce [12]byte
-	binary.BigEndian.PutUint32(nonce[8:], c.counter)
-	c.counter++
-	return nonce[:]
+	conn *websocket.Conn
+	wire *whatsappfixture.Transport
+	done chan struct{}
 }
 
 type sdkPeerFrame struct {
@@ -84,32 +56,9 @@ func newSDKPeer(t *testing.T) *sdkPeer {
 func newSDKPeerMode(t *testing.T, paired bool) *sdkPeer {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	p := &sdkPeer{ctx: ctx, cancel: cancel, static: keys.NewKeyPair(),
+	p := &sdkPeer{ctx: ctx, cancel: cancel, noise: whatsappfixture.NewNoiseServer(t),
 		frames: make(chan sdkPeerFrame, 64), protocol: make(chan sdkPeerFrame, 64), failures: make(chan error, 8),
 		paired: paired, ready: make(chan *sdkPeerSocket, 1)}
-	root, intermediate := keys.NewKeyPair(), keys.NewKeyPair()
-	oldRoot := whatsmeow.WACertPubKey
-	whatsmeow.WACertPubKey = *root.Pub
-	makeCertificate := func(serial, issuer uint32, key *keys.KeyPair, signer *keys.KeyPair) *waCert.CertChain_NoiseCertificate {
-		details, err := proto.Marshal(&waCert.CertChain_NoiseCertificate_Details{
-			Serial: proto.Uint32(serial), IssuerSerial: proto.Uint32(issuer), Key: key.Pub[:],
-			NotBefore: proto.Uint64(uint64(time.Now().Add(-time.Minute).Unix())),
-			NotAfter:  proto.Uint64(uint64(time.Now().Add(time.Hour).Unix())),
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		signature := ecc.CalculateSignature(ecc.NewDjbECPrivateKey(*signer.Priv), details)
-		return &waCert.CertChain_NoiseCertificate{Details: details, Signature: signature[:]}
-	}
-	var err error
-	p.cert, err = proto.Marshal(&waCert.CertChain{
-		Intermediate: makeCertificate(1, 0, intermediate, root),
-		Leaf:         makeCertificate(2, 1, p.static, intermediate),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	p.server = httptest.NewTLSServer(http.HandlerFunc(p.serve))
 	t.Cleanup(func() {
 		p.mu.Lock()
@@ -122,7 +71,6 @@ func newSDKPeerMode(t *testing.T, paired bool) *sdkPeer {
 		}
 		p.server.Close()
 		p.wg.Wait()
-		whatsmeow.WACertPubKey = oldRoot
 		select {
 		case err := <-p.failures:
 			t.Errorf("SDK peer: %v", err)
@@ -201,24 +149,9 @@ func (p *sdkPeer) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for {
-		frame, err := readSDKPeerFrame(p.ctx, conn, nil)
+		node, err := peer.wire.Read(p.ctx)
 		if err != nil {
 			return // Test-owned disconnects deliberately interrupt pending effects.
-		}
-		plain, err := peer.read.key.Open(nil, peer.read.nonce(), frame, nil)
-		if err != nil {
-			p.fail(err)
-			return
-		}
-		unpacked, err := waBinary.Unpack(plain)
-		if err != nil {
-			p.fail(err)
-			return
-		}
-		node, err := waBinary.Unmarshal(unpacked)
-		if err != nil {
-			p.fail(err)
-			return
 		}
 		if node.Tag == "message" || node.Tag == "iq" && node.AttrGetter().OptionalString("xmlns") == "md" {
 			select {
@@ -286,118 +219,13 @@ func (p *sdkPeer) fail(err error) {
 	}
 }
 
-func readSDKPeerFrame(ctx context.Context, conn *websocket.Conn, header []byte) ([]byte, error) {
-	kind, data, err := conn.Read(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if kind != websocket.MessageBinary || len(data) < len(header)+3 || !bytes.Equal(data[:len(header)], header) {
-		return nil, errors.New("unexpected SDK frame/header")
-	}
-	data = data[len(header):]
-	n := int(data[0])<<16 | int(data[1])<<8 | int(data[2])
-	if n != len(data)-3 {
-		return nil, errors.New("unexpected SDK frame length")
-	}
-	return data[3:], nil
-}
-
-func writeSDKPeerFrame(ctx context.Context, conn *websocket.Conn, data []byte) error {
-	frame := append([]byte{byte(len(data) >> 16), byte(len(data) >> 8), byte(len(data))}, data...)
-	return conn.Write(ctx, websocket.MessageBinary, frame)
-}
-
-func (p *sdkPeer) handshake(peer *sdkPeerSocket) error {
-	data, err := readSDKPeerFrame(p.ctx, peer.conn, socket.WAConnHeader)
-	if err != nil {
-		return err
-	}
-	var hello waWa6.HandshakeMessage
-	if err = proto.Unmarshal(data, &hello); err != nil {
-		return err
-	}
-	clientEphemeral := hello.GetClientHello().GetEphemeral()
-	if len(clientEphemeral) != 32 {
-		return errors.New("invalid SDK client ephemeral key")
-	}
-	// Use the pinned public handshake engine, including its omission of an empty
-	// first-message payload. Track only the chaining key to obtain responder
-	// transport keys: Finish exposes an initiator socket, not responder keys.
-	state := socket.NewNoiseHandshake()
-	state.Start(socket.NoiseStartPattern, socket.WAConnHeader)
-	chainingKey := []byte(socket.NoiseStartPattern)
-	mix := func(private, public []byte) error {
-		secret, err := curve25519.X25519(private, public)
-		if err != nil {
-			return err
-		}
-		if err := state.MixIntoKey(secret); err != nil {
-			return err
-		}
-		keys := make([]byte, 64)
-		if _, err := io.ReadFull(hkdf.New(sha256.New, secret, chainingKey, nil), keys); err != nil {
-			return err
-		}
-		chainingKey = keys[:32]
-		return nil
-	}
-	serverEphemeral := keys.NewKeyPair()
-	state.Authenticate(clientEphemeral)
-	state.Authenticate(serverEphemeral.Pub[:])
-	if err := mix(serverEphemeral.Priv[:], clientEphemeral); err != nil {
-		return err
-	}
-	static := state.Encrypt(p.static.Pub[:])
-	if err := mix(p.static.Priv[:], clientEphemeral); err != nil {
-		return err
-	}
-	data, err = proto.Marshal(&waWa6.HandshakeMessage{ServerHello: &waWa6.HandshakeMessage_ServerHello{
-		Ephemeral: serverEphemeral.Pub[:], Static: static, Payload: state.Encrypt(p.cert),
-	}})
-	if err != nil {
-		return err
-	}
-	if err = writeSDKPeerFrame(p.ctx, peer.conn, data); err != nil {
-		return err
-	}
-	data, err = readSDKPeerFrame(p.ctx, peer.conn, nil)
-	if err != nil {
-		return err
-	}
-	var finish waWa6.HandshakeMessage
-	if err = proto.Unmarshal(data, &finish); err != nil {
-		return err
-	}
-	clientStatic, err := state.Decrypt(finish.GetClientFinish().GetStatic())
-	if err != nil {
-		return err
-	}
-	if err := mix(serverEphemeral.Priv[:], clientStatic); err != nil {
-		return err
-	}
-	if _, err = state.Decrypt(finish.GetClientFinish().GetPayload()); err != nil {
-		return err
-	}
-	transportKeys := make([]byte, 64)
-	if _, err := io.ReadFull(hkdf.New(sha256.New, nil, chainingKey, nil), transportKeys); err != nil {
-		return err
-	}
-	if peer.read.key, err = gcmutil.Prepare(transportKeys[:32]); err != nil {
-		return err
-	}
-	peer.write.key, err = gcmutil.Prepare(transportKeys[32:])
+func (p *sdkPeer) handshake(peer *sdkPeerSocket) (err error) {
+	peer.wire, err = p.noise.Handshake(p.ctx, peer.conn)
 	return err
 }
 
 func (p *sdkPeerSocket) send(ctx context.Context, node waBinary.Node) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	data, err := waBinary.Marshal(node)
-	if err != nil {
-		return err
-	}
-	data = p.write.key.Seal(nil, p.write.nonce(), data, nil)
-	return writeSDKPeerFrame(ctx, p.conn, data)
+	return p.wire.Send(ctx, node)
 }
 
 func (p *sdkPeer) next(t *testing.T) sdkPeerFrame {
