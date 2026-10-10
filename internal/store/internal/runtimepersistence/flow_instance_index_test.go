@@ -173,6 +173,26 @@ func proveR7ScalarHistoricalIndex(t *testing.T, f receiverConfigActivationFixtur
 	if _, native, err := observed.NativeConstruction(); err != nil || native {
 		t.Fatalf("materialize-only scalar lookup fabricated native receipt: native=%t err=%v", native, err)
 	}
+	before, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostics := f.store.(pipeline.DynamicFlowRuntimeReadinessPersistence)
+	if rows, err := diagnostics.InspectDynamicFlowRuntimeReadinessForRun(f.ctx, fork.ForkRunID, fact); err != nil || len(rows) != 0 {
+		t.Fatalf("fixed-cut header became native corruption or synthetic attachment: rows=%+v err=%v", rows, err)
+	}
+	projection, err := diagnostics.InspectDynamicFlowRuntimeReadinessForSource(f.ctx, fact)
+	if err != nil || len(projection.CurrentPending) != 2 || len(projection.CurrentCompleted) != 0 || len(projection.SourceTransitionRequired) != 0 {
+		t.Fatalf("historical diagnostic exemption changed native readiness: %+v err=%v", projection, err)
+	}
+	for _, readiness := range projection.CurrentPending {
+		if readiness.Plan.RunID != runID {
+			t.Fatalf("historical fixed-cut header acquired fresh readiness: %+v", readiness)
+		}
+	}
+	if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("historical diagnostic read changed durable evidence: %v", err)
+	}
 }
 
 func TestR7ConstructionAddressImmutableBothStores(t *testing.T) {
