@@ -161,10 +161,9 @@ func TestSelectedContractFanOutAdmissionRequiresExactElementAndSemanticDigest(t 
 	if strings.HasPrefix(frozenSource.ItemsFrom, "entity.") {
 		fieldSource.Kind, fieldSource.Field = fanoutobligation.SourceEntityField, strings.TrimPrefix(frozenSource.ItemsFrom, "entity.")
 	}
-	plan := runfork.RunForkPlan{FanOutObligations: []runfork.RunForkFanOutObligation{{
-		Intent: fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{PlanRef: sourceRef, Source: fieldSource,
-			Capsule: fanoutobligation.Capsule{SourcePlanRef: sourceRef, SourceProjection: frozenSource}}},
-	}}}
+	plan := runfork.RunForkPlan{FanOutObligations: []runfork.RunForkFanOutObligation{
+		selectedFanOutHistoryFixture(t, selectedPlan, sourceRef, fieldSource, frozenSource),
+	}}
 	refs, err := admitSelectedContractFanOutPlans(plan, source)
 	if err != nil {
 		t.Fatalf("admit selected fan-out with unchanged semantics: %v", err)
@@ -176,7 +175,7 @@ func TestSelectedContractFanOutAdmissionRequiresExactElementAndSemanticDigest(t 
 	changed := plan
 	changed.FanOutObligations = append([]runfork.RunForkFanOutObligation(nil), plan.FanOutObligations...)
 	changed.FanOutObligations[0].Intent.Request.Capsule.SourcePlanRef.SemanticDigest = "sha256:" + strings.Repeat("f", 64)
-	if _, err := admitSelectedContractFanOutPlans(changed, source); err == nil || !strings.Contains(err.Error(), "semantic digest disagrees") {
+	if _, err := admitSelectedContractFanOutPlans(changed, source); err == nil || !strings.Contains(err.Error(), "contradict the same artifact") {
 		t.Fatalf("changed semantic digest error = %v", err)
 	}
 
@@ -184,6 +183,7 @@ func TestSelectedContractFanOutAdmissionRequiresExactElementAndSemanticDigest(t 
 	missing.FanOutObligations = append([]runfork.RunForkFanOutObligation(nil), plan.FanOutObligations...)
 	missing.FanOutObligations[0].Intent.Request.PlanRef.ElementRef.SemanticPath = "missing." + uuid.NewString()
 	missingRequest := &missing.FanOutObligations[0].Intent.Request
+	missingRequest.Key.ElementRef = missingRequest.PlanRef.ElementRef
 	missingRequest.Capsule.SourceProjection = frozenSource.Clone()
 	missingRequest.Capsule.SourceProjection.ElementRef = missingRequest.PlanRef.ElementRef
 	missingRequest.PlanRef.SemanticDigest, err = canonicaljson.Hash(missingRequest.Capsule.SourceProjection)

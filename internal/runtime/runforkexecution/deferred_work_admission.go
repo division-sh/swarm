@@ -108,7 +108,8 @@ func (a selectedContractDeferredWorkAdmission) validate(sourceRunID string, poin
 }
 
 func admitSelectedContractFanOutPlans(plan runfork.RunForkPlan, source semanticview.Source) ([]runtimecontracts.FanOutPlanRef, error) {
-	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
+	requirements, err := runfork.FanOutContinuationRequirements(plan)
+	if err != nil {
 		return nil, err
 	}
 	compiled, err := selectedContractCompiledFanOutPlans(source)
@@ -128,6 +129,9 @@ func admitSelectedContractFanOutPlans(plan runfork.RunForkPlan, source semanticv
 			if obligation.Barrier != nil {
 				return nil, fmt.Errorf("deployment feed cannot carry a handler fan-out barrier")
 			}
+			continue
+		}
+		if !requirements[obligation.Intent.Request.Key] {
 			continue
 		}
 		sourceRef := obligation.Intent.Request.PlanRef
