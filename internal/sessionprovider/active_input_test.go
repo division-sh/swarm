@@ -87,6 +87,10 @@ func newActiveInputFixtureWithOutput(t *testing.T, backend string, outbound bool
 }
 
 func newActiveInputFixtureWithProof(t *testing.T, backend string, outbound, saveProof bool) *activeInputFixture {
+	return newActiveInputFixtureWithTarget(t, backend, outbound, saveProof, 1)
+}
+
+func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, saveProof bool, targetGeneration uint64) *activeInputFixture {
 	t.Helper()
 	f := &activeInputFixture{handled: make(chan capturedEvent, 1)}
 	if backend == "sqlite" {
@@ -129,7 +133,7 @@ func newActiveInputFixtureWithProof(t *testing.T, backend string, outbound, save
 	}
 	f.source = captureSource{Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
 		BundleHash: source.BundleHash(), BundleIdentity: "active-native-input", PackInventoryGeneration: "sha256:active-native-input",
-		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: 1}, CatalogGeneration: catalog.Generation()}
+		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: targetGeneration}, CatalogGeneration: catalog.Generation()}
 	id := uuid.NewString()
 	f.operation, err = f.selected.ReserveChannelOnboarding(ctx, channelonboarding.StartRequest{OperationID: id,
 		RequestKeyHash: id, RequestHash: id, PrincipalID: principal.ID, Verb: channelonboarding.VerbConnect, Provider: "whatsapp",
@@ -312,7 +316,7 @@ func (f *activeInputFixture) receiveCaptureMessageSDK(t *testing.T, content *waE
 	return event
 }
 
-func (f *activeInputFixture) activate(t *testing.T) {
+func (f *activeInputFixture) confirm(t *testing.T) operatorchannel.Operation {
 	t.Helper()
 	ctx, now := f.ctx, time.Now().UTC().Truncate(time.Microsecond)
 	authority := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: f.operation.SessionAccount}
@@ -348,6 +352,14 @@ func (f *activeInputFixture) activate(t *testing.T) {
 		t.Fatalf("real operator confirmation: %+v %v", f.binding, err)
 	}
 	admitted.Close()
+	return identity
+}
+
+func (f *activeInputFixture) activate(t *testing.T) {
+	t.Helper()
+	identity := f.confirm(t)
+	ctx, now := f.ctx, time.Now().UTC().Truncate(time.Microsecond)
+	var err error
 	for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhasePublishingActivation} {
 		f.operation, err = f.selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: f.operation.OperationID,
 			ExpectedRevision: f.operation.Revision, Phase: phase, IdentityOperationID: identity.OperationID, BindingRevision: f.binding.Revision, Now: now})

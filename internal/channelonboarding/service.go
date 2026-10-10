@@ -988,27 +988,11 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				op = next
 				continue
 			}
-			promoted, err := s.activations.AdmitChannelTarget(ctx, op, candidate)
+			promotedOp, promoted, err := s.admitConfirmedTarget(ctx, op, candidate)
 			if err != nil {
 				return s.blockedResult(ctx, op, candidate, fmt.Errorf("admit channel target: %w", err))
 			}
-			if err := promoted.Validate(); err != nil {
-				return Result{}, err
-			}
-			if !promoted.Coordinate.MatchesDurableIdentity(candidate.Coordinate) || promoted.Target.Selector != candidate.Target.Selector || promoted.Target.AdmissionGeneration != candidate.Target.AdmissionGeneration || promoted.Interface.Normalized() != candidate.Interface.Normalized() {
-				return Result{}, fmt.Errorf("%w: admitted channel target changed declaration authority", ErrRevisionConflict)
-			}
-			if !op.Coordinate.Matches(promoted.Coordinate) {
-				next, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
-					OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: op.Phase,
-					RebindCoordinate: &promoted.Coordinate, Now: s.now().UTC(),
-				})
-				if err != nil {
-					return Result{}, err
-				}
-				op = next
-			}
-			candidate = promoted
+			op, candidate = promotedOp, promoted
 			if err := s.activations.PreflightChannelActivation(ctx, op, candidate); err != nil {
 				if terminal, ok := AsTerminalActivationError(err); ok {
 					failed, failErr := s.failOperation(ctx, op, terminal.Code, terminal.Error())
@@ -1125,6 +1109,13 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			}
 			if decision.blocked {
 				return s.result(ctx, op, &candidate)
+			}
+			if op.Posture == ActivationSessionConnection {
+				promotedOp, promoted, err := s.admitConfirmedTarget(caller, op, candidate)
+				if err != nil {
+					return s.blockedResult(ctx, op, candidate, fmt.Errorf("admit confirmed session target: %w", err))
+				}
+				op, candidate = promotedOp, promoted
 			}
 			op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
 				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhasePublishingActivation,
@@ -1254,6 +1245,31 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			return Result{}, fmt.Errorf("%w: unsupported onboarding phase %q", ErrConflict, op.Phase)
 		}
 	}
+}
+
+func (s *Service) admitConfirmedTarget(ctx context.Context, op Operation, candidate Candidate) (Operation, Candidate, error) {
+	if op.Posture == ActivationSessionConnection && (op.Phase != PhaseAwaitingOperatorConfirmation || op.BindingRevision < 1 || op.ValidateSessionAccount() != nil) {
+		return op, candidate, fmt.Errorf("%w: native target requires checkpointed operator confirmation", ErrRevisionConflict)
+	}
+	promoted, err := s.activations.AdmitChannelTarget(ctx, op, candidate)
+	if err != nil {
+		return op, candidate, err
+	}
+	if err := promoted.Validate(); err != nil {
+		return op, candidate, err
+	}
+	if !promoted.Coordinate.MatchesRuntimeContext(candidate.Coordinate) || promoted.Target.Selector != candidate.Target.Selector ||
+		promoted.Target.AdmissionGeneration != candidate.Target.AdmissionGeneration || promoted.Interface.Normalized() != candidate.Interface.Normalized() {
+		return op, candidate, fmt.Errorf("%w: admitted channel target changed declaration authority", ErrRevisionConflict)
+	}
+	if !op.Coordinate.Matches(promoted.Coordinate) {
+		op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID,
+			ExpectedRevision: op.Revision, Phase: op.Phase, RebindCoordinate: &promoted.Coordinate, Now: s.now().UTC()})
+		if err != nil {
+			return op, candidate, err
+		}
+	}
+	return op, promoted, nil
 }
 
 func (s *Service) lockDrive(ctx context.Context, operationID string) (func(), error) {

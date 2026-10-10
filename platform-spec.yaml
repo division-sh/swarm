@@ -11298,6 +11298,20 @@ tool_model:
         declaration-only boot and restart do not open an SDK or adopt private pairing as authority. A retained
         nonterminal generation disabled for this reason consumes the same quiescence owner as other inactive
         bindings, preserving its history and override as session_dormant/effective_state=session_required.
+        Fresh native standing admission follows the authenticated operator's committed confirmation, never pairing
+        alone. The existing onboarding owner checkpoints that exact binding revision before target promotion and
+        advances to executable activation only after the current runtime owner publishes the standing target and
+        the parent checkpoints its exact generation. Promotion holds the original connection's native account
+        admission; a fabricated account record or unavailable connection cannot substitute for that admission.
+        The selected onboarding persistence owner observes the exact parent, principal, committed identity child,
+        binding revision and session account together, including the current activation after publication. Retained
+        confirmed responsibility may enable its exact compiled source/plan at boot before the transport is restored;
+        disconnected health does not erase that enabled retention obligation. This is standing responsibility only,
+        not native execution permission, READY health or an automatic resend. Requests and writes still require
+        fresh native admission and the full activation/binding/target join. A frozen standing decision revalidates
+        its original responsibility and refuses withdrawal, supersession, contradiction or failed observation;
+        it never adopts a later account or binding. Promoting one selector cannot refresh a sibling's frozen session
+        decision. Unconfirmed, failed, retired and historical responsibilities remain non-retaining.
         A retained bootstrap handle is not a successful attempt. Reuse waits for the original attempt result
         and checks the concrete original connection's current lifetime; failed, fenced or closed attempts refuse
         without another Connect, changed connection identity or premature cleanup/possession release. Cancellation

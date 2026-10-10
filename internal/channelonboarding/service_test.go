@@ -1975,6 +1975,10 @@ type cancellationTestStore struct {
 	events             *[]string
 }
 
+func (s *cancellationTestStore) SessionStandingBindingCurrent(context.Context, Operation) (bool, error) {
+	return false, errors.New("webhook fixture cannot admit a session standing binding")
+}
+
 func (s *cancellationTestStore) observe(ctx context.Context) {
 	if ctx.Err() != nil {
 		s.sawCanceledContext = true
@@ -2496,6 +2500,10 @@ type readbackTestStore struct {
 	*cancellationTestStore
 	operations  []Operation
 	activations []ConnectedChannelActivation
+}
+
+func (s *readbackTestStore) SessionStandingBindingCurrent(context.Context, Operation) (bool, error) {
+	return false, errors.New("readback fixture cannot admit a session standing binding")
 }
 
 func (s *readbackTestStore) GetChannelOnboarding(ctx context.Context, operationID string) (Operation, error) {

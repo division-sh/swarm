@@ -22,7 +22,7 @@ func TestRunServeWhatsAppUnpairedDeclarationBothStores(t *testing.T) {
 			opts := cliapp.ServeOptions{
 				SourceRoot:       filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session"),
 				PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-				SelfCheck: true, AbandonActiveRuns: true, Verbose: true,
+				SelfCheck: true, Verbose: true,
 				WorkspaceBackend: "host", WorkspaceBackendSet: true, StoreMode: backend, StoreModeSet: true,
 			}
 			if backend == "sqlite" {
