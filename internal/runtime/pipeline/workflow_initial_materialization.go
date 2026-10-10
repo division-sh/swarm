@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-const workflowInitialMaterializationProjectionVersion = 2
+const workflowInitialMaterializationProjectionVersion = 3
 
 func validateWorkflowInitialEntry(source semanticview.Source, instance WorkflowInstance, initialStage string) error {
 	graph, found := semanticview.WorkflowStageTopology(source, instance.WorkflowName)
@@ -44,6 +44,7 @@ func ValidateFlowConstructionPublication(raw []byte, owner runtimeflowidentity.R
 
 type FlowConstructionPublicationEvidence struct {
 	Identity      runtimeflowidentity.Instance
+	InstanceKey   string
 	CreatingInput FlowConstructionInput
 	Fields        map[string]any
 }
@@ -59,7 +60,7 @@ func ProjectFlowConstructionPublication(raw []byte, owner runtimeflowidentity.Ru
 	if err != nil {
 		return FlowConstructionPublicationEvidence{}, err
 	}
-	evidence := FlowConstructionPublicationEvidence{Identity: receipt.Readiness.Identity, CreatingInput: receipt.CreatingInput}
+	evidence := FlowConstructionPublicationEvidence{Identity: receipt.Readiness.Identity, InstanceKey: receipt.InstanceKey, CreatingInput: receipt.CreatingInput}
 	if receipt.Persisted.Fields == nil {
 		return evidence, nil
 	}
@@ -103,6 +104,7 @@ func decodeFlowConstructionPublication(raw []byte, owner runtimeflowidentity.Run
 	var wire struct {
 		workflowInitialMaterializationProjection
 		CreatingInput *FlowConstructionInput `json:"creating_input"`
+		InstanceKey   *string                `json:"instance_key"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -116,8 +118,12 @@ func decodeFlowConstructionPublication(raw []byte, owner runtimeflowidentity.Run
 	if wire.CreatingInput == nil {
 		return workflowInitialMaterializationProjection{}, fmt.Errorf("flow construction receipt requires creating_input")
 	}
+	if wire.InstanceKey == nil {
+		return workflowInitialMaterializationProjection{}, fmt.Errorf("flow construction receipt requires instance_key")
+	}
 	receipt := wire.workflowInitialMaterializationProjection
 	receipt.CreatingInput = *wire.CreatingInput
+	receipt.InstanceKey = *wire.InstanceKey
 	if err := receipt.CreatingInput.Validate(); err != nil {
 		return workflowInitialMaterializationProjection{}, err
 	}
@@ -141,6 +147,7 @@ type workflowInitialMaterializationProjection struct {
 	RunID           string                              `json:"run_id"`
 	EntityID        string                              `json:"entity_id"`
 	FlowInstance    string                              `json:"flow_instance"`
+	InstanceKey     string                              `json:"instance_key"`
 	WorkflowName    string                              `json:"workflow_name"`
 	WorkflowVersion string                              `json:"workflow_version"`
 	InitialState    string                              `json:"initial_state"`

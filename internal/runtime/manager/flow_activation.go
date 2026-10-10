@@ -299,6 +299,10 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 	if err != nil {
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
+	instanceKey, err := runtimepipeline.AdmitFlowInstanceKey(req.ContractBundle, templateID, req.ResolvedKey)
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+	}
 	plan := runtimepipeline.FlowInstanceActivationPlan{
 		Instance: runtimepipeline.WorkflowInstance{
 			InstanceID:         instanceID,
@@ -309,6 +313,7 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 			ParentFlowID:       strings.TrimSpace(instance.ParentRoute.FlowID),
 			ParentFlowInstance: strings.Trim(instance.ParentRoute.FlowInstance, "/"),
 			ParentEntityID:     strings.TrimSpace(instance.ParentEntityID),
+			InstanceKey:        instanceKey,
 			WorkflowName:       templateID,
 			WorkflowVersion:    strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
 			Mode:               strings.TrimSpace(schema.EffectiveMode()),
