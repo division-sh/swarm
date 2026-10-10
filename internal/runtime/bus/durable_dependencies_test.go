@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -20,6 +21,15 @@ import (
 )
 
 var errUnexpectedDurableTestRole = errors.New("unexpected durable EventBus test role")
+
+func TestEventBusHasNoPersistedTopologyOwner(t *testing.T) {
+	if _, present := reflect.TypeOf(DurableDependencies{}).FieldByName("FlowRouteTopology"); present {
+		t.Error("EventBus still accepts a persisted topology owner")
+	}
+	if _, present := reflect.TypeOf((*EventBus)(nil)).MethodByName("StageFlowInstanceRouteContext"); present {
+		t.Error("EventBus still exposes persisted topology staging")
+	}
+}
 
 type unexpectedDurableTestRoles struct {
 	runtimerunlifecycle.OperationOwner
@@ -177,9 +187,6 @@ func ExactDurableTestDependencies(selected any) DurableDependencies {
 	if deps.DeliveryLifecycle == nil {
 		deps.DeliveryLifecycle = defaults
 	}
-	if deps.FlowRouteTopology == nil {
-		deps.FlowRouteTopology = defaults
-	}
 	if deps.ActiveAgents == nil {
 		deps.ActiveAgents = defaults
 	}
@@ -226,9 +233,6 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 	if role, ok := selected.(runtimedelivery.Store); ok {
 		deps.DeliveryLifecycle = role
 	}
-	if role, ok := selected.(FlowInstanceRouteTopologyPersistence); ok {
-		deps.FlowRouteTopology = role
-	}
 	if role, ok := selected.(ActiveAgentDescriptorLister); ok {
 		deps.ActiveAgents = role
 	}
@@ -259,8 +263,8 @@ func TestDurableDependenciesDoNotRequireReceiverElectionReader(t *testing.T) {
 	deps := DurableDependencies{
 		Instances:    roles,
 		RunLifecycle: roles, DeliveryLifecycle: roles,
-		FlowRouteTopology: roles,
-		ActiveAgents:      roles, ActiveFlows: roles, TargetOwners: roles,
+
+		ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
 		PreparedEvents: roles, TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles,
 	}
 	opts := EventBusOptions{

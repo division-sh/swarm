@@ -265,8 +265,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
-			FlowRouteTopology: selected,
-			ActiveAgents:      selected, ActiveFlows: selected, TargetOwners: selected,
+			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
 			PreparedEvents: selected, TargetFailureRecorder: selected,
 			RunOrigins: selected, StandingRestarts: selected,
 			Instances: workflow, ConstructionPublications: workflow,
@@ -293,8 +292,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
-			FlowRouteTopology: selected,
-			ActiveAgents:      selected, ActiveFlows: selected, TargetOwners: selected,
+			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
 			PreparedEvents: selected, TargetFailureRecorder: selected,
 			RunOrigins: selected, StandingRestarts: selected,
 			Instances: workflow, ConstructionPublications: workflow,

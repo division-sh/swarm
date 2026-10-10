@@ -415,7 +415,6 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 			ConstructionPublications: receipts,
 			ActiveAgents:             store,
 			ActiveFlows:              store,
-			FlowRouteTopology:        store,
 		},
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 			t.Fatal("existing account route descriptors should satisfy fan-out delivery")

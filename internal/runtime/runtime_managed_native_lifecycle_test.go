@@ -209,7 +209,7 @@ func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) run
 	return runtimebus.DurableDependencies{
 		RunLifecycle: roles, DeliveryLifecycle: delivery,
 
-		FlowRouteTopology: roles, ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
+		ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
 		PreparedEvents:        roles,
 		TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles, Instances: roles,
 	}

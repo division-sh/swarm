@@ -789,13 +789,10 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 					if err != nil {
 						t.Fatalf("ListActiveFlowInstanceDescriptors: %v", err)
 					}
-					var testedDescriptor, stagedDescriptor *runtimebus.ActiveFlowInstanceDescriptor
+					var testedDescriptor *runtimebus.ActiveFlowInstanceDescriptor
 					for idx := range descriptors {
 						if descriptors[idx].FlowInstance == "account/existing" {
 							testedDescriptor = &descriptors[idx]
-						}
-						if descriptors[idx].FlowInstance == "account/current" {
-							stagedDescriptor = &descriptors[idx]
 						}
 					}
 					if testedDescriptor == nil {
@@ -872,39 +869,6 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 						if !reflect.DeepEqual(afterPin, before) {
 							t.Fatalf("%s pin mutated route state: before=%#v after=%#v", resolution.name, before, afterPin)
 						}
-					}
-					if stagedDescriptor == nil {
-						t.Fatal("route staging requires its exact constructed descriptor")
-					}
-					_, err = eventBus.StageFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
-						Identity: flowIdentity,
-						Instance: stagedDescriptor.Identity,
-						ActivationVariables: map[string]string{
-							"account_id": "current",
-						},
-					})
-					if tc.wantError != "" {
-						if err == nil || !strings.Contains(err.Error(), tc.wantError) {
-							t.Fatalf("StageFlowInstanceRouteContext error = %v, want %q", err, tc.wantError)
-						}
-						after, readErr := selected.ListFlowInstanceRouteRecords(ctx, flowIdentity)
-						if readErr != nil {
-							t.Fatalf("read exact route set after rejection: %v", readErr)
-						}
-						if !reflect.DeepEqual(after, before) {
-							t.Fatalf("exact route set changed across provenance rejection: before=%#v after=%#v", before, after)
-						}
-						return
-					}
-					if err != nil {
-						t.Fatalf("StageFlowInstanceRouteContext exact owner: %v", err)
-					}
-					after, err := selected.ListFlowInstanceRouteRecords(ctx, flowIdentity)
-					if err != nil {
-						t.Fatalf("read exact route set after replacement: %v", err)
-					}
-					if len(after) == 0 || reflect.DeepEqual(after, before) {
-						t.Fatalf("exact readiness owner did not replace prior route set: before=%#v after=%#v", before, after)
 					}
 				})
 			}

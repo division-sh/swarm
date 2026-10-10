@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -108,14 +106,14 @@ type DurableDependencies struct {
 	ReplyContext             runtimereplycontext.Store
 	RunLifecycle             runtimerunlifecycle.OperationOwner
 	DeliveryLifecycle        runtimedelivery.Store
-	FlowRouteTopology        FlowInstanceRouteTopologyPersistence
-	ActiveAgents             ActiveAgentDescriptorLister
-	ActiveFlows              ActiveFlowInstanceDescriptorLister
-	TargetOwners             SelectedRunTargetOwnerLister
-	PreparedEvents           PreparedPublishEventReader
-	TargetFailureRecorder    TargetFailureDeadLetterRecorder
-	RunOrigins               RunOriginReader
-	StandingRestarts         runtimerunlifecycle.StandingRestartDispositionReader
+
+	ActiveAgents          ActiveAgentDescriptorLister
+	ActiveFlows           ActiveFlowInstanceDescriptorLister
+	TargetOwners          SelectedRunTargetOwnerLister
+	PreparedEvents        PreparedPublishEventReader
+	TargetFailureRecorder TargetFailureDeadLetterRecorder
+	RunOrigins            RunOriginReader
+	StandingRestarts      runtimerunlifecycle.StandingRestartDispositionReader
 }
 
 func (d DurableDependencies) validate() error {
@@ -127,7 +125,6 @@ func (d DurableDependencies) validate() error {
 		{"construction publication reader", d.ConstructionPublications},
 		{"run lifecycle owner", d.RunLifecycle},
 		{"delivery lifecycle owner", d.DeliveryLifecycle},
-		{"flow route topology owner", d.FlowRouteTopology},
 		{"active agent descriptor reader", d.ActiveAgents},
 		{"active flow descriptor reader", d.ActiveFlows},
 		{"selected-run target owner reader", d.TargetOwners},
@@ -756,227 +753,6 @@ func (eb *EventBus) validateActiveFlowInstanceDescriptorsForSemanticSource(runID
 		out = append(out, descriptor)
 	}
 	return out, nil
-}
-
-type selectedFlowInstanceRouteContext struct {
-	graph          runtimepinrouting.CompiledConnectGraph
-	inputProducers runtimepinrouting.FlowInputProducerResolver
-	selection      runtimepinrouting.RouteDependencySelection
-	descriptors    []ActiveFlowInstanceDescriptor
-}
-
-func (eb *EventBus) selectFlowInstanceRouteContext(
-	ctx context.Context,
-	table *RouteTable,
-	lister ActiveFlowInstanceDescriptorLister,
-	runID string,
-	changedPaths []string,
-) (selectedFlowInstanceRouteContext, error) {
-	if !table.compiledSourceReady {
-		return selectedFlowInstanceRouteContext{}, errors.New("route topology requires a paired compiled source")
-	}
-	graph, inputProducers := table.connectGraph, table.inputProducers
-	selection := graph.SelectRouteDependencies(changedPaths)
-	context := selectedFlowInstanceRouteContext{graph: graph, inputProducers: inputProducers, selection: selection}
-	templateIDs := table.activeTemplateIDsForFlowPaths(selection.ContextFlowPaths)
-	if len(templateIDs) == 0 {
-		return context, nil
-	}
-	scoped, ok := lister.(ScopedActiveFlowInstanceDescriptorLister)
-	if !ok {
-		return selectedFlowInstanceRouteContext{}, errors.New("route topology requires graph-scoped active descriptor owner")
-	}
-	descriptors, err := scoped.ListActiveFlowInstanceDescriptorsForScope(ctx, runID, templateIDs, nil)
-	if err != nil {
-		return selectedFlowInstanceRouteContext{}, fmt.Errorf("list graph-selected route descriptors: %w", err)
-	}
-	context.descriptors, err = eb.validateActiveFlowInstanceDescriptorsForSemanticSource(runID, descriptors)
-	if err != nil {
-		return selectedFlowInstanceRouteContext{}, err
-	}
-	return context, nil
-}
-
-func selectedFlowInstanceRouteOwners(selection runtimepinrouting.RouteDependencySelection, contextIdentities []runtimeflowidentity.RunScopedFlowInstance, explicit ...runtimeflowidentity.RunScopedFlowInstance) []runtimeflowidentity.RunScopedFlowInstance {
-	affected := make(map[string]struct{}, len(selection.AffectedFlowPaths))
-	for _, path := range selection.AffectedFlowPaths {
-		affected[path] = struct{}{}
-	}
-	owners := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(contextIdentities)+len(explicit))
-	for _, identity := range contextIdentities {
-		if _, selected := affected[identity.Route.ScopeKey]; selected {
-			owners[identity] = struct{}{}
-		}
-	}
-	for _, identity := range explicit {
-		owners[identity] = struct{}{}
-	}
-	identities := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(owners))
-	for identity := range owners {
-		identities = append(identities, identity)
-	}
-	sort.Slice(identities, func(i, j int) bool { return identities[i].Key() < identities[j].Key() })
-	return identities
-}
-
-func (eb *EventBus) deriveFlowInstanceRouteRecordTopology(
-	ctx context.Context,
-	table *RouteTable,
-	lister ActiveFlowInstanceDescriptorLister,
-	runID string,
-	include *FlowInstanceRouteMaterializationRequest,
-	exclude runtimeflowidentity.RunScopedFlowInstance,
-) (*RouteTable, []runtimeflowidentity.RunScopedFlowInstance, error) {
-	changedPaths := make([]string, 0, 2)
-	if include != nil {
-		changedPaths = append(changedPaths, include.Normalized().Identity.Route.ScopeKey)
-	}
-	exclude = exclude.Normalize()
-	if exclude.Validate() == nil {
-		changedPaths = append(changedPaths, exclude.Route.ScopeKey)
-	}
-	if len(changedPaths) == 0 {
-		return nil, nil, errors.New("route record replacement requires an exact changed owner")
-	}
-	selected, err := eb.selectFlowInstanceRouteContext(ctx, table, lister, runID, changedPaths)
-	if err != nil {
-		return nil, nil, err
-	}
-	staged, contextIdentities, err := eb.deriveFlowInstanceRouteTopologyFromDescriptors(ctx, table, runID, include, exclude, selected.graph, selected.inputProducers, true, selected.descriptors)
-	if err != nil {
-		return nil, nil, err
-	}
-	explicit := make([]runtimeflowidentity.RunScopedFlowInstance, 0, 2)
-	if include != nil {
-		explicit = append(explicit, include.Normalized().Identity)
-	}
-	if exclude.Validate() == nil {
-		explicit = append(explicit, exclude)
-	}
-	return staged, selectedFlowInstanceRouteOwners(selected.selection, contextIdentities, explicit...), nil
-}
-
-func (eb *EventBus) deriveFlowInstanceRouteTopologyFromDescriptors(
-	ctx context.Context,
-	table *RouteTable,
-	runID string,
-	include *FlowInstanceRouteMaterializationRequest,
-	exclude runtimeflowidentity.RunScopedFlowInstance,
-	graph runtimepinrouting.CompiledConnectGraph,
-	inputProducers runtimepinrouting.FlowInputProducerResolver,
-	deferRebuild bool,
-	descriptors []ActiveFlowInstanceDescriptor,
-) (*RouteTable, []runtimeflowidentity.RunScopedFlowInstance, error) {
-	staged, err := deriveRouteTableWithInputProducers(table.source, graph, inputProducers)
-	if err != nil {
-		return nil, nil, fmt.Errorf("derive persisted flow-instance route table: %w", err)
-	}
-	identities := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(descriptors)+1)
-	changed := false
-	exclude = exclude.Normalize()
-	if exclude.Validate() == nil {
-		if err := staged.removeFlowInstanceRouteForContext(ctx, exclude); err != nil {
-			return nil, nil, fmt.Errorf("exclude terminal flow-instance route %s: %w", exclude.Key(), err)
-		}
-	}
-	for _, descriptor := range descriptors {
-		if descriptor.Identity.InstanceID != descriptor.InstanceID || descriptor.Identity.InstancePath != descriptor.FlowInstance || descriptor.Identity.TemplateID != descriptor.FlowTemplate || descriptor.Identity.EntityID != descriptor.EntityID {
-			return nil, nil, errors.New("active flow-instance descriptor lost its exact construction identity")
-		}
-		route := descriptor.Identity.Route()
-		identity, err := runtimeflowidentity.NewRunScopedFlowInstance(descriptor.RunID, route)
-		if err != nil {
-			return nil, nil, fmt.Errorf("compose active flow-instance descriptor identity: %w", err)
-		}
-		if identity == exclude || (include != nil && identity == include.Identity) {
-			continue
-		}
-		templateID, found := staged.FlowInstanceTemplateID(identity.Route)
-		if !found {
-			continue
-		}
-		if descriptor.FlowTemplate != templateID {
-			return nil, nil, fmt.Errorf(
-				"active flow-instance descriptor %s template %s does not match route template %s for scope %s",
-				identity.Route.InstancePath,
-				descriptor.FlowTemplate,
-				templateID,
-				identity.Route.ScopeKey,
-			)
-		}
-		added, err := staged.addFlowInstanceRouteForTopology(FlowInstanceRouteMaterializationRequest{
-			Identity:            identity,
-			Instance:            descriptor.Identity,
-			ActivationVariables: descriptor.AddressFields,
-		}, &inputProducers)
-		if err != nil {
-			return nil, nil, fmt.Errorf("derive active flow-instance route %s: %w", identity.Key(), err)
-		}
-		changed = changed || added
-		identities[identity] = struct{}{}
-	}
-	if include != nil {
-		req := include.Normalized()
-		added, err := staged.addFlowInstanceRouteForTopology(req, &inputProducers)
-		if err != nil {
-			return nil, nil, err
-		}
-		changed = changed || added
-		identities[req.Identity] = struct{}{}
-	}
-	if changed && !deferRebuild {
-		staged.rebuildStagedFlowInstanceRoutes()
-	}
-	out := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(identities))
-	for identity := range identities {
-		out = append(out, identity)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
-	return staged, out, nil
-}
-
-func flowInstanceRouteTopologyRecordSets(table *RouteTable, identities []runtimeflowidentity.RunScopedFlowInstance) []FlowInstanceRouteRecordSet {
-	return table.materializedRouteRecordSets(identities)
-}
-
-// StageFlowInstanceRouteContext persists the exact derived route set but keeps
-// it process-invisible until its topology owner publishes it.
-func (eb *EventBus) StageFlowInstanceRouteContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) (FlowInstanceRouteTopologyResult, error) {
-	if eb == nil {
-		return FlowInstanceRouteTopologyResult{}, errors.New("event bus is required")
-	}
-	var err error
-	ctx, err = eb.admitSourceArtifactFact(ctx)
-	if err != nil {
-		return FlowInstanceRouteTopologyResult{}, err
-	}
-	eb.mu.RLock()
-	table := eb.routeTable
-	eb.mu.RUnlock()
-	if table == nil {
-		return FlowInstanceRouteTopologyResult{}, errors.New("route table is not initialized")
-	}
-	persister := eb.durable.FlowRouteTopology
-	if persister == nil {
-		return FlowInstanceRouteTopologyResult{}, errors.New("exact flow-instance route-topology persistence is required")
-	}
-	descriptorLister := eb.durable.ActiveFlows
-	if descriptorLister == nil {
-		return FlowInstanceRouteTopologyResult{}, errors.New("flow-instance route staging requires active flow-instance descriptors")
-	}
-	req = req.Normalized()
-	staged, identities, err := eb.deriveFlowInstanceRouteRecordTopology(
-		ctx,
-		table,
-		descriptorLister,
-		req.Identity.RunID,
-		&req,
-		runtimeflowidentity.RunScopedFlowInstance{},
-	)
-	if err != nil {
-		return FlowInstanceRouteTopologyResult{}, err
-	}
-	return persister.ReplaceFlowInstanceRouteTopology(ctx, flowInstanceRouteTopologyRecordSets(staged, identities))
 }
 
 func (eb *EventBus) SetLoggerHook(logger LoggerHook) {

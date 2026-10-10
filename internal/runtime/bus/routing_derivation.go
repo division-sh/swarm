@@ -118,23 +118,6 @@ type routeFlowTemplate struct {
 	Subscribers []routeSubscriberTemplate
 }
 
-func (rt *RouteTable) activeTemplateIDsForFlowPaths(paths []string) []string {
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	seen := make(map[string]struct{}, len(paths))
-	for _, path := range paths {
-		if template, ok := rt.templates[path]; ok {
-			seen[template.FlowID] = struct{}{}
-		}
-	}
-	ids := make([]string, 0, len(seen))
-	for id := range seen {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
-}
-
 type routeSubscriberTemplate struct {
 	IDTemplate    string
 	Kind          subscriberKind

@@ -152,8 +152,8 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore, runID string, w
 		DeliveryAuthority:   authority,
 		Durable: runtimebus.DurableDependencies{
 			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
-			FlowRouteTopology: pg,
-			ActiveAgents:      pg, ActiveFlows: pg, TargetOwners: pg, PreparedEvents: pg,
+
+			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, PreparedEvents: pg,
 			TargetFailureRecorder: pg, RunOrigins: pg, StandingRestarts: pg,
 			Instances: workflow, ConstructionPublications: workflow,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),

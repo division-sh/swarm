@@ -402,8 +402,7 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 	durable := bus.DurableDependencies{
 		ReplyContext: f.selected, RunLifecycle: f.selected, DeliveryLifecycle: delivery,
 
-		FlowRouteTopology: f.selected,
-		ActiveAgents:      f.selected, ActiveFlows: f.selected, TargetOwners: f.selected,
+		ActiveAgents: f.selected, ActiveFlows: f.selected, TargetOwners: f.selected,
 		PreparedEvents: f.selected, TargetFailureRecorder: f.selected,
 		RunOrigins: f.selected, StandingRestarts: f.selected,
 	}

@@ -508,64 +508,6 @@ func TestPublishRootsRejectForeignSourceBeforeWorkOccurrenceAdmission(t *testing
 	}
 }
 
-func TestAdjacentDurableMutationRootsRejectForeignSourceBeforeMutation(t *testing.T) {
-	owned := sourceMutationFact(t, "c")
-	foreign := sourceMutationFact(t, "d")
-	owner := newSourceMutationProbeOwner()
-	store := &sourceBoundaryProbeStore{}
-	bus := newSourceMutationProbeBusWithStore(t, store, owned, owner, sourceMutationRouteSource(t))
-	foreignCtx := runtimecorrelation.WithSourceArtifactFact(context.Background(), foreign)
-	req := FlowInstanceRouteMaterializationRequest{
-		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("work", "instance-a")),
-	}
-
-	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
-	rollback := make([]runtimepipelinefixture.OwnerAction, 0, 1)
-	routeCtx := runtimepipelinefixture.WithSQLTx(foreignCtx, &sql.Tx{})
-	routeCtx = runtimepipelinefixture.WithPostCommitActions(routeCtx, &postCommit)
-	routeCtx = runtimepipelinefixture.WithRollbackActions(routeCtx, &rollback)
-	if err := bus.AddFlowInstanceRouteContextFixture(routeCtx, req); err == nil ||
-		!strings.Contains(err.Error(), "bundle source fact conflicts") {
-		t.Fatalf("foreign route add error = %v, want source conflict", err)
-	}
-	if store.upsertCalls != 0 || len(postCommit) != 0 || len(rollback) != 0 || bus.HasFlowInstanceRoute(req.Identity) {
-		t.Fatalf(
-			"route add mutations = upsert:%d post_commit:%d rollback:%d local:%v, want zero",
-			store.upsertCalls, len(postCommit), len(rollback), bus.HasFlowInstanceRoute(req.Identity),
-		)
-	}
-
-	if err := bus.AddFlowInstanceRouteContextFixture(context.Background(), req); err != nil {
-		t.Fatalf("owner-bound route add: %v", err)
-	}
-	if store.upsertCalls == 0 || !owned.Matches(store.upsertFact) || !bus.HasFlowInstanceRoute(req.Identity) {
-		t.Fatal("owner-bound route add did not persist and publish with the immutable source")
-	}
-	beforeDeletes := store.deleteCalls
-	if err := bus.RemoveFlowInstanceRouteContextFixture(foreignCtx, req.Identity); err == nil ||
-		!strings.Contains(err.Error(), "bundle source fact conflicts") {
-		t.Fatalf("foreign route remove error = %v, want source conflict", err)
-	}
-	if store.deleteCalls != beforeDeletes || !bus.HasFlowInstanceRoute(req.Identity) {
-		t.Fatal("foreign route removal mutated persistence or the local route table")
-	}
-	if err := bus.RemoveFlowInstanceRouteFixture(req.Identity); err != nil {
-		t.Fatalf("owner-bound no-context route removal: %v", err)
-	}
-	if store.deleteCalls != beforeDeletes+1 || !owned.Matches(store.deleteFact) || bus.HasFlowInstanceRoute(req.Identity) {
-		t.Fatal("owner-bound route removal did not use the immutable bus source")
-	}
-
-	if _, err := bus.MarkDeliveryInProgress(foreignCtx, "agent-a", "session-a"); err == nil ||
-		!strings.Contains(err.Error(), "bundle source fact conflicts") {
-		t.Fatalf("foreign delivery-session error = %v, want source conflict", err)
-	}
-	if store.bindCalls != 0 {
-		t.Fatalf("delivery-session store mutations = %d, want zero", store.bindCalls)
-	}
-
-}
-
 func TestDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMutation(t *testing.T) {
 	owned := sourceMutationFact(t, "7")
 	foreign := sourceMutationFact(t, "8")
