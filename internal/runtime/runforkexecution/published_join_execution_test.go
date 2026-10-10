@@ -614,7 +614,11 @@ func requirePublishedJoinChildReceiver(t *testing.T, ctx context.Context, select
 	if ref.FlowPath() == "orders" && (header.ParentFlowID != "." || header.ParentFlowInstance != child || header.ParentEntityID != child) {
 		t.Fatalf("orders receiver lost its constructed child root parent: %+v", header)
 	}
-	joins, err := joinruntime.List(header.StateBuckets)
+	buckets, err := joinruntime.PersistedBuckets(header.StateBuckets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joins, err := joinruntime.List(buckets)
 	if err != nil || len(joins) != 1 || !joins[0].JoinRef().Equal(ref) || joins[0].Status != joinruntime.StatusClosed ||
 		joins[0].OutcomePending || !joins[0].OutcomeFired || joins[0].TransferredPublication == nil {
 		t.Fatalf("receiver did not consume its exact retained completion: %+v err=%v", joins, err)
