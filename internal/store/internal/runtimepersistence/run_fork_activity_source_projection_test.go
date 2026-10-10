@@ -121,7 +121,9 @@ func TestSelectedContractOrdinarySourceStatePresenceBothStores(t *testing.T) {
 					ctx := testAuthorActivityContext()
 					switch state {
 					case "missing":
-						if _, err := fixture.db.ExecContext(ctx, `DELETE FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, child.ForkRunID, child.ForkRunID); err != nil {
+						// Missing construction removes the subtree together; deleting
+						// its structural parent alone violates the native ancestry key.
+						if _, err := fixture.db.ExecContext(ctx, `DELETE FROM flow_instances WHERE run_id=$1`, child.ForkRunID); err != nil {
 							t.Fatal(err)
 						}
 					case "corrupt":

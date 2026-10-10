@@ -14,9 +14,6 @@ import (
 
 func TestAdmitSelectedContractRouteHistoryDerivesSelectedRoutesWithoutMutating(t *testing.T) {
 	plan := testRunForkPlan("producer/scan.requested", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
-	plan.UnsupportedBlockers = []runfork.RunForkUnsupportedBlocker{{
-		Code: runfork.RunForkBlockerFlowRouteHistoryUnproven,
-	}}
 	source := testContractFrontierSource("consumer-node")
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
@@ -42,9 +39,6 @@ func TestAdmitSelectedContractRouteHistoryDerivesSelectedRoutesWithoutMutating(t
 	if !admission.NonMutating || admission.RouteReconstructionSupported {
 		t.Fatalf("mutation flags = non_mutating:%v route_supported:%v", admission.NonMutating, admission.RouteReconstructionSupported)
 	}
-	if !admission.SourceRouteFactsPresent {
-		t.Fatalf("source route facts present = false, want true")
-	}
 	if len(admission.SelectedRouteEvents) != 1 {
 		t.Fatalf("selected route events = %#v, want one historical route event", admission.SelectedRouteEvents)
 	}
@@ -59,8 +53,8 @@ func TestAdmitSelectedContractRouteHistoryDerivesSelectedRoutesWithoutMutating(t
 	if !hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating) {
 		t.Fatalf("blockers = %#v, want non-mutating route admission blocker", admission.UnsupportedBlockers)
 	}
-	if !hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerFlowRouteHistoryUnproven) {
-		t.Fatalf("blockers = %#v, want source route history blocker", admission.UnsupportedBlockers)
+	if len(admission.UnsupportedBlockers) != 1 {
+		t.Fatalf("blockers = %#v, want only non-mutating admission", admission.UnsupportedBlockers)
 	}
 	if !routeBoundaryHas(admission.InvalidPaths, "copy_source_routing_rules", runfork.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("invalid paths = %#v, want source routing_rules copy invalid", admission.InvalidPaths)

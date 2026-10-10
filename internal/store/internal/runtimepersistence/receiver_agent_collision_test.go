@@ -27,6 +27,7 @@ func TestReceiverAgentBusinessNamespaceNativeBothStores(t *testing.T) {
 		for _, scenario := range []string{"runtime_names", "inert_prompt_json"} {
 			t.Run(backend+"/"+scenario, func(t *testing.T) {
 				f := newReceiverConfigActivationFixture(t, backend)
+				f.constructKeylessRoot(t)
 				req := f.request("business-key", "ti-collision", "authored-label")
 				values := canonicalrouting.ReceiverAgentCollisionValues()
 				supplied := receiverSuppliedPayload(t, req)

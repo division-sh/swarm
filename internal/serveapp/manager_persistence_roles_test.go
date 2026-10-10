@@ -20,6 +20,5 @@ func selectedStoreManagerPersistenceRoles(selected any, eventBus *runtimebus.Eve
 	roles.EventExistence, _ = selected.(runtimemanager.EventExistenceReader)
 	roles.DirectiveOperations, _ = selected.(runtimeagentcontrol.DirectiveOperationStore)
 	roles.DirectiveTargets, _ = selected.(runtimemanager.AgentDirectiveRunTargetResolver)
-	roles.FlowRoutes, _ = selected.(runtimebus.FlowInstanceRoutePersistence)
 	return roles
 }

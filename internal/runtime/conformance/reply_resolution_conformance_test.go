@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -23,6 +22,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -77,8 +77,9 @@ func TestReplyResolutionConformance_BootAndLoweringExposePairedLoop(t *testing.T
 
 func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t *testing.T) {
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	source := templatereply.LoadSource(t, templatereply.Options{DefaultEventIDCorrelation: true})
+	fact := conformanceSourceArtifactFact(t, source)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), fact), runID)
 	receipts := replyConformanceConstructionReceipts(t, source, runID)
 	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
 	if got := report.HardInvalidities(); len(got) != 0 {
@@ -86,28 +87,17 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 	}
 	store := newReplyConformanceStore()
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
-		ContractBundle: source,
+		ContractBundle: source, SourceArtifactFact: fact,
 		Durable: bus.DurableDependencies{
 			Instances:                receipts,
 			ConstructionPublications: receipts,
 			ReplyContext:             store,
 			ActiveFlows:              store,
 			TargetOwners:             store,
-			FlowRouteTopology:        store,
 		},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	if err := flowroutefixture.StageAndPublish(ctx, eb, bus.FlowInstanceRouteMaterializationRequest{
-		Identity: runtimeflowidentity.RunScopedFlowInstance{
-			RunID: runID,
-			Route: runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, "account-a", templatereply.RequesterFlowID+"/account-a"),
-		},
-		ActivationVariables: map[string]string{"account_id": "account-a"},
-		Instance:            replyConformanceRequesterIdentity(t, source, runID, "account-a"),
-	}); err != nil {
-		t.Fatalf("materialize requester route: %v", err)
 	}
 	request := replyConformanceEventForRun(source.ResolveFlowEventReference(templatereply.RequesterFlowID, templatereply.RequestEvent), uuid.NewString(), runID, templatereply.RequesterFlowID, templatereply.RequesterFlowID+"/account-a", map[string]any{
 		"account_id": "account-a",
@@ -166,35 +156,23 @@ func TestReplyResolutionConformance_VerifierFailsClosedForInvalidPairedTopology(
 
 func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPersistedContext(t *testing.T) {
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	source := templatereply.LoadSource(t, templatereply.Options{ExplicitCorrelation: true})
+	fact := conformanceSourceArtifactFact(t, source)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), fact), runID)
 	store := newReplyConformanceStore()
 	receipts := replyConformanceConstructionReceipts(t, source, runID)
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
-		ContractBundle: source,
+		ContractBundle: source, SourceArtifactFact: fact,
 		Durable: bus.DurableDependencies{
 			Instances:                receipts,
 			ConstructionPublications: receipts,
 			ReplyContext:             store,
 			ActiveFlows:              store,
 			TargetOwners:             store,
-			FlowRouteTopology:        store,
 		},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	for _, accountID := range []string{"account-a", "account-b"} {
-		if err := flowroutefixture.StageAndPublish(ctx, eb, bus.FlowInstanceRouteMaterializationRequest{
-			Identity: runtimeflowidentity.RunScopedFlowInstance{
-				RunID: runID,
-				Route: runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, accountID, templatereply.RequesterFlowID+"/"+accountID),
-			},
-			ActivationVariables: map[string]string{"account_id": accountID},
-			Instance:            replyConformanceRequesterIdentity(t, source, runID, accountID),
-		}); err != nil {
-			t.Fatalf("materialize requester route %s: %v", accountID, err)
-		}
 	}
 
 	type requestCase struct {
@@ -580,7 +558,7 @@ func TestReplyResolutionConformance_TypedHumanTaskPreservesReplyAuthorityAcrossR
 
 			// Rebuild the bus and coordinator before any operator outcome. No
 			// process-local request state may be needed to resume the requester.
-			resumedBus, outcomes := newDurableReplyHumanTaskRuntime(t, ctx, backend, source)
+			resumedBus, outcomes, _ := newDurableReplyHumanTaskRuntime(t, ctx, backend, source)
 			persistedCard, err := cards.GetDecisionCard(ctx, card.CardID)
 			if err != nil {
 				t.Fatalf("reload typed human-task card: %v", err)
@@ -678,7 +656,7 @@ func proveTypedHumanTaskStaleOrigin(t *testing.T, ctx context.Context, backend d
 	card := createReplyConformanceHumanTask(t, ctx, cards, runID, requestID, deliveryContext, "stale")
 	waitReplyConformanceBus(t, ctx, requestBus)
 
-	resumedBus, outcomes := newDurableReplyHumanTaskRuntime(t, ctx, backend, source)
+	resumedBus, outcomes, coordinator := newDurableReplyHumanTaskRuntime(t, ctx, backend, source)
 	decisionAt := time.Now().UTC()
 	decisionEventID := uuid.NewString()
 	decided, err := storetest.DecisionCardDomain(cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{
@@ -695,13 +673,14 @@ func proveTypedHumanTaskStaleOrigin(t *testing.T, ctx context.Context, backend d
 	if got := approvedOutcome.DeliveryContext().ReplyContextID(); got != deliveryContext.ReplyContextID() {
 		t.Fatalf("stale-origin approved reply context = %q, want %q", got, deliveryContext.ReplyContextID())
 	}
-	if err := resumedBus.RouteTable().RemoveFlowInstanceRoute(runtimeflowidentity.RunScopedFlowInstance{
+	owner := runtimeflowidentity.RunScopedFlowInstance{
 		RunID: runID,
 		Route: runtimeflowidentity.StoredRoute(
 			templatereply.RequesterFlowID, "account-a", templatereply.RequesterFlowID+"/account-a",
 		),
-	}); err != nil {
-		t.Fatalf("remove stale requester route: %v", err)
+	}
+	if err := coordinator.MarkTerminated(ctx, owner, runtimeidentity.NormalizeEntityID(runtimeflowidentity.EntityID(owner.Route.InstancePath)), time.Now().UTC()); err != nil {
+		t.Fatalf("terminate stale requester through its lifecycle owner: %v", err)
 	}
 
 	replyID := uuid.NewString()
@@ -782,7 +761,7 @@ func createReplyConformanceHumanTask(t *testing.T, ctx context.Context, cards re
 	return card
 }
 
-func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, source semanticview.Source) (*bus.EventBus, <-chan *bus.LocalDelivery) {
+func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, source semanticview.Source) (*bus.EventBus, <-chan *bus.LocalDelivery, *runtimepipeline.PipelineCoordinator) {
 	t.Helper()
 	cards, ok := backend.(replyHumanTaskConformanceStore)
 	if !ok {
@@ -840,7 +819,7 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 		t.Fatalf("admit provider human-task outcome subscriptions: %v", err)
 	}
 	outcomes := runtimebustest.SubscribeIdentity(t, eb, requesterIdentity, admission)
-	return eb, outcomes
+	return eb, outcomes, coordinator
 }
 
 func replyConformanceCardLifecycleEvent(t *testing.T, card decisioncard.Card, eventID, eventType string, at time.Time) events.Event {
@@ -910,35 +889,22 @@ func newDurableReplyConformanceBus(t *testing.T, ctx context.Context, backend du
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	persisted, err := backend.ListFlowInstanceRoutes(ctx)
-	if err != nil {
-		t.Fatalf("ListFlowInstanceRoutes: %v", err)
-	}
-	persistedByPath := make(map[string]struct{}, len(persisted))
-	for _, route := range persisted {
-		persistedByPath[route.Key()] = struct{}{}
-	}
 	runID := runtimecorrelation.RunIDFromContext(ctx)
 	for _, accountID := range []string{"account-a", "account-b"} {
-		req := bus.FlowInstanceRouteMaterializationRequest{
-			Identity: runtimeflowidentity.RunScopedFlowInstance{
-				RunID: runID,
-				Route: runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, accountID, templatereply.RequesterFlowID+"/"+accountID),
-			},
-			ActivationVariables: map[string]string{"account_id": accountID},
+		owner := runtimeflowidentity.RunScopedFlowInstance{
+			RunID: runID,
+			Route: runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, accountID, templatereply.RequesterFlowID+"/"+accountID),
 		}
-		evidence, err := backend.LoadFlowConstructionPublication(ctx, req.Identity, runtimeflowidentity.EntityID(req.Identity.Route.InstancePath))
+		request, err := runtimepipeline.NewExactFlowInstanceLookup(source, conformanceSourceArtifactFact(t, source), owner)
 		if err != nil {
-			t.Fatalf("read exact requester construction: %v", err)
+			t.Fatal(err)
 		}
-		req.Instance = evidence.Identity
-		if _, exists := persistedByPath[req.Identity.Key()]; exists {
-			err = flowroutefixture.Publish(eb, req)
-		} else {
-			err = flowroutefixture.StageAndPublish(ctx, eb, req)
+		observed, found, err := backend.LookupFlowInstance(ctx, request)
+		if err != nil || !found || observed.Identity().EntityID != runtimeflowidentity.EntityID(owner.Route.InstancePath) {
+			t.Fatalf("read exact requester construction %s: found=%t observed=%+v err=%v", accountID, found, observed, err)
 		}
-		if err != nil {
-			t.Fatalf("materialize requester route %s: %v", accountID, err)
+		if err := observed.ValidateSelection(request); err != nil {
+			t.Fatal(err)
 		}
 	}
 	return eb
@@ -1220,15 +1186,6 @@ func replyConformanceConstructedOwners() []bus.ActiveTargetDescriptor {
 		ID: templatereply.ProviderFlowID, FlowInstance: templatereply.ProviderFlowID,
 		EntityID: runtimeflowidentity.EntityID(templatereply.ProviderFlowID),
 	})
-}
-
-func (s *replyConformanceStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []bus.FlowInstanceRouteRecordSet) (bus.FlowInstanceRouteTopologyResult, error) {
-	for _, set := range sets {
-		if err := set.Identity.Validate(); err != nil {
-			return bus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("invalid flow-instance route identity: %#v", set.Identity)
-		}
-	}
-	return bus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
 }
 
 func (s *replyConformanceStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {

@@ -54,7 +54,11 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 	}
 	var nodeRoute, agentRoute events.DeliveryRoute
 	var agentPlan agentidentity.Plan
-	for _, subscriber := range table.Resolve("sink/work.completed") {
+	definitions, err := table.PubsubDeclarationDefinitions("sink", []string{"sink/work.completed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, subscriber := range definitions {
 		route := events.DeliveryRoute{Recipient: subscriber.Recipient}
 		if route.Recipient.IsNode() {
 			nodeRoute = route

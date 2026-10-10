@@ -401,6 +401,7 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 			if code, _ := rpcErr.Data["code"].(string); code != apiv1.EventPublishFailedCode {
 				t.Fatalf("%s event.publish error = %#v, want %s", backend, rpcErr, apiv1.EventPublishFailedCode)
 			}
+			requirePublicInputFailureCause(t, rpcErr, "injected delivery route persistence failure")
 			eventID, runID := publicInputFailureIdentity(t, rpcErr)
 			requirePublicInputRollbackNoResidue(t, db, backend, idempotencyKey, eventID, runID)
 		})
@@ -443,6 +444,11 @@ func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcro
 				if code, _ := rpcErr.Data["code"].(string); code != apiv1.EventPublishFailedCode {
 					t.Fatalf("%s/%s event.publish error = %#v, want %s", backend, stage.name, rpcErr, apiv1.EventPublishFailedCode)
 				}
+				cause := "injected committed replay-scope persistence failure"
+				if stage.name == "api_completion" {
+					cause = "injected API idempotency completion persistence failure"
+				}
+				requirePublicInputFailureCause(t, rpcErr, cause)
 				eventID, runID := publicInputFailureIdentity(t, rpcErr)
 				requirePublicInputRollbackNoResidue(t, db, backend, idempotencyKey, eventID, runID)
 			})
@@ -509,6 +515,18 @@ func publicInputFailureIdentity(t *testing.T, rpcErr *servedJSONRPCError) (strin
 	return eventID, runID
 }
 
+func requirePublicInputFailureCause(t *testing.T, rpcErr *servedJSONRPCError, expected string) {
+	t.Helper()
+	details, ok := rpcErr.Data["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("event.publish failure has no details: %#v", rpcErr)
+	}
+	reason, _ := details["reason"].(string)
+	if !strings.Contains(reason, expected) {
+		t.Fatalf("event.publish failed before the intended atomicity boundary: got %q, want %q", reason, expected)
+	}
+}
+
 func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend servedparity.Backend, idempotencyKey, eventID, runID string) {
 	t.Helper()
 	queries := []struct {
@@ -519,7 +537,8 @@ func requirePublicInputRollbackNoResidue(t *testing.T, db *sql.DB, backend serve
 		{label: "run", sql: `SELECT COUNT(*) FROM runs WHERE run_id = ?`, args: []any{runID}},
 		{label: "flow instance", sql: `SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`},
 		{label: "entity", sql: `SELECT COUNT(*) FROM entity_state WHERE run_id = ?`, args: []any{runID}},
-		{label: "route", sql: `SELECT COUNT(*) FROM routing_rules WHERE flow_instance LIKE 'telegram-chat/%'`},
+		{label: "construction receipt", sql: `SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id = ?`, args: []any{runID}},
+		{label: "desired attachment", sql: `SELECT COUNT(*) FROM flow_instance_runtime_readiness WHERE run_id = ?`, args: []any{runID}},
 		{label: "event", sql: `SELECT COUNT(*) FROM events WHERE event_id = ?`, args: []any{eventID}},
 		{label: "delivery", sql: `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, args: []any{eventID}},
 		{label: "replay scope", sql: `SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id = ?`, args: []any{eventID}},

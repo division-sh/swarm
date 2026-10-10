@@ -144,7 +144,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				t.Fatal("missing fork owner")
 			}
 			request := runfork.RunForkMaterializeRequest{SourceRunID: started.RunID, At: frontier, OriginalLoopCarriage: carriage}
-			const refusal = "fork materialization requires execution-ready plan; blockers: timer_history_unproven, flow_route_history_unproven"
+			const refusal = "fork materialization requires execution-ready plan; blockers: timer_history_unproven"
 			for attempt := 0; attempt < 2; attempt++ {
 				child, err := owner.Materialize(servedControlProofAuthorActivityContext(t, rt), request)
 				if err == nil || err.Error() != refusal {
@@ -160,7 +160,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				for _, blocker := range child.UnsupportedBlockers {
 					codes = append(codes, blocker.Code)
 				}
-				if !reflect.DeepEqual(codes, []string{runfork.RunForkBlockerTimerHistoryUnproven, runfork.RunForkBlockerFlowRouteHistoryUnproven}) {
+				if !reflect.DeepEqual(codes, []string{runfork.RunForkBlockerTimerHistoryUnproven}) {
 					t.Fatalf("refusal lost canonical blocker evidence: %+v", child.UnsupportedBlockers)
 				}
 				if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {

@@ -49,11 +49,15 @@ func TestRootInputSourceLoadedConsumerCardinality(t *testing.T) {
 						events.RouteIdentity{FlowID: "first", FlowInstance: "first", EntityID: runtimeflowidentity.EntityID("first")},
 						events.RouteIdentity{FlowID: "second", FlowInstance: "second", EntityID: runtimeflowidentity.EntityID("second")},
 					)
-					eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+					eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
+						Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+					})
 					if err != nil {
 						t.Fatal(err)
 					}
-					installConnectionSourceConstruction(t, eb, source, ".")
+					for _, flow := range []string{".", "first", "second"} {
+						installConnectionSourceConstruction(t, eb, source, flow)
+					}
 					evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "thing.created", "", "", []byte("{}"), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 					plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 					if err != nil {
@@ -95,7 +99,7 @@ func TestProviderLocalConsumptionUsesOnlyExactSameInstanceOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	consumers := routes.ResolveForRun(busInternalTestRunID, "validation/thing.created")
+	consumers := routes.PubsubDeclarationDefinitionsFixture(t, "validation", "validation/thing.created")
 	if len(consumers) != 1 || consumers[0].RouteSourceCode() != "subscription" {
 		t.Fatalf("provider has competing subscription authority: %#v", consumers)
 	}

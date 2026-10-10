@@ -401,17 +401,18 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 	}
 	durable := bus.DurableDependencies{
 		ReplyContext: f.selected, RunLifecycle: f.selected, DeliveryLifecycle: delivery,
-		FlowRoutes: f.selected, FlowRouteRecords: f.selected, FlowRouteSets: f.selected,
-		FlowRouteTopology: f.selected, FlowRouteRollback: f.selected,
+
 		ActiveAgents: f.selected, ActiveFlows: f.selected, TargetOwners: f.selected,
 		PreparedEvents: f.selected, TargetFailureRecorder: f.selected,
-		RunOrigins: f.selected, StandingRestarts: f.selected, ConstructionPublications: f.selected,
+		RunOrigins: f.selected, StandingRestarts: f.selected,
 	}
 	var owner runforkexecution.SelectedContractExecutionOwner
 	var err error
 	switch selected := f.selected.(type) {
 	case *store.SQLiteRuntimeStore:
 		durable.EmitFeedback = selected
+		workflow := pipeline.NewWorkflowPersistence(selected)
+		durable.Instances, durable.ConstructionPublications = workflow, workflow
 		forkOwner := fork
 		if forkOwner == nil {
 			forkOwner = selected
@@ -419,17 +420,19 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 		roles := manager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
 			EffectsRecovery: selected, DeliveryQuiescence: selected, EventExistence: selected,
-			DirectiveOperations: selected, DirectiveTargets: selected, FlowRoutes: selected,
+			DirectiveOperations: selected, DirectiveTargets: selected,
 			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(
-			pipeline.NewWorkflowPersistence(selected), forkOwner, selected, selected, selected,
+			workflow, forkOwner, selected, selected, selected,
 			durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected,
 			selected, selected, selected, selected, selected,
 		)
 	case *store.PostgresStore:
 		durable.EmitFeedback = selected
+		workflow := pipeline.NewWorkflowPersistence(selected)
+		durable.Instances, durable.ConstructionPublications = workflow, workflow
 		forkOwner := fork
 		if forkOwner == nil {
 			forkOwner = selected
@@ -437,11 +440,11 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 		roles := manager.PersistenceRoles{
 			LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
 			EffectsRecovery: selected, DeliveryQuiescence: selected, EventExistence: selected,
-			DirectiveOperations: selected, DirectiveTargets: selected, FlowRoutes: selected,
+			DirectiveOperations: selected, DirectiveTargets: selected,
 			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(
-			pipeline.NewWorkflowPersistence(selected), forkOwner, selected, selected, selected,
+			workflow, forkOwner, selected, selected, selected,
 			durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected,
 			selected, selected, selected, selected, selected,
