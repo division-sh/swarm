@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
 // InstallActiveForkReceiverHeaderDoneFaultTx deliberately invalidates only the
@@ -73,7 +74,9 @@ func commitWorkflowInstanceHeader(ctx context.Context, tx *sql.Tx, postgres bool
 			record.WorkflowName, record.Mode, record.EntityType}
 	}
 	var fact workflowEngineStateFact
+	write := transactiontest.BeginWorkflowHeaderJSON(ctx, len(record.Config))
 	err := tx.QueryRowContext(ctx, query+` RETURNING CAST(run_id AS TEXT), CAST(entity_id AS TEXT)`, args...).Scan(&fact.runID, &fact.entityID)
+	write.End(err)
 	if err == sql.ErrNoRows {
 		return workflowEngineStateFact{}, workflowEngineStateRevisionConflict(record)
 	}
