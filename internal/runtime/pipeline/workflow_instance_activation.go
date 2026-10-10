@@ -279,6 +279,7 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 		RunID:           normalized.Readiness.RunID,
 		EntityID:        identity.RowID(),
 		FlowInstance:    identity.StorageRef,
+		InstanceKey:     instance.InstanceKey,
 		WorkflowName:    instance.WorkflowName,
 		WorkflowVersion: instance.WorkflowVersion,
 		InitialState:    instance.CurrentState,

@@ -3,6 +3,7 @@ package pipelinepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -57,28 +58,37 @@ func ReadFlowConstructionPublicationTx(ctx context.Context, tx *sql.Tx, owner fl
 	}
 	var raw, readiness []byte
 	var templateID, headerEntityID, planHash string
-	if err := tx.QueryRowContext(ctx, `SELECT m.projection, fi.flow_template, fi.entity_id, r.plan, r.plan_hash
+	var parentInstance, instanceKey sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT m.projection, fi.flow_template, fi.entity_id, r.plan, r.plan_hash, fi.parent_instance, fi.instance_key
 		FROM workflow_instance_initial_materializations m
 		JOIN flow_instances fi ON fi.run_id=m.run_id AND fi.instance_path=m.instance_path AND fi.entity_id=m.entity_id
 		JOIN flow_instance_runtime_readiness r ON r.run_id=fi.run_id AND r.instance_path=fi.instance_path
-		WHERE m.run_id=$1 AND m.entity_id=$2 AND m.instance_path=$3`, owner.RunID, entityID, owner.Route.InstancePath).Scan(&raw, &templateID, &headerEntityID, &readiness, &planHash); err != nil {
+		WHERE m.run_id=$1 AND m.entity_id=$2 AND m.instance_path=$3`, owner.RunID, entityID, owner.Route.InstancePath).Scan(&raw, &templateID, &headerEntityID, &readiness, &planHash, &parentInstance, &instanceKey); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return pipeline.FlowConstructionPublicationEvidence{}, corruptFlowConstructionEvidence(owner, err)
+		}
 		return pipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("read immutable construction evidence: %w", err)
 	}
 	evidence, err := pipeline.ProjectFlowConstructionPublication(raw, owner, entityID)
 	if err != nil {
-		return pipeline.FlowConstructionPublicationEvidence{}, err
+		return pipeline.FlowConstructionPublicationEvidence{}, corruptFlowConstructionEvidence(owner, err)
 	}
 	if evidence.CreatingInput.EventID == uuid.Nil.String() {
-		return pipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("construction evidence requires exact creating-event identity")
+		return pipeline.FlowConstructionPublicationEvidence{}, corruptFlowConstructionEvidence(owner, fmt.Errorf("construction evidence requires exact creating-event identity"))
 	}
 	plan, err := pipeline.DecodeFlowReadinessPlan(readiness, planHash)
 	if err != nil {
-		return pipeline.FlowConstructionPublicationEvidence{}, err
+		return pipeline.FlowConstructionPublicationEvidence{}, corruptFlowConstructionEvidence(owner, err)
 	}
-	if evidence.Identity.TemplateID != templateID || evidence.Identity.EntityID != headerEntityID || plan.Identity != evidence.Identity || plan.RunID != owner.RunID {
-		return pipeline.FlowConstructionPublicationEvidence{}, fmt.Errorf("construction evidence contradicts its native header or attachment owner")
+	if evidence.Identity.TemplateID != templateID || evidence.Identity.EntityID != headerEntityID || plan.Identity != evidence.Identity || plan.RunID != owner.RunID ||
+		evidence.Identity.ParentRoute.FlowInstance != parentInstance.String || evidence.InstanceKey != instanceKey.String {
+		return pipeline.FlowConstructionPublicationEvidence{}, corruptFlowConstructionEvidence(owner, fmt.Errorf("construction evidence contradicts its native header or attachment owner"))
 	}
 	return evidence, nil
+}
+
+func corruptFlowConstructionEvidence(owner flowidentity.RunScopedFlowInstance, err error) error {
+	return &pipeline.FlowInstanceConstructionCorruption{RunID: owner.RunID, FlowID: owner.Route.ScopeKey, InstancePath: owner.Route.InstancePath, Cause: err}
 }
 
 func ReadFlowConstructionPublicationFieldsTx(ctx context.Context, tx *sql.Tx, owner flowidentity.RunScopedFlowInstance, entityID, eventID string) (map[string]any, error) {

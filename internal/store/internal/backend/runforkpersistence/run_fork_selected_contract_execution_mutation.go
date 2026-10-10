@@ -391,6 +391,10 @@ func selectedContractHistoricalHeader(state selectedContractWorkflowState, confi
 	if err != nil {
 		return runtimepipeline.WorkflowEngineStateRecord{}, err
 	}
+	construction, err := runtimepipeline.DecodeWorkflowInstanceRecordedHeader(identity.Route, config)
+	if err != nil {
+		return runtimepipeline.WorkflowEngineStateRecord{}, err
+	}
 	projection, err := projectRunForkEntityOwnership(state.SourceRunID, state.RunID, history.EntityID, metadata.FlowInstance)
 	if err != nil {
 		return runtimepipeline.WorkflowEngineStateRecord{}, fmt.Errorf("historical header requires exact source/child entity correspondence: %w", err)
@@ -408,6 +412,7 @@ func selectedContractHistoricalHeader(state selectedContractWorkflowState, confi
 	}
 	record := runtimepipeline.WorkflowEngineStateRecord{
 		Identity: identity, EntityID: state.EntityID, WorkflowName: state.WorkflowName, WorkflowVersion: state.WorkflowVersion,
+		ParentInstance: construction.ParentRoute().FlowInstance, InstanceKey: metadata.InstanceKey,
 		Mode: state.Mode, Status: "active", CurrentState: history.CurrentState, StageDefined: metadata.StageDefined,
 		EntityType: state.EntityType, Slug: metadata.Slug, Name: metadata.Name, Config: config,
 		EnteredStageAt: *history.EnteredStateAt, CreatedAt: now, UpdatedAt: now,
