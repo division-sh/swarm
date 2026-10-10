@@ -206,13 +206,8 @@ func loadRunForkTimerHistoryInventory(snapshot *runForkRevisionSnapshot, facts r
 		}
 		seen[timer.TimerID] = struct{}{}
 		if arrival, owned := arrivalByID[timer.TimerID]; owned {
-			if err := requireRunForkArrivalSourceRecord(timer, arrival); err != nil {
+			if err := requireRunForkArrivalSourceRecord(snapshot, timer, arrival); err != nil {
 				return runForkTimerHistoryInventory{}, err
-			}
-			if arrival.Status == genericschedule.StatusFired {
-				if _, err := runForkPublishedArrivalEvidence(snapshot, arrival); err != nil {
-					return runForkTimerHistoryInventory{}, err
-				}
 			}
 			delete(arrivalByID, timer.TimerID)
 			continue
@@ -239,7 +234,7 @@ func loadRunForkTimerHistoryInventory(snapshot *runForkRevisionSnapshot, facts r
 	return inventory, nil
 }
 
-func requireRunForkArrivalSourceRecord(timer runForkRevisionTimer, arrival genericschedule.Activation) error {
+func requireRunForkArrivalSourceRecord(snapshot *runForkRevisionSnapshot, timer runForkRevisionTimer, arrival genericschedule.Activation) error {
 	actual, err := projectRunForkGenericActivation(timer)
 	if err != nil {
 		return err
@@ -251,6 +246,10 @@ func requireRunForkArrivalSourceRecord(timer runForkRevisionTimer, arrival gener
 	got, err := actual.EvidenceDigest()
 	if err != nil || got != want {
 		return fmt.Errorf("arrival inventory differs from its exact source row")
+	}
+	if arrival.Status == genericschedule.StatusFired {
+		_, err := runForkPublishedArrivalEvidence(snapshot, arrival)
+		return err
 	}
 	return nil
 }
