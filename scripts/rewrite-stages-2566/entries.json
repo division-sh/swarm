@@ -5515,26 +5515,36 @@
   {
     "file": "internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go",
     "source": "internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go",
-    "flow": "selectedActivityProducerSourceOptions/literal-2",
+    "flow": "selectedActivityProducerSourceWithRootFields/literal-2",
     "entry": "pending",
     "order": [
       "pending"
     ],
     "finals": [],
-    "function": "selectedActivityProducerSourceOptions",
-    "literal": 2
+    "function": "selectedActivityProducerSourceWithRootFields",
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go",
+      "function": "selectedActivityProducerSourceOptions",
+      "literal": 2
+    }
   },
   {
     "file": "internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go",
     "source": "internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go",
-    "flow": "selectedActivityProducerSourceOptions/literal-10",
+    "flow": "selectedActivityProducerSourceWithRootFields/literal-10",
     "entry": "pending",
     "order": [
       "pending"
     ],
     "finals": [],
-    "function": "selectedActivityProducerSourceOptions",
-    "literal": 10
+    "function": "selectedActivityProducerSourceWithRootFields",
+    "literal": 10,
+    "current_selector": {
+      "file": "internal/store/internal/runtimepersistence/run_fork_activity_source_projection_test.go",
+      "function": "selectedActivityProducerSourceOptions",
+      "literal": 10
+    }
   },
   {
     "file": "internal/store/internal/runtimepersistence/run_fork_branch_point_activation_test.go",
