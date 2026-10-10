@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -119,7 +120,7 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			db := workflowOwnershipCompanionDatabase(t, backend)
-			for _, change := range []string{"fresh_then_exact_reuse", "missing_config", "duplicate_agents", "wrong_agent_route", "missing_readiness", "wrong_readiness", "inactive", "wrong_config", "wrong_entity_owner"} {
+			for _, change := range []string{"fresh_then_exact_reuse", "missing_header", "missing_config", "duplicate_agents", "wrong_agent_route", "missing_readiness", "wrong_readiness", "inactive", "wrong_config", "wrong_entity_owner"} {
 				t.Run(change, func(t *testing.T) {
 					plan, planning, state, modes, forkID := workflowOwnershipProjection(t, source, "consumer")
 					state.ExecutionMode = executionmode.Live
@@ -150,6 +151,9 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 					}
 					canonical := prepared.States[0]
 					candidate := selectedContractWorkflowState{SourceRunID: plan.SourceRunID, RunID: forkID, EntityID: canonical.EntityID, EntityType: canonical.EntityType, WorkflowName: canonical.FlowID, WorkflowVersion: canonical.WorkflowVersion, Mode: canonical.Mode, ExecutionMode: canonical.ExecutionMode, Route: canonical.Route.InstancePath, Agents: canonical.Agents, History: plan.Entities[0]}
+					candidate.History.MaterializationMetadata.Status = "active"
+					candidate.History.MaterializationMetadata.CreatedAt = *candidate.History.EnteredStateAt
+					candidate.History.MaterializationMetadata.UpdatedAt = *candidate.History.EnteredStateAt
 					fact, err := correlation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("a", 64))
 					if err != nil {
 						t.Fatal(err)
@@ -163,30 +167,56 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 					if _, err := tx.Exec(`INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type) VALUES ($1,$2,$3,$4)`, candidate.RunID, candidate.EntityID, candidate.Route, candidate.EntityType); err != nil {
 						t.Fatal(err)
 					}
-					switch change {
-					case "missing_config":
+					if change == "missing_config" {
 						candidate.History.MaterializationMetadata = nil
+					}
+					beforeConstruction := workflowOwnershipCompanionSnapshot(t, tx)
+					if change != "missing_header" {
+						err := workflowOwnershipMaterializeHistoricalHeader(ctx, tx, backend == "postgres", fact, plan, candidate)
+						if change == "missing_config" {
+							if err == nil {
+								t.Fatal("missing historical configuration admitted")
+							}
+							if after := workflowOwnershipCompanionSnapshot(t, tx); !reflect.DeepEqual(beforeConstruction, after) {
+								t.Fatal("refused historical construction changed selected state")
+							}
+							return
+						}
+						if err != nil {
+							t.Fatalf("canonical historical materialization: %v", err)
+						}
+					}
+					switch change {
 					case "duplicate_agents":
 						candidate.Agents = append(candidate.Agents, candidate.Agents[0])
 					case "wrong_agent_route":
 						candidate.Agents[0].Plan.Route.InstancePath = "consumer/other"
 					}
+					beforeAttachment := workflowOwnershipCompanionSnapshot(t, tx)
 					topologies, err := materializeSelectedContractWorkflowState(ctx, tx, backend == "postgres", fact, candidate, time.Now().UTC())
-					if change == "missing_config" || change == "duplicate_agents" || change == "wrong_agent_route" {
+					if change == "missing_header" || change == "duplicate_agents" || change == "wrong_agent_route" {
 						if err == nil {
 							t.Fatal("invalid declaration inputs admitted")
+						}
+						if after := workflowOwnershipCompanionSnapshot(t, tx); !reflect.DeepEqual(beforeAttachment, after) {
+							t.Fatal("refused attachment created or changed historical state")
 						}
 						return
 					}
 					if err != nil || len(topologies) != len(state.Agents) {
-						t.Fatalf("fresh template historical-header construction: %v", err)
+						t.Fatalf("attachment to admitted template historical header: %v", err)
 					}
 					var persisted []byte
 					if err := tx.QueryRow(`SELECT config FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, candidate.RunID, candidate.Route).Scan(&persisted); err != nil {
 						t.Fatal(err)
 					}
-					if _, err := pipeline.DecodeWorkflowInstanceRecordedHeader(canonical.Route, persisted); err != nil {
+					recorded, err := pipeline.DecodeWorkflowInstanceRecordedHeader(canonical.Route, persisted)
+					if err != nil {
 						t.Fatal(err)
+					}
+					identity, _, err := selectedContractWorkflowIdentity(candidate)
+					if err != nil || recorded.ParentRoute() != identity.ParentRoute || recorded.WorkflowVersion() != candidate.WorkflowVersion {
+						t.Fatalf("attachment changed historical parent/control: %v", err)
 					}
 					query := ""
 					switch change {
@@ -228,7 +258,7 @@ func TestSelectedForkHistoricalFieldlessHeaderBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			db := workflowOwnershipCompanionDatabase(t, backend)
 			for _, staged := range []bool{false, true} {
-				for _, change := range []string{"exact", "imported_state", "missing_lifecycle", "spurious_fields", "spurious_state", "mismatched_type", "missing_execution_mode", "dynamic_agents", "missing_readiness", "wrong_readiness"} {
+				for _, change := range []string{"exact", "missing_header", "imported_state", "missing_lifecycle", "spurious_fields", "spurious_state", "mismatched_type", "missing_execution_mode", "dynamic_agents", "missing_readiness", "wrong_readiness"} {
 					t.Run(fmt.Sprintf("staged_%t/%s", staged, change), func(t *testing.T) {
 						ctx := context.Background()
 						tx, err := db.BeginTx(ctx, nil)
@@ -237,7 +267,7 @@ func TestSelectedForkHistoricalFieldlessHeaderBothStores(t *testing.T) {
 						}
 						defer tx.Rollback()
 						entered := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
-						metadata := &runfork.RunForkMaterializedEntitySnapshotMetadata{Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: "receiver", StageDefined: staged}
+						metadata := &runfork.RunForkMaterializedEntitySnapshotMetadata{Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: "receiver", StageDefined: staged, Status: "active", CreatedAt: entered, UpdatedAt: entered}
 						sourceRun, childRun, sourceEntity := uuid.NewString(), uuid.NewString(), flowidentity.EntityID(metadata.FlowInstance)
 						projection, err := runfork.ProjectEntityOwnership(sourceRun, childRun, sourceEntity, metadata.FlowInstance)
 						if err != nil {
@@ -279,12 +309,31 @@ func TestSelectedForkHistoricalFieldlessHeaderBothStores(t *testing.T) {
 							}
 						case "mismatched_type":
 							metadata.EntityType = "fake"
+						}
+						before := workflowOwnershipCompanionSnapshot(t, tx)
+						if change != "missing_header" {
+							err := workflowOwnershipMaterializeHistoricalHeader(ctx, tx, backend == "postgres", fact,
+								runfork.RunForkPlan{SourceRunID: sourceRun, Entities: []runfork.RunForkEntityState{state.History}}, state)
+							if change == "imported_state" || change == "missing_lifecycle" || change == "spurious_fields" || change == "spurious_state" || change == "mismatched_type" {
+								if err == nil {
+									t.Fatal("invalid historical header admitted")
+								}
+								if after := workflowOwnershipCompanionSnapshot(t, tx); !reflect.DeepEqual(before, after) {
+									t.Fatal("refused historical construction changed selected state")
+								}
+								return
+							}
+							if err != nil {
+								t.Fatalf("canonical fieldless historical materialization: %v", err)
+							}
+						}
+						switch change {
 						case "missing_execution_mode":
 							state.ExecutionMode = ""
 						case "dynamic_agents":
 							state.Agents = []runfork.RunForkSelectedContractAgentExpectation{{}}
 						}
-						before := workflowOwnershipCompanionSnapshot(t, tx)
+						before = workflowOwnershipCompanionSnapshot(t, tx)
 						_, err = materializeSelectedContractWorkflowState(ctx, tx, backend == "postgres", fact, state, time.Now().UTC())
 						if change != "exact" && change != "missing_readiness" && change != "wrong_readiness" {
 							if err == nil {
@@ -551,6 +600,7 @@ func workflowOwnershipCompanionDatabase(t *testing.T, backend string) *sql.DB {
 		fmt.Sprintf(`CREATE TEMP TABLE entity_state (run_id %s, entity_id %s, flow_instance TEXT, entity_type TEXT, PRIMARY KEY(run_id,entity_id))`, idType, idType),
 		fmt.Sprintf(`CREATE TEMP TABLE flow_instances (run_id %s, instance_path TEXT, entity_id %s NOT NULL, entity_type TEXT, slug TEXT, name TEXT, flow_template TEXT, mode TEXT, config %s, status TEXT, stage_defined BOOLEAN NOT NULL, current_state TEXT NOT NULL, gates %s NOT NULL, bookkeeping %s NOT NULL, accumulator %s NOT NULL, revision BIGINT NOT NULL, entered_state_at %s NOT NULL, created_at %s, updated_at %s NOT NULL, terminated_at %s, PRIMARY KEY(run_id,instance_path))`, idType, idType, jsonType, jsonType, jsonType, jsonType, timeType, timeType, timeType, timeType),
 		fmt.Sprintf(`CREATE TEMP TABLE flow_instance_runtime_readiness (run_id %s, instance_path TEXT, plan %s, plan_hash TEXT NOT NULL, activation_attempt_id BIGINT NOT NULL DEFAULT 1, activation_attempt_grant_id %s, activation_attempt_state TEXT NOT NULL DEFAULT 'planned', phase TEXT NOT NULL DEFAULT 'planned', creation_event_emitted_at %s, created_at %s, updated_at %s, PRIMARY KEY(run_id,instance_path))`, idType, jsonType, idType, timeType, timeType, timeType),
+		fmt.Sprintf(`CREATE TEMP TABLE workflow_instance_initial_materializations (run_id %s, entity_id %s, instance_path TEXT, projection_version INTEGER NOT NULL, projection %s NOT NULL, occurred_at %s NOT NULL, PRIMARY KEY(run_id,instance_path))`, idType, idType, jsonType, timeType),
 	} {
 		if _, err := db.Exec(query); err != nil {
 			t.Fatal(err)
@@ -559,10 +609,25 @@ func workflowOwnershipCompanionDatabase(t *testing.T, backend string) *sql.DB {
 	return db
 }
 
+func workflowOwnershipMaterializeHistoricalHeader(ctx context.Context, tx *sql.Tx, postgres bool, fact correlation.SourceArtifactFact, plan runfork.RunForkPlan, state selectedContractWorkflowState) error {
+	if state.History.MaterializationMetadata == nil {
+		return fmt.Errorf("historical fixture requires captured materialization metadata")
+	}
+	header, err := projectRunForkHistoricalHeader(state.SourceRunID, state.RunID, state.EntityID, state.Route, fact.BundleHash(), state.History)
+	if err != nil {
+		return err
+	}
+	receipt, err := projectRunForkConstructionReceipt(plan, state.RunID, state.History, header.CreatedAt)
+	if err != nil {
+		return err
+	}
+	return pipelinepersistence.CommitSelectedHistoricalWorkflowHeader(ctx, tx, postgres, header, receipt)
+}
+
 func workflowOwnershipCompanionSnapshot(t *testing.T, tx *sql.Tx) []string {
 	t.Helper()
 	var out []string
-	for _, table := range []string{"entity_state", "flow_instances", "flow_instance_runtime_readiness"} {
+	for _, table := range []string{"entity_state", "flow_instances", "flow_instance_runtime_readiness", "workflow_instance_initial_materializations"} {
 		rows, err := tx.Query("SELECT * FROM " + table)
 		if err != nil {
 			t.Fatal(err)
