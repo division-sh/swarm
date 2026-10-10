@@ -4138,15 +4138,14 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
 	}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
 	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1")), "v-1"))
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "one", busInternalTestRunID, eventtest.UUID("ent-1"))}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
-	}
 	consumerOne := subscribeInternalDeliveriesForTest(t, eb, testFlowNode(t, "consumer", "consumer-node").Key(), events.EventType("producer/deploy.done"))
 	consumerTwo := subscribeInternalDeliveriesForTest(t, eb, "consumer-node-two")
 	eventID := uuid.NewString()
@@ -4172,10 +4171,6 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 		FlowInstance:  "consumer/two",
 		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 	}}
-	store.flowInstanceDescriptorCalls = 0
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "two")), Instance: StoredFlowInstanceIdentityFixture(source, "consumer", "two", busInternalTestRunID, eventtest.UUID("ent-2"))}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute(two): %v", err)
-	}
 	store.flowInstanceDescriptorCalls = 0
 
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{

@@ -71,9 +71,8 @@ func TestGroupedMaterializedRouteSetsMatchPerOwnerScan(t *testing.T) {
 			for _, recipientID := range []string{"alpha", "beta", "alpha"} {
 				rt.patterns = append(rt.patterns, routePattern{
 					RunID: runID, InstancePath: identity.Route.InstancePath,
-					SourceInstancePath: "sources/source-one",
-					EventPattern:       identity.Route.InstancePath + "/work.ready",
-					Subscriber:         Subscriber{Recipient: events.MustAgentDeliveryRecipient(recipientID)},
+					EventPattern: identity.Route.InstancePath + "/work.ready",
+					Subscriber:   Subscriber{Recipient: events.MustAgentDeliveryRecipient(recipientID)},
 				})
 			}
 		}

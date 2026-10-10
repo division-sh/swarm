@@ -13,12 +13,6 @@ import (
 func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
 	files := parseBusProductionFiles(t)
 	requiredCalls := map[string]map[string]bool{
-		"routeTemplateSourceObserverKey": {
-			"resolvedSubscriberRoleKey": false,
-		},
-		"routePatternIdentity": {
-			"resolvedSubscriberRoleKey": false,
-		},
 		"appendUniqueSubscriber": {
 			"resolvedSubscriberRoleKey": false,
 		},
@@ -44,12 +38,22 @@ func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
 		},
 	}
 	forbiddenIdentifiers := map[string]struct{}{
-		"EventDeliveryTargetReader":  {},
-		"DeliveryTargets":            {},
-		"ListEventDeliveryTargets":   {},
-		"deliveryTargetsForManifest": {},
-		"deliveryTargetsForEvent":    {},
-		"cloneRouteTargetMap":        {},
+		"templateObservers":                        {},
+		"routeTemplateSourceObserver":              {},
+		"addTemplateSourceObserverLocked":          {},
+		"materializeTemplateSourceObserversLocked": {},
+		"materializeTemplateSourceObserverLocked":  {},
+		"compiledRouteOwnerDependencies":           {},
+		"pubsubObserverDeclarations":               {},
+		"SourceTemplatePath":                       {},
+		"SourceLocalEvent":                         {},
+		"SourceInstancePath":                       {},
+		"EventDeliveryTargetReader":                {},
+		"DeliveryTargets":                          {},
+		"ListEventDeliveryTargets":                 {},
+		"deliveryTargetsForManifest":               {},
+		"deliveryTargetsForEvent":                  {},
+		"cloneRouteTargetMap":                      {},
 	}
 
 	for path, file := range files {

@@ -18334,6 +18334,11 @@ platform_tables:
         operation-private constructor proposal, not process route membership. A terminated or final-state origin remains
         occupied but has no fresh reply carrier; classify the existing stale-arrival outcome without claiming its reply
         context. Independent lookup, source, identity and corruption failures remain errors, never stale-arrival evidence.'
+      retired_observer_registry: 'A mutable template-source observer registry and its per-source-instance materialized
+        patterns are unsupported. Authored subscriptions consume their compiled admission and exact native receiver;
+        cross-flow delivery consumes the explicit compiled connection and actual stored parent/key identity. A new source
+        instance does not replace another producer family or establish a new subscription. Handler and concrete agent
+        roles remain distinct in operation-local recipient projection.'
       description: 'Unified routing table for both contract-defined patterns and materialized instance routes. Replaces the
         need for a separate flow_instance_routes table. At boot: contract subscriptions inserted as pattern rows (is_wildcard
         may be true). On receiver creation: wildcard patterns expanded into concrete rows (is_materialized = true, materialized_from

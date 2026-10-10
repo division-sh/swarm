@@ -17,10 +17,6 @@ func TestRouteIncrementalResolutionMatchesFullRebuild(t *testing.T) {
 		{EventPattern: "workers/*/data", Subscriber: Subscriber{Path: "wild"}},
 		{EventPattern: "workers/alpha/data", Subscriber: Subscriber{Path: "exact"}},
 	}
-	rt.templateObservers["workers"] = []routeTemplateSourceObserver{{
-		SourceTemplatePath: "workers", SourceLocalEvent: "data",
-		Subscriber: Subscriber{Path: "observer"},
-	}}
 	rt.rebuildLocked()
 	check := func(label string) {
 		t.Helper()
@@ -79,9 +75,6 @@ func TestRouteRetirementInvalidatesResolutionCache(t *testing.T) {
 		{EventPattern: "workers/*/data", Subscriber: Subscriber{Path: "wild"}},
 		{EventPattern: "workers/alpha/data", Subscriber: Subscriber{Path: "exact"}},
 	}
-	rt.templateObservers["workers"] = []routeTemplateSourceObserver{{
-		SourceTemplatePath: "workers", SourceLocalEvent: "data", Subscriber: Subscriber{Path: "observer"},
-	}}
 	rt.rebuildLocked()
 	add := func(runID, instance string) runtimeflowidentity.RunScopedFlowInstance {
 		t.Helper()
