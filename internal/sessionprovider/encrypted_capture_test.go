@@ -138,7 +138,7 @@ func TestWhatsAppEncryptedCaptureCommitControlsSDKReceipt(t *testing.T) {
 				t.Fatal(err)
 			}
 			peer.attach(t, o.client)
-			if err := o.connect(); err != nil {
+			if err := o.connect(o.ctx); err != nil {
 				t.Fatal(err)
 			}
 			if !o.client.WaitForConnection(5 * time.Second) {

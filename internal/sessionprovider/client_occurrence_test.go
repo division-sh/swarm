@@ -38,7 +38,7 @@ func newOccurrenceFixture(t *testing.T, peer *sdkPeer, device *store.Device, con
 			t.Error(err)
 		}
 	})
-	if err := o.connect(); err != nil {
+	if err := o.connect(o.ctx); err != nil {
 		t.Fatal(err)
 	}
 	if !o.client.WaitForConnection(5 * time.Second) {
@@ -84,7 +84,7 @@ func TestWhatsAppClientOccurrenceNormalSendAndExplicitLogout(t *testing.T) {
 			if device.Deleted != (operation == "logout") {
 				t.Fatalf("wrong explicit deletion outcome: %v", device.Deleted)
 			}
-			if err := o.connect(); err == nil {
+			if err := o.connect(o.ctx); err == nil {
 				t.Fatal("used SDK occurrence accepted another connect")
 			}
 		})
@@ -119,7 +119,7 @@ func TestWhatsAppClientOccurrenceLostResultCannotReplayOnSuccessor(t *testing.T)
 				if err := awaitOccurrenceProbe(t, peer.ctx, done); err == nil {
 					t.Fatal("lost result became successful settlement")
 				}
-				if err := o.connect(); !errors.Is(err, errClientOccurrenceFenced) {
+				if err := o.connect(o.ctx); !errors.Is(err, errClientOccurrenceFenced) {
 					t.Fatalf("old occurrence could reconnect: %v", err)
 				}
 				if err := runOccurrenceProbe(peer.ctx, o, operation, "FORBIDDEN_RETRY"); !errors.Is(err, errClientOccurrenceFenced) {

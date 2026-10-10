@@ -11252,6 +11252,14 @@ tool_model:
         work lease owns the SDK, callbacks, database and possession through complete retirement; it creates no
         standing service, executable target or enabled business binding. Parent retirement cancels and joins that
         connection. A failed drain or close keeps both possession and runtime work until explicit complete cleanup.
+        Concurrent close callers wait through cancellation-aware serialization; expiration returns the caller's
+        cancellation without releasing or canceling another cleanup owner's retained work or possession.
+        Caller cancellation fences a pending SDK dial or handshake and returns from the individual wait without
+        permitting reconnect. The concrete attempt retains its transient runtime work through complete SDK and
+        occurrence joining, even if an internal SDK handshake wait outlives that caller. Quiescence, possession
+        release and final cleanup cannot run ahead of this work; an expired cleanup wait reports non-completion.
+        A successful connect instead detaches that caller's cancellation: the established
+        socket remains under the original connection/runtime lifetime, not the completed transient call.
         Each account admission additionally retains transient runtime work through its existing single release;
         runtime fencing refuses new admissions and quiescence cannot finish while such admission remains held.
         Health readback supplies a held account admission and exact connected occurrence observation, never a

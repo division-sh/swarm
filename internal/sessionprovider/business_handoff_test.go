@@ -98,7 +98,7 @@ func (f *activeInputFixture) installBusinessOccurrence(t *testing.T) {
 	f.setScope(channelonboarding.SessionInputBusiness)
 	f.bindCaptureCallbacks(t)
 	f.peer.attach(t, f.occurrence.client)
-	if err := f.occurrence.connect(); err != nil || !f.occurrence.client.WaitForConnection(5*time.Second) {
+	if err := f.occurrence.connect(f.occurrence.ctx); err != nil || !f.occurrence.client.WaitForConnection(5*time.Second) {
 		t.Fatal("reopened native connection", err)
 	}
 	reader, err := newSessionInputReader(f.state, f.spool)

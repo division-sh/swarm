@@ -137,7 +137,13 @@ func (o *clientOccurrence) bindPairing(scope pairingQRScope) (*pairingQR, error)
 	return pairing, nil
 }
 
-func (o *clientOccurrence) connect() error {
+func (o *clientOccurrence) connect(ctx context.Context) (err error) {
+	if ctx == nil {
+		return errClientOccurrenceFenced
+	}
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
 	o.mu.Lock()
 	if o.fenced || o.ctx.Err() != nil {
 		o.mu.Unlock()
@@ -154,12 +160,31 @@ func (o *clientOccurrence) connect() error {
 	o.started = true
 	o.inFlight++
 	o.mu.Unlock()
-	defer o.release()
-	if err := o.client.ConnectContext(o.ctx); err != nil {
+	defer func() {
+		o.release()
+		if err != nil {
+			err = errors.Join(err, o.join(context.WithoutCancel(o.ctx)))
+		}
+	}()
+	// The SDK retains its connect context for the socket's lifetime. Cancel
+	// that owned occurrence only while this caller's attempt is pending.
+	canceled := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
 		o.fence()
-		return err
+		close(canceled)
+	})
+	err = o.client.ConnectContext(o.ctx)
+	if !stop() {
+		<-canceled
 	}
-	return nil
+	err = errors.Join(err, context.Cause(ctx))
+	if err == nil && o.ctx.Err() != nil {
+		err = errClientOccurrenceFenced
+	}
+	if err != nil {
+		o.fence()
+	}
+	return err
 }
 
 func (o *clientOccurrence) acquire(ctx context.Context) (context.Context, func(), error) {

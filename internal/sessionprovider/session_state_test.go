@@ -47,7 +47,7 @@ func TestWhatsAppSessionStateRealSDKRestartRetainsExactAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	peer.attach(t, first.client)
-	if err := first.connect(); err != nil || !first.client.WaitForConnection(5*time.Second) {
+	if err := first.connect(first.ctx); err != nil || !first.client.WaitForConnection(5*time.Second) {
 		t.Fatal("first owned SDK connection failed", err)
 	}
 	if err := first.client.Store.Sessions.PutSession(context.Background(), "retained_peer.0", []byte("retained SDK session")); err != nil {
@@ -70,7 +70,7 @@ func TestWhatsAppSessionStateRealSDKRestartRetainsExactAccount(t *testing.T) {
 		t.Fatal("ordinary state close/reopen lost SDK state", err)
 	}
 	peer.attach(t, second.client)
-	if err := second.connect(); err != nil || !second.client.WaitForConnection(5*time.Second) {
+	if err := second.connect(second.ctx); err != nil || !second.client.WaitForConnection(5*time.Second) {
 		t.Fatal("retained owned SDK connection failed", err)
 	}
 	done := make(chan error, 1)

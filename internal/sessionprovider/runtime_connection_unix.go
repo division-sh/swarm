@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -39,7 +38,7 @@ type RuntimeConnectionOptions struct {
 // RuntimeConnection owns the actual SDK state and socket, not a registration
 // promise. Neither its zero value nor its readback can manufacture execution.
 type RuntimeConnection struct {
-	mu          sync.Mutex
+	lifecycle   chan struct{}
 	parent      *worklifetime.RuntimeOccurrence
 	work        *worklifetime.Lease
 	ctx         context.Context
@@ -70,7 +69,7 @@ func OpenRuntimeConnection(ctx context.Context, opts RuntimeConnectionOptions) (
 		return nil, err
 	}
 	owned, cancel := context.WithCancel(work.Context())
-	c := &RuntimeConnection{parent: parent, work: work, ctx: owned, cancel: cancel, closed: make(chan struct{}),
+	c := &RuntimeConnection{parent: parent, work: work, ctx: owned, cancel: cancel, closed: make(chan struct{}), lifecycle: make(chan struct{}, 1),
 		store: opts.Store, operation: op, plan: opts.Plan, credentials: opts.Credentials, directory: opts.Directory}
 	go c.joinRetirement()
 	if err := c.open(); err != nil {
@@ -136,8 +135,10 @@ func validateRuntimeConnectionPlan(plan packs.SatisfactionPlan, op channelonboar
 }
 
 func (c *RuntimeConnection) open() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	if err := c.lockLifecycle(c.ctx); err != nil {
+		return err
+	}
+	defer func() { <-c.lifecycle }()
 	if c.ctx.Err() != nil {
 		return errRuntimeConnection
 	}
@@ -193,7 +194,12 @@ func (c *RuntimeConnection) Connect(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	defer func() { err = errors.Join(err, work.Done()) }()
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			err = errors.Join(err, work.Done())
+		}
+	}()
 	if _, err := c.currentOperation(work.Context()); err != nil {
 		return err
 	}
@@ -201,7 +207,25 @@ func (c *RuntimeConnection) Connect(ctx context.Context) (err error) {
 	if occurrence == nil {
 		return errClientOccurrenceFenced
 	}
-	return occurrence.connect()
+	// Cancellation may stop the caller's wait before the SDK's handshake wait
+	// exits. The attempt retains this transient lease through its complete
+	// occurrence join; no dial or cleanup is abandoned on caller return.
+	done := make(chan error, 1)
+	handedOff = true
+	go func() {
+		err := occurrence.connect(work.Context())
+		done <- errors.Join(err, work.Done())
+	}()
+	select {
+	case err := <-done:
+		return errors.Join(err, context.Cause(ctx))
+	case <-ctx.Done():
+		occurrence.fence()
+		return context.Cause(ctx)
+	case <-c.ctx.Done():
+		occurrence.fence()
+		return context.Cause(c.ctx)
+	}
 }
 
 func (c *RuntimeConnection) CurrentValueMatchesSeal(ctx context.Context, expected credentials.ValueEvidence) (bool, error) {
@@ -288,11 +312,13 @@ func (c *RuntimeConnection) Close(ctx context.Context) error {
 	if c == nil {
 		return nil
 	}
-	if ctx == nil || c.closed == nil || c.cancel == nil || c.work == nil {
+	if ctx == nil || c.closed == nil || c.cancel == nil || c.work == nil || c.lifecycle == nil {
 		return errRuntimeConnection
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	if err := c.lockLifecycle(ctx); err != nil {
+		return err
+	}
+	defer func() { <-c.lifecycle }()
 	select {
 	case <-c.closed:
 		return c.closeErr
@@ -312,6 +338,24 @@ func (c *RuntimeConnection) Close(ctx context.Context) error {
 	c.closeErr = nil
 	close(c.closed)
 	return nil
+}
+
+// The cleanup owner retains resources while joining. Other callers only wait
+// for serialization and may cancel that wait without canceling its cleanup.
+func (c *RuntimeConnection) lockLifecycle(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	select {
+	case c.lifecycle <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-c.lifecycle
+			return context.Cause(ctx)
+		}
+		return nil
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	}
 }
 
 var _ operatorchannel.SessionAdmissionOwner = (*RuntimeConnection)(nil)
