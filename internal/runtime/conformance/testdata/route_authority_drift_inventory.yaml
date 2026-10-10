@@ -808,7 +808,10 @@ seam_families:
       - platform-spec.yaml
       - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/core/pinrouting/connect_scoped_candidates_test.go
+      - internal/runtime/core/pinrouting/connect_receiver_binding_test.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/connect_instance_selection.go
+      - internal/runtime/bus/indexed_connect_receivers.go
       - internal/runtime/bus/connect_candidate_scope_test.go
       - internal/runtime/bus/a9_existing_selection_probe_test.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
@@ -880,6 +883,7 @@ seam_families:
       - internal/runtime/template_instance_delivery_test.go
       - internal/runtime/conformance/fan_in_barrier_runtime_conformance_test.go
       - internal/runtime/conformance/notify_all_children_runtime_conformance_test.go
+      - internal/runtime/conformance/template_instance_semantic_ownership_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
       - internal/store/internal/runtimepersistence/flow_instance_descriptor_authority_test.go
       - internal/store/internal/runtimepersistence/flow_instance_descriptors_sqlite_test.go

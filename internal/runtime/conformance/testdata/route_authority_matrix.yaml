@@ -423,7 +423,7 @@ rows:
       - {kind: issue, issue: 1479}
       - {kind: issue, issue: 1494}
       - {kind: issue, issue: 1545}
-      - {kind: go_test, name: TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution}
+      - {kind: go_test, name: TestConnectLookupScopeRejectsForeignInventoryAndIndependentErrors}
       - {kind: go_test, name: TestCompileConnectPlansUsesSelectInputResolution}
       - {kind: go_test, name: TestConnectRoutePlanProductionAPIHasNoRetiredIdentityOrPolicyFacts}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget}

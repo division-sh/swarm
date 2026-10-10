@@ -188,7 +188,7 @@ func validatePubsubExactCoordinates(scope pipeline.FlowInstanceLookupScope, obse
 // PubsubReceiverDefinitions binds source-owned subscription definitions to an
 // identity admitted by the caller. It grants neither existence nor readiness.
 func (rt *RouteTable) PubsubReceiverDefinitions(runID string, instance flowidentity.Instance, keys []string) ([]Subscriber, error) {
-	if rt == nil || !rt.compiledSourceReady {
+	if rt == nil || rt.source == nil || !rt.compiledSourceReady {
 		return nil, fmt.Errorf("pubsub binding requires its compiled source")
 	}
 	if err := instance.ValidateConstruction(rt.source, runID); err != nil {
@@ -208,7 +208,7 @@ func (rt *RouteTable) PubsubReceiverDefinitions(runID string, instance flowident
 // PubsubDeclarationDefinitions is non-executing descriptive data. Like its
 // connection counterpart it cannot establish an instance or attach resources.
 func (rt *RouteTable) PubsubDeclarationDefinitions(flowID string, keys []string) ([]Subscriber, error) {
-	if rt == nil || !rt.compiledSourceReady {
+	if rt == nil || rt.source == nil || !rt.compiledSourceReady {
 		return nil, fmt.Errorf("pubsub declaration requires its compiled source")
 	}
 	scope, found := rt.source.FlowScopeByID(flowID)
