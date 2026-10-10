@@ -312,6 +312,74 @@ func newR7KeylessIndexProof(t *testing.T, backend string) (receiverConfigActivat
 	return f, plan
 }
 
+func TestR7DirectoryScopedInventoryIgnoresAmbientRunBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f, first := newR7KeylessIndexProof(t, backend)
+			source := semanticview.Wrap(f.bundle)
+			fact, _ := correlation.SourceArtifactFactFromContext(f.ctx)
+			standing, err := f.workflows.ReconcileStandingService(f.ctx, pipeline.StandingServiceCandidate{
+				BindingEnabled: true, ServiceID: flowidentity.StandingServiceID("."), FlowPath: ".", Source: fact,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			secondCtx := correlation.WithRunID(f.ctx, standing.RunID)
+			request := sqliteFlowActivationRequest(f.bundle, ".", standing.RunID, "", standing.RunID)
+			request.Instance = flowidentity.Stored(source, ".", standing.RunID, standing.RunID, standing.RunID, "")
+			second, err := f.manager.PrepareFlowInstanceActivation(secondCtx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(secondCtx, second); err != nil {
+				t.Fatal(err)
+			}
+			index := f.store.(pipeline.FlowInstanceIndexReader)
+			for _, check := range []struct {
+				root pipeline.FlowInstanceActivationPlan
+				ctx  context.Context
+			}{
+				{first, secondCtx},
+				{second, f.ctx},
+			} {
+				runID := check.root.Readiness.RunID
+				scope, err := pipeline.NewFlowInstanceLookupScope(source, fact, runID, []string{"detail"}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				observations, err := index.ListFlowInstances(check.ctx, scope)
+				if err != nil || len(observations) != 1 {
+					t.Fatalf("explicit run scope lost fieldless construction: %+v err=%v", observations, err)
+				}
+				observed := observations[0]
+				if observed.Owner().RunID != runID || observed.Identity().TemplateID != "detail" || observed.Identity().ParentEntityID != check.root.Identity.EntityID || observed.Identity().ParentRoute.FlowInstance != check.root.Identity.InstancePath {
+					t.Fatalf("inventory borrowed an ambient run or unrelated parent: %+v", observed.Identity())
+				}
+				instance, err := observed.WorkflowInstance()
+				if err != nil || instance.Mode != "static" || instance.StageDefined || len(instance.Fields) != 0 {
+					t.Fatalf("inventory still depends on template-only entity state: %+v err=%v", instance, err)
+				}
+				empty, err := pipeline.NewFlowInstanceLookupScope(source, fact, runID, nil, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if observations, err := index.ListFlowInstances(check.ctx, empty); err != nil || len(observations) != 0 {
+					t.Fatalf("empty scope became an unbounded instance census: %+v err=%v", observations, err)
+				}
+			}
+			if _, err := index.ListFlowInstances(f.ctx, pipeline.FlowInstanceLookupScope{}); err == nil {
+				t.Fatal("inventory accepted an unadmitted scope")
+			}
+			if _, err := pipeline.NewFlowInstanceLookupScope(source, fact, "", []string{"detail"}, nil); err == nil {
+				t.Fatal("inventory filled its missing run from ambient context")
+			}
+			if _, err := pipeline.NewFlowInstanceLookupScope(source, fact, first.Readiness.RunID, []string{"unknown"}, nil); err == nil {
+				t.Fatal("inventory accepted an unknown declaration")
+			}
+		})
+	}
+}
+
 func TestR7DirectoryUnconstructedStandingRunHasNoObservationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
