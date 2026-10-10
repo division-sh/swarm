@@ -208,7 +208,7 @@ func TestWhatsAppSDKStoreDeviceSaveKeepsEveryStateFieldGuarded(t *testing.T) {
 }
 
 func TestWhatsAppSDKStoreRefusesImplicitAndRetiredLogout(t *testing.T) {
-	for _, mode := range []string{"implicit", "explicit", "retired"} {
+	for _, mode := range []string{"implicit", "undrained_explicit", "explicit", "retired"} {
 		t.Run(mode, func(t *testing.T) {
 			_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
 			device := newSDKDeviceFixture(t, container)
@@ -222,6 +222,11 @@ func TestWhatsAppSDKStoreRefusesImplicitAndRetiredLogout(t *testing.T) {
 			}
 			if mode == "retired" {
 				guard.fence.fence()
+			}
+			if mode == "explicit" {
+				if err := guard.fence.quiesceForLogout(ctx); err != nil {
+					t.Fatal(err)
+				}
 			}
 			originalID := *device.ID
 			err = device.Delete(ctx)

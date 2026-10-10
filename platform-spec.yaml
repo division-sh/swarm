@@ -11310,6 +11310,10 @@ tool_model:
         most one unlink. Cancellation or retirement while waiting for the drain grants no send, local deletion or
         adoption of the reservation by another caller. In-flight admitted work is joined rather than silently canceled
         to make logout possible. Unbind, reset, proof revoke, source retirement and ordinary stop retain pairing.
+        Callback admission is fenced and its existing capture/failure-evidence owner joins before unlink. The private
+        SDK-store owner then quiesces new ordinary work and drains admitted transactions; inherited transaction work
+        may complete, but ended transaction contexts grant nothing. This quiescence keeps only the exact current
+        explicit deletion permit available after the drain; it never grants deletion after ordinary retirement.
       session_private_directory_component: >
         On supported Linux and Darwin hosts, the concrete connection directory is keyed by the retained connection
         UUID under an existing private runtime-state base, never source hash, run or process occurrence. Directory,
