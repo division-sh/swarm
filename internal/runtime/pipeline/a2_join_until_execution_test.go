@@ -13,10 +13,9 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestA2UntilClosesMultipleJoinsAndPreservesOrdinaryHandlerOnBothStores(t *testing.T) {
+func VerifyNativeA2UntilClosesMultipleJoinsAndPreservesOrdinaryHandlerOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, backend := range workflowJoinStoreCases() {
 		t.Run(backend.name, func(t *testing.T) {
-			h := newExactWorkflowJoinHarness(t, backend, "orders", "awaiting", []any{"a", "b"})
 			files := workflowJoinLifecycleFixtureFiles(false, "")
 			files["orders/events.yaml"] += "halt.requested:\nfirst.closed:\nsecond.closed:\nhalt.observed:\nalternate.completed:\n  member_id: text\n  result: ItemResult\n"
 			files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "on_complete: {advances_to: ready}", "until: halt.requested\n        on_complete: {emit: {event: first.closed}}", 1)
@@ -31,19 +30,13 @@ func TestA2UntilClosesMultipleJoinsAndPreservesOrdinaryHandlerOnBothStores(t *te
     halt.requested:
       emit: {event: halt.observed}
 `
-			h.bundle = loadWorkflowTempBundle(t, files)
-			h.source.Source = semanticview.Wrap(h.bundle)
-			h.source.plans = nil
+			bundle := loadWorkflowTempBundle(t, files)
+			h := newNativeExactWorkflowJoinHarness(t, backend.name, "orders", "awaiting", []any{"a", "b"}, bundle, open)
 			node := pipelineNode(t, "orders", "join-node")
-			for _, plan := range h.bundle.Semantics.Joins {
-				if plan.Node.Equal(node) {
-					h.source.plans = append(h.source.plans, plan)
-				}
-			}
 			if len(h.source.plans) != 2 {
-				t.Fatalf("compiled until consumers = %#v", h.source.plans)
+				t.Fatalf("until fixture joins=%d, want two", len(h.source.plans))
 			}
-			h.pc = h.newCoordinator()
+
 			if err := applyTestInitialEntryEffect(h.ctx, h.pc, h.route, h.entityID); err != nil {
 				t.Fatal(err)
 			}
@@ -52,7 +45,7 @@ func TestA2UntilClosesMultipleJoinsAndPreservesOrdinaryHandlerOnBothStores(t *te
 			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 				FlowID: "orders", FlowInstance: h.path, EntityID: h.entityID,
 			})}
-			ctx, err := persistWorkflowJoinPublicationForTest(t, h.pc, h.ctx, event, route, true)
+			ctx, err := nativeWorkflowJoinPublicationContextForTest(t, h.fixture, h.pc, h.ctx, event, route, true)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -100,16 +93,16 @@ func TestA2UntilClosesMultipleJoinsAndPreservesOrdinaryHandlerOnBothStores(t *te
 			if !resolved.Matched || len(resolved.Handler.JoinUntilPlans) != 2 || resolved.Handler.Emit.Event != h.source.ResolveExecutableNodeEventReference(node, "halt.observed") {
 				t.Fatalf("ordinary and compiled consumers were not composed: matched=%v plans=%d emit=%q key=%q", resolved.Matched, len(resolved.Handler.JoinUntilPlans), resolved.Handler.Emit.Event, resolved.HandlerEventKey)
 			}
-			before := h.bus.outboxCount()
-			result, err := executeClaimedWorkflowJoinForTest(t, h.pc, ctx, node, resolved.Handler, workflowTriggerContext{Event: event,
+			before := h.bus.committedCount()
+			result, err := executeNativeClaimedPipelineHandlerForTest(t, h.pc, ctx, node, resolved.Handler, workflowTriggerContext{Event: event,
 				State: mustCurrentWorkflowState(t, h.pc, ctx, h.route, h.entityID), HandlerEventKey: resolved.HandlerEventKey})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if h.bus.outboxCount() != before+1 || h.bus.outboxIntent(before).Event.Type() != observed {
+			if h.bus.committedCount() != before+1 || h.bus.persistedPublishedEvent(t, h.fixture, h.ctx, before).Type() != observed {
 				var emitted []events.EventType
-				for i := before; i < h.bus.outboxCount(); i++ {
-					emitted = append(emitted, h.bus.outboxIntent(i).Event.Type())
+				for i := before; i < h.bus.committedCount(); i++ {
+					emitted = append(emitted, h.bus.persistedPublishedEvent(t, h.fixture, h.ctx, i).Type())
 				}
 				t.Fatalf("until suppressed or duplicated the ordinary handler: emitted=%v expected=%q committed=%v", emitted, observed, result.Committed)
 			}
@@ -132,7 +125,7 @@ func TestA2UntilClosesMultipleJoinsAndPreservesOrdinaryHandlerOnBothStores(t *te
 				}
 			}
 			h.restart()
-			schedules, _ := committedWorkflowSchedulesForTest(t, h.store)
+			schedules, _ := h.mutations.schedules()
 			for _, arm := range arms {
 				fired := false
 				for _, schedule := range schedules {
@@ -159,8 +152,8 @@ func TestA2UntilClosesMultipleJoinsAndPreservesOrdinaryHandlerOnBothStores(t *te
 				}
 			}
 			counts := map[events.EventType]int{}
-			for i := 0; i < h.bus.outboxCount(); i++ {
-				counts[h.bus.outboxIntent(i).Event.Type()]++
+			for i := 0; i < h.bus.committedCount(); i++ {
+				counts[h.bus.persistedPublishedEvent(t, h.fixture, h.ctx, i).Type()]++
 			}
 			if counts[firstClosed] != 1 || counts[secondClosed] != 1 || counts[observed] != 1 {
 				t.Fatalf("continuations were broadcast or repeated: %#v", counts)

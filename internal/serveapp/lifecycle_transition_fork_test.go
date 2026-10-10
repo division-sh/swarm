@@ -54,7 +54,7 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 				stage = "drafting"
 				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, stage)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "fork-pause"})
 			frontierEvent := "work.observed"
 			frontierPayload := map[string]any{"seed": true}
@@ -72,7 +72,7 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 || !reflect.DeepEqual(fork, duplicate) {
 				t.Fatalf("fork=%#v duplicate=%#v", fork, duplicate)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 			if gate {
 				requireLifecycleFrozenGateControlRefusal(t, rt, seed.RunID, parentCard, fork.ForkRunID)
 			} else {

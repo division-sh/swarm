@@ -196,11 +196,11 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	}
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
 	assertEventPublishDeliveriesContain(t, deliveries, "node", eventPublishScanNodeID(t), "pending", 1)
-	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count = %d, want 1", count)
 	}
 	assertExistingRunEventPublishPersistence(t, db, runID, eventID, "cli-publish:"+actorTokenID(testToken))
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
+	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
 	got := requireAPIV1RuntimeBusEvent(t, ch, "event.publish delivery")
@@ -222,7 +222,7 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	}
 	assertEventPublishDeliveriesContain(t, replayDeliveries, "agent", "scan-orchestrator", "pending", 1)
 	assertEventPublishDeliveriesContain(t, replayDeliveries, "node", eventPublishScanNodeID(t), "pending", 1)
-	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
 	}
 
@@ -233,7 +233,7 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	if data := asMap(t, conflict.Error.Data); data["code"] != IdempotencyConflictCode {
 		t.Fatalf("event.publish conflict data = %#v", data)
 	}
-	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after conflict = %d, want 1", count)
 	}
 }
@@ -285,13 +285,13 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
 	assertEventPublishDeliveriesContain(t, deliveries, "node", eventPublishScanNodeID(t), "pending", 1)
 	assertExistingRunEventPublishPersistence(t, db, runID, eventID, "cli-publish:"+actorTokenID(testToken))
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
+	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows before dispatch release = %d, want 1", count)
 	}
 
 	probe.RequirePostCommitDispatchStarted(eventID)
 	requireNoAPIV1RuntimeBusEvent(t, ch, "event.publish delivery before post-commit release")
-	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, eventID); got != 0 {
 		t.Fatalf("pipeline receipts before post-commit release = %d, want 0", got)
 	}
 
@@ -301,7 +301,7 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
 	}
 	probe.RequirePostCommitDispatchCompleted(eventID)
-	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, eventID); got != 1 {
 		t.Fatalf("pipeline receipts after post-commit release = %d, want 1", got)
 	}
 }
@@ -333,7 +333,7 @@ func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *t
 	}
 	assertEventPublishDeliveryIdentity(t, asMap(t, deliveries[0]), "node", eventPublishScanNodeID(t), "pending", 1)
 	assertSQLiteEventPublishRows(t, storetest.DatabaseForTest(sqliteStore), runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
-	if count := countSQLiteAPIIdempotencyRows(t, storetest.DatabaseForTest(sqliteStore)); count != 1 {
+	if count := countAPIIdempotencyRows(t, sqliteStore); count != 1 {
 		t.Fatalf("sqlite api_idempotency rows = %d, want 1", count)
 	}
 
@@ -345,7 +345,7 @@ func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *t
 	if replayResult["event_id"] != eventID || replayResult["run_id"] != runID {
 		t.Fatalf("sqlite replay result = %#v, want original event/run", replayResult)
 	}
-	if count := countSQLiteEventsByName(t, storetest.DatabaseForTest(sqliteStore), "scan.requested"); count != 1 {
+	if count := countEventsByName(t, sqliteStore, "scan.requested"); count != 1 {
 		t.Fatalf("sqlite event rows after replay = %d, want 1", count)
 	}
 
@@ -356,7 +356,7 @@ func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *t
 	if data := asMap(t, conflict.Error.Data); data["code"] != IdempotencyConflictCode {
 		t.Fatalf("sqlite idempotency conflict data = %#v", data)
 	}
-	if count := countSQLiteEventsByName(t, storetest.DatabaseForTest(sqliteStore), "scan.requested"); count != 1 {
+	if count := countEventsByName(t, sqliteStore, "scan.requested"); count != 1 {
 		t.Fatalf("sqlite event rows after conflict = %d, want 1", count)
 	}
 
@@ -364,10 +364,10 @@ func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *t
 	if nonIDEM.Error != nil {
 		t.Fatalf("sqlite non-idempotent event.publish error = %#v", nonIDEM.Error)
 	}
-	if count := countSQLiteEventsByName(t, storetest.DatabaseForTest(sqliteStore), "scan.requested"); count != 2 {
+	if count := countEventsByName(t, sqliteStore, "scan.requested"); count != 2 {
 		t.Fatalf("sqlite event rows after non-idempotent publish = %d, want 2", count)
 	}
-	if count := countSQLiteAPIIdempotencyRows(t, storetest.DatabaseForTest(sqliteStore)); count != 1 {
+	if count := countAPIIdempotencyRows(t, sqliteStore); count != 1 {
 		t.Fatalf("sqlite api_idempotency rows after non-idempotent publish = %d, want 1", count)
 	}
 }
@@ -398,20 +398,19 @@ func TestOperatorEventPublishSQLitePayloadFailureLeavesNoIdempotencyCompletionOr
 	if data := asMap(t, resp.Error.Data); data["code"] != PayloadValidationFailedCode {
 		t.Fatalf("sqlite payload validation data = %#v", data)
 	}
-	if count := countSQLiteEventsByName(t, storetest.DatabaseForTest(sqliteStore), "scan.requested"); count != 0 {
+	if count := countEventsByName(t, sqliteStore, "scan.requested"); count != 0 {
 		t.Fatalf("sqlite event rows after failed publish = %d, want 0", count)
 	}
-	if count := countSQLiteAllRunRows(t, storetest.DatabaseForTest(sqliteStore)); count != 0 {
+	if count := countAllRunRows(t, sqliteStore); count != 0 {
 		t.Fatalf("sqlite run rows after failed publish = %d, want 0", count)
 	}
-	if count := countSQLiteAPIIdempotencyRows(t, storetest.DatabaseForTest(sqliteStore)); count != 0 {
+	if count := countAPIIdempotencyRows(t, sqliteStore); count != 0 {
 		t.Fatalf("sqlite api_idempotency rows after failed publish = %d, want 0", count)
 	}
 }
 
 func TestOperatorEventPublishRejectsPrivateFlowDespiteLiveRecipient(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(flowScopedEventPublishTestBundle())
 	canonicalEventName := "repo-scaffold/repo_scaffold.repo_commit_succeeded"
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -455,10 +454,10 @@ func TestOperatorEventPublishRejectsPrivateFlowDespiteLiveRecipient(t *testing.T
 	if data["code"] != EventNotDeclaredCode || asMap(t, data["details"])["reason"] != "selected_root_input_required" {
 		t.Fatalf("private recipient rejection = %#v", published.Error)
 	}
-	if got := countAllEventRows(t, db); got != 0 {
+	if got := countAllEventRows(t, pg); got != 0 {
 		t.Fatalf("private publication wrote %d events", got)
 	}
-	if got := countAPIIdempotencyRows(t, db); got != 0 {
+	if got := countAPIIdempotencyRows(t, pg); got != 0 {
 		t.Fatalf("private publication wrote %d receipts", got)
 	}
 	select {
@@ -513,10 +512,10 @@ func TestOperatorEventPublishSQLiteRejectsPrivateOrdinaryFlowEndpoint(t *testing
 	if data["code"] != EventNotDeclaredCode || asMap(t, data["details"])["reason"] != "selected_root_input_required" {
 		t.Fatalf("private input rejection = %#v", published.Error)
 	}
-	if got := countSQLiteEventsByName(t, storetest.DatabaseForTest(selected), canonicalEventName); got != 0 {
+	if got := countEventsByName(t, selected, canonicalEventName); got != 0 {
 		t.Fatalf("private publication wrote %d events", got)
 	}
-	if countSQLiteAllRunRows(t, storetest.DatabaseForTest(selected)) != 0 || countSQLiteAPIIdempotencyRows(t, storetest.DatabaseForTest(selected)) != 0 {
+	if countAllRunRows(t, selected) != 0 || countAPIIdempotencyRows(t, selected) != 0 {
 		t.Fatal("private publication wrote a run or receipt")
 	}
 }
@@ -538,11 +537,11 @@ func TestOperatorEventPublishRootEventNameWinsOverFlowLeafAliases(t *testing.T) 
 	result := asMap(t, published.Result)
 	eventID := stringValue(t, result["event_id"], "event_id")
 	runID := stringValue(t, result["run_id"], "run_id")
-	if got := countEventsByName(t, db, "item.received"); got != 1 {
+	if got := countEventsByName(t, pg, "item.received"); got != 1 {
 		t.Fatalf("item.received event count = %d, want 1", got)
 	}
 	for _, flowEventName := range []string{"alpha-flow/item.received", "beta-flow/item.received"} {
-		if got := countEventsByName(t, db, flowEventName); got != 0 {
+		if got := countEventsByName(t, pg, flowEventName); got != 0 {
 			t.Fatalf("%s event count = %d, want 0", flowEventName, got)
 		}
 	}
@@ -551,8 +550,7 @@ func TestOperatorEventPublishRootEventNameWinsOverFlowLeafAliases(t *testing.T) 
 
 func TestOperatorEventPublishFlowScopedEventNameFailuresFailClosed(t *testing.T) {
 	t.Run("unknown flow scoped event", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(flowScopedEventPublishTestBundle())
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -572,12 +570,11 @@ func TestOperatorEventPublishFlowScopedEventNameFailuresFailClosed(t *testing.T)
 		if details["event_name"] != "repo-scaffold/repo_scaffold.missing" || details["reason"] != "selected_root_input_required" {
 			t.Fatalf("unknown flow-scoped details = %#v", details)
 		}
-		assertNoFlowScopedEventPublishPersistence(t, db)
+		assertNoFlowScopedEventPublishPersistence(t, pg)
 	})
 
 	t.Run("ambiguous unscoped leaf", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(ambiguousFlowScopedEventPublishTestBundle())
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -597,13 +594,12 @@ func TestOperatorEventPublishFlowScopedEventNameFailuresFailClosed(t *testing.T)
 		if details["event_name"] != "workflow.completed" || details["reason"] != "selected_root_input_required" {
 			t.Fatalf("ambiguous leaf details = %#v", details)
 		}
-		assertNoFlowScopedEventPublishPersistence(t, db)
+		assertNoFlowScopedEventPublishPersistence(t, pg)
 	})
 }
 
 func TestOperatorEventPublishHandlersRequireCanonicalBundleHashForCreateNewWork(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -613,7 +609,7 @@ func TestOperatorEventPublishHandlersRequireCanonicalBundleHashForCreateNewWork(
 
 	resp := rpcCall(t, handler, eventPublishBodyWithRetiredBundleInput("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-publish-retired"))
 	assertInvalidRunStartParam(t, resp, retiredBundleInputName())
-	assertNoEventPublishPersistence(t, db)
+	assertNoEventPublishPersistence(t, pg)
 }
 
 func TestOperatorEventPublishPostgresUsesPublisherScopeWithPlainRequestContext(t *testing.T) {
@@ -637,7 +633,7 @@ func TestOperatorEventPublishPostgresUsesPublisherScopeWithPlainRequestContext(t
 	eventID := stringValue(t, result["event_id"], "event_id")
 	runID := stringValue(t, result["run_id"], "run_id")
 	assertExistingRunEventPublishPersistence(t, db, runID, eventID, "cli-publish:"+actorTokenID(testToken))
-	if got := countEventsByName(t, db, "scan.requested"); got != 1 {
+	if got := countEventsByName(t, pg, "scan.requested"); got != 1 {
 		t.Fatalf("scan.requested event count = %d, want 1", got)
 	}
 	got := requireAPIV1RuntimeBusEvent(t, ch, "event.publish delivery")
@@ -737,10 +733,10 @@ func TestOperatorEventPublishReturnsStoredCompletionWithoutPostCommitReadback(t 
 	if first.Error != nil {
 		t.Fatalf("first event.publish error = %#v", first.Error)
 	}
-	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count = %d, want 1", count)
 	}
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
+	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
 	var storedResponse []byte
@@ -781,7 +777,7 @@ func TestOperatorEventPublishReturnsStoredCompletionWithoutPostCommitReadback(t 
 	if eventID != firstEventID || runID != firstRunID {
 		t.Fatalf("replay identity = %s/%s, want stored %s/%s", eventID, runID, firstEventID, firstRunID)
 	}
-	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
 	}
 	if observability.calls != 0 {
@@ -796,8 +792,7 @@ func TestOperatorEventPublishReturnsStoredCompletionWithoutPostCommitReadback(t 
 }
 
 func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	failing := &failStandalonePipelineReceiptOnceStore{
 		PostgresStore: pg,
 		obligations: &failAPIPipelineSettlementOnceStore{
@@ -826,16 +821,16 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 	result := asMap(t, published.Result)
 	eventID := stringValue(t, result["event_id"], "event_id")
 	probe.RequirePostCommitDispatchCompleted(eventID)
-	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after post-commit receipt failure = %d, want 1", count)
 	}
-	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
+	if got := countEventDeliveriesForEvent(t, ctx, pg, eventID); got != 1 {
 		t.Fatalf("event deliveries after post-commit receipt failure = %d, want 1", got)
 	}
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
+	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows after post-commit receipt failure = %d, want 1", count)
 	}
-	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, eventID); got != 0 {
 		t.Fatalf("pipeline receipts after injected failure = %d, want 0", got)
 	}
 	missing, ok, err := claimNextAPIPipelineWork(t, ctx, pg.PipelineObligations())
@@ -857,17 +852,16 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 	if replayEventID := stringValue(t, asMap(t, replay.Result)["event_id"], "event_id"); replayEventID != eventID {
 		t.Fatalf("event.publish replay event_id = %q, want original %q", replayEventID, eventID)
 	}
-	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
 	}
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
+	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows after replay = %d, want 1", count)
 	}
 }
 
 func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	failing := &failNormalRunCompletionStore{
 		PostgresStore: pg,
 		err:           errors.New("simulated normal-run completion failure"),
@@ -892,17 +886,17 @@ func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(
 	}
 	result := asMap(t, published.Result)
 	eventID := stringValue(t, result["event_id"], "event_id")
-	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after post-commit completion failure = %d, want 1", count)
 	}
-	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
+	if got := countEventDeliveriesForEvent(t, ctx, pg, eventID); got != 1 {
 		t.Fatalf("event deliveries after post-commit completion failure = %d, want 1", got)
 	}
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
+	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows after post-commit completion failure = %d, want 1", count)
 	}
 	probe.RequirePostCommitDispatchCompleted(eventID)
-	outcome, failure := loadPipelineReceiptOutcomeAndFailure(t, ctx, db, eventID)
+	outcome, failure := loadPipelineReceiptOutcomeAndFailure(t, ctx, pg, eventID)
 	if outcome != "success" || failure != nil {
 		t.Fatalf("pipeline receipt outcome=%q failure=%#v, want successful processing acknowledgement", outcome, failure)
 	}
@@ -915,10 +909,10 @@ func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(
 	if replayEventID := stringValue(t, asMap(t, replay.Result)["event_id"], "event_id"); replayEventID != eventID {
 		t.Fatalf("event.publish replay event_id = %q, want original %q", replayEventID, eventID)
 	}
-	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after replay = %d, want 1", count)
 	}
-	if count := countAPIIdempotencyRows(t, db); count != 1 {
+	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows after replay = %d, want 1", count)
 	}
 }
@@ -951,8 +945,8 @@ func TestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError(t *tes
 	if details["event_name"] != "scan.requested" || details["phase"] != "publish" || !strings.Contains(fmt.Sprint(details["reason"]), "simulated pre-commit replay scope failure") {
 		t.Fatalf("event.publish pre-commit error details = %#v", details)
 	}
-	assertNoEventPublishPersistence(t, db)
-	if got := countAllEventDeliveries(t, db); got != 0 {
+	assertNoEventPublishPersistence(t, pg)
+	if got := countAllEventDeliveries(t, pg); got != 0 {
 		t.Fatalf("event_deliveries rows after pre-commit failure = %d, want 0", got)
 	}
 	if _, err := db.ExecContext(ctx, `SELECT 1`); err != nil {
@@ -961,8 +955,7 @@ func TestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError(t *tes
 }
 
 func TestOperatorEventPublishIsUnavailableWithoutDurableAckPublisher(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	publisher := &plainEventPublisher{}
 	handler := eventPublishTestHandlerWithStores(t, pg, pg, pg, publisher, source)
@@ -983,15 +976,14 @@ func TestOperatorEventPublishIsUnavailableWithoutDurableAckPublisher(t *testing.
 	if publisher.publishCalls != 0 {
 		t.Fatalf("plain Publish calls = %d, want 0", publisher.publishCalls)
 	}
-	assertNoEventPublishPersistence(t, db)
-	if got := countAllEventDeliveries(t, db); got != 0 {
+	assertNoEventPublishPersistence(t, pg)
+	if got := countAllEventDeliveries(t, pg); got != 0 {
 		t.Fatalf("event_deliveries rows after missing durable ack publisher = %d, want 0", got)
 	}
 }
 
 func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -1023,7 +1015,7 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 	}
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
 	assertEventPublishDeliveriesContain(t, deliveries, "node", eventPublishScanNodeID(t), "pending", 1)
-	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after targeted publish = %d, want 2", count)
 	}
 	got := requireAPIV1RuntimeBusEventID(t, ch, targetedEventID, "targeted explicit-run delivery")
@@ -1038,7 +1030,7 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 	if data := asMap(t, mismatch.Error.Data); data["code"] != BundleMismatchCode {
 		t.Fatalf("mismatched run bundle data = %#v, want %s", data, BundleMismatchCode)
 	}
-	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after mismatched target = %d, want 2", count)
 	}
 
@@ -1065,7 +1057,7 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 	if data := asMap(t, terminal.Error.Data); data["code"] != RunAlreadyTerminalCode {
 		t.Fatalf("terminal run data = %#v, want %s", data, RunAlreadyTerminalCode)
 	}
-	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after failed targets = %d, want 2", count)
 	}
 }
@@ -1110,16 +1102,16 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
 	assertEventPublishDeliveriesContain(t, deliveries, "node", identitytest.RootNode(t, "scan-orchestrator").Key(), "pending", 1)
 	assertEventPublishEventRow(t, db, runID, followUpEventID, "scan.followup", "operator-test")
-	if got := countRunRowsByID(t, db, runID); got != 1 {
+	if got := countRunRowsByID(t, pg, runID); got != 1 {
 		t.Fatalf("run rows for selected run = %d, want 1", got)
 	}
-	if got := countAllRunRows(t, db); got != 1 {
+	if got := countAllRunRows(t, pg); got != 1 {
 		t.Fatalf("all run rows after follow-up = %d, want 1", got)
 	}
-	if got := countEventRowsByRunID(t, db, runID); got != 2 {
+	if got := countEventRowsByRunID(t, pg, runID); got != 2 {
 		t.Fatalf("events for selected run = %d, want 2", got)
 	}
-	if got := countEventDeliveriesForEvent(t, ctx, db, followUpEventID); got != 1 {
+	if got := countEventDeliveriesForEvent(t, ctx, pg, followUpEventID); got != 1 {
 		t.Fatalf("agent event_deliveries for follow-up = %d, want 1", got)
 	}
 	got := requireAPIV1RuntimeBusEventID(t, followUpCh, followUpEventID, "follow-up delivery")
@@ -1139,10 +1131,10 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 	if details["reason"] != "declared_event_has_no_selected_run_recipient" {
 		t.Fatalf("unhandled follow-up details = %#v", details)
 	}
-	if got := countAllEventRows(t, db); got != 2 {
+	if got := countAllEventRows(t, pg); got != 2 {
 		t.Fatalf("event rows after rejected follow-up = %d, want 2", got)
 	}
-	if got := countAPIIdempotencyRows(t, db); got != 2 {
+	if got := countAPIIdempotencyRows(t, pg); got != 2 {
 		t.Fatalf("api_idempotency rows after rejected follow-up = %d, want 2", got)
 	}
 }
@@ -1199,10 +1191,10 @@ func TestOperatorEventPublishPrivateTargetCannotAuthorizePublication(t *testing.
 	if data["code"] != EventNotDeclaredCode || asMap(t, data["details"])["reason"] != "selected_root_input_required" {
 		t.Fatalf("private target rejection = %#v", targeted.Error)
 	}
-	if got := countEventRowsByRunID(t, db, runID); got != 1 {
+	if got := countEventRowsByRunID(t, pg, runID); got != 1 {
 		t.Fatalf("private target wrote events: %d", got)
 	}
-	if got := countAPIIdempotencyRows(t, db); got != 1 {
+	if got := countAPIIdempotencyRows(t, pg); got != 1 {
 		t.Fatalf("private target wrote an idempotency receipt: %d", got)
 	}
 }
@@ -1322,7 +1314,6 @@ func TestPublicEventInputEligibilityIgnoresChildAndCatalogOnlyOwners(t *testing.
 func TestOperatorEventPublishMissingTemplateInputFailsClosedBeforeLowerPrecedencePublication(t *testing.T) {
 	type fixture struct {
 		store canonicalEventPublishProofStore
-		db    *sql.DB
 	}
 	for _, backend := range []struct {
 		name string
@@ -1332,14 +1323,14 @@ func TestOperatorEventPublishMissingTemplateInputFailsClosedBeforeLowerPrecedenc
 			name: "sqlite",
 			open: func(t *testing.T, ctx context.Context) fixture {
 				selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return fixture{store: selected, db: storetest.DatabaseForTest(selected)}
+				return fixture{store: selected}
 			},
 		},
 		{
 			name: "postgres",
 			open: func(t *testing.T, _ context.Context) fixture {
-				_, db, _ := testutil.StartPostgres(t)
-				return fixture{store: storetest.AdmitPostgresRuntimeStore(t, db), db: db}
+				selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+				return fixture{store: selected}
 			},
 		},
 	} {
@@ -1379,10 +1370,10 @@ func TestOperatorEventPublishMissingTemplateInputFailsClosedBeforeLowerPrecedenc
 					if details["reason"] != "selected_root_input_required" {
 						t.Fatalf("event.publish details = %#v, want selected_root_input_required", details)
 					}
-					if got := countAllEventRows(t, f.db); got != 0 {
+					if got := countAllEventRows(t, f.store); got != 0 {
 						t.Fatalf("event rows after missing template input = %d, want 0", got)
 					}
-					if got := countAPIIdempotencyRows(t, f.db); got != 0 {
+					if got := countAPIIdempotencyRows(t, f.store); got != 0 {
 						t.Fatalf("API idempotency rows after missing template input = %d, want 0", got)
 					}
 				})
@@ -1497,10 +1488,10 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 					t.Fatalf("error details = %#v, want reason %s", details, tc.wantReason)
 				}
 			}
-			if got := countEventRowsByRunID(t, db, runID); got != 1 {
+			if got := countEventRowsByRunID(t, pg, runID); got != 1 {
 				t.Fatalf("events for selected run after rejected target = %d, want 1", got)
 			}
-			if got := countAPIIdempotencyRows(t, db); got != 1 {
+			if got := countAPIIdempotencyRows(t, pg); got != 1 {
 				t.Fatalf("api_idempotency rows after rejected target = %d, want 1", got)
 			}
 		})
@@ -1509,8 +1500,7 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 
 func TestOperatorEventPublishExplicitRunIsUnavailableWithoutRecipientPlanChecker(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(eventPublishFollowUpTestBundle())
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -1538,13 +1528,13 @@ func TestOperatorEventPublishExplicitRunIsUnavailableWithoutRecipientPlanChecker
 	if details["method"] != "event.publish" {
 		t.Fatalf("missing recipient-plan checker details = %#v", details)
 	}
-	if got := countAllRunRows(t, db); got != 1 {
+	if got := countAllRunRows(t, pg); got != 1 {
 		t.Fatalf("run rows after missing recipient-plan checker = %d, want 1", got)
 	}
-	if got := countAllEventRows(t, db); got != 1 {
+	if got := countAllEventRows(t, pg); got != 1 {
 		t.Fatalf("event rows after missing recipient-plan checker = %d, want 1", got)
 	}
-	if got := countAPIIdempotencyRows(t, db); got != 1 {
+	if got := countAPIIdempotencyRows(t, pg); got != 1 {
 		t.Fatalf("api_idempotency rows after missing recipient-plan checker = %d, want 1", got)
 	}
 }
@@ -1577,13 +1567,13 @@ func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing
 	if result["run_id"] != runID || result["new_run_created"] != false {
 		t.Fatalf("sqlite follow-up result = %#v, want selected existing run", result)
 	}
-	if got := countSQLiteAllRunRows(t, storetest.DatabaseForTest(sqliteStore)); got != 1 {
+	if got := countAllRunRows(t, sqliteStore); got != 1 {
 		t.Fatalf("sqlite run rows after follow-up = %d, want 1", got)
 	}
-	if got := countSQLiteEventRowsByRunID(t, storetest.DatabaseForTest(sqliteStore), runID); got != 2 {
+	if got := countEventRowsByRunID(t, sqliteStore, runID); got != 2 {
 		t.Fatalf("sqlite events for selected run = %d, want 2", got)
 	}
-	if got := countSQLiteEventsByName(t, storetest.DatabaseForTest(sqliteStore), "scan.followup"); got != 1 {
+	if got := countEventsByName(t, sqliteStore, "scan.followup"); got != 1 {
 		t.Fatalf("sqlite scan.followup rows = %d, want 1", got)
 	}
 	deliveries := asSlice(t, result["deliveries"])
@@ -1599,8 +1589,7 @@ func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing
 }
 
 func TestOperatorEventPublishRejectsCallerEntityIDForCreateEntityBeforePersistence(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	bundle := eventPublishCreateEntityTestBundle(t)
 	source := semanticview.Wrap(bundle)
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
@@ -1625,13 +1614,13 @@ func TestOperatorEventPublishRejectsCallerEntityIDForCreateEntityBeforePersisten
 	if violation := asMap(t, violations[0]); violation["field_path"] != "$.entity_id" || violation["rule"] != "constructor_owns_entity_id" {
 		t.Fatalf("violation = %#v", violation)
 	}
-	if got := countAllRunRows(t, db); got != 0 {
+	if got := countAllRunRows(t, pg); got != 0 {
 		t.Fatalf("run rows after create-entity rejection = %d, want 0", got)
 	}
-	if got := countAllEventRows(t, db); got != 0 {
+	if got := countAllEventRows(t, pg); got != 0 {
 		t.Fatalf("event rows after create-entity rejection = %d, want 0", got)
 	}
-	if got := countAPIIdempotencyRows(t, db); got != 0 {
+	if got := countAPIIdempotencyRows(t, pg); got != 0 {
 		t.Fatalf("api_idempotency rows after create-entity rejection = %d, want 0", got)
 	}
 }
@@ -1663,13 +1652,13 @@ func TestOperatorEventPublishSQLiteRejectsCallerEntityIDForCreateEntityBeforePer
 	if violation := asMap(t, violations[0]); violation["field_path"] != "$.entity_id" || violation["rule"] != "constructor_owns_entity_id" {
 		t.Fatalf("sqlite violation = %#v", violation)
 	}
-	if got := countSQLiteAllRunRows(t, storetest.DatabaseForTest(sqliteStore)); got != 0 {
+	if got := countAllRunRows(t, sqliteStore); got != 0 {
 		t.Fatalf("sqlite run rows after create-entity rejection = %d, want 0", got)
 	}
-	if got := countSQLiteAllEventRows(t, storetest.DatabaseForTest(sqliteStore)); got != 0 {
+	if got := countAllEventRows(t, sqliteStore); got != 0 {
 		t.Fatalf("sqlite event rows after create-entity rejection = %d, want 0", got)
 	}
-	if got := countSQLiteAPIIdempotencyRows(t, storetest.DatabaseForTest(sqliteStore)); got != 0 {
+	if got := countAPIIdempotencyRows(t, sqliteStore); got != 0 {
 		t.Fatalf("sqlite api_idempotency rows after create-entity rejection = %d, want 0", got)
 	}
 }
@@ -1838,10 +1827,10 @@ func TestOperatorEventPublishOperatorReferenceValidatesSameRunProvenance(t *test
 		t.Fatalf("child operator_reference_event_id = %#v, want %s", childResult["operator_reference_event_id"], parentEventID)
 	}
 	assertOperatorEventReference(t, db, childEventID, parentEventID)
-	if count := countEventsByName(t, db, "scan.requested"); count != 2 {
+	if count := countEventsByName(t, pg, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after sourced publish = %d, want 2", count)
 	}
-	if count := countAPIIdempotencyRows(t, db); count != 2 {
+	if count := countAPIIdempotencyRows(t, pg); count != 2 {
 		t.Fatalf("api_idempotency rows after sourced publish = %d, want 2", count)
 	}
 	got := requireAPIV1RuntimeBusEventID(t, ch, childEventID, "operator-injected event delivery")
@@ -1851,8 +1840,7 @@ func TestOperatorEventPublishOperatorReferenceValidatesSameRunProvenance(t *test
 }
 
 func TestOperatorEventPublishOperatorReferenceRejectsInvalidReferenceBeforePersistence(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -1956,10 +1944,10 @@ func TestOperatorEventPublishOperatorReferenceRejectsInvalidReferenceBeforePersi
 			} else if details := asMap(t, asMap(t, resp.Error.Data)["details"]); details["field"] != tc.wantField {
 				t.Fatalf("invalid params details = %#v, want field %s", details, tc.wantField)
 			}
-			if count := countEventsByName(t, db, "scan.requested"); count != tc.wantEventRows {
+			if count := countEventsByName(t, pg, "scan.requested"); count != tc.wantEventRows {
 				t.Fatalf("scan.requested event rows = %d, want %d", count, tc.wantEventRows)
 			}
-			if count := countAPIIdempotencyRows(t, db); count != tc.wantIDEMRows {
+			if count := countAPIIdempotencyRows(t, pg); count != tc.wantIDEMRows {
 				t.Fatalf("api_idempotency rows = %d, want %d", count, tc.wantIDEMRows)
 			}
 		})
@@ -1968,8 +1956,7 @@ func TestOperatorEventPublishOperatorReferenceRejectsInvalidReferenceBeforePersi
 
 func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 	t.Run("non-routable bundle hash", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -1984,12 +1971,11 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 		if data := asMap(t, resp.Error.Data); data["code"] != BundleUnavailableCode {
 			t.Fatalf("bundle unavailable data = %#v", data)
 		}
-		assertNoEventPublishPersistence(t, db)
+		assertNoEventPublishPersistence(t, pg)
 	})
 
 	t.Run("invalid canonical bundle hash", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -2004,12 +1990,11 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 		if data := asMap(t, resp.Error.Data); data["code"] != UnsupportedBundleHashCode {
 			t.Fatalf("unsupported bundle hash data = %#v", data)
 		}
-		assertNoEventPublishPersistence(t, db)
+		assertNoEventPublishPersistence(t, pg)
 	})
 
 	t.Run("retired bundle input is rejected", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -2019,12 +2004,11 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 
 		resp := rpcCall(t, handler, eventPublishBodyWithCanonicalAndRetiredInput("", runStartTestBundleHash, "scan.requested", `{"topic":"medicine"}`, "", "idem-event-retired-input"))
 		assertInvalidRunStartParam(t, resp, retiredBundleInputName())
-		assertNoEventPublishPersistence(t, db)
+		assertNoEventPublishPersistence(t, pg)
 	})
 
 	t.Run("undeclared event", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -2039,12 +2023,11 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 		if data := asMap(t, resp.Error.Data); data["code"] != EventNotDeclaredCode {
 			t.Fatalf("undeclared event data = %#v", data)
 		}
-		assertNoEventPublishPersistence(t, db)
+		assertNoEventPublishPersistence(t, pg)
 	})
 
 	t.Run("payload validation", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 			ContractBundle:     source,
@@ -2068,12 +2051,11 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 		if data := asMap(t, resp.Error.Data); data["code"] != PayloadValidationFailedCode {
 			t.Fatalf("payload validation data = %#v", data)
 		}
-		assertNoEventPublishPersistence(t, db)
+		assertNoEventPublishPersistence(t, pg)
 	})
 
 	t.Run("invalid run id", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
@@ -2085,14 +2067,12 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 		if resp.Error == nil || resp.Error.Code != codeInvalidParams {
 			t.Fatalf("event.publish invalid run_id error = %#v, want invalid params", resp.Error)
 		}
-		assertNoEventPublishPersistence(t, db)
+		assertNoEventPublishPersistence(t, pg)
 	})
 }
 
 func TestOperatorEventPublishQueuesWhileRuntimePaused(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -2128,10 +2108,10 @@ func TestOperatorEventPublishQueuesWhileRuntimePaused(t *testing.T) {
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
 	assertEventPublishDeliveriesContain(t, deliveries, "node", eventPublishScanNodeID(t), "pending", 1)
 	requireNoAPIV1RuntimeBusEvent(t, ch, "paused event.publish before resume")
-	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
+	if got := countEventDeliveriesForEvent(t, ctx, pg, eventID); got != 1 {
 		t.Fatalf("paused event deliveries = %d, want 1 queued route", got)
 	}
-	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, eventID); got != 0 {
 		t.Fatalf("paused pipeline receipts = %d, want 0", got)
 	}
 
@@ -2150,7 +2130,7 @@ func TestOperatorEventPublishQueuesWhileRuntimePaused(t *testing.T) {
 	if got.ID() != eventID {
 		t.Fatalf("released event = %s, want %s", got.ID(), eventID)
 	}
-	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, eventID); got != 1 {
 		t.Fatalf("pipeline receipts after resume = %d, want 1", got)
 	}
 }
@@ -3031,116 +3011,65 @@ func assertOperatorEventReference(t *testing.T, db *sql.DB, eventID, wantReferen
 	}
 }
 
-func assertNoEventPublishPersistence(t *testing.T, db *sql.DB) {
+func assertNoEventPublishPersistence(t *testing.T, selected any) {
 	t.Helper()
-	if count := countAllRunRows(t, db); count != 0 {
+	evidence, err := storetest.ReadAPIEventPublicationRefusalStorage(context.Background(), selected, "scan.requested")
+	if err != nil {
+		t.Fatalf("load publication refusal storage: %v", err)
+	}
+	if count := evidence.Runs; count != 0 {
 		t.Fatalf("run rows = %d, want 0", count)
 	}
-	if count := countEventsByName(t, db, "scan.requested"); count != 0 {
+	if count := evidence.MatchingEvents; count != 0 {
 		t.Fatalf("scan.requested event rows = %d, want 0", count)
 	}
-	if count := countAPIIdempotencyRows(t, db); count != 0 {
+	if count := evidence.APICompletions; count != 0 {
 		t.Fatalf("api_idempotency rows = %d, want 0", count)
 	}
 }
 
-func assertNoFlowScopedEventPublishPersistence(t *testing.T, db *sql.DB) {
+func assertNoFlowScopedEventPublishPersistence(t *testing.T, selected any) {
 	t.Helper()
-	if count := countAllRunRows(t, db); count != 0 {
+	evidence, err := storetest.ReadAPIFlowPublicationRefusalStorage(context.Background(), selected)
+	if err != nil {
+		t.Fatalf("load publication cardinality evidence: %v", err)
+	}
+	if count := evidence.Runs; count != 0 {
 		t.Fatalf("run rows = %d, want 0", count)
 	}
-	if count := countAllEventRows(t, db); count != 0 {
+	if count := evidence.Events; count != 0 {
 		t.Fatalf("event rows = %d, want 0", count)
 	}
-	if count := countAPIIdempotencyRows(t, db); count != 0 {
+	if count := evidence.APICompletions; count != 0 {
 		t.Fatalf("api_idempotency rows = %d, want 0", count)
 	}
 }
 
-func countAllEventDeliveries(t *testing.T, db *sql.DB) int {
+func countAllEventDeliveries(t *testing.T, selected any) int {
 	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM event_deliveries`).Scan(&count); err != nil {
+	count, err := storetest.CountPhysicalEventDeliveries(context.Background(), selected)
+	if err != nil {
 		t.Fatalf("count event_deliveries rows: %v", err)
 	}
 	return count
 }
 
-func countAllEventRows(t *testing.T, db *sql.DB) int {
+func countAllEventRows(t *testing.T, selected any) int {
 	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&count); err != nil {
+	count, err := storetest.CountPhysicalEvents(context.Background(), selected)
+	if err != nil {
 		t.Fatalf("count all event rows: %v", err)
 	}
 	return count
 }
 
-func countSQLiteEventsByName(t *testing.T, db *sql.DB, eventName string) int {
+func loadPipelineReceiptOutcomeAndFailure(t *testing.T, ctx context.Context, selected any, eventID string) (string, *runtimefailures.Envelope) {
 	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = ?`, eventName).Scan(&count); err != nil {
-		t.Fatalf("count sqlite events: %v", err)
-	}
-	return count
-}
-
-func countSQLiteEventRowsByRunID(t *testing.T, db *sql.DB, runID string) int {
-	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id = ?`, runID).Scan(&count); err != nil {
-		t.Fatalf("count sqlite event rows: %v", err)
-	}
-	return count
-}
-
-func countSQLiteAllEventRows(t *testing.T, db *sql.DB) int {
-	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&count); err != nil {
-		t.Fatalf("count sqlite all event rows: %v", err)
-	}
-	return count
-}
-
-func countSQLiteAllRunRows(t *testing.T, db *sql.DB) int {
-	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&count); err != nil {
-		t.Fatalf("count sqlite runs: %v", err)
-	}
-	return count
-}
-
-func countSQLiteAPIIdempotencyRows(t *testing.T, db *sql.DB) int {
-	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM api_idempotency`).Scan(&count); err != nil {
-		t.Fatalf("count sqlite api_idempotency rows: %v", err)
-	}
-	return count
-}
-
-func loadPipelineReceiptOutcomeAndFailure(t *testing.T, ctx context.Context, db *sql.DB, eventID string) (string, *runtimefailures.Envelope) {
-	t.Helper()
-	var outcome string
-	var raw []byte
-	if err := db.QueryRowContext(ctx, `
-		SELECT outcome, failure
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'platform'
-		  AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&outcome, &raw); err != nil {
+	outcome, failure, err := storetest.ReadPipelineReceiptOutcomeStorage(ctx, selected, eventID)
+	if err != nil {
 		t.Fatalf("load pipeline receipt for %s: %v", eventID, err)
 	}
-	if len(raw) == 0 {
-		return outcome, nil
-	}
-	failure, err := runtimefailures.UnmarshalEnvelope(raw)
-	if err != nil {
-		t.Fatalf("decode pipeline receipt failure for %s: %v", eventID, err)
-	}
-	return outcome, &failure
+	return outcome, failure
 }
 
 func stringValue(t *testing.T, value any, field string) string {

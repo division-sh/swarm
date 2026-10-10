@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/google/uuid"
 )
 
@@ -15,7 +16,8 @@ type TrackedProjectionMutationStorage struct {
 }
 
 type TrackedEntityMutationProjectionStorage struct {
-	CurrentState                            string
+	EntityType, CurrentState                string
+	Revision                                int
 	Fields, Bookkeeping, Gates, Accumulator json.RawMessage
 	Mutations                               []TrackedProjectionMutationStorage
 }
@@ -26,32 +28,15 @@ func ReadTrackedEntityMutationProjectionStorageForTest(ctx context.Context, sele
 			return TrackedEntityMutationProjectionStorage{}, fmt.Errorf("projection observation requires exact run and entity identities: %w", err)
 		}
 	}
-	var read func(context.Context, func(context.Context, *sql.Tx) error) error
-	switch owner := selected.(type) {
-	case *PostgresStore:
-		if owner == nil || owner.backend == nil || owner.pipelinePostgresOwner == nil || !owner.backend.Valid() {
-			return TrackedEntityMutationProjectionStorage{}, fmt.Errorf("observation requires an initialized postgres read owner")
-		}
-		if err := owner.requireCurrentSchema(); err != nil {
-			return TrackedEntityMutationProjectionStorage{}, err
-		}
-		read = owner.backend.RunReadTransaction
-	case *SQLiteRuntimeStore:
-		if owner == nil || owner.backend == nil || owner.pipelineSQLiteOwner == nil || !owner.backend.Valid() {
-			return TrackedEntityMutationProjectionStorage{}, fmt.Errorf("observation requires an initialized sqlite read owner")
-		}
-		if err := owner.requireCurrentSchema(); err != nil {
-			return TrackedEntityMutationProjectionStorage{}, err
-		}
-		read = owner.backend.RunReadTransaction
-	default:
-		return TrackedEntityMutationProjectionStorage{}, fmt.Errorf("observation requires the original native owner, got %T", selected)
+	read, err := selectedTrackedProjectionReadForTest(selected)
+	if err != nil {
+		return TrackedEntityMutationProjectionStorage{}, err
 	}
 	var evidence TrackedEntityMutationProjectionStorage
-	err := read(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	err = read(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var fields, bookkeeping, gates, accumulator []byte
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(current_state,''),COALESCE(fields,'{}'),COALESCE(bookkeeping,'{}'),COALESCE(gates,'{}'),COALESCE(accumulator,'{}') FROM entity_state WHERE run_id=$1 AND entity_id=$2`, run, entity).
-			Scan(&evidence.CurrentState, &fields, &bookkeeping, &gates, &accumulator); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT entity_type,COALESCE(current_state,''),COALESCE(fields,'{}'),COALESCE(bookkeeping,'{}'),COALESCE(gates,'{}'),COALESCE(accumulator,'{}'),revision FROM entity_state WHERE run_id=$1 AND entity_id=$2`, run, entity).
+			Scan(&evidence.EntityType, &evidence.CurrentState, &fields, &bookkeeping, &gates, &accumulator, &evidence.Revision); err != nil {
 			return fmt.Errorf("load entity_state projection: %w", err)
 		}
 		evidence.Fields, evidence.Bookkeeping = append(json.RawMessage(nil), fields...), append(json.RawMessage(nil), bookkeeping...)
@@ -131,4 +116,64 @@ func CorruptRegistryVerdictForTest(ctx context.Context, selected any, run, entit
 	default:
 		return fmt.Errorf("registry fixture requires the original native owner")
 	}
+}
+
+func selectedTrackedProjectionReadForTest(selected any) (func(context.Context, func(context.Context, *sql.Tx) error) error, error) {
+	var read func(context.Context, func(context.Context, *sql.Tx) error) error
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		if owner == nil || owner.backend == nil || owner.pipelinePostgresOwner == nil || !owner.backend.Valid() {
+			return nil, fmt.Errorf("observation requires an initialized postgres read owner")
+		}
+		if err := owner.requireCurrentSchema(); err != nil {
+			return nil, err
+		}
+		read = owner.backend.RunReadTransaction
+	case *SQLiteRuntimeStore:
+		if owner == nil || owner.backend == nil || owner.pipelineSQLiteOwner == nil || !owner.backend.Valid() {
+			return nil, fmt.Errorf("observation requires an initialized sqlite read owner")
+		}
+		if err := owner.requireCurrentSchema(); err != nil {
+			return nil, err
+		}
+		read = owner.backend.RunReadTransaction
+	default:
+		return nil, fmt.Errorf("observation requires the original native owner, got %T", selected)
+	}
+	return read, nil
+}
+
+func ReadRunEntityMutationHistoryStorageForTest(ctx context.Context, selected any, run string) ([]operatorread.RunDebugMutation, error) {
+	if err := validateWorkflowProjectionFaultRun(run); err != nil {
+		return nil, err
+	}
+	read, err := selectedTrackedProjectionReadForTest(selected)
+	if err != nil {
+		return nil, err
+	}
+	var evidence []operatorread.RunDebugMutation
+	err = read(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT entity_id,domain,path,COALESCE(new_value,'null') FROM entity_mutations WHERE run_id=$1 ORDER BY created_at DESC,mutation_id DESC`, run)
+		if err != nil {
+			return fmt.Errorf("query mutations: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var row operatorread.RunDebugMutation
+			var value []byte
+			if err := rows.Scan(&row.EntityID, &row.Domain, &row.Path, &value); err != nil {
+				return fmt.Errorf("scan mutation: %w", err)
+			}
+			row.NewValue = append(json.RawMessage(nil), value...)
+			evidence = append(evidence, row)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("read mutations: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return evidence, nil
 }

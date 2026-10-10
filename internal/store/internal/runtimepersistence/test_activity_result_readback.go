@@ -15,6 +15,28 @@ type ActivityResultPublicationStorage struct {
 	ResetOperations, ActivityAttempts, SuccessfulActivityAttempts   int
 }
 
+type ProposedEffectRunExecutionStorage struct{ Requests, SuccessfulAttempts int }
+
+func ReadProposedEffectRunExecutionStorageForTest(ctx context.Context, selected any, runID string) (ProposedEffectRunExecutionStorage, error) {
+	var observed ProposedEffectRunExecutionStorage
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return observed, err
+	}
+	if err := validateSelectedForkStorageIdentity(runID); err != nil {
+		return observed, err
+	}
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT
+			(SELECT COUNT(*) FROM events WHERE CAST(run_id AS TEXT)=$1 AND event_name='platform.activity_requested'),
+			(SELECT COUNT(*) FROM activity_attempts WHERE CAST(run_id AS TEXT)=$1 AND status='succeeded')`, runID).
+			Scan(&observed.Requests, &observed.SuccessfulAttempts)
+	})
+	if err != nil {
+		return ProposedEffectRunExecutionStorage{}, err
+	}
+	return observed, nil
+}
+
 func ObserveActivityResultPublicationStorageForTest(ctx context.Context, selected any) (ActivityResultPublicationStorage, error) {
 	var observed ActivityResultPublicationStorage
 	read := func(ctx context.Context, tx *sql.Tx) error {

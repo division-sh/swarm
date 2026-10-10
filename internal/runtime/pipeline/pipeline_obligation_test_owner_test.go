@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -187,7 +186,6 @@ func (*unavailablePipelineTestHumanTaskExpiry) CommitHumanTaskExpirations(contex
 	return CommittedHumanTaskExpiry{}, errors.New("human-task expiry is unavailable")
 }
 
-type unavailablePipelineTestDecisionCardMutations struct{ DecisionCardMutationOwner }
 type unavailablePipelineTestDeliveryRuntime struct{ WorkflowDeliveryRuntime }
 type unavailablePipelineTestDeadLetters struct {
 	runtimedeadletters.AcknowledgedRecorder
@@ -259,59 +257,11 @@ func completeDurablePipelineTestOptions(bus Bus, opts PipelineCoordinatorOptions
 	return opts
 }
 
-func newDurablePipelineCoordinatorForTest(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
-	if opts.Persistence.Configured() && !opts.Persistence.Valid() {
-		panic("pipeline test configured incomplete workflow persistence: " + strings.Join(missingWorkflowPersistenceTestRoles(opts.Persistence), ", "))
-	}
-	pc := NewPipelineCoordinatorWithOptions(bus, completeDurablePipelineTestOptions(bus, opts))
-	if pc != nil && pc.workflowStore != nil && opts.Persistence.store != nil {
-		fixture := opts.Persistence.store.testFixture()
-		registerWorkflowPersistenceFixture(pc.workflowStore, fixture.db, fixture.dialect, fixture.runner)
-	}
-	return pc
-}
-
 func newPreviewPipelineCoordinatorForTest(bus Bus, opts PipelineCoordinatorOptions) *PipelineCoordinator {
 	if !opts.ExecutionPosture.Valid() {
 		opts.ExecutionPosture = executionposture.Live
 	}
 	return newPreviewPipelineCoordinator(bus, opts)
-}
-
-func missingWorkflowPersistenceTestRoles(p WorkflowPersistence) []string {
-	if p.store == nil {
-		return []string{"store"}
-	}
-	roles := []struct {
-		name    string
-		missing bool
-	}{
-		{"entity_query", p.store.entityQuery == nil},
-		{"route_recovery", p.store.routeRecovery == nil},
-		{"activity_results", p.store.activityResults == nil},
-		{"activity_journal", p.store.activityJournal == nil},
-		{"gate_routes", p.store.gateRoutes == nil},
-		{"timer_obligations", p.store.timerObligations == nil},
-		{"fan_out_obligations", p.store.fanOutObligations == nil},
-		{"engine_mutations", p.store.engineMutations == nil},
-		{"card_mutations", p.store.cardMutations == nil},
-		{"timer_occurrences", p.store.timerOccurrences == nil},
-		{"timer_activations", p.store.timerActivations == nil},
-		{"readiness", p.store.readiness == nil},
-		{"standing_services", p.store.standingServices == nil},
-		{"decision_routes", p.store.decisionRoutes == nil},
-		{"instance_reader", p.store.instanceReader == nil},
-		{"entity_state_reader", p.store.entityStateReader == nil},
-		{"entity_collection_reader", p.store.entityCollectionReader == nil},
-		{"target_reader", p.store.targetReader == nil},
-	}
-	missing := make([]string, 0, len(roles))
-	for _, role := range roles {
-		if role.missing {
-			missing = append(missing, role.name)
-		}
-	}
-	return missing
 }
 
 func TestPipelineCoordinatorRequiresCanonicalObligationOwner(t *testing.T) {

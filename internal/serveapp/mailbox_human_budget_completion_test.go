@@ -84,7 +84,7 @@ func TestMailboxHumanBudgetAndCrossCredentialDraftBothStores(t *testing.T) {
 						t.Fatalf("credential B did not consume credential A's principal draft: %s %s", draftStatus, actual)
 					}
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, f.base.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, f.base.RunID)
 				completed = append(completed, retained{params: params, result: result, runID: f.base.RunID})
 			}
 			rt, _ = restart()

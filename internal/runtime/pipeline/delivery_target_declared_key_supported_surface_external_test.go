@@ -38,7 +38,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 				t.Run(storeCase.name+"/"+acquisition+"/"+keyRelation, func(t *testing.T) {
 					selected := storeCase.open(t)
 					runID := uuid.NewString()
-					insertGateRecoveryRun(t, selected, runID)
+					insertGateRecoveryRun(t, selected.events, runID)
 					ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 
 					source, node := targetedDeclaredKeyExecutionSource(t, acquisition)

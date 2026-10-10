@@ -2,8 +2,8 @@ package bus_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/lib/pq"
 )
 
@@ -39,11 +40,11 @@ func (r *blockedOriginReader) LoadRunOrigin(ctx context.Context, id string) (run
 	return origin, err
 }
 
-func waitOriginSQLLock(t *testing.T, db *sql.DB) {
+func waitOriginSQLLock(t *testing.T, selected completeEventDispatchStore) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		blocked, err := originSQLLockCount(db)
+		blocked, err := originSQLLockCount(selected)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -55,24 +56,16 @@ func waitOriginSQLLock(t *testing.T, db *sql.DB) {
 	t.Fatal("origin query did not reach the PostgreSQL lock barrier")
 }
 
-func originSQLLockCount(db *sql.DB) (int, error) {
-	var blocked int
-	// The run-header projection prefix remains visible if pg_stat_activity truncates the query.
-	err := db.QueryRow(`
-SELECT count(*) FROM pg_stat_activity
-WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock'
-  AND btrim(regexp_replace(query, '[[:space:]]+', ' ', 'g'))
-      LIKE 'SELECT r.run_id::text, lower(r.status), r.bundle_hash, r.origin_kind,%'
-`).Scan(&blocked)
-	return blocked, err
+func originSQLLockCount(selected completeEventDispatchStore) (int, error) {
+	return storetest.ReadPostgresRunOriginLockCount(context.Background(), selected)
 }
 
-func waitPostgresReadLockCount(t *testing.T, db *sql.DB, want int) {
+func waitPostgresReadLockCount(t *testing.T, selected completeEventDispatchStore, want int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		var blocked int
-		if err := db.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock'`).Scan(&blocked); err != nil {
+		blocked, err := storetest.ReadPostgresDatabaseLockCount(context.Background(), selected)
+		if err != nil {
 			t.Fatal(err)
 		}
 		if blocked == want {
@@ -97,14 +90,14 @@ func TestOriginSQLLockObserverPostgres(t *testing.T) {
 			f := newCompleteEventDispatchFixtureWithOrigin(t, "postgres", false, runlifecycle.ScenarioSetupRunOrigin())
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			lock, err := f.db.BeginTx(ctx, nil)
+			lock, err := storetest.HoldPostgresRunTableReadBarrier(ctx, f.store)
 			if err != nil {
 				t.Fatal(err)
 			}
 			completed := make(chan error, 2)
 			readers := 0
 			defer func() {
-				if err := lock.Rollback(); err != nil {
+				if err := lock.Close(); err != nil {
 					t.Error(err)
 				}
 				for range readers {
@@ -118,9 +111,6 @@ func TestOriginSQLLockObserverPostgres(t *testing.T) {
 					}
 				}
 			}()
-			if _, err := lock.Exec(`LOCK TABLE runs IN ACCESS EXCLUSIVE MODE`); err != nil {
-				t.Fatal(err)
-			}
 			if tc.unrelated {
 				readers++
 				go func() {
@@ -137,8 +127,8 @@ func TestOriginSQLLockObserverPostgres(t *testing.T) {
 					completed <- err
 				}()
 			}
-			waitPostgresReadLockCount(t, f.db, readers)
-			blocked, err := originSQLLockCount(f.db)
+			waitPostgresReadLockCount(t, f.store, readers)
+			blocked, err := originSQLLockCount(f.store)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -146,7 +136,7 @@ func TestOriginSQLLockObserverPostgres(t *testing.T) {
 				t.Fatalf("origin lock count = %d, want %d with %d actual blocked readers", blocked, want, readers)
 			}
 			if tc.origin {
-				waitOriginSQLLock(t, f.db)
+				waitOriginSQLLock(t, f.store)
 			}
 		})
 	}
@@ -172,6 +162,44 @@ func TestContinuationOriginReadPostgresCancellationCausality(t *testing.T) {
 			var c *deliverycontinuation.Coordinator
 			var owner *worklifetime.RuntimeOccurrence
 			var process *worklifetime.Process
+			var barrier *storetest.PostgresRunTableReadBarrier
+			var releaseOnce sync.Once
+			releaseReader := func() { releaseOnce.Do(func() { close(reader.release) }) }
+			completed := make(chan error, 1)
+			workerStarted, workerJoined := false, false
+			generation := &completeEventDispatchGeneration{}
+			t.Cleanup(func() {
+				clean := true
+				cancel()
+				if c != nil {
+					wait, stop := context.WithCancel(context.Background())
+					stop()
+					_ = c.Retire(wait)
+				}
+				if barrier != nil {
+					if err := barrier.Close(); err != nil {
+						clean = false
+						t.Error(err)
+					}
+				}
+				releaseReader()
+				if err := generation.close(); err != nil {
+					clean = false
+					t.Error(err)
+				}
+				if workerStarted && !workerJoined {
+					select {
+					case <-completed:
+						workerJoined = true
+					case <-time.After(5 * time.Second):
+						clean = false
+						t.Error("failed origin proof left an unjoined worker")
+					}
+				}
+				if clean && (owner == nil || owner.ActiveCount() == 0) && (!workerStarted || workerJoined) {
+					t.Log("origin proof cleanup joined")
+				}
+			})
 			var id string
 			if coordinated {
 				acknowledgePipelineTestEvent(t, ctx, f.store, f.event.ID())
@@ -192,25 +220,28 @@ func TestContinuationOriginReadPostgresCancellationCausality(t *testing.T) {
 					t.Fatal(err)
 				}
 				process = worklifetime.NewProcess()
+				generation.process = process
 				owner, err = process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: snapshot.Authority.ExecutionID(), BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
 				if err != nil {
 					t.Fatal(err)
 				}
+				generation.owner = owner
 				c, err = deliverycontinuation.New(f.store, f.store, snapshot.Authority, owner, f.bus, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
+				generation.coordinator = c
 				if err := f.bus.SetDeliveryContinuationOwner(c); err != nil {
 					t.Fatal(err)
 				}
 			}
 			reader.enabled.Store(true)
-			completed := make(chan error, 1)
 			if coordinated {
 				if err := c.Start(ctx); err != nil {
 					t.Fatal(err)
 				}
 			} else {
+				workerStarted = true
 				go func() { _, err := reader.LoadRunOrigin(ctx, f.event.RunID()); completed <- err }()
 			}
 			var readCtx context.Context
@@ -219,20 +250,18 @@ func TestContinuationOriginReadPostgresCancellationCausality(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("origin not entered")
 			}
-			lock, err := f.db.BeginTx(context.Background(), nil)
+			var err error
+			barrier, err = storetest.HoldPostgresRunTableReadBarrier(context.Background(), f.store)
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer lock.Rollback()
-			if _, err := lock.Exec(`LOCK TABLE runs IN ACCESS EXCLUSIVE MODE`); err != nil {
-				t.Fatal(err)
-			}
-			close(reader.release)
-			waitOriginSQLLock(t, f.db)
+			releaseReader()
+			waitOriginSQLLock(t, f.store)
 			if coordinated {
 				wait, stop := context.WithCancel(context.Background())
 				stop()
 				_ = c.Retire(wait)
+				workerStarted = true
 				go func() { completed <- c.Retire(context.Background()) }()
 				if readCtx.Done() != nil {
 					t.Error("retirement can cancel admitted SQL")
@@ -260,7 +289,7 @@ func TestContinuationOriginReadPostgresCancellationCausality(t *testing.T) {
 					t.Fatal("native origin query did not cancel")
 				}
 			}
-			if err := lock.Rollback(); err != nil {
+			if err := barrier.Close(); err != nil {
 				t.Fatal(err)
 			}
 			if coordinated {
@@ -275,6 +304,7 @@ func TestContinuationOriginReadPostgresCancellationCausality(t *testing.T) {
 			}
 			select {
 			case err := <-completed:
+				workerJoined = true
 				if !coordinated && err == nil {
 					t.Fatal("retired read continued business work")
 				}
@@ -291,11 +321,7 @@ func TestContinuationOriginReadPostgresCancellationCausality(t *testing.T) {
 				if _, err := c.Acquire(id); err == nil {
 					t.Error("retired owner accepted carrier")
 				}
-				if _, err := owner.RetireAndWait(context.Background()); err != nil {
-					t.Error(err)
-				}
-				process.Retire()
-				if _, err := process.Join(context.Background()); err != nil {
+				if err := generation.close(); err != nil {
 					t.Error(err)
 				}
 				snapshot, err := f.store.Snapshot(context.Background(), id)

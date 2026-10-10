@@ -2,7 +2,6 @@ package bus_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -38,7 +37,6 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
@@ -52,6 +50,7 @@ type completeEventDispatchStore interface {
 	runtimemanager.AgentLifecycleStateReader
 	storetest.AgentFixtureStore
 	runtimerunlifecycle.OperationOwner
+	storetest.RunFixtureStore
 	decisioncard.Store
 	decisioncard.ProposedEffectStore
 	decisioncard.HumanTaskStore
@@ -69,8 +68,6 @@ func (standingDispatchWorkflowModule) GuardRegistry() runtimepipeline.GuardRegis
 
 type completeEventDispatchFixture struct {
 	store    completeEventDispatchStore
-	db       *sql.DB
-	dialect  string
 	ctx      context.Context
 	bus      *runtimebus.EventBus
 	event    events.Event
@@ -286,16 +283,11 @@ func newCompleteEventDispatchFixtureWithOrigin(
 ) completeEventDispatchFixture {
 	t.Helper()
 	var selected completeEventDispatchStore
-	var db *sql.DB
 	switch backend {
 	case "sqlite":
-		sqlite := storetest.StartSQLiteRuntimeStore(t)
-		selected, db = sqlite, storetest.DatabaseForTest(sqlite)
+		selected = storetest.StartSQLiteRuntimeStore(t)
 	case "postgres":
-		_, postgresDB, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		postgres := storetest.AdmitPostgresRuntimeStore(t, postgresDB)
-		selected, db = postgres, postgresDB
+		selected = storetest.StartPostgresRuntimeStore(t)
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 	}
@@ -346,7 +338,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 			t.Fatalf("standing recovery fixture = %#v, want run %s generation %d", reconciled, runID, origin.Generation())
 		}
 	} else {
-		seedCompleteEventDispatchRunWithOrigin(t, ctx, db, backend, runID, createdAt, origin)
+		seedCompleteEventDispatchRunWithOrigin(t, ctx, selected, runID, createdAt, origin)
 	}
 	sourceRoute := events.RouteIdentity{
 		FlowID: "source-flow", FlowInstance: "source-flow/one", EntityID: uuid.NewString(),
@@ -368,7 +360,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	identity := agentidentitytest.RootDeclaredForRun(t, runID, agentID, completeEventAgentOwnerURI(agentID))
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity}}, runtimepipelineobligation.ScopeSubscribed)
 	fixture := completeEventDispatchFixture{
-		store: selected, db: db, dialect: backend, ctx: ctx, bus: bus, event: event, agentID: agentID, identity: identity,
+		store: selected, ctx: ctx, bus: bus, event: event, agentID: agentID, identity: identity,
 	}
 	if decisionObligation {
 		fixture.insertDecisionObligation(t)
@@ -392,13 +384,12 @@ func (f completeEventDispatchFixture) subscribe(t testing.TB, eventTypes ...even
 	return runtimebustest.SubscribeIdentity(t, f.bus, f.identity, admission)
 }
 
-func seedCompleteEventDispatchRun(t testing.TB, ctx context.Context, db *sql.DB, backend, runID string, startedAt time.Time) {
+func seedCompleteEventDispatchRun(t testing.TB, ctx context.Context, selected storetest.RunFixtureStore, runID string, startedAt time.Time) {
 	t.Helper()
 	seedCompleteEventDispatchRunWithOrigin(
 		t,
 		ctx,
-		db,
-		backend,
+		selected,
 		runID,
 		startedAt,
 		runlifecyclefixture.ScenarioSetupOrigin(),
@@ -408,17 +399,13 @@ func seedCompleteEventDispatchRun(t testing.TB, ctx context.Context, db *sql.DB,
 func seedCompleteEventDispatchRunWithOrigin(
 	t testing.TB,
 	ctx context.Context,
-	db *sql.DB,
-	backend, runID string,
+	selected storetest.RunFixtureStore,
+	runID string,
 	startedAt time.Time,
 	origin runtimerunlifecycle.RunOrigin,
 ) {
 	t.Helper()
-	if backend == "postgres" {
-		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: origin, RunID: runID, StartedAt: startedAt})
-	} else {
-		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: origin, RunID: runID, StartedAt: startedAt})
-	}
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: origin, RunID: runID, StartedAt: startedAt})
 }
 
 func (f completeEventDispatchFixture) invoke(surface string) (int, error) {
@@ -437,24 +424,13 @@ func (f completeEventDispatchFixture) invoke(surface string) (int, error) {
 }
 
 func (f completeEventDispatchFixture) updateChainDepth(depth int) error {
-	query := `UPDATE events SET chain_depth = ? WHERE event_id = ?`
-	args := []any{depth, f.event.ID()}
-	if f.dialect == "postgres" {
-		query = `UPDATE events SET chain_depth = $1 WHERE event_id = $2::uuid`
-	}
-	_, err := f.db.ExecContext(f.ctx, query, args...)
-	return err
+	return storetest.SetEventChainDepth(f.ctx, f.store, f.event.ID(), depth)
 }
 
 func (f completeEventDispatchFixture) assertNoAgentDispatchMutation(t *testing.T) {
 	t.Helper()
-	var outcomes int
-	query := `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = ? AND d.subscriber_type = 'agent' AND d.subscriber_id = ?`
-	args := []any{f.event.ID(), f.agentID}
-	if f.dialect == "postgres" {
-		query = `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id = $2`
-	}
-	if err := f.db.QueryRowContext(f.ctx, query, args...).Scan(&outcomes); err != nil {
+	outcomes, err := storetest.ReadAgentSettledAttemptCount(f.ctx, f.store, f.event.ID(), f.agentID)
+	if err != nil {
 		t.Fatalf("count agent delivery outcomes: %v", err)
 	}
 	if outcomes != 0 {
@@ -464,12 +440,8 @@ func (f completeEventDispatchFixture) assertNoAgentDispatchMutation(t *testing.T
 
 func (f completeEventDispatchFixture) decisionObligationStatus(t *testing.T, eventID string) string {
 	t.Helper()
-	query := `SELECT status FROM decision_card_route_obligations WHERE event_id = ?`
-	if f.dialect == "postgres" {
-		query = `SELECT status FROM decision_card_route_obligations WHERE event_id = $1::uuid`
-	}
-	var status string
-	if err := f.db.QueryRowContext(f.ctx, query, eventID).Scan(&status); err != nil {
+	status, err := storetest.ReadDecisionRouteStatusStorage(f.ctx, f.store, eventID)
+	if err != nil {
 		t.Fatalf("load decision route status for %s: %v", eventID, err)
 	}
 	return status
@@ -479,52 +451,41 @@ func (f completeEventDispatchFixture) insertDecisionObligation(t *testing.T) {
 	f.insertDecisionObligationFor(t, f.event)
 }
 
-func (f completeEventDispatchFixture) insertDecisionObligationFor(t *testing.T, event events.Event) {
+func (f completeEventDispatchFixture) insertDecisionObligationFor(t *testing.T, event events.Event) decisioncard.Card {
 	t.Helper()
-	cardID := uuid.NewString()
-	if f.dialect == "postgres" {
-		if _, err := f.db.ExecContext(f.ctx, `
-			INSERT INTO decision_cards (
-				card_id, run_id, anchor_kind, anchor, status, execution_mode, snapshot,
-				card_content_hash, decision_schema_hash, bundle_hash, effective_cadence,
-				provenance, verdict, fields, decided_by, decided_at, decision_event_id,
-				created_at, updated_at
-			) VALUES (
-				$1::uuid, $2::uuid, 'stage_gate', '{}'::jsonb, 'decided', 'mock', '{}'::jsonb,
-				'card-hash', 'schema-hash', 'bundle-hash', '{}'::jsonb,
-				'{}'::jsonb, 'approve', '{}'::jsonb, 'test', $3, $4::uuid, $3, $3
-			)
-		`, cardID, event.RunID(), event.CreatedAt(), event.ID()); err != nil {
-			t.Fatalf("insert decision card: %v", err)
-		}
-		if _, err := f.db.ExecContext(f.ctx, `
-			INSERT INTO decision_card_route_obligations (
-				event_id, card_id, run_id, status, attempt_count, next_attempt_at, created_at, updated_at
-			) VALUES ($1::uuid, $2::uuid, $3::uuid, 'pending', 0, $4, $4, $4)
-		`, event.ID(), cardID, event.RunID(), event.CreatedAt()); err != nil {
-			t.Fatalf("insert decision obligation: %v", err)
-		}
-		return
+	entityID := uuid.NewString()
+	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
+		Route: runtimeflowidentity.RouteForInstancePath("source-flow/one"), FlowID: "source-flow",
+		EntityID: entityID, Stage: "awaiting_review", StageActivationID: uuid.NewString(),
+		Source: eventtest.ConcreteTemplateRoutingSource("source-flow", "source-flow/one", entityID),
+	})
+	if err != nil {
+		t.Fatalf("admit decision route anchor: %v", err)
 	}
-	if _, err := f.db.ExecContext(f.ctx, `
-		INSERT INTO decision_cards (
-			card_id, run_id, anchor_kind, anchor, status, execution_mode, snapshot,
-			card_content_hash, decision_schema_hash, bundle_hash, effective_cadence,
-			provenance, verdict, fields, decided_by, decided_at, decision_event_id,
-			created_at, updated_at
-		) VALUES (?, ?, 'stage_gate', '{}', 'decided', 'mock', '{}',
-			'card-hash', 'schema-hash', 'bundle-hash', '{}', '{}', 'approve', '{}',
-			'test', ?, ?, ?, ?)
-	`, cardID, event.RunID(), event.CreatedAt(), event.ID(), event.CreatedAt(), event.CreatedAt()); err != nil {
-		t.Fatalf("insert decision card: %v", err)
+	snapshot, err := decisioncard.FreezeSnapshot("dispatch_review", "", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {Verdict: "approve", AdvancesTo: "approved"},
+	})
+	if err != nil {
+		t.Fatalf("freeze decision route contract: %v", err)
 	}
-	if _, err := f.db.ExecContext(f.ctx, `
-		INSERT INTO decision_card_route_obligations (
-			event_id, card_id, run_id, status, attempt_count, next_attempt_at, created_at, updated_at
-		) VALUES (?, ?, ?, 'pending', 0, ?, ?, ?)
-	`, event.ID(), cardID, event.RunID(), event.CreatedAt(), event.CreatedAt(), event.CreatedAt()); err != nil {
-		t.Fatalf("insert decision obligation: %v", err)
+	card, err := decisioncard.New(decisioncard.Card{
+		CardID: uuid.NewString(), RunID: event.RunID(), Anchor: anchor, ExecutionMode: executionmode.Mock,
+		Snapshot: snapshot, BundleHash: authorActivityTestBundleHash, CreatedAt: event.CreatedAt(),
+	})
+	if err != nil {
+		t.Fatalf("admit decision route card: %v", err)
 	}
+	if err := f.store.CreateDecisionCard(f.ctx, card); err != nil {
+		t.Fatalf("create decision route card: %v", err)
+	}
+	outcome, err := storetest.DecisionCardDomain(f.store).ApplyDecisionForTest(f.ctx, decisioncard.DecideRequest{
+		CardID: card.CardID, Verdict: "approve", PrincipalID: "test", ObservedContentHash: card.CardContentHash,
+		DecisionEventID: event.ID(), Now: event.CreatedAt(),
+	})
+	if err != nil {
+		t.Fatalf("commit decision route obligation: %v", err)
+	}
+	return outcome.Card
 }
 
 func (f completeEventDispatchFixture) managedContext(t *testing.T) context.Context {

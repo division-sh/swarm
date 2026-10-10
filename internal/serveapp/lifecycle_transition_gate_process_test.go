@@ -63,7 +63,7 @@ func TestServedCompiledGateOutcomeRestartOnBothStores(t *testing.T) {
 			}
 			second, rt := start(false)
 			requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "done")
-			waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			after := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 			if len(after) != 1 || !reflect.DeepEqual(readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, outcomeID), before[0]) || after[0].TriggerEventID != outcomeID || after[0].From != "approved" || after[0].To != "done" {
 				t.Fatalf("restart changed gate cause or replayed route: before=%#v after=%#v", before, after)

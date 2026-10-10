@@ -510,6 +510,15 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		"TestNativeLoopClaimFixturesDoNotReceiveRawAuthority",
 		"TestNativeMockFixturesDoNotReceiveRawAuthority",
 		"TestNativeAPIReadSetupDoesNotReceiveRawAuthority",
+		"TestNativeProjectionRoundTripFixturesDoNotReceiveRawAuthority",
+		"TestNativeStorageIdentityFixturesDoNotReceiveRawAuthority",
+		"TestNativeProjectionStorageFixturesDoNotReceiveRawAuthority",
+		"TestNativeProjectionShapeFixturesDoNotReceiveRawAuthority",
+		"TestNativeProjectionHeaderFixturesDoNotReceiveRawAuthority",
+		"TestNativeMutationSeedFixturesDoNotReceiveRawAuthority",
+		"TestNativeLookupMissFixturesDoNotReceiveRawAuthority",
+		"TestNativeBookkeepingFixturesDoNotReceiveRawAuthority",
+		"TestNativeHandlerFixturesDoNotReceiveRawAuthority",
 	}
 	if len(censusUnit.RequiredChildren) != 1 || !slices.Equal(censusUnit.RequiredChildren["TestNativeFixtureFamiliesDoNotReceiveRawAuthority"], nativeChildren) {
 		t.Fatal("census unit dropped a completed-family assertion")
@@ -521,7 +530,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 			t.Fatalf("profile %s lost mandatory persistence census", name)
 		}
 	}
-	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-flow-lifecycle", "store-runtime-fanout", "store-runtime-fanout-process", "store-runtime-fork-generation", "store-runtime-full-03", "store-runtime-full-03-i-l", "store-runtime-full-04", "store-runtime-full-05", "store-runtime-full-07-fork", "store-runtime-selected", "store-runtime-s-z-rest"}
+	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-flow-lifecycle", "store-runtime-fanout", "store-runtime-fanout-process", "store-runtime-fork-generation", "store-runtime-full-03", "store-runtime-full-03-i-l", "store-runtime-full-04", "store-runtime-full-05", "store-runtime-full-07-fork", "store-runtime-full-06"}
 	storeRuntimePatterns := make([]*regexp.Regexp, 0, len(storeRuntimeUnits))
 	for _, unitID := range storeRuntimeUnits {
 		unit, exists := policy.Units[unitID]

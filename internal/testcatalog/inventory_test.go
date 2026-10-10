@@ -445,7 +445,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		"store-runtime-full-01", "store-runtime-full-02", "store-runtime-flow-lifecycle",
 		"store-runtime-fanout", "store-runtime-fanout-process", "store-runtime-fork-generation",
 		"store-runtime-full-03", "store-runtime-full-03-i-l", "store-runtime-full-04",
-		"store-runtime-full-05", "store-runtime-full-07-fork", "store-runtime-selected", "store-runtime-s-z-rest",
+		"store-runtime-full-05", "store-runtime-full-07-fork", "store-runtime-full-06",
 	}
 	for pkg, ids := range map[string][]string{"serveapp": serveUnits, "runtime/cataloge2e": catalogUnits, "store/internal/runtimepersistence": storeRuntimeUnits} {
 		var units []testplanning.ProofUnit

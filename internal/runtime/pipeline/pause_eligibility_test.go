@@ -30,7 +30,7 @@ func TestPausedHandedNodeParksUntilContinueBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			s := backend.open(t)
 			runID := uuid.NewString()
-			insertGateRecoveryRun(t, s, runID)
+			insertGateRecoveryRun(t, s.events, runID)
 			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			repo := canonicalrouting.RepoRoot(t)
 			bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopySelectionRetry(t), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})

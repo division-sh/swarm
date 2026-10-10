@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
-
 	"github.com/google/uuid"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -255,11 +253,11 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	ctx := runtimeauthoractivity.WithScope(runtimecorrelation.WithSourceArtifactFact(context.Background(), sourceFact), runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, sourceFact.BundleHash()))
 	ctx = runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), executionmode.Live)
 	bundleHash := sourceFact.BundleHash()
+	fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, Artifact: bundle.SourceArtifact}
 	if sqlite {
-		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: bundleHash, Artifact: bundle.SourceArtifact})
-	} else {
-		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, Artifact: bundle.SourceArtifact})
+		fixture.StartedAt = time.Now().UTC()
 	}
+	storetest.RequireRun(t, ctx, selected, fixture)
 
 	occurredAt := time.Now().UTC().Truncate(time.Microsecond)
 	source := semanticview.Wrap(bundle)

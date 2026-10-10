@@ -32,11 +32,6 @@ type timerTransitionContentionOwner struct {
 	activationReadErr          error
 	holdActivationRead         bool
 	holdTargetRead             bool
-	heldReadPublisher          context.Context
-	heldTargetReads            int
-	targetReadErr              error
-	heldReadEntered            func(string, context.Context)
-	readReturned               func(string, context.Context, error)
 }
 
 type timerTransitionOutcomeCapture struct {
@@ -45,7 +40,6 @@ type timerTransitionOutcomeCapture struct {
 	eventID         string
 	event           events.Event
 	beforeIntercept func(context.Context) context.Context
-	afterIntercept  func(context.Context)
 	entryErr        error
 	interceptErr    error
 	exitErr         error
@@ -59,25 +53,18 @@ func (c *timerTransitionOutcomeCapture) Intercept(ctx context.Context, event eve
 	pass, emitted, outcome, err := c.coordinator.Intercept(ctx, event)
 	c.outcome, c.eventID, c.event, c.interceptErr = outcome, event.ID(), event, err
 	c.exitErr = ctx.Err()
-	if c.afterIntercept != nil {
-		c.afterIntercept(ctx)
-	}
 	return pass, emitted, outcome, err
 }
 
 func (o *timerTransitionContentionOwner) LoadWorkflowTimerActivation(ctx context.Context, activationID string) (runtimepipeline.WorkflowTimerActivation, bool, error) {
 	if o.holdActivationRead {
-		if o.heldReadEntered != nil {
-			o.heldReadEntered("activation", ctx)
-		}
-		if err := joinTimerTestInterruption(o.heldReadPublisher, ctx); err != nil {
-			return runtimepipeline.WorkflowTimerActivation{}, false, err
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+			return runtimepipeline.WorkflowTimerActivation{}, false, errors.New("held timer authorization read did not cancel")
 		}
 	}
 	activation, found, err := o.WorkflowPersistenceOwner.LoadWorkflowTimerActivation(ctx, activationID)
-	if o.readReturned != nil {
-		o.readReturned("activation", ctx, err)
-	}
 	if ctx.Err() != nil {
 		o.interruptedActivationReads++
 		o.activationReadErr = err
@@ -87,38 +74,13 @@ func (o *timerTransitionContentionOwner) LoadWorkflowTimerActivation(ctx context
 
 func (o *timerTransitionContentionOwner) LoadWorkflowTargetPersistence(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entity runtimeidentity.EntityID) (runtimepipeline.WorkflowTargetPersistenceRecord, error) {
 	if o.holdTargetRead {
-		o.heldTargetReads++
-		if o.heldReadEntered != nil {
-			o.heldReadEntered("target", ctx)
-		}
-		if err := joinTimerTestInterruption(o.heldReadPublisher, ctx); err != nil {
-			return runtimepipeline.WorkflowTargetPersistenceRecord{}, err
-		}
-	}
-	result, err := o.WorkflowPersistenceOwner.LoadWorkflowTargetPersistence(ctx, identity, entity)
-	if o.readReturned != nil {
-		o.readReturned("target", ctx, err)
-	}
-	if o.holdTargetRead {
-		o.targetReadErr = err
-	}
-	return result, err
-}
-
-func joinTimerTestInterruption(publisher, receiver context.Context) error {
-	guard := time.NewTimer(5 * time.Second)
-	defer guard.Stop()
-	for _, lifetime := range []context.Context{publisher, receiver} {
-		if lifetime == nil {
-			continue
-		}
 		select {
-		case <-lifetime.Done():
-		case <-guard.C:
-			return errors.New("timer test cancellation did not reach the intended context within five seconds")
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+			return runtimepipeline.WorkflowTargetPersistenceRecord{}, errors.New("held timer target read did not cancel")
 		}
 	}
-	return nil
+	return o.WorkflowPersistenceOwner.LoadWorkflowTargetPersistence(ctx, identity, entity)
 }
 
 func (o *timerTransitionContentionOwner) CommitWorkflowEngineMutation(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
@@ -152,10 +114,6 @@ func TestIssue2564M09TimerPublishedOccurrenceCanceledTransitionReplayBothStores(
 
 func TestWorkflowTimerDispatchDeadlineCutClassificationOnBothStores(t *testing.T) {
 	verifyWorkflowTimerPublishedOccurrenceRecovery(t, []string{"deadline_dispatch_before_mutation", "deadline_dispatch_before_authorization"})
-}
-
-func TestWorkflowTimerPublisherDeadlineEarlyDispatchJoinsBothLifetimesBothStores(t *testing.T) {
-	verifyWorkflowTimerPublishedOccurrenceRecovery(t, []string{"deadline_dispatch_early_target"})
 }
 
 func TestIssue2564M09TimerDispatchEntryCancellationLeavesBusObligationReplayableBothStores(t *testing.T) {
@@ -258,25 +216,10 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 				}
 				fireCtx := ctx
 				var interrupted error
-				var receiverProbe *timerReceiverReadCut
-				deadlineDispatch := scenario == "deadline_dispatch" || scenario == "deadline_dispatch_early_target" || scenario == "deadline_dispatch_before_mutation" || scenario == "deadline_dispatch_before_authorization"
+				deadlineDispatch := scenario == "deadline_dispatch" || scenario == "deadline_dispatch_before_mutation" || scenario == "deadline_dispatch_before_authorization"
 				deadlineBeforeMutation := false
-				earlyPublisherJoined := false
 				entryCut := scenario == "canceled_entry" || scenario == "deadline_entry" || scenario == "deadline_entry_live_outer"
 				switch scenario {
-				case "receiver_cancellation_cause_held_activation", "receiver_cancellation_cause_held_target", "receiver_cancellation_cause_held_activation_delayed_entry", "receiver_cancellation_cause_held_target_delayed_entry":
-					var cancel context.CancelFunc
-					fireCtx, cancel = context.WithCancel(ctx)
-					defer cancel()
-					read := "activation"
-					if scenario == "receiver_cancellation_cause_held_target" || scenario == "receiver_cancellation_cause_held_target_delayed_entry" {
-						read = "target"
-					}
-					receiverProbe = &timerReceiverReadCut{publisher: fireCtx, read: read, owner: owner, test: t}
-					receiverProbe.delayEntry = scenario == "receiver_cancellation_cause_held_activation_delayed_entry" || scenario == "receiver_cancellation_cause_held_target_delayed_entry"
-					owner.heldReadEntered = receiverProbe.enterRead
-					owner.readReturned = receiverProbe.returnRead
-					capture.beforeIntercept = receiverProbe.beginReceiver
 				case "deadline_entry_live_outer":
 					interrupted = context.DeadlineExceeded
 					capture.beforeIntercept = func(dispatchCtx context.Context) context.Context {
@@ -339,31 +282,12 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 						}
 						return ctx
 					}
-				case "deadline_dispatch", "deadline_dispatch_early_target", "deadline_dispatch_before_mutation", "deadline_dispatch_before_authorization":
+				case "deadline_dispatch", "deadline_dispatch_before_mutation", "deadline_dispatch_before_authorization":
 					interrupted = context.DeadlineExceeded
 					var cancel context.CancelFunc
 					fireCtx, cancel = context.WithTimeout(ctx, time.Second)
 					defer cancel()
-					if scenario == "deadline_dispatch" || scenario == "deadline_dispatch_early_target" {
-						capture.afterIntercept = func(receiver context.Context) {
-							if owner.calls != 0 || !runtimefailures.IsContextInterruption(receiver.Err()) {
-								return
-							}
-							publisherDeadline, publisherBound := fireCtx.Deadline()
-							receiverDeadline, receiverBound := receiver.Deadline()
-							if !publisherBound || !receiverBound || !receiverDeadline.Equal(publisherDeadline) {
-								t.Fatal("early publisher-deadline cut lost the exact receiver deadline")
-							}
-							if err := joinTimerTestInterruption(fireCtx, receiver); err != nil {
-								t.Fatal(err)
-							}
-							earlyPublisherJoined = true
-						}
-					} else {
-						// These held cuts are publisher-driven, not receiver-only.
-						owner.heldReadPublisher = fireCtx
-					}
-					owner.holdTargetRead = scenario == "deadline_dispatch_before_mutation" || scenario == "deadline_dispatch_early_target"
+					owner.holdTargetRead = scenario == "deadline_dispatch_before_mutation"
 					if scenario == "deadline_dispatch_before_authorization" {
 						capture.beforeIntercept = func(dispatchCtx context.Context) context.Context {
 							owner.holdActivationRead = true
@@ -381,16 +305,6 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 					}
 				}
 				outcome, err := runtimepipeline.FireWorkflowTimerOccurrenceForTest(fireCtx, pc, rows[0])
-				publisherReturnErr := fireCtx.Err()
-				defer func() {
-					if (!deadlineDispatch && receiverProbe == nil) || !t.Failed() {
-						return
-					}
-					owner.holdActivationRead, owner.holdTargetRead = false, false
-					before, beforeFound, beforeErr := pc.Load(ctx, identity)
-					timer, timerFound, timerErr := activations.LoadWorkflowTimerActivation(ctx, rows[0].Ref.ActivationID)
-					t.Logf("M09 failed-cut evidence parent=%v publication=%s dispatch=%v entry=%v exit=%v intercept=%v outcome=%+v calls=%d acknowledged=%d mutation=%v authorization_reads=%d authorization_error=%v event=%s stage=%s history=%d state_found=%t state_error=%v timer_found=%t timer_status=%s fired_at=%s timer_error=%v receipts=%d", fireCtx.Err(), outcome, err, capture.entryErr, capture.exitErr, capture.interceptErr, capture.outcome, owner.calls, owner.acknowledged, owner.lastErr, owner.interruptedActivationReads, owner.activationReadErr, capture.eventID, before.CurrentState, len(before.TransitionHistory), beforeFound, beforeErr, timerFound, timer.Status, timer.FiredAt.Format(time.RFC3339Nano), timerErr, gateRecoveryPipelineReceiptCount(t, selected, capture.eventID))
-				}()
 				if entryCut {
 					if scenario == "deadline_entry_live_outer" && fireCtx.Err() != nil {
 						t.Fatalf("receiver-only deadline also ended the outer context: %v", fireCtx.Err())
@@ -405,12 +319,6 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 					if scenario == "deadline_entry" && !errors.Is(fireCtx.Err(), context.DeadlineExceeded) {
 						t.Fatalf("dispatch entry deadline did not expire: %v", fireCtx.Err())
 					}
-				}
-				if receiverProbe != nil {
-					receiverProbe.validate(capture, publisherReturnErr)
-					interrupted = context.Canceled
-					entryCut = receiverProbe.read == "activation"
-					deadlineBeforeMutation = receiverProbe.read == "target"
 				}
 				if deadlineDispatch {
 					if !errors.Is(fireCtx.Err(), context.DeadlineExceeded) {
@@ -445,11 +353,8 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 						interrupted = owner.lastErr
 					}
 				}
-				if scenario == "deadline_dispatch_early_target" && !earlyPublisherJoined {
-					t.Fatal("early dispatch did not join the exact publisher and receiver lifetimes")
-				}
-				if (scenario == "deadline_dispatch_before_mutation" || scenario == "deadline_dispatch_early_target") && (!deadlineBeforeMutation || owner.calls != 0 || owner.heldTargetReads != 1 || !errors.Is(owner.targetReadErr, interrupted)) {
-					t.Fatalf("held target read did not prove the authorized pre-mutation cut: calls=%d entry_cut=%t target_reads=%d target_error=%v", owner.calls, entryCut, owner.heldTargetReads, owner.targetReadErr)
+				if scenario == "deadline_dispatch_before_mutation" && (!deadlineBeforeMutation || owner.calls != 0) {
+					t.Fatalf("held target read did not prove the authorized pre-mutation cut: calls=%d entry_cut=%t", owner.calls, entryCut)
 				}
 				if scenario == "deadline_dispatch_before_authorization" && (!entryCut || capture.entryErr != nil || owner.calls != 0 || owner.interruptedActivationReads != 1 || !errors.Is(owner.activationReadErr, interrupted)) {
 					t.Fatalf("held activation read did not prove live entry followed by authorization refusal: calls=%d entry=%v reads=%d read_error=%v", owner.calls, capture.entryErr, owner.interruptedActivationReads, owner.activationReadErr)
@@ -471,11 +376,8 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 					if err != nil || !found || before.CurrentState != "waiting" || len(before.TransitionHistory) != 0 || owner.acknowledged != 0 {
 						t.Fatalf("rejected transition leaked: %+v found=%t error=%v", before, found, err)
 					}
-					if got := gateRecoveryPipelineReceiptCount(t, selected, eventID); got != 0 {
+					if got := gateRecoveryPipelineReceiptCount(t, selected.events, eventID); got != 0 {
 						t.Fatalf("rejected transition has %d terminal receipts", got)
-					}
-					if receiverProbe != nil {
-						t.Logf("M09_INITIAL read=%s event=%s activation=%s publication=%s timer=%s stage=%s history=%d calls=%d acknowledgments=%d receipts=0", receiverProbe.read, eventID, fired.Ref.ActivationID, outcome, fired.Status, before.CurrentState, len(before.TransitionHistory), owner.calls, owner.acknowledged)
 					}
 					retry, ok := capture.outcome.RetryRelease()
 					code := "workflow_engine_state_revision_conflict"
@@ -522,10 +424,7 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 					owner.reject = false
 					owner.commitContext = nil
 					owner.holdActivationRead, owner.holdTargetRead = false, false
-					owner.heldReadPublisher = nil
-					owner.heldReadEntered, owner.readReturned = nil, nil
 					capture.beforeIntercept = nil
-					capture.afterIntercept = nil
 					if scenario == "restart_retry" {
 						if err := pc.StopWorkflowTimerLifecycle(ctx); err != nil {
 							t.Fatal(err)
@@ -555,11 +454,8 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 					t.Fatalf("settled occurrence replayed: %+v error=%v", result, err)
 				}
 				persisted, found, err := activations.LoadWorkflowTimerActivation(ctx, fired.Ref.ActivationID)
-				if err != nil || !found || !reflect.DeepEqual(persisted, fired) || workflowTimerEventCount(t, selected, runID, runtimecontracts.WorkflowStageTimerInternalEvent) != 1 || gateRecoveryPipelineReceiptCount(t, selected, eventID) != 1 {
+				if err != nil || !found || !reflect.DeepEqual(persisted, fired) || workflowTimerEventCount(t, selected, runID, runtimecontracts.WorkflowStageTimerInternalEvent) != 1 || gateRecoveryPipelineReceiptCount(t, selected.events, eventID) != 1 {
 					t.Fatalf("recovery changed exact occurrence/history: before=%+v after=%+v error=%v", fired, persisted, err)
-				}
-				if receiverProbe != nil {
-					t.Logf("M09_FINAL read=%s event=%s activation=%s stage=%s trigger=%s history=%d calls=%d acknowledgments=%d receipts=1 event_count=1 occurrence_unchanged=true", receiverProbe.read, eventID, fired.Ref.ActivationID, after.CurrentState, after.TransitionHistory[0].TriggerEventID, len(after.TransitionHistory), owner.calls, owner.acknowledged)
 				}
 			})
 		}

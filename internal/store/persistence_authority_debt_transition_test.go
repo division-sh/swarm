@@ -11,6 +11,8 @@ import (
 // digest. The origin and permission checks are hashed, so the transition cannot
 // be reactivated after landing by editing this destination alone.
 const debtG01CollectorTo = "b42ea974646e7b666459091174645baa501d91da16871813568db23858def7b7"
+const debtQuiescenceCollectorTo = "4ab44a86253d3b09474c20463ca1a4e5c6296f4a4694e4d80d904832757ae047"
+const debtRunFixtureCollectorTo = "dd36814075a0641f1085eb8fe8d74ae1cd61d8fba3b6047a8514b175ddbfa53e"
 
 func TestPersistenceAuthorityDebtG01TransitionIsExactAndMetadataOnly(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
@@ -69,5 +71,111 @@ func TestPersistenceAuthorityDebtG01TransitionIsExactAndMetadataOnly(t *testing.
 				t.Fatal("transition admitted a non-metadata baseline change")
 			}
 		})
+	}
+}
+
+func TestPersistenceAuthorityDebtQuiescenceTransitionPreservesExactDebtAndDirection(t *testing.T) {
+	old, current := debtQuiescenceUncertaintyTransition()
+	unrelated := debtControlSite("call:QueryRow", 3)
+	oldState := debtControlSet(old, unrelated)
+	newState := debtControlSet(current, unrelated)
+	for _, test := range []struct {
+		name                       string
+		actual, head, base, source map[string]authorityDebtSite
+		accept                     bool
+	}{
+		{"unchanged-before", oldState, oldState, oldState, oldState, true},
+		{"forward-refresh", newState, oldState, oldState, oldState, true},
+		{"forward-refreshed", newState, newState, oldState, oldState, true},
+		{"inert-after-landing", newState, newState, newState, newState, true},
+		{"both-actual", debtControlSet(old, current, unrelated), newState, oldState, oldState, false},
+		{"both-head", newState, debtControlSet(old, current, unrelated), oldState, oldState, false},
+		{"both-trusted", newState, newState, debtControlSet(old, current, unrelated), oldState, false},
+		{"both-source", newState, newState, oldState, debtControlSet(old, current, unrelated), false},
+		{"reverse-landed", oldState, oldState, newState, newState, false},
+		{"old-source-resurrection", oldState, oldState, oldState, newState, false},
+		{"independent-source-does-not-match", newState, newState, oldState, debtControlSet(unrelated), false},
+		{"unrelated-addition-despite-lower-count", debtControlSet(current, debtControlSite("call:Exec", 1)), debtControlSet(current, debtControlSite("call:Exec", 1)), oldState, oldState, false},
+		{"unrelated-multiplicity-increase", debtControlSet(current, debtControlSite("call:QueryRow", 4)), debtControlSet(current, debtControlSite("call:QueryRow", 4)), oldState, oldState, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			failures := authorityDebtRatchet(test.actual, test.head, test.base, test.source)
+			if (len(failures) == 0) != test.accept {
+				t.Fatalf("accepted=%v,failures=%v", test.accept, failures)
+			}
+		})
+	}
+	for _, field := range []string{"file", "declaration", "kind", "hash", "context", "family", "owner", "multiplicity"} {
+		t.Run(field, func(t *testing.T) {
+			changed := current
+			switch field {
+			case "file":
+				changed.File += ".other"
+			case "declaration":
+				changed.Declaration += "Other"
+			case "kind":
+				changed.Kind = "raw-operation"
+			case "hash":
+				changed.Operation = "declaration:" + strings.Repeat("e", 64)
+			case "context":
+				changed.Resolved += "other"
+			case "family":
+				changed.Family += "other"
+			case "owner":
+				changed.Replacement += "other"
+			case "multiplicity":
+				changed.Multiplicity = 2
+			}
+			state := debtControlSet(changed, unrelated)
+			if failures := authorityDebtRatchet(state, state, oldState, oldState); len(failures) == 0 {
+				t.Fatal("reviewed transition admitted a different site or count")
+			}
+		})
+	}
+	if oldState[old.identity()] != old || oldState[current.identity()].Multiplicity != 0 {
+		t.Fatal("comparison mutated its original trusted reference")
+	}
+}
+
+func TestPersistenceAuthorityDebtQuiescenceCollectorTransitionIsPinnedAndDownward(t *testing.T) {
+	old, forward := debtQuiescenceUncertaintyTransition()
+	legacy := debtControlSite("call:QueryRow", 3)
+	trusted := authorityDebtBaseline{BootstrapSource: strings.Repeat("a", 40), Collector: debtQuiescenceCollectorFrom, Sites: debtControlSet(old, legacy)}
+	for _, test := range []struct {
+		name   string
+		sites  map[string]authorityDebtSite
+		accept bool
+	}{
+		{"before-refresh", trusted.Sites, true},
+		{"exact-forward", debtControlSet(forward, legacy), true},
+		{"forward-and-genuine-removal", debtControlSet(forward), true},
+		{"uncertainty-dropped", debtControlSet(legacy), false},
+		{"both-identities", debtControlSet(old, forward), false},
+		{"increased-uncertainty", debtControlSet(authorityDebtSite{forward.Kind, forward.File, forward.Declaration, forward.Operation, forward.Resolved, forward.Family, forward.Replacement, 2}), false},
+		{"new-raw-despite-lower-count", debtControlSet(forward, debtControlSite("call:Exec", 1)), false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			head := trusted
+			head.Collector, head.Sites = debtQuiescenceCollectorTo, test.sites
+			if err := debtValidateCollectorIdentity(debtQuiescenceCollectorFrom, debtQuiescenceCollectorTo, trusted, head, ""); (err == nil) != test.accept {
+				t.Fatalf("accepted=%v,error=%v", test.accept, err)
+			}
+		})
+	}
+	landed := trusted
+	landed.Collector, landed.Sites = debtQuiescenceCollectorTo, debtControlSet(forward)
+	if err := debtValidateCollectorIdentity(debtQuiescenceCollectorTo, debtQuiescenceCollectorTo, landed, landed, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := debtValidateCollectorIdentity(debtQuiescenceCollectorTo, debtQuiescenceCollectorFrom, landed, trusted, ""); err == nil {
+		t.Fatal("reverse collector transition accepted")
+	}
+	wrong := landed
+	wrong.BootstrapSource = strings.Repeat("b", 40)
+	if err := debtValidateCollectorIdentity(debtQuiescenceCollectorFrom, debtQuiescenceCollectorTo, trusted, wrong, ""); err == nil {
+		t.Fatal("bootstrap origin changed")
+	}
+	if err := debtValidateCollectorIdentity(debtQuiescenceCollectorFrom, strings.Repeat("c", 64), trusted, landed, ""); err == nil {
+		t.Fatal("unreviewed collector digest accepted")
 	}
 }

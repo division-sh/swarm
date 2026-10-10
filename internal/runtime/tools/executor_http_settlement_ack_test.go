@@ -23,7 +23,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
@@ -127,9 +126,9 @@ func settledHTTPToolSource(url string) semanticview.Source {
 
 func requireHTTPSettlementOutcome(t *testing.T, selected httpSettlementSelectedStore, operationID string, state runtimeeffects.State, count int) {
 	t.Helper()
-	db := storetest.DatabaseForTest(selected)
-	var actual int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM runtime_external_effect_attempts`).Scan(&actual); err != nil || actual != count {
+	attempts, err := storetest.ReadExternalAttemptStorage(context.Background(), selected)
+	actual := len(attempts)
+	if err != nil || actual != count {
 		t.Fatalf("effect attempt count=%d err=%v, want %d", actual, err, count)
 	}
 	outcome, found, err := selected.GetExternalEffectOutcome(context.Background(), operationID)
@@ -145,9 +144,8 @@ func TestHTTPToolAcknowledgedSettlementCleanupPreservesResponseBothStores(t *tes
 			if backend == "sqlite" {
 				selected = storetest.StartSQLiteRuntimeStore(t)
 			} else {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+				native, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+				selected = native
 			}
 			ctx, actor := selectedHTTPSettlementContext(t, selected, "http-tool-settlement-ack")
 			fault := errors.New("injected post-commit completion handoff failure")
@@ -171,10 +169,11 @@ func TestHTTPToolAcknowledgedSettlementCleanupPreservesResponseBothStores(t *tes
 			if err != nil || !ok || len(response) != 1 || response["receipt"] != "provider-42" || calls.Load() != 1 || sink.submits != 1 {
 				t.Fatalf("acknowledged HTTP result=%#v err=%v calls=%d handoffs=%d", out, err, calls.Load(), sink.submits)
 			}
-			var operationID string
-			if err := storetest.DatabaseForTest(selected).QueryRow(`SELECT CAST(operation_id AS TEXT) FROM runtime_external_effect_attempts`).Scan(&operationID); err != nil {
-				t.Fatal(err)
+			attempts, err := storetest.ReadExternalAttemptStorage(context.Background(), selected)
+			if err != nil || len(attempts) != 1 {
+				t.Fatalf("expected one original physical attempt: %+v/%v", attempts, err)
 			}
+			operationID := attempts[0].OperationID
 			requireHTTPSettlementOutcome(t, selected, operationID, runtimeeffects.StateSettled, 1)
 			for _, definition := range executor.ToolDefinitionsForActorInContext(ctx, actor) {
 				if definition.Name == "compute_only" {
@@ -217,7 +216,13 @@ func TestHTTPToolAcknowledgedSettlementCleanupPreservesResponseBothStores(t *tes
 			}
 			requireHTTPSettlementOutcome(t, selected, operationID, runtimeeffects.StateSettled, 2)
 			var settledCount int
-			if err := storetest.DatabaseForTest(selected).QueryRow(`SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE state='settled'`).Scan(&settledCount); err != nil || settledCount != 1 {
+			attempts, err = storetest.ReadExternalAttemptStorage(context.Background(), selected)
+			for _, attempt := range attempts {
+				if attempt.State == "settled" {
+					settledCount++
+				}
+			}
+			if err != nil || settledCount != 1 {
 				t.Fatalf("settled attempt count=%d err=%v, want only acknowledged settlement", settledCount, err)
 			}
 			for _, entry := range bus.logs {

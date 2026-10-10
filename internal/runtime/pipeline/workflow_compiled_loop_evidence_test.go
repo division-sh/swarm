@@ -74,6 +74,7 @@ closer:
 
 type compiledLoopEvidenceHarness struct {
 	t        *testing.T
+	fixture  *PipelineDeliveryNativeFixtureForTest
 	ctx      context.Context
 	pc       *PipelineCoordinator
 	store    *workflowInstanceStore
@@ -83,24 +84,26 @@ type compiledLoopEvidenceHarness struct {
 	clock    time.Time
 }
 
-func newCompiledLoopEvidenceHarness(t *testing.T, storeCase workflowJoinStoreCase) *compiledLoopEvidenceHarness {
+func newCompiledLoopEvidenceHarness(t *testing.T, storeCase workflowJoinStoreCase, open pipelineDeliveryNativeOpenerForTest) *compiledLoopEvidenceHarness {
 	t.Helper()
-	store, ctx := storeCase.open(t)
 	source := compiledLoopEvidenceSource(t)
-	pc := newWorkflowJoinPipelineCoordinator(t, &recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-		Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
-	})
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("compiled loop requires its admitted bundle")
+	}
+	fixture, pc, ctx, _ := nativeWorkflowJoinCoordinatorForTest(t, storeCase.name, bundle, nil, open)
+	store := pc.workflowStore
 	runID := runtimecorrelation.RunIDFromContext(ctx)
 	entityID := runID
 	now := canonicalWorkflowTimerTime(time.Now().UTC())
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
+		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
 		CurrentState: "waiting", CreatedAt: now, EnteredStageAt: now, EntityType: "test_entity", Fields: map[string]any{},
 	})
-	if err := store.upsert(ctx, instance); err != nil {
+	if err := fixture.Construct(ctx, instance); err != nil {
 		t.Fatal(err)
 	}
-	return &compiledLoopEvidenceHarness{t: t, ctx: ctx, pc: pc, store: store, source: source, route: testWorkflowInstanceRoute(runID), entityID: entityID, clock: now}
+	return &compiledLoopEvidenceHarness{t: t, fixture: fixture, ctx: ctx, pc: pc, store: store, source: source, route: testWorkflowInstanceRoute(runID), entityID: entityID, clock: now}
 }
 
 func (h *compiledLoopEvidenceHarness) load() WorkflowInstance {
@@ -134,20 +137,23 @@ func (h *compiledLoopEvidenceHarness) execute(nodeID, eventType, revision string
 		h.t.Fatal(err)
 	}
 	runID := runtimecorrelation.RunIDFromContext(h.ctx)
-	event := eventtest.RunCreatingRootIngressWithRoutingSource(eventID, events.EventType(eventType), "operator", "", payload, 0, runID, "", handlerTestWorkflowEnvelope(".", runID, h.entityID), testWorkflowRoutingSource(".", runID, h.entityID), h.clock)
-	persistWorkflowTimerEvent(h.t, h.store, h.ctx, eventID, eventType, runID, h.entityID, payload, h.clock)
+	event := eventtest.ExistingRunRootIngressWithRoutingSource(eventID, events.EventType(eventType), "operator", "", payload, 0, runID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: h.entityID}), testWorkflowRoutingSource(".", runID, h.entityID), h.clock)
 	node := pipelineSourceNode(h.t, h.source, ".", nodeID)
 	handler, ok := h.source.ExecutableNodeEventHandlers(node)[eventType]
 	if !ok {
 		h.t.Fatalf("source lacks %s/%s", node.Key(), eventType)
 	}
-	ctx := withClaimedWorkflowNodePublicationForTest(h.t, h.pc, h.ctx, event, events.DeliveryRoute{
+	route := events.DeliveryRoute{
 		Recipient: events.MustNodeDeliveryRecipient(node),
 		Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: h.entityID}),
-	})
-	result, err := h.pc.executeNodeContractHandler(ctx, node, handler, workflowTriggerContext{
+	}
+	if err := h.fixture.PublishNode(h.ctx, event, route); err != nil {
+		h.t.Fatal(err)
+	}
+	ctx := withWorkflowNodeDeliveryRoute(runtimecorrelation.WithInboundEvent(h.ctx, event), route)
+	result, err := executeNativeClaimedPipelineHandlerForTest(h.t, h.pc, ctx, node, handler, workflowTriggerContext{
 		Event: event, HandlerEventKey: eventType, State: mustCurrentWorkflowState(h.t, h.pc, h.ctx, h.route, h.entityID),
-	}, false)
+	})
 	return result, event, err
 }
 
@@ -185,7 +191,7 @@ func (h *compiledLoopEvidenceHarness) advance(nodeID, eventType, revision, from,
 	return record
 }
 
-func TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores(t *testing.T) {
+func VerifyNativePipelineCompiledLoopCarrierSourceAdmissionOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		for _, tc := range []struct {
 			node, event string
@@ -196,7 +202,7 @@ func TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores(t *testing.T) {
 			{"collector", "loop.complete", contracts.HandlerAdvanceCarrierOnComplete, handlerselection.ContextOnComplete},
 		} {
 			t.Run(storeCase.name+"/"+tc.event, func(t *testing.T) {
-				h := newCompiledLoopEvidenceHarness(t, storeCase)
+				h := newCompiledLoopEvidenceHarness(t, storeCase, open)
 				h.advance("starter", "loop.start", "", "waiting", "drafting", contracts.LoopOperationStart, contracts.HandlerAdvanceCarrierHandler)
 				revision := h.activation().RevisionID
 				record := h.advance(tc.node, tc.event, revision, "drafting", "review", contracts.LoopOperationAdmit, tc.carrier)
@@ -223,11 +229,11 @@ func TestPipelineCompiledLoopCarrierSourceAdmissionOnBothStores(t *testing.T) {
 	}
 }
 
-func TestPipelineCompiledLoopOperationEvidenceOnBothStores(t *testing.T) {
+func VerifyNativePipelineCompiledLoopOperationEvidenceOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		for _, outcome := range []string{"close", "escape"} {
 			t.Run(storeCase.name+"/"+outcome, func(t *testing.T) {
-				h := newCompiledLoopEvidenceHarness(t, storeCase)
+				h := newCompiledLoopEvidenceHarness(t, storeCase, open)
 				h.advance("starter", "loop.start", "", "waiting", "drafting", contracts.LoopOperationStart, contracts.HandlerAdvanceCarrierHandler)
 				first := h.activation()
 				h.advance("reviewer", "loop.rule", first.RevisionID, "drafting", "review", contracts.LoopOperationAdmit, contracts.HandlerAdvanceCarrierRules)

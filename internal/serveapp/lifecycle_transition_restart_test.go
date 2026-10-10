@@ -26,6 +26,8 @@ import (
 // lifecycle rows or a replacement receiver/transition implementation.
 func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget ...time.Duration) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
 	t.Helper()
+	var deliveryReader servedRunDeliveryReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	opts := &cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
@@ -75,7 +77,7 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 			}
 		}
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-		return process, servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, opts.SourceRoot), ReceiverStateReader: receiverReader}
+		return process, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, opts.SourceRoot), ReceiverStateReader: receiverReader}
 	}
 }
 
@@ -110,7 +112,7 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, seedParams)
 			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
 			params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
 			if code := first.stop(); code != 0 {
 				t.Fatalf("first stop=%d", code)
@@ -146,7 +148,7 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			}
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decided)
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			var entity operatorread.OperatorEntityFull
 			requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
 			if entity.Fields["result"] != "approved" {
@@ -241,7 +243,7 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 					repeated := requireServedEventPublishRPCResult(t, rt.Endpoint, capParams)
 					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), repeated.EventID, "review", "drafting")
-					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				}
 				armed.Store(true)
 				cap := requireServedEventPublishRPCResult(t, rt.Endpoint, capParams)
@@ -263,7 +265,7 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 				second, rt := start()
 				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "escaped")
 				receipt := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "done")
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				closed := readLifecycleLoop(t, rt, seed.RunID, entityID)
 				if closed.RevisionID != capRevision || closed.Attempt != 2 || closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" {
 					t.Fatalf("restart loop=%#v", closed)

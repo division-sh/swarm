@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -17,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
 
-func TestPipelineRejectsFabricatedGuardCauseOnBothStores(t *testing.T) {
+func VerifyNativePipelineRejectsFabricatedGuardCauseOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
 		"schema.yaml":   "name: guard-cause-hostility\nstages:\n  ready: {}\n  done: {final: true}\n  killed: {final: true}\n",
 		"entities.yaml": "test_entity:\n  marker: text\n",
@@ -67,15 +66,17 @@ func TestPipelineRejectsFabricatedGuardCauseOnBothStores(t *testing.T) {
 			{"failed_guard_not_last", "router", "kill_chain", "leading-pass", "killed", []string{"leading-pass", "declared-kill"}, "guard checks"},
 		} {
 			t.Run(backend.name+"/"+tc.name, func(t *testing.T) {
-				store, ctx := backend.open(t)
-				pc := newWorkflowJoinPipelineCoordinator(t, &recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-					Module: &pipelineFixtureWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
-				})
+				bundle, found := semanticview.Bundle(source)
+				if !found {
+					t.Fatal("hostile cause proof requires its original compiled artifact")
+				}
+				fixture, pc, ctx := nativePilotPipelineForTest(t, backend.name, bundle, open)
+				store := pc.workflowStore
 				runID := correlation.RunIDFromContext(ctx)
-				entityID := eventtest.UUID("guard-cause-" + backend.name + "-" + tc.name)
+				entityID := runID
 				address := testEngineStateAddress(".", runID, entityID)
 				address.FlowInstance = testRunScopedWorkflowInstanceFromContext(ctx, runID)
-				if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 					Mode: contracts.FlowModeStatic, CurrentState: "ready", EntityType: "test_entity", Fields: map[string]any{"marker": "unchanged"},
 				})); err != nil {
@@ -99,9 +100,10 @@ func TestPipelineRejectsFabricatedGuardCauseOnBothStores(t *testing.T) {
 				}
 				state := testEngineStateMutation(map[string]any{"marker": "unauthorized"}, nil, nil)
 				state.NextState, state.Transition = tc.target, &cause
-				state.TriggerEventID, state.TriggerEventType = eventtest.UUID("guard-trigger-"+tc.name), tc.handler
-				state.TriggeredAt = time.Now().UTC()
-				persistWorkflowTimerEvent(t, store, ctx, state.TriggerEventID, state.TriggerEventType, runID, entityID, nil, state.TriggeredAt)
+				state.TriggerEventType, state.TriggeredAt = tc.handler, time.Now().UTC()
+				inbound := nativeWorkflowJoinEventForTest(ctx, ".", runID, entityID, tc.handler, []byte("{}"), state.TriggeredAt)
+				state.TriggerEventID = inbound.ID()
+				fixture.PublishDirect(ctx, inbound)
 				effect, err := workflowlifecycle.NewAcceptedEvent(address.FlowInstance.Route, identity.NormalizeEntityID(entityID), state.TriggerEventID, state.TriggerEventType, executionmode.Live, state.TriggeredAt, &cause)
 				if err != nil {
 					t.Fatal(err)

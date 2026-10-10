@@ -1,12 +1,9 @@
 package pipeline
 
 import (
-	"encoding/json"
-	"fmt"
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 func ActivityAttemptStoryDraft(rec ActivityAttemptRecord, transition string) runtimeauthoractivity.Draft {
@@ -47,14 +44,3 @@ func activityOccurrenceTime(rec ActivityAttemptRecord, transition string) time.T
 }
 
 func intPointer(value int) *int { return &value }
-
-func pipelineFailureJSON(failure *runtimefailures.Envelope) (string, error) {
-	if failure == nil {
-		return "", nil
-	}
-	encoded, err := json.Marshal(failure)
-	if err != nil {
-		return "", fmt.Errorf("marshal pipeline failure: %w", err)
-	}
-	return string(encoded), nil
-}

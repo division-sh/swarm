@@ -72,14 +72,15 @@ func (b *canceledTurnConsumerBus) DispatchTurnTimeoutReaction(ctx context.Contex
 	return b.dispatch(ctx, committed)
 }
 
-func TestCanceledDeliveryConsumerKeepsExactCommitAndCleanupEvidence(t *testing.T) {
+func ProveNativeCanceledDeliveryConsumerKeepsExactCommitAndCleanupEvidence(t *testing.T, open managerDeliveryNativeFactory) {
 	for _, mode := range []string{"healthy", "captured", "foreign_capture", "prepare_failure", "unacknowledged", "foreign_origin", "missing_reaction", "commit_cleanup", "continuation_cleanup", "dispatch_cleanup"} {
 		t.Run(mode, func(t *testing.T) {
-			store := newManagerDeliveryTestStore(t)
+			store := open(t)
 			bus := &canceledTurnConsumerBus{reaction: turnReactionProbe{id: uuid.NewString()}}
 			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: store})
-			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Time{})
-			ctx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), event, "canceled-consumer")
+			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+			store.seedClaim(t, store.Context, event, "canceled-consumer")
+			ctx := managerClaimedDeliveryContext(t, am, store.Context, event, "canceled-consumer")
 			claim, _ := deliverylifecycle.ClaimFromContext(ctx)
 			origin, err := effects.DeliveryCompletionOrigin(claim)
 			if err != nil {
@@ -166,18 +167,19 @@ func TestCanceledDeliveryConsumerKeepsExactCommitAndCleanupEvidence(t *testing.T
 	}
 }
 
-func TestStartupCanceledTurnCommitsBeforeAdmissionWithoutExecutingReaction(t *testing.T) {
+func ProveNativeStartupCanceledTurnCommitsBeforeAdmissionWithoutExecutingReaction(t *testing.T, open managerDeliveryNativeFactory) {
 	for _, mode := range []string{"healthy", "list_failure", "prepare_failure", "unacknowledged", "missing_reaction", "commit_cleanup", "unowned_continuation"} {
 		t.Run(mode, func(t *testing.T) {
-			deliveries := newManagerDeliveryTestStore(t)
+			deliveries := open(t)
 			bus := &canceledTurnConsumerBus{reaction: turnReactionProbe{id: uuid.NewString()}}
 			bus.dispatch = func(context.Context, effects.CommittedTurnReaction) error {
 				t.Fatal("startup dispatched a reaction before runtime admission")
 				return nil
 			}
 			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveries})
-			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Time{})
-			ctx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), event, "startup-canceled")
+			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+			deliveries.seedClaim(t, deliveries.Context, event, "startup-canceled")
+			ctx := managerClaimedDeliveryContext(t, am, deliveries.Context, event, "startup-canceled")
 			claim, _ := deliverylifecycle.ClaimFromContext(ctx)
 			origin, err := effects.DeliveryCompletionOrigin(claim)
 			if err != nil {

@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -18,34 +17,28 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
-func withNativeObservabilityStores(t *testing.T, proof func(*testing.T, context.Context, observabilityFixtureStore, *sql.DB, authoractivityfixture.Dialect)) {
+func withNativeObservabilityStores(t *testing.T, proof func(*testing.T, context.Context, observabilityFixtureStore)) {
 	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
 			var selected observabilityFixtureStore
-			var db *sql.DB
-			dialect := authoractivityfixture.DialectSQLite
 			if backend == "sqlite" {
 				s := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				selected, db = s, storetest.DatabaseForTest(s)
+				selected = s
 			} else {
-				_, db, _ = testutil.StartPostgres(t)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
-				dialect = authoractivityfixture.DialectPostgres
+				selected = storetest.StartPostgresRuntimeStore(t)
 			}
-			proof(t, ctx, selected, db, dialect)
+			proof(t, ctx, selected)
 		})
 	}
 }
 
 func TestCanonicalEventReadbackOverridesConflictingReceiptsBothStores(t *testing.T) {
-	withNativeObservabilityStores(t, func(t *testing.T, ctx context.Context, selected observabilityFixtureStore, db *sql.DB, dialect authoractivityfixture.Dialect) {
+	withNativeObservabilityStores(t, func(t *testing.T, ctx context.Context, selected observabilityFixtureStore) {
 		runID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 		fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID}
 		storetest.RequireRun(t, ctx, selected, fixture)
@@ -78,22 +71,11 @@ func TestCanonicalEventReadbackOverridesConflictingReceiptsBothStores(t *testing
 			}
 		}
 		// Deliberately conflicting legacy evidence must not replace delivery truth.
-		query := `INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, side_effects, failure, processed_at) VALUES (?, 'platform', ?, ?, ?, ?, ?)`
-		if dialect == authoractivityfixture.DialectPostgres {
-			query = `INSERT INTO event_receipts (event_id, subscriber_type, subscriber_id, outcome, side_effects, failure, processed_at) VALUES ($1::uuid, 'platform', $2, $3, $4::jsonb, $5::jsonb, $6)`
-		}
-		failure, err := json.Marshal(testFailure("receipt_should_not_win"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, receipt := range []struct {
-			agent, outcome, effects string
-			failure                 any
-		}{
-			{"agent-pending", "dead_letter", `{"retry_count":9}`, string(failure)},
-			{"agent-failed", "success", `{"retry_count":0}`, nil},
+		for _, receipt := range []storetest.ObservabilityReceiptConflict{
+			storetest.PendingDeliveryWithDeadLetterReceipt,
+			storetest.FailedDeliveryWithSuccessReceipt,
 		} {
-			if _, err := db.ExecContext(ctx, query, eventID, receipt.agent, receipt.outcome, receipt.effects, receipt.failure, time.Now().UTC()); err != nil {
+			if err := storetest.SetObservabilityReceiptConflict(ctx, selected, eventID, receipt, time.Now().UTC()); err != nil {
 				t.Fatalf("conflicting receipt: %v", err)
 			}
 		}
@@ -168,7 +150,7 @@ func TestCanonicalEventReadbackOverridesConflictingReceiptsBothStores(t *testing
 		if _, err := selected.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{Disposition: runtimedelivery.FailureRetry, Failure: testFailure("delivery_wins"), RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation()}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.ExecContext(ctx, query, detailID, "agent-failed", "dead_letter", `{"retry_count":7,"error":"receipt-loses"}`, nil, time.Now().UTC()); err != nil {
+		if err := storetest.SetObservabilityReceiptConflict(ctx, selected, detailID, storetest.FailedDeliveryWithDeadLetterReceipt, time.Now().UTC()); err != nil {
 			t.Fatal(err)
 		}
 		detail, err := selected.LoadOperatorEvent(ctx, detailID)
@@ -236,7 +218,7 @@ func TestCanonicalEventReadbackOverridesConflictingReceiptsBothStores(t *testing
 }
 
 func TestRetiredDashboardObservabilityAssertionsThroughV1BothStores(t *testing.T) {
-	withNativeObservabilityStores(t, func(t *testing.T, ctx context.Context, selected observabilityFixtureStore, db *sql.DB, dialect authoractivityfixture.Dialect) {
+	withNativeObservabilityStores(t, func(t *testing.T, ctx context.Context, selected observabilityFixtureStore) {
 		base := time.Now().UTC().Truncate(time.Second).Add(-time.Minute)
 		insert := func(component, action, code, agent string, at time.Time) {
 			t.Helper()
@@ -249,13 +231,13 @@ func TestRetiredDashboardObservabilityAssertionsThroughV1BothStores(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, dialect, uuid.NewString(), "runtime", payload, at)
+			storetest.InsertDiagnosticDirectEventRecord(t, ctx, selected, uuid.NewString(), payload, at)
 		}
 		insert("mcp-gateway", "request_failed", "retry_exhausted", "agent-a", base)
 		insert("mcp-gateway", "request_failed", "retry_exhausted", "agent-b", base.Add(time.Second))
 		insert("diagnostics", "same_second_order", "older_code", "", base.Add(100*time.Millisecond))
 		insert("diagnostics", "same_second_order", "newer_code", "", base.Add(900*time.Millisecond))
-		storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, dialect, uuid.NewString(), "runtime", []byte(`{"log_level":"error","message":"message fallback","details":{"component":"no-failure","action":"fallback_case"}}`), base)
+		storetest.InsertDiagnosticDirectEventRecord(t, ctx, selected, uuid.NewString(), []byte(`{"log_level":"error","message":"message fallback","details":{"component":"no-failure","action":"fallback_case"}}`), base)
 		grouped, err := selected.ListOperatorRuntimeIncidents(ctx, operatorread.OperatorRuntimeIncidentListOptions{SinceHours: 24, MCPOnly: true})
 		if err != nil || len(grouped.Incidents) != 1 {
 			t.Fatalf("grouped: %#v, %v", grouped, err)
@@ -300,7 +282,7 @@ func TestRetiredDashboardObservabilityAssertionsThroughV1BothStores(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, dialect, uuid.NewString(), "runtime", payload, base.Add(time.Duration(i)*time.Second))
+			storetest.InsertDiagnosticDirectEventRecord(t, ctx, selected, uuid.NewString(), payload, base.Add(time.Duration(i)*time.Second))
 		}
 		logs, err := selected.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{Component: "agent-manager", Limit: 10})
 		if err != nil || len(logs.Logs) != 3 {
@@ -342,7 +324,7 @@ func TestCanonicalObservabilityCorruptionRefusesBothStores(t *testing.T) {
 		{"component", `{"log_level":"error","message":"incomplete runtime incident","details":{"action":"request_failed","failure":null}}`, "runtime.incidents", "runtime log component is required"},
 	} {
 		t.Run(cell.name, func(t *testing.T) {
-			withNativeObservabilityStores(t, func(t *testing.T, ctx context.Context, selected observabilityFixtureStore, db *sql.DB, dialect authoractivityfixture.Dialect) {
+			withNativeObservabilityStores(t, func(t *testing.T, ctx context.Context, selected observabilityFixtureStore) {
 				payload := cell.payload
 				if cell.name == "component" {
 					raw, err := json.Marshal(testFailure("retry_exhausted"))
@@ -351,7 +333,7 @@ func TestCanonicalObservabilityCorruptionRefusesBothStores(t *testing.T) {
 					}
 					payload = strings.Replace(payload, "null", string(raw), 1)
 				}
-				storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, dialect, uuid.NewString(), "runtime", []byte(payload), time.Now().UTC())
+				storetest.InsertDiagnosticDirectEventRecord(t, ctx, selected, uuid.NewString(), []byte(payload), time.Now().UTC())
 				var err error
 				if cell.method == "runtime.logs" {
 					_, err = selected.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{Limit: 10})

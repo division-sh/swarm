@@ -110,7 +110,7 @@ func TestMailboxPrincipalConcurrentTransportBothStores(t *testing.T) {
 						if fresh != 1 {
 							t.Fatalf("fresh executions=%d, want one", fresh)
 						}
-						waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, f.base.RunID)
+						waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, f.base.RunID)
 						var principal, actor, actorKind, hash, resource, raw string
 						if err := rt.DB.QueryRow(`SELECT principal_id FROM operator_principals`).Scan(&principal); err != nil {
 							t.Fatal(err)
@@ -175,7 +175,7 @@ func TestMailboxPrincipalConcurrentTransportBothStores(t *testing.T) {
 							if err := json.Unmarshal(response, &original); err != nil {
 								t.Fatal(err)
 							}
-							waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fresh.base.RunID)
+							waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fresh.base.RunID)
 							before := mailboxCompletionRunEffects(t, rt, fresh.base.RunID)
 							for _, token := range []string{apiv1.DefaultLoopbackAPIToken, secondToken} {
 								got, status, err := mailboxTransportRequest(fresh.ctx, rt.Endpoint, "http", token, method, params)

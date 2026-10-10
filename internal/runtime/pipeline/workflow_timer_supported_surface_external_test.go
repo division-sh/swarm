@@ -23,8 +23,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -883,7 +883,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 				t.Fatal("injected pipeline receipt failure was not reached")
 			}
 			eventID := workflowTimerPersistedEventID(t, selected, runID)
-			if got := gateRecoveryPipelineReceiptCount(t, selected, eventID); got != 0 {
+			if got := gateRecoveryPipelineReceiptCount(t, selected.events, eventID); got != 0 {
 				t.Fatalf("pipeline receipts before recovery = %d, want 0", got)
 			}
 
@@ -908,7 +908,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			if instance.CurrentState != "done" || len(instance.TransitionHistory) != 1 || instance.TransitionHistory[0].TriggerEventID != eventID {
 				t.Fatalf("recovered workflow lifecycle = state:%s history:%#v, want one exact timer transition", instance.CurrentState, instance.TransitionHistory)
 			}
-			if got := gateRecoveryPipelineReceiptCount(t, selected, eventID); got != 1 {
+			if got := gateRecoveryPipelineReceiptCount(t, selected.events, eventID); got != 1 {
 				t.Fatalf("pipeline receipts after recovery = %d, want 1", got)
 			}
 		})
@@ -1103,12 +1103,7 @@ func workflowLifecycleSourceContext(t *testing.T, selected gateRecoveryStoreCase
 	t.Helper()
 	fact := mustAuthorActivityTestSourceArtifactFactForHash(bundle.SourceArtifact.BundleHash())
 	ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), runID))
-	fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact}
-	if selected.postgres {
-		runlifecyclefixture.RequirePostgres(t, ctx, selected.db, fixture)
-	} else {
-		runlifecyclefixture.RequireSQLite(t, ctx, selected.db, fixture)
-	}
+	storetest.RequireRun(t, ctx, selected.events, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 	return ctx, fact
 }
 

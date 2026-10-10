@@ -110,6 +110,19 @@ type managedNativeRecoveryDeliveryStore struct {
 	onClaim    func(context.Context) error
 }
 
+// Preflight-only collaborators have no publication or persistence authority.
+func (*managedNativeRecoveryDeliveryStore) ClaimDelivery(context.Context, runtimedelivery.ExecutionAuthority, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
+	return runtimedelivery.ClaimResult{}, fmt.Errorf("preflight delivery collaborator cannot claim unpublished persistent work")
+}
+
+func TestRuntimeRecoveryPreflightCollaboratorRefusesPersistentClaims(t *testing.T) {
+	store := &managedNativeRecoveryDeliveryStore{}
+	result, err := store.ClaimDelivery(context.Background(), runtimedelivery.ExecutionAuthority{}, events.Event{}, events.DeliveryRoute{})
+	if err == nil || result.Acknowledged || store.claimCalls.Load() != 0 {
+		t.Fatalf("preflight collaborator claimed persistence: %+v/%v", result, err)
+	}
+}
+
 type managedNativeDurableRoles struct {
 	runtimerunlifecycle.OperationOwner
 }

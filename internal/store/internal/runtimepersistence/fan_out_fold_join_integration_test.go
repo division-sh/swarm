@@ -39,7 +39,7 @@ func TestFanOutFoldJoinRollbackAndFreshSiblingBothStores(t *testing.T) {
 			if _, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET cursor=0,status='open' WHERE run_id=$1 AND semantic_path=$2`, second.runID, second.semanticPath); err != nil {
 				t.Fatal(err)
 			}
-			advanceFanOutBarriersForTest(t, ctx, selected, db, first.runID, base.Add(2*time.Second))
+			advanceFanOutBarriersForTest(t, ctx, selected, first.runID, base.Add(2*time.Second))
 			empty := fanoutbarrier.Summary{}
 			assertFanOutBarrierState(t, ctx, db, first.runID, first.deliveryID, first.semanticPath, fanoutbarrier.StatusClosedPending, &empty, firstHandle.TaskID())
 			assertFanOutBarrierState(t, ctx, db, second.runID, second.deliveryID, second.semanticPath, fanoutbarrier.StatusArmed, nil, "")
@@ -48,11 +48,11 @@ func TestFanOutFoldJoinRollbackAndFreshSiblingBothStores(t *testing.T) {
 			if _, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET status='canceled',blocked_reason='fold_join_test' WHERE run_id=$1 AND semantic_path=$2`, second.runID, second.semanticPath); err != nil {
 				t.Fatal(err)
 			}
-			advanceFanOutBarriersForTest(t, ctx, selected, db, first.runID, base.Add(3*time.Second))
+			advanceFanOutBarriersForTest(t, ctx, selected, first.runID, base.Add(3*time.Second))
 			canceled := fanoutbarrier.Summary{Total: 1, Canceled: 1}
 			assertFanOutBarrierState(t, ctx, db, second.runID, second.deliveryID, second.semanticPath, fanoutbarrier.StatusClosedPending, &canceled, secondHandle.TaskID())
 			assertFanOutBarrierTimerCount(t, ctx, db, first.runID, 2)
-			advanceFanOutBarriersForTest(t, ctx, selected, db, first.runID, base.Add(4*time.Second))
+			advanceFanOutBarriersForTest(t, ctx, selected, first.runID, base.Add(4*time.Second))
 			assertFanOutBarrierTimerCount(t, ctx, db, first.runID, 2)
 		})
 	}

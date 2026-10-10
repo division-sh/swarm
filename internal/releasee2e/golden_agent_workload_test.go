@@ -860,7 +860,7 @@ func goldenRuntimeConfig(store goldenStoreSelection) string {
 		"  backend: claude_cli\n" +
 		"workspace:\n" +
 		"  backend: host\n" +
-		store.configYAML
+		store.configYAML + testutil.EphemeralServeListenerConfig()
 }
 
 // Clock processes need only an isolated location, not a diagnostic pool or a

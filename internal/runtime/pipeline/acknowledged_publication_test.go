@@ -126,7 +126,7 @@ func TestDecisionCardAcknowledgedErrorStillDispatchesOnce(t *testing.T) {
 	}
 }
 
-func TestHumanTaskExpiryAcknowledgementControlsPublicationEffects(t *testing.T) {
+func VerifyHumanTaskExpiryAcknowledgementControlsPublicationEffectsForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
 	for _, tc := range []struct {
 		name         string
 		acknowledged bool
@@ -137,14 +137,13 @@ func TestHumanTaskExpiryAcknowledgementControlsPublicationEffects(t *testing.T) 
 		{name: "unacknowledged error", wantRelease: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db := newSQLiteWorkflowInstanceStoreTestDB(t)
-			workflowStore := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db})
+			fixture := open(t)
 			bus := &acknowledgementProbeBus{recordingPipelineBus: &recordingPipelineBus{}}
 			commitErr := errors.New("commit result reported an error")
 			expiry := &transactionProbeHumanTaskExpiry{
 				event: acknowledgementTestEvent(uuid.NewString()), acknowledged: tc.acknowledged, commitErr: commitErr,
 			}
-			pc := &PipelineCoordinator{bus: bus, workflowStore: workflowStore}
+			pc := &PipelineCoordinator{bus: bus, workflowStore: fixture.Persistence.store}
 			err := pc.expireHumanTaskCards(context.Background(), expiry, time.Now().UTC(), 10)
 			if !errors.Is(err, commitErr) {
 				t.Fatalf("error = %v, want original commit error", err)

@@ -32,7 +32,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 			t.Run(backend.name+"/"+name, func(t *testing.T) {
 				selected := backend.open(t)
 				runID := uuid.NewString()
-				insertGateRecoveryRun(t, selected, runID)
+				insertGateRecoveryRun(t, selected.events, runID)
 				ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				source, node := targetedDeclaredKeyExecutionSource(t, "select_or_create")
 				module := proposedEffectProofModule{source: source,

@@ -76,7 +76,7 @@ func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T
 		BundleHash: "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		StartedAt:  now.Add(-2 * time.Hour), EndedAt: now.Add(-90 * time.Minute),
 	})
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: newerRunID, StartedAt: now.Add(-time.Hour),
 	})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, olderEventID, olderRunID, "scan.requested", events.EventProducerAgent, "test", "", "", now.Add(-119*time.Minute))
@@ -121,7 +121,7 @@ func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t
 	olderRunID := uuid.NewString()
 	emptyRunID := uuid.NewString()
 	now := time.Unix(1700000000, 0).UTC()
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: targetRunID, StartedAt: now,
 	})
 	RequireCorruptRunSnapshotForTest(t, ctx, pg, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
@@ -129,7 +129,7 @@ func TestRunDebugReadSurface_ResolveLatestRunDebugRunID_UsesLatestPersistedRun(t
 		BundleHash: "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		StartedAt:  now.Add(-time.Hour),
 	})
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: emptyRunID, StartedAt: now.Add(time.Hour),
 	})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, uuid.NewString(), targetRunID, "scan.corpus_file_requested", events.EventProducerAgent, "builder", "", "", now.Add(time.Second))
@@ -286,7 +286,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 	now := time.Now().UTC()
 
 	for _, runID := range []string{blockedRunID, readyRunID} {
-		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
+		requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 			RunID: runID, StartedAt: now.Add(-time.Minute),
 		})
 	}

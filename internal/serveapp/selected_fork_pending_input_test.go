@@ -33,7 +33,7 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "input-seed",
 				})
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "input-pause"})
 				params := map[string]any{"event_name": "work.first", "run_id": seed.RunID, "payload": map[string]any{"token": "proof"}, "idempotency_key": "input-pending"}
@@ -89,7 +89,7 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				}
 				if mode == "pause_resume" {
 					requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": seed.RunID, "idempotency_key": "input-resume"})
-					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					requirePendingInputStateCount(t, rt, seed.RunID, "done", 2)
 					requirePendingInputPublicStates(t, rt, seed.RunID, 2)
 					return
@@ -143,7 +143,7 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				if err := json.Unmarshal(response.Result, &fork); err != nil {
 					t.Fatal(err)
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 				requirePendingInputStateCount(t, rt, fork.ForkRunID, "done", wantDone)
 				requirePendingInputStateCount(t, rt, fork.ForkRunID, "ready", 2-wantDone)
 				requirePendingInputPublicStates(t, rt, fork.ForkRunID, wantDone)
@@ -167,7 +167,7 @@ func TestExplicitTargetRestrictsConnectedSiblingsBothStores(t *testing.T) {
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "target-seed",
 			})
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			requirePendingInputStateCount(t, rt, seed.RunID, "ready", 3)
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "target-pause"})
 			var childEntity, siblingEntity string
@@ -205,7 +205,7 @@ func TestExplicitTargetRestrictsConnectedSiblingsBothStores(t *testing.T) {
 				t.Fatalf("invalid target changed application state: %+v", response)
 			}
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": seed.RunID, "idempotency_key": "target-resume"})
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			var childState, siblingState string
 			if err := rt.DB.QueryRow(`SELECT current_state FROM entity_state WHERE run_id=$1 AND flow_instance='child'`, seed.RunID).Scan(&childState); err != nil {
 				t.Fatal(err)

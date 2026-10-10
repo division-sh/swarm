@@ -45,8 +45,6 @@ func TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStore
 				bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", "", "accounts:\n  status: text\n  items: list<text>\n")
 				var base runtimetools.EntityPersistence
 				var sourceCtx context.Context
-				query := `SELECT revision FROM entity_state WHERE run_id = ? AND entity_id = ?`
-				mutationQuery := `SELECT COUNT(*) FROM entity_mutations WHERE run_id = ? AND entity_id = ?`
 				if backend == "sqlite" {
 					selected := newSQLiteRuntimeToolStoreForTest(t)
 					sourceCtx = seedEntityToolSourceRun(t, selected, bundle)
@@ -55,8 +53,6 @@ func TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStore
 					selected := newPostgresHumanTaskToolStoreForTest(t)
 					sourceCtx = seedEntityToolSourceRun(t, selected, bundle)
 					base = selected
-					query = `SELECT revision FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
-					mutationQuery = `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 				}
 				fault := errors.Join(errors.New("independent post-commit cleanup failed"), errors.New("SQL connection password=private-token"))
 				fixture := sourceCtx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
@@ -70,14 +66,11 @@ func TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStore
 				entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 					"flow_instance": "review/inst-1", "fields": map[string]any{"status": "open", "items": []any{"equal"}},
 				})
-				db := storetest.DatabaseForTest(base)
-				var before, baselineRevision int
-				if err := db.QueryRowContext(ctx, mutationQuery, entityToolTestRunID, entityID).Scan(&before); err != nil {
+				baseline, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, base, entityToolTestRunID, entityID)
+				if err != nil {
 					t.Fatal(err)
 				}
-				if err := db.QueryRowContext(ctx, query, entityToolTestRunID, entityID).Scan(&baselineRevision); err != nil {
-					t.Fatal(err)
-				}
+				before, baselineRevision := len(baseline.Mutations), baseline.Revision
 				input := map[string]any{
 					"entity_id": entityID, "field": "status", "value": "closed",
 				}
@@ -120,13 +113,11 @@ func TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStore
 				if !diagnosticFound {
 					t.Fatal("acknowledged post-commit failure was not logged internally")
 				}
-				var revision, count int
-				if err := db.QueryRowContext(ctx, query, entityToolTestRunID, entityID).Scan(&revision); err != nil {
+				committed, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, base, entityToolTestRunID, entityID)
+				if err != nil {
 					t.Fatal(err)
 				}
-				if err := db.QueryRowContext(ctx, mutationQuery, entityToolTestRunID, entityID).Scan(&count); err != nil {
-					t.Fatal(err)
-				}
+				revision, count := committed.Revision, len(committed.Mutations)
 				if response["revision"] != revision || revision != baselineRevision+1 || count != before+1 || writer.writes != 1 {
 					t.Fatalf("committed revision = %#v, persisted revision = %d, mutations = %d, writes = %d", response["revision"], revision, count, writer.writes)
 				}
@@ -143,7 +134,9 @@ func TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStore
 				if out != nil || !errors.Is(err, fault) || !strings.Contains(err.Error(), "write_failed") {
 					t.Fatalf("unacknowledged tool result = %#v, %v; want write_failed without revision", out, err)
 				}
-				if err := db.QueryRowContext(ctx, mutationQuery, entityToolTestRunID, entityID).Scan(&count); err != nil || count != before+1 {
+				refused, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, base, entityToolTestRunID, entityID)
+				count = len(refused.Mutations)
+				if err != nil || count != before+1 {
 					t.Fatalf("unacknowledged write mutations = %d, error = %v", count, err)
 				}
 				after, found, err := base.LoadEntityState(ctx, runtimetools.EntityIdentity{RunID: entityToolTestRunID, EntityID: entityID})

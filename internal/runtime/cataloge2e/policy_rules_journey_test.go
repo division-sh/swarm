@@ -95,8 +95,8 @@ func TestR3RulesSelectedActorMachineBothStores(t *testing.T) {
 			if err := h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "work.requested", Payload: map[string]any{"left": 1, "right": 1}}, 10*time.Second, true); err != nil {
 				t.Fatal(err)
 			}
-			var point string
-			if err := h.db.QueryRowContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name='work.requested'`, catalogRuntimeRunID).Scan(&point); err != nil {
+			point, err := h.readRunNamedEventIdentity(ctx, catalogRuntimeRunID, "work.requested")
+			if err != nil {
 				t.Fatal(err)
 			}
 			var artifact interface {

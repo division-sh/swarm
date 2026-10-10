@@ -2,14 +2,12 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -22,21 +20,15 @@ func TestResetInventoryAndOperationLeaseBothStores(t *testing.T) {
 				destructivereset.InventoryReader
 				destructivereset.LockManager
 			}
-			var db *sql.DB
 			if backend == "sqlite" {
 				s := newBootstrappedSQLiteRuntimeStoreForTest(t)
-				selected, db = s, s.backend.ConstructionHandle()
+				selected = s
 			} else {
 				_, database, _ := testutil.StartPostgres(t)
-				selected, db = newTestPostgresStore(t, database), database
+				selected = newTestPostgresStore(t, database)
 			}
 			ctx := testAuthorActivityContext()
-			seed := runlifecyclefixture.Fixture{RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin()}
-			if backend == "sqlite" {
-				runlifecyclefixture.RequireSQLite(t, ctx, db, seed)
-			} else {
-				runlifecyclefixture.RequirePostgres(t, ctx, db, seed)
-			}
+			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{RunID: runID, Origin: semanticScenarioSetupRunOriginForTest()})
 			inventory, err := selected.ReadResetInventory(ctx)
 			if err != nil {
 				t.Fatal(err)

@@ -974,7 +974,7 @@ func projectionDeliveryAuthorities(t *testing.T) map[string]runtimedelivery.Exec
 	return map[string]runtimedelivery.ExecutionAuthority{"normal": normal, "selected": selected}
 }
 
-func TestRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T) {
+func ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T, newNativeDelivery, newSelectedDelivery managerDeliveryNativeFactory) {
 	type branch struct {
 		name         string
 		result       func(string) runtimedelivery.ClaimResult
@@ -1026,31 +1026,72 @@ func TestRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T) {
 	}
 	for authorityName, authority := range projectionDeliveryAuthorities(t) {
 		for _, test := range branches {
+			if test.delegate != (newNativeDelivery != nil) {
+				continue
+			}
 			t.Run(authorityName+"/"+test.name, func(t *testing.T) {
 				bus := newProjectionTestBus()
 				handled := make(chan int, 1)
-				am := newProjectionTestManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
-					return &projectionTestAgent{id: cfg.ID, subs: []events.EventType{"test.old"}, handled: handled}, nil
-				})
-				baseStore := am.deliveryStore
-				if test.delegate && authority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork {
-					baseStore.(*managerDeliveryTestStore).seedSelectedExecution(t, authority)
+				var nativeDelivery *ManagerDeliveryNativeFixture
+				if test.delegate {
+					if authorityName == "selected" {
+						nativeDelivery = newSelectedDelivery(t)
+					} else {
+						nativeDelivery = newNativeDelivery(t)
+					}
+					authority = nativeDelivery.Authority
 				}
-				const agentID = "carrier-disposition-agent"
+				agentID := "carrier-disposition-agent"
+				eventType := events.EventType("test.old")
 				runID := eventtest.UUID("projection-run")
 				if authority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork {
 					runID = authority.ForkRunID()
 				}
-				if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
+				route := managerAgentDeliveryRouteForRun(runID, agentID)
+				opts := AgentManagerOptions{}
+				if nativeDelivery != nil {
+					opts.DeliveryStore = nativeDelivery
+					opts.SemanticSource = nativeDelivery.SemanticSource
+					opts.SourceArtifactFact = authority.SourceArtifact()
+					if authorityName == "selected" {
+						route = nativeDelivery.SelectedRoute
+						agentID = route.AgentIdentity.AgentID()
+						eventType = nativeDelivery.SelectedEvent.Type()
+					} else {
+						nativeDelivery.RequireRun(t, runID)
+					}
+				}
+				opts.WorkOwner = newTestManagerWorkOwner(t)
+				bus.owner = opts.WorkOwner
+				am := newTestAgentManagerWithOptions(t, bus, func(cfg models.AgentConfig) (Agent, error) {
+					return &projectionTestAgent{id: cfg.ID, subs: []events.EventType{eventType}, handled: handled}, nil
+				}, opts)
+				baseStore := am.deliveryStore
+				if err := am.spawnAgentInternal(func() context.Context {
+					if nativeDelivery != nil {
+						return nativeDelivery.Context
+					}
+					return testAuthorActivityContext(context.Background())
+				}(), PersistedAgent{Topology: managerTestEphemeralTopologyAdmission(t), Config: managerTestAgentConfig(models.AgentConfig{
 					ExecutionMode: "live", ID: agentID,
-					Identity: runtimeagentidentitytest.RootRuntimeForRun(t, runID, agentID, "carrier-disposition-test"), Subscriptions: []string{"test.old"},
-				})); err != nil {
+					Identity: route.AgentIdentity, Subscriptions: []string{string(eventType)},
+				})}, false); err != nil {
 					t.Fatalf("SpawnAgent: %v", err)
 				}
 				runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
 				defer cancelRun()
 				managedCtx := managedExecutionTestContext(t, runCtx)
-				if authority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork {
+				if nativeDelivery != nil {
+					managedCtx = nativeDelivery.Context
+					if authorityName == "normal" {
+						admission, err := managedexecution.New(managedexecution.KindNormalRuntime, authority.ExecutionID(), authority.Generation(), "", "carrier-disposition-actors", authority.SourceArtifact().BundleHash(), nil)
+						if err != nil {
+							t.Fatal(err)
+						}
+						managedCtx = managedexecution.WithAdmission(managedCtx, admission)
+					}
+				}
+				if authority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork && nativeDelivery == nil {
 					admission, err := managedexecution.New(
 						managedexecution.KindSelectedContractFork, authority.ExecutionID(), authority.Generation(), authority.ForkRunID(),
 						"carrier-disposition-actors", authority.SourceArtifact().BundleHash(), nil,
@@ -1067,7 +1108,12 @@ func TestRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T) {
 					eventtest.UUID("carrier-disposition-"+authorityName+"-"+test.name), "test.old", "test", "", []byte(`{}`), 0,
 					runID, "", events.EventEnvelope{}, time.Now(),
 				)
-				route := managerAgentDeliveryRouteForRun(runID, agentID)
+				if nativeDelivery != nil {
+					if authorityName == "selected" {
+						evt = nativeDelivery.SelectedEvent
+					}
+					nativeDelivery.Publish(t, nativeDelivery.Context, evt, []events.DeliveryRoute{route}, authority)
+				}
 				deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), route)
 				if err != nil {
 					t.Fatalf("derive delivery identity: %v", err)

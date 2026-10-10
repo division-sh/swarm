@@ -50,7 +50,7 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root, hook)
 			t.Cleanup(func() { once.Do(func() { close(release) }) })
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "seed"})
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			input := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.first", "run_id": seed.RunID, "payload": map[string]any{"token": "proof"}, "idempotency_key": "mixed-input"})
 			select {
 			case <-childStarted:
@@ -134,7 +134,7 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 				}
 			}
 			once.Do(func() { close(release) })
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			requirePendingInputStateCount(t, rt, seed.RunID, "done", 2)
 			requirePendingInputStateCount(t, rt, seed.RunID, "archived", 1)
 		})

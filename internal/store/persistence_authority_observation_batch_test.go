@@ -48,6 +48,7 @@ func TestObservationBatchGuardRejectsRawAndCallbackAuthority(t *testing.T) {
 	for _, item := range []struct{ path, declaration string }{
 		{"internal/store/storetest/notify_execution_storage.go", "ReadNotifyCompletedTurns"},
 		{"internal/store/storetest/tracked_entity_mutation_projection.go", "ReadTrackedEntityMutationProjectionStorage"},
+		{"internal/store/storetest/tracked_entity_mutation_projection.go", "ReadRunEntityMutationHistoryStorage"},
 		{"internal/runtime/conformance/notify_all_children_runtime_conformance_test.go", "assertNotifyAllChildrenCompletedTurns"},
 		{"internal/runtime/conformance/notify_all_children_runtime_conformance_test.go", "loadNotifyAllChildrenItemEvents"},
 		{"internal/runtime/conformance/persisted_surfaces_test.go", "trackedMutationStateMatchesEntityState"},

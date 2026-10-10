@@ -25,7 +25,7 @@ func TestForkBarrierScheduleHostileAdmissionBothStores(t *testing.T) {
 				t.Run(variant, func(t *testing.T) {
 					at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 					ctx, fixture, _ := seedDeclaredForkFanOutFixtureWithBarrier(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, 0, at, true)
-					advanceFanOutBarriersForTest(t, ctx, selected, db, fixture.runID, at.Add(time.Second))
+					advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, at.Add(time.Second))
 					id := mustFanOutBarrierScheduleActivationID(t, ctx, db, fixture)
 					var query string
 					switch variant {

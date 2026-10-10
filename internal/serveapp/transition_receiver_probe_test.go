@@ -33,7 +33,7 @@ func proveReceiverMaterializationBothStores(t *testing.T, source func(testing.TB
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "ordinary-cross-flow"}
 				}
 				started := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 				var status string
 				if err := rt.DB.QueryRow(`SELECT status FROM event_deliveries WHERE event_id = $1`, started.EventID).Scan(&status); err != nil {
 					t.Fatal(err)

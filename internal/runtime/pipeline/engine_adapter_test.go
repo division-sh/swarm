@@ -20,7 +20,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -190,11 +189,7 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 	}
 }
 
-func TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID(t *testing.T) {
-
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
+func VerifyPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowIDForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": `name: runtime-test
@@ -214,18 +209,23 @@ request.received:
   request_id: text
 `,
 	})
-	pc := newPostgresPipelineCoordinatorForTest(noopPipelineBus{}, db, PipelineCoordinatorOptions{
+	fixture := open(t, source)
+	ctx := runtimecorrelation.WithRunID(fixture.Context, testPipelineRunID)
+	if err := fixture.RequireRun(ctx, testPipelineRunID); err != nil {
+		t.Fatal(err)
+	}
+	pc := fixture.NewCoordinator(PipelineCoordinatorOptions{
 		Module: &pipelineFixtureWorkflowModule{
 			source: source,
 		},
 	})
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      "child/existing",
 		EntityID:        entityID,
 		WorkflowName:    "child",
-		WorkflowVersion: "1.0.0",
+		WorkflowVersion: source.WorkflowVersion(),
 		CurrentState:    "queued",
 		Fields: map[string]any{
 			"entity_id":  entityID,
@@ -480,13 +480,10 @@ func TestApplyEngineStateMutationDoesNotCaptureSubjectIDFromMetadata(t *testing.
 	}
 }
 
-func TestUpdateEntityState_ReturnsWorkflowStoreMutationError(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	if err := db.Close(); err != nil {
-		t.Fatalf("close db: %v", err)
-	}
+func VerifyUpdateEntityState_ReturnsWorkflowStoreMutationErrorForTest(t *testing.T, open func(*testing.T) WorkflowClosedOwnerNativeFixtureForTest) {
+	fixture := open(t)
 	pc := &PipelineCoordinator{
-		workflowStore: newPostgresWorkflowInstanceStoreForTest(db),
+		workflowStore: fixture.Persistence.store,
 		module: &previewWorkflowModule{
 			bundle: &runtimecontracts.WorkflowContractBundle{
 				Semantics: runtimecontracts.WorkflowSemanticView{
@@ -496,207 +493,205 @@ func TestUpdateEntityState_ReturnsWorkflowStoreMutationError(t *testing.T) {
 			},
 		},
 	}
-
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	ctx := testPipelineRunContextNoSeed(t)
+	closedErr := closeWorkflowNativeOwnerForTest(t, fixture, entityID)
+	ctx := fixture.Context
 	err := pc.persistWorkflowStateForTest(testWorkflowStateTransitionContext(ctx, testWorkflowInstanceRoute(entityID), entityID, "scoring/vertical.marginal"), testWorkflowInstanceRoute(entityID), entityID, "marginal_review", "scoring/vertical.marginal")
 	if err == nil {
 		t.Fatal("expected workflow state persistence to fail when workflow store mutate fails")
 	}
+	if err.Error() != closedErr.Error() {
+		t.Fatalf("workflow state did not propagate original closed-owner read: got=%v want=%v", err, closedErr)
+	}
 }
 
-func TestPipelineEngineMutationOwnerRejectsForeignFlowWrite(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	store := newPostgresWorkflowInstanceStoreForTest(db)
+func VerifyPipelineEngineMutationOwnerRejectsForeignFlowWriteForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
+	source := loadWorkflowTempSource(t, map[string]string{
+		"schema.yaml":          "name: foreign-flow-write\n",
+		"flow-a/schema.yaml":   "name: flow-a\nstages:\n  pending: {}\n",
+		"flow-a/entities.yaml": "test_entity: {}\n",
+		"flow-b/schema.yaml":   "name: flow-b\nstages:\n  pending: {}\n",
+		"flow-b/entities.yaml": "test_entity: {}\n",
+	})
+	fixture := open(t, source)
+	store := fixture.Persistence.store
+	ctx := runtimecorrelation.WithRunID(fixture.Context, testPipelineRunID)
+	if err := fixture.RequireRun(ctx, testPipelineRunID); err != nil {
+		t.Fatal(err)
+	}
+	pc := fixture.NewCoordinator(PipelineCoordinatorOptions{
+		Module: staticSemanticWorkflowModule{source: source},
+	})
 	entityID := "11111111-1111-1111-1111-111111111111"
-	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      "flow-a",
 		EntityID:        entityID,
 		WorkflowName:    "flow-a",
-		WorkflowVersion: "1.6.0",
+		WorkflowVersion: source.WorkflowVersion(),
 		CurrentState:    "pending",
 		Fields:          map[string]any{},
 		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("upsert flow-a entity: %v", err)
 	}
-
-	repo := pipelineEngineStateRepo{
-		coordinator: &PipelineCoordinator{
-			workflowStore: store,
-			module: &previewWorkflowModule{
-				bundle: &runtimecontracts.WorkflowContractBundle{
-					Semantics: runtimecontracts.WorkflowSemanticView{
-						FlowPrefix: map[string]string{
-							"flow-a": "flow-a",
-							"flow-b": "flow-b",
-						},
-					},
-				},
-			},
-		},
+	repo := pipelineEngineStateRepo{coordinator: pc}
+	before, exists, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, "flow-a"))
+	if err != nil || !exists {
+		t.Fatalf("before foreign-flow refusal: exists=%t err=%v", exists, err)
 	}
-	ctx := withPipelineFlowScope(testWorkflowStoreRunContext(t, store), "flow-b")
+	executionCtx := withPipelineFlowScope(ctx, "flow-b")
 	address := testEngineStateAddress("flow-b", "flow-a", entityID)
-	evaluated := loadEngineEvaluationForTest(t, ctx, repo, address)
-	_, err := (pipelineEngineMutationOwner{store: store, state: repo}).CommitEngineMutation(ctx, runtimeengine.EngineMutation{
+	address.FlowInstance = testRunScopedWorkflowInstanceFromContext(ctx, "flow-a")
+	evaluated := loadEngineEvaluationForTest(t, executionCtx, repo, address)
+	_, err = (pipelineEngineMutationOwner{store: store, state: repo}).CommitEngineMutation(executionCtx, runtimeengine.EngineMutation{
 		Address: address, EvaluatedState: evaluated,
 		State: testEngineStateMutation(map[string]any{"note": "bad write"}, nil, nil),
 	})
 	if err == nil || !strings.Contains(err.Error(), "cross_flow_write_forbidden") {
 		t.Fatalf("expected cross_flow_write_forbidden, got %v", err)
 	}
+	after, exists, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, "flow-a"))
+	if err != nil || !exists || !reflect.DeepEqual(before, after) {
+		t.Fatalf("foreign-flow refusal mutated its original target: exists=%t err=%v before=%#v after=%#v", exists, err, before, after)
+	}
 }
 
-func TestPipelineEngineMutationOwnerRejectsWrongRunRootAddressBeforeMutationOnBothStores(t *testing.T) {
+func VerifyPipelineEngineMutationOwnerRejectsWrongRunRootAddressBeforeMutationOnBothStoresForTest(t *testing.T, backend string, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	const wrongRunID = "88888888-8888-8888-8888-888888888888"
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			db, store := openHandlerEntityRequirementStore(t, backend)
-			source := handlerEntityRequirementExecutionSource()
-			coordinator := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
-				Module:              staticSemanticWorkflowModule{source: source},
-				Persistence:         workflowPersistenceForTest(store),
-				PipelineObligations: unavailablePipelineTestObligationOwner{},
-			})
-			var ctx context.Context
-			if backend == "sqlite" {
-				ctx = sqliteExactOnceRunContext(t, db)
-			} else {
-				ctx = testPipelineRunContext(t, db)
-			}
-			entityID := eventtest.UUID("wrong-run-root-engine-" + backend)
-			address := testEngineStateAddress(".", wrongRunID, entityID)
-			mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil, nil)
-			mutation.StateCarrier.Control.EntityType = "test_entity"
-			mutation.TriggeredAt = time.Date(2026, time.August, 22, 12, 0, 0, 0, time.UTC)
-			repo := pipelineEngineStateRepo{coordinator: coordinator}
-			evaluated, found, err := repo.LoadState(ctx, address)
-			if err != nil || found {
-				t.Fatalf("wrong-run fixture unexpectedly has R1: found=%v error=%v", found, err)
-			}
-
-			_, err = (pipelineEngineMutationOwner{
-				store: store,
-				state: repo,
-			}).CommitEngineMutation(ctx, runtimeengine.EngineMutation{Address: address, EvaluatedState: evaluated, State: mutation})
-			if err == nil || !strings.Contains(err.Error(), "disagrees with current root coordinate") {
-				t.Fatalf("wrong-run root mutation error = %v", err)
-			}
-			for _, table := range []string{"entity_state", "flow_instances"} {
-				var count int
-				if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil || count != 0 {
-					t.Fatalf("%s rows after wrong-run root mutation = %d, err=%v", table, count, err)
-				}
-			}
-		})
+	source := handlerEntityRequirementExecutionSource()
+	fixture := open(t, source)
+	store := fixture.Persistence.store
+	ctx := runtimecorrelation.WithRunID(fixture.Context, testPipelineRunID)
+	if err := fixture.RequireRun(ctx, testPipelineRunID); err != nil {
+		t.Fatal(err)
 	}
-}
+	coordinator := fixture.NewCoordinator(PipelineCoordinatorOptions{
+		Module: staticSemanticWorkflowModule{source: source},
+	})
 
-func TestWorkflowEngineMutationRejectsEntityContractDriftOnBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			db, store := openHandlerEntityRequirementStore(t, backend)
-			source := handlerEntityRequirementExecutionSource()
-			coordinator := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
-				Module:              staticSemanticWorkflowModule{source: source},
-				Persistence:         workflowPersistenceForTest(store),
-				PipelineObligations: unavailablePipelineTestObligationOwner{},
-			})
-			var ctx context.Context
-			if backend == "sqlite" {
-				ctx = sqliteExactOnceRunContext(t, db)
-			} else {
-				ctx = testPipelineRunContext(t, db)
-			}
-			entityID := eventtest.UUID("entity-contract-drift-" + backend)
-			instance := materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
-				WorkflowName: ".", WorkflowVersion: "1", Mode: runtimecontracts.FlowModeStatic,
-				CurrentState: "active", Fields: map[string]any{"marker": "unchanged"}, EntityType: "wrong_entity",
-			})
-			if err := store.upsert(ctx, instance); err != nil {
-				t.Fatalf("seed contradictory entity contract: %v", err)
-			}
-			mutation := testEngineStateMutation(map[string]any{"marker": "mutated"}, nil, nil)
-			mutation.NextState = "done"
-			mutation.TriggeredAt = time.Date(2026, time.August, 23, 4, 0, 0, 0, time.UTC)
-			address := testEngineStateAddress(".", testPipelineRunID, entityID)
-			repo := pipelineEngineStateRepo{coordinator: coordinator}
-			evaluated := loadEngineEvaluationForTest(t, ctx, repo, address)
-			_, err := (pipelineEngineMutationOwner{
-				store: store, state: repo,
-			}).CommitEngineMutation(ctx, runtimeengine.EngineMutation{
-				Address: address, EvaluatedState: evaluated, State: mutation,
-			})
-			if err == nil || !strings.Contains(err.Error(), `entity_type "wrong_entity" disagrees with canonical contract "test_entity"`) {
-				t.Fatalf("entity contract drift mutation error = %v", err)
-			}
-			stored, found, loadErr := store.Load(ctx, testRunScopedWorkflowInstanceFromContext(ctx, testPipelineRunID))
-			if loadErr != nil || !found || stored.EntityType != "wrong_entity" || stored.CurrentState != "active" || stored.Revision != 1 || stored.Fields["marker"] != "unchanged" {
-				t.Fatalf("rejected entity contract drift changed state: found=%t err=%v state=%#v", found, loadErr, stored)
-			}
-		})
+	entityID := eventtest.UUID("wrong-run-root-engine-" + backend)
+	address := testEngineStateAddress(".", wrongRunID, entityID)
+	mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil, nil)
+	mutation.StateCarrier.Control.EntityType = "test_entity"
+	mutation.TriggeredAt = time.Date(2026, time.August, 22, 12, 0, 0, 0, time.UTC)
+
+	repo := pipelineEngineStateRepo{coordinator: coordinator}
+	evaluated, found, err := repo.LoadState(ctx, address)
+	if err != nil || found {
+		t.Fatalf("wrong-run fixture unexpectedly has R1: found=%v error=%v", found, err)
 	}
-}
-
-func TestWorkflowEngineFirstMaterializationRejectsMissingOrContradictoryEntityContractOnBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, carriedType := range []string{"", "wrong_entity"} {
-			label := "missing"
-			if carriedType != "" {
-				label = "contradictory"
-			}
-			t.Run(backend+"/"+label, func(t *testing.T) {
-				db, store := openHandlerEntityRequirementStore(t, backend)
-				source := handlerEntityRequirementExecutionSource()
-				coordinator := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
-					Module:              staticSemanticWorkflowModule{source: source},
-					Persistence:         workflowPersistenceForTest(store),
-					PipelineObligations: unavailablePipelineTestObligationOwner{},
-				})
-				var ctx context.Context
-				if backend == "sqlite" {
-					ctx = sqliteExactOnceRunContext(t, db)
-				} else {
-					ctx = testPipelineRunContext(t, db)
-				}
-				entityID := eventtest.UUID("first-materialization-contract-" + backend + "-" + label)
-				mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil, nil)
-				mutation.NextState = "active"
-				mutation.StateCarrier.Control = runtimeengine.StateControl{
-					FlowPath: testPipelineRunID, StorageRef: testPipelineRunID, InstanceID: testPipelineRunID, EntityType: carriedType,
-				}
-				mutation.TriggeredAt = time.Date(2026, time.August, 23, 4, 5, 0, 0, time.UTC)
-				address := testEngineStateAddress(".", testPipelineRunID, entityID)
-				repo := pipelineEngineStateRepo{coordinator: coordinator}
-				evaluated, found, err := repo.LoadState(ctx, address)
-				if err != nil || found || evaluated.Persisted != nil {
-					t.Fatalf("unconstructed fixture unexpectedly has R1: found=%v error=%v", found, err)
-				}
-				r2 := &rejectWorkflowEvaluationR2Reader{}
-				coordinator.workflowStore.targetReader = r2
-				_, err = (pipelineEngineMutationOwner{
-					store: store, state: repo,
-				}).CommitEngineMutation(ctx, runtimeengine.EngineMutation{
-					Address: address, EvaluatedState: evaluated, State: mutation,
-				})
-				if err == nil || !strings.Contains(err.Error(), "requires its exact evaluated persistence snapshot") || r2.calls != 0 {
-					t.Fatalf("%s entity contract materialization error = %v", label, err)
-				}
-				for _, table := range []string{"entity_state", "flow_instances", "entity_mutations"} {
-					var count int
-					if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil || count != 0 {
-						t.Fatalf("%s rows after rejected %s contract = %d, err=%v", table, label, count, err)
-					}
-				}
-			})
+	_, err = (pipelineEngineMutationOwner{
+		store: store,
+		state: repo,
+	}).CommitEngineMutation(ctx, runtimeengine.EngineMutation{Address: address, EvaluatedState: evaluated, State: mutation})
+	if err == nil || !strings.Contains(err.Error(), "disagrees with current root coordinate") {
+		t.Fatalf("wrong-run root mutation error = %v", err)
+	}
+	counts := nativeWorkflowEnginePhysicalCountsForTest(t, fixture, ctx)
+	for _, table := range []string{"entity_state", "flow_instances"} {
+		if count := counts[table]; count != 0 {
+			t.Fatalf("%s rows after wrong-run root mutation = %d", table, count)
 		}
 	}
 }
 
-func TestPipelineEngineStateRepoLoadStateMissingEntityDoesNotMaterializeDefaults(t *testing.T) {
+func VerifyWorkflowEngineMutationRejectsEntityContractDriftOnBothStoresForTest(t *testing.T, backend string, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
+	source := handlerEntityRequirementExecutionSource()
+	fixture := open(t, source)
+	store := fixture.Persistence.store
+	ctx := runtimecorrelation.WithRunID(fixture.Context, testPipelineRunID)
+	if err := fixture.RequireRun(ctx, testPipelineRunID); err != nil {
+		t.Fatal(err)
+	}
+	coordinator := fixture.NewCoordinator(PipelineCoordinatorOptions{
+		Module: staticSemanticWorkflowModule{source: source},
+	})
+	entityID := eventtest.UUID("entity-contract-drift-" + backend)
+	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
+		InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
+		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), Mode: runtimecontracts.FlowModeStatic,
+		CurrentState: "active", Fields: map[string]any{"marker": "unchanged"}, EntityType: "wrong_entity",
+	})
+	if err := fixture.Construct(ctx, instance); err != nil {
+		t.Fatalf("seed contradictory entity contract: %v", err)
+	}
+	mutation := testEngineStateMutation(map[string]any{"marker": "mutated"}, nil, nil)
+	mutation.NextState = "done"
+	mutation.TriggeredAt = time.Date(2026, time.August, 23, 4, 0, 0, 0, time.UTC)
+	address := testEngineStateAddress(".", testPipelineRunID, entityID)
+	repo := pipelineEngineStateRepo{coordinator: coordinator}
+	evaluated := loadEngineEvaluationForTest(t, ctx, repo, address)
+	_, err := (pipelineEngineMutationOwner{
+		store: store, state: repo,
+	}).CommitEngineMutation(ctx, runtimeengine.EngineMutation{
+		Address: address, EvaluatedState: evaluated, State: mutation,
+	})
+	if err == nil || !strings.Contains(err.Error(), `entity_type "wrong_entity" disagrees with canonical contract "test_entity"`) {
+		t.Fatalf("entity contract drift mutation error = %v", err)
+	}
+	stored, found, loadErr := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, testPipelineRunID))
+	if loadErr != nil || !found || stored.EntityType != "wrong_entity" || stored.CurrentState != "active" || stored.Revision != 1 || stored.Fields["marker"] != "unchanged" {
+		t.Fatalf("rejected entity contract drift changed state: found=%t err=%v state=%#v", found, loadErr, stored)
+	}
+	counts := nativeWorkflowEnginePhysicalCountsForTest(t, fixture, ctx)
+	if counts["entity_state"] != 1 || counts["flow_instances"] != 1 || counts["entity_mutations"] < 1 {
+		t.Fatalf("native rejected-state readback lost physical evidence: %#v", counts)
+	}
+}
+
+func VerifyWorkflowEngineFirstMaterializationRejectsMissingOrContradictoryEntityContractOnBothStoresForTest(t *testing.T, backend string, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
+	for _, carriedType := range []string{"", "wrong_entity"} {
+		label := "missing"
+		if carriedType != "" {
+			label = "contradictory"
+		}
+		t.Run(label, func(t *testing.T) {
+			source := handlerEntityRequirementExecutionSource()
+			fixture := open(t, source)
+			store := fixture.Persistence.store
+			ctx := runtimecorrelation.WithRunID(fixture.Context, testPipelineRunID)
+			if err := fixture.RequireRun(ctx, testPipelineRunID); err != nil {
+				t.Fatal(err)
+			}
+			coordinator := fixture.NewCoordinator(PipelineCoordinatorOptions{
+				Module: staticSemanticWorkflowModule{source: source},
+			})
+
+			entityID := eventtest.UUID("first-materialization-contract-" + backend + "-" + label)
+			mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil, nil)
+			mutation.NextState = "active"
+			mutation.StateCarrier.Control = runtimeengine.StateControl{
+				FlowPath: testPipelineRunID, StorageRef: testPipelineRunID, InstanceID: testPipelineRunID, EntityType: carriedType,
+			}
+			mutation.TriggeredAt = time.Date(2026, time.August, 23, 4, 5, 0, 0, time.UTC)
+			address := testEngineStateAddress(".", testPipelineRunID, entityID)
+			repo := pipelineEngineStateRepo{coordinator: coordinator}
+			evaluated, found, err := repo.LoadState(ctx, address)
+			if err != nil || found || evaluated.Persisted != nil {
+				t.Fatalf("unconstructed fixture unexpectedly has R1: found=%v error=%v", found, err)
+			}
+			r2 := &rejectWorkflowEvaluationR2Reader{}
+			coordinator.workflowStore.targetReader = r2
+			_, err = (pipelineEngineMutationOwner{
+				store: store, state: repo,
+			}).CommitEngineMutation(ctx, runtimeengine.EngineMutation{
+				Address: address, EvaluatedState: evaluated, State: mutation,
+			})
+			if err == nil || !strings.Contains(err.Error(), "requires its exact evaluated persistence snapshot") || r2.calls != 0 {
+				t.Fatalf("%s entity contract materialization error = %v", label, err)
+			}
+			counts := nativeWorkflowEnginePhysicalCountsForTest(t, fixture, ctx)
+			for _, table := range []string{"entity_state", "flow_instances", "entity_mutations"} {
+				if count := counts[table]; count != 0 {
+					t.Fatalf("%s rows after rejected %s contract = %d", table, label, count)
+				}
+			}
+		})
+	}
+}
+
+func VerifyPipelineEngineStateRepoLoadStateMissingEntityDoesNotMaterializeDefaultsForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
 
 		"schema.yaml": "name: runtime-test\n",
@@ -715,16 +710,17 @@ review_entity:
 	if !ok {
 		t.Fatal("expected temp workflow bundle")
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+	fixture := open(t, source)
+	ctx := nativeWorkflowHandlerRunContextForTest(t, fixture)
 	repo := pipelineEngineStateRepo{
-		coordinator: &PipelineCoordinator{
-			workflowStore: newPostgresWorkflowInstanceStoreForTest(db),
-			module:        &previewWorkflowModule{bundle: bundle},
-		},
+		coordinator: fixture.NewCoordinator(PipelineCoordinatorOptions{
+			Module: &previewWorkflowModule{bundle: bundle},
+		}),
 	}
 
-	loaded, ok, err := repo.LoadState(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), testEngineStateAddress("review", "review/inst-missing", FlowInstanceEntityID("review/inst-missing")))
+	address := testEngineStateAddress("review", "review/inst-missing", FlowInstanceEntityID("review/inst-missing"))
+	address.FlowInstance = testRunScopedWorkflowInstanceFromContext(ctx, "review/inst-missing")
+	loaded, ok, err := repo.LoadState(ctx, address)
 	if err != nil {
 		t.Fatalf("LoadState: %v", err)
 	}
@@ -733,28 +729,29 @@ review_entity:
 	}
 }
 
-func TestPipelineEngineMutationOwnerRoundTripsTypedCarrier(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	store := newPostgresWorkflowInstanceStoreForTest(db)
-	source := testRootEntityContractSource("root", "test_entity")
-	bundle, _ := semanticview.Bundle(source)
-	bundle.RootEntities["test_entity"].Fields["score"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
-	bundle.RootEntities["test_entity"].Fields["subject_id"] = runtimecontracts.EntityFieldDecl{Type: "text"}
+func VerifyPipelineEngineMutationOwnerRoundTripsTypedCarrierForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
+	source := loadWorkflowTempSource(t, map[string]string{
+		"schema.yaml":   "name: root\n",
+		"entities.yaml": "test_entity:\n  score: integer\n  subject_id: text\n",
+	})
+	fixture := open(t, source)
+	ctx := runtimecorrelation.WithRunID(fixture.Context, testPipelineRunID)
+	if err := fixture.RequireRun(ctx, testPipelineRunID); err != nil {
+		t.Fatal(err)
+	}
+	store := fixture.Persistence.store
 	repo := pipelineEngineStateRepo{
-		coordinator: &PipelineCoordinator{
-			workflowStore: store,
-			module:        &pipelineFixtureWorkflowModule{source: source},
-		},
+		coordinator: fixture.NewCoordinator(PipelineCoordinatorOptions{
+			Module: &pipelineFixtureWorkflowModule{source: source},
+		}),
 	}
 	entityID := identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111")
-	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID.String(),
 		StorageRef:      testPipelineRunID,
 		EntityID:        entityID.String(),
 		WorkflowName:    ".",
-		WorkflowVersion: "1.0.0",
+		WorkflowVersion: source.WorkflowVersion(),
 		CurrentState:    "pending",
 		Fields:          map[string]any{},
 		StateBuckets:    map[string]any{},
@@ -769,7 +766,7 @@ func TestPipelineEngineMutationOwnerRoundTripsTypedCarrier(t *testing.T) {
 	)
 
 	address := testEngineStateAddress(".", testPipelineRunID, entityID.String())
-	ctx := testWorkflowStoreRunContext(t, repo.coordinator.workflowStore)
+	address.FlowInstance = testRunScopedWorkflowInstanceFromContext(ctx, testPipelineRunID)
 	evaluated := loadEngineEvaluationForTest(t, ctx, repo, address)
 	if _, err := (pipelineEngineMutationOwner{store: store, state: repo}).CommitEngineMutation(
 		ctx,
@@ -777,7 +774,7 @@ func TestPipelineEngineMutationOwnerRoundTripsTypedCarrier(t *testing.T) {
 	); err != nil {
 		t.Fatalf("CommitEngineMutation: %v", err)
 	}
-	loaded, ok, err := repo.LoadState(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), address)
+	loaded, ok, err := repo.LoadState(ctx, address)
 	if err != nil {
 		t.Fatalf("LoadState: %v", err)
 	}
@@ -795,13 +792,12 @@ func TestPipelineEngineMutationOwnerRoundTripsTypedCarrier(t *testing.T) {
 	}
 }
 
-func TestPipelineEngineStateRepoLoadStateRejectsMalformedPersistedCarrier(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
+func VerifyPipelineEngineStateRepoLoadStateRejectsMalformedPersistedCarrierForTest(t *testing.T, open func(*testing.T, string) WorkflowProjectionNativeFixtureForTest) {
 	t.Run("state_buckets", func(t *testing.T) {
-		store := newPostgresWorkflowInstanceStoreForTest(db)
-		if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
+		fixture := open(t, testPipelineRunID)
+		ctx := fixture.Context
+		store := fixture.Persistence.store
+		if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 			InstanceID:      "22222222-2222-2222-2222-222222222222",
 			StorageRef:      "root",
 			EntityID:        "22222222-2222-2222-2222-222222222222",
@@ -816,25 +812,23 @@ func TestPipelineEngineStateRepoLoadStateRejectsMalformedPersistedCarrier(t *tes
 			t.Fatalf("upsert malformed state bucket instance: %v", err)
 		}
 		repo := pipelineEngineStateRepo{coordinator: &PipelineCoordinator{workflowStore: store}}
-		_, _, err := repo.LoadState(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), testEngineStateAddress("root", "root", "22222222-2222-2222-2222-222222222222"))
+		_, _, err := repo.LoadState(ctx, testEngineStateAddress("root", "root", "22222222-2222-2222-2222-222222222222"))
 		if err == nil || !strings.Contains(err.Error(), "invalid workflow state bucket") {
 			t.Fatalf("LoadState error = %v, want invalid workflow state bucket", err)
 		}
 	})
 }
 
-func TestAccumulatorAppend_ReturnsWorkflowStoreMutationError(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	if err := db.Close(); err != nil {
-		t.Fatalf("close db: %v", err)
-	}
-	pc := &PipelineCoordinator{
-		workflowStore: newPostgresWorkflowInstanceStoreForTest(db),
-	}
-
-	err := commitAccumulatorAppendForTest(testPipelineRunContextNoSeed(t), pc, testWorkflowInstanceRoute("11111111-1111-1111-1111-111111111111"), "11111111-1111-1111-1111-111111111111", "", "research", map[string]any{"summary": "done"})
+func VerifyAccumulatorAppend_ReturnsWorkflowStoreMutationErrorForTest(t *testing.T, open func(*testing.T) WorkflowClosedOwnerNativeFixtureForTest) {
+	fixture := open(t)
+	pc := &PipelineCoordinator{workflowStore: fixture.Persistence.store}
+	closedErr := closeWorkflowNativeOwnerForTest(t, fixture, "11111111-1111-1111-1111-111111111111")
+	err := commitAccumulatorAppendForTest(fixture.Context, pc, testWorkflowInstanceRoute("11111111-1111-1111-1111-111111111111"), "11111111-1111-1111-1111-111111111111", "", "research", map[string]any{"summary": "done"})
 	if err == nil {
 		t.Fatal("expected accumulator append to fail when workflow store mutate fails")
+	}
+	if err.Error() != closedErr.Error() {
+		t.Fatalf("accumulator append did not propagate original closed-owner read: got=%v want=%v", err, closedErr)
 	}
 }
 

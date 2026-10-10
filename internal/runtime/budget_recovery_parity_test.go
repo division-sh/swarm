@@ -26,12 +26,12 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 type budgetRecoveryParityStore interface {
+	storetest.RunFixtureStore
 	budgetspend.Store
 	runtimebus.EventStore
 	runtimemanager.ManagerPersistence
@@ -71,13 +71,8 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 			runA, runB := uuid.NewString(), uuid.NewString()
 			entityA, entityB, terminalEntity, crossSourceEntity := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 			otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# budget-stage-second-source\n"))
-			seedBudgetRecoveryRun(t, ctx, db, postgres, runA, now)
-			secondRun := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runB, Artifact: otherArtifact, StartedAt: now.Add(time.Second)}
-			if postgres {
-				runlifecyclefixture.RequirePostgres(t, ctx, db, secondRun)
-			} else {
-				runlifecyclefixture.RequireSQLite(t, ctx, db, secondRun)
-			}
+			seedBudgetRecoveryRun(t, ctx, selected, runA, now)
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runB, Artifact: otherArtifact, StartedAt: now.Add(time.Second)})
 			seedBudgetRecoveryEntity(t, ctx, db, postgres, runA, entityA, "active", now)
 			seedBudgetRecoveryEntity(t, ctx, db, postgres, runB, entityB, "active", now.Add(time.Second))
 			seedBudgetRecoveryEntity(t, ctx, db, postgres, runA, terminalEntity, "done", now.Add(2*time.Second))
@@ -255,13 +250,9 @@ func budgetRecoverySpend(t *testing.T, entityID, flowInstance string, cost float
 	}
 }
 
-func seedBudgetRecoveryRun(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, runID string, at time.Time) {
+func seedBudgetRecoveryRun(t *testing.T, ctx context.Context, selected storetest.RunFixtureStore, runID string, at time.Time) {
 	t.Helper()
-	if postgres {
-		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: at})
-	} else {
-		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: at})
-	}
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at})
 }
 
 func seedBudgetRecoveryEntity(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, runID, entityID, state string, at time.Time) {

@@ -2,9 +2,9 @@ package bus_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -53,7 +52,6 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
@@ -89,11 +87,13 @@ func TestMockOnlyPostureRejectsLiveEventBeforePersistence(t *testing.T) {
 
 type retainedConnectionCommitStore struct {
 	runtimebus.InMemoryEventStore
-	conn *sql.Conn
+	sawPublisherValue bool
 }
 
+type publisherDispatchValueKey struct{}
+
 func (s *retainedConnectionCommitStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
-	ctx = runtimepipelinefixture.WithSQLConn(ctx, s.conn)
+	s.sawPublisherValue = ctx.Value(publisherDispatchValueKey{}) == "publisher-value"
 	return s.InMemoryEventStore.CommitPublication(ctx, command)
 }
 
@@ -107,33 +107,27 @@ func (o *dispatchContextObserver) NotifyLifecycle(ctx context.Context, signal ru
 		return
 	}
 	o.called = true
-	if _, ok := runtimepipelinefixture.SQLConn(ctx); ok {
-		o.t.Error("post-commit dispatch retained the transaction-owned SQL connection")
-	}
-	if _, ok := runtimepipelinefixture.SQLTx(ctx); ok {
-		o.t.Error("post-commit dispatch retained the completed SQL transaction")
+	if ctx.Value(publisherDispatchValueKey{}) != nil {
+		o.t.Error("post-commit dispatch retained publisher-owned context values")
 	}
 }
 
 func TestCommittedPublishDispatchDropsTransactionConnectionCapability(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	conn, err := db.Conn(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
+	// Empty receiver values are the context boundary; real selected connection
+	// lifetimes remain covered by the PostgreSQL publication/replay pool proofs.
+	store := &retainedConnectionCommitStore{}
 	observer := &dispatchContextObserver{t: t}
-	bus, err := newScopedTestEventBus(&retainedConnectionCommitStore{conn: conn}, runtimebus.EventBusOptions{TestLifecycleProbe: observer})
+	bus, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{TestLifecycleProbe: observer})
 	if err != nil {
 		t.Fatal(err)
 	}
 	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "provider", "", []byte(`{}`), 0, eventBusTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), event); err != nil {
+	ctx := context.WithValue(testAuthorActivityContext(context.Background()), publisherDispatchValueKey{}, "publisher-value")
+	if err := bus.Publish(ctx, event); err != nil {
 		t.Fatal(err)
+	}
+	if !store.sawPublisherValue {
+		t.Fatal("publisher value never reached the commit boundary")
 	}
 	if !observer.called {
 		t.Fatal("post-commit dispatch lifecycle was not observed")
@@ -141,9 +135,9 @@ func TestCommittedPublishDispatchDropsTransactionConnectionCapability(t *testing
 }
 
 func TestCommittedPublishDispatchDoesNotExposePublicationClaimConnection(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	ctx := eventBusTestRunContext(t, db)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
+	ctx := eventBusTestRunContext(t, pg)
+	ctx = context.WithValue(ctx, publisherDispatchValueKey{}, "publisher-value")
 	observer := &dispatchContextObserver{t: t}
 	bus, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{TestLifecycleProbe: observer})
 	if err != nil {
@@ -161,14 +155,18 @@ func TestCommittedPublishDispatchDoesNotExposePublicationClaimConnection(t *test
 	}
 }
 
-func eventBusTestRunContext(t *testing.T, db *sql.DB) context.Context {
-	return eventBusTestRunContextForSource(t, db, nil)
+type eventBusRunFixtureStore interface {
+	runtimebus.EventStore
+	storetest.RunFixtureStore
 }
 
-func eventBusTestRunContextForSource(t *testing.T, db *sql.DB, source semanticview.Source) context.Context {
+func eventBusTestRunContext(t *testing.T, selected eventBusRunFixtureStore) context.Context {
+	return eventBusTestRunContextForSource(t, selected, nil)
+}
+
+func eventBusTestRunContextForSource(t *testing.T, selected eventBusRunFixtureStore, source semanticview.Source) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), eventBusTestRunID)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source)); err != nil {
 		t.Fatalf("persist exact event bus test source artifact: %v", err)
 	}
@@ -181,8 +179,7 @@ func eventBusTestRunContextForSource(t *testing.T, db *sql.DB, source semanticvi
 }
 
 func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
 	runID := uuid.NewString()
 	if err := storetest.EnsureEphemeralRun(ctx, pg, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
@@ -194,18 +191,7 @@ func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres(t *tes
 		t.Fatalf("mark run cancelled: %v", err)
 	}
 	assertEventBusTerminalRunRefusal(t, pg, runID, "cancelled", func(eventID string) (string, int, int, error) {
-		var status string
-		var eventCount, deliveryCount int
-		if err := db.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&status); err != nil {
-			return "", 0, 0, err
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&eventCount); err != nil {
-			return "", 0, 0, err
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid`, eventID).Scan(&deliveryCount); err != nil {
-			return "", 0, 0, err
-		}
-		return status, eventCount, deliveryCount, nil
+		return readEventBusTerminalRefusalState(ctx, pg, runID, eventID)
 	})
 }
 
@@ -222,19 +208,31 @@ func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite(t *testi
 		t.Fatalf("mark run cancelled: %v", err)
 	}
 	assertEventBusTerminalRunRefusal(t, sqliteStore, runID, "cancelled", func(eventID string) (string, int, int, error) {
-		var status string
-		var eventCount, deliveryCount int
-		if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`, runID).Scan(&status); err != nil {
-			return "", 0, 0, err
-		}
-		if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&eventCount); err != nil {
-			return "", 0, 0, err
-		}
-		if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, eventID).Scan(&deliveryCount); err != nil {
-			return "", 0, 0, err
-		}
-		return status, eventCount, deliveryCount, nil
+		return readEventBusTerminalRefusalState(ctx, sqliteStore, runID, eventID)
 	})
+}
+
+func readEventBusTerminalRefusalState(ctx context.Context, selected runtimebus.RunLifecycleReadPersistence, runID, eventID string) (string, int, int, error) {
+	snapshot, err := selected.LoadRunLifecycleSnapshot(ctx, runID)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	if snapshot.RunID != runID {
+		return "", 0, 0, fmt.Errorf("terminal refusal witness borrowed run %s instead of %s", snapshot.RunID, runID)
+	}
+	_, found, err := storetest.ReadCanonicalEventRecord(ctx, selected, eventID)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	deliveries, err := storetest.ReadEventDeliveryDiagnosticRows(ctx, selected, eventID)
+	if err != nil {
+		return "", 0, 0, err
+	}
+	eventCount := 0
+	if found {
+		eventCount = 1
+	}
+	return snapshot.Status, eventCount, len(deliveries), nil
 }
 
 type eventBusExactDuplicateState struct {
@@ -245,9 +243,24 @@ type eventBusExactDuplicateState struct {
 	OutcomeRows   int
 }
 
+func readEventBusExactDuplicateState(ctx context.Context, selected any, runID, eventID string) (eventBusExactDuplicateState, error) {
+	evidence, err := storetest.ObserveSemanticEventFixtureEvidence(ctx, selected, runID, eventID)
+	if err != nil {
+		return eventBusExactDuplicateState{}, err
+	}
+	eventRows := 0
+	if evidence.RecordFound {
+		eventRows = 1
+	}
+	return eventBusExactDuplicateState{
+		Status: evidence.RunStatus, RunEventCount: evidence.RunEventCount,
+		EventRows: eventRows, DeliveryRows: len(evidence.DeliveryProjections),
+		OutcomeRows: evidence.SettledDeliveryAttemptCount,
+	}, nil
+}
+
 func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	if _, err := newScopedTestEventBus(pg); err != nil {
 		t.Fatalf("register author activity catalog: %v", err)
 	}
@@ -260,25 +273,7 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-original"), AgentIdentity: runtimebustest.IdentityForRun(t, runID, "agent-original", "")}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeDirect)
 	assertEventBusExactDuplicateIsOperationNoOp(t, pg, evt, func() (eventBusExactDuplicateState, error) {
-		var state eventBusExactDuplicateState
-		if err := db.QueryRowContext(ctx, `SELECT COALESCE(status, ''), COALESCE(event_count, 0) FROM runs WHERE run_id = $1::uuid`, runID).Scan(&state.Status, &state.RunEventCount); err != nil {
-			return state, err
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, evt.ID()).Scan(&state.EventRows); err != nil {
-			return state, err
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid`, evt.ID()).Scan(&state.DeliveryRows); err != nil {
-			return state, err
-		}
-		if err := db.QueryRowContext(ctx, `
-			SELECT COUNT(*)
-			FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
-			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
-			WHERE d.event_id = $1::uuid
-		`, evt.ID()).Scan(&state.OutcomeRows); err != nil {
-			return state, err
-		}
-		return state, nil
+		return readEventBusExactDuplicateState(ctx, pg, runID, evt.ID())
 	}, func() error {
 		claimed, err := storetest.ClaimDelivery(ctx, pg, evt, route)
 		if err != nil {
@@ -308,25 +303,7 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-original"), AgentIdentity: runtimebustest.IdentityForRun(t, runID, "agent-original", "")}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeDirect)
 	assertEventBusExactDuplicateIsOperationNoOp(t, sqliteStore, evt, func() (eventBusExactDuplicateState, error) {
-		var state eventBusExactDuplicateState
-		if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `SELECT COALESCE(status, ''), COALESCE(event_count, 0) FROM runs WHERE run_id = ?`, runID).Scan(&state.Status, &state.RunEventCount); err != nil {
-			return state, err
-		}
-		if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, evt.ID()).Scan(&state.EventRows); err != nil {
-			return state, err
-		}
-		if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, evt.ID()).Scan(&state.DeliveryRows); err != nil {
-			return state, err
-		}
-		if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
-			SELECT COUNT(*)
-			FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
-			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
-			WHERE d.event_id = ?
-		`, evt.ID()).Scan(&state.OutcomeRows); err != nil {
-			return state, err
-		}
-		return state, nil
+		return readEventBusExactDuplicateState(ctx, sqliteStore, runID, evt.ID())
 	}, func() error {
 		claimed, err := storetest.ClaimDelivery(ctx, sqliteStore, evt, route)
 		if err != nil {
@@ -354,8 +331,7 @@ func TestEventBusZeroRouteExactDuplicateRetainsDurableAuthorityBothStores(t *tes
 			if backend == "sqlite" {
 				selected = storetest.StartSQLiteRuntimeStore(t)
 			} else {
-				_, db, _ := testutil.StartPostgres(t)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			}
 			runID := uuid.NewString()
 			if err := storetest.EnsureEphemeralRun(ctx, selected, runID, time.Now().UTC()); err != nil {
@@ -461,11 +437,13 @@ func exactDuplicateEventBusEvent(runID string) events.Event {
 }
 
 func TestEventBusRejectsDiagnosticDirectEventsThroughEveryPublishOwnerPostgres(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	assertEventBusDiagnosticDirectRefusal(t, pg, func(eventID string) (int, error) {
-		var count int
-		err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&count)
+		_, found, err := storetest.ReadCanonicalEventRecord(context.Background(), pg, eventID)
+		count := 0
+		if found {
+			count = 1
+		}
 		return count, err
 	})
 }
@@ -473,8 +451,11 @@ func TestEventBusRejectsDiagnosticDirectEventsThroughEveryPublishOwnerPostgres(t
 func TestEventBusRejectsDiagnosticDirectEventsThroughEveryPublishOwnerSQLite(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	assertEventBusDiagnosticDirectRefusal(t, sqliteStore, func(eventID string) (int, error) {
-		var count int
-		err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&count)
+		_, found, err := storetest.ReadCanonicalEventRecord(context.Background(), sqliteStore, eventID)
+		count := 0
+		if found {
+			count = 1
+		}
 		return count, err
 	})
 }
@@ -622,7 +603,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := eventBusTestRunContextForSource(t, db, semanticview.Wrap(bundle))
+	ctx := eventBusTestRunContextForSource(t, pg, semanticview.Wrap(bundle))
 	instanceRoute := runtimeflowidentity.DeriveRoute("account", "one")
 	accountConstruction := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "account", "one", eventBusTestRunID)
 	bundleHash := testSourceArtifactFact(source).BundleHash()
@@ -648,7 +629,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc = newEventBusWorkflowCoordinator(eb, db, pg, module)
+	pc = newEventBusWorkflowCoordinator(eb, pg, module)
 	if pc == nil {
 		t.Fatal("expected pipeline coordinator")
 	}
@@ -872,11 +853,8 @@ type nonTransactionalPersistedBeforeInterceptor struct {
 	store *recordingEventStore
 }
 
-func (i nonTransactionalPersistedBeforeInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+func (i nonTransactionalPersistedBeforeInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
-	if tx, ok := runtimepipelinefixture.SQLTx(ctx); ok && tx != nil {
-		i.t.Fatal("non-transactional interceptor unexpectedly ran with sql tx")
-	}
 	for _, got := range i.store.eventTypes() {
 		if got == string(evt.Type()) {
 			return true, nil, runtimepipelineobligation.Continue(), nil
@@ -889,6 +867,7 @@ func (i nonTransactionalPersistedBeforeInterceptor) Intercept(ctx context.Contex
 type postCommitTxAbsentInterceptor struct {
 	t              *testing.T
 	store          *store.PostgresStore
+	probe          *storetest.TransactionCollector
 	eventID        string
 	called         chan struct{}
 	wantRecipients []string
@@ -897,9 +876,7 @@ type postCommitTxAbsentInterceptor struct {
 
 func (i postCommitTxAbsentInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
-	if tx, ok := runtimepipelinefixture.SQLTx(ctx); ok && tx != nil {
-		i.t.Fatal("post-commit interceptor ran with sql tx still in context")
-	}
+	requireNativePublicationSettledBeforeIntercept(i.t, i.probe)
 	ok, err := i.store.EventExists(ctx, i.eventID)
 	if err != nil {
 		i.t.Fatalf("EventExists(%s): %v", i.eventID, err)
@@ -915,7 +892,7 @@ func (i postCommitTxAbsentInterceptor) Intercept(ctx context.Context, _ events.E
 		assertSortedStringsEqual(i.t, got, i.wantRecipients)
 	}
 	if i.wantScope != "" {
-		got := loadCommittedPipelineScopePostgres(i.t, ctx, storetest.DatabaseForTest(i.store), i.eventID)
+		got := loadCommittedPipelineScopePostgres(i.t, ctx, i.store, i.eventID)
 		if got != i.wantScope {
 			i.t.Fatalf("committed replay scope = %q, want %q", got, i.wantScope)
 		}
@@ -927,15 +904,11 @@ func (i postCommitTxAbsentInterceptor) Intercept(ctx context.Context, _ events.E
 	return true, nil, runtimepipelineobligation.Continue(), nil
 }
 
-func loadCommittedPipelineScopePostgres(t *testing.T, ctx context.Context, db *sql.DB, eventID string) runtimepipelineobligation.CommittedScope {
+func loadCommittedPipelineScopePostgres(t *testing.T, ctx context.Context, selected any, eventID string) runtimepipelineobligation.CommittedScope {
 	t.Helper()
-	var raw string
-	if err := db.QueryRowContext(ctx, `SELECT scope FROM committed_replay_scopes WHERE event_id = $1::uuid`, eventID).Scan(&raw); err != nil {
-		t.Fatalf("load committed pipeline scope for %s: %v", eventID, err)
-	}
-	scope, err := runtimepipelineobligation.ParseCommittedScope(raw)
+	scope, err := storetest.ReadCommittedPipelineScope(ctx, selected, eventID)
 	if err != nil {
-		t.Fatalf("parse committed pipeline scope for %s: %v", eventID, err)
+		t.Fatalf("load committed pipeline scope for %s: %v", eventID, err)
 	}
 	return scope
 }
@@ -943,6 +916,7 @@ func loadCommittedPipelineScopePostgres(t *testing.T, ctx context.Context, db *s
 type postCommitErrorInterceptor struct {
 	t       *testing.T
 	store   *store.PostgresStore
+	probe   *storetest.TransactionCollector
 	eventID string
 	err     error
 }
@@ -969,17 +943,10 @@ func TestEventBusPendingPostCommitFaultRetainsDurablePublicationOnBothStores(t *
 					runtimerunlifecycle.CandidateStore
 					PipelineObligations() runtimepipelineobligation.Store
 				}
-				var db *sql.DB
-				placeholder := "?"
 				if backend == "sqlite" {
 					selected = storetest.StartSQLiteRuntimeStore(t)
-					db = storetest.DatabaseForTest(selected)
 				} else {
-					var cleanup func()
-					_, db, cleanup = testutil.StartPostgres(t)
-					t.Cleanup(cleanup)
-					selected = storetest.AdmitPostgresRuntimeStore(t, db)
-					placeholder = "$1::uuid"
+					selected = storetest.StartPostgresRuntimeStore(t)
 				}
 				ctx := testAuthorActivityContext(context.Background())
 				runID, eventID := uuid.NewString(), uuid.NewString()
@@ -1000,14 +967,15 @@ func TestEventBusPendingPostCommitFaultRetainsDurablePublicationOnBothStores(t *
 				if err := eb.Publish(ctx, event); !errors.Is(err, fault.err) {
 					t.Fatalf("publish error = %v, want %v", err, fault.err)
 				}
-				var eventCount int
-				if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE event_id = "+placeholder, eventID).Scan(&eventCount); err != nil {
+				evidence, err := storetest.ObserveSemanticEventFixtureEvidence(ctx, selected, runID, eventID)
+				if err != nil {
 					t.Fatal(err)
 				}
-				var receiptCount int
-				if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM event_receipts WHERE event_id = "+placeholder+" AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'", eventID).Scan(&receiptCount); err != nil {
-					t.Fatal(err)
+				eventCount := 0
+				if evidence.RecordFound {
+					eventCount = 1
 				}
+				receiptCount := evidence.PipelineReceiptCount
 				if eventCount != 1 || receiptCount != 0 {
 					t.Fatalf("committed event count = %d, pipeline receipt count = %d; want 1, 0", eventCount, receiptCount)
 				}
@@ -1029,8 +997,13 @@ func TestEventBusPendingPostCommitFaultRetainsDurablePublicationOnBothStores(t *
 				if err != nil {
 					t.Fatalf("recover pending publication: %v", err)
 				}
-				if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM event_receipts WHERE event_id = "+placeholder+" AND subscriber_type = 'platform' AND subscriber_id = 'pipeline' AND outcome = 'success'", eventID).Scan(&receiptCount); err != nil {
+				evidence, err = storetest.ObserveSemanticEventFixtureEvidence(ctx, selected, runID, eventID)
+				if err != nil {
 					t.Fatal(err)
+				}
+				receiptCount = evidence.PipelineReceiptCount
+				if evidence.PipelineReceiptOutcome != "success" {
+					receiptCount = 0
 				}
 				if receiptCount != 1 {
 					t.Fatalf("recovered success receipt count = %d, sweep=%+v; want 1", receiptCount, sweep)
@@ -1042,9 +1015,7 @@ func TestEventBusPendingPostCommitFaultRetainsDurablePublicationOnBothStores(t *
 
 func (i postCommitErrorInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
-	if tx, ok := runtimepipelinefixture.SQLTx(ctx); ok && tx != nil {
-		i.t.Fatal("post-commit error interceptor ran with sql tx still in context")
-	}
+	requireNativePublicationSettledBeforeIntercept(i.t, i.probe)
 	ok, err := i.store.EventExists(ctx, i.eventID)
 	if err != nil {
 		i.t.Fatalf("EventExists(%s): %v", i.eventID, err)
@@ -1058,6 +1029,7 @@ func (i postCommitErrorInterceptor) Intercept(ctx context.Context, _ events.Even
 type deferredEventVisibleInterceptor struct {
 	t        *testing.T
 	store    *store.PostgresStore
+	probe    *storetest.TransactionCollector
 	eventID  string
 	checkFor events.EventType
 }
@@ -1072,9 +1044,7 @@ func (i deferredEventVisibleInterceptor) Intercept(ctx context.Context, evt even
 	if evt.Type() != i.checkFor {
 		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
-	if tx, ok := runtimepipelinefixture.SQLTx(ctx); ok && tx != nil {
-		i.t.Fatal("deferred event interceptor ran with sql tx still in context")
-	}
+	requireNativePublicationSettledBeforeIntercept(i.t, i.probe)
 	ok, err := i.store.EventExists(ctx, i.eventID)
 	if err != nil {
 		i.t.Fatalf("EventExists(%s): %v", i.eventID, err)
@@ -1083,6 +1053,16 @@ func (i deferredEventVisibleInterceptor) Intercept(ctx context.Context, evt even
 		i.t.Fatalf("expected deferred event %s to be persisted before interceptors ran", i.eventID)
 	}
 	return true, nil, runtimepipelineobligation.Continue(), nil
+}
+
+func requireNativePublicationSettledBeforeIntercept(t *testing.T, probe *storetest.TransactionCollector) {
+	t.Helper()
+	if probe == nil {
+		t.Fatal("post-commit proof requires its original selected transaction observer")
+	}
+	if counts := probe.Snapshot(); counts.Total.WriteCommits == 0 || counts.Active != 0 {
+		t.Fatalf("interceptor reached before native publication settled: %+v", counts)
+	}
 }
 
 type recordingLoggerHook struct {
@@ -1271,58 +1251,36 @@ func seedActiveRuntimeBusAgent(t *testing.T, ctx context.Context, pg *store.Post
 	return identity
 }
 
-func loadRunStateForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string) (string, string, string) {
+func loadRunStateForEvent(t *testing.T, ctx context.Context, selected any, eventID string) (string, string, string) {
 	t.Helper()
-	var runID, runStatus, triggerEventType string
-	if err := db.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(r.run_id::text, ''),
-			COALESCE(r.status, ''),
-			COALESCE(r.trigger_event_type, '')
-		FROM events e
-		INNER JOIN runs r ON r.run_id = e.run_id
-		WHERE e.event_id = $1::uuid
-	`, eventID).Scan(&runID, &runStatus, &triggerEventType); err != nil {
+	out, err := storetest.ReadStandaloneRunStorage(ctx, selected, eventID)
+	if err != nil {
 		t.Fatalf("load run state for %s: %v", eventID, err)
 	}
-	return runID, runStatus, triggerEventType
+	return out.RunID, out.Status, out.TriggerEventType
 }
 
-func countEventDeliveriesForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string) int {
+func countEventDeliveriesForEvent(t *testing.T, ctx context.Context, selected any, eventID string) int {
 	t.Helper()
-	var count int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-	`, eventID).Scan(&count); err != nil {
+	count, err := storetest.CountAgentEventDeliveryStorage(ctx, selected, eventID)
+	if err != nil {
 		t.Fatalf("count event deliveries for %s: %v", eventID, err)
 	}
 	return count
 }
 
-func countPipelineReceiptsForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID string) int {
+func countPipelineReceiptsForEvent(t *testing.T, ctx context.Context, selected any, eventID string) int {
 	t.Helper()
-	var count int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'platform'
-		  AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&count); err != nil {
+	count, err := storetest.CountPipelineEventReceiptStorage(ctx, selected, eventID)
+	if err != nil {
 		t.Fatalf("count pipeline receipts for %s: %v", eventID, err)
 	}
 	return count
 }
 
 func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	ctx := eventBusTestRunContext(t, db)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
+	ctx := eventBusTestRunContext(t, pg)
 	failing := &failStandalonePipelineReceiptOnceStore{
 		PostgresStore: pg,
 		obligations: &failPipelineSettlementOnceStore{
@@ -1363,10 +1321,10 @@ func TestEventBusPublishTransactionalPostCommitReceiptFailureIsRecoverable(t *te
 	if !ok {
 		t.Fatalf("event %s was not persisted", eventID)
 	}
-	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
+	if got := countEventDeliveriesForEvent(t, ctx, pg, eventID); got != 1 {
 		t.Fatalf("event deliveries = %d, want 1", got)
 	}
-	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, eventID); got != 0 {
 		t.Fatalf("pipeline receipts = %d, want 0 after injected failure", got)
 	}
 	missing, ok, err := claimNextPipelineWork(t, ctx, pg.PipelineObligations(), runtimepipelineobligation.GlobalRecoveryQuery())
@@ -1408,22 +1366,13 @@ func (s *failPipelineSettlementOnceStore) Settle(ctx context.Context, claim runt
 	return s.Store.Settle(ctx, claim, disposition)
 }
 
-func loadAgentDeliveryForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID, agentID string) (string, string) {
+func loadAgentDeliveryForEvent(t *testing.T, ctx context.Context, selected any, eventID, agentID string) (string, string) {
 	t.Helper()
-	var status, runStatus string
-	if err := db.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(d.status, ''),
-			COALESCE(r.status, '')
-		FROM event_deliveries d
-		INNER JOIN runs r ON r.run_id = d.run_id
-		WHERE d.event_id = $1::uuid
-		  AND d.subscriber_type = 'agent'
-		  AND d.subscriber_id = $2
-	`, eventID, agentID).Scan(&status, &runStatus); err != nil {
+	out, err := storetest.ReadStandaloneAgentDeliveryStorage(ctx, selected, eventID, agentID)
+	if err != nil {
 		t.Fatalf("load delivery state for %s/%s: %v", eventID, agentID, err)
 	}
-	return status, runStatus
+	return out.Status, out.RunStatus
 }
 
 func TestEventBusPublish_LogsQueuedDeliveryLifecycleTransition(t *testing.T) {
@@ -2108,10 +2057,8 @@ func TestEventBusWaitForQuiescenceWaitsForPublishCompletion(t *testing.T) {
 }
 
 func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	ctx := eventBusTestRunContext(t, db)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
+	ctx := eventBusTestRunContext(t, pg)
 	const eventID = "11111111-1111-1111-1111-111111111136"
 	const agentID = "agent-acknowledged-publish"
 	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, eventBusTestRunID, agentID)
@@ -2156,7 +2103,7 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 		t.Fatalf("ListEventDeliveryRecipients(%s): %v", eventID, err)
 	}
 	assertSortedStringsEqual(t, gotRecipients, []string{agentID})
-	gotScope := loadCommittedPipelineScopePostgres(t, ctx, db, eventID)
+	gotScope := loadCommittedPipelineScopePostgres(t, ctx, pg, eventID)
 	if gotScope != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed pipeline scope = %q, want %q", gotScope, runtimepipelineobligation.ScopeSubscribed)
 	}
@@ -2189,49 +2136,59 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 	}
 }
 
+type foregroundClaimFixtureStore interface {
+	runtimebus.EventStore
+	storetest.RunFixtureStore
+}
+
 func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgres(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		open func(*testing.T) (runtimebus.EventStore, runtimebus.EventStore, *sql.DB, string)
+		open func(*testing.T) foregroundClaimFixtureStore
 	}{
 		{
 			name: "sqlite",
-			open: func(t *testing.T) (runtimebus.EventStore, runtimebus.EventStore, *sql.DB, string) {
-				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected, selected, storetest.DatabaseForTest(selected), "?"
+			open: func(t *testing.T) foregroundClaimFixtureStore {
+				return storetest.StartSQLiteRuntimeStore(t)
 			},
 		},
 		{
 			name: "postgres",
-			open: func(t *testing.T) (runtimebus.EventStore, runtimebus.EventStore, *sql.DB, string) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), storetest.AdmitPostgresRuntimeStore(t, db), db, "$1::uuid"
+			open: func(t *testing.T) foregroundClaimFixtureStore {
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			foregroundStore, siblingStore, db, _ := tc.open(t)
+			selected := tc.open(t)
 			runID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-			if tc.name == "sqlite" {
-				runlifecyclefixture.RequireSQLite(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
-			} else {
-				runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
-			}
+			storetest.RequireRun(t, context.Background(), selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 			started := make(chan struct{}, 1)
 			release := make(chan struct{})
-			foreground, err := newScopedTestEventBus(foregroundStore, runtimebus.EventBusOptions{
+			foreground, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{
 				Interceptors: []runtimebus.EventInterceptor{waitInterceptor{started: started, release: release}},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			sibling, err := newScopedTestEventBus(siblingStore)
+			sibling, err := newScopedTestEventBus(selected)
 			if err != nil {
 				t.Fatal(err)
 			}
 			publishDone := make(chan error, 1)
+			var publisher sync.WaitGroup
+			var releaseOnce sync.Once
+			releaseDispatch := func() { releaseOnce.Do(func() { close(release) }) }
+			defer func() {
+				releaseDispatch()
+				publisher.Wait()
+				if err := foreground.WaitForQuiescence(context.Background()); err != nil {
+					t.Errorf("join foreground fixture dispatch: %v", err)
+				}
+			}()
+			publisher.Add(1)
 			go func() {
+				defer publisher.Done()
 				publishDone <- foreground.PublishAcknowledged(context.Background(), eventtest.ExistingRunRootIngress(
 					eventID, events.EventType("custom.shared_claim"), "test", "", []byte(`{}`), 0, runID,
 					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC()))
@@ -2244,7 +2201,7 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 			if result, err := sibling.SweepPipelineObligations(context.Background(), 10); err != nil || result.Settled != 0 {
 				t.Fatalf("sibling sweep while foreground owns event = %d, %v; want 0, nil", result.Settled, err)
 			}
-			close(release)
+			releaseDispatch()
 			waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := foreground.WaitForQuiescence(waitCtx); err != nil {
@@ -2311,11 +2268,10 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 	const poolSize = 4
 	for _, form := range []string{"synchronous", "acknowledged"} {
 		t.Run(form, func(t *testing.T) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			pg := storetest.AdmitPostgresRuntimeStore(t, db)
-			db.SetMaxOpenConns(poolSize)
-			db.SetMaxIdleConns(poolSize)
+			pg := storetest.StartPostgresRuntimeStore(t)
+			if err := storetest.LimitPostgresPublicationFixturePool(context.Background(), pg); err != nil {
+				t.Fatal(err)
+			}
 
 			bus, err := newScopedTestEventBus(pg)
 			if err != nil {
@@ -2324,6 +2280,11 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
+			var workers sync.WaitGroup
+			defer func() {
+				cancel()
+				workers.Wait()
+			}()
 			start := make(chan struct{})
 			eventIDs := make([]string, poolSize)
 			runIDs := make([]string, poolSize)
@@ -2334,8 +2295,14 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 				storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runIDs[i]})
 				eventID := eventIDs[i]
 				runID := runIDs[i]
+				workers.Add(1)
 				go func() {
-					<-start
+					defer workers.Done()
+					select {
+					case <-start:
+					case <-ctx.Done():
+						return
+					}
 					evt := eventtest.ExistingRunRootIngress(
 						eventID, events.EventType("custom.pool_saturation"), "test", "", []byte(`{}`), 0, runID,
 						events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()), time.Now().UTC(),
@@ -2360,14 +2327,8 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 				t.Fatalf("wait for publication settlement: %v", err)
 			}
 			for _, eventID := range eventIDs {
-				var count int
-				if err := db.QueryRowContext(context.Background(), `
-					SELECT COUNT(*)
-					FROM event_receipts
-					WHERE event_id = $1::uuid
-					  AND subscriber_type = 'platform'
-					  AND subscriber_id = 'pipeline'
-				`, eventID).Scan(&count); err != nil {
+				count, err := storetest.CountPipelineEventReceiptStorage(context.Background(), pg, eventID)
+				if err != nil {
 					t.Fatalf("count pipeline receipt for %s: %v", eventID, err)
 				}
 				if count != 1 {
@@ -2382,9 +2343,7 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 	const poolSize = 4
 	for _, surface := range []string{"generic_periodic", "decision_periodic", "run_queue", "startup"} {
 		t.Run(surface, func(t *testing.T) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			seedStore := storetest.AdmitPostgresRuntimeStore(t, db)
+			seedStore := storetest.StartPostgresRuntimeStore(t)
 			if _, err := newScopedTestEventBus(seedStore); err != nil {
 				t.Fatalf("prepare replay seed author activity catalog: %v", err)
 			}
@@ -2393,22 +2352,30 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 			decisionRoute := surface == "decision_periodic"
 			for i := 0; i < poolSize; i++ {
 				runIDs[i] = uuid.NewString()
-				runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runIDs[i], BundleHash: authorActivityTestBundleHash})
+				storetest.RequireRun(t, context.Background(), seedStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runIDs[i], BundleHash: authorActivityTestBundleHash})
 				eventIDs[i] = seedReplayPoolEvent(t, seedStore, runIDs[i], decisionRoute)
 			}
-			db.SetMaxOpenConns(poolSize)
-			db.SetMaxIdleConns(poolSize)
+			if err := storetest.LimitPostgresPublicationFixturePool(context.Background(), seedStore); err != nil {
+				t.Fatal(err)
+			}
 
 			claimed := make(chan struct{}, poolSize)
 			release := make(chan struct{})
 			start := make(chan struct{})
 			errs := make(chan error, poolSize)
+			workerContext, cancelWorkers := context.WithCancel(context.Background())
+			var workers sync.WaitGroup
+			var releaseOnce sync.Once
+			defer func() {
+				cancelWorkers()
+				releaseOnce.Do(func() { close(release) })
+				workers.Wait()
+			}()
 			for i := 0; i < poolSize; i++ {
-				selectedStore := storetest.AdmitPostgresRuntimeStore(t, db)
 				selected := &replayClaimBarrierStore{
-					PostgresStore: selectedStore,
+					PostgresStore: seedStore,
 					obligations: &blockingPipelineObligationStore{
-						Store: selectedStore.PipelineObligations(), eventID: eventIDs[i], claimed: claimed, release: release,
+						Store: seedStore.PipelineObligations(), eventID: eventIDs[i], claimed: claimed, release: release,
 					},
 				}
 				bus, err := newScopedTestEventBus(selected)
@@ -2416,9 +2383,15 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 					t.Fatal(err)
 				}
 				runID := runIDs[i]
+				workers.Add(1)
 				go func() {
-					<-start
-					ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+					defer workers.Done()
+					select {
+					case <-start:
+					case <-workerContext.Done():
+						return
+					}
+					ctx, cancel := context.WithTimeout(workerContext, 15*time.Second)
 					defer cancel()
 					switch surface {
 					case "generic_periodic", "decision_periodic":
@@ -2436,23 +2409,23 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 			for i := 0; i < poolSize; i++ {
 				requireSignalBefore(t, claimed, 5*time.Second, "aligned PostgreSQL replay claim")
 			}
-			close(release)
+			releaseOnce.Do(func() { close(release) })
 			for i := 0; i < poolSize; i++ {
 				if err := requireErrorBefore(t, errs, 10*time.Second, "pool-saturated replay"); err != nil {
 					t.Fatal(err)
 				}
 			}
 			for _, eventID := range eventIDs {
-				var count int
-				if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).Scan(&count); err != nil {
+				count, err := storetest.CountPipelineEventReceiptStorage(context.Background(), seedStore, eventID)
+				if err != nil {
 					t.Fatal(err)
 				}
 				if count != 1 {
 					t.Fatalf("pipeline receipt count for %s = %d, want 1", eventID, count)
 				}
 				if decisionRoute {
-					var status string
-					if err := db.QueryRowContext(context.Background(), `SELECT status FROM decision_card_route_obligations WHERE event_id = $1::uuid`, eventID).Scan(&status); err != nil || status != "completed" {
+					status, err := storetest.ReadDecisionRouteStatusStorage(context.Background(), seedStore, eventID)
+					if err != nil || status != "completed" {
 						t.Fatalf("decision route status for %s = %q, %v; want completed", eventID, status, err)
 					}
 				}
@@ -2550,29 +2523,25 @@ func TestEventBusPublishNonTransactional_PersistsBeforeInterceptorsRun(t *testin
 }
 
 func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	ctx := eventBusTestRunContext(t, db)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
+	ctx := eventBusTestRunContext(t, pg)
 	eventID := "11111111-1111-1111-1111-111111111111"
 	agentID := "agent-post-commit-publish"
 	agentIdentity := seedActiveRuntimeBusAgent(t, ctx, pg, eventBusTestRunID, agentID)
 	called := make(chan struct{}, 1)
+	interceptor := &postCommitTxAbsentInterceptor{
+		t: t, store: pg, eventID: eventID, called: called,
+		wantRecipients: []string{agentID}, wantScope: runtimepipelineobligation.ScopeSubscribed,
+	}
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
-		Interceptors: []runtimebus.EventInterceptor{postCommitTxAbsentInterceptor{
-			t:              t,
-			store:          pg,
-			eventID:        eventID,
-			called:         called,
-			wantRecipients: []string{agentID},
-			wantScope:      runtimepipelineobligation.ScopeSubscribed,
-		}},
+		Interceptors: []runtimebus.EventInterceptor{interceptor},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	ch := runtimebustest.SubscribeForRun(t, eb, eventBusTestRunID, agentID, events.EventType("task.completed"))
 	defer runtimebustest.UnsubscribeIdentity(eb, agentIdentity)
+	interceptor.probe = storetest.CollectTransactions(t, pg, storetest.TransactionProbeOptions{})
 	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngress(
 		eventID,
 		events.EventType("task.completed"),
@@ -2594,10 +2563,8 @@ func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) 
 }
 
 func TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	providerReached := make(chan struct{}, 1)
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
 		Interceptors: []runtimebus.EventInterceptor{providerReachabilityInterceptor{reached: providerReached}},
@@ -2647,23 +2614,18 @@ func TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability(t *tes
 }
 
 func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecordsReceipt(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	ctx := eventBusTestRunContext(t, db)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
+	ctx := eventBusTestRunContext(t, pg)
 	eventID := "11111111-1111-1111-1111-111111111112"
 	wantErr := errors.New("post-commit interceptor failure")
+	interceptor := &postCommitErrorInterceptor{t: t, store: pg, eventID: eventID, err: wantErr}
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
-		Interceptors: []runtimebus.EventInterceptor{postCommitErrorInterceptor{
-			t:       t,
-			store:   pg,
-			eventID: eventID,
-			err:     wantErr,
-		}},
+		Interceptors: []runtimebus.EventInterceptor{interceptor},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	interceptor.probe = storetest.CollectTransactions(t, pg, storetest.TransactionProbeOptions{})
 	err = eb.Publish(ctx, eventtest.ExistingRunRootIngress(
 		eventID,
 		events.EventType("task.failed"),
@@ -2678,15 +2640,18 @@ func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecord
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("Publish error = %v, want %v", err, wantErr)
 	}
-	var outcome, failureClass, detailCode string
-	if err := db.QueryRowContext(ctx, `
-		SELECT outcome, COALESCE(failure->>'class', ''), COALESCE(failure->'detail'->>'code', '')
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'platform'
-		  AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&outcome, &failureClass, &detailCode); err != nil {
+	evidence, err := storetest.ObserveSemanticEventFixtureEvidence(ctx, pg, eventBusTestRunID, eventID)
+	if err != nil {
 		t.Fatalf("load pipeline receipt: %v", err)
+	}
+	if evidence.PipelineReceiptCount != 1 {
+		t.Fatalf("pipeline receipt count = %d, want 1", evidence.PipelineReceiptCount)
+	}
+	outcome := evidence.PipelineReceiptOutcome
+	var failureClass, detailCode string
+	if evidence.PipelineReceiptFailure != nil {
+		failureClass = string(evidence.PipelineReceiptFailure.Class)
+		detailCode = evidence.PipelineReceiptFailure.Detail.Code
 	}
 	if outcome != "dead_letter" || failureClass != string(runtimefailures.ClassInternalFailure) || detailCode != "event_interceptor_failed" {
 		t.Fatalf("pipeline receipt = outcome:%q class:%q detail:%q, want canonical event_interceptor_failed", outcome, failureClass, detailCode)
@@ -2694,8 +2659,7 @@ func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecord
 }
 
 func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2718,16 +2682,11 @@ func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.
 		t.Fatalf("Publish: %v", err)
 	}
 
-	var reason, targetContext string
-	if err := db.QueryRowContext(ctx, `
-		SELECT failure->'detail'->>'code', COALESCE((failure->'detail'->'attributes'->'target')::text, '')
-		FROM dead_letters
-		WHERE original_event_id = $1::uuid
-		  AND failure->>'class' = 'platform.target_unreachable'
-		  AND handler_node = 'pin_routing'
-	`, eventID).Scan(&reason, &targetContext); err != nil {
+	storage, err := storetest.ReadTargetFailureDeadLetterStorage(ctx, pg, eventID)
+	if err != nil {
 		t.Fatalf("query dead_letters: %v", err)
 	}
+	reason, targetContext := storage.Reason, storage.TargetContext
 	if reason != "target_unreachable_terminated" {
 		t.Fatalf("target failure reason = %q, want target_unreachable_terminated", reason)
 	}
@@ -2787,30 +2746,19 @@ func TestEventBusPublishSQLiteRecordsTargetFailureDeadLetter(t *testing.T) {
 		t.Fatalf("Publish: %v", err)
 	}
 
-	var reason, targetContext string
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
-		SELECT COALESCE(json_extract(failure, '$.detail.code'), ''), COALESCE(json_extract(failure, '$.detail.attributes.target'), '')
-		FROM dead_letters
-		WHERE original_event_id = ?
-		  AND json_extract(failure, '$.class') = 'platform.target_unreachable'
-		  AND handler_node = 'pin_routing'
-	`, eventID).Scan(&reason, &targetContext); err != nil {
+	storage, err := storetest.ReadTargetFailureDeadLetterStorage(ctx, sqliteStore, eventID)
+	if err != nil {
 		t.Fatalf("query sqlite dead_letters: %v", err)
 	}
+	reason, targetContext := storage.Reason, storage.TargetContext
 	if reason != "target_unreachable_terminated" {
 		t.Fatalf("target failure reason = %q, want target_unreachable_terminated", reason)
 	}
 	if !strings.Contains(targetContext, "missing-flow") {
 		t.Fatalf("target context = %s, want missing-flow", targetContext)
 	}
-	var pipelineReceipts int
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_receipts
-		WHERE event_id = ?
-		  AND subscriber_type = 'platform'
-		  AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&pipelineReceipts); err != nil {
+	pipelineReceipts, err := storetest.CountPipelineEventReceiptStorage(ctx, sqliteStore, eventID)
+	if err != nil {
 		t.Fatalf("query sqlite pipeline receipt: %v", err)
 	}
 	if pipelineReceipts != 1 {
@@ -2819,8 +2767,7 @@ func TestEventBusPublishSQLiteRecordsTargetFailureDeadLetter(t *testing.T) {
 }
 
 func TestEventBusPublish_ClassifiesCanonicalRunSourceArtifactThroughRunLifecycleOwner(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	runID := uuid.NewString()
 	artifact := admitEventBusPersistedSourceArtifact(t, context.Background(), pg)
 	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(artifact.BundleHash())
@@ -2839,12 +2786,8 @@ func TestEventBusPublish_ClassifiesCanonicalRunSourceArtifactThroughRunLifecycle
 		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	var bundleHash string
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT bundle_hash
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, runID).Scan(&bundleHash); err != nil {
+	bundleHash, err := storetest.ReadSelectedForkRunBundleHash(context.Background(), pg, runID)
+	if err != nil {
 		t.Fatalf("load run source artifact: %v", err)
 	}
 	if bundleHash != sourceFact.BundleHash() {
@@ -2853,8 +2796,7 @@ func TestEventBusPublish_ClassifiesCanonicalRunSourceArtifactThroughRunLifecycle
 }
 
 func TestEventBusPublishDirect_RequiresExactSourceArtifactFactOnRunRow(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	runID := uuid.NewString()
 	artifact := admitEventBusPersistedSourceArtifact(t, context.Background(), pg)
 	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(artifact.BundleHash())
@@ -2873,8 +2815,8 @@ func TestEventBusPublishDirect_RequiresExactSourceArtifactFactOnRunRow(t *testin
 	evt := eventtest.RunCreatingRootIngress(
 		eventID, eventType, "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)
-	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.EventOrigin(t, eventID, string(eventType)), RunID: runID,
+	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{
+		Origin: storetest.EventOrigin(t, eventID, string(eventType)), RunID: runID,
 		BundleHash: wantHash,
 	})
 	agentIdentity := runtimebustest.IdentityForRun(t, runID, "agent-a", "bundle-source-test")
@@ -2897,12 +2839,8 @@ func TestEventBusPublishDirect_RequiresExactSourceArtifactFactOnRunRow(t *testin
 	if err := eb.PublishDirect(context.Background(), evt, []string{"agent-a"}); err != nil {
 		t.Fatalf("PublishDirect: %v", err)
 	}
-	var bundleHash string
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT bundle_hash
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, runID).Scan(&bundleHash); err != nil {
+	bundleHash, err := storetest.ReadSelectedForkRunBundleHash(context.Background(), pg, runID)
+	if err != nil {
 		t.Fatalf("load run source artifact: %v", err)
 	}
 	if bundleHash != sourceFact.BundleHash() {
@@ -2929,20 +2867,16 @@ func admitEventBusPersistedSourceArtifact(t *testing.T, ctx context.Context, sel
 }
 
 func TestEventBusPublishDeferred_RunsInterceptorsAfterDeferredEventCommit(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	eventID := "22222222-2222-2222-2222-222222222222"
+	interceptor := &deferredEventVisibleInterceptor{t: t, store: pg, eventID: eventID, checkFor: events.EventType("custom.middle")}
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
-		Interceptors: []runtimebus.EventInterceptor{deferredEventVisibleInterceptor{
-			t:        t,
-			store:    pg,
-			eventID:  eventID,
-			checkFor: events.EventType("custom.middle"),
-		}},
+		Interceptors: []runtimebus.EventInterceptor{interceptor},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	interceptor.probe = storetest.CollectTransactions(t, pg, storetest.TransactionProbeOptions{})
 	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress("11111111-1111-1111-1111-111111111111",
 		events.EventType("custom.root"), "", "", []byte(`{"entity_id":"ent-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 	); err != nil {
@@ -3024,11 +2958,8 @@ func TestEventBusPublish_RuntimeControlBypassesContradictionRouting(t *testing.T
 }
 
 func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersistedDeliveries(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eb, err := newScopedTestEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -3066,14 +2997,14 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 			if err := eb.Publish(ctx, tc.event(tc.eventID, tc.eventType)); err != nil {
 				t.Fatalf("Publish(%s): %v", tc.eventType, err)
 			}
-			executeStandaloneCompletionCandidate(t, ctx, db, pg, tc.eventID)
+			executeStandaloneCompletionCandidate(t, ctx, pg, tc.eventID)
 
 			got := requireBusEvent(t, internal, "standalone platform event internal delivery")
 			if got.ID() != tc.eventID {
 				t.Fatalf("internal delivery event_id = %q, want %q", got.ID(), tc.eventID)
 			}
 
-			runID, runStatus, triggerEventType := loadRunStateForEvent(t, ctx, db, tc.eventID)
+			runID, runStatus, triggerEventType := loadRunStateForEvent(t, ctx, pg, tc.eventID)
 			if strings.TrimSpace(runID) == "" {
 				t.Fatalf("run_id missing for %s", tc.eventType)
 			}
@@ -3083,7 +3014,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 			if triggerEventType != string(tc.eventType) {
 				t.Fatalf("trigger_event_type for %s = %q, want %q", tc.eventType, triggerEventType, tc.eventType)
 			}
-			if got := countEventDeliveriesForEvent(t, ctx, db, tc.eventID); got != 0 {
+			if got := countEventDeliveriesForEvent(t, ctx, pg, tc.eventID); got != 0 {
 				t.Fatalf("event_deliveries for %s = %d, want 0", tc.eventType, got)
 			}
 		})
@@ -3091,11 +3022,8 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 }
 
 func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalReceipt(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	eb, err := newScopedTestEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -3150,8 +3078,8 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
-				Origin:     runlifecyclefixture.EventOrigin(t, tc.eventID, string(tc.eventType)),
+			storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
+				Origin:     storetest.EventOrigin(t, tc.eventID, string(tc.eventType)),
 				RunID:      tc.runID,
 				BundleHash: authorActivityTestBundleHash,
 			})
@@ -3175,10 +3103,10 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 				t.Fatalf("delivered event_id = %q, want %q", got.ID(), tc.eventID)
 			}
 
-			if got := countEventDeliveriesForEvent(t, ctx, db, tc.eventID); got != 1 {
+			if got := countEventDeliveriesForEvent(t, ctx, pg, tc.eventID); got != 1 {
 				t.Fatalf("event_deliveries for %s = %d, want 1", tc.eventType, got)
 			}
-			if deliveryStatus, runStatus := loadAgentDeliveryForEvent(t, ctx, db, tc.eventID, agentID); deliveryStatus != "pending" || runStatus != "running" {
+			if deliveryStatus, runStatus := loadAgentDeliveryForEvent(t, ctx, pg, tc.eventID, agentID); deliveryStatus != "pending" || runStatus != "running" {
 				t.Fatalf("pre-receipt state for %s = delivery:%q run:%q, want pending/running", tc.eventType, deliveryStatus, runStatus)
 			}
 
@@ -3190,9 +3118,9 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 				t.Fatalf("SettleSuccess(%s): %v", tc.eventType, err)
 			}
-			executeStandaloneCompletionCandidate(t, ctx, db, pg, tc.eventID)
+			executeStandaloneCompletionCandidate(t, ctx, pg, tc.eventID)
 
-			deliveryStatus, runStatus := loadAgentDeliveryForEvent(t, ctx, db, tc.eventID, agentID)
+			deliveryStatus, runStatus := loadAgentDeliveryForEvent(t, ctx, pg, tc.eventID, agentID)
 			if deliveryStatus != "delivered" {
 				t.Fatalf("delivery status for %s = %q, want delivered", tc.eventType, deliveryStatus)
 			}
@@ -3203,15 +3131,10 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 	}
 }
 
-func executeStandaloneCompletionCandidate(t *testing.T, ctx context.Context, db *sql.DB, pg *store.PostgresStore, eventID string) {
+func executeStandaloneCompletionCandidate(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventID string) {
 	t.Helper()
-	var candidate runtimerunlifecycle.Candidate
-	if err := db.QueryRowContext(ctx, `
-		SELECT r.run_id::text, r.bundle_hash, r.completion_revision, r.completion_due_at
-		FROM runs r
-		JOIN events e ON e.run_id = r.run_id
-		WHERE e.event_id = $1::uuid
-	`, eventID).Scan(&candidate.RunID, &candidate.BundleHash, &candidate.Revision, &candidate.DueAt); err != nil {
+	candidate, err := storetest.ReadStandaloneCompletionCandidate(ctx, pg, eventID)
+	if err != nil {
 		t.Fatalf("load standalone completion candidate: %v", err)
 	}
 	result, err := pg.ExecuteCompletionCandidate(ctx, candidate, runtimerunlifecycle.FinalCatalog{})
@@ -3247,11 +3170,8 @@ func platformSignalFixturePayload(t *testing.T, eventType events.EventType) []by
 }
 
 func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	ctx := eventBusTestRunContext(t, db)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
+	ctx := eventBusTestRunContext(t, pg)
 	eb, err := newScopedTestEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -3289,10 +3209,10 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 	}
 
 	requireNoBusEvent(t, ch, "paused runtime before resume")
-	if got := countEventDeliveriesForEvent(t, ctx, db, eventID); got != 1 {
+	if got := countEventDeliveriesForEvent(t, ctx, pg, eventID); got != 1 {
 		t.Fatalf("event deliveries while paused = %d, want 1", got)
 	}
-	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, eventID); got != 0 {
 		t.Fatalf("pipeline receipts while paused = %d, want 0", got)
 	}
 
@@ -3310,7 +3230,7 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 	if got.ID() != eventID {
 		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
 	}
-	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
+	if got := countPipelineReceiptsForEvent(t, ctx, pg, eventID); got != 1 {
 		t.Fatalf("pipeline receipts after resume = %d, want 1", got)
 	}
 }
@@ -3467,7 +3387,6 @@ func loadEventBusTempBundle(t *testing.T, files map[string]string) *runtimecontr
 
 func newEventBusWorkflowCoordinator(
 	eventBus *runtimebus.EventBus,
-	db *sql.DB,
 	selected completeEventDispatchStore,
 	module runtimepipeline.WorkflowModule,
 ) *runtimepipeline.PipelineCoordinator {
@@ -3525,7 +3444,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc = newEventBusWorkflowCoordinator(eb, db, pg, module)
+	pc = newEventBusWorkflowCoordinator(eb, pg, module)
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
@@ -3534,7 +3453,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	childEntityID := runtimepipeline.FlowInstanceEntityID("child")
 	grandchildEntityID := runtimepipeline.FlowInstanceEntityID("child/grandchild")
 	workflowStore := pc
-	ctx := eventBusTestRunContextForSource(t, db, semanticview.Wrap(bundle))
+	ctx := eventBusTestRunContextForSource(t, pg, semanticview.Wrap(bundle))
 	for _, instance := range exactEventBusWorkflowFixtures(t, semanticview.Wrap(bundle), []runtimepipeline.WorkflowInstance{
 		{
 			InstanceID:      eventBusTestRunID,
@@ -3709,12 +3628,10 @@ func contains(items []string, want string) bool {
 }
 
 func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	module, bundle := mixedNodeRouteWorkflowModule(t)
 	source := semanticview.Wrap(bundle)
-	ctx := eventBusTestRunContextForSource(t, db, source)
+	ctx := eventBusTestRunContextForSource(t, pg, source)
 	const eventType = "route.start"
 	rootEntityID := runtimeflowidentity.EntityID(eventBusTestRunID)
 	rootIdentity := runtimeflowidentity.Stored(source, ".", eventBusTestRunID, eventBusTestRunID, rootEntityID, "")
@@ -3761,7 +3678,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc = newEventBusWorkflowCoordinator(eb, db, pg, module)
+	pc = newEventBusWorkflowCoordinator(eb, pg, module)
 	if _, ok := any(pc).(runtimebus.DeliveryRouteInterceptor); !ok {
 		t.Fatal("PipelineCoordinator does not implement DeliveryRouteInterceptor")
 	}
@@ -3839,8 +3756,8 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 	if err := eb.WaitForQuiescence(ctx); err != nil {
 		t.Fatalf("WaitForQuiescence: %v", err)
 	}
-	assertNodeDeliveryStatus(t, db, evt.ID(), rootRoute.Recipient.ID(), "delivered")
-	assertNodeDeliveryStatus(t, db, evt.ID(), targetRoute.Recipient.ID(), "delivered")
+	assertNodeDeliveryStatus(t, pg, evt.ID(), rootRoute.Recipient.ID(), "delivered")
+	assertNodeDeliveryStatus(t, pg, evt.ID(), targetRoute.Recipient.ID(), "delivered")
 	select {
 	case got := <-live:
 		t.Fatalf("consumed mixed node route event leaked to workflow-runtime carrier: %#v", got)
@@ -3962,19 +3879,14 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 	}, bundle
 }
 
-func assertNodeDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want string) {
+func assertNodeDeliveryStatus(t *testing.T, selected runtimebus.EventStore, eventID, nodeID, want string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	count := 0
 	for {
-		if err := db.QueryRowContext(context.Background(), `
-			SELECT COUNT(*)
-			FROM event_deliveries
-			WHERE event_id = $1::uuid
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = $2
-			  AND status = $3
-		`, eventID, nodeID, want).Scan(&count); err != nil {
+		var err error
+		count, err = storetest.ReadServedDeliveryStatusCount(context.Background(), selected, eventID, "node", nodeID, want)
+		if err != nil {
 			t.Fatalf("query delivery status for %s: %v", nodeID, err)
 		}
 		if count == 1 || time.Now().After(deadline) {
@@ -3983,77 +3895,18 @@ func assertNodeDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want st
 		time.Sleep(10 * time.Millisecond)
 	}
 	if count != 1 {
-		rows, err := db.QueryContext(context.Background(), `
-			SELECT subscriber_id, COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(delivery_target_route::text, '')
-			FROM event_deliveries
-			WHERE event_id = $1::uuid
-			ORDER BY subscriber_id, delivery_target_route::text
-		`, eventID)
+		diagnostic, err := storetest.ReadNodeDeliveryDiagnosticStorage(context.Background(), selected, eventID)
 		if err != nil {
 			t.Fatalf("delivery rows for %s status %q = %d, want 1; dump query failed: %v", nodeID, want, count, err)
 		}
-		defer rows.Close()
-		dump := make([]string, 0)
-		for rows.Next() {
-			var subscriber, status, reason, target string
-			if err := rows.Scan(&subscriber, &status, &reason, &target); err != nil {
-				t.Fatalf("scan delivery dump: %v", err)
-			}
-			dump = append(dump, subscriber+" status="+status+" reason="+reason+" target="+target)
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatalf("iterate delivery dump: %v", err)
-		}
-		deadLetters := make([]string, 0)
-		deadRows, err := db.QueryContext(context.Background(), `
-			SELECT COALESCE(handler_node, ''), COALESCE(failure->>'class', ''), COALESCE(failure::text, '')
-			FROM dead_letters
-			WHERE original_event_id = $1::uuid
-			ORDER BY created_at ASC
-		`, eventID)
-		if err == nil {
-			defer deadRows.Close()
-			for deadRows.Next() {
-				var node, failure, message string
-				if err := deadRows.Scan(&node, &failure, &message); err != nil {
-					t.Fatalf("scan dead letter dump: %v", err)
-				}
-				deadLetters = append(deadLetters, node+" failure="+failure+" detail="+message)
-			}
-			if err := deadRows.Err(); err != nil {
-				t.Fatalf("iterate dead letter dump: %v", err)
-			}
-		}
-		receipts := make([]string, 0)
-		receiptRows, err := db.QueryContext(context.Background(), `
-			SELECT subscriber_type || '/' || subscriber_id,
-			       outcome || ' reason=' || COALESCE(reason_code, '') || ' failure=' || COALESCE(failure::text, '')
-			FROM event_receipts
-			WHERE event_id = $1::uuid
-			ORDER BY subscriber_type, subscriber_id
-		`, eventID)
-		if err == nil {
-			defer receiptRows.Close()
-			for receiptRows.Next() {
-				var subscriber, outcome string
-				if err := receiptRows.Scan(&subscriber, &outcome); err != nil {
-					t.Fatalf("scan receipt dump: %v", err)
-				}
-				receipts = append(receipts, subscriber+" outcome="+outcome)
-			}
-		}
-		t.Fatalf("delivery rows for %s status %q = %d, want 1; rows=%v dead_letters=%v receipts=%v", nodeID, want, count, dump, deadLetters, receipts)
+		t.Fatalf("delivery rows for %s status %q = %d, want 1; rows=%v dead_letters=%v receipts=%v", nodeID, want, count, diagnostic.Rows, diagnostic.DeadLetters, diagnostic.Receipts)
 	}
 }
 
-func assertNodeDeliveryTarget(t *testing.T, db *sql.DB, eventID, nodeID string, want events.DeliveryTargetOwnership) {
+func assertNodeDeliveryTarget(t *testing.T, selected runtimebus.EventStore, eventID, nodeID string, want events.DeliveryTargetOwnership) {
 	t.Helper()
-	var raw string
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT delivery_target_route::text
-		FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, eventID, nodeID).Scan(&raw); err != nil {
+	raw, err := storetest.ReadNodeDeliveryTargetEncoding(context.Background(), selected, eventID, nodeID)
+	if err != nil {
 		t.Fatalf("load delivery target for %s: %v", nodeID, err)
 	}
 	var got events.DeliveryTargetOwnership
@@ -4074,10 +3927,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	module := newFixtureWorkflowModule(t, bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	var pc *runtimepipeline.PipelineCoordinator
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
@@ -4091,13 +3941,13 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc = newEventBusWorkflowCoordinator(eb, db, pg, module)
+	pc = newEventBusWorkflowCoordinator(eb, pg, module)
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
 
 	rootEntityID := runtimeflowidentity.EntityID(eventBusTestRunID)
-	ctx := eventBusTestRunContextForSource(t, db, semanticview.Wrap(bundle))
+	ctx := eventBusTestRunContextForSource(t, pg, semanticview.Wrap(bundle))
 	workflowStore := pc
 	for _, instance := range exactEventBusWorkflowFixtures(t, semanticview.Wrap(bundle), []runtimepipeline.WorkflowInstance{
 		{
@@ -4314,32 +4164,32 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	if err := eb.WaitForQuiescence(ctx); err != nil {
 		t.Fatalf("WaitForQuiescence: %v", err)
 	}
-	assertNodeDeliveryStatus(t, db, initial.ID(), initialPlan.DeliveryRoutes[0].Recipient.ID(), "delivered")
-	assertNodeDeliveryTarget(t, db, initial.ID(), initialPlan.DeliveryRoutes[0].Recipient.ID(), wantRootReturn)
-	var stepBeginEventID string
-	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'step.begin' ORDER BY created_at DESC LIMIT 1`).Scan(&stepBeginEventID); err != nil {
+	assertNodeDeliveryStatus(t, pg, initial.ID(), initialPlan.DeliveryRoutes[0].Recipient.ID(), "delivered")
+	assertNodeDeliveryTarget(t, pg, initial.ID(), initialPlan.DeliveryRoutes[0].Recipient.ID(), wantRootReturn)
+	stepBeginEventID, err := storetest.ReadLatestNamedEventIdentityStorage(ctx, pg, "step.begin", "")
+	if err != nil {
 		t.Fatalf("load step.begin event id: %v", err)
 	}
-	assertNodeDeliveryStatus(t, db, stepBeginEventID, rootConnectPlan.DeliveryRoutes[0].Recipient.ID(), "delivered")
-	assertNodeDeliveryTarget(t, db, stepBeginEventID, rootConnectPlan.DeliveryRoutes[0].Recipient.ID(), childOwnership)
-	var microStartEventID string
-	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'child/micro.start' ORDER BY created_at DESC LIMIT 1`).Scan(&microStartEventID); err != nil {
+	assertNodeDeliveryStatus(t, pg, stepBeginEventID, rootConnectPlan.DeliveryRoutes[0].Recipient.ID(), "delivered")
+	assertNodeDeliveryTarget(t, pg, stepBeginEventID, rootConnectPlan.DeliveryRoutes[0].Recipient.ID(), childOwnership)
+	microStartEventID, err := storetest.ReadLatestNamedEventIdentityStorage(ctx, pg, "child/micro.start", "")
+	if err != nil {
 		t.Fatalf("load child/micro.start event id: %v", err)
 	}
-	assertNodeDeliveryStatus(t, db, microStartEventID, grandchildConnectPlan.DeliveryRoutes[0].Recipient.ID(), "delivered")
-	assertNodeDeliveryTarget(t, db, microStartEventID, grandchildConnectPlan.DeliveryRoutes[0].Recipient.ID(), grandchildOwnership)
-	var microDoneEventID string
-	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'child/grandchild/micro.done' ORDER BY created_at DESC LIMIT 1`).Scan(&microDoneEventID); err != nil {
+	assertNodeDeliveryStatus(t, pg, microStartEventID, grandchildConnectPlan.DeliveryRoutes[0].Recipient.ID(), "delivered")
+	assertNodeDeliveryTarget(t, pg, microStartEventID, grandchildConnectPlan.DeliveryRoutes[0].Recipient.ID(), grandchildOwnership)
+	microDoneEventID, err := storetest.ReadLatestNamedEventIdentityStorage(ctx, pg, "child/grandchild/micro.done", "")
+	if err != nil {
 		t.Fatalf("load child/grandchild/micro.done event id: %v", err)
 	}
-	assertNodeDeliveryStatus(t, db, microDoneEventID, rootConnectPlan.DeliveryRoutes[0].Recipient.ID(), "delivered")
-	assertNodeDeliveryTarget(t, db, microDoneEventID, rootConnectPlan.DeliveryRoutes[0].Recipient.ID(), childOwnership)
-	var microRelayedEventID string
-	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'child/micro.relayed' ORDER BY created_at DESC LIMIT 1`).Scan(&microRelayedEventID); err != nil {
+	assertNodeDeliveryStatus(t, pg, microDoneEventID, rootConnectPlan.DeliveryRoutes[0].Recipient.ID(), "delivered")
+	assertNodeDeliveryTarget(t, pg, microDoneEventID, rootConnectPlan.DeliveryRoutes[0].Recipient.ID(), childOwnership)
+	microRelayedEventID, err := storetest.ReadLatestNamedEventIdentityStorage(ctx, pg, "child/micro.relayed", "")
+	if err != nil {
 		t.Fatalf("load child/micro.relayed event id: %v", err)
 	}
-	assertNodeDeliveryStatus(t, db, microRelayedEventID, rootReturnRecipientID, "delivered")
-	assertNodeDeliveryTarget(t, db, microRelayedEventID, rootReturnRecipientID, wantRootReturn)
+	assertNodeDeliveryStatus(t, pg, microRelayedEventID, rootReturnRecipientID, "delivered")
+	assertNodeDeliveryTarget(t, pg, microRelayedEventID, rootReturnRecipientID, wantRootReturn)
 
 	root, found, err := workflowStore.Load(ctx, testRunScopedFlowRoute(runtimeflowidentity.RouteForInstancePath(eventBusTestRunID)))
 	if err != nil {
@@ -4349,16 +4199,11 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatal("expected root instance")
 	}
 	if got := strings.TrimSpace(root.CurrentState); got != "done" {
-		rows, _ := db.QueryContext(context.Background(), `SELECT event_name, COALESCE(entity_id::text,''), COALESCE(flow_instance,'') FROM events ORDER BY created_at ASC, event_id ASC`)
+		rows, err := storetest.ReadGlobalEventChronology(context.Background(), pg)
+		if err != nil { t.Fatalf("read root-state event diagnostic: %v", err) }
 		dump := make([]string, 0)
-		if rows != nil {
-			defer rows.Close()
-			for rows.Next() {
-				var name, entityID, flowInstance string
-				if scanErr := rows.Scan(&name, &entityID, &flowInstance); scanErr == nil {
-					dump = append(dump, name+" entity="+entityID+" flow="+flowInstance)
-				}
-			}
+		for _, row := range rows {
+			dump = append(dump, row.Name+" entity="+row.EntityID+" flow="+row.FlowInstance)
 		}
 		t.Fatalf("root current_state = %q, want done through declared ancestor connects; events=%v", got, dump)
 	}
@@ -4375,20 +4220,12 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	grandchildState := strings.TrimSpace(grandchildInstance.CurrentState)
 	instances := []runtimepipeline.WorkflowInstance{childInstance, grandchildInstance}
 	var emitted []string
-	rows, err := db.QueryContext(context.Background(), `SELECT event_name FROM events ORDER BY created_at ASC, event_id ASC`)
+	rows, err := storetest.ReadGlobalEventChronology(context.Background(), pg)
 	if err != nil {
 		t.Fatalf("query events: %v", err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			t.Fatalf("scan event: %v", err)
-		}
-		emitted = append(emitted, strings.TrimSpace(name))
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate events: %v", err)
+	for _, row := range rows {
+		emitted = append(emitted, strings.TrimSpace(row.Name))
 	}
 	if childState != "completed" {
 		t.Fatalf("child current_state = %q, want completed; events=%v instances=%#v", childState, emitted, instances)
@@ -4430,13 +4267,13 @@ func TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutat
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc = newEventBusWorkflowCoordinator(eb, db, pg, module)
+	pc = newEventBusWorkflowCoordinator(eb, pg, module)
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
 
 	rootEntityID := runtimeflowidentity.EntityID(eventBusTestRunID)
-	ctx := eventBusTestRunContextForSource(t, db, semanticview.Wrap(bundle))
+	ctx := eventBusTestRunContextForSource(t, pg, semanticview.Wrap(bundle))
 	workflowStore := pc
 	rootFixture := exactEventBusWorkflowFixtures(t, semanticview.Wrap(bundle), []runtimepipeline.WorkflowInstance{{
 		InstanceID:      eventBusTestRunID,

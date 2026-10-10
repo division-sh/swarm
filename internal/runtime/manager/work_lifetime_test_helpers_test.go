@@ -256,9 +256,6 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 			opts.DeliveryStore = deliveryStore
 		}
 	}
-	if opts.DeliveryStore == nil {
-		opts.DeliveryStore = newManagerDeliveryTestStore(t)
-	}
 	if opts.SessionLifecycle == nil && opts.Sessions != nil {
 		opts.SessionLifecycle, _ = opts.Sessions.(sessions.LifecycleProjection)
 	}

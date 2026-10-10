@@ -62,6 +62,9 @@ func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerRepla
 		options.RunLifecycle = selected
 		options.PipelineObligations = selected.PipelineObligations()
 		options.DeliveryRuntime = deliveryBus
+		if bus == nil {
+			bus = deliveryBus
+		}
 		pc := pipeline.NewPipelineCoordinatorWithOptions(bus, options)
 		if pc == nil {
 			t.Fatal("native activity coordinator rejected its selected semantic owners")
@@ -80,6 +83,7 @@ func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerRepla
 	return pipeline.WorkflowActivityNativeFixtureForTest{
 		Persistence: persistence,
 		Context:     ctx,
+		Runs:        selected,
 		RequireRun: func(ctx context.Context, runID string) error {
 			return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{
 				RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(),
@@ -116,6 +120,12 @@ func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerRepla
 		ReadAttemptStatuses: func(ctx context.Context) ([]string, error) {
 			return storetest.ReadWorkflowActivityAttemptStatuses(ctx, selected)
 		},
+		EventIDCount: func(ctx context.Context, event string) int {
+			return storetest.ObserveEventCardinality(t, ctx, selected, event)
+		},
+		Publish: func(ctx context.Context, event events.Event) {
+			storetest.CommitSemanticEvent(t, ctx, selected, event)
+		},
 		Reopen: func() pipeline.WorkflowActivityNativeFixtureForTest {
 			if err := join(); err != nil {
 				t.Fatal(err)
@@ -148,6 +158,48 @@ func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerRepla
 
 func TestActivityJournalFixtureTerminalNoopBothStores(t *testing.T) {
 	pipeline.VerifyActivityJournalFixtureTerminalNoopBothStoresForTest(t, workflowActivityNativeFixture)
+}
+
+func TestHumanTaskExpiryUsesClosedSelectedStoreCommitEvidence(t *testing.T) {
+	verifyNativeActivityBothStores(t, pipeline.VerifyHumanTaskExpiryUsesClosedSelectedStoreCommitEvidenceForTest)
+}
+
+func TestHumanTaskExpiryAcknowledgementControlsPublicationEffects(t *testing.T) {
+	verifyNativeActivityBothStores(t, pipeline.VerifyHumanTaskExpiryAcknowledgementControlsPublicationEffectsForTest)
+}
+
+func TestForkedSourceWorkflowInstanceMutationsRefuseAndPreserveReadback(t *testing.T) {
+	pipeline.VerifyForkedSourceWorkflowInstanceMutationsRefuseAndPreserveReadbackForTest(t, workflowActivityNativeFixture)
+}
+
+func TestForkedSourceActivityAttemptMutationsRefuseAndPreserveJournal(t *testing.T) {
+	pipeline.VerifyForkedSourceActivityAttemptMutationsRefuseAndPreserveJournalForTest(t, workflowActivityNativeFixture)
+}
+
+func TestReceiverConfigAndRuntimeControlsRoundTripBothStores(t *testing.T) {
+	pipeline.VerifyReceiverConfigAndRuntimeControlsRoundTripBothStoresForTest(t, workflowActivityNativeFixture)
+}
+
+func TestActivityBoringProofDuplicateRequestReusesRecordedReadResult(t *testing.T) {
+	pipeline.VerifyNativeActivityBoringProofDuplicateRequestReusesRecordedReadResultForTest(t, workflowActivityNativeFixture)
+}
+
+func TestActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIdentity(t *testing.T) {
+	pipeline.VerifyNativeActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIdentityForTest(t, workflowActivityNativeFixture)
+}
+
+func TestActivityBoringProofRetryIsBoundedAndTraced(t *testing.T) {
+	pipeline.VerifyNativeActivityBoringProofRetryIsBoundedAndTracedForTest(t, workflowActivityNativeFixture)
+}
+
+func TestScenarioExecutionProfileMismatchFencesTerminalReplay(t *testing.T) {
+	pipeline.VerifyScenarioExecutionProfileMismatchFencesTerminalReplayForTest(t, func(t *testing.T) pipeline.WorkflowActivityNativeFixtureForTest {
+		return workflowActivityNativeFixture(t, "sqlite")
+	})
+}
+
+func TestPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T) {
+	pipeline.VerifyPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDeliveryForTest(t, workflowActivityNativeFixture)
 }
 
 func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {

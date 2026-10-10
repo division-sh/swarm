@@ -18,8 +18,6 @@ import (
 	"testing"
 	"time"
 
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
-
 	"github.com/google/uuid"
 
 	"github.com/division-sh/swarm/internal/config"
@@ -1080,8 +1078,8 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 	t.Cleanup(lease.Release)
 
 	sourceRunID := uuid.NewString()
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID,
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID,
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()),
 	})
 	workOwner := testGatewayWorkOwner(t)
@@ -2782,13 +2780,14 @@ func (selectedForkStartupVisibleSurfaceProbe) ProbeStartupVisibleToolSurface(ctx
 
 func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.DB) selectedContractForkLocalRuntimeContainer {
 	t.Helper()
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
 	forkEventID := uuid.NewString()
 	bindingID := uuid.NewString()
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
 		Artifact: runForkTestSourceArtifact,
 	})
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.proof",
@@ -2798,7 +2797,7 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 	if err != nil {
 		t.Fatal(err)
 	}
-	storetest.RequireRun(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), storetest.RunFixture{
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		RunID: forkRunID, State: storerunlifecycle.StatePaused, Origin: forkOrigin,
 		Artifact: runForkTestSourceArtifact, StartedAt: now,
 	})
@@ -2825,7 +2824,6 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 		Owner: runfork.RunForkSelectedContractRecipientPlanningOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
 		NonMutating: true, RecipientPlanningSupported: true, ContractSelection: selection,
 	}
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	declarations, err := runtimeagenttopology.NewSelectedDeclarationPlan(runForkTestBundleHash, []runtimeagenttopology.DesiredAgent{})
 	if err != nil {
 		t.Fatal(err)
@@ -3120,14 +3118,15 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 
 func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
 	forkEventID := uuid.NewString()
 	bindingID := uuid.NewString()
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now,
 		Artifact: runForkTestSourceArtifact,
 	})
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.test",
@@ -3137,7 +3136,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	if err != nil {
 		t.Fatal(err)
 	}
-	storetest.RequireRun(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), storetest.RunFixture{
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		RunID: forkRunID, State: storerunlifecycle.StatePaused, Origin: forkOrigin,
 		Artifact: runForkTestSourceArtifact, StartedAt: now,
 	})
@@ -5433,8 +5432,9 @@ func seedSelectedExecutionStateOnlySourceRun(
 		runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash()),
 	)
 	admitSelectedExecutionSourceArtifact(t, ctx, db, sourceFact.BundleHash())
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), Source: sourceFact,
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
+		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: sourceFact.BundleHash(),
 	})
 	event := eventtest.ExistingRunRootIngress(
 		sourceEventID,
@@ -5447,7 +5447,7 @@ func seedSelectedExecutionStateOnlySourceRun(
 		events.EventEnvelope{Scope: events.EventScopeGlobal},
 		at,
 	)
-	commitRunForkTestEvent(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), event, nil)
+	commitRunForkTestEvent(t, ctx, selected, event, nil)
 }
 
 func selectedExecutionEntitylessNodeRoute(nodeID string) events.DeliveryRoute {
@@ -5518,8 +5518,9 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	if len(input.payload) != 0 {
 		payload = input.payload
 	}
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), Source: sourceFact,
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
+		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: sourceFact.BundleHash(),
 	})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(sourceEventID, events.EventType(eventName), "source-runtime", "", payload, 0, sourceRunID,
 		envelope, routingSource, at, mode)
@@ -5531,7 +5532,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		}
 	}
 	routes := append([]events.DeliveryRoute{primaryRoute}, extraRoutes...)
-	commitRunForkTestEvent(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), event, routes)
+	commitRunForkTestEvent(t, ctx, selected, event, routes)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at

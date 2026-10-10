@@ -55,10 +55,12 @@ func scatterGatherTransactionDiagnostics(t *testing.T, h *runtimeHarness) func(s
 
 func catalogDeliveryAttemptCounts(t *testing.T, h *runtimeHarness, runID string) (deliveries, attempts int64) {
 	t.Helper()
-	const query = `SELECT COUNT(*), COALESCE(SUM(d.claim_version),0)
-		FROM event_deliveries d JOIN events e ON e.event_id=d.event_id
-		WHERE e.run_id=$1 AND e.event_name<>'platform.runtime_log'`
-	if err := h.db.QueryRowContext(context.Background(), query, runID).Scan(&deliveries, &attempts); err != nil {
+	reader, err := h.catalogOperatorEventLister()
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliveries, attempts, err = storetest.ReadNonLogRunDeliveryClaimTotals(context.Background(), reader, runID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	return deliveries, attempts

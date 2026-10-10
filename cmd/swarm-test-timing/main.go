@@ -399,9 +399,8 @@ func evaluateBudget(cfg config) error {
 		return err
 	}
 	evidence, problems := readEvidenceTree(cfg.evidenceRoot)
-	mode := testtiming.TestTimeModeForEvent(cfg.event)
 	result := testtiming.EvaluateBudget(policy, testtiming.EvaluationOptions{
-		AdvisoryTiming:    mode == testtiming.TestTimePR,
+		AdvisoryTiming:    cfg.event == "pull_request",
 		WorkflowRunID:     cfg.workflowRunID,
 		WorkflowAttempt:   cfg.workflowAttempt,
 		Plan:              plan,
@@ -424,8 +423,11 @@ func evaluateBudget(cfg config) error {
 	if err != nil {
 		return err
 	}
-	ratchet := testtiming.EvaluateTestTime(reference, proofPolicy, plan, cfg.workflowRunID, cfg.workflowAttempt, evidence, mode)
-	result.AttachTestTime(ratchet)
+	ratchet := testtiming.EvaluateTestTime(reference, proofPolicy, plan, cfg.workflowRunID, cfg.workflowAttempt, evidence)
+	result.TestTime = &ratchet
+	if ratchet.Status == testtiming.BudgetFail || ratchet.Status == testtiming.BudgetIncomplete {
+		result.Status = ratchet.Status
+	}
 	jobsFile, jobsErr := os.Open(cfg.jobsPath)
 	var jobs []testtiming.ActionJob
 	if jobsErr == nil {

@@ -10,7 +10,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -30,10 +29,7 @@ func runFixtureProofBackends() []struct {
 		open func(*testing.T) runFixtureProofStore
 	}{
 		{"sqlite", func(t *testing.T) runFixtureProofStore { return StartSQLiteRuntimeStore(t) }},
-		{"postgres", func(t *testing.T) runFixtureProofStore {
-			_, db, _ := testutil.StartPostgres(t)
-			return AdmitPostgresRuntimeStore(t, db)
-		}},
+		{"postgres", func(t *testing.T) runFixtureProofStore { return StartPostgresRuntimeStore(t) }},
 	}
 }
 

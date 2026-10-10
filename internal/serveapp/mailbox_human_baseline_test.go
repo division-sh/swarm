@@ -32,7 +32,7 @@ func TestHumanTaskRealProducerCompletionBaselineBothStores(t *testing.T) {
 			}
 			var result map[string]any
 			requireServedJSONRPCResult(t, f.rt.Endpoint, "mailbox.defer", map[string]any{"card_id": card.CardID, "until": time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano), "idempotency_key": "baseline-human-defer"}, &result)
-			waitServedRunDeliveryQuiescence(t, f.rt.DB, f.rt.Backend, card.RunID)
+			waitServedRunDeliveryQuiescence(t, f.rt.ReadRunDeliveries, card.RunID)
 			rows, err := f.rt.DB.Query(`SELECT d.subscriber_id,d.status,CAST(d.delivery_target_route AS TEXT),d.agent_flow_scope_key,d.agent_flow_instance_path FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 AND e.event_name='human_task.deferred'`, card.RunID)
 			if err != nil {
 				t.Fatal(err)

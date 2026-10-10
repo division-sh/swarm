@@ -23,7 +23,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 			for _, scope := range scopes {
 				requireLifecycleFlowEntity(t, rt, seed.RunID, scope, "waiting")
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "static-fork-pause"})
 			frontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.first", "run_id": seed.RunID, "payload": map[string]any{"choice": "alpha"}, "idempotency_key": "static-fork-frontier",
@@ -63,7 +63,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 				}
 				requireLifecycleEventCount(t, rt, fork.ForkRunID, scope+"work.completed", 1)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 			childBefore := lifecycleStoredSnapshot(t, rt, fork.ForkRunID)
 			duplicate := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
 			if !reflect.DeepEqual(fork, duplicate) || lifecycleStoredSnapshot(t, rt, seed.RunID) != before || lifecycleStoredSnapshot(t, rt, fork.ForkRunID) != childBefore {

@@ -2,7 +2,6 @@ package runtime_test
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"sync"
@@ -188,7 +187,6 @@ type externalRuntimeTestWorkflowOwner interface {
 func newExternalRuntimeTestPipelineCoordinator(
 	t testing.TB,
 	bus *runtimebus.EventBus,
-	db *sql.DB,
 	selected any,
 	opts runtimepipeline.PipelineCoordinatorOptions,
 ) *runtimepipeline.PipelineCoordinator {

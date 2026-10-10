@@ -87,28 +87,6 @@ checks. Archive the inputs, reviewed attribution and outputs together with the
 run/attempt links. A successful command is report generation, not proof that a
 regression, rate or lag is known.
 
-## PR And Cadence Timing
-
-`-evaluate-budget` uses the existing trusted `-event` input. Only exact
-`pull_request` selects independent PR added/promoted-cost enforcement. Complete
-plan-bound proof and unapproved >30s placement still fail closed; new-work cost
-must satisfy both 5% of the frozen tier baseline and 600 seconds. Retained
-speedups and removed roots cannot subsidize new work. Retained drift that would
-fail the original aggregate is an explicit PR warning, not a proof waiver.
-
-Fresh schedule/manual/master evaluation requires a full hosted plan and retains
-the original complete aggregate enforcement. Missing or unknown events never
-enable advisory comparison. The pinned reference, command budgets, selection
-syntax, cadence and gate freshness stay unchanged. A real retained slowdown may
-therefore first block the next full nightly, as explicitly accepted under #2535.
-
-JSON records `comparison_mode`, independent added cost, exhaustive
-`tiers[].retained_cells` identities/before/after/delta and strict counterfactual.
-Markdown labels the bounded largest-delta view. Command, ratchet and actual-job
-results compose monotonically (`PASS < WARN < FAIL < INCOMPLETE`); a warning
-cannot overwrite failed or incomplete evidence. Re-evaluating archived receipts
-is algorithm evidence only and never relabels an original red run as green.
-
 ## Named CI Supplements
 
 The current PR-body selection can retain a lower tier plus named hosted units:

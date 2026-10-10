@@ -23,7 +23,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -53,10 +52,8 @@ func (a *destructiveResetBlockingDirectiveAgent) BoardStep(context.Context, runt
 }
 
 func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := storeTestWorkContext(t, testAuthorActivityContext())
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})

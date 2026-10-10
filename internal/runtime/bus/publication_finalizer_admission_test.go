@@ -14,12 +14,12 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestCommittedFinalizersScopeIngressAdmissionWithoutLosingRuntimeAuthority(t *testing.T) {
+func VerifyCommittedFinalizersScopeIngressAdmissionWithoutLosingRuntimeAuthorityForTest(t *testing.T, open ExactHandoffNativeOpenerForTest) {
 	for _, boundary := range []string{"flow_activation", "agent_readiness"} {
 		t.Run(boundary, func(t *testing.T) {
 			runID, eventID := uuid.NewString(), uuid.NewString()
 			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: testAgentRouteIdentityForRun(t, runID, "agent-a", "")}
-			store := newExactHandoffProofStore(t, false)
+			store := newExactHandoffProofStore(open(t, false), false)
 			store.seed(t, eventID, runID, route)
 			claim := store.claim(t, eventID, runID, route)
 			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Minute))

@@ -4,16 +4,25 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	runstore "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
+	artifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 func TestPostgresLLMExactRevisionFactsUseStoredUUIDCoordinates(t *testing.T) {
@@ -23,6 +32,36 @@ func TestPostgresLLMExactRevisionFactsUseStoredUUIDCoordinates(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
+	schema, err := schemastore.NewPostgres(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec contracts.PlatformSpecDocument
+	if err := yaml.Unmarshal(platform.PlatformSpecYAML(), &spec); err != nil {
+		t.Fatal(err)
+	}
+	plans, err := schemastore.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := schema.BootstrapSchema(ctx, schemastore.SchemaBootstrapRequest{
+		PlatformPlans: plans,
+		Origin:        schemastore.RuntimeStoreOrigin{SwarmVersion: "llm-coordinate-proof", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lifecycle, err := runstore.NewPostgres(backend, schema.RequireCurrent, runhandoff.NewCandidateCoordinator())
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := artifactstore.NewPostgres(backend, schema.RequireCurrent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupCtx := authoractivity.WithScope(ctx, authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
+	if _, err := artifacts.EnsureSourceArtifact(setupCtx, sourceartifactfixture.Artifact()); err != nil {
+		t.Fatal(err)
+	}
 	name, err := agentidentity.DeclaredName("uuid-agent", "uuid-owner")
 	if err != nil {
 		t.Fatal(err)
@@ -41,8 +80,8 @@ func TestPostgresLLMExactRevisionFactsUseStoredUUIDCoordinates(t *testing.T) {
 			}
 			sessionID, firstRunID, nextRunID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			for _, runID := range []string{firstRunID, nextRunID} {
-				if err := runlifecyclefixture.Materialize(ctx, db, runlifecyclefixture.DialectPostgres, runlifecyclefixture.Fixture{
-					RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Artifact: sourceartifactfixture.Artifact(),
+				if _, err := lifecycle.CreateRun(setupCtx, runlifecycle.CreateRequest{
+					RunID: runID, Origin: runlifecycle.ScenarioSetupRunOrigin(), Source: sourceartifactfixture.Fact(), StartedAt: time.Now().UTC(),
 				}); err != nil {
 					t.Fatal(err)
 				}

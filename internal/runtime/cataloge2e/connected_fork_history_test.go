@@ -3,13 +3,9 @@ package cataloge2e
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
-	"encoding/json"
 	"fmt"
 	"os"
 	"reflect"
-	"sort"
-	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -105,78 +101,15 @@ func TestConnectedForkCompletedDynamicHistoryRefusalBothStores(t *testing.T) {
 
 // Every application table, column and row participates. Only database-internal
 // objects are excluded; the caller must join background writers first.
-func snapshotCatalogApplication(t *testing.T, h *runtimeHarness) map[string][]string {
+func snapshotCatalogApplication(t *testing.T, h *runtimeHarness) map[string]storetest.SelectedForkStorageTableSnapshot {
 	t.Helper()
-	opts := &sql.TxOptions{ReadOnly: true}
-	query := `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`
-	if h.backend == catalogBackendPostgres {
-		opts.Isolation = sql.LevelRepeatableRead
-		query = `SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name`
-	}
-	tx, err := h.db.BeginTx(context.Background(), opts)
+	reader, err := h.catalogOperatorEventLister()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback()
-	rows, err := tx.Query(query)
+	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(context.Background(), reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var tables []string
-	for rows.Next() {
-		var table string
-		if err := rows.Scan(&table); err != nil {
-			t.Fatal(err)
-		}
-		tables = append(tables, table)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
-	out := map[string][]string{}
-	for _, table := range tables {
-		rows, err := tx.Query(`SELECT * FROM "` + strings.ReplaceAll(table, `"`, `""`) + `"`)
-		if err != nil {
-			t.Fatal(err)
-		}
-		columns, err := rows.Columns()
-		if err != nil {
-			t.Fatal(err)
-		}
-		encoded, err := json.Marshal(columns)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out[table+"/columns"] = []string{string(encoded)}
-		out[table] = []string{}
-		for rows.Next() {
-			values, pointers := make([]any, len(columns)), make([]any, len(columns))
-			for i := range values {
-				pointers[i] = &values[i]
-			}
-			if err := rows.Scan(pointers...); err != nil {
-				t.Fatal(err)
-			}
-			for i, value := range values {
-				if raw, ok := value.([]byte); ok {
-					values[i] = string(raw)
-				}
-			}
-			encoded, err := json.Marshal(values)
-			if err != nil {
-				t.Fatal(err)
-			}
-			out[table] = append(out[table], string(encoded))
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
-		}
-		rows.Close()
-		sort.Strings(out[table])
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	return out
+	return snapshot
 }
