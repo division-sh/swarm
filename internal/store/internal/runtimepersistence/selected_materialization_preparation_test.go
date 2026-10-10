@@ -96,7 +96,7 @@ func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fo
 			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
-			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+			ActiveAgents: selected, PreparedEvents: selected,
 			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 			Instances: workflow, ConstructionPublications: workflow,
 		}
@@ -120,7 +120,7 @@ func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fo
 			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
-			ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+			ActiveAgents: selected, PreparedEvents: selected,
 			TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 			Instances: workflow, ConstructionPublications: workflow,
 		}

@@ -393,6 +393,28 @@ func explicitRootPublicationTarget(evt events.Event) events.RouteIdentity {
 	}
 }
 
+func (p RoutePlan) authorizesTerminalTargetDiagnostic(event events.Event) bool {
+	if p.TargetFailure != runtimepinrouting.FailureTargetUnreachableTerminated || p.AuthorityOwner != routePlanSourceConnectRoutePlan || p.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed {
+		return false
+	}
+	target := explicitRootPublicationTarget(event)
+	if target.Empty() {
+		return false
+	}
+	return blockedConnectTargetsMatch(p.ConnectEvaluation, []events.RouteIdentity{target})
+}
+
+func blockedConnectTargetsMatch(ledger events.ConnectEvaluationLedger, targets []events.RouteIdentity) bool {
+	var selected []events.RouteIdentity
+	for _, plan := range ledger.Plans() {
+		if plan.Resolution() != events.ConnectPlanResolutionBlocked {
+			return false
+		}
+		selected = append(selected, plan.Targets()...)
+	}
+	return len(selected) > 0 && sameRouteIdentities(selected, targets)
+}
+
 func composeIndependentPubsubBranch(connectPlan, localPlan RoutePlan) RoutePlan {
 	connectPlan = connectPlan.Normalized()
 	localPlan = localPlan.Normalized()
@@ -430,6 +452,36 @@ func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRout
 	routePlan.ReplyCreations = append([]runtimereplycontext.Record(nil), connectPlan.ReplyCreations...)
 	routePlan.ReplyClaims = append([]runtimereplycontext.ClaimCommand(nil), connectPlan.ReplyClaims...)
 	return routePlan.Normalized()
+}
+
+func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, evt events.Event, plan RoutePlan) (selectedRunTargetOwnerProjection, error) {
+	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
+	if p.connectPlanner.source != nil {
+		var targets []events.RouteIdentity
+		for _, intent := range plan.DeliveryIntents {
+			target := intent.TargetBlueprint
+			if intent.Recipient.IsNode() {
+				var err error
+				target, err = runtimepipeline.AdmitDeliveryTargetLookupCoordinate(runtimepipeline.DeliveryTargetOwnershipRequest{
+					Source: p.connectPlanner.source, Event: evt, Recipient: intent.Recipient, Blueprint: target, Handler: intent.Handler,
+				})
+				if err != nil {
+					return selectedRunTargetOwnerProjection{}, err
+				}
+			}
+			targets = append(targets, target)
+		}
+		owners, err := p.connectPlanner.exactLookupCoordinates(evt.RunID(), targets)
+		if err != nil {
+			return selectedRunTargetOwnerProjection{}, err
+		}
+		scope, err := p.connectPlanner.lookupTargetScope(ctx, evt.RunID(), nil, owners)
+		if err != nil {
+			return selectedRunTargetOwnerProjection{}, err
+		}
+		ctx = withSelectedTargetOwnerLookupScope(ctx, scope)
+	}
+	return p.recipientPolicy.loadSelectedRunTargetOwnerProjection(ctx)
 }
 
 func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recipients []string) (RoutePlan, error) {
@@ -491,11 +543,11 @@ func (p deliveryPlanner) PlanExactDirect(ctx context.Context, evt events.Event, 
 		return RoutePlan{}, errors.New("exact direct delivery routes are required")
 	}
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
-	projection, err := p.recipientPolicy.loadSelectedRunTargetOwnerProjection(ctx)
+	agents, agentsAvailable, err := p.recipientPolicy.loadActiveAgentDescriptors(ctx)
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	manifest := exactDirectRecipientManifest(candidates, projection.agents, projection.agentsAvailable)
+	manifest := exactDirectRecipientManifest(candidates, agents, agentsAvailable)
 	available := make(map[agentidentity.Identity]struct{}, len(manifest.LiveRecipients))
 	for _, recipient := range manifest.LiveRecipients {
 		if !recipient.AgentIdentity.IsZero() {
@@ -519,7 +571,7 @@ func (p deliveryPlanner) PlanExactDirect(ctx context.Context, evt events.Event, 
 		"exact_routes":          true,
 		"requested_route_count": len(routes),
 	}
-	return projection.resolveRoutePlan(routePlan)
+	return routePlan.Normalized(), nil
 }
 
 // Exact direct delivery consumes caller-supplied routes as its sole route and

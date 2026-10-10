@@ -452,10 +452,8 @@ func TestMixedPubsubConnectCompositionReplayUsesCommittedRoutes(t *testing.T) {
 	wantRoutes := append([]events.DeliveryRoute(nil), store.routes[evt.ID()]...)
 	wantEvent := store.events[evt.ID()]
 
-	routeTable.mu.Lock()
 	routeTable.templates = nil
 	routeTable.connectGraph = runtimepinrouting.CompiledConnectGraph{}
-	routeTable.mu.Unlock()
 
 	restarted, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, RouteTable: routeTable,
 		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},

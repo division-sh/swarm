@@ -1,77 +1,15 @@
 package runtime
 
 import (
-	"context"
-	"errors"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
-
-type inboundFixtureOwner struct {
-	RunID        string
-	FlowInstance string
-	EntityID     string
-}
-
-type inboundFixtureOwners []inboundFixtureOwner
-
-func (owners inboundFixtureOwners) ListSelectedRunTargetOwners(_ context.Context, runID string) ([]runtimebus.ActiveTargetDescriptor, error) {
-	var out []runtimebus.ActiveTargetDescriptor
-	for _, owner := range owners {
-		if owner.RunID == runID {
-			out = append(out, runtimebus.ActiveTargetDescriptor{FlowInstance: owner.FlowInstance, EntityID: owner.EntityID})
-		}
-	}
-	return out, nil
-}
-
-func (owners inboundFixtureOwners) ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, instancePaths []string, sourceEntityID string) ([]runtimebus.ActiveTargetDescriptor, error) {
-	if len(instancePaths) == 0 && sourceEntityID == "" {
-		return nil, errors.New("target owner lookup requires a selected scope")
-	}
-	paths := make(map[string]struct{}, len(instancePaths))
-	for _, path := range instancePaths {
-		paths[path] = struct{}{}
-	}
-	all, err := owners.ListSelectedRunTargetOwners(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	var selected []runtimebus.ActiveTargetDescriptor
-	for _, owner := range all {
-		_, byPath := paths[owner.FlowInstance]
-		if byPath || sourceEntityID != "" && owner.EntityID == sourceEntityID {
-			selected = append(selected, owner)
-		}
-	}
-	return selected, nil
-}
-
-func TestInboundFixtureOwnersRespectGraphScope(t *testing.T) {
-	owners := inboundFixtureOwners{
-		{RunID: "run-1", FlowInstance: "root/first", EntityID: "entity-1"},
-		{RunID: "run-1", FlowInstance: "root/second", EntityID: "entity-2"},
-		{RunID: "run-2", FlowInstance: "root/first", EntityID: "entity-1"},
-	}
-	selected, err := owners.ListSelectedRunTargetOwnersForScope(context.Background(), "run-1", []string{"root/first"}, "")
-	if err != nil || len(selected) != 1 || selected[0].EntityID != "entity-1" {
-		t.Fatalf("path scope selected=%#v err=%v", selected, err)
-	}
-	selected, err = owners.ListSelectedRunTargetOwnersForScope(context.Background(), "run-1", nil, "entity-2")
-	if err != nil || len(selected) != 1 || selected[0].FlowInstance != "root/second" {
-		t.Fatalf("source-entity scope selected=%#v err=%v", selected, err)
-	}
-	if _, err := owners.ListSelectedRunTargetOwnersForScope(context.Background(), "run-1", nil, ""); err == nil {
-		t.Fatal("empty graph scope was accepted")
-	}
-}
 
 func newInboundTestEventBus(t testing.TB, store runtimebus.EventStore, targets ...InboundTarget) (*runtimebus.EventBus, error) {
 	return newInboundTestEventBusWithOptions(t, store, runtimebus.EventBusOptions{}, targets...)
@@ -123,14 +61,5 @@ func newInboundTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = runtimeTestOccurrence(t, opts.SourceArtifactFact.BundleHash())
 	}
-	var owners inboundFixtureOwners
-	for _, target := range targets {
-		instance, err := flowidentity.StandingForGeneration(opts.ContractBundle, target.FlowPath, target.RunID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		owners = append(owners, inboundFixtureOwner{RunID: target.RunID, FlowInstance: instance.InstancePath, EntityID: instance.EntityID})
-	}
-	opts.Durable.TargetOwners = owners
 	return newRuntimeTestEventBusWithOptions(t, store, opts)
 }

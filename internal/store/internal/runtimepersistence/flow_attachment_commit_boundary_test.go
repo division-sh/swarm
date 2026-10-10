@@ -259,10 +259,10 @@ func TestFlowAttachmentNativeCommitAcknowledgmentBothStores(t *testing.T) {
 						t.Fatal("attachment reconciliation repeated constructor lifecycle evidence")
 					}
 					f.bus.mu.Lock()
-					staged, published := len(f.bus.stagedRequests), len(f.bus.routeRequests)
+					prepared, published := len(f.bus.preparedAgentRoutes), len(f.bus.publishedAgentRoutes)
 					f.bus.mu.Unlock()
-					if staged != 0 || published != 0 {
-						t.Fatalf("store acknowledgment reconciliation installed process routes: staged=%d published=%d", staged, published)
+					if prepared != 0 || published != 0 {
+						t.Fatalf("store acknowledgment reconciliation installed agent carriers: prepared=%d published=%d", prepared, published)
 					}
 				})
 			}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -19,9 +20,10 @@ func newR7SelectionProof(t *testing.T, backend string) (receiverConfigActivation
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 		"schema.yaml":          "name: selection-proof\n",
-		"worker/schema.yaml":   "name: worker\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+		"worker/schema.yaml":   "name: worker\ninstance: item_id\nstages:\n  pending: {}\n  done: {final: true}\npins:\n  inputs:\n    - item.created\n",
 		"worker/entities.yaml": "item:\n  item_id: text\n",
-		"worker/events.yaml":   "item.created:\n  item_id: text\n",
+		"worker/events.yaml":   "item.created:\n  item_id: text\nitem.finished:\n",
+		"worker/nodes.yaml":    "progress:\n  execution_type: system_node\n  subscribes_to: [item.finished]\n  event_handlers:\n    item.finished:\n      advances_to: done\n",
 	}, nil)
 	runID := correlation.RunIDFromContext(f.ctx)
 	rootRequest := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
@@ -129,6 +131,50 @@ func TestR7SelectCreateSelectOrCreateBothStores(t *testing.T) {
 				})
 			}
 			owner := flowidentity.RunScopedFlowInstance{RunID: request.Lookup.RunID(), Route: winner.Identity.Route()}
+			persisted, err := winner.PersistenceRecord()
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutation := persisted.State
+			mutation.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+			mutation.ExpectedRevision, mutation.ExpectedState = 1, mutation.CurrentState
+			mutation.CurrentState = "done"
+			mutation.EnteredStageAt, mutation.UpdatedAt = winner.OccurredAt.Add(time.Second), winner.OccurredAt.Add(time.Second)
+			mutation = workflowTargetMutationEntry(t, f, mutation, "item.finished")
+			if _, err := f.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(f.ctx, pipeline.WorkflowEngineMutationCommand{State: mutation}); err != nil {
+				t.Fatal(err)
+			}
+			for _, mode := range []contracts.FlowInputResolutionMode{contracts.FlowInputResolutionModeSelect, contracts.FlowInputResolutionModeCreate, contracts.FlowInputResolutionModeSelectOrCreate} {
+				t.Run("final_stage_"+contracts.FlowInputResolutionModeCode(mode), func(t *testing.T) {
+					request := request
+					request.Mode = mode
+					requireR7SelectionNoMutation(t, f, func() {
+						selected, err := pipeline.PrepareFlowInstanceSelection(f.ctx, index, f.manager, request)
+						if err == nil || selected.Activation != nil || selected.Observation.Valid() {
+							t.Fatalf("final-stage occupancy became creation or execution: %+v %v", selected, err)
+						}
+						if mode == contracts.FlowInputResolutionModeCreate {
+							var conflict *pipeline.FlowInstanceActivationConflict
+							if !errors.As(err, &conflict) || conflict.Owner != owner {
+								t.Fatalf("final-stage create lost occupied identity: %v", err)
+							}
+						} else {
+							var terminal *pipeline.TerminalReceiverError
+							if !errors.As(err, &terminal) || terminal.FlowID != "worker" || terminal.Stage != "done" {
+								t.Fatalf("final-stage selection lost proven availability refusal: %v", err)
+							}
+						}
+						observed, found, readErr := index.LookupFlowInstance(f.ctx, request.Lookup)
+						if readErr != nil || !found || observed.Identity() != winner.Identity {
+							t.Fatalf("final-stage receiver became absent: %+v found=%t err=%v", observed, found, readErr)
+						}
+						header, readErr := observed.WorkflowInstance()
+						if readErr != nil || header.Status != "active" || !header.TerminatedAt.IsZero() || header.CurrentState != "done" {
+							t.Fatalf("final-stage control accidentally terminated its receiver: %+v err=%v", header, readErr)
+						}
+					})
+				})
+			}
 			if err := f.workflows.MarkTerminated(f.ctx, owner, identity.NormalizeEntityID(winner.Identity.EntityID), winner.OccurredAt.AddDate(0, 0, 1)); err != nil {
 				t.Fatal(err)
 			}
@@ -140,6 +186,21 @@ func TestR7SelectCreateSelectOrCreateBothStores(t *testing.T) {
 						selected, err := pipeline.PrepareFlowInstanceSelection(f.ctx, index, f.manager, request)
 						if err == nil || selected.Activation != nil || selected.Observation.Valid() {
 							t.Fatalf("terminal occupancy became creation or execution: %+v %v", selected, err)
+						}
+						if mode == contracts.FlowInputResolutionModeCreate {
+							var conflict *pipeline.FlowInstanceActivationConflict
+							if !errors.As(err, &conflict) || conflict.Owner != owner {
+								t.Fatalf("terminal create lost occupied identity: %v", err)
+							}
+						} else {
+							var terminated *pipeline.TerminatedReceiverError
+							if !errors.As(err, &terminated) || terminated.FlowID != "worker" {
+								t.Fatalf("terminal selection lost proven availability refusal: %v", err)
+							}
+						}
+						observed, found, readErr := index.LookupFlowInstance(f.ctx, request.Lookup)
+						if readErr != nil || !found || observed.Identity() != winner.Identity {
+							t.Fatalf("refused receiver became absent: %+v found=%t err=%v", observed, found, readErr)
 						}
 					})
 				})

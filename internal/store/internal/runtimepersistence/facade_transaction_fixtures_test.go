@@ -96,14 +96,6 @@ func (s *SQLiteRuntimeStore) CommitFlowInstanceActivationsTx(ctx context.Context
 	return s.pipelineSQLiteOwner.CommitFlowInstanceActivationsTx(ctx, attempt, plans)
 }
 
-func (s *PostgresStore) ReplaceFlowInstanceRouteTopologyTx(ctx context.Context, tx *sql.Tx, sets []runtimebus.FlowInstanceRouteRecordSet) ([]runtimebus.FlowInstanceRouteRecordSet, error) {
-	return s.pipelinePostgresOwner.ReplaceFlowInstanceRouteTopologyTx(ctx, tx, sets)
-}
-
-func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteTopologyTx(ctx context.Context, tx *sql.Tx, sets []runtimebus.FlowInstanceRouteRecordSet) ([]runtimebus.FlowInstanceRouteRecordSet, error) {
-	return s.pipelineSQLiteOwner.ReplaceFlowInstanceRouteTopologyTx(ctx, tx, sets)
-}
-
 func (s *PostgresStore) MarkDynamicFlowCreationOccurrenceCommittedTx(ctx context.Context, tx *sql.Tx, request runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest) error {
 	return s.pipelinePostgresOwner.MarkDynamicFlowCreationOccurrenceCommittedTx(ctx, tx, request)
 }

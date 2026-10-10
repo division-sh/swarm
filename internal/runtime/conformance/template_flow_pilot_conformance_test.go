@@ -414,7 +414,6 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 			Instances:                receipts,
 			ConstructionPublications: receipts,
 			ActiveAgents:             store,
-			ActiveFlows:              store,
 		},
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 			t.Fatal("existing account route descriptors should satisfy fan-out delivery")
@@ -593,7 +592,6 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 					Instances:                receipts,
 					ConstructionPublications: receipts,
 					ActiveAgents:             store,
-					ActiveFlows:              store,
 				},
 				TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 					t.Fatal("fail-closed fan-out route should not activate an account instance")
@@ -693,15 +691,6 @@ type fanOutPinRouteMemoryStore struct {
 	deliveryRoutes     map[string][]events.DeliveryRoute
 }
 
-func (s *fanOutPinRouteMemoryStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []runtimebus.FlowInstanceRouteRecordSet) (runtimebus.FlowInstanceRouteTopologyResult, error) {
-	for _, set := range sets {
-		if err := set.Identity.Validate(); err != nil {
-			return runtimebus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("invalid flow-instance route identity: %#v", set.Identity)
-		}
-	}
-	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
-}
-
 func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	sourceFact := s.sourceArtifactFact
 	if strings.TrimSpace(sourceFact.BundleHash()) == "" {
@@ -718,44 +707,6 @@ func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Co
 		}
 	}
 	return descriptors, nil
-}
-
-func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs, instancePaths []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	templates := make(map[string]struct{}, len(templateIDs))
-	paths := make(map[string]struct{}, len(instancePaths))
-	for _, templateID := range templateIDs {
-		templates[templateID] = struct{}{}
-	}
-	for _, path := range instancePaths {
-		paths[path] = struct{}{}
-	}
-	descriptors, err := s.ListActiveFlowInstanceDescriptors(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	var selected []runtimebus.ActiveFlowInstanceDescriptor
-	for _, descriptor := range descriptors {
-		_, templateMatch := templates[descriptor.FlowTemplate]
-		_, pathMatch := paths[descriptor.FlowInstance]
-		if descriptor.RunID == runID && (templateMatch || pathMatch) {
-			selected = append(selected, descriptor)
-		}
-	}
-	return selected, nil
-}
-
-func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptorsForKey(ctx context.Context, runID, templateID, keyField, keyValue string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	descriptors, err := s.ListActiveFlowInstanceDescriptors(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	var selected []runtimebus.ActiveFlowInstanceDescriptor
-	for _, descriptor := range descriptors {
-		if descriptor.RunID == runID && descriptor.FlowTemplate == templateID && descriptor.AddressFields[keyField] == keyValue {
-			selected = append(selected, descriptor)
-		}
-	}
-	return selected, nil
 }
 
 func (s *fanOutPinRouteMemoryStore) ListActiveAgentDescriptors(context.Context, string) ([]runtimebus.ActiveAgentDescriptor, error) {

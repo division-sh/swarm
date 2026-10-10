@@ -298,11 +298,8 @@ type conformanceDurableEventBusStore interface {
 	decisioncard.HumanTaskStore
 	runtimepipeline.DecisionCardDraftExpiry
 	runtimepipeline.HumanTaskExpiry
-	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteTopologyPersistence
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimepipeline.WorkflowEmitFeedbackOwner
 	runtimebus.PreparedPublishEventReader
@@ -323,7 +320,7 @@ func conformanceDurableEventBusDependencies(store conformanceDurableEventBusStor
 		Instances:                store,
 		ConstructionPublications: store,
 		ReplyContext:             store, RunLifecycle: store, DeliveryLifecycle: store,
-		ActiveAgents: store, ActiveFlows: store, TargetOwners: store, PreparedEvents: store,
+		ActiveAgents: store, PreparedEvents: store,
 		TargetFailureRecorder: store, RunOrigins: store, StandingRestarts: store, EmitFeedback: store,
 	}
 }

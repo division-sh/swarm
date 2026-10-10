@@ -152,7 +152,7 @@ func TestNormalizeRunForkSelectedContractRouteRecoveryRejectsCurrentRouteOwner(t
 		ForkEventID:       eventID,
 		ContractSelection: selection,
 		RouteTopology: runfork.RunForkSelectedContractRouteTopology{
-			Owner:                         "internal/runtime/bus.RouteTable.AddFlowInstanceRoute",
+			Owner:                         "retired_mutable_route_owner",
 			NonMutating:                   true,
 			ContractSelection:             selection,
 			FrontierEvidenceFingerprint:   "frontier",

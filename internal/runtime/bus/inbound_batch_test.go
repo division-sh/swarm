@@ -300,7 +300,7 @@ func TestPrepareInboundDeliveryBatchRejectsChangedAuthenticatedPublicationBefore
 			if _, err := bus.PrepareInboundDeliveryBatch(testAuthorActivityContext(context.Background()), batch); err == nil {
 				t.Fatal("changed authenticated publication was accepted")
 			}
-			if len(store.events) != 0 || len(store.routes) != 0 || len(bus.RouteTable().instanceOwners) != 0 {
+			if len(store.events) != 0 || len(store.routes) != 0 || len(store.instanceObservations) != 0 || len(store.constructions) != 0 {
 				t.Fatal("refused authenticated publication changed event, delivery or construction state")
 			}
 		})
