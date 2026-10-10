@@ -11348,6 +11348,9 @@ tool_model:
         cleanup evidence. Construction publishes its cached result after settling the original selection use,
         and retirement joins that same attempt before releasing connection possession. Durable post-reservation
         settlement keeps its existing lifetime; canceled native readback cannot re-enter an uncancelable wait.
+        Native result readback uses that requesting lifetime for both QR disclosure and paired readiness health
+        observation of a pending original attempt. Readback cancellation grants neither QR nor READY authority;
+        it does not cancel durable settlement or release another caller's retained construction responsibility.
         Only the private connection owner may checkpoint the exact
         persisted SDK account while its original reserved occurrence is authenticated. It freezes account provenance
         and advances to awaiting_external_identity under the selected operation revision, without claiming a human

@@ -933,6 +933,10 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 	// Durable post-reservation settlement retains its existing lifetime. Native
 	// connection waits/checkpoints still honor the requesting caller's deadline.
 	ctx = context.WithoutCancel(ctx)
+	readback := ctx
+	if op.Posture == ActivationSessionConnection {
+		readback = caller
+	}
 	if err := s.qualifyProvider(candidate); err != nil {
 		return Result{Operation: op, Candidate: &candidate}, err
 	}
@@ -952,7 +956,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 		case PhasePreparing:
 			admissions, err := s.admitCredentials(ctx, op, candidate, providerCredential, true)
 			if err != nil {
-				result, blockedErr := s.blockedResult(ctx, op, candidate, err)
+				result, blockedErr := s.blockedResult(readback, op, candidate, err)
 				if blockedErr != nil {
 					return result, fmt.Errorf("admit channel credentials: %w", blockedErr)
 				}
@@ -973,11 +977,11 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			if err := s.validateCredentialAdmissions(ctx, op); err != nil {
 				var required *CredentialRequiredError
 				if !errors.As(err, &required) {
-					return s.blockedResult(ctx, op, candidate, err)
+					return s.blockedResult(readback, op, candidate, err)
 				}
 				var resetErr error
 				op, resetErr = s.resetRejectedCredentialAdmissions(context.WithoutCancel(ctx), op)
-				return s.blockedResult(ctx, op, candidate, errors.Join(err, resetErr))
+				return s.blockedResult(readback, op, candidate, errors.Join(err, resetErr))
 			}
 			if op.Posture == ActivationSessionConnection {
 				next, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID,
@@ -990,7 +994,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			}
 			promotedOp, promoted, err := s.admitConfirmedTarget(ctx, op, candidate)
 			if err != nil {
-				return s.blockedResult(ctx, op, candidate, fmt.Errorf("admit channel target: %w", err))
+				return s.blockedResult(readback, op, candidate, fmt.Errorf("admit channel target: %w", err))
 			}
 			op, candidate = promotedOp, promoted
 			if err := s.activations.PreflightChannelActivation(ctx, op, candidate); err != nil {
@@ -999,11 +1003,11 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 					if failErr != nil {
 						return Result{}, errors.Join(err, failErr)
 					}
-					return s.result(ctx, failed, &candidate)
+					return s.result(readback, failed, &candidate)
 				}
 				var resetErr error
 				op, resetErr = s.resetRejectedCredentialAdmissions(context.WithoutCancel(ctx), op)
-				return s.blockedResult(ctx, op, candidate, errors.Join(fmt.Errorf("preflight channel activation: %w", err), resetErr))
+				return s.blockedResult(readback, op, candidate, errors.Join(fmt.Errorf("preflight channel activation: %w", err), resetErr))
 			}
 			next, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
 				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhaseActivatingProvider,
@@ -1016,11 +1020,11 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 		case PhaseActivatingProvider:
 			if op.Posture == ActivationSessionConnection {
 				if err := s.sessions.BootstrapSession(caller, op, candidate); err != nil {
-					return s.blockedResult(caller, op, candidate, err)
+					return s.blockedResult(readback, op, candidate, err)
 				}
 				next, paired, err := s.sessions.CheckpointSessionPairing(caller, op)
 				if err != nil {
-					return s.blockedResult(caller, op, candidate, err)
+					return s.blockedResult(readback, op, candidate, err)
 				}
 				if next.OperationID != op.OperationID || next.PrincipalID != op.PrincipalID ||
 					!next.Coordinate.MatchesDeclaration(op.Coordinate) || next.SessionConnectionID != op.SessionConnectionID ||
@@ -1030,7 +1034,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				}
 				op = next
 				if !paired {
-					return s.result(caller, op, &candidate)
+					return s.result(readback, op, &candidate)
 				}
 				continue
 			}
@@ -1040,9 +1044,9 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 					if failErr != nil {
 						return Result{}, errors.Join(err, failErr)
 					}
-					return s.result(ctx, failed, &candidate)
+					return s.result(readback, failed, &candidate)
 				}
-				return s.blockedResult(ctx, op, candidate, fmt.Errorf("refresh channel activation candidates: %w", err))
+				return s.blockedResult(readback, op, candidate, fmt.Errorf("refresh channel activation candidates: %w", err))
 			}
 			var err error
 			op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhaseAwaitingExternalIdentity, Now: s.now().UTC()})
@@ -1058,13 +1062,13 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 					if strings.TrimSpace(providerCredential) != "" {
 						continue
 					}
-					return s.blockedResult(ctx, op, candidate, required)
+					return s.blockedResult(readback, op, candidate, required)
 				}
 				return Result{}, fmt.Errorf("advance channel identity: %w", err)
 			}
 			op = next
 			if blocked {
-				result, err := s.result(ctx, op, &candidate)
+				result, err := s.result(readback, op, &candidate)
 				if err != nil {
 					return result, fmt.Errorf("project channel awaiting external identity: %w", err)
 				}
@@ -1084,7 +1088,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 						return Result{}, err
 					}
 					if strings.TrimSpace(providerCredential) == "" {
-						return s.blockedResult(ctx, op, candidate, credentialRequiredForStaleIdentity(op, identityOp))
+						return s.blockedResult(readback, op, candidate, credentialRequiredForStaleIdentity(op, identityOp))
 					}
 					continue
 				}
@@ -1093,7 +1097,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 					if failErr != nil {
 						return Result{}, failErr
 					}
-					return s.result(ctx, failed, &candidate)
+					return s.result(readback, failed, &candidate)
 				}
 			}
 			decision, err := s.reconcileConfirmedBinding(ctx, op)
@@ -1103,17 +1107,17 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			op = decision.operation
 			if decision.credentialRequired != nil {
 				if strings.TrimSpace(providerCredential) == "" {
-					return s.blockedResult(ctx, op, candidate, decision.credentialRequired)
+					return s.blockedResult(readback, op, candidate, decision.credentialRequired)
 				}
 				continue
 			}
 			if decision.blocked {
-				return s.result(ctx, op, &candidate)
+				return s.result(readback, op, &candidate)
 			}
 			if op.Posture == ActivationSessionConnection {
 				promotedOp, promoted, err := s.admitConfirmedTarget(caller, op, candidate)
 				if err != nil {
-					return s.blockedResult(ctx, op, candidate, fmt.Errorf("admit confirmed session target: %w", err))
+					return s.blockedResult(readback, op, candidate, fmt.Errorf("admit confirmed session target: %w", err))
 				}
 				op, candidate = promotedOp, promoted
 			}
@@ -1135,12 +1139,12 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			op = decision.operation
 			if decision.credentialRequired != nil {
 				if strings.TrimSpace(providerCredential) == "" {
-					return s.blockedResult(ctx, op, candidate, decision.credentialRequired)
+					return s.blockedResult(readback, op, candidate, decision.credentialRequired)
 				}
 				continue
 			}
 			if decision.blocked {
-				return s.result(ctx, op, &candidate)
+				return s.result(readback, op, &candidate)
 			}
 			binding := decision.binding
 			op, _, err = s.store.PublishConnectedChannelActivation(ctx, PublishActivationRequest{
@@ -1160,7 +1164,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				return Result{}, err
 			}
 			if err := s.activations.PublishChannelActivation(ctx, op, activation); err != nil {
-				return s.blockedResult(ctx, op, candidate, err)
+				return s.blockedResult(readback, op, candidate, err)
 			}
 			if err := s.reachTestBarrier(TestAfterProcessPublicationBeforePromotion, op.OperationID); err != nil {
 				return Result{}, err
@@ -1177,7 +1181,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				return Result{}, err
 			}
 			if err := s.activations.PromoteChannelRegistration(ctx, op, activation); err != nil {
-				return s.blockedResult(ctx, op, candidate, err)
+				return s.blockedResult(readback, op, candidate, err)
 			}
 			op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
 				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhaseRetiringPredecessor, Now: s.now().UTC(),
@@ -1191,7 +1195,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				return Result{}, err
 			}
 			if err := s.releaseSupersededCredentials(ctx, op, activation); err != nil {
-				return s.blockedResult(ctx, op, candidate, err)
+				return s.blockedResult(readback, op, candidate, err)
 			}
 			op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
 				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhaseDeliveringConfirmation, Now: s.now().UTC(),
@@ -1224,13 +1228,13 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			}
 			confirmation, err := s.confirmation.DispatchChannelConfirmation(ctx, ConfirmationRequest{Operation: op, Activation: activation, Candidate: candidate, Binding: binding})
 			if err != nil {
-				return s.blockedResult(ctx, op, candidate, err)
+				return s.blockedResult(readback, op, candidate, err)
 			}
 			if confirmation.OperationID != op.ConfirmationOperationID {
 				return Result{}, fmt.Errorf("%w: confirmation dispatcher returned operation %q for exact operation %q", ErrConflict, confirmation.OperationID, op.ConfirmationOperationID)
 			}
 			if !confirmation.TerminalSuccess {
-				return s.result(ctx, op, &candidate)
+				return s.result(readback, op, &candidate)
 			}
 			op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
 				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhaseSucceeded,
@@ -1240,7 +1244,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				return Result{}, err
 			}
 		case PhaseSucceeded, PhaseFailed, PhaseRetired:
-			return s.result(ctx, op, &candidate)
+			return s.result(readback, op, &candidate)
 		default:
 			return Result{}, fmt.Errorf("%w: unsupported onboarding phase %q", ErrConflict, op.Phase)
 		}
