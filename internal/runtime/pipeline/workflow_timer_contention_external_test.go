@@ -154,6 +154,10 @@ func TestWorkflowTimerDispatchDeadlineCutClassificationOnBothStores(t *testing.T
 	verifyWorkflowTimerPublishedOccurrenceRecovery(t, []string{"deadline_dispatch_before_mutation", "deadline_dispatch_before_authorization"})
 }
 
+func TestWorkflowTimerPublisherDeadlineEarlyDispatchJoinsBothLifetimesBothStores(t *testing.T) {
+	verifyWorkflowTimerPublishedOccurrenceRecovery(t, []string{"deadline_dispatch_early_target"})
+}
+
 func TestIssue2564M09TimerDispatchEntryCancellationLeavesBusObligationReplayableBothStores(t *testing.T) {
 	verifyWorkflowTimerPublishedOccurrenceRecovery(t, []string{"canceled_entry", "deadline_entry"})
 }
@@ -255,8 +259,9 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 				fireCtx := ctx
 				var interrupted error
 				var receiverProbe *timerReceiverReadCut
-				deadlineDispatch := scenario == "deadline_dispatch" || scenario == "deadline_dispatch_before_mutation" || scenario == "deadline_dispatch_before_authorization"
+				deadlineDispatch := scenario == "deadline_dispatch" || scenario == "deadline_dispatch_early_target" || scenario == "deadline_dispatch_before_mutation" || scenario == "deadline_dispatch_before_authorization"
 				deadlineBeforeMutation := false
+				earlyPublisherJoined := false
 				entryCut := scenario == "canceled_entry" || scenario == "deadline_entry" || scenario == "deadline_entry_live_outer"
 				switch scenario {
 				case "receiver_deadline_held_activation", "receiver_deadline_held_target":
@@ -333,12 +338,12 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 						}
 						return ctx
 					}
-				case "deadline_dispatch", "deadline_dispatch_before_mutation", "deadline_dispatch_before_authorization":
+				case "deadline_dispatch", "deadline_dispatch_early_target", "deadline_dispatch_before_mutation", "deadline_dispatch_before_authorization":
 					interrupted = context.DeadlineExceeded
 					var cancel context.CancelFunc
 					fireCtx, cancel = context.WithTimeout(ctx, time.Second)
 					defer cancel()
-					if scenario == "deadline_dispatch" {
+					if scenario == "deadline_dispatch" || scenario == "deadline_dispatch_early_target" {
 						capture.afterIntercept = func(receiver context.Context) {
 							if owner.calls != 0 || !runtimefailures.IsContextInterruption(receiver.Err()) {
 								return
@@ -351,12 +356,13 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 							if err := joinTimerTestInterruption(fireCtx, receiver); err != nil {
 								t.Fatal(err)
 							}
+							earlyPublisherJoined = true
 						}
 					} else {
 						// These held cuts are publisher-driven, not receiver-only.
 						owner.heldReadPublisher = fireCtx
 					}
-					owner.holdTargetRead = scenario == "deadline_dispatch_before_mutation"
+					owner.holdTargetRead = scenario == "deadline_dispatch_before_mutation" || scenario == "deadline_dispatch_early_target"
 					if scenario == "deadline_dispatch_before_authorization" {
 						capture.beforeIntercept = func(dispatchCtx context.Context) context.Context {
 							owner.holdActivationRead = true
@@ -438,7 +444,10 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 						interrupted = owner.lastErr
 					}
 				}
-				if scenario == "deadline_dispatch_before_mutation" && (!deadlineBeforeMutation || owner.calls != 0 || owner.heldTargetReads != 1 || !errors.Is(owner.targetReadErr, interrupted)) {
+				if scenario == "deadline_dispatch_early_target" && !earlyPublisherJoined {
+					t.Fatal("early dispatch did not join the exact publisher and receiver lifetimes")
+				}
+				if (scenario == "deadline_dispatch_before_mutation" || scenario == "deadline_dispatch_early_target") && (!deadlineBeforeMutation || owner.calls != 0 || owner.heldTargetReads != 1 || !errors.Is(owner.targetReadErr, interrupted)) {
 					t.Fatalf("held target read did not prove the authorized pre-mutation cut: calls=%d entry_cut=%t target_reads=%d target_error=%v", owner.calls, entryCut, owner.heldTargetReads, owner.targetReadErr)
 				}
 				if scenario == "deadline_dispatch_before_authorization" && (!entryCut || capture.entryErr != nil || owner.calls != 0 || owner.interruptedActivationReads != 1 || !errors.Is(owner.activationReadErr, interrupted)) {
