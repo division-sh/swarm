@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -113,13 +114,11 @@ func newReceiverConfigActivationFixtureWithOwnership(t *testing.T, backend strin
 
 func newReceiverConfigActivationFixtureForStore(t *testing.T, selected agentFixtureFlowStore, withAgents bool, files map[string]string, decorate func(manager.FlowInstanceActivationCommitter) manager.FlowInstanceActivationCommitter, own func(*testing.T, *manager.AgentManager) *manager.AgentManager, configureLifecycle func(*pipeline.PipelineCoordinatorOptions), configure ...func(*manager.AgentManagerOptions)) receiverConfigActivationFixture {
 	t.Helper()
-	bundle := loadLifecyclePersistenceFixtureForTest(t, files)
 	if withAgents {
-		actors := sqliteFlowActivationBundle(t)
-		bundle.FlowTree.ByID["review"].Agents = actors.FlowTree.ByID["review"].Agents
-		bundle.FlowTree.ByID["review"].AgentURIs = actors.FlowTree.ByID["review"].AgentURIs
-		bundle.URIRegistry = actors.URIRegistry
+		files = maps.Clone(files)
+		files["review/agents.yaml"] = "reviewer:\n  model: regular\n  intent: {inline: Review the task.}\n  subscriptions: [task.started]\n"
 	}
+	bundle := loadLifecyclePersistenceFixtureForTest(t, files)
 	fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 	ctx := correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), uuid.NewString())
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: correlation.RunIDFromContext(ctx), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
@@ -433,9 +432,13 @@ func TestReceiverConfigActivationRaceAndRollbackBothStores(t *testing.T) {
 func (f receiverConfigActivationFixture) requireCounts(t *testing.T, want int) {
 	t.Helper()
 	for _, table := range []string{"flow_instances", "entity_state", "workflow_instance_initial_materializations", "flow_instance_runtime_readiness"} {
+		wantRows := want
+		if f.rootConstructed && table != "entity_state" {
+			wantRows++
+		}
 		var got int
-		if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM `+table+` WHERE run_id=$1`, correlation.RunIDFromContext(f.ctx)).Scan(&got); err != nil || got != want {
-			t.Fatalf("%s rows=%d want=%d: %v", table, got, want, err)
+		if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM `+table+` WHERE run_id=$1`, correlation.RunIDFromContext(f.ctx)).Scan(&got); err != nil || got != wantRows {
+			t.Fatalf("%s rows=%d want=%d: %v", table, got, wantRows, err)
 		}
 	}
 }

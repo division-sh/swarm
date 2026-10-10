@@ -2,9 +2,13 @@ package tools
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -18,6 +22,39 @@ import (
 // Explicit component evidence, not selected-store construction or attachment.
 type emitInstanceObservationFixture struct {
 	observations []pipeline.FlowInstanceObservation
+}
+
+func emitInstanceActor(t testing.TB, source semanticview.Source, instance flowidentity.Instance, emitted string) actors.AgentConfig {
+	t.Helper()
+	declarations := semanticview.AgentDeclarationsForOwner(source, instance.TemplateID)
+	if len(declarations) != 1 {
+		t.Fatalf("emit fixture requires one physical agent: %+v", declarations)
+	}
+	namePlan, err := semanticview.ScopedAgentNamePlan(source, declarations[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := namePlan.Materialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, err := instance.Route().AgentIdentityRoute()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agentidentity.NewPlan(name, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := plan.Live(toolTestRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return actors.AgentConfig{
+		ExecutionMode: "live", ID: identity.AgentID(), Identity: identity,
+		Role: namePlan.EffectiveRole(declarations[0].Entry), FlowID: instance.TemplateID,
+		FlowPath: identity.FlowInstance(), EntityID: instance.EntityID, EmitEvents: []string{emitted},
+	}
 }
 
 func emitInstanceObservation(t testing.TB, source semanticview.Source, identity flowidentity.Instance, key string) pipeline.FlowInstanceObservation {
@@ -67,16 +104,25 @@ func (f emitInstanceObservationFixture) LookupFlowInstance(ctx context.Context, 
 	if err := ctx.Err(); err != nil {
 		return pipeline.FlowInstanceObservation{}, false, err
 	}
+	var selected pipeline.FlowInstanceObservation
 	for _, observed := range f.observations {
-		if request.RunID() != observed.Owner().RunID || request.ExactPath() != observed.Identity().InstancePath {
+		identity := observed.Identity()
+		if request.RunID() != observed.Owner().RunID || request.FlowID() != identity.TemplateID {
+			continue
+		}
+		if request.ExactPath() != "" && request.ExactPath() != identity.InstancePath || request.DeclaredSelection() &&
+			(request.ParentInstance() != identity.ParentRoute.FlowInstance || request.InstanceKey() != observed.InstanceKey()) {
 			continue
 		}
 		if err := observed.ValidateSelection(request); err != nil {
 			return pipeline.FlowInstanceObservation{}, false, err
 		}
-		return observed, true, nil
+		if selected.Valid() {
+			return pipeline.FlowInstanceObservation{}, false, fmt.Errorf("emit fixture repeats its exact instance selector")
+		}
+		selected = observed
 	}
-	return pipeline.FlowInstanceObservation{}, false, nil
+	return selected, selected.Valid(), nil
 }
 
 func (f emitInstanceObservationFixture) ListFlowInstances(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error) {
@@ -84,16 +130,25 @@ func (f emitInstanceObservationFixture) ListFlowInstances(ctx context.Context, s
 		return nil, err
 	}
 	var out []pipeline.FlowInstanceObservation
-	for _, owner := range scope.Coordinates() {
-		lookup, err := pipeline.NewExactFlowInstanceLookup(scope.Source(), scope.SourceFact(), owner)
-		if err != nil {
-			return nil, err
+	for _, observed := range f.observations {
+		if observed.Owner().RunID != scope.RunID() {
+			continue
 		}
-		observed, found, err := f.LookupFlowInstance(ctx, lookup)
-		if err != nil {
-			return nil, err
+		included := slices.Contains(scope.FlowIDs(), observed.Identity().TemplateID)
+		for _, owner := range scope.Coordinates() {
+			if owner.Key() != observed.Owner().Key() {
+				continue
+			}
+			lookup, err := pipeline.NewExactFlowInstanceLookup(scope.Source(), scope.SourceFact(), owner)
+			if err != nil {
+				return nil, err
+			}
+			if err := observed.ValidateSelection(lookup); err != nil {
+				return nil, err
+			}
+			included = true
 		}
-		if found {
+		if included {
 			out = append(out, observed)
 		}
 	}

@@ -478,10 +478,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 						if err != nil || !found {
 							t.Fatalf("source before: %v %t", err, found)
 						}
-						routesBefore, err := selected.ListFlowInstanceRouteRecords(ctx, owner)
-						if err != nil {
-							t.Fatal(err)
-						}
+						routesBefore := catalogCommittedDeliveryRoutes(t, ctx, selected, frontierID)
 						var sourceStore interface {
 							storetest.DurableDataCatalogStore
 							forkexecution.SourceArtifactSelectedContractSourceStore
@@ -606,10 +603,6 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 							if err != nil || terminal.Status != "cancelled" || terminal.EndedAt == nil {
 								t.Fatalf("fenced frontier lost its terminal tombstone: %+v err=%v", terminal, err)
 							}
-							routes, err := selected.ListFlowInstanceRouteRecords(ctx, forkOwner)
-							if err != nil || len(routes) != 0 {
-								t.Fatalf("discard left materialized fork routes: %+v err=%v", routes, err)
-							}
 						}
 						observed, err := catalogRunScopedOperatorEvents(h, forkRun)
 						if err != nil || (!refused && !fenced && len(observed) == 0) || ((refused || fenced) && len(observed) != 0) {
@@ -679,8 +672,8 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 						if err != nil || !found {
 							t.Fatalf("source after: %v %t", err, found)
 						}
-						routesAfter, err := selected.ListFlowInstanceRouteRecords(ctx, owner)
-						if err != nil || before.CurrentState != after.CurrentState || before.Revision != after.Revision || !reflect.DeepEqual(before.Fields, after.Fields) || !reflect.DeepEqual(routesBefore, routesAfter) {
+						routesAfter := catalogCommittedDeliveryRoutes(t, ctx, selected, frontierID)
+						if before.CurrentState != after.CurrentState || before.Revision != after.Revision || !reflect.DeepEqual(before.Fields, after.Fields) || !reflect.DeepEqual(routesBefore, routesAfter) {
 							t.Fatalf("source changed: before=%#v after=%#v err=%v", before, after, err)
 						}
 					})
@@ -705,10 +698,6 @@ func selectedForkReadinessSnapshot(t *testing.T, ctx context.Context, h *runtime
 	if err != nil || !found {
 		t.Fatalf("snapshot readiness: %t %v", found, err)
 	}
-	routes, err := selected.ListFlowInstanceRouteRecords(ctx, owner)
-	if err != nil {
-		t.Fatal(err)
-	}
 	lifecycle, err := selected.LoadRunLifecycleSnapshot(ctx, runID)
 	if err != nil {
 		t.Fatal(err)
@@ -717,7 +706,7 @@ func selectedForkReadinessSnapshot(t *testing.T, ctx context.Context, h *runtime
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := json.Marshal([]any{state, readiness, routes, lifecycle, events})
+	encoded, err := json.Marshal([]any{state, readiness, lifecycle, events})
 	if err != nil {
 		t.Fatal(err)
 	}
