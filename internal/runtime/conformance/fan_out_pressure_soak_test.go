@@ -262,22 +262,26 @@ func (c *pressureSoakControl) reserve(ctx context.Context, timing *pressureSoakT
 	timing.ReserveSequence = c.reservationEntries
 	timing.ReserveEntered = time.Now()
 	timing.ProducedAtEntry, timing.CommittedAtEntry = c.state.Produced, c.state.Committed
-	if !c.allowReservationBarging {
-		if c.waitingCount == len(c.waiting) {
-			c.mu.Unlock()
-			return fmt.Errorf("pressure fixture exceeded its four real serving waiters")
-		}
-		c.waiting[c.waitingCount] = timing.ReserveSequence
-		c.waitingCount++
-		defer c.removeWaiter(timing.ReserveSequence)
+	if c.waitingCount == len(c.waiting) {
+		c.mu.Unlock()
+		return fmt.Errorf("pressure fixture exceeded its four real serving waiters")
 	}
+	c.waiting[c.waitingCount] = timing.ReserveSequence
+	c.waitingCount++
+	defer c.removeWaiter(timing.ReserveSequence)
 	c.mu.Unlock()
 	for {
 		c.mu.Lock()
 		timing.ReserveAttempts++
 		timing.LastReserveAttempt = time.Now()
 		available := c.state.Draining || c.state.Produced-c.state.Committed-c.state.Reserved > c.floor
-		if available && (c.allowReservationBarging || c.waiting[0] == timing.ReserveSequence) {
+		next := c.waiting[0]
+		// Only the negative control's first waiter may starve. Its peers
+		// remain FIFO, and draining restores the complete queue's order.
+		if c.allowReservationBarging && !c.state.Draining && next == 1 {
+			next = c.waiting[1]
+		}
+		if available && next == timing.ReserveSequence {
 			c.state.Reserved++
 			timing.ReserveGranted = time.Now()
 			timing.ProducedAtGrant, timing.CommittedAtGrant = c.state.Produced, c.state.Committed
