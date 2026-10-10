@@ -29,15 +29,25 @@ func TestEventBusHasNoPersistedTopologyOwner(t *testing.T) {
 	if _, present := reflect.TypeOf((*EventBus)(nil)).MethodByName("StageFlowInstanceRouteContext"); present {
 		t.Error("EventBus still exposes persisted topology staging")
 	}
+	for _, field := range []string{"ActiveFlows", "TargetOwners"} {
+		if _, present := reflect.TypeOf(DurableDependencies{}).FieldByName(field); present {
+			t.Errorf("EventBus still accepts retired instance descriptor reader %s", field)
+		}
+	}
 }
 
 func TestCompiledRoutesCannotExportMaterializedMembership(t *testing.T) {
-	for _, name := range []string{"MaterializedRoutes", "Resolve", "ResolveForRun"} {
+	for _, name := range []string{"MaterializedRoutes", "Resolve", "ResolveForRun", "HasFlowInstanceRoute", "RemoveFlowInstanceRoute", "AddFlowInstanceRoute"} {
 		if _, present := reflect.TypeOf((*RouteTable)(nil)).MethodByName(name); present {
 			t.Errorf("compiled source table still exports retired membership API %s", name)
 		}
 	}
-	for _, name := range []string{"routes", "patterns", "eventPath", "instanceEventPath", "resolutionIndexDirty", "exactPatternIndexes", "wildcardPatternIndexes"} {
+	for _, name := range []string{"HasFlowInstanceRoute", "PinRoutingDescriptors"} {
+		if _, present := reflect.TypeOf((*EventBus)(nil)).MethodByName(name); present {
+			t.Errorf("EventBus still exports retired membership API %s", name)
+		}
+	}
+	for _, name := range []string{"routes", "patterns", "eventPath", "instanceEventPath", "resolutionIndexDirty", "exactPatternIndexes", "wildcardPatternIndexes", "instanceOwners", "authoredEventPath", "authoredScopes", "mu"} {
 		if _, present := reflect.TypeOf(RouteTable{}).FieldByName(name); present {
 			t.Errorf("compiled source table retains retired resolution cache %s", name)
 		}
@@ -45,7 +55,7 @@ func TestCompiledRoutesCannotExportMaterializedMembership(t *testing.T) {
 }
 
 func TestCompiledPubsubBindingsRejectMissingSource(t *testing.T) {
-	for _, table := range []*RouteTable{nil, {}, newRouteTable(nil)} {
+	for _, table := range []*RouteTable{nil, {}, derivedRouteTableFixture(t, nil)} {
 		if got, err := table.PubsubDeclarationDefinitions("scoring", []string{"scoring/result.direct"}); err == nil || len(got) != 0 {
 			t.Fatalf("missing source produced declaration bindings: got=%+v err=%v", got, err)
 		}
@@ -144,25 +154,7 @@ func (unexpectedDurableTestRoles) SummarizeRun(context.Context, string) (runtime
 func (unexpectedDurableTestRoles) TerminalizeRun(context.Context, string, string) ([]runtimedelivery.Terminalization, error) {
 	return nil, errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) ReplaceFlowInstanceRouteTopology(context.Context, []FlowInstanceRouteRecordSet) (FlowInstanceRouteTopologyResult, error) {
-	return FlowInstanceRouteTopologyResult{}, errUnexpectedDurableTestRole
-}
 func (unexpectedDurableTestRoles) ListActiveAgentDescriptors(context.Context, string) ([]ActiveAgentDescriptor, error) {
-	return nil, nil
-}
-func (unexpectedDurableTestRoles) ListActiveFlowInstanceDescriptors(context.Context, string) ([]ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-func (unexpectedDurableTestRoles) ListActiveFlowInstanceDescriptorsForScope(context.Context, string, []string, []string) ([]ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-func (unexpectedDurableTestRoles) ListActiveFlowInstanceDescriptorsForKey(context.Context, string, string, string, string) ([]ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-func (unexpectedDurableTestRoles) ListSelectedRunTargetOwners(context.Context, string) ([]ActiveTargetDescriptor, error) {
-	return nil, nil
-}
-func (unexpectedDurableTestRoles) ListSelectedRunTargetOwnersForScope(context.Context, string, []string, string) ([]ActiveTargetDescriptor, error) {
 	return nil, nil
 }
 func (unexpectedDurableTestRoles) LoadWorkflowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error) {
@@ -214,12 +206,6 @@ func ExactDurableTestDependencies(selected any) DurableDependencies {
 	if deps.ActiveAgents == nil {
 		deps.ActiveAgents = defaults
 	}
-	if deps.ActiveFlows == nil {
-		deps.ActiveFlows = defaults
-	}
-	if deps.TargetOwners == nil {
-		deps.TargetOwners = defaults
-	}
 	if deps.PreparedEvents == nil {
 		deps.PreparedEvents = defaults
 	}
@@ -260,12 +246,6 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 	if role, ok := selected.(ActiveAgentDescriptorLister); ok {
 		deps.ActiveAgents = role
 	}
-	if role, ok := selected.(ActiveFlowInstanceDescriptorLister); ok {
-		deps.ActiveFlows = role
-	}
-	if role, ok := selected.(SelectedRunTargetOwnerLister); ok {
-		deps.TargetOwners = role
-	}
 	if role, ok := selected.(PreparedPublishEventReader); ok {
 		deps.PreparedEvents = role
 	}
@@ -288,7 +268,7 @@ func TestDurableDependenciesDoNotRequireReceiverElectionReader(t *testing.T) {
 		Instances:    roles,
 		RunLifecycle: roles, DeliveryLifecycle: roles,
 
-		ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
+		ActiveAgents:   roles,
 		PreparedEvents: roles, TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles,
 	}
 	opts := EventBusOptions{

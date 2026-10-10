@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
@@ -368,41 +367,11 @@ func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[agentidenti
 	return set, true, nil
 }
 
-func (eb *EventBus) PinRoutingDescriptors(ctx context.Context) ([]runtimepinrouting.Descriptor, error) {
-	descriptors, _, err := eb.activeTargetDescriptors(ctx)
-	if err != nil {
-		return nil, err
-	}
-	agents, _, err := eb.activeAgentDescriptors(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ordered := newOrderedActiveTargetDescriptors(descriptors)
-	for _, descriptor := range activeTargetDescriptorsFromAgents(agents) {
-		ordered.add(descriptor)
-	}
-	out := make([]runtimepinrouting.Descriptor, 0, len(ordered.descriptors))
-	for _, descriptor := range ordered.descriptors {
-		descriptor = descriptor.Normalized()
-		if descriptor.FlowInstance == "" && descriptor.EntityID == "" {
-			continue
-		}
-		out = append(out, runtimepinrouting.Descriptor{
-			FlowID:        descriptor.FlowID,
-			ID:            descriptor.ID,
-			EntityID:      descriptor.EntityID,
-			FlowInstance:  descriptor.FlowInstance,
-			AddressFields: normalizeDescriptorAddressFields(descriptor.AddressFields),
-		})
-	}
-	return out, nil
-}
-
 type selectedTargetOwnerLookupScopeKey struct{}
 
 type selectedTargetOwnerLookupScope struct {
-	instancePaths  []string
-	sourceEntityID string
+	lookup       runtimepipeline.FlowInstanceLookupScope
+	observations []runtimepipeline.FlowInstanceObservation
 }
 
 func withSelectedTargetOwnerLookupScope(ctx context.Context, scope selectedTargetOwnerLookupScope) context.Context {
@@ -413,67 +382,41 @@ func withSelectedTargetOwnerLookupScope(ctx context.Context, scope selectedTarge
 }
 
 func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTargetDescriptor, bool, error) {
+	eb.mu.RLock()
+	withoutSource := eb.semanticSource == nil
+	eb.mu.RUnlock()
+	if eb.ephemeral && withoutSource {
+		return nil, false, nil
+	}
 	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
 	if !ok || strings.TrimSpace(inbound.RunID()) == "" {
 		return nil, false, errors.New("active target descriptors require exact inbound run identity")
 	}
-	runID := inbound.RunID()
 	scope, scoped := ctx.Value(selectedTargetOwnerLookupScopeKey{}).(selectedTargetOwnerLookupScope)
-	lister := eb.durable.ActiveFlows
-	ordered := newOrderedActiveTargetDescriptors([]ActiveTargetDescriptor{})
-	available := false
-	targetOwners := eb.durable.TargetOwners
-	if targetOwners != nil {
-		available = true
-		var owners []ActiveTargetDescriptor
-		var err error
-		if scoped {
-			selected, ok := targetOwners.(ScopedSelectedRunTargetOwnerLister)
-			if !ok {
-				return nil, true, errors.New("selected store lacks graph-scoped target owner lookup")
-			}
-			if len(scope.instancePaths) > 0 || scope.sourceEntityID != "" {
-				owners, err = selected.ListSelectedRunTargetOwnersForScope(ctx, runID, scope.instancePaths, scope.sourceEntityID)
-			}
-		} else {
-			owners, err = targetOwners.ListSelectedRunTargetOwners(ctx, runID)
-		}
+	if !scoped || !scope.lookup.Valid() || scope.lookup.RunID() != inbound.RunID() {
+		return nil, true, errors.New("target owners require their compiled instance lookup scope")
+	}
+	fact, present := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !present || !scope.lookup.SourceFact().Matches(fact) {
+		return nil, true, errors.New("target owners require their admitted source")
+	}
+	owners := make([]ActiveTargetDescriptor, 0, len(scope.observations))
+	for _, observed := range scope.observations {
+		instance, err := observed.WorkflowInstance()
 		if err != nil {
 			return nil, true, err
 		}
-		for _, owner := range owners {
-			ordered.add(owner)
+		identity := observed.Identity()
+		stage := ""
+		if instance.StageDefined {
+			stage = instance.CurrentState
 		}
+		owners = append(owners, ActiveTargetDescriptor{
+			FlowID: identity.TemplateID, ID: identity.InstanceID, EntityID: identity.EntityID, FlowInstance: identity.InstancePath,
+			Availability: runtimepipeline.NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()),
+		})
 	}
-	if lister == nil {
-		return ordered.descriptors, available, nil
-	}
-	available = true
-	var flowDescriptors []ActiveFlowInstanceDescriptor
-	var err error
-	if scoped {
-		selected, ok := lister.(ScopedActiveFlowInstanceDescriptorLister)
-		if !ok {
-			return nil, true, errors.New("selected store lacks graph-scoped flow descriptor lookup")
-		}
-		if len(scope.instancePaths) > 0 {
-			flowDescriptors, err = selected.ListActiveFlowInstanceDescriptorsForScope(ctx, runID, nil, scope.instancePaths)
-			if err == nil {
-				flowDescriptors, err = eb.validateActiveFlowInstanceDescriptorsForSemanticSource(runID, flowDescriptors)
-			}
-		}
-	} else {
-		flowDescriptors, err = eb.activeFlowInstanceDescriptorsForSemanticSource(ctx, lister, runID)
-	}
-	if err != nil {
-		return nil, true, err
-	}
-	for _, descriptor := range flowDescriptors {
-		if descriptor.RunID == runID {
-			ordered.add(descriptor.TargetDescriptor())
-		}
-	}
-	return ordered.descriptors, available, nil
+	return owners, true, nil
 }
 
 func activeTargetDescriptorsFromAgents(descriptors map[agentidentity.Identity]ActiveAgentDescriptor) []ActiveTargetDescriptor {

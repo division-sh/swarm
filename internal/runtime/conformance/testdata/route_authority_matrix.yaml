@@ -430,14 +430,18 @@ rows:
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceAndReplaysCommittedRoute}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGaps}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps}
-      - {kind: go_test, name: TestEventBusPinRoutingDescriptorsIncludeActiveDynamicFlowInstances}
+      - {kind: go_test, name: TestCompiledRoutesCannotExportMaterializedMembership}
+      - {kind: go_test, name: TestParentLocalReturnPersistsExactNativeReceiverBothStores}
       - {kind: go_test, name: TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates}
       - {kind: go_test, name: TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates}
       - {kind: go_test, name: TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres}
     notes: >
-      Descriptor evidence may match only the receiver's declared scalar instance
-      identity. It is evidence for ConnectRoutePlan materialization, not topology
-      or selection-policy authority. Arbitrary indexed business-field addressing
+      Native instance selection consumes the receiver's declared scalar business
+      key and admitted stored construction through the instance index. The orphan
+      PinRoutingDescriptors accessor is retired; the restoration guard and native
+      committed-replay proof replace its representation-only test. Remaining
+      target-policy descriptors do not manufacture construction or topology.
+      Arbitrary indexed business-field addressing
       is retired; nested, undeclared, unindexed, config, and unrelated instance
       fields cannot become routing authority.
 

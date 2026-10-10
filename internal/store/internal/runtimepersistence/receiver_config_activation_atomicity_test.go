@@ -278,6 +278,7 @@ func TestReceiverConfigActivationRaceAndRollbackBothStores(t *testing.T) {
 					agentCount = 0
 				}
 				f := newReceiverConfigActivationFixtureWithAgents(t, backend, agentCount != 0)
+				f.constructKeylessRoot(t)
 				ctx, cancel := context.WithTimeout(f.ctx, 25*time.Second)
 				defer cancel()
 				requests := []pipeline.FlowInstanceActivationRequest{f.request("business-key", "ti-receiver-one", "first"), f.request("business-key", "ti-receiver-one", "second")}

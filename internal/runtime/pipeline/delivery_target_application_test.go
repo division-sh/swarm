@@ -449,8 +449,14 @@ func VerifyDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycl
 			handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
 			target := events.RouteIdentity{FlowID: ".", FlowInstance: instancePath, EntityID: entityID}
 			evt := handlerTestRootIngress(uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
-			if _, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target)); err == nil || !strings.Contains(err.Error(), testCase.wantError) {
-				t.Fatalf("invalid %s persistence error = %v, want %q", testCase.name, err, testCase.wantError)
+			_, err = pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target))
+			var terminated *TerminatedReceiverError
+			if testCase.name == "terminated-status" {
+				if !errors.As(err, &terminated) || terminated.FlowID != "." {
+					t.Fatalf("terminated persistence error = %v, want exact root-flow refusal", err)
+				}
+			} else if err == nil || errors.As(err, &terminated) || !strings.Contains(err.Error(), testCase.wantError) {
+				t.Fatalf("invalid %s persistence error = %v, want independent %q", testCase.name, err, testCase.wantError)
 			}
 
 			after, err := fixture.Persistence.store.LoadTargetPersistence(ctx, stateOwner, runtimeidentity.NormalizeEntityID(entityID))

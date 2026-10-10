@@ -68,7 +68,7 @@ func newSelectedContractExecutionOwnerForTest(t testing.TB, selected *store.Post
 		Instances:    workflow, ConstructionPublications: workflow,
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
-		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+		ActiveAgents: selected, PreparedEvents: selected,
 		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 	}
 	roles := runtimemanager.PersistenceRoles{
@@ -107,7 +107,7 @@ func newSelectedContractSQLiteExecutionOwnerForTest(t testing.TB, selected *stor
 		Instances:    workflow, ConstructionPublications: workflow,
 		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
 
-		ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected, PreparedEvents: selected,
+		ActiveAgents: selected, PreparedEvents: selected,
 		TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected,
 	}
 	roles := runtimemanager.PersistenceRoles{

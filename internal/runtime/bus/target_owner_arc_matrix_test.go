@@ -15,6 +15,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -99,18 +100,17 @@ func TestNestedChildToConcreteTemplateReceiverUsesSelectedOwner(t *testing.T) {
 		},
 	}
 	interceptor := &connectRoutePlanNodeInterceptor{}
+	runID := uuid.NewString()
 	eventBus, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate), Interceptors: []EventInterceptor{interceptor},
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
 	})
 	if err != nil {
 		t.Fatalf("create EventBus: %v", err)
 	}
-	store.bus = eventBus
-	runID := uuid.NewString()
 	constructedSource := installConnectionSourceConstructionForRun(t, eventBus, source, "left/child/producer", runID)
-	if err := eventBus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRouteForRun(runID, runtimeflowidentity.DeriveRoute("account", "one")), Instance: StoredFlowInstanceIdentityFixture(source, "account", "one", runID, selectedEntityID)}); err != nil {
-		t.Fatalf("add selected template route: %v", err)
-	}
+	store.installIndexObservation(constructionIndexObservation(t, source, runID, StoredFlowInstanceIdentityFixture(source, "account", "one", runID, selectedEntityID), "acct-1"))
+	store.installConstructionReceipt(testRunScopedFlowRouteForRun(runID, runtimeflowidentity.DeriveRoute("account", "one")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "account", "one", runID, selectedEntityID)})
 	sourceRoute := events.RouteIdentity{
 		FlowID: "left/child/producer", FlowInstance: constructedSource.InstancePath, EntityID: constructedSource.EntityID,
 	}.Normalized()
@@ -151,23 +151,25 @@ func TestNestedChildToConcreteTemplateReceiverUsesSelectedOwner(t *testing.T) {
 func TestNestedChildToRootReceiverUsesSelectedOwner(t *testing.T) {
 	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyNestedSingletonOutputRootConnect(t))
 	runID := uuid.NewString()
-	rootEntityID := eventtest.UUID("nested-root-selected-owner")
+	rootEntityID := runtimeflowidentity.EntityID(runID)
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(events.RouteIdentity{FlowInstance: runID, EntityID: rootEntityID})
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	eventBus, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source, Interceptors: []EventInterceptor{interceptor},
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
 	})
 	if err != nil {
 		t.Fatalf("create EventBus: %v", err)
 	}
 	sourceRoute := events.RouteIdentity{
-		FlowID: "left/child/scout", FlowInstance: "left/child/scout", EntityID: eventtest.UUID("nested-root-source-owner"),
+		FlowID: "left/child/scout", FlowInstance: "left/child/scout", EntityID: runtimeflowidentity.EntityID("left/child/scout"),
 	}.Normalized()
 	routingSource, err := events.NewStaticFlowRoutingSource(sourceRoute)
 	if err != nil {
 		t.Fatalf("construct nested root-return source: %v", err)
 	}
+	installConnectionSourceConstructionForRun(t, eventBus, source, "left/child/scout", runID)
 	event := eventtest.ChildForProducerWithRoutingSource(
 		uuid.NewString(), events.EventType("left/child/scout/scout.completed"), eventtest.Producer(events.EventProducerNode, "scout-worker"), "",
 		[]byte(`{"proof":"nested-root-return"}`), 0,
@@ -208,6 +210,7 @@ func runTargetOwnerArc(t *testing.T, test targetOwnerArcCase) {
 	eventBus, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source,
 		Interceptors:   []EventInterceptor{interceptor},
+		Durable:        DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
 	})
 	if err != nil {
 		t.Fatalf("create EventBus: %v", err)
@@ -223,10 +226,31 @@ func runTargetOwnerArc(t *testing.T, test targetOwnerArcCase) {
 		envelope = events.EnvelopeForSourceRoute(envelope, sourceRoute)
 	}
 	event := targetOwnerArcEvent(t, test, eventID, eventType, runID, envelope, routingSource)
-	wantRoute := events.RouteIdentity{
-		FlowID: test.receiverPath, FlowInstance: test.receiverPath,
-		EntityID: runtimeflowidentity.EntityID(test.receiverPath),
-	}.Normalized()
+	var constructedSource runtimeflowidentity.Instance
+	if test.sourceKind == targetOwnerArcRoot {
+		constructedSource = installConnectionSourceConstructionForRun(t, eventBus, source, ".", runID)
+	} else if test.sourceKind == targetOwnerArcTemplate {
+		bundle, _ := semanticview.Bundle(source)
+		view, _ := bundle.FlowViewByID(test.sourcePath)
+		installConnectionSourceConstructionForRun(t, eventBus, source, view.Parent.Paths.FlowPath, runID)
+		constructedSource = StoredFlowInstanceIdentityFixture(source, test.sourcePath, "instance-1", runID, sourceRoute.EntityID)
+		store.installIndexObservation(constructionIndexObservation(t, source, runID, constructedSource, "instance-1"))
+		store.installConstructionReceipt(testRunScopedFlowRouteForRun(runID, constructedSource.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: constructedSource, InstanceKey: "instance-1"})
+	} else {
+		constructedSource = installConnectionSourceConstructionForRun(t, eventBus, source, test.sourcePath, runID)
+	}
+	var receiver runtimeflowidentity.Instance
+	if test.sourceKind == targetOwnerArcTemplate && strings.HasPrefix(test.receiverPath, test.sourcePath+"/") {
+		receiver, err = runtimeflowidentity.KeylessChild(source, constructedSource, test.receiverPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		store.installIndexObservation(constructionIndexObservation(t, source, runID, receiver, ""))
+		store.installConstructionReceipt(testRunScopedFlowRouteForRun(runID, receiver.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: receiver})
+	} else {
+		receiver = installConnectionSourceConstructionForRun(t, eventBus, source, test.receiverPath, runID)
+	}
+	wantRoute := events.RouteIdentity{FlowID: receiver.TemplateID, FlowInstance: receiver.InstancePath, EntityID: receiver.EntityID}
 	// Keyless receivers have been constructed before an ordinary handler runs.
 	store.setTargetOwnerRoutes(wantRoute)
 	wantOwner := events.MustExistingEntityTarget(wantRoute)
@@ -281,6 +305,24 @@ func runTargetOwnerArc(t *testing.T, test targetOwnerArcCase) {
 		t.Fatalf("replay live/internal/routes = %#v/%#v/%#v", live, internal, replayRoutes)
 	}
 	assertTargetOwnerArcRoute(t, replayRoutes[0], wantOwner)
+	if test.sourceEntity != "" {
+		hostile := sourceRoute
+		hostile.EntityID = test.sourceEntity
+		hostileSource, err := events.NewStaticFlowRoutingSource(hostile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hostileEvent := targetOwnerArcEvent(t, test, uuid.NewString(), eventType, runID, events.EnvelopeForSourceRoute(events.EventEnvelope{}, hostile), hostileSource)
+		if _, err := eventBus.CheckPublishRecipientPlan(ctx, hostileEvent); err == nil || !strings.Contains(err.Error(), "contradicts") {
+			t.Fatalf("foreign entity replaced exact source evidence: %v", err)
+		}
+		if err := eventBus.Publish(ctx, hostileEvent); err == nil || !strings.Contains(err.Error(), "contradicts") {
+			t.Fatalf("foreign entity publication was not refused: %v", err)
+		}
+		if len(store.events) != 1 || len(store.routes) != 1 || len(store.settlements) != 1 || interceptor.Count() != 1 {
+			t.Fatal("hostile source changed the accepted event, deliveries or execution count")
+		}
+	}
 }
 
 func targetOwnerArcEvent(
@@ -380,11 +422,9 @@ func targetOwnerArcFixture(
 		routingSource events.RoutingSource
 		err           error
 	)
-	sourceEntityID := strings.TrimSpace(test.sourceEntity)
-	if sourceEntityID == "" {
-		sourceEntityID = eventtest.UUID("arc-source-" + test.name)
-	}
+	sourceEntityID := eventtest.UUID("arc-source-" + test.name)
 	if test.sourceKind == targetOwnerArcRoot {
+		sourceEntityID = runtimeflowidentity.EntityID(runID)
 		repoRoot := canonicalrouting.RepoRoot(t)
 		fixtureRoot := canonicalrouting.CopyRootOutputSingletonArc(t)
 		bundle, err = runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
@@ -409,10 +449,11 @@ func targetOwnerArcFixture(
 			Event: localEvent, From: producer.id, To: receiver.id,
 		}})
 
-		bundle.Semantics.Name = "root-workflow"
 		instancePath := test.sourcePath
 		if test.sourceKind == targetOwnerArcTemplate {
 			instancePath += "/instance-1"
+		} else {
+			sourceEntityID = runtimeflowidentity.EntityID(instancePath)
 		}
 		sourceRoute = events.RouteIdentity{FlowID: producer.id, FlowInstance: instancePath, EntityID: sourceEntityID}.Normalized()
 		eventType = events.EventType(instancePath + "/" + localEvent)
@@ -451,14 +492,16 @@ func testEventBusCrossFlowTargetOwnerRejectsWrongFullPathBeforePersistence(t *te
 	runID := uuid.NewString()
 	source, eventType, _, _, _ := targetOwnerArcFixture(t, test, runID)
 	wrongRoute := events.RouteIdentity{
-		FlowID: "producer", FlowInstance: "unrelated/worker/result", EntityID: eventtest.UUID("wrong-full-path-owner"),
+		FlowID: test.sourcePath, FlowInstance: "unrelated/worker/result", EntityID: eventtest.UUID("wrong-full-path-owner"),
 	}.Normalized()
 	wrongSource, err := events.NewStaticFlowRoutingSource(wrongRoute)
 	if err != nil {
 		t.Fatalf("construct wrong-path source: %v", err)
 	}
 	store := newTargetRouteMemoryStore()
-	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
+	})
 	if err != nil {
 		t.Fatalf("create EventBus: %v", err)
 	}
@@ -500,20 +543,23 @@ func TestEventBusReentrantBoomerangPreservesExactOwnersWhilePriorDeliveriesRemai
 
 	runID := uuid.NewString()
 	rootRoute := events.RouteIdentity{
-		FlowID: ".", FlowInstance: runID, EntityID: eventtest.UUID("boomerang-root-owner"),
+		FlowID: ".", FlowInstance: runID, EntityID: runtimeflowidentity.EntityID(runID),
 	}.Normalized()
 	childRoute := events.RouteIdentity{
-		FlowID: "boomerang", FlowInstance: "boomerang", EntityID: eventtest.UUID("boomerang-child-owner"),
+		FlowID: "boomerang", FlowInstance: "boomerang", EntityID: runtimeflowidentity.EntityID("boomerang"),
 	}.Normalized()
 	if rootRoute.EntityID == childRoute.EntityID {
 		t.Fatal("boomerang root and child owners must remain distinguishable")
 	}
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(rootRoute, childRoute)
-	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
+	})
 	if err != nil {
 		t.Fatalf("create boomerang EventBus: %v", err)
 	}
+	installConnectionSourceConstructionForRun(t, eventBus, source, "boomerang", runID)
 	childDeliveries := subscribeInternalDeliveriesForTest(t, eventBus, testFlowNode(t, "boomerang", "boomerang-worker").Key(), events.EventType(pingEvent))
 	rootDeliveries := subscribeInternalDeliveriesForTest(t, eventBus, testRootNode(t, "root-boomerang").Key(), events.EventType("boomerang/"+pongEvent))
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
@@ -612,8 +658,8 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 	connect := func(id string) runtimecontracts.FlowConnect {
 		return runtimecontracts.FlowConnect{Event: eventName, From: "producer", To: "fanout/" + id}
 	}
-	sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("mixed-owner-source")}.Normalized()
-	existingRoute := events.RouteIdentity{FlowID: "fanout/existing", FlowInstance: "fanout/existing", EntityID: eventtest.UUID("mixed-owner-existing")}.Normalized()
+	sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")}.Normalized()
+	existingRoute := events.RouteIdentity{FlowID: "fanout/existing", FlowInstance: "fanout/existing", EntityID: runtimeflowidentity.EntityID("fanout/existing")}.Normalized()
 	constructedRoute := events.RouteIdentity{FlowID: "fanout/constructed", FlowInstance: "fanout/constructed", EntityID: runtimeflowidentity.EntityID("fanout/constructed")}
 	fieldlessRoute := events.RouteIdentity{FlowID: "fanout/entityless", FlowInstance: "fanout/entityless", EntityID: runtimeflowidentity.EntityID("fanout/entityless")}
 	poisonedStore := newTargetRouteMemoryStore()
@@ -622,21 +668,28 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 		[]connectRoutePlanTestFlow{producer, existing, constructed, entityless, poison},
 		[]runtimecontracts.FlowConnect{connect("existing"), connect("constructed"), connect("entityless"), connect("poison")})
 
-	poisonedBus, err := newScopedTestEventBus(poisonedStore, EventBusOptions{ContractBundle: semanticview.Wrap(poisonedBundle)})
+	runID := uuid.NewString()
+	poisonedSource := semanticview.Wrap(poisonedBundle)
+	poisonedBus, err := newScopedTestEventBus(poisonedStore, EventBusOptions{
+		ContractBundle: poisonedSource,
+		Durable:        DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
+	})
 	if err != nil {
 		t.Fatalf("create poisoned fan-out EventBus: %v", err)
 	}
-	runID := uuid.NewString()
+	for _, flowID := range []string{"producer", "fanout/existing", "fanout/constructed", "fanout/entityless"} {
+		installConnectionSourceConstructionForRun(t, poisonedBus, poisonedSource, flowID, runID)
+	}
 	ctx := runtimedelivery.WithRoute(runtimecorrelation.WithRunID(context.Background(), runID), events.DeliveryRoute{Target: events.MustExistingEntityTarget(sourceRoute)})
 	eventID := uuid.NewString()
 	event := connectRoutePlanStaticProducerEvent(
 		eventID, events.EventType("producer/"+eventName), "", "", []byte(`{"proof":"mixed-owner"}`), 0, runID, "",
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), time.Now().UTC(),
 	)
-	if _, err := poisonedBus.CheckPublishRecipientPlan(ctx, event); err == nil || !strings.Contains(err.Error(), "target owner is missing") {
+	if _, err := poisonedBus.CheckPublishRecipientPlan(ctx, event); err == nil || !isolatedInstanceLookupMiss(err) {
 		t.Fatalf("poisoned fan-out preflight error = %v, want missing required owner", err)
 	}
-	if err := poisonedBus.Publish(ctx, event); err == nil || !strings.Contains(err.Error(), "target owner is missing") {
+	if err := poisonedBus.Publish(ctx, event); err == nil || !isolatedInstanceLookupMiss(err) {
 		t.Fatalf("poisoned fan-out publish error = %v, want missing required owner", err)
 	}
 	if len(poisonedStore.events) != 0 || len(poisonedStore.routes) != 0 || len(poisonedStore.settlements) != 0 || len(poisonedStore.scopes) != 0 || len(poisonedStore.receipts) != 0 || len(poisonedStore.flowRoutes) != 0 {
@@ -653,9 +706,13 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	legalBus, err := newScopedTestEventBus(legalStore, EventBusOptions{
 		ContractBundle: semanticview.Wrap(legalBundle), Interceptors: []EventInterceptor{interceptor},
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
 	})
 	if err != nil {
 		t.Fatalf("create legal mixed-owner EventBus: %v", err)
+	}
+	for _, flowID := range []string{"producer", "fanout/existing", "fanout/constructed", "fanout/entityless"} {
+		installConnectionSourceConstructionForRun(t, legalBus, semanticview.Wrap(legalBundle), flowID, runID)
 	}
 	plan, err := legalBus.CheckPublishRecipientPlan(ctx, event)
 	if err != nil {
@@ -734,17 +791,34 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	eventBus, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate), Interceptors: []EventInterceptor{interceptor},
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
 	})
 	if err != nil {
 		t.Fatalf("create diamond EventBus: %v", err)
 	}
-	store.bus = eventBus
 	for _, identity := range []runtimeflowidentity.Route{
 		runtimeflowidentity.DeriveRoute("branch", "left"),
 		runtimeflowidentity.DeriveRoute("branch", "right"),
 	} {
-		if err := eventBus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRouteForRun(runID, identity)}); err != nil {
-			t.Fatalf("materialize diamond branch route %s: %v", identity.InstancePath, err)
+		instance := ConstructedFlowInstanceIdentityFixture(source, "branch", identity.InstanceID, runID)
+		store.installIndexObservation(constructionIndexObservation(t, source, runID, instance, identity.InstanceID))
+		store.installConstructionReceipt(testRunScopedFlowRouteForRun(runID, instance.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: instance, InstanceKey: identity.InstanceID})
+		worker, err := runtimeflowidentity.KeylessChild(source, instance, "branch/worker")
+		if err != nil {
+			t.Fatal(err)
+		}
+		store.installIndexObservation(constructionIndexObservation(t, source, runID, worker, ""))
+		store.installConstructionReceipt(testRunScopedFlowRouteForRun(runID, worker.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: worker})
+		for _, flowID := range []string{"branch/worker/result-static", "branch/worker/result"} {
+			child, err := runtimeflowidentity.KeylessChild(source, worker, flowID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store.installIndexObservation(constructionIndexObservation(t, source, runID, child, ""))
+			store.installConstructionReceipt(testRunScopedFlowRouteForRun(runID, child.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: child})
+			store.targetOwners = append(store.targetOwners, targetOwnerDescriptors(events.RouteIdentity{
+				FlowID: child.TemplateID, FlowInstance: child.InstancePath, EntityID: child.EntityID,
+			})...)
 		}
 	}
 	installConnectionSourceConstructionForRun(t, eventBus, source, ".", runID)
@@ -815,12 +889,14 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 			}
 			if strings.Contains(route.Recipient.LocalID(), "static-result") {
 				staticSeen = true
-				if !route.Target.ExistingEntity() || route.Target.Route() != staticRoute || route.Target.Route().EntityID == parent.route.EntityID {
-					t.Fatalf("%s nested static target = %s %#v, want exact receiver-owned state %#v", parent.name, route.Target.Code(), route.Target.Route(), staticRoute)
+				wantPath := parent.route.FlowInstance + "/worker/result-static"
+				want := events.RouteIdentity{FlowID: staticRoute.FlowID, FlowInstance: wantPath, EntityID: runtimeflowidentity.EntityID(wantPath)}
+				if !route.Target.ExistingEntity() || route.Target.Route() != want || route.Target.Route().EntityID == parent.route.EntityID {
+					t.Fatalf("%s nested static target = %s %#v, want exact receiver-owned state %#v", parent.name, route.Target.Code(), route.Target.Route(), want)
 				}
 			} else if strings.Contains(route.Recipient.LocalID(), "singleton-result") {
 				singletonSeen = true
-				wantPath := "branch/worker/result"
+				wantPath := parent.route.FlowInstance + "/worker/result"
 				if !route.Target.ExistingEntity() || route.Target.Route().FlowInstance != wantPath || route.Target.Route().EntityID != runtimeflowidentity.EntityID(wantPath) {
 					t.Fatalf("%s nested singleton target = %s %#v, want constructed %q", parent.name, route.Target.Code(), route.Target.Route(), wantPath)
 				}

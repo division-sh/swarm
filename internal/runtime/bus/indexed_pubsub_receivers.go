@@ -140,12 +140,23 @@ func pubsubScopeIncludes(scope pipeline.FlowInstanceLookupScope, owner flowident
 }
 
 func (r connectRoutePlanResolver) indexedInstances(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]flowidentity.Instance, error) {
+	observations, err := r.indexedObservations(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	instances := make([]flowidentity.Instance, 0, len(observations))
+	for _, observed := range observations {
+		instances = append(instances, observed.Identity())
+	}
+	return instances, nil
+}
+
+func (r connectRoutePlanResolver) indexedObservations(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error) {
 	observations, err := r.lifecycle.index.ListFlowInstances(ctx, scope)
 	if err != nil {
 		return nil, err
 	}
 	seen := make(map[string]struct{}, len(observations))
-	instances := make([]flowidentity.Instance, 0, len(observations))
 	for _, observed := range observations {
 		if observed.Owner().RunID != scope.RunID() || !pubsubScopeIncludes(scope, observed.Owner(), observed.Identity().TemplateID) {
 			return nil, fmt.Errorf("receiver inventory crosses its compiled lookup scope")
@@ -164,9 +175,8 @@ func (r connectRoutePlanResolver) indexedInstances(ctx context.Context, scope pi
 			return nil, fmt.Errorf("receiver inventory repeats a native coordinate")
 		}
 		seen[observed.Owner().Key()] = struct{}{}
-		instances = append(instances, observed.Identity())
 	}
-	return instances, nil
+	return observations, nil
 }
 
 func validatePubsubExactCoordinates(scope pipeline.FlowInstanceLookupScope, observed pipeline.FlowInstanceObservation) error {

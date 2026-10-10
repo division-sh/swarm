@@ -10,14 +10,11 @@ import (
 
 func TestNamesOnlyPrivateInputDoesNotInventExternalProducer(t *testing.T) {
 	source := loadNamesOnlyRouteSource(t, canonicalrouting.WritePublicTemplateInputRoute(t))
-	if routeFlowInputHasExternalProducer(source, "operating", "opco.product_initialization_requested") {
+	routes := derivedRouteTableFixture(t, source)
+	if routeFlowInputProducerIsExternal(routes.inputProducers.Resolve("operating", "opco.product_initialization_requested")) {
 		t.Fatal("unconnected private input acquired external producer authority")
 	}
 
-	routes, err := DeriveRouteTable(source)
-	if err != nil {
-		t.Fatalf("DeriveRouteTable: %v", err)
-	}
 	for _, eventType := range []string{"opco.product_initialization_requested", "operating/opco.product_initialization_requested"} {
 		for _, subscriber := range routes.PubsubDeclarationDefinitionsFixture(t, "operating", eventType) {
 			if subscriber.RouteSourceCode() != "subscription" {
@@ -33,15 +30,17 @@ func TestRouteResolveSubscriberPatterns_PrivatePinKeepsOrdinarySubscription(t *t
 	if !ok {
 		t.Fatal("worker flow scope missing")
 	}
-	patterns, err := routeResolveSubscriberPatterns(
+	routes := derivedRouteTableFixture(t, source)
+	patterns, err := routeResolveSubscriberPatternsWithInputProducers(
 		source,
 		subscriberNode,
 		scope.ID,
 		scope.InputEvents,
 		scope.Path,
 		scope.Path,
-		routeFlowLocalEventSet(source, scope),
+		routes.templates["operating"].LocalEvents,
 		"opco.product_initialization_requested",
+		routes.inputProducers,
 	)
 	if err != nil {
 		t.Fatalf("resolve subscriber patterns: %v", err)

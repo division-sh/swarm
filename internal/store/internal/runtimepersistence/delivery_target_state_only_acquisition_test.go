@@ -32,15 +32,32 @@ import (
 func TestForkedSourceCanonicalTargetOwnersExcludeAndPreserveReadbackBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
+			source := stateOnlyAcquisitionSourceWithMode(t, "freeze", runtimecontracts.FlowModeTemplate)
+			bundle, _ := semanticview.Bundle(source)
+			selected, _, ctx, runID := openStateOnlyAcquisitionStoreWithSource(t, backend, source)
 			childRunID := uuid.NewString()
 			requireRunningRunForTest(t, ctx, selected, childRunID, time.Now().UTC())
-			instance := "freeze/instance"
-			entityID := runtimepipeline.FlowInstanceEntityID(instance)
-			seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, instance, "active", "source")
-			seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, instance, "freeze", "review_item", "active", "{}", time.Now().UTC())
-			before, err := selected.ListSelectedRunTargetOwners(ctx, runID)
-			if err != nil || len(before) != 1 || before[0].EntityID != entityID || before[0].FlowInstance != instance {
+			root := runtimeflowidentity.Stored(source, ".", runID, runID, "", "")
+			constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: root, OccurredAt: time.Now().UTC()})
+			child, err := runtimeflowidentity.KeyedChild(source, root, "freeze", "instance")
+			if err != nil {
+				t.Fatal(err)
+			}
+			child.EntityID = uuid.NewString()
+			created := time.Now().UTC()
+			constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), runtimepipeline.FlowInstanceActivationRequest{
+				ContractBundle: source, Instance: child, OccurredAt: created,
+				ConstructorInput: "test.node_emitted.upserter", ResolvedKey: "source",
+				TriggerEvent: eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted.upserter", "fixture", "", []byte(`{"account_id":"source","instance_key":"source"}`), 0, runID, events.EventEnvelope{}, created),
+			})
+			fact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
+			exact := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: child.Route()}
+			lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, fact, exact)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, found, err := selected.LookupFlowInstance(ctx, lookup)
+			if err != nil || !found || before.Identity() != child || before.RunState() != runtimerunlifecycle.StateRunning {
 				t.Fatalf("canonical owners before freeze = %#v, %v", before, err)
 			}
 			snapshot, disposition, err := selected.ForkRunSource(ctx, runtimerunlifecycle.ForkSourceRequest{
@@ -49,16 +66,15 @@ func TestForkedSourceCanonicalTargetOwnersExcludeAndPreserveReadbackBothStores(t
 			if err != nil || disposition != runtimerunlifecycle.MutationApplied || snapshot.State != runtimerunlifecycle.StateForked {
 				t.Fatalf("freeze = %#v, %v, %v", snapshot, disposition, err)
 			}
-			after, err := selected.ListSelectedRunTargetOwners(ctx, runID)
-			if err != nil || len(after) != 0 {
-				t.Fatalf("canonical owners after freeze = %#v, %v", after, err)
+			after, found, err := selected.LookupFlowInstance(ctx, lookup)
+			if err != nil || !found || after.Identity() != child || after.RunState() != runtimerunlifecycle.StateForked {
+				t.Fatalf("freeze erased stored ownership = %#v, found=%t, %v", after, found, err)
 			}
-			exact, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.Route{ScopeKey: "freeze", InstanceID: "instance", InstancePath: instance})
-			if err != nil {
-				t.Fatal(err)
+			if readiness, present := after.Readiness(); !present || readiness.Eligible() {
+				t.Fatalf("forked source remained executable: %+v present=%t", readiness, present)
 			}
-			record, found, err := selected.LoadWorkflowEntityState(ctx, exact, runtimeidentity.NormalizeEntityID(entityID))
-			if err != nil || !found || record.EntityID != entityID || record.CurrentState != "active" {
+			record, found, err := selected.LoadWorkflowEntityState(ctx, exact, runtimeidentity.NormalizeEntityID(child.EntityID))
+			if err != nil || !found || record.EntityID != child.EntityID || record.CurrentState != "active" {
 				t.Fatalf("historical state must remain readable = %#v, found=%t, %v", record, found, err)
 			}
 		})
