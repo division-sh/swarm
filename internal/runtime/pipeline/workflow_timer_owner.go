@@ -1060,6 +1060,10 @@ func (activation WorkflowTimerActivation) ValidatePublishedOccurrence(evt events
 	}
 	if evt.ID() != timeridentity.WorkflowTimerOccurrenceEventID(occurrence) ||
 		evt.RunID() != activation.RunID ||
+		evt.ExecutionMode() != activation.ExecutionMode ||
+		evt.CreatedAt().Before(occurrence.DueAt) ||
+		evt.CreatedAt().After(activation.FiredAt) ||
+		(!activation.Recurring && !evt.CreatedAt().Equal(activation.FiredAt)) ||
 		strings.TrimSpace(string(evt.Type())) != activation.EventType ||
 		!workflowTimerJSONEqual(evt.Payload(), activation.Payload) {
 		return occurrence, fmt.Errorf(
@@ -1229,7 +1233,7 @@ func workflowTimerOccurrenceAccepted(activation WorkflowTimerActivation, occurre
 	if activation.RecurrenceInterval <= 0 || !occurrence.DueAt.Before(activation.FireAt) {
 		return false
 	}
-	firstDue := canonicalWorkflowTimerTime(activation.CreatedAt.Add(activation.RecurrenceInterval))
+	firstDue := canonicalWorkflowTimerTime(activation.armedAt().Add(activation.RecurrenceInterval))
 	if occurrence.DueAt.Before(firstDue) {
 		return false
 	}

@@ -20981,6 +20981,8 @@ run_model:
         delivery or additional root agent. Final selected settlement recognizes a workflow timer publication only
         through its exact typed occurrence, canonical child activation and admitted event record, consuming the same
         immutable publication validator as timer admission within the settlement transaction. Validated timer
+        publication evidence agrees on execution mode and accepted time; inherited recurrence uses the retained
+        original arming coordinate rather than child birth as its first-due bound. Validated timer
         publications root the selected event lineage even when there was no replayed input. Producer spelling alone
         grants nothing; preactivation emptiness, current selected fencing and no-live-attempt checks remain unchanged.
         A removed declaration is canceled at child materialization as rule_removed, retaining
