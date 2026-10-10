@@ -27,35 +27,6 @@ const authorActivityTestBundleHash = sourceartifactfixture.BundleHash
 
 var authorActivityTestSourceArtifactFact = sourceartifactfixture.Fact()
 
-func exactTestFlowInstanceDescriptors(in []ActiveFlowInstanceDescriptor, workflowVersion string, sourceFact runtimecorrelation.SourceArtifactFact, runID string, sources ...semanticview.Source) []ActiveFlowInstanceDescriptor {
-	if sourceFact.Validate() != nil {
-		sourceFact = authorActivityTestSourceArtifactFact
-	}
-	bundleHash := sourceFact.BundleHash()
-	out := append([]ActiveFlowInstanceDescriptor(nil), in...)
-	for idx := range out {
-		if strings.TrimSpace(out[idx].RunID) == "" {
-			out[idx].RunID = strings.TrimSpace(runID)
-		}
-		if strings.TrimSpace(out[idx].FlowTemplate) == "" {
-			out[idx].FlowTemplate = runtimeflowidentity.RouteForInstancePath(out[idx].FlowInstance).ScopeKey
-		}
-		if strings.TrimSpace(out[idx].BundleHash) == "" {
-			out[idx].BundleHash = bundleHash
-		}
-		if strings.TrimSpace(out[idx].WorkflowVersion) == "" {
-			out[idx].WorkflowVersion = strings.TrimSpace(workflowVersion)
-		}
-		if out[idx].Identity == (runtimeflowidentity.Instance{}) && len(sources) == 1 {
-			out[idx].Identity = ConstructedFlowInstanceIdentityFixture(sources[0], out[idx].FlowTemplate, runtimeflowidentity.LogicalInstanceID(out[idx].FlowInstance), out[idx].RunID)
-			if out[idx].EntityID == "" {
-				out[idx].EntityID = out[idx].Identity.EntityID
-			}
-		}
-	}
-	return out
-}
-
 var authorActivityTestDifferentEventTypes = strings.Fields(`
 account.ready child/child.start child/grandchild/micro.done child/grandchild/micro.started child/inst-1/micro.started
 child/output.done custom.bad custom.claimed custom.completion_failure custom.direct custom.direct.empty custom.emitted
@@ -249,15 +220,6 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 		setTestConstructionSource(semanticview.Source)
 	}); ok {
 		receiver.setTestConstructionSource(opts.ContractBundle)
-	}
-	if receiver, ok := store.(interface {
-		setTestSemanticSource(runtimecorrelation.SourceArtifactFact, string)
-	}); ok {
-		workflowVersion := "1.0.0"
-		if opts.ContractBundle != nil && strings.TrimSpace(opts.ContractBundle.WorkflowVersion()) != "" {
-			workflowVersion = opts.ContractBundle.WorkflowVersion()
-		}
-		receiver.setTestSemanticSource(opts.SourceArtifactFact, workflowVersion)
 	}
 	if opts.WorkOwner == nil {
 		processOwner := worklifetime.NewProcess()

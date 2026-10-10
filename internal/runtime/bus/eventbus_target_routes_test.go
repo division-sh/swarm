@@ -41,6 +41,8 @@ import (
 type targetRouteMemoryStore struct {
 	mu                      sync.Mutex
 	instanceObservations    []runtimepipeline.FlowInstanceObservation
+	instanceIndexReads      int
+	instanceIndexErr        error
 	constructionIndexSource semanticview.Source
 	constructions           map[runtimeflowidentity.RunScopedFlowInstance]runtimepipeline.FlowConstructionPublicationEvidence
 	events                  map[string]events.Event

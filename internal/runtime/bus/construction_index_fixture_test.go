@@ -166,14 +166,16 @@ func (s *targetRouteMemoryStore) setTestConstructionSource(source semanticview.S
 
 func (s *targetRouteMemoryStore) LookupFlowInstance(ctx context.Context, request pipeline.FlowInstanceLookupRequest) (pipeline.FlowInstanceObservation, bool, error) {
 	s.mu.Lock()
-	reader := constructionIndexTestReader{observations: slices.Clone(s.instanceObservations)}
+	s.instanceIndexReads++
+	reader := constructionIndexTestReader{observations: slices.Clone(s.instanceObservations), err: s.instanceIndexErr}
 	s.mu.Unlock()
 	return reader.LookupFlowInstance(ctx, request)
 }
 
 func (s *targetRouteMemoryStore) ListFlowInstances(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error) {
 	s.mu.Lock()
-	reader := constructionIndexTestReader{observations: slices.Clone(s.instanceObservations)}
+	s.instanceIndexReads++
+	reader := constructionIndexTestReader{observations: slices.Clone(s.instanceObservations), err: s.instanceIndexErr}
 	s.mu.Unlock()
 	return reader.ListFlowInstances(ctx, scope)
 }

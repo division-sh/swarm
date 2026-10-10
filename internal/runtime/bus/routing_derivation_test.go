@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -393,33 +394,8 @@ func exactSubscriptionRouteSource(nodeSubscription string, agentSubscriptions []
 }
 
 type routePersistenceTestStore struct {
-	routes             map[string]runtimebus.FlowInstanceRouteRecord
-	flowInstances      []runtimebus.ActiveFlowInstanceDescriptor
-	targetOwners       []runtimebus.ActiveTargetDescriptor
-	stagedRoutes       []runtimebus.FlowInstanceRouteRecord
-	deliveries         map[string][]string
-	upsertErr          error
-	deleteErr          error
-	deleteCalls        []runtimeflowidentity.RunScopedFlowInstance
-	replaceCalls       []runtimeflowidentity.RunScopedFlowInstance
-	upsertCalls        int
-	upsertAfterWrite   bool
-	sourceArtifactFact runtimecorrelation.SourceArtifactFact
-	workflowVersion    string
-	constructionSource semanticview.Source
-}
-
-func (s *routePersistenceTestStore) setTestConstructionSource(source semanticview.Source) {
-	s.constructionSource = source
-}
-
-func (s *routePersistenceTestStore) setTestSemanticSource(fact runtimecorrelation.SourceArtifactFact, workflowVersion string) {
-	s.sourceArtifactFact = fact
-	s.workflowVersion = workflowVersion
-}
-
-func (s *routePersistenceTestStore) ListActiveFlowInstanceDescriptors(_ context.Context, runID string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID, s.constructionSource), nil
+	targetOwners []runtimebus.ActiveTargetDescriptor
+	deliveries   map[string][]string
 }
 
 func (s *routePersistenceTestStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
@@ -443,23 +419,6 @@ func (*routePersistenceTestStore) ListEventDeliveryRecipients(context.Context, s
 	return []string{}, nil
 }
 
-func (s *routePersistenceTestStore) UpsertFlowInstanceRoute(_ context.Context, route runtimebus.FlowInstanceRouteRecord) error {
-	s.upsertCalls++
-	s.stagedRoutes = append(s.stagedRoutes, route)
-	if s.routes == nil {
-		s.routes = map[string]runtimebus.FlowInstanceRouteRecord{}
-	}
-	s.routes[route.Identity.Key()] = route
-	if s.upsertAfterWrite && s.upsertErr != nil {
-		return s.upsertErr
-	}
-	if s.upsertErr != nil {
-		delete(s.routes, route.Identity.Key())
-		return s.upsertErr
-	}
-	return nil
-}
-
 func (s *routePersistenceTestStore) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
 	return fn(ctx)
 }
@@ -470,15 +429,22 @@ func TestEventBusCompiledFlowInstanceBindingDoesNotRewritePersistence(t *testing
 		Produces:     []string{"task.started"},
 		SubscribesTo: []string{"task.started"},
 	})
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
+	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "review", "inst-1", eventBusTestRunID)
+	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, "acct-1")
+	index := runtimebus.FlowInstanceIndexFixture(observed)
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source, Durable: runtimebus.DurableDependencies{Instances: index}})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	if got := eb.RouteTable().PubsubReceiverDefinitionsFixture(t, eventBusTestRunID, runtimebus.ConstructedFlowInstanceIdentityFixture(source, "review", "inst-1", eventBusTestRunID), "review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != testFlowNode(t, "review", "materialized-node").Key() {
 		t.Fatalf("compiled subscribers = %#v, want materialized-node declaration identity", got)
 	}
-	if store.upsertCalls != 0 || len(store.routes) != 0 {
-		t.Fatalf("compiled binding rewrote persistence: calls=%d routes=%#v", store.upsertCalls, store.routes)
+	lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, observed.SourceFact(), observed.Owner())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual, found, err := index.LookupFlowInstance(context.Background(), lookup); err != nil || !found || !reflect.DeepEqual(actual, observed) {
+		t.Fatalf("compiled binding changed native instance evidence: actual=%+v found=%t err=%v", actual, found, err)
 	}
 }
 
@@ -487,7 +453,10 @@ func TestCompiledFlowInstanceBindingRejectsUnknownCanonicalTemplateWithoutMutati
 	source := routeMaterializationNodeSource(t, "known", runtimecontracts.SystemNodeContract{
 		SubscribesTo: []string{"task.started"},
 	})
-	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
+	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "known", "inst-1", eventBusTestRunID)
+	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, "acct-1")
+	index := runtimebus.FlowInstanceIndexFixture(observed)
+	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source, Durable: runtimebus.DurableDependencies{Instances: index}})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -498,18 +467,13 @@ func TestCompiledFlowInstanceBindingRejectsUnknownCanonicalTemplateWithoutMutati
 	if err == nil || !strings.Contains(err.Error(), "construction identity has an unknown or inconsistent authored owner") {
 		t.Fatalf("compiled binding error = %v, want unknown canonical template", err)
 	}
-	if len(store.routes) != 0 || store.upsertCalls != 0 {
-		t.Fatalf("unknown template mutated route state: routes=%#v upserts=%d", store.routes, store.upsertCalls)
+	lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, observed.SourceFact(), observed.Owner())
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func (s *routePersistenceTestStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	s.deleteCalls = append(s.deleteCalls, identity)
-	if s.deleteErr != nil {
-		return s.deleteErr
+	if actual, found, err := index.LookupFlowInstance(context.Background(), lookup); err != nil || !found || !reflect.DeepEqual(actual, observed) {
+		t.Fatalf("unknown template changed native instance evidence: actual=%+v found=%t err=%v", actual, found, err)
 	}
-	delete(s.routes, identity.Key())
-	return nil
 }
 
 func TestIndexedFlowInstanceBindingRejectsCrossedExactOwners(t *testing.T) {
@@ -553,20 +517,13 @@ func TestIndexedFlowInstanceBindingRejectsCrossedExactOwners(t *testing.T) {
 	}
 }
 
-func (s *routePersistenceTestStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	out := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(s.routes))
-	for _, route := range s.routes {
-		out = append(out, route.Identity)
-	}
-	return out, nil
-}
-
 func TestEventBusIndexedFlowInstanceDeliversDeclaredAgentSubscriber(t *testing.T) {
 	store := &routePersistenceTestStore{}
 	bundle := routeMaterializationConfigVarBundle(t)
 	source := semanticview.Wrap(bundle)
 	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "operating", "11111111-1111-4111-8111-111111111111", eventBusTestRunID)
-	index := runtimebus.FlowInstanceIndexFixture(runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, instance.InstanceID))
+	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, instance.InstanceID)
+	index := runtimebus.FlowInstanceIndexFixture(observed)
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		Durable:        runtimebus.DurableDependencies{Instances: index},
@@ -596,8 +553,12 @@ func TestEventBusIndexedFlowInstanceDeliversDeclaredAgentSubscriber(t *testing.T
 	if len(resolved) != 1 || resolved[0].AgentPlan != agentPlan {
 		t.Fatalf("active agent route = %#v, want exact identity %s", resolved, agentIdentity)
 	}
-	if len(store.routes) != 0 || store.upsertCalls != 0 || len(store.replaceCalls) != 0 {
-		t.Fatalf("compiled binding wrote retired route mirror: routes=%#v upserts=%d replacements=%#v", store.routes, store.upsertCalls, store.replaceCalls)
+	lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, observed.SourceFact(), observed.Owner())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual, found, err := index.LookupFlowInstance(context.Background(), lookup); err != nil || !found || !reflect.DeepEqual(actual, observed) {
+		t.Fatalf("compiled agent binding changed native instance evidence: actual=%+v found=%t err=%v", actual, found, err)
 	}
 	evt := eventtest.ExistingRunRootIngressWithRoutingSource(eventtest.UUID("event-rendered-route-delivery"),
 		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"), "", "", nil, 0, eventBusTestRunID,

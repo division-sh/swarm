@@ -86,7 +86,6 @@ type claudeAttemptProofStore interface {
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimebus.ActiveAgentDescriptorLister
-	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimerunlifecycle.StandingRestartDispositionReader
 	runtimebus.PreparedPublishEventReader

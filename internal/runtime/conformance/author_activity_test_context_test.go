@@ -299,7 +299,6 @@ type conformanceDurableEventBusStore interface {
 	runtimepipeline.DecisionCardDraftExpiry
 	runtimepipeline.HumanTaskExpiry
 	runtimebus.ActiveAgentDescriptorLister
-	runtimebus.ActiveFlowInstanceDescriptorLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimepipeline.WorkflowEmitFeedbackOwner
 	runtimebus.PreparedPublishEventReader

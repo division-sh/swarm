@@ -85,22 +85,11 @@ func (s providerOutputAuthorizedTestSource) FlowInputEventPin(flowID, event stri
 
 type connectRoutePlanDescriptorStore struct {
 	*targetRouteMemoryStore
-	flowInstances               []ActiveFlowInstanceDescriptor
-	flowInstanceDescriptorCalls int
-	flowInstanceDescriptorErr   error
-	sourceArtifactFact          runtimecorrelation.SourceArtifactFact
-	workflowVersion             string
-	constructionSource          semanticview.Source
+	flowInstances []ActiveFlowInstanceDescriptor
 }
 
 func (s *connectRoutePlanDescriptorStore) setTestConstructionSource(source semanticview.Source) {
-	s.constructionSource = source
 	s.targetRouteMemoryStore.setTestConstructionSource(source)
-}
-
-func (s *connectRoutePlanDescriptorStore) setTestSemanticSource(fact runtimecorrelation.SourceArtifactFact, workflowVersion string) {
-	s.sourceArtifactFact = fact
-	s.workflowVersion = workflowVersion
 }
 
 type connectRoutePlanMutationStore struct {
@@ -116,11 +105,6 @@ type connectRoutePlanLifecycleStore struct {
 type connectRoutePlanConcurrentLifecycleStore struct {
 	*connectRoutePlanLifecycleStore
 	mu sync.Mutex
-}
-
-type connectRoutePlanForbiddenDescriptorStore struct {
-	*connectRoutePlanLifecycleStore
-	descriptorReads int
 }
 
 type apiEventPublicationMemoryStore struct {
@@ -879,14 +863,6 @@ func connectReceiverPinLegalSource(t testing.TB, shape string) semanticview.Sour
 	}, connects))
 }
 
-func (s *connectRoutePlanDescriptorStore) ListActiveFlowInstanceDescriptors(_ context.Context, runID string) ([]ActiveFlowInstanceDescriptor, error) {
-	s.flowInstanceDescriptorCalls++
-	if s.flowInstanceDescriptorErr != nil {
-		return nil, s.flowInstanceDescriptorErr
-	}
-	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID, s.constructionSource), nil
-}
-
 func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 	fields, err := testFlowActivationConstructorFields(req)
 	if err != nil {
@@ -912,18 +888,6 @@ func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runti
 		return s.failAfterDescriptorWithoutRoute
 	}
 	return nil
-}
-
-func (s *connectRoutePlanConcurrentLifecycleStore) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]ActiveFlowInstanceDescriptor, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.flowInstanceDescriptorCalls++
-	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID, s.constructionSource), nil
-}
-
-func (s *connectRoutePlanForbiddenDescriptorStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]ActiveFlowInstanceDescriptor, error) {
-	s.descriptorReads++
-	return nil, errors.New("retired descriptor membership read")
 }
 
 func (s *connectRoutePlanConcurrentLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -2186,13 +2150,9 @@ func TestEventRouteSettlementDuplicateAndRecoveryPreserveOriginalFact(t *testing
 	}
 
 	store.flowInstances = nil
-	store.flowInstanceDescriptorErr = errors.New("descriptor lookup must not run for a durable duplicate")
-	store.flowInstanceDescriptorCalls = 0
+	store.refuseInstanceIndexReads(t)
 	if err := write(); err != nil {
-		t.Fatalf("duplicate WriteOutbox after descriptor failure: %v", err)
-	}
-	if got := store.flowInstanceDescriptorCalls; got != 0 {
-		t.Fatalf("duplicate descriptor calls = %d, want durable identity short-circuit", got)
+		t.Fatalf("duplicate WriteOutbox with instance-index reads refused: %v", err)
 	}
 	if got := store.events[eventID].TargetRoute().Normalized(); got != wantTarget.Normalized() {
 		t.Fatalf("duplicate persisted target = %#v, want unchanged %#v", got, wantTarget)
@@ -2456,9 +2416,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 		FlowInstance:  "consumer/drift",
 		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 	}}
-	store.flowInstanceDescriptorCalls = 0
 	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "drift")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "consumer", "drift", busInternalTestRunID, eventtest.UUID("ent-drift"))})
-	store.flowInstanceDescriptorCalls = 0
+	store.refuseInstanceIndexReads(t)
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
 	}, nil); err != nil {
@@ -2469,18 +2428,13 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 		t.Fatalf("replayed delivery target = flow_instance:%q entity:%q, want persisted lifecycle-created %q/%q",
 			replayed.FlowInstance(), replayed.EntityID(), activation.Instance.InstancePath, activation.Instance.EntityID)
 	}
-	if got := store.flowInstanceDescriptorCalls; got != 0 {
-		t.Fatalf("replay descriptor calls = %d, want 0 because lifecycle-created persisted route/scope is authoritative", got)
-	}
 }
 
 func TestCompiledConnectEvaluationDoesNotRequireLegacyFlowDescriptors(t *testing.T) {
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, false)
-	store := &connectRoutePlanForbiddenDescriptorStore{
-		connectRoutePlanLifecycleStore: &connectRoutePlanLifecycleStore{
-			connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
-				targetRouteMemoryStore: newTargetRouteMemoryStore(),
-			},
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -2501,8 +2455,8 @@ func TestCompiledConnectEvaluationDoesNotRequireLegacyFlowDescriptors(t *testing
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	if store.descriptorReads != 0 {
-		t.Fatalf("native selection read retired descriptor membership %d times", store.descriptorReads)
+	if store.instanceIndexReads == 0 {
+		t.Fatal("native selection did not consume the instance index")
 	}
 	if got := len(store.activations); got != 1 {
 		t.Fatalf("activations = %d, want exactly one post-fence mutation", got)
@@ -2679,7 +2633,7 @@ func TestCommittedReplayReusesPersistedSyntheticInstanceSourceWithoutReminting(t
 	}
 
 	replayTarget := subscribeInternalDeliveriesForTest(t, eb, want.Recipient.ID())
-	store.flowInstanceDescriptorCalls = 0
+	store.refuseInstanceIndexReads(t)
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish same event retry: %v", err)
 	}
@@ -3093,7 +3047,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "drift")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "account", "drift", busInternalTestRunID, eventtest.UUID("ent-drift"))})
 	replayTarget := subscribeInternalDeliveriesForTest(t, restarted, want.Recipient.ID())
 	hostileReplacement := subscribeInternalDeliveriesForTest(t, restarted, "account-node-drift")
-	store.flowInstanceDescriptorCalls = 0
+	store.refuseInstanceIndexReads(t)
 	if _, err := restarted.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
 	}, nil); err != nil {
@@ -3102,9 +3056,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	replayed := requireBusEvent(t, replayTarget, "select resolution committed replay")
 	if replayed.FlowInstance() != "account/one" || replayed.EntityID() != eventtest.UUID("ent-1") {
 		t.Fatalf("replayed delivery target = flow_instance:%q entity:%q, want persisted account/one ent-1", replayed.FlowInstance(), replayed.EntityID())
-	}
-	if got := store.flowInstanceDescriptorCalls; got != 0 {
-		t.Fatalf("replay descriptor calls = %d, want 0 because persisted route/scope is authoritative", got)
 	}
 	requireNoConnectRoutePlanBusEvent(t, hostileReplacement, "replacement topology must not capture historical replay")
 	if routes := store.routes[eventID]; len(routes) != 1 || !reflect.DeepEqual(routes[0], committedRoute) {
@@ -3351,9 +3302,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 		FlowInstance:  "account/drift",
 		AddressFields: map[string]string{"entity.account_id": "acct-2"},
 	}}
-	store.flowInstanceDescriptorCalls = 0
 	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "drift")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "account", "drift", busInternalTestRunID, eventtest.UUID("ent-drift"))})
-	store.flowInstanceDescriptorCalls = 0
+	store.refuseInstanceIndexReads(t)
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: missing, Scope: runtimepipelineobligation.ScopeSubscribed,
 	}, nil); err != nil {
@@ -3363,9 +3313,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {
 		t.Fatalf("replayed target = flow_instance:%q entity:%q, want persisted %s/%s",
 			replayed.FlowInstance(), replayed.EntityID(), activation.Instance.InstancePath, activation.Instance.EntityID)
-	}
-	if got := store.flowInstanceDescriptorCalls; got != 0 {
-		t.Fatalf("replay descriptor calls = %d, want 0 because persisted route/scope is authoritative", got)
 	}
 }
 
@@ -3818,7 +3765,7 @@ func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryIsNoOpAndExpl
 	}
 	activation := store.activations[0]
 	replayTarget := subscribeInternalDeliveriesForTest(t, eb, testFlowNode(t, "consumer", "consumer-node").Key())
-	store.flowInstanceDescriptorCalls = 0
+	store.refuseInstanceIndexReads(t)
 
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish retry: %v", err)
@@ -4017,7 +3964,7 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 		FlowInstance:  "consumer/two",
 		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 	}}
-	store.flowInstanceDescriptorCalls = 0
+	store.refuseInstanceIndexReads(t)
 
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
@@ -4034,9 +3981,6 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 		evt := delivery.Event()
 		t.Fatalf("descriptor drift recipient received replay: flow_instance:%q entity:%q", evt.FlowInstance(), evt.EntityID())
 	default:
-	}
-	if got := store.flowInstanceDescriptorCalls; got != 0 {
-		t.Fatalf("replay descriptor calls = %d, want 0 because persisted route/scope is authoritative", got)
 	}
 }
 

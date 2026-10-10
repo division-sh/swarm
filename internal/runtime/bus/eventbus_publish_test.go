@@ -1097,10 +1097,6 @@ type routeSetEventStore struct {
 	routes map[string][]events.DeliveryRoute
 }
 
-func (s *routeSetEventStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-
 type replayCapableAtomicStoreMissingScope struct {
 	mu         sync.Mutex
 	deliveries []string

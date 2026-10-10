@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
@@ -20,21 +19,8 @@ import (
 
 type finalFlowInstanceAuthoringLifecycleStore struct {
 	*targetRouteMemoryStore
-	flowInstances               []ActiveFlowInstanceDescriptor
-	flowInstanceDescriptorCalls int
-	activations                 []runtimepipeline.FlowInstanceActivationRequest
-	sourceArtifactFact          runtimecorrelation.SourceArtifactFact
-	workflowVersion             string
-}
-
-func (s *finalFlowInstanceAuthoringLifecycleStore) ListActiveFlowInstanceDescriptors(_ context.Context, runID string) ([]ActiveFlowInstanceDescriptor, error) {
-	s.flowInstanceDescriptorCalls++
-	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID), nil
-}
-
-func (s *finalFlowInstanceAuthoringLifecycleStore) setTestSemanticSource(fact runtimecorrelation.SourceArtifactFact, workflowVersion string) {
-	s.sourceArtifactFact = fact
-	s.workflowVersion = workflowVersion
+	flowInstances []ActiveFlowInstanceDescriptor
+	activations   []runtimepipeline.FlowInstanceActivationRequest
 }
 
 func (s *finalFlowInstanceAuthoringLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -161,8 +147,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 		FlowTemplate:  finalflowinstanceauthoring.TemplateFlowID,
 		AddressFields: map[string]string{"entity.account_id": "acct-42"},
 	}}
-	store.flowInstanceDescriptorCalls = 0
-	store.flowInstanceDescriptorCalls = 0
+	store.refuseInstanceIndexReads(t)
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
 	}, nil); err != nil {
@@ -172,9 +157,6 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {
 		t.Fatalf("drift replay target = flow_instance:%q entity:%q, want persisted %q/%q",
 			replayed.FlowInstance(), replayed.EntityID(), activation.Instance.InstancePath, activation.Instance.EntityID)
-	}
-	if got := store.flowInstanceDescriptorCalls; got != 0 {
-		t.Fatalf("replay descriptor calls = %d, want 0 because persisted delivery target route is authoritative", got)
 	}
 }
 
