@@ -784,11 +784,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 }
 
 func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.Event, publication eventBusCommitPublishPlan) (RoutePlan, error) {
-	planner := eb.deliveryPlanner
-	planner.recipientPolicy.prospective = publication.prospective
-	planner.recipientPolicy.runProposal = publication.runProposal
-	planner.connectPlanner.lifecycle.runProposal = publication.runProposal
-	planner.routeResolver.resolveRoutedSubscribers = planner.connectPlanner.resolvePubsubSubscribers
+	planner := eb.publicationDeliveryPlanner(publication.prospective, publication.runProposal)
 	planRoutes := func(context.Context, events.Event) (RoutePlan, error) {
 		return eb.planSubscribedRoutePlanWithPlanner(withClosedPublicationPlanning(ctx), evt, true, planner)
 	}
@@ -2694,15 +2690,26 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 			return result, nil
 		}
 	}
-	proposal, err := eb.preparePublicationRunProposal(ictx, admitted, runtimepipeline.FlowInstanceRunProposal{})
-	if err != nil {
-		return PublishRecipientPlan{}, err
-	}
+	return eb.previewFreshPublicationRecipients(ictx, admitted)
+}
+
+func (eb *EventBus) publicationDeliveryPlanner(prospective runtimepipeline.PreparedWorkflowPublicationState, proposal runtimepipeline.FlowInstanceRunProposal) deliveryPlanner {
 	planner := eb.deliveryPlanner
+	planner.recipientPolicy.prospective = prospective
 	planner.recipientPolicy.runProposal = proposal
 	planner.connectPlanner.lifecycle.runProposal = proposal
 	planner.routeResolver.resolveRoutedSubscribers = planner.connectPlanner.resolvePubsubSubscribers
-	plan, err := eb.planSubscribedRoutePlanWithPlanner(withConnectPlanningPreview(ictx), evt, false, planner)
+	return planner
+}
+
+func (eb *EventBus) previewFreshPublicationRecipients(ctx context.Context, admitted events.AdmittedEvent) (PublishRecipientPlan, error) {
+	proposal, err := eb.preparePublicationRunProposal(ctx, admitted, runtimepipeline.FlowInstanceRunProposal{})
+	if err != nil {
+		return PublishRecipientPlan{}, err
+	}
+	planner := eb.publicationDeliveryPlanner(runtimepipeline.PreparedWorkflowPublicationState{}, proposal)
+	evt := admitted.Event()
+	plan, err := eb.planSubscribedRoutePlanWithPlanner(withConnectPlanningPreview(ctx), evt, false, planner)
 	if err != nil {
 		return PublishRecipientPlan{}, err
 	}
