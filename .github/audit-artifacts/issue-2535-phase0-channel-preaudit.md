@@ -1357,3 +1357,50 @@ run fresh whole Local core22/22, all six complete channel units and six named
 supplements (worker race x3), plus exact-head hosted full CI. No red-core or
 diagnostic receipt carry; server2 allocation remains explicit after D joins.
 The final-head audit and both local/hosted success still precede merge approval.
+
+## E2E-13 Predecessor Native Settlement Gate
+
+Hosted38015134533 at1a43 FAILS E2E-13/explicit_postgres with3 registrations and
+2 deliveries despite the explicit en flag. Reviewer-G5477103531/6092686116
+identifies a missed UPSTREAM fixture gate: public connect waits for its
+confirmation and general readiness, not native installation or standing-card
+settlement. Reconnect's credential-write crash can therefore interrupt the
+predecessor's unrelated provider write. No native uncertainty retry/clearing,
+cadence change, deadline waiver or production repair is authorized.
+
+The actual hosted native refusal is uncertain/admin-recovery, not missing
+language: predecessor e8d971a0 and successor3fae0e22 repeatedly refuse delivery
+7fb71e7f through the entire15s bound. CI executes merge556d93a2 (parents44c and
+1a43), while local focused tests used the source head; Go1.25.0 versus1.25.5
+and different scheduling are recorded, not asserted to be causal. The exact
+hosted pre-crash database/payload snapshot was not retained.
+
+A disposable1a43 diagnostic uses the existing provider command-apply barrier,
+existing native install/setting readback helpers, public onboarding readback
+and the selected delivery observer. On BOTH stores it proves immediately
+before arm AND at the credential cut: the exact predecessor install attempt
+is launched, setting planned, readback absent and client_language en. After
+joined shutdown the SAME operation/setting is outcome_uncertain/uncertain;
+successor readback remains invalid, and both actual delivered texts are
+Swarm channel connected. for chat7213. The same standing-card source persists
+in rendered state with no receipt; releasing the fake provider permits one
+command write but cannot manufacture acknowledgment or clear uncertainty.
+The unchanged3/3 assertion then fails on both stores. This is a deterministic
+real pending-write counterexample, not a blind rerun or qualification credit.
+It demonstrates the fixture race; exact hosted pre-cut ordering remains
+unobserved and is not reconstructed as historical fact.
+
+The authorized fixture-only repair waits for the exact predecessor's PUBLIC
+qualified native-inbox projection (which requires the installed/readback
+setting) and existing exact standing-card receipt helper before barrier.Arm.
+Reuse the existing selected observer connection for E2E-13/14 instead of adding
+another raw constructor/query site. Keep explicit language, actual credential
+crash, both-store restart/identity predicates,15s post-recovery bound, exactly
+three distinct delivered effects and one card. No runtime/schema/spec-semantic,
+unit/root/registry, legacy, framework, baseline or vendor change.
+
+Focused corrected full E2E-13 under race on both stores and the complete
+serveapp-channel unit precede renewed exact-head core22/all12 supplements and
+hosted full. Any settled-before-crash setting that later becomes uncertain
+requires STOP and a bounded native-owner runtime gate. Existing2353/harness
+watchlist owns this second fixture manifestation; no new issue or closure claim.
