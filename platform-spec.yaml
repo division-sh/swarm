@@ -11265,6 +11265,14 @@ tool_model:
         account requires its existing database and exactly one matching SDK account; missing, multiple, malformed
         or mismatched accounts refuse without deletion, replacement pairing or first-account selection. Bootstrap
         may create unpaired private state but grants no account admission, operator identity or executable readiness.
+        The private persistence owner prepares genuine SDK prekeys in one bounded FULL-durability transaction,
+        using the pinned SDK generation and transaction APIs rather than copying its implementation or seeding
+        uploaded keys. Batch generation, single-key generation and decryption transactions share owner-local
+        serialization before acquiring SDK transaction/key locks, including freshly loaded handles. Nested SDK
+        work joins its still-active original transaction; foreign or expired transaction contexts refuse.
+        A standalone preparation returns keys only after commit and returns no usable keys on cancellation or
+        write/commit failure. Failed or interrupted preparation cannot expose a durably partial batch. Complete
+        SDK-store joining includes generation, transaction settlement and waiting callers before database close.
         One client occurrence owns the state at a time. Its complete callback, work and SDK-store join precedes a
         successor occurrence or database close. Failed join or close retains possession and responsibility, while
         ordinary retirement preserves every pairing file. Private descriptors close before possession is released.

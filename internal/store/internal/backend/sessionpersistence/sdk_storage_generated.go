@@ -43,12 +43,6 @@ func (s *sdkStorage) DeleteOldOutgoingEvents(ctx context.Context) error {
 func (s *sdkStorage) DeleteSession(ctx context.Context, address string) error {
 	return s.session.DeleteSession(ctx, address)
 }
-func (s *sdkStorage) DoDecryptionTxn(ctx context.Context, fn func(context.Context) error) error {
-	return s.session.DoDecryptionTxn(ctx, fn)
-}
-func (s *sdkStorage) GenOnePreKey(ctx context.Context) (*keys.PreKey, error) {
-	return s.session.GenOnePreKey(ctx)
-}
 func (s *sdkStorage) GetAllAppStateSyncKeys(ctx context.Context) ([]*store.AppStateSyncKey, error) {
 	return s.session.GetAllAppStateSyncKeys(ctx)
 }
@@ -90,9 +84,6 @@ func (s *sdkStorage) GetMessageSecret(ctx context.Context, chat types.JID, sende
 }
 func (s *sdkStorage) GetNCTSalt(ctx context.Context) ([]byte, error) {
 	return s.session.GetNCTSalt(ctx)
-}
-func (s *sdkStorage) GetOrGenPreKeys(ctx context.Context, count uint32) ([]*keys.PreKey, error) {
-	return s.session.GetOrGenPreKeys(ctx, count)
 }
 func (s *sdkStorage) GetOutgoingEvent(ctx context.Context, chatJID types.JID, altChatJID types.JID, id types.MessageID) (string, []byte, error) {
 	return s.session.GetOutgoingEvent(ctx, chatJID, altChatJID, id)
