@@ -592,11 +592,12 @@ type serveConnectedChannelReadiness struct {
 	credentials *runtimecredentials.SnapshotOwner
 	effects     runtimeeffects.OutcomeStore
 	ingress     *runtimepublicingress.ReadinessOwner
+	sessions    serveSessionBootstrapOwner
 	now         func() time.Time
 }
 
 func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) (channelonboarding.ConnectedChannelReadiness, bool, error) {
-	if o == nil || o.manager == nil || o.store == nil || o.identities == nil || o.credentials == nil || o.effects == nil || o.ingress == nil {
+	if o == nil || o.manager == nil || o.store == nil || o.identities == nil || o.credentials == nil || o.effects == nil {
 		return channelonboarding.ConnectedChannelReadiness{}, false, fmt.Errorf("connected channel readiness dependencies are incomplete")
 	}
 	activation, err := o.store.GetConnectedChannelActivation(ctx, op.SlotKey)
@@ -642,6 +643,18 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 	if !planCurrent {
 		facts.PlanGeneration = plangeneration.Generation{}
 	}
+	if activation.Posture == channelonboarding.ActivationSessionConnection {
+		current, err := o.observeSessionReadiness(ctx, op, activation, &facts)
+		if err != nil {
+			return channelonboarding.ConnectedChannelReadiness{}, false, err
+		}
+		defer facts.SessionAuthority.CloseExecution()
+		if !current {
+			return channelonboarding.ConnectedChannelReadiness{Reason: channelonboarding.ReadinessSessionUnavailable,
+				Coordinate: activation.Coordinate, ActivationRevision: activation.Revision, BindingRevision: activation.BindingRevision,
+				ActivationGeneration: facts.ActivationGeneration.Diagnostic(), ObservedAt: facts.ObservedAt}, true, nil
+		}
+	}
 
 	binding, proofCurrent, bindingErr := o.identities.CurrentBindingReadiness(ctx, activation.Interface)
 	if bindingErr != nil {
@@ -653,6 +666,11 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 		facts.ExpectedBindingRevision = binding.Revision
 		facts.ProofCurrent = proofCurrent
 		facts.ExpectedProofRevision = binding.ProofRevision
+		if activation.Posture == channelonboarding.ActivationSessionConnection &&
+			(binding.PrincipalID != activation.PrincipalID || binding.ProviderAuthority.Kind != operatorchannel.ProviderAuthoritySession ||
+				binding.ProviderAuthority.Session != activation.SessionAccount) {
+			facts.ExpectedBindingRevision = 0
+		}
 	}
 
 	credentialProjection := o.credentials.BeginSecretBindingProjection()
@@ -677,6 +695,9 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 
 	switch activation.Posture {
 	case channelonboarding.ActivationWebhookRegistration:
+		if o.ingress == nil {
+			return channelonboarding.ConnectedChannelReadiness{}, false, fmt.Errorf("webhook channel readiness requires its ingress owner")
+		}
 		registration, found := o.ingress.ChannelRegistrationCurrent(ctx, now, planID, activation.TargetSelector, activation.Provider)
 		if found && registration.Exposure != nil {
 			facts.ExposureGeneration = registration.Exposure.GenerationID
@@ -684,8 +705,6 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 			facts.RegistrationActivationGeneration = registration.ActivationGeneration
 			facts.RegistrationCurrent = registration.Current && registration.ActivationGeneration.Equal(facts.ActivationGeneration)
 		}
-	case channelonboarding.ActivationSessionConnection:
-		return channelonboarding.ConnectedChannelReadiness{Reason: channelonboarding.ReadinessSessionUnavailable, Coordinate: activation.Coordinate, ObservedAt: now}, true, nil
 	}
 	projection := channelonboarding.ProjectReadiness(facts)
 	projection.NativeInboxRequired = nativeRequired
@@ -701,6 +720,27 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 	}
 	projection.NativeInbox = &qualification
 	return projection, true, nil
+}
+
+func (o *serveConnectedChannelReadiness) observeSessionReadiness(ctx context.Context, op channelonboarding.Operation,
+	activation channelonboarding.ConnectedChannelActivation, facts *channelonboarding.ReadinessFacts,
+) (bool, error) {
+	if o.sessions == nil {
+		return false, nil
+	}
+	if activation.OperationID != op.OperationID || activation.PrincipalID != op.PrincipalID ||
+		activation.Posture != op.Posture || activation.Provider != op.Provider || activation.Interface.Normalized() != op.Interface.Normalized() ||
+		activation.Revision != op.ActivationRevision || activation.BindingRevision != op.BindingRevision ||
+		activation.SessionAccount != op.SessionAccount || !activation.Coordinate.Matches(op.Coordinate) {
+		return false, channelonboarding.ErrRevisionConflict
+	}
+	provider, observed, current, err := o.sessions.ObserveSession(ctx, op)
+	if err != nil || !current {
+		return false, err
+	}
+	facts.SessionAuthority, facts.SessionObservation = provider, &observed
+	facts.ObservedAt = observed.ObservedAt
+	return true, nil
 }
 
 func (o *serveConnectedChannelReadiness) observedAt() time.Time {

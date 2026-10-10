@@ -596,8 +596,8 @@ typed-process-local	callback-type	typed	internal/runtime/inbound.go	InboundGatew
 typed-process-local	callback-type	typed	internal/runtime/inbound.go	InboundGateway	field:shutdownAdmissionClosed	func() bool
 typed-process-local	callback-type	typed	internal/runtime/inbound.go	NewInboundGateway	param:shutdownAdmissionClosed	func() bool
 typed-process-local	callback-type	typed	internal/runtime/inbound.go	projectInboundPublication	param:selectBare	func(github.com/division-sh/swarm/internal/operatorchannel.InboundText) (bool, error)
-typed-process-local	callback-type	typed	internal/runtime/inbound.go	projectOperatorInboundOutput	param:selectBare	func(github.com/division-sh/swarm/internal/operatorchannel.InboundText) (bool, error)
-typed-process-local	callback-type	typed	internal/runtime/inbound.go	projectOperatorTextOutput	param:selectBare	func(github.com/division-sh/swarm/internal/operatorchannel.InboundText) (bool, error)
+typed-process-local	callback-type	typed	internal/runtime/inboundpublication/operator_channel.go	ProjectOperatorOutput	param:selectBare	func(github.com/division-sh/swarm/internal/operatorchannel.InboundText) (bool, error)
+typed-process-local	callback-type	typed	internal/runtime/inboundpublication/operator_channel.go	projectOperatorText	param:selectBare	func(github.com/division-sh/swarm/internal/operatorchannel.InboundText) (bool, error)
 typed-process-local	callback-type	typed	internal/runtime/inboundpublication/inboundpublication.go	(github.com/division-sh/swarm/internal/runtime/inboundpublication.CommitCommand).WithNativeLifetime	result:#2	func()
 typed-process-local	callback-type	typed	internal/runtime/inboundpublication/inboundpublication.go	nativeCommitContext	field:cancel	context.CancelFunc
 typed-process-local	interface-method	typed	internal/runtime/inboundpublication/inboundpublication.go	Runner	method:CommitInboundPublication	func(ctx context.Context, command github.com/division-sh/swarm/internal/runtime/inboundpublication.CommitCommand) (github.com/division-sh/swarm/internal/runtime/inboundpublication.CommitResult, error)

@@ -20,6 +20,7 @@ type serveSessionBootstrapOwner interface {
 	channelonboarding.SessionBootstrapOwner
 	operatorchannel.CredentialCurrentness
 	operatorchannel.SessionAdmissionOwner
+	ObserveSession(context.Context, channelonboarding.Operation) (operatorchannel.ProviderAuthority, operatorchannel.SessionConnectionObservation, bool, error)
 }
 
 // One private platform constructor, initialized only by the compiled native

@@ -1501,6 +1501,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
 		native:      stores.ChannelNative(),
 		credentials: providerCredentialOwner, effects: confirmationEffects, ingress: ready,
+		sessions: sessionBootstrap,
 	}
 	channelOnboarding, err := channelonboarding.NewService(channelonboarding.ServiceOptions{
 		Store: channelOnboardingStore, Identities: operatorChannels, Credentials: credentialWriter,
