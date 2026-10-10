@@ -370,9 +370,10 @@ func selectedContractConstructedReadinessTestEntity(t *testing.T, source semanti
 	if err := instance.ValidateConstruction(source, selectedContractAgentTestRunID); err != nil {
 		t.Fatal(err)
 	}
-	configValues := map[string]any{}
+	// Initial fields are authored separately from current-at-cut state and IDs.
+	initialFields := map[string]any{}
 	if scope.Mode == "template" {
-		configValues["worker_id"] = "recorded-business-key"
+		initialFields["worker_id"] = "recorded-business-key"
 	}
 	payload, err := runtimepipeline.WorkflowInstanceHeaderPayloadForIdentity(instance, source.WorkflowVersion())
 	if err != nil {
@@ -383,9 +384,37 @@ func selectedContractConstructedReadinessTestEntity(t *testing.T, source semanti
 		t.Fatal(err)
 	}
 	entered := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("readiness fixture requires its immutable source bundle")
+	}
+	hash, err := runtimecontracts.BundleHash(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	construction := runtimepipeline.FlowInstanceActivationPlan{
+		Identity: instance, OccurredAt: entered,
+		Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+			Identity: instance, RunID: selectedContractAgentTestRunID, BundleHash: hash,
+			WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
+		},
+		CreatingInput: runtimepipeline.FlowConstructionInput{},
+		Instance: runtimepipeline.WorkflowInstance{
+			InstanceID: instance.InstanceID, StorageRef: instance.InstancePath, EntityID: instance.EntityID,
+			EntityType: entityType, InstanceKind: scope.Mode, Mode: scope.Mode, Status: "active",
+			ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance,
+			ParentEntityID: instance.ParentEntityID, WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(),
+			CurrentState: initial.ID(), StageDefined: graph.StageCount() != 0, Fields: initialFields,
+			EnteredStageAt: entered, CreatedAt: entered,
+		},
+	}
+	record, err := construction.PersistenceRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
 	return runfork.RunForkEntityState{EntityID: id, CurrentState: initial.ID(), EnteredStateAt: &entered,
 		MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
-			FlowConfig:   config,
+			FlowConfig: config, InitialMaterialization: record.InitialMaterialization,
 			Owner:        runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
 			Source:       runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 			FlowInstance: path, EntityType: entityType, FlowTemplate: flowID, Mode: scope.Mode,
