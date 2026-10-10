@@ -126,6 +126,8 @@ func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnap
 		FlowConfig:     append([]byte(nil), sourceState.FlowConfig...),
 		Owner:          runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
 		FlowInstance:   flowInstance,
+		ParentInstance: sourceState.ParentInstance,
+		InstanceKey:    sourceState.InstanceKey,
 		EntityType:     entityType,
 		Slug:           strings.TrimSpace(sourceState.Slug),
 		Name:           strings.TrimSpace(sourceState.Name),
@@ -139,6 +141,56 @@ func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnap
 		TerminatedAt:   sourceState.TerminatedAt,
 		EnteredStateAt: sourceState.EnteredStateAt,
 	}, "", true
+}
+
+// The relational parent foreign key requires the admitted parent header first.
+// Order by recorded construction facts, never by path shape or entity hashes.
+func runForkEntitiesInConstructionOrder(entities []runfork.RunForkEntityState) ([]runfork.RunForkEntityState, error) {
+	byPath := make(map[string]int, len(entities))
+	for index, entity := range entities {
+		metadata := entity.MaterializationMetadata
+		if metadata == nil {
+			return nil, fmt.Errorf("historical entity %s requires admitted metadata", entity.EntityID)
+		}
+		if metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance {
+			continue
+		}
+		if _, duplicate := byPath[metadata.FlowInstance]; duplicate {
+			return nil, fmt.Errorf("historical construction has duplicate path %s", metadata.FlowInstance)
+		}
+		byPath[metadata.FlowInstance] = index
+	}
+	visiting, done := make([]bool, len(entities)), make([]bool, len(entities))
+	ordered := make([]runfork.RunForkEntityState, 0, len(entities))
+	var visit func(int) error
+	visit = func(index int) error {
+		if done[index] {
+			return nil
+		}
+		if visiting[index] {
+			return fmt.Errorf("historical construction has cyclic parent ancestry")
+		}
+		visiting[index] = true
+		metadata := entities[index].MaterializationMetadata
+		if metadata.ParentInstance != "" {
+			parent, found := byPath[metadata.ParentInstance]
+			if !found {
+				return fmt.Errorf("historical construction %s has no admitted parent %s", metadata.FlowInstance, metadata.ParentInstance)
+			}
+			if err := visit(parent); err != nil {
+				return err
+			}
+		}
+		done[index] = true
+		ordered = append(ordered, entities[index])
+		return nil
+	}
+	for index := range entities {
+		if err := visit(index); err != nil {
+			return nil, err
+		}
+	}
+	return ordered, nil
 }
 
 func validateRunForkEntityMetadataOwners(snapshot *runForkRevisionSnapshot) error {

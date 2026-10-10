@@ -141,6 +141,7 @@ type PipelinePostgresOwner struct {
 	events                 EventCommitOwner
 	resourceData           *storedurabledata.Owner
 	selectedFork           SelectedForkCommitTxOwner
+	historicalInstances    HistoricalFlowInstanceReader
 	genericSchedules       GenericScheduleTxOwner
 	turnTerminations       WorkflowTurnTerminationTxOwner
 }
@@ -165,6 +166,7 @@ type PipelineSQLiteOwner struct {
 	events                 EventCommitOwner
 	resourceData           *storedurabledata.Owner
 	selectedFork           SelectedForkCommitTxOwner
+	historicalInstances    HistoricalFlowInstanceReader
 	genericSchedules       GenericScheduleTxOwner
 	turnTerminations       WorkflowTurnTerminationTxOwner
 	nowFn                  func() time.Time

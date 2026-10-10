@@ -195,6 +195,8 @@ type RunForkMaterializedEntitySnapshotMetadata struct {
 	FlowConfig     json.RawMessage `json:"flow_config,omitempty"`
 	Owner          string          `json:"owner"`
 	FlowInstance   string          `json:"flow_instance"`
+	ParentInstance string          `json:"parent_instance"`
+	InstanceKey    string          `json:"instance_key"`
 	EntityType     string          `json:"entity_type"`
 	Slug           string          `json:"slug,omitempty"`
 	Name           string          `json:"name,omitempty"`
