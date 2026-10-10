@@ -112,11 +112,8 @@ type scopedTestDurableStore interface {
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
-	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteTopologyPersistence
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
@@ -163,9 +160,8 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 		RunLifecycle:             eventStore,
 		DeliveryLifecycle:        eventStore,
 
-		ActiveAgents:          eventStore,
-		ActiveFlows:           eventStore,
-		TargetOwners:          eventStore,
+		ActiveAgents: eventStore,
+
 		PreparedEvents:        eventStore,
 		TargetFailureRecorder: eventStore,
 		RunOrigins:            eventStore,

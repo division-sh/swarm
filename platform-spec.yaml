@@ -1440,7 +1440,7 @@ contract_formats:
         publications continue to compile their own evidence at the original classification boundary.
 
         SQLite may retain named, fixed read-statement handles for canonical single-event lookup,
-        active flow-instance descriptors, and selected-run target owners under its existing pool owner.
+        and active flow-instance descriptors under its existing pool owner.
         These handles retain no rows, absence decisions, snapshots, or execution authority. Every call
         executes its unchanged read and strict decoding at the original observation boundary. Failed or
         canceled preparation is not retained; pool shutdown closes all owned handles and cannot reopen
@@ -13825,7 +13825,9 @@ flow_model:
             Pubsub planning and connect-recipient evaluation consume the exact admitted run_id and canonical
             flowidentity.RunScopedFlowInstance through the selected-store index and existing constructor proposal owner.
             Declaration-only bindings are not evidence of native existence or execution readiness. Resolve/ResolveForRun,
-            mutable exact/wildcard resolution caches and cache rebuild/indexing are retired; source-only bindings never
+            AddFlowInstanceRoute/HasFlowInstanceRoute/RemoveFlowInstanceRoute, instance-owner and authored-path collision
+            maps, mutable exact/wildcard resolution caches and cache rebuild/indexing
+            are retired; source-only bindings never
             authorize runless execution. Another run at the same path is an independent owner, never fallback authority.
             because low-level event.publish can publish a declared event without an authored static producer endpoint. The
             complete ordered relation result is consumed by static topology projection, boot verification, and runtime route
@@ -14599,6 +14601,9 @@ flow_model:
           The canonical instance-source type resolver owns compatibility for every runnable create, select, and select-or-create path before route-plan lowering. For `payload.<field>`, the actual source type comes from that field in the bound producer event schema. For `generated.uuid` and `event.id`, the actual source type is the intrinsic UUID-compatible platform type. No authored type assertion or conversion seam exists. The actual source type MUST also be scalar-compatible with the receiver entity instance field after named catalog aliases are resolved.
         stored_receiver_selection: |
           Existing receiver selection consumes the compiled typed per-edge business key, exact receiver declaration, selected run, structural parent, and admitted stored construction identity. The selected discriminator, path and entity remain the stored facts; they need not equal a would-create hash. Creation derives a discriminator only after no eligible existing match and an authorized create decision. A routable derived address cannot substitute for the same key and owner checks. Same-key receivers under different structural parents are distinct; ambiguity within the selected parent fails closed.
+          Target-owner planning consumes the same graph-scoped instance-index observations as receiver selection, including exact source, declaration, run, construction provenance and readiness. It does not merge an active-flow descriptor reader with a separate target-owner inventory. A declaration with no admitted construction yields no existing target; terminal construction remains observable but grants no execution. Declaration identity comes from the admitted observation, never from parsing its stored instance path. Native corruption, foreign or duplicate coordinates and independent read failures fail closed rather than becoming absence or a full-run lookup. Prepared construction remains a separately admitted proposal until its existing commit owner acknowledges publication.
+          A parent-local return selects the constructed lexical owner. Its structural parent is read by exact recorded run/path/entity through the same instance index, not by descending to an ancestor or inferring a parent from a sender address. An authored input pin does not change this ownership; schema-only and pinned parent-local endpoints consume the same recorded ancestry.
+          Explicit private receiver targets require exact selected-source/run construction evidence before executable selection. Absent receivers and mismatched stored entities refuse publication without event, delivery, receipt, or diagnostic mutation. A constructed terminal receiver with keyless ancestry authorized by an ordinary compiled connection instead records target_unreachable_terminated with the exact target in its blocked connect evaluation, one canonical pre-delivery dead letter and one pipeline settlement; it creates no executable delivery or unrelated dispatch. The targetless journal remains a projection of zero deliveries. Exact duplicate admission consumes the persisted blocked evaluation to verify the original requested target and never reselects a receiver; a different target refuses without mutation. Keyed selection, reply correlation and explicit-create conflicts retain their existing owners and cannot be replaced by this diagnostic.
         modes:
           create:
             status: runnable_in_1835_pr1
@@ -18328,16 +18333,43 @@ platform_tables:
         conversation context (all messages, all tool results) in one row.'
     routing_rules:
       retired_api: 'Standalone UpsertFlowInstanceRoute, DeleteFlowInstanceRoute and ListFlowInstanceRoutes are unsupported.
+        ReplaceFlowInstanceRouteTopology, its transaction variant and the materialized topology replacement role are
+        unsupported. No independent selected-store operation writes, diffs, replaces or acknowledges an instance-route
+        mirror. Native construction/publication commits persist the exact construction and admitted delivery facts;
+        operation-local recipient binding consumes those facts without a compensating topology transaction.
         EventBus.StageFlowInstanceRouteContext and the injected FlowRouteTopology persistence role are unsupported;
         EventBus neither stages nor acknowledges a persisted instance-membership mirror. Construction and attachment
         acknowledgment belong to their native commit owners, independently of any process route table.
         The compiled source table does not export MaterializedRoutes or stage/rebuild concrete-instance topology;
         recipient definitions bind to exact admitted instance observations without publishing membership.
+        Derivation admits the complete source declaration and subscriber definitions in one operation;
+        a graph-only partial table is not a production source-table constructor.
         Publication preflight consumes the explicitly injected RunLifecycle.RequireActiveRun and PreparedEvents owners;
         discovering run authority from EventStore or the redundant RequirePublicationRunActive alias is unsupported.
         Constructed existence, immutable parent/key selection and terminal occupancy are observed through the native
         FlowInstanceIndexReader, never through persisted route membership. Fixed-revision observations consume admitted
-        historical construction evidence; missing native receipt or readiness evidence is corruption, not an absent route.'
+        historical construction evidence; missing native receipt or readiness evidence is corruption, not an absent route.
+        ListSelectedRunTargetOwners and ListSelectedRunTargetOwnersForScope are unsupported orphan inventories.
+        ListActiveFlowInstanceDescriptorsForScope and ListActiveFlowInstanceDescriptorsForKey are unsupported;
+        normalized entity-field descriptor matching cannot elect an instance. Bounded compiled declaration or exact
+        coordinate lookup consumes immutable construction keys and stored identities, including terminal occupancy.
+        Recipient materialization reloads target evidence only through exact candidate coordinates admitted by that
+        same instance index; it does not regain an unbounded descriptor inventory after returning from planning.
+        Node lookup candidates carry the admitted handler declaration, not a declaration inferred from a stored path.
+        Root path-only and empty targets bind to the canonical selected run coordinate; contradictory explicit flow
+        or run coordinates are rejected. Non-root lookup still requires its exact concrete instance path.
+        ListFlowInstanceRouteRecords is unsupported; persisted per-instance route membership cannot elect or validate
+        an executable receiver. Instance observation and delivery planning consume their separate canonical owners.
+        A selected receiver with proven terminal stage or terminated construction produces the existing target-unreachable
+        publication outcome without creating a replacement. Unknown lifecycle, corruption, foreign-owner and independent
+        joined failures remain errors; they cannot be converted to absence or a benign target refusal.
+        A termination timestamp does not legitimize an unknown or missing lifecycle status.
+        Receiver observations consume exact admitted coordinates or compiled declaration scopes, including actual
+        structural parents and typed keys; source-entity scans cannot substitute for that selection.
+        A non-executable receiver remains occupied and historically readable; availability is not instance absence.
+        Exact direct delivery consumes its already admitted route/target without electing or reinterpreting a receiver
+        through current instance inventories. Its current exact agent availability check remains mandatory and preserves
+        independent lookup failures; receiver selection and exact committed-route consumption are distinct operations.'
       reply_origin_availability: 'Reply recipient binding consumes the admitted native origin header or the exact
         operation-private constructor proposal, not process route membership. A terminated or final-state origin remains
         occupied but has no fresh reply carrier; classify the existing stale-arrival outcome without claiming its reply

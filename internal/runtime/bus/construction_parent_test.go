@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -19,7 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestA9ConstructionSelectionRequiresExactIndexWithoutPlannerOrCacheFallback(t *testing.T) {
+func TestA9ConstructionSelectionRequiresExactIndexWithoutPlanner(t *testing.T) {
 	source := nestedConnectionConstructionSource(t)
 	root := flowidentity.Stored(source, ".", busInternalTestRunID, busInternalTestRunID, busInternalTestRunID, "")
 	parent, err := flowidentity.KeyedChild(source, root, "parent", "stored-parent")
@@ -27,9 +29,6 @@ func TestA9ConstructionSelectionRequiresExactIndexWithoutPlannerOrCacheFallback(
 		t.Fatal(err)
 	}
 	parent.EntityID = eventtest.UUID("non-derived-parent")
-	table := &RouteTable{instanceOwners: map[flowidentity.RunScopedFlowInstance]flowidentity.Instance{
-		testRunScopedFlowRoute(root.Route()): root, testRunScopedFlowRoute(parent.Route()): parent,
-	}}
 	rootObservation := constructionIndexObservation(t, source, busInternalTestRunID, root, "")
 	parentObservation := constructionIndexObservation(t, source, busInternalTestRunID, parent, "left")
 	independent := errors.New("independent index failure")
@@ -40,7 +39,7 @@ func TestA9ConstructionSelectionRequiresExactIndexWithoutPlannerOrCacheFallback(
 		valid   bool
 	}{
 		{name: "genuine receipt without planner", reader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{rootObservation, parentObservation}}, valid: true},
-		{name: "missing reader with populated cache"},
+		{name: "missing reader with compiled source"},
 		{name: "absent receipt", reader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{rootObservation}}},
 		{name: "foreign run", reader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{rootObservation, parentObservation}}},
 		{name: "wrong same-key entity", reader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{rootObservation, parentObservation}}},
@@ -51,13 +50,10 @@ func TestA9ConstructionSelectionRequiresExactIndexWithoutPlannerOrCacheFallback(
 		{name: "cancellation", reader: constructionIndexTestReader{err: context.Canceled}, wantErr: context.Canceled},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if table.instanceOwners[testRunScopedFlowRoute(parent.Route())] != parent {
-				t.Fatal("cache counterexample missing")
-			}
 			owner := connectInstanceSelector{source: source, index: test.reader}
 			instances, err := owner.constructionOwners(constructionIndexContext(t, source), busInternalTestRunID)
 			if err != nil || len(instances) != 0 {
-				t.Fatalf("process cache became committed construction evidence: %+v %v", instances, err)
+				t.Fatalf("compiled source became committed construction evidence: %+v %v", instances, err)
 			}
 			run, entity := busInternalTestRunID, parent.EntityID
 			if test.name == "foreign run" {
@@ -101,6 +97,78 @@ func TestA9MissingCreationPlannerCannotBorrowReceiptAuthority(t *testing.T) {
 	}
 }
 
+func TestParentLocalConstructionSelectionUsesRecordedAncestry(t *testing.T) {
+	for _, authoredPin := range []bool{false, true} {
+		t.Run(fmt.Sprintf("authored_input_%t", authoredPin), func(t *testing.T) {
+			parentFlow := connectRoutePlanTestFlow{
+				id: "parent", mode: contracts.FlowModeStatic,
+				nodes: map[string]contracts.SystemNodeContract{
+					"collector": {EventHandlers: map[string]contracts.SystemNodeEventHandler{"work.done": existingOwnerHandlerFixture()}},
+				},
+			}
+			if authoredPin {
+				parentFlow.inputs = []contracts.FlowInputEventPin{{Event: "work.done"}}
+			}
+			source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
+				parentFlow,
+				{id: "parent/child", mode: contracts.FlowModeStatic, outputs: []contracts.FlowOutputEventPin{{Event: "work.done"}}},
+			}, []contracts.FlowConnect{{Event: "work.done", From: "parent/child", To: "parent"}}))
+			graph := pinrouting.CompileConnectGraph(source)
+			if issues := graph.Issues(); len(issues) != 0 || len(graph.Plans()) != 1 {
+				t.Fatalf("parent-local graph plans=%+v issues=%+v", graph.Plans(), issues)
+			}
+			root := ConstructedFlowInstanceIdentityFixture(source, ".", "", busInternalTestRunID)
+			parent := ConstructedFlowInstanceIdentityFixture(source, "parent", "", busInternalTestRunID)
+			child := ConstructedFlowInstanceIdentityFixture(source, "parent/child", "", busInternalTestRunID)
+			observations := []pipeline.FlowInstanceObservation{
+				constructionIndexObservation(t, source, busInternalTestRunID, root, ""),
+				constructionIndexObservation(t, source, busInternalTestRunID, parent, ""),
+				constructionIndexObservation(t, source, busInternalTestRunID, child, ""),
+			}
+			independent := errors.New("parent index unavailable")
+			joined := errors.Join(context.Canceled, independent)
+			for _, test := range []struct {
+				name   string
+				index  constructionIndexTestReader
+				runID  string
+				entity string
+				want   error
+				valid  bool
+			}{
+				{name: "exact recorded parent", index: constructionIndexTestReader{observations: observations}, valid: true},
+				{name: "missing structural parent", index: constructionIndexTestReader{observations: observations[1:]}},
+				{name: "missing lexical owner", index: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{observations[0], observations[2]}}},
+				{name: "foreign run", index: constructionIndexTestReader{observations: observations}, runID: eventtest.UUID("foreign-local-run")},
+				{name: "foreign source entity", index: constructionIndexTestReader{observations: observations}, entity: eventtest.UUID("foreign-local-entity")},
+				{name: "independent failure", index: constructionIndexTestReader{err: independent}, want: independent},
+				{name: "cancellation", index: constructionIndexTestReader{err: context.Canceled}, want: context.Canceled},
+				{name: "joined cancellation and independent failure", index: constructionIndexTestReader{err: joined}, want: joined},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					runID, entity := busInternalTestRunID, child.EntityID
+					if test.runID != "" {
+						runID = test.runID
+					}
+					if test.entity != "" {
+						entity = test.entity
+					}
+					sender := eventtest.StaticFlowRoutingSource(child.TemplateID, child.InstancePath, entity)
+					event := eventtest.ExistingRunRootIngressWithRoutingSource(eventtest.UUID("parent-local-event"), "parent/child/work.done", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, sender, time.Now().UTC())
+					owner := connectInstanceSelector{source: source, index: test.index}
+					actual, err := owner.constructionParent(constructionIndexContext(t, source), event, graph.Plans()[0])
+					if test.valid {
+						if err != nil || actual != root {
+							t.Fatalf("parent-local structural parent=%+v err=%v, want %+v", actual, err, root)
+						}
+					} else if err == nil || actual != (flowidentity.Instance{}) || test.want != nil && !errors.Is(err, test.want) {
+						t.Fatalf("parent-local refusal lost exact index authority: parent=%+v err=%v", actual, err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func nestedConnectionConstructionSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyNestedKeyedConnectionSelection(t))
@@ -122,15 +190,6 @@ func TestA9NestedConnectionSelectionUsesEveryEdgeKeyAndConstructedParent(t *test
 		}
 	}
 	root := flowidentity.Stored(source, ".", busInternalTestRunID, busInternalTestRunID, busInternalTestRunID, "")
-	table := &RouteTable{instanceOwners: map[flowidentity.RunScopedFlowInstance]flowidentity.Instance{}}
-	add := func(instance flowidentity.Instance) {
-		coordinate, err := flowidentity.NewRunScopedFlowInstance(busInternalTestRunID, instance.Route())
-		if err != nil {
-			t.Fatal(err)
-		}
-		table.instanceOwners[coordinate] = instance
-	}
-	add(root)
 	index := constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, busInternalTestRunID, root, "")}}
 	parents := map[string]flowidentity.Instance{}
 	leaves := map[string]flowidentity.Instance{}
@@ -157,7 +216,6 @@ func TestA9NestedConnectionSelectionUsesEveryEdgeKeyAndConstructedParent(t *test
 			t.Fatal(err)
 		}
 		for _, instance := range []flowidentity.Instance{parent, middle, leaf} {
-			add(instance)
 			key := ""
 			if instance.TemplateID == "parent" {
 				key = parentKey
@@ -195,11 +253,18 @@ func TestA9NestedConnectionSelectionUsesEveryEdgeKeyAndConstructedParent(t *test
 	}
 	// Even exactly one existing parent/leaf cannot substitute for a compiled
 	// ancestor selection. Keep the complete real root and one constructed branch.
-	for coordinate, instance := range table.instanceOwners {
+	var singleBranch []pipeline.FlowInstanceObservation
+	for _, observed := range index.observations {
+		instance := observed.Identity()
 		if instance == parents["right"] || instance == leaves["right"] || instance.ParentEntityID == parents["right"].EntityID {
-			delete(table.instanceOwners, coordinate)
+			continue
 		}
+		singleBranch = append(singleBranch, observed)
 	}
+	if len(singleBranch) != 4 {
+		t.Fatalf("sole-branch counterexample needs root, parent, middle and leaf: %+v", singleBranch)
+	}
+	owner.index = constructionIndexTestReader{observations: singleBranch}
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("no-ancestor"), "start", "test", "", []byte(`{"parent_key":"left","leaf_key":"same"}`), 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
 	if _, _, _, err := owner.Materialize(withConnectRoutePlanPreview(constructionIndexContext(t, source)), event, leafPlan, map[string]string{"payload.parent_key": "left", "payload.leaf_key": "same"}); err == nil {
 		t.Fatal("sole existing receiver bypassed the missing ancestor edge")
@@ -223,7 +288,14 @@ func TestA9ConnectionAncestorCandidatesAreResolvedOnlyByDependentPaths(t *testin
 		t.Run(test.name, func(t *testing.T) {
 			source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyConnectionAncestorCandidates(t, test.dependentEvent, test.competing))
 			store := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}}
-			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate)})
+			eb, err := newScopedTestEventBus(store, EventBusOptions{
+				ContractBundle: source,
+				Durable: DurableDependencies{
+					Instances:    store,
+					RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID},
+				},
+				TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -243,9 +315,6 @@ func TestA9ConnectionAncestorCandidatesAreResolvedOnlyByDependentPaths(t *testin
 			add := func(instance flowidentity.Instance, key string) {
 				t.Helper()
 				coordinate := testRunScopedFlowRoute(instance.Route())
-				if err := eb.RouteTable().AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: coordinate, Instance: instance}); err != nil {
-					t.Fatal(err)
-				}
 				store.installConstructionReceipt(coordinate, pipeline.FlowConstructionPublicationEvidence{Identity: instance})
 				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, instance, key))
 				store.flowInstances = append(store.flowInstances, ActiveFlowInstanceDescriptor{
@@ -273,10 +342,11 @@ func TestA9ConnectionAncestorCandidatesAreResolvedOnlyByDependentPaths(t *testin
 				}
 				add(other, "leaf-key")
 			}
-			before := make(map[flowidentity.RunScopedFlowInstance]flowidentity.Instance)
-			for coordinate, instance := range eb.RouteTable().instanceOwners {
-				before[coordinate] = instance
+			before := make([]pipeline.FlowInstanceObservation, len(store.instanceObservations))
+			for i, observed := range store.instanceObservations {
+				before[i] = constructionIndexObservation(t, source, busInternalTestRunID, observed.Identity(), observed.InstanceKey())
 			}
+			beforeReceipts := maps.Clone(store.constructions)
 			envelope := events.EventEnvelope{}
 			if test.targeted {
 				envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{FlowID: "worker", FlowInstance: workers[0].InstancePath, EntityID: workers[0].EntityID})
@@ -293,7 +363,7 @@ func TestA9ConnectionAncestorCandidatesAreResolvedOnlyByDependentPaths(t *testin
 			} else if err != nil || check.TargetFailure != "" || len(check.DeliveryRoutes) != test.wantRoutes {
 				t.Fatalf("independent/dependent selections: %+v err=%v, want %d routes", check, err, test.wantRoutes)
 			}
-			if len(store.events) != 0 || len(store.routes) != 0 || len(store.activations) != 0 || !reflect.DeepEqual(before, eb.RouteTable().instanceOwners) {
+			if len(store.events) != 0 || len(store.routes) != 0 || len(store.activations) != 0 || !reflect.DeepEqual(before, store.instanceObservations) || !reflect.DeepEqual(beforeReceipts, store.constructions) {
 				t.Fatal("planning or rejected ambiguity mutated publication/construction state")
 			}
 		})

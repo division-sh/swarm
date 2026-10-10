@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -19,7 +20,6 @@ import (
 
 type finalFlowInstanceAuthoringLifecycleStore struct {
 	*targetRouteMemoryStore
-	bus                         *EventBus
 	flowInstances               []ActiveFlowInstanceDescriptor
 	flowInstanceDescriptorCalls int
 	activations                 []runtimepipeline.FlowInstanceActivationRequest
@@ -30,29 +30,6 @@ type finalFlowInstanceAuthoringLifecycleStore struct {
 func (s *finalFlowInstanceAuthoringLifecycleStore) ListActiveFlowInstanceDescriptors(_ context.Context, runID string) ([]ActiveFlowInstanceDescriptor, error) {
 	s.flowInstanceDescriptorCalls++
 	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID), nil
-}
-
-func (s *finalFlowInstanceAuthoringLifecycleStore) ListActiveFlowInstanceDescriptorsForScope(_ context.Context, runID string, templateIDs, instancePaths []string) ([]ActiveFlowInstanceDescriptor, error) {
-	s.flowInstanceDescriptorCalls++
-	return connectRoutePlanScopedDescriptors(
-		exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID),
-		templateIDs, instancePaths,
-	), nil
-}
-
-func (s *finalFlowInstanceAuthoringLifecycleStore) ListActiveFlowInstanceDescriptorsForKey(_ context.Context, runID, templateID, keyField, keyValue string) ([]ActiveFlowInstanceDescriptor, error) {
-	s.flowInstanceDescriptorCalls++
-	return connectRoutePlanKeyedDescriptors(
-		exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID),
-		templateID, keyField, keyValue,
-	), nil
-}
-
-func (s *finalFlowInstanceAuthoringLifecycleStore) ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []FlowInstanceRouteRecordSet) (FlowInstanceRouteTopologyResult, error) {
-	if err := s.targetRouteMemoryStore.ReplaceFlowInstanceRouteTopology(ctx, sets); err != nil {
-		return FlowInstanceRouteTopologyResult{}, err
-	}
-	return FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
 }
 
 func (s *finalFlowInstanceAuthoringLifecycleStore) setTestSemanticSource(fact runtimecorrelation.SourceArtifactFact, workflowVersion string) {
@@ -71,12 +48,7 @@ func (s *finalFlowInstanceAuthoringLifecycleStore) Activate(ctx context.Context,
 		FlowTemplate:  req.Instance.TemplateID,
 		AddressFields: map[string]string{"entity.account_id": accountID},
 	})
-	if s.bus == nil {
-		return nil
-	}
-	return s.bus.AddFlowInstanceRouteContextFixture(ctx, FlowInstanceRouteMaterializationRequest{
-		Identity: testRunScopedFlowRouteForRun(req.TriggerEvent.RunID(), req.Instance.Route()),
-	})
+	return nil
 }
 
 func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsReplayableTemplateTarget(t *testing.T) {
@@ -91,7 +63,6 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	store.bus = eb
 
 	installConnectionSourceConstructionForRun(t, eb, source, "producer", evt.RunID())
 	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
@@ -191,11 +162,6 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 		AddressFields: map[string]string{"entity.account_id": "acct-42"},
 	}}
 	store.flowInstanceDescriptorCalls = 0
-	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{
-		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute(finalflowinstanceauthoring.TemplateFlowID, "drift")),
-	}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
-	}
 	store.flowInstanceDescriptorCalls = 0
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
@@ -219,6 +185,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 		payload       json.RawMessage
 		flowInstances []ActiveFlowInstanceDescriptor
 		wantFailure   string
+		corruption    bool
 	}{
 		{
 			name:        "missing renamed producer key",
@@ -232,17 +199,19 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 				{InstanceID: "one", EntityID: "ent-1", FlowInstance: finalflowinstanceauthoring.TemplateFlowID + "/one", FlowTemplate: finalflowinstanceauthoring.TemplateFlowID, AddressFields: map[string]string{"entity.account_id": "acct-42"}},
 				{InstanceID: "two", EntityID: "ent-2", FlowInstance: finalflowinstanceauthoring.TemplateFlowID + "/two", FlowTemplate: finalflowinstanceauthoring.TemplateFlowID, AddressFields: map[string]string{"entity.account_id": "acct-42"}},
 			},
-			wantFailure: runtimepinrouting.ConnectFailureTargetAmbiguous.Code(),
+			corruption: true,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			evt := finalFlowInstanceAuthoringEvent(uuid.NewString(), tc.payload)
 			store := &finalFlowInstanceAuthoringLifecycleStore{
 				targetRouteMemoryStore: newTargetRouteMemoryStore(),
 				flowInstances:          tc.flowInstances,
 			}
 			eb, err := newScopedTestEventBus(store, EventBusOptions{
 				ContractBundle: source,
+				Durable:        DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: evt.RunID()}},
 				TemplateInstancePlanner: newTestFlowInstanceActivationOwner(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 					t.Fatal("fail-closed route must not activate a template instance")
 					return nil
@@ -251,19 +220,20 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			evt := finalFlowInstanceAuthoringEvent(uuid.NewString(), tc.payload)
 			installConnectionSourceConstructionForRun(t, eb, source, "producer", evt.RunID())
 			for _, descriptor := range tc.flowInstances {
 				instance := StoredFlowInstanceIdentityFixture(source, finalflowinstanceauthoring.TemplateFlowID, descriptor.InstanceID, evt.RunID(), descriptor.EntityID)
-				if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{
-					Identity: testRunScopedFlowRouteForRun(evt.RunID(), instance.Route()), Instance: instance,
-				}); err != nil {
-					t.Fatalf("install ambiguous receiver construction: %v", err)
-				}
+				store.installIndexObservation(constructionIndexObservation(t, source, evt.RunID(), instance, "acct-42"))
+				store.installConstructionReceipt(testRunScopedFlowRouteForRun(evt.RunID(), instance.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: instance})
 			}
 
 			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
-			if err != nil {
+			var corruption *runtimepipeline.FlowInstanceConstructionCorruption
+			if tc.corruption {
+				if !errors.As(err, &corruption) {
+					t.Fatalf("duplicate durable selector did not report corruption: %v", err)
+				}
+			} else if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
 			}
 			if plan.TargetFailure != tc.wantFailure {
@@ -274,7 +244,12 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 				t.Fatalf("fail-closed route exposed executable plan: recipients=%#v persisted=%#v routed=%#v subscriptions=%#v routes=%#v",
 					plan.Recipients, plan.PersistedRecipients, plan.RoutedRecipients, plan.SubscriptionRecipients, plan.DeliveryRoutes)
 			}
-			if err := eb.Publish(context.Background(), evt); err != nil {
+			err = eb.Publish(context.Background(), evt)
+			if tc.corruption {
+				if !errors.As(err, &corruption) || len(store.events) != 0 || len(store.activations) != 0 {
+					t.Fatalf("corrupt selector mutated publication/construction or lost its error: %v", err)
+				}
+			} else if err != nil {
 				t.Fatalf("Publish fail-closed event: %v", err)
 			}
 			if routes := store.routes[evt.ID()]; len(routes) != 0 {

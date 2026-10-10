@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -32,7 +31,6 @@ type forkedDomainConsumerSurface interface {
 	SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)
 	RecordSpend(context.Context, budgetspend.SpendRecord) error
 	ListBudgetProjectionTargets(context.Context) ([]budgetspend.ProjectionTarget, error)
-	ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) (runtimebus.FlowInstanceRouteTopologyResult, error)
 	pipeline.FlowInstanceIndexReader
 	RecordDeadLetter(context.Context, runtimedeadletters.Record) error
 }
@@ -100,10 +98,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			opts := completeWorkflowTestCoordinatorOptions(pipeline.NewWorkflowPersistence(selected), selected)
 			opts.Module = runForkGateWorkflowModule{source: source}
 			writer := pipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, opts)
-			route := runtimebus.FlowInstanceRouteRecord{
-				Identity: runtimeflowidentity.RunScopedFlowInstance{RunID: fixture.sourceRun, Route: runtimeflowidentity.DeriveRoute("freeze", "domain")}, EventPattern: "freeze/domain/input",
-				SubscriberType: "node", SubscriberID: "freeze-node", SourceFlow: "freeze",
-			}
+			receiver := runtimeflowidentity.RunScopedFlowInstance{RunID: fixture.sourceRun, Route: child.Route()}
 			eventID := uuid.NewString()
 			insertForkedConsumerEvent(t, fixture, eventID, "freeze.domain", fixture.forkedAt.Add(-time.Minute))
 
@@ -138,9 +133,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 				}
 			}
 
-			_, err = surface.ReplaceFlowInstanceRouteTopology(ctx, []runtimebus.FlowInstanceRouteRecordSet{{Identity: route.Identity}})
-			requireForkedSourceRefusal(t, "replace flow topology", err)
-			lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, route.Identity)
+			lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, receiver)
 			if err != nil {
 				t.Fatal(err)
 			}

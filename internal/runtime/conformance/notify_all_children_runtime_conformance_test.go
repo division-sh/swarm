@@ -14,7 +14,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -72,43 +71,15 @@ type notifyAllChildrenStore interface {
 	runtimemanager.ManagerPersistence
 	storetest.AgentFixtureStore
 	runtimemanager.AgentLifecycleStateReader
-	ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error)
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
-	ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error)
 }
 
 type failingNotifyAllChildrenPostgresStore struct {
 	*store.PostgresStore
-	failNextRouteReplacement atomic.Bool
-	transientRouteFailures   atomic.Int32
-}
-
-func (s *failingNotifyAllChildrenPostgresStore) ReplaceFlowInstanceRouteTopology(
-	ctx context.Context,
-	sets []runtimebus.FlowInstanceRouteRecordSet,
-) (runtimebus.FlowInstanceRouteTopologyResult, error) {
-	if s.failNextRouteReplacement.Swap(false) {
-		s.transientRouteFailures.Add(1)
-		return runtimebus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("injected transient postgres exact route replacement failure")
-	}
-	return s.PostgresStore.ReplaceFlowInstanceRouteTopology(ctx, sets)
 }
 
 type failingNotifyAllChildrenSQLiteStore struct {
 	*store.SQLiteRuntimeStore
-	failNextRouteReplacement atomic.Bool
-	transientRouteFailures   atomic.Int32
-}
-
-func (s *failingNotifyAllChildrenSQLiteStore) ReplaceFlowInstanceRouteTopology(
-	ctx context.Context,
-	sets []runtimebus.FlowInstanceRouteRecordSet,
-) (runtimebus.FlowInstanceRouteTopologyResult, error) {
-	if s.failNextRouteReplacement.Swap(false) {
-		s.transientRouteFailures.Add(1)
-		return runtimebus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("injected transient sqlite exact route replacement failure")
-	}
-	return s.SQLiteRuntimeStore.ReplaceFlowInstanceRouteTopology(ctx, sets)
 }
 
 type notifyAllChildrenRuntime struct {
@@ -941,7 +912,7 @@ func TestNumericFanOutTemplateSelectOrCreateMaterializesOnBothBackends(t *testin
 			if err != nil || summary.Cardinality != len(rows) || summary.Committed != len(rows) || summary.Settled != len(rows) || summary.SemanticRejected != 0 {
 				t.Fatalf("template numeric fan-out summary = %#v err=%v", summary, err)
 			}
-			descriptors := notifyAllChildrenAccountDescriptors(t, ctx, selected)
+			descriptors := notifyAllChildrenAccountInstances(t, ctx, selected, source)
 			if len(descriptors) != len(rows) {
 				t.Fatalf("template numeric downstream entities = %#v, want %d", descriptors, len(rows))
 			}
@@ -951,9 +922,9 @@ func TestNumericFanOutTemplateSelectOrCreateMaterializesOnBothBackends(t *testin
 				if !ok {
 					t.Fatalf("template numeric downstream entity %s was not materialized", accountID)
 				}
-				assertNotifyAllChildrenMetadata(t, ctx, selected, descriptor.FlowInstance, "account_id", accountID)
-				assertNotifyAllChildrenMetadata(t, ctx, selected, descriptor.FlowInstance, "eng_roles", row["eng_roles"])
-				assertNotifyAllChildrenMetadata(t, ctx, selected, descriptor.FlowInstance, "gem_score", row["gem_score"])
+				assertNotifyAllChildrenMetadata(t, ctx, selected, descriptor.InstancePath, "account_id", accountID)
+				assertNotifyAllChildrenMetadata(t, ctx, selected, descriptor.InstancePath, "eng_roles", row["eng_roles"])
+				assertNotifyAllChildrenMetadata(t, ctx, selected, descriptor.InstancePath, "gem_score", row["gem_score"])
 			}
 		})
 	}
@@ -1197,14 +1168,14 @@ func proveDynamicFlowSourceRevisionConvergence(
 		"portfolio_id": "portfolio-main",
 		"account_id":   "acct-revision",
 	})
-	descriptor, ok := notifyAllChildrenAccountDescriptors(t, ctx, selected)["acct-revision"]
+	descriptor, ok := notifyAllChildrenAccountInstances(t, ctx, selected, sourceV1)["acct-revision"]
 	if !ok {
 		t.Fatal("created account descriptor is missing")
 	}
 	if _, err := runtimeV1.manager.HydrateForStartup(ctx); err != nil {
 		t.Fatalf("finalize v1 readiness through startup owner: %v", err)
 	}
-	initialReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctx, runtimeV1.pipeline, runID, descriptor.FlowInstance)
+	initialReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctx, runtimeV1.pipeline, runID, descriptor.InstancePath)
 	if got := !initialReadiness.CreationEventEmittedAt.IsZero(); got != autoEmit {
 		t.Fatalf("initial creation completion = %t, want %t", got, autoEmit)
 	}
@@ -1249,7 +1220,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if err := runtimeV2.manager.CompleteDynamicFlowRuntimeStartupTopology(ctxV2, startupV2); err != nil {
 		t.Fatalf("attach revised source topology: %v", err)
 	}
-	revisedReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctxV2, runtimeV2.pipeline, runID, descriptor.FlowInstance)
+	revisedReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctxV2, runtimeV2.pipeline, runID, descriptor.InstancePath)
 
 	v2Agents := loadNotifyAllChildrenAgentsByID(t, ctx, selected)
 	if _, found := v2Agents[retiredID]; found {
@@ -1262,19 +1233,19 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if writer := v2Agents[writerID]; writer.Config.Role != "writer" || writer.LifecycleGeneration == 0 {
 		t.Fatalf("added writer = %#v", writer)
 	}
-	if _, err := runtimeV2.manager.ResolveAgentConfig(runID, retiredID, descriptor.FlowInstance); err == nil {
+	if _, err := runtimeV2.manager.ResolveAgentConfig(runID, retiredID, descriptor.InstancePath); err == nil {
 		t.Fatalf("removed agent %s remains process-visible", retiredID)
 	}
-	if cfg, err := runtimeV2.manager.ResolveAgentConfig(runID, readerID, descriptor.FlowInstance); err != nil || cfg.Role != "reader-v2" {
+	if cfg, err := runtimeV2.manager.ResolveAgentConfig(runID, readerID, descriptor.InstancePath); err != nil || cfg.Role != "reader-v2" {
 		t.Fatalf("changed reader process config = %#v err=%v", cfg, err)
 	}
-	if cfg, err := runtimeV2.manager.ResolveAgentConfig(runID, writerID, descriptor.FlowInstance); err != nil || cfg.Role != "writer" {
+	if cfg, err := runtimeV2.manager.ResolveAgentConfig(runID, writerID, descriptor.InstancePath); err != nil || cfg.Role != "writer" {
 		t.Fatalf("added writer process config = %#v err=%v", cfg, err)
 	}
 	if _, exists := reflect.TypeOf(runtimeV2.manager).MethodByName("SpawnAgent"); exists {
 		t.Fatal("retired generic agent hire writer remains exported")
 	}
-	if cfg, err := runtimeV1.manager.ResolveAgentConfig(runID, readerID, descriptor.FlowInstance); err != nil || cfg.Role != "reader-v1" {
+	if cfg, err := runtimeV1.manager.ResolveAgentConfig(runID, readerID, descriptor.InstancePath); err != nil || cfg.Role != "reader-v1" {
 		t.Fatalf("stale predecessor process projection changed after replay rejection: %#v err=%v", cfg, err)
 	}
 	if revisedReadiness.Plan.WorkflowVersion != sourceV2.WorkflowVersion() {
@@ -1306,11 +1277,11 @@ func proveDynamicFlowSourceRevisionConvergence(
 		t.Fatalf("restart hydration: %v", err)
 	}
 	for _, agentID := range []string{readerID, writerID} {
-		if _, err := runtimeV3.manager.ResolveAgentConfig(runID, agentID, descriptor.FlowInstance); err != nil {
+		if _, err := runtimeV3.manager.ResolveAgentConfig(runID, agentID, descriptor.InstancePath); err != nil {
 			t.Fatalf("restart omitted exact active agent %s", agentID)
 		}
 	}
-	if _, err := runtimeV3.manager.ResolveAgentConfig(runID, retiredID, descriptor.FlowInstance); err == nil {
+	if _, err := runtimeV3.manager.ResolveAgentConfig(runID, retiredID, descriptor.InstancePath); err == nil {
 		t.Fatalf("restart resurrected removed agent %s", retiredID)
 	}
 
@@ -1339,7 +1310,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if err := runtimeV4.manager.CompleteDynamicFlowRuntimeStartupTopology(ctxV3, startupV4); err != nil {
 		t.Fatalf("attach reintroduced source topology: %v", err)
 	}
-	waitNotifyAllChildrenRuntimeReadiness(t, ctxV3, runtimeV4.pipeline, runID, descriptor.FlowInstance)
+	waitNotifyAllChildrenRuntimeReadiness(t, ctxV3, runtimeV4.pipeline, runID, descriptor.InstancePath)
 	v3Agents := loadNotifyAllChildrenAgentsByID(t, ctx, selected)
 	reintroduced := v3Agents[retiredID]
 	if reintroduced.Config.Role != "returned" || reintroduced.LifecycleGeneration <= terminated.Generation {
@@ -1351,7 +1322,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if reader := v3Agents[readerID]; reader.Config.Role != "reader-v3" {
 		t.Fatalf("v3 reader = %#v", reader)
 	}
-	if cfg, err := runtimeV4.manager.ResolveAgentConfig(runID, retiredID, descriptor.FlowInstance); err != nil || cfg.Role != "returned" {
+	if cfg, err := runtimeV4.manager.ResolveAgentConfig(runID, retiredID, descriptor.InstancePath); err != nil || cfg.Role != "returned" {
 		t.Fatalf("reintroduced process config = %#v err=%v", cfg, err)
 	}
 
@@ -1373,7 +1344,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 		t.Fatalf("reintroduced restart hydration: %v", err)
 	}
 	for _, agentID := range []string{readerID, writerID, retiredID} {
-		if _, err := runtimeV5.manager.ResolveAgentConfig(runID, agentID, descriptor.FlowInstance); err != nil {
+		if _, err := runtimeV5.manager.ResolveAgentConfig(runID, agentID, descriptor.InstancePath); err != nil {
 			t.Fatalf("reintroduced restart omitted active agent %s", agentID)
 		}
 	}
@@ -1414,12 +1385,12 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 					if _, err := db.Exec(`
 						CREATE FUNCTION fail_notify_route_retirement() RETURNS trigger AS $$
 						BEGIN
-							RAISE EXCEPTION 'injected postgres exact route replacement failure';
+							RAISE EXCEPTION 'injected postgres flow terminalization failure';
 						END;
 						$$ LANGUAGE plpgsql;
 						CREATE TRIGGER fail_notify_route_retirement
-						BEFORE UPDATE OF status ON routing_rules
-						FOR EACH ROW WHEN (NEW.status = 'inactive')
+						BEFORE UPDATE OF status ON flow_instances
+						FOR EACH ROW WHEN (NEW.status = 'terminated')
 						EXECUTE FUNCTION fail_notify_route_retirement();
 					`); err != nil {
 						t.Fatalf("install postgres route-retirement failure: %v", err)
@@ -1436,10 +1407,10 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 				return selected, db, func() {
 					if _, err := db.Exec(`
 						CREATE TRIGGER fail_notify_route_retirement
-						BEFORE UPDATE OF status ON routing_rules
-						FOR EACH ROW WHEN NEW.status = 'inactive'
+						BEFORE UPDATE OF status ON flow_instances
+						FOR EACH ROW WHEN NEW.status = 'terminated'
 						BEGIN
-							SELECT RAISE(ABORT, 'injected sqlite exact route replacement failure');
+							SELECT RAISE(ABORT, 'injected sqlite flow terminalization failure');
 						END
 					`); err != nil {
 						t.Fatalf("install sqlite route-retirement failure: %v", err)
@@ -1462,7 +1433,7 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 				"portfolio_id": "portfolio-main",
 				"account_id":   "acct-rollback",
 			})
-			descriptor, ok := notifyAllChildrenAccountDescriptors(t, ctx, selected)["acct-rollback"]
+			descriptor, ok := notifyAllChildrenAccountInstances(t, ctx, selected, source)["acct-rollback"]
 			if !ok {
 				t.Fatal("created account descriptor is missing")
 			}
@@ -1471,45 +1442,47 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 				Route: runtimeflowidentity.StoredRoute(
 					notifyallchildren.ChildFlowID,
 					descriptor.InstanceID,
-					descriptor.FlowInstance,
+					descriptor.InstancePath,
 				),
 			}
-			before, err := selected.ListFlowInstanceRouteRecords(ctx, route)
-			if err != nil || len(before) == 0 {
-				t.Fatalf("load prior exact route set: routes=%#v err=%v", before, err)
+			request, err := runtimepipeline.NewExactFlowInstanceLookup(source, runtime.sourceArtifactFact, route)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if !runtime.bus.HasFlowInstanceRoute(route) {
-				t.Fatal("created process route is not active before terminalization")
+			before, found, err := selected.LookupFlowInstance(ctx, request)
+			if err != nil || !found {
+				t.Fatalf("load constructed receiver before terminalization: found=%t err=%v", found, err)
+			}
+			beforeHeader, err := before.WorkflowInstance()
+			if err != nil || beforeHeader.Status != "active" {
+				t.Fatalf("created receiver is not active: header=%+v err=%v", beforeHeader, err)
 			}
 
 			failReplacement()
 			err = runtime.manager.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
 				ContractBundle: source,
-				Instance: runtimeflowidentity.Stored(
-					source,
-					notifyallchildren.ChildFlowID,
-					descriptor.FlowInstance,
-					descriptor.InstanceID,
-					descriptor.EntityID,
-					"",
-				),
-				FinalState: "active",
+				Instance:       before.Identity(),
+				FinalState:     "active",
 			})
-			if err == nil || !strings.Contains(err.Error(), "exact route replacement failure") {
-				t.Fatalf("DeactivateFlowInstanceModel error = %v, want injected route replacement failure", err)
+			if err == nil || !strings.Contains(err.Error(), "flow terminalization failure") {
+				t.Fatalf("DeactivateFlowInstanceModel error = %v, want injected native termination failure", err)
 			}
 
-			if got := loadNotifyAllChildrenFlowInstanceStatus(t, ctx, selected, db, descriptor.FlowInstance); got != "active" {
+			if got := loadNotifyAllChildrenFlowInstanceStatus(t, ctx, selected, db, descriptor.InstancePath); got != "active" {
 				t.Fatalf("flow instance status after replacement rollback = %q, want active", got)
 			}
-			after, err := selected.ListFlowInstanceRouteRecords(ctx, route)
-			if err != nil || !slices.EqualFunc(after, before, func(a, b runtimebus.FlowInstanceRouteRecord) bool {
-				return a == b
-			}) {
-				t.Fatalf("exact route set after replacement rollback: before=%#v after=%#v err=%v", before, after, err)
+			after, found, err := selected.LookupFlowInstance(ctx, request)
+			if err != nil || !found || after.Identity() != before.Identity() {
+				t.Fatalf("constructed receiver after termination rollback: actual=%+v found=%t err=%v", after.Identity(), found, err)
 			}
-			if !runtime.bus.HasFlowInstanceRoute(route) {
-				t.Fatal("process route retired despite selected mutation rollback")
+			afterHeader, err := after.WorkflowInstance()
+			if err != nil || !reflect.DeepEqual(afterHeader, beforeHeader) {
+				t.Fatalf("native header after termination rollback: before=%+v after=%+v err=%v", beforeHeader, afterHeader, err)
+			}
+			beforeReadiness, beforeReady := before.Readiness()
+			afterReadiness, afterReady := after.Readiness()
+			if !beforeReady || !afterReady || !reflect.DeepEqual(beforeReadiness, afterReadiness) {
+				t.Fatal("readiness changed despite selected termination rollback")
 			}
 		})
 	}
@@ -1583,13 +1556,13 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 						"account_ids":  accountIDs,
 					})
 
-					descriptors := notifyAllChildrenAccountDescriptors(t, ctx, backend)
+					descriptors := notifyAllChildrenAccountInstances(t, ctx, backend, source)
 					if len(descriptors) != cardinality {
 						t.Fatalf("active account descriptors = %#v, want %d", descriptors, cardinality)
 					}
 					assertNotifyAllChildrenConcreteAgentSet(t, ctx, backend, descriptors, nameCase.agentID)
 
-					blocked := descriptors[accountIDs[len(accountIDs)-1]].FlowInstance
+					blocked := descriptors[accountIDs[len(accountIDs)-1]].InstancePath
 					gate.block(blocked)
 					publishNotifyAllChildrenEventAsync(t, ctx, runtime, source, runID, "portfolio.notify.requested", map[string]any{
 						"portfolio_id": "portfolio-main",
@@ -1598,7 +1571,7 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 					gate.waitStarted(t, blocked)
 
 					for _, accountID := range accountIDs[:len(accountIDs)-1] {
-						waitNotifyAllChildrenEntityState(t, ctx, backend, db, descriptors[accountID].FlowInstance, "completed")
+						waitNotifyAllChildrenEntityState(t, ctx, backend, db, descriptors[accountID].InstancePath, "completed")
 					}
 					if got := loadNotifyAllChildrenEntityState(t, ctx, backend, db, blocked); got != "active" {
 						t.Fatalf("blocked sibling status = %q, want active while another instance is terminal", got)
@@ -1611,7 +1584,7 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 					gate.release(blocked)
 					waitNotifyAllChildrenRuntime(t, runtime, runID)
 					for _, accountID := range accountIDs {
-						instancePath := descriptors[accountID].FlowInstance
+						instancePath := descriptors[accountID].InstancePath
 						waitNotifyAllChildrenEntityState(t, ctx, backend, db, instancePath, "completed")
 						waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, backend, runID, nameCase.agentID, instancePath, "delivered")
 						assertNotifyAllChildrenAgentEmissionSettledToSameInstanceNode(t, ctx, db, tc.name, runID, nameCase.agentID, instancePath)
@@ -1630,19 +1603,19 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 						removed := descriptors[accountIDs[0]]
 						if err := runtime.manager.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
 							ContractBundle: source,
-							Instance:       runtimeflowidentity.Stored(source, notifyallchildren.ChildFlowID, removed.FlowInstance, removed.InstanceID, removed.EntityID, ""),
+							Instance:       removed,
 							FinalState:     "completed",
 						}); err != nil {
 							t.Fatalf("explicit completed-child deactivation: %v", err)
 						}
 						waitNotifyAllChildrenRuntime(t, runtime, runID)
-						if _, err := runtime.manager.ResolveAgentConfig(runID, nameCase.agentID, removed.FlowInstance); !errors.Is(err, runtimemanager.ErrAgentNotFound) {
+						if _, err := runtime.manager.ResolveAgentConfig(runID, nameCase.agentID, removed.InstancePath); !errors.Is(err, runtimemanager.ErrAgentNotFound) {
 							t.Fatalf("explicitly deactivated child remains process-visible: %v", err)
 						}
-						remaining := make(map[string]runtimebus.ActiveFlowInstanceDescriptor, cardinality-1)
+						remaining := make(map[string]runtimeflowidentity.Instance, cardinality-1)
 						for _, accountID := range accountIDs[1:] {
 							remaining[accountID] = descriptors[accountID]
-							waitNotifyAllChildrenAgentRetainedIdle(t, ctx, backend, runtime.manager, runID, nameCase.agentID, descriptors[accountID].FlowInstance)
+							waitNotifyAllChildrenAgentRetainedIdle(t, ctx, backend, runtime.manager, runID, nameCase.agentID, descriptors[accountID].InstancePath)
 						}
 						assertNotifyAllChildrenConcreteAgentSet(t, ctx, backend, remaining, nameCase.agentID)
 					}
@@ -1739,7 +1712,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				})
 			}
 
-			descriptors := notifyAllChildrenAccountDescriptors(t, ctx, backend)
+			descriptors := notifyAllChildrenAccountInstances(t, ctx, backend, source)
 			if len(descriptors) != 3 {
 				dumpNotifyAllChildrenRuntimeState(t, ctx, backend)
 				t.Logf("notify-all-children runtime diagnostics: %#v", runtime.diagnostics.snapshot())
@@ -1785,15 +1758,8 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			stale := descriptors["acct-stale"]
 			if err := runtime.manager.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
 				ContractBundle: source,
-				Instance: runtimeflowidentity.Stored(
-					source,
-					notifyallchildren.ChildFlowID,
-					stale.FlowInstance,
-					stale.InstanceID,
-					stale.EntityID,
-					"",
-				),
-				FinalState: "active",
+				Instance:       stale,
+				FinalState:     "active",
 			}); err != nil {
 				t.Fatalf("deactivate stale account: %v", err)
 			}
@@ -1818,7 +1784,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				}
 				want := descriptors[accountID]
 				assertNotifyAllChildrenExactRoutes(t, routes, want)
-				assertNotifyAllChildrenMetadata(t, ctx, backend, want.FlowInstance, "last_command", "refresh")
+				assertNotifyAllChildrenMetadata(t, ctx, backend, want.InstancePath, "last_command", "refresh")
 			}
 
 			staleID := items["acct-stale"]
@@ -1841,7 +1807,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				"portfolio_id": "portfolio-main",
 				"command":      "newer",
 			})
-			assertNotifyAllChildrenMetadata(t, ctx, backend, descriptors["acct-a"].FlowInstance, "last_command", "newer")
+			assertNotifyAllChildrenMetadata(t, ctx, backend, descriptors["acct-a"].InstancePath, "last_command", "newer")
 			publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.membership.seeded", map[string]any{
 				"portfolio_id": "portfolio-main",
 				"account_ids":  []string{"acct-b"},
@@ -1908,7 +1874,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			}
 			startNotifyAllChildrenDeliveryContinuations(t, ctx, backend, restarted, recoveryEvent.ID(), routes[0])
 			waitNotifyAllChildrenRuntime(t, restarted, runID)
-			assertNotifyAllChildrenMetadata(t, ctx, backend, descriptors["acct-a"].FlowInstance, "last_command", "refresh")
+			assertNotifyAllChildrenMetadata(t, ctx, backend, descriptors["acct-a"].InstancePath, "last_command", "refresh")
 			if got := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID); got != eventCountBefore {
 				t.Fatalf("item event count after replay = %d, want %d; replay must not re-expand current membership", got, eventCountBefore)
 			}
@@ -1924,7 +1890,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 func assertNotifyAllChildrenExactRoutes(
 	t testing.TB,
 	routes []events.DeliveryRoute,
-	want runtimebus.ActiveFlowInstanceDescriptor,
+	want runtimeflowidentity.Instance,
 ) {
 	t.Helper()
 	if len(routes) != 2 {
@@ -1933,8 +1899,8 @@ func assertNotifyAllChildrenExactRoutes(
 	var nodeFound, agentFound bool
 	for _, route := range routes {
 		target := route.Target.Route()
-		if target.FlowInstance != want.FlowInstance || target.EntityID != want.EntityID {
-			t.Fatalf("persisted route = %#v, want target %s/%s", route, want.FlowInstance, want.EntityID)
+		if target.FlowInstance != want.InstancePath || target.EntityID != want.EntityID {
+			t.Fatalf("persisted route = %#v, want target %s/%s", route, want.InstancePath, want.EntityID)
 		}
 		switch {
 		case route.Recipient.IsNode():
@@ -1946,7 +1912,7 @@ func assertNotifyAllChildrenExactRoutes(
 			}
 			agentFound = route.Recipient.ID() == "account-worker" &&
 				identity.AgentID() == "account-worker" &&
-				identity.FlowInstance() == want.FlowInstance
+				identity.FlowInstance() == want.InstancePath
 		}
 	}
 	if !nodeFound || !agentFound {
@@ -2418,7 +2384,7 @@ func assertNotifyAllChildrenConcreteAgentSet(
 	t testing.TB,
 	ctx context.Context,
 	selected notifyAllChildrenStore,
-	descriptors map[string]runtimebus.ActiveFlowInstanceDescriptor,
+	descriptors map[string]runtimeflowidentity.Instance,
 	agentID string,
 ) {
 	t.Helper()
@@ -2428,7 +2394,7 @@ func assertNotifyAllChildrenConcreteAgentSet(
 	}
 	remaining := make(map[string]struct{}, len(descriptors))
 	for _, descriptor := range descriptors {
-		remaining[descriptor.FlowInstance] = struct{}{}
+		remaining[descriptor.InstancePath] = struct{}{}
 	}
 	var matched int
 	for _, agent := range agents {
@@ -2806,20 +2772,26 @@ func assertNotifyAllChildrenRunPersisted(t *testing.T, ctx context.Context, back
 	}
 }
 
-func notifyAllChildrenAccountDescriptors(t *testing.T, ctx context.Context, backend notifyAllChildrenStore) map[string]runtimebus.ActiveFlowInstanceDescriptor {
+func notifyAllChildrenAccountInstances(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, source semanticview.Source) map[string]runtimeflowidentity.Instance {
 	t.Helper()
-	descriptors, err := backend.ListActiveFlowInstanceDescriptors(ctx, runtimecorrelation.RunIDFromContext(ctx))
+	scope, err := runtimepipeline.NewFlowInstanceLookupScope(source, conformanceSourceArtifactFact(t, source), runtimecorrelation.RunIDFromContext(ctx), []string{notifyallchildren.ChildFlowID}, nil)
 	if err != nil {
-		t.Fatalf("ListActiveFlowInstanceDescriptors: %v", err)
+		t.Fatalf("admit account instance scope: %v", err)
 	}
-	out := map[string]runtimebus.ActiveFlowInstanceDescriptor{}
-	for _, descriptor := range descriptors {
-		if descriptor.FlowTemplate != notifyallchildren.ChildFlowID {
-			continue
+	instances, err := backend.ListFlowInstances(ctx, scope)
+	if err != nil {
+		t.Fatalf("ListFlowInstances: %v", err)
+	}
+	out := make(map[string]runtimeflowidentity.Instance, len(instances))
+	for _, instance := range instances {
+		accountID := instance.InstanceKey()
+		if accountID == "" {
+			t.Fatal("constructed account has no admitted instance key")
 		}
-		if accountID := descriptor.AddressFields["entity.account_id"]; accountID != "" {
-			out[accountID] = descriptor
+		if _, duplicate := out[accountID]; duplicate {
+			t.Fatalf("multiple account instances for key %q", accountID)
 		}
+		out[accountID] = instance.Identity()
 	}
 	return out
 }

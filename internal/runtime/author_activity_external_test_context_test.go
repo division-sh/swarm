@@ -381,7 +381,11 @@ func installExternalManagerTestGeneration(
 
 func admitExternalManagerTestGeneration(t testing.TB, ctx context.Context, selected agentfixture.Store, manager *runtimemanager.AgentManager, source semanticview.Source) {
 	t.Helper()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}
+	fact, present := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !present || fact.Validate() != nil {
+		t.Fatal("external manager fixture requires its admitted source context")
+	}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)
 	if err != nil {
 		t.Fatal(err)
@@ -411,11 +415,8 @@ type externalRuntimeTestDurableEventStore interface {
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
-	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteTopologyPersistence
 	runtimebus.ActiveAgentDescriptorLister
 	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
@@ -429,9 +430,9 @@ func externalRuntimeTestDurableDependencies(durable externalRuntimeTestDurableEv
 		ConstructionPublications: durable,
 		EmitFeedback:             durable,
 		ReplyContext:             durable, RunLifecycle: durable,
-		DeliveryLifecycle: durable,
-		ActiveAgents:      durable,
-		ActiveFlows:       durable, TargetOwners: durable, PreparedEvents: durable,
+		DeliveryLifecycle:     durable,
+		ActiveAgents:          durable,
+		PreparedEvents:        durable,
 		TargetFailureRecorder: durable, RunOrigins: durable, StandingRestarts: durable,
 	}
 }

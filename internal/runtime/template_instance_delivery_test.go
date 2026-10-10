@@ -201,7 +201,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := seedRuntimeTestRun(t, pg)
+	ctx := seedRuntimeTestRunForSource(t, pg, source)
 	var manager *runtimemanager.AgentManager
 	var activationCalls atomic.Int32
 	activationResults := make(chan error, 4)
@@ -221,7 +221,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 			activationResults <- err
 			return err
 		}),
-		ContractBundle: source})
+		ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source)})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   executionposture.Live,
 		BaseContext:        ctx,
-		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		SemanticSource:     source,
 		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances:  pc,
@@ -323,7 +323,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := seedRuntimeTestRun(t, pg)
+	ctx := seedRuntimeTestRunForSource(t, pg, source)
 	durable := externalRuntimeTestDurableDependencies(pg)
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -339,7 +339,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 			}
 			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
 		}),
-		ContractBundle: source, Durable: durable})
+		ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source), Durable: durable})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   executionposture.Live,
 		BaseContext:        ctx,
-		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		SemanticSource:     source,
 		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances:  pc,
@@ -391,18 +391,18 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	`, []any{instancePath + "/opco.product_initialization_requested"})
 
 	renderedAgentID := "ceo"
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM routing_rules
-		WHERE flow_instance = $2
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = $1
-		  AND status = 'active'
-	`, 1, renderedAgentID, instancePath)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM routing_rules
-		WHERE flow_instance = $1
-		  AND subscriber_id = 'ceo-{product_id}'
-	`, 0, instancePath)
+	scope, err := runtimepipeline.NewFlowInstanceLookupScope(source, runtimeTestSourceArtifactFact(t, source), templateInstanceDeliveryRunID, []string{"operating"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instances, err := pg.ListFlowInstances(ctx, scope)
+	if err != nil || len(instances) != 1 || instances[0].Identity().InstancePath != instancePath {
+		t.Fatalf("constructed operating inventory = %+v, err=%v, want one exact receiver %s", instances, err, instancePath)
+	}
+	readiness, found := instances[0].Readiness()
+	if !found || len(readiness.Plan.Agents) != 1 || readiness.Plan.Agents[0].Identity.AgentID() != renderedAgentID {
+		t.Fatalf("constructed agent expectations = %+v, found=%t, want only %s", readiness.Plan.Agents, found, renderedAgentID)
+	}
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid
@@ -422,14 +422,15 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := seedRuntimeTestRun(t, pg)
+	ctx := seedRuntimeTestRunForSource(t, pg, source)
 	testsql.InstallPostgresEventDeliveryFailureAfterFlowMaterialization(t, ctx, db, testsql.EventCorruptionClaim{
 		Invariant: "store.event_record.named_operation_atomicity",
 		Reason:    "prove late delivery failure rolls back the event and connect-created lifecycle facts",
 	}, "consumer")
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
-		ContractBundle: source,
+		ContractBundle:     source,
+		SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 			if manager == nil {
 				return runtimepipeline.FlowInstanceActivationPlan{}, errors.New("agent manager is required")
@@ -458,14 +459,16 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   executionposture.Live,
 		BaseContext:        ctx,
-		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		SemanticSource:     source,
 		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances:  pc,
 		PersistenceRoles:   externalRuntimeTestManagerBusRoles(bus),
 		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg), ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
+	admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
 	producer := seedRuntimeTestKeylessSource(t, ctx, pg, pc, "producer")
+	assertRuntimeTestConstructedInstance(t, ctx, pg, source, producer)
 	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, pg)
 	if err != nil {
 		t.Fatal(err)
@@ -500,11 +503,20 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		WHERE flow_template = 'consumer'
 	`, 0)
 	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM entity_state
+		SELECT COUNT(*) FROM flow_instances
 	`, 2)
 	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM routing_rules
+		SELECT COUNT(*) FROM entity_state
 	`, 0)
+	scope, err := runtimepipeline.NewFlowInstanceLookupScope(source, runtimeTestSourceArtifactFact(t, source), templateInstanceDeliveryRunID, []string{"consumer"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instances, err := pg.ListFlowInstances(ctx, scope)
+	if err != nil || len(instances) != 0 {
+		t.Fatalf("failed publication exposed a constructed consumer: %+v err=%v", instances, err)
+	}
+	assertRuntimeTestConstructedInstance(t, ctx, pg, source, producer)
 	after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, pg)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("failed publication changed the prepared source tree or target storage: %v", err)
@@ -517,7 +529,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := seedRuntimeTestRun(t, pg)
+	ctx := seedRuntimeTestRunForSource(t, pg, source)
 	var pc *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -534,7 +546,8 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
 		}),
 
-		ContractBundle: source,
+		ContractBundle:     source,
+		SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
 				return nil
@@ -558,7 +571,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   executionposture.Live,
 		BaseContext:        ctx,
-		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		SemanticSource:     source,
 		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances:  pc,
@@ -648,7 +661,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := seedRuntimeTestRun(t, pg)
+	ctx := seedRuntimeTestRunForSource(t, pg, source)
 	var pc *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -665,7 +678,8 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
 		}),
 
-		ContractBundle: source,
+		ContractBundle:     source,
+		SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
 				return nil
@@ -689,7 +703,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   executionposture.Live,
 		BaseContext:        ctx,
-		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+		SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		SemanticSource:     source,
 		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances:  pc,

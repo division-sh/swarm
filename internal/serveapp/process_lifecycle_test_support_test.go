@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -21,9 +22,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -201,19 +205,114 @@ func (*processIngressProofStore) ValidateInboundPublicationIntegrity(context.Con
 }
 
 type processIngressEventStore struct {
-	events       []events.Event
-	construction runtimepipeline.FlowConstructionPublicationEvidence
+	events      []events.Event
+	observation runtimepipeline.FlowInstanceObservation
+}
+
+// These transport fixtures admit one exact root; they do not simulate runtime
+// attachment or substitute for the native two-store lifecycle proofs.
+func newProcessIngressEventStore(t testing.TB, source semanticview.Source, runID string) *processIngressEventStore {
+	t.Helper()
+	bundle, found := semanticview.Bundle(source)
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("transport construction requires its admitted source")
+	}
+	fact := mustServeTestEphemeralSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	flowID := semanticview.RootExecutionFlowID(source)
+	identity, err := runtimeflowidentity.StandingForGeneration(source, flowID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := runtimepipeline.NewExactFlowInstanceLookup(source, fact, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: identity.Route()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema, found := source.FlowSchemaByID(flowID)
+	if !found || !schema.Instance.Empty() {
+		t.Fatal("transport construction requires its declared keyless root")
+	}
+	topology, found := semanticview.WorkflowStageTopology(source, flowID)
+	if !found {
+		t.Fatal("transport construction requires its compiled stage catalog")
+	}
+	initial, err := topology.InitialStoredStage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Unix(1700000000, 0).UTC()
+	header := runtimepipeline.WorkflowInstance{
+		WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), Mode: schema.EffectiveMode(), Status: "active",
+		InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
+		CurrentState: initial.ID(), StageDefined: !initial.IsStatelessPosture(), Revision: 1, CreatedAt: at, UpdatedAt: at,
+	}
+	if entity, declared := entityruntime.ResolveForFlow(source, flowID); declared {
+		header.EntityType = entity.EntityType
+	}
+	origin, err := runlifecycle.StandingGenerationRunOrigin(runtimeflowidentity.StandingServiceID(flowID), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: origin, BundleHash: fact.BundleHash(), StartedAt: at}
+	receipt := runtimepipeline.FlowConstructionPublicationEvidence{Identity: identity}
+	readiness := runtimepipeline.DynamicFlowRuntimeReadiness{
+		Plan:            runtimepipeline.DynamicFlowRuntimeReadinessPlan{Identity: identity, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},
+		OwningRunSource: fact, RunStatus: "running", InstanceStatus: "active",
+	}
+	observed, err := runtimepipeline.AdmitNativeFlowInstanceObservation(request, header, run, 1, receipt, readiness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &processIngressEventStore{observation: observed}
+}
+
+func (s *processIngressEventStore) LookupFlowInstance(ctx context.Context, request runtimepipeline.FlowInstanceLookupRequest) (runtimepipeline.FlowInstanceObservation, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimepipeline.FlowInstanceObservation{}, false, err
+	}
+	identity := s.observation.Identity()
+	if !s.observation.Valid() || s.observation.Owner().RunID != request.RunID() || identity.TemplateID != request.FlowID() {
+		return runtimepipeline.FlowInstanceObservation{}, false, nil
+	}
+	if err := s.observation.ValidateSelection(request); err != nil {
+		return runtimepipeline.FlowInstanceObservation{}, false, err
+	}
+	return s.observation, true, nil
+}
+
+func (s *processIngressEventStore) ListFlowInstances(ctx context.Context, scope runtimepipeline.FlowInstanceLookupScope) ([]runtimepipeline.FlowInstanceObservation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	observed := s.observation
+	if !observed.Valid() || observed.Owner().RunID != scope.RunID() {
+		return nil, nil
+	}
+	if !slices.Contains(scope.FlowIDs(), observed.Identity().TemplateID) && !slices.Contains(scope.Coordinates(), observed.Owner()) {
+		return nil, nil
+	}
+	request, err := runtimepipeline.NewExactFlowInstanceLookup(scope.Source(), scope.SourceFact(), observed.Owner())
+	if err != nil {
+		return nil, err
+	}
+	if err := observed.ValidateSelection(request); err != nil {
+		return nil, err
+	}
+	return []runtimepipeline.FlowInstanceObservation{observed}, nil
 }
 
 func (s *processIngressEventStore) LoadFlowConstructionPublication(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entityID string) (runtimepipeline.FlowConstructionPublicationEvidence, error) {
 	if err := ctx.Err(); err != nil {
 		return runtimepipeline.FlowConstructionPublicationEvidence{}, err
 	}
-	identity := s.construction.Identity
-	if identity.InstancePath == "" || identity.InstanceID != owner.RunID || identity.Route() != owner.Route || identity.EntityID != entityID {
+	identity := s.observation.Identity()
+	if !s.observation.Valid() || s.observation.Owner() != owner || identity.EntityID != entityID {
 		return runtimepipeline.FlowConstructionPublicationEvidence{}, errors.New("transport fixture has no construction observation for that owner")
 	}
-	return s.construction, nil
+	receipt, native, err := s.observation.NativeConstruction()
+	if err != nil || !native {
+		return runtimepipeline.FlowConstructionPublicationEvidence{}, errors.New("transport fixture has no native construction")
+	}
+	return receipt, nil
 }
 
 func (s *processIngressEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {

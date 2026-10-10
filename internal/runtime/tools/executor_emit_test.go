@@ -181,7 +181,6 @@ type emitRoutePlanStore struct {
 	routes        map[string][]events.DeliveryRoute
 	scopes        map[string]runtimepipelineobligation.CommittedScope
 	active        []string
-	targetOwners  []runtimebus.ActiveTargetDescriptor
 	stages        map[string]runtimepipeline.WorkflowPublicationStageEvidence
 	feedback      map[string]runtimepipeline.WorkflowEmitFeedback
 }
@@ -221,7 +220,7 @@ func newEmitRoutePlanEventBus(t *testing.T, store *emitRoutePlanStore, source se
 		ExecutionPosture:   executionposture.Live,
 		SourceArtifactFact: sourceFact,
 		ContractBundle:     source,
-		Durable:            runtimebus.DurableDependencies{TargetOwners: store, Instances: store.instanceIndex, EmitFeedback: store},
+		Durable:            runtimebus.DurableDependencies{Instances: store.instanceIndex, EmitFeedback: store},
 		WorkOwner:          owner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
@@ -280,25 +279,6 @@ func (s *emitRoutePlanStore) ListEventDeliveryRecipients(_ context.Context, even
 		}
 	}
 	return out, nil
-}
-
-func (s *emitRoutePlanStore) ListSelectedRunTargetOwners(context.Context, string) ([]runtimebus.ActiveTargetDescriptor, error) {
-	return append([]runtimebus.ActiveTargetDescriptor(nil), s.targetOwners...), nil
-}
-
-func (s *emitRoutePlanStore) ListSelectedRunTargetOwnersForScope(_ context.Context, _ string, instancePaths []string, sourceEntityID string) ([]runtimebus.ActiveTargetDescriptor, error) {
-	selected := make(map[string]struct{}, len(instancePaths))
-	for _, path := range instancePaths {
-		selected[path] = struct{}{}
-	}
-	var owners []runtimebus.ActiveTargetDescriptor
-	for _, owner := range s.targetOwners {
-		_, selectedPath := selected[owner.FlowInstance]
-		if selectedPath || sourceEntityID != "" && owner.EntityID == sourceEntityID {
-			owners = append(owners, owner)
-		}
-	}
-	return owners, nil
 }
 
 func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
@@ -1214,10 +1194,6 @@ func TestHandleEmitTool_RoutesTypedRootOutputToRootNodeConsumer(t *testing.T) {
 	store.instanceIndex = emitInstanceObservationFixture{observations: []runtimepipeline.FlowInstanceObservation{
 		emitInstanceObservation(t, source, root, ""),
 	}}
-	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
-		ID: toolTestRunID, EntityID: runtimeflowidentity.EntityID(toolTestRunID), FlowInstance: toolTestRunID,
-		Availability: runtimepipeline.NewDeliveryTargetAvailability("", "active", false),
-	}}
 	eventBus := newEmitRoutePlanEventBus(t, store, source, emitInstanceSourceFact(t, source))
 	actor := emitInstanceActor(t, source, root, "cycle.ping")
 	exec := NewExecutorWithOptions(eventBus, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
@@ -1265,10 +1241,6 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 	}}
 	eventBus := newEmitRoutePlanEventBus(t, store, source, emitInstanceSourceFact(t, source))
 	entityID := runtimeflowidentity.EntityID(route.InstancePath)
-	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
-		ID: route.InstancePath, EntityID: entityID, FlowInstance: route.InstancePath,
-		Availability: runtimepipeline.NewDeliveryTargetAvailability("", "active", false),
-	}}
 	declarations := semanticview.AgentDeclarationsForOwner(source, "review")
 	if len(declarations) != 1 {
 		t.Fatalf("same-instance emitter requires one physical declaration: %+v", declarations)
@@ -1349,10 +1321,6 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 		emitInstanceObservation(t, source, producer, ""),
 		emitInstanceObservation(t, source, consumer, ""),
 	}}
-	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
-		ID: "consumer", EntityID: runtimeflowidentity.EntityID("consumer"), FlowInstance: "consumer",
-		Availability: runtimepipeline.NewDeliveryTargetAvailability("", "active", false),
-	}}
 	eb := newEmitRoutePlanEventBus(t, store, source, emitInstanceSourceFact(t, source))
 	emitRegistry := NewEmitRegistry(source, nil)
 	actor := emitInstanceActor(t, source, producer, "deploy.done")
@@ -1432,9 +1400,6 @@ func TestHandleEmitTool_RootReceiverConnectRemainsTargetlessBeforePreflight(t *t
 		FlowInstance: runID,
 		EntityID:     runtimeflowidentity.EntityID(runID),
 	}
-	store.targetOwners = []runtimebus.ActiveTargetDescriptor{{
-		ID: parentRoute.FlowInstance, EntityID: parentRoute.EntityID, FlowInstance: parentRoute.FlowInstance,
-	}}
 	actor := emitInstanceActor(t, source, producer, "producer/deploy.done")
 	probe := &emitPreflightCaptureBus{EventBus: eb}
 	actor.Identity.RunID = runID

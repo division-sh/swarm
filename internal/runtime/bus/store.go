@@ -515,46 +515,8 @@ type FlowInstanceRouteRecord struct {
 	SourceFlow     string
 }
 
-// FlowInstanceRouteRecordSet is one exact route owner's complete materialized
-// record set within a topology replacement.
-type FlowInstanceRouteRecordSet struct {
-	Identity runtimeflowidentity.RunScopedFlowInstance
-	Routes   []FlowInstanceRouteRecord
-}
-
-func validateFlowInstanceRouteTopology(sets []FlowInstanceRouteRecordSet) error {
-	seen := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(sets))
-	for setIndex, set := range sets {
-		identity := set.Identity.Normalize()
-		if err := identity.Validate(); err != nil || identity != set.Identity {
-			return fmt.Errorf("route set %d requires canonical exact identity", setIndex)
-		}
-		if _, exists := seen[identity]; exists {
-			return fmt.Errorf("route set %d repeats owner %s", setIndex, identity.Key())
-		}
-		seen[identity] = struct{}{}
-		for routeIndex, route := range set.Routes {
-			if route.Identity != identity || strings.TrimSpace(route.EventPattern) == "" ||
-				strings.TrimSpace(route.SubscriberType) == "" || strings.TrimSpace(route.SubscriberID) == "" {
-				return fmt.Errorf("route set %d record %d requires exact owner, event pattern, and subscriber", setIndex, routeIndex)
-			}
-		}
-	}
-	return nil
-}
-
-// FlowInstanceRouteTopologyPersistence atomically replaces every affected
-// route owner in one closed selected-store operation.
 type FlowInstanceRouteTopologyResult struct {
 	Acknowledged bool
-}
-
-type FlowInstanceRouteTopologyPersistence interface {
-	ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []FlowInstanceRouteRecordSet) (FlowInstanceRouteTopologyResult, error)
-}
-
-type FlowInstanceRouteRecordReader interface {
-	ListFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]FlowInstanceRouteRecord, error)
 }
 
 type ActiveAgentDescriptor struct {
@@ -642,20 +604,6 @@ type ActiveFlowInstanceDescriptorLister interface {
 	ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]ActiveFlowInstanceDescriptor, error)
 }
 
-// ScopedActiveFlowInstanceDescriptorLister loads only graph-selected context
-// descriptors. Template IDs and instance paths are exact alternatives; an
-// empty scope is never interpreted as a full-run request.
-type ScopedActiveFlowInstanceDescriptorLister interface {
-	ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs, instancePaths []string) ([]ActiveFlowInstanceDescriptor, error)
-}
-
-// Key-matched lookup must return every selected descriptor with the supplied
-// canonical key value, including hostile rows at a noncanonical instance
-// path. The compiled lifecycle owner, not SQL, decides the expected identity.
-type KeyedActiveFlowInstanceDescriptorLister interface {
-	ListActiveFlowInstanceDescriptorsForKey(ctx context.Context, runID, templateID, keyField, keyValue string) ([]ActiveFlowInstanceDescriptor, error)
-}
-
 type ActiveTargetDescriptor struct {
 	FlowID        string
 	Availability  runtimepipeline.DeliveryTargetAvailability
@@ -677,20 +625,6 @@ func (d ActiveTargetDescriptor) Normalized() ActiveTargetDescriptor {
 		AddressFields: normalizeDescriptorAddressFields(d.AddressFields),
 		Materializing: d.Materializing,
 	}
-}
-
-// SelectedRunTargetOwnerLister exposes exact receiver ownership rows from the
-// selected run. It is deliberately separate from template route descriptors:
-// static and root owners come from entity_state, while template descriptors
-// additionally carry readiness and address evidence.
-type SelectedRunTargetOwnerLister interface {
-	ListSelectedRunTargetOwners(ctx context.Context, runID string) ([]ActiveTargetDescriptor, error)
-}
-
-// ScopedSelectedRunTargetOwnerLister consumes exact graph-selected instance
-// paths. It does not decide which receiver or entity owns an event.
-type ScopedSelectedRunTargetOwnerLister interface {
-	ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, instancePaths []string, sourceEntityID string) ([]ActiveTargetDescriptor, error)
 }
 
 func normalizeDescriptorAddressFields(in map[string]string) map[string]string {

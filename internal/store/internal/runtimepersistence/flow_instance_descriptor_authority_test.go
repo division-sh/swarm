@@ -30,10 +30,7 @@ import (
 
 type flowInstanceDescriptorAuthorityStore interface {
 	externalStoreTestDurableEventBusStore
-	runtimebus.FlowInstanceRouteTopologyPersistence
-	runtimebus.FlowInstanceRouteRecordReader
 	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.ScopedActiveFlowInstanceDescriptorLister
 }
 
 type dynamicFlowSourceProjectionStore interface {
@@ -802,23 +799,9 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 						t.Fatalf("descriptor semantic source = %#v, want exact source", *testedDescriptor)
 					}
 
-					flowIdentity := runtimeflowidentity.RunScopedFlowInstance{
-						RunID: runID,
-						Route: runtimeflowidentity.DeriveRoute(notifyallchildren.ChildFlowID, "current"),
-					}
-					prior := runtimebus.FlowInstanceRouteRecord{
-						Identity:       flowIdentity,
-						EventPattern:   flowIdentity.Route.InstancePath + "/prior.event",
-						SubscriberType: "agent",
-						SubscriberID:   "prior-agent",
-						SourceFlow:     notifyallchildren.ChildFlowID,
-					}
-					if _, err := selected.ReplaceFlowInstanceRouteTopology(ctx, []runtimebus.FlowInstanceRouteRecordSet{{Identity: flowIdentity, Routes: []runtimebus.FlowInstanceRouteRecord{prior}}}); err != nil {
-						t.Fatalf("seed prior exact route set: %v", err)
-					}
-					before, err := selected.ListFlowInstanceRouteRecords(ctx, flowIdentity)
+					before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 					if err != nil {
-						t.Fatalf("read prior exact route set: %v", err)
+						t.Fatal(err)
 					}
 
 					eventBus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{
@@ -862,12 +845,12 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 						} else if pinErr != nil {
 							t.Fatalf("%s exact source admission: %v", resolution.name, pinErr)
 						}
-						afterPin, readErr := selected.ListFlowInstanceRouteRecords(ctx, flowIdentity)
+						afterPin, readErr := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 						if readErr != nil {
-							t.Fatalf("read exact route set after %s pin: %v", resolution.name, readErr)
+							t.Fatal(readErr)
 						}
 						if !reflect.DeepEqual(afterPin, before) {
-							t.Fatalf("%s pin mutated route state: before=%#v after=%#v", resolution.name, before, afterPin)
+							t.Fatalf("%s pin mutated durable state: before=%#v after=%#v", resolution.name, before, afterPin)
 						}
 					}
 				})

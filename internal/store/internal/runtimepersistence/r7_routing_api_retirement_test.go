@@ -19,7 +19,7 @@ func TestR7SelectedStoresExposeNoAuthoredRoutingRuleAPI(t *testing.T) {
 func TestR7SelectedStoresExposeNoStandaloneInstanceRouteMutation(t *testing.T) {
 	for _, store := range []any{(*PostgresStore)(nil), (*SQLiteRuntimeStore)(nil)} {
 		owner := reflect.TypeOf(store)
-		for _, name := range []string{"ReplaceFlowInstanceRouteRecords", "RollbackFlowInstanceRoute", "UpsertFlowInstanceRoute", "DeleteFlowInstanceRoute", "ListFlowInstanceRoutes", "RequirePublicationRunActive"} {
+		for _, name := range []string{"ListFlowInstanceRouteRecords", "ListActiveFlowInstanceDescriptorsForScope", "ListActiveFlowInstanceDescriptorsForKey", "ListSelectedRunTargetOwners", "ListSelectedRunTargetOwnersForScope", "ReplaceFlowInstanceRouteTopology", "ReplaceFlowInstanceRouteTopologyTx", "ReplaceFlowInstanceRouteRecords", "RollbackFlowInstanceRoute", "UpsertFlowInstanceRoute", "DeleteFlowInstanceRoute", "ListFlowInstanceRoutes", "RequirePublicationRunActive"} {
 			if _, present := owner.MethodByName(name); present {
 				t.Errorf("%s exposes retired standalone route-planning API %s", owner, name)
 			}

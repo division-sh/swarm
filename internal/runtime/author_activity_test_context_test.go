@@ -481,11 +481,7 @@ type runtimeTestDurableEventStore interface {
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
-	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteTopologyPersistence
 	runtimebus.ActiveAgentDescriptorLister
-	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
@@ -498,9 +494,9 @@ func runtimeTestDurableDependencies(durable runtimeTestDurableEventStore) runtim
 		Instances:                durable,
 		ConstructionPublications: durable,
 		ReplyContext:             durable, RunLifecycle: durable,
-		DeliveryLifecycle: durable,
-		ActiveAgents:      durable,
-		ActiveFlows:       durable, TargetOwners: durable, PreparedEvents: durable,
+		DeliveryLifecycle:     durable,
+		ActiveAgents:          durable,
+		PreparedEvents:        durable,
 		TargetFailureRecorder: durable, RunOrigins: durable, StandingRestarts: durable,
 	}
 }

@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -52,25 +53,50 @@ func TestSelectedRunTargetOwnersUseConstructedHeadersBothStores(t *testing.T) {
 				if err != nil || !committed.Acknowledged || !committed.Created {
 					t.Fatalf("construct target: result=%+v err=%v", committed, err)
 				}
-				selected := f.store.(interface {
-					bus.SelectedRunTargetOwnerLister
-					bus.ScopedSelectedRunTargetOwnerLister
-				})
-				lookups := map[string]func(context.Context) ([]bus.ActiveTargetDescriptor, error){
-					"all": func(ctx context.Context) ([]bus.ActiveTargetDescriptor, error) {
-						return selected.ListSelectedRunTargetOwners(ctx, runID)
+				selected := f.store.(pipeline.FlowInstanceIndexReader)
+				source := semanticview.Wrap(f.bundle)
+				fact, present := correlation.SourceArtifactFactFromContext(f.ctx)
+				if !present {
+					t.Fatal("target header proof requires admitted source")
+				}
+				all, err := pipeline.NewFlowInstanceLookupScope(source, fact, runID, []string{".", "review"}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				path, err := pipeline.NewFlowInstanceLookupScope(source, fact, runID, nil, []flowidentity.RunScopedFlowInstance{{RunID: runID, Route: target.Route()}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				declared, err := pipeline.NewDeclaredFlowInstanceLookup(source, fact, runID, "review", plan.Identity, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				lookups := map[string]func(context.Context) ([]pipeline.FlowInstanceObservation, error){
+					"all": func(ctx context.Context) ([]pipeline.FlowInstanceObservation, error) {
+						return selected.ListFlowInstances(ctx, all)
 					},
-					"path": func(ctx context.Context) ([]bus.ActiveTargetDescriptor, error) {
-						return selected.ListSelectedRunTargetOwnersForScope(ctx, runID, []string{"review"}, "")
+					"path": func(ctx context.Context) ([]pipeline.FlowInstanceObservation, error) {
+						return selected.ListFlowInstances(ctx, path)
 					},
-					"source": func(ctx context.Context) ([]bus.ActiveTargetDescriptor, error) {
-						return selected.ListSelectedRunTargetOwnersForScope(ctx, runID, nil, target.EntityID)
+					"declaration": func(ctx context.Context) ([]pipeline.FlowInstanceObservation, error) {
+						observed, found, err := selected.LookupFlowInstance(ctx, declared)
+						if err != nil || !found {
+							return nil, err
+						}
+						return []pipeline.FlowInstanceObservation{observed}, nil
 					},
 				}
 				check := func(want int) {
 					t.Helper()
 					for name, lookup := range lookups {
 						owners, err := lookup(f.ctx)
+						if want == 0 && fielded && name != "all" {
+							var corruption *pipeline.FlowInstanceConstructionCorruption
+							if !errors.As(err, &corruption) || corruption.RunID != runID || corruption.InstancePath != target.InstancePath || len(owners) != 0 {
+								t.Fatalf("%s hid partial construction: owners=%+v err=%v", name, owners, err)
+							}
+							continue
+						}
 						wantCount := want
 						if name == "all" {
 							wantCount++
@@ -79,10 +105,11 @@ func TestSelectedRunTargetOwnersUseConstructedHeadersBothStores(t *testing.T) {
 							t.Fatalf("%s owners=%+v err=%v, want %d", name, owners, err, wantCount)
 						}
 						seen := map[string]bool{}
-						for _, owner := range owners {
-							if owner.FlowInstance == target.InstancePath && owner.EntityID == target.EntityID && want == 1 {
+						for _, observed := range owners {
+							owner := observed.Identity()
+							if owner == target && want == 1 {
 								seen["review"] = true
-							} else if name == "all" && owner.FlowInstance == runID && owner.EntityID == runID {
+							} else if name == "all" && owner == plan.Identity {
 								seen["root"] = true
 							} else {
 								t.Fatalf("%s lost exact constructed identity: %+v", name, owner)
@@ -94,7 +121,13 @@ func TestSelectedRunTargetOwnersUseConstructedHeadersBothStores(t *testing.T) {
 					}
 				}
 				check(1)
-				foreign, err := selected.ListSelectedRunTargetOwnersForScope(f.ctx, uuid.NewString(), []string{"review"}, target.EntityID)
+				foreignRun := uuid.NewString()
+				requireRunFixtureForTest(t, f.ctx, f.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: foreignRun, Artifact: f.bundle.SourceArtifact, BundleHash: fact.BundleHash()})
+				foreignScope, err := pipeline.NewFlowInstanceLookupScope(source, fact, foreignRun, []string{"review"}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				foreign, err := selected.ListFlowInstances(f.ctx, foreignScope)
 				if err != nil || len(foreign) != 0 {
 					t.Fatalf("foreign run borrowed target header: %+v err=%v", foreign, err)
 				}

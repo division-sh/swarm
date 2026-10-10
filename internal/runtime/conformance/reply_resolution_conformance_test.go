@@ -92,8 +92,6 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 			Instances:                receipts,
 			ConstructionPublications: receipts,
 			ReplyContext:             store,
-			ActiveFlows:              store,
-			TargetOwners:             store,
 		},
 	})
 	if err != nil {
@@ -167,8 +165,6 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 			Instances:                receipts,
 			ConstructionPublications: receipts,
 			ReplyContext:             store,
-			ActiveFlows:              store,
-			TargetOwners:             store,
 		},
 	})
 	if err != nil {
@@ -1141,33 +1137,6 @@ func (s *replyConformanceStore) ListActiveFlowInstanceDescriptors(context.Contex
 	return nil, nil
 }
 
-func (s *replyConformanceStore) ListActiveFlowInstanceDescriptorsForScope(context.Context, string, []string, []string) ([]bus.ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-
-func (s *replyConformanceStore) ListActiveFlowInstanceDescriptorsForKey(context.Context, string, string, string, string) ([]bus.ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-
-func (s *replyConformanceStore) ListSelectedRunTargetOwners(context.Context, string) ([]bus.ActiveTargetDescriptor, error) {
-	return replyConformanceConstructedOwners(), nil
-}
-
-func (s *replyConformanceStore) ListSelectedRunTargetOwnersForScope(_ context.Context, _ string, instancePaths []string, sourceEntityID string) ([]bus.ActiveTargetDescriptor, error) {
-	selected := make(map[string]struct{}, len(instancePaths))
-	for _, path := range instancePaths {
-		selected[path] = struct{}{}
-	}
-	var owners []bus.ActiveTargetDescriptor
-	for _, owner := range replyConformanceConstructedOwners() {
-		_, selectedPath := selected[owner.FlowInstance]
-		if selectedPath || sourceEntityID != "" && owner.EntityID == sourceEntityID {
-			owners = append(owners, owner)
-		}
-	}
-	return owners, nil
-}
-
 func replyConformanceTargetOwners() []bus.ActiveTargetDescriptor {
 	out := make([]bus.ActiveTargetDescriptor, 0, 2)
 	for _, accountID := range []string{"account-a", "account-b"} {
@@ -1179,13 +1148,6 @@ func replyConformanceTargetOwners() []bus.ActiveTargetDescriptor {
 		})
 	}
 	return out
-}
-
-func replyConformanceConstructedOwners() []bus.ActiveTargetDescriptor {
-	return append(replyConformanceTargetOwners(), bus.ActiveTargetDescriptor{
-		ID: templatereply.ProviderFlowID, FlowInstance: templatereply.ProviderFlowID,
-		EntityID: runtimeflowidentity.EntityID(templatereply.ProviderFlowID),
-	})
 }
 
 func (s *replyConformanceStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {

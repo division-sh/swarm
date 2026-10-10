@@ -11,7 +11,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -29,11 +28,12 @@ func TestIndexedPubsubUsesNativeExistenceAndStoredIdentity(t *testing.T) {
 	reader := &unscopedConnectIndexTestReader{}
 	resolver := newConnectRoutePlanResolver(source, table, nil, reader, nil)
 	keys := []string{instance.InstancePath + "/account.ready"}
-	if err := table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: flowidentity.RunScopedFlowInstance{RunID: event.RunID(), Route: instance.Route()}, Instance: instance}); err != nil {
-		t.Fatal(err)
+	definitions, err := table.PubsubReceiverDefinitions(event.RunID(), instance, keys)
+	if err != nil || len(definitions) != 1 {
+		t.Fatalf("counterexample needs a compiled subscriber: definitions=%+v err=%v", definitions, err)
 	}
 	if subscribers, err := resolver.resolvePubsubSubscribers(ctx, event, keys, ordinaryPublicationSource{}); err != nil || len(subscribers) != 0 {
-		t.Fatalf("stale process membership substituted for native absence: subscribers=%+v err=%v", subscribers, err)
+		t.Fatalf("compiled subscriber substituted for native absence: subscribers=%+v err=%v", subscribers, err)
 	}
 	reader.observations = []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, event.RunID(), instance, "42")}
 	first, err := resolver.resolvePubsubSubscribers(ctx, event, keys, ordinaryPublicationSource{})
@@ -43,12 +43,9 @@ func TestIndexedPubsubUsesNativeExistenceAndStoredIdentity(t *testing.T) {
 	if len(reader.requested) != 2 || len(reader.requested[1].FlowIDs()) != 0 || len(reader.requested[1].Coordinates()) != 1 || reader.requested[1].Coordinates()[0].Key() != reader.observations[0].Owner().Key() {
 		t.Fatalf("pubsub escaped its compiled declaration scope: %+v", reader.requested)
 	}
-	if err := table.RemoveFlowInstanceRoute(reader.observations[0].Owner()); err != nil {
-		t.Fatal(err)
-	}
 	second, err := resolver.resolvePubsubSubscribers(ctx, event, keys, ordinaryPublicationSource{})
 	if err != nil || !reflect.DeepEqual(first, second) {
-		t.Fatalf("process deletion changed native recipient projection: first=%+v second=%+v err=%v", first, second, err)
+		t.Fatalf("repeated lookup changed native recipient projection: first=%+v second=%+v err=%v", first, second, err)
 	}
 	if subscribers, err := resolver.resolvePubsubSubscribers(ctx, event, []string{"account/account.ready"}, ordinaryPublicationSource{}); err != nil || len(subscribers) != 0 {
 		t.Fatalf("declaration alias inferred a keyed instance: subscribers=%+v err=%v", subscribers, err)
