@@ -10,11 +10,9 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 const wakeupCallbackTimeout = 10 * time.Second
@@ -473,15 +471,7 @@ func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (outcome CommitResu
 	if err := validateInstanceExecutionOwner(ctx, activation.Command); err != nil {
 		return CommitResult{Outcome: CommitRetry}, err
 	}
-	projected, err := workflowexpr.ProjectSemanticValue(activation.Command.Payload)
-	if err != nil {
-		return CommitResult{Outcome: CommitRetry}, err
-	}
-	payload, err := canonicaljson.MarshalPreservingNumberKinds(projected)
-	if err != nil {
-		return CommitResult{Outcome: CommitRetry}, err
-	}
-	event, err := occurrenceEvent(activation, occurrence, payload)
+	event, err := occurrencePublicationEvent(activation, occurrence)
 	if err != nil {
 		return CommitResult{Outcome: CommitRetry}, err
 	}

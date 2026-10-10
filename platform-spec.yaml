@@ -20995,9 +20995,16 @@ run_model:
         including its start selector, not event metadata reconstructed from the minimal child binding. The sealed
         readiness projection includes every recorded root and descendant attachment even without an immediate
         delivery frontier; it persists fresh child readiness, not source attachment phases, and creates no dummy
-        delivery or additional root agent. Final selected settlement recognizes a workflow timer publication only
-        through its exact typed occurrence, canonical child activation and admitted event record, consuming the same
-        immutable publication validator as timer admission within the settlement transaction. Validated timer
+        delivery or additional root agent. Final selected settlement recognizes a workflow timer or accepted one-shot
+        generic schedule publication only through its exact occurrence, canonical child activation and admitted event
+        record, consuming the family''s immutable publication validator within the settlement transaction. Generic
+        publication evidence uses the same semantic payload projection as ordinary emission and proves exact run,
+        mode, source, producer, task, deterministic event identity and retained due/admission/acceptance coordinates.
+        Prepared-only stamps and a recurring activation''s preceding accepted history are not current publication
+        evidence. Prepared targets remain the publication/delivery owner''s evidence, not facts inferred from a timer.
+        The fixed-cut source reader validates an accepted arrival against its exact revisioned event through that
+        same family validator; missing, duplicate, out-of-cut or mismatched events fail closed. This validation does
+        not rearm the occurrence or independently admit its historical delivery continuation. Validated timer
         publication evidence agrees on execution mode and accepted time; inherited recurrence uses the retained
         original arming coordinate rather than child birth as its first-due bound. Validated timer
         publications root the selected event lineage even when there was no replayed input. Producer spelling alone
@@ -21039,7 +21046,12 @@ run_model:
         remains historical evidence, not the current occurrence''s terminal disposition. The shared generic lifecycle
         validator enforces these relationships before continuing readback normalizes progress for comparison;
         a canceled companion remains the exact canceled disposition. Readback never repairs missing work,
-        grants execution or discharges source-history admission by itself. Generic execution selection and writes
+        grants execution or discharges source-history admission by itself. Activated selected startup recovers exact
+        child event/delivery work, then enumerates only that child''s active generic schedules and reconciles each
+        through the existing lifecycle before releasing the scheduler''s startup fence. The complete scoped census
+        rejects foreign, duplicate and nonactive work before installing any wakeup; each activation is freshly read
+        and claimed, so a cancellation after census cannot be resurrected. No process-global scan or source-run
+        wakeup is used by this path. Generic execution selection and writes
         consume the existing run-lifecycle execution owner: durable selected binding, current running child state,
         exact run/source context and the current selected execution fence are required, independently of inherited
         row provenance. Selected lease freshness uses actual database time at the authority read or fence, not

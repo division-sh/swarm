@@ -7,13 +7,71 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	postgresrecord "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	sqliterecord "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 )
 
 type selectedTimerActivationRead func(context.Context, *sql.Tx, string) (pipeline.WorkflowTimerActivation, bool, error)
+type selectedGenericOccurrenceRead func(context.Context, *sql.Tx, bool, string) ([]genericschedule.Activation, error)
+
+func selectedContractTimerLineage(ctx context.Context, tx *sql.Tx, runID string, postgres bool, load selectedTimerActivationRead) ([]string, error) {
+	ordinary, err := selectedContractWorkflowTimerLineage(ctx, tx, runID, postgres, load)
+	if err != nil {
+		return nil, err
+	}
+	joins, err := selectedContractGenericScheduleLineage(ctx, tx, runID, postgres, storegenericschedule.ReadPublishedOccurrencesTx)
+	if err != nil {
+		return nil, err
+	}
+	return append(ordinary, joins...), nil
+}
+
+func selectedContractGenericScheduleLineage(ctx context.Context, tx *sql.Tx, runID string, postgres bool, load selectedGenericOccurrenceRead) ([]string, error) {
+	activations, err := load(ctx, tx, postgres, runID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(activations))
+	seen := make(map[string]struct{}, len(activations))
+	for _, activation := range activations {
+		if err := activation.Validate(); err != nil {
+			return nil, err
+		}
+		if activation.Command.RunID != runID || activation.Status != genericschedule.StatusFired || activation.CurrentEventID == "" {
+			return nil, fmt.Errorf("selected schedule lineage requires an exact accepted child occurrence")
+		}
+		if _, duplicate := seen[activation.CurrentEventID]; duplicate {
+			return nil, fmt.Errorf("selected schedule lineage repeats an accepted occurrence")
+		}
+		seen[activation.CurrentEventID] = struct{}{}
+		var record eventrecord.Record
+		var found bool
+		if postgres {
+			record, found, err = postgresrecord.Load(ctx, tx, activation.CurrentEventID)
+		} else {
+			record, found, err = sqliterecord.Load(ctx, tx, activation.CurrentEventID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, fmt.Errorf("selected schedule lineage lacks its exact published event")
+		}
+		admitted, err := record.Decode()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := activation.ValidatePublishedOccurrence(admitted.Event()); err != nil {
+			return nil, err
+		}
+		ids = append(ids, activation.CurrentEventID)
+	}
+	return ids, nil
+}
 
 // The caller already holds exact selected settlement authority. These are
 // canonical obligation publications, not input replay or permission to execute.
