@@ -285,8 +285,10 @@ func VerifyDeliveryTargetApplicationRejectsWrongRunRootTargetsBeforeMutationOnBo
 				if err != nil || !found || !strings.Contains(marker, "unchanged") {
 					t.Fatalf("wrong-run rejection changed seeded state: fields=%q err=%v", marker, err)
 				}
-				if !reflect.DeepEqual(before.State, persisted) {
-					t.Fatal("wrong-run refusal changed unasserted field facts or clocks")
+				// Compare exact snapshots from one reader, not driver-local times against UTC.
+				after, err := fixture.Persistence.store.LoadTargetPersistence(ctx, testRunScopedWorkflowInstanceFromContext(ctx, wrongRunID), runtimeidentity.NormalizeEntityID(entityID))
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatalf("wrong-run refusal changed unasserted field facts or clocks: before=%#v after=%#v err=%v", before, after, err)
 				}
 			}
 		})
@@ -350,8 +352,9 @@ func VerifyDeliveryTargetApplicationRejectsStateOnlyChildRelabeledAsParentOnBoth
 	if err != nil || !found || persisted.CurrentState != "active" || persisted.Revision != 1 || fieldsErr != nil || fields["marker"] != "unchanged" {
 		t.Fatalf("rejected child state changed: found=%t err=%v state=%#v", found, err, persisted)
 	}
-	if !reflect.DeepEqual(prestate.State, persisted) {
-		t.Fatal("rejected child changed an unasserted field or lifecycle clock")
+	after, err := fixture.Persistence.store.LoadTargetPersistence(ctx, childOwner, runtimeidentity.NormalizeEntityID(entityID))
+	if err != nil || !reflect.DeepEqual(prestate, after) {
+		t.Fatalf("rejected child changed an unasserted field or lifecycle clock: before=%#v after=%#v err=%v", prestate, after, err)
 	}
 }
 
