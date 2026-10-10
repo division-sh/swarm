@@ -25,10 +25,12 @@ type sdkStoreLease struct {
 // sdkStoreFence covers the pinned SDK's state methods, including transactions
 // which database/sql.Close and the SDK callback queue do not join themselves.
 type sdkStoreFence struct {
-	mu       sync.Mutex
-	fenced   bool
-	inFlight int
-	drained  chan struct{}
+	mu           sync.Mutex
+	fenced       bool
+	quiescing    bool
+	quiesceDrain chan struct{}
+	inFlight     int
+	drained      chan struct{}
 }
 
 func newSDKStoreFence() *sdkStoreFence {
@@ -52,7 +54,17 @@ func (f *sdkStoreFence) acquireScope(ctx context.Context, continueTransaction bo
 	}
 	f.mu.Lock()
 	parent, _ := ctx.Value(sdkStoreLeaseKey{}).(*sdkStoreLease)
-	if f.fenced && (!continueTransaction || parent == nil || parent.owner != f || !parent.active) {
+	inherited := continueTransaction && parent != nil && parent.owner == f && parent.active
+	if f.fenced && !inherited {
+		f.mu.Unlock()
+		return nil, nil, errSDKStoreFenced
+	}
+	if !continueTransaction {
+		if !f.quiescing || f.quiesceDrain != nil || f.fenced {
+			f.mu.Unlock()
+			return nil, nil, errSDKStoreFenced
+		}
+	} else if f.quiescing && !inherited {
 		f.mu.Unlock()
 		return nil, nil, errSDKStoreFenced
 	}
@@ -67,10 +79,58 @@ func (f *sdkStoreFence) acquireScope(ctx context.Context, continueTransaction bo
 		}
 		lease.active = false
 		f.inFlight--
+		if f.inFlight == 0 && f.quiesceDrain != nil {
+			close(f.quiesceDrain)
+			f.quiesceDrain = nil
+		}
 		if f.fenced && f.inFlight == 0 {
 			close(f.drained)
 		}
 	}, nil
+}
+
+// Logout drains ordinary SDK state work without retiring the one current
+// deletion permit. Inherited transactions finish; fresh ordinary work refuses.
+func (f *sdkStoreFence) quiesceForLogout(ctx context.Context) error {
+	if ctx == nil {
+		return errSDKStoreFenced
+	}
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
+	f.mu.Lock()
+	if f.fenced {
+		f.mu.Unlock()
+		return errSDKStoreFenced
+	}
+	drained := f.quiesceDrain
+	if !f.quiescing {
+		f.quiescing = true
+		drained = make(chan struct{})
+		if f.inFlight == 0 {
+			close(drained)
+		} else {
+			f.quiesceDrain = drained
+		}
+	} else if drained == nil {
+		f.mu.Unlock()
+		return context.Cause(ctx)
+	}
+	f.mu.Unlock()
+	select {
+	case <-drained:
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	}
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fenced {
+		return errSDKStoreFenced
+	}
+	return nil
 }
 
 func (f *sdkStoreFence) fence() {
