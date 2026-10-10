@@ -304,7 +304,7 @@ func TestIssue642TimerForkCrashRestartBothStores(t *testing.T) {
 				}
 				terminal, err := terminalOwner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{})
 				if err != nil || len(terminal) != 1 || terminal[0].RunID != checkpoint.ForkRun || terminal[0].Disposition != runfork.SelectedForkRecoveryTerminal {
-					t.Fatalf("completed timer child reopened execution: %+v err=%v", terminal, err)
+					t.Fatalf("completed timer child reopened execution: %+v state_before=%+v cleanup=%v err=%v", terminal, stateBefore, owner.ports.contexts.cleanupErr, err)
 				}
 				stateAfter, err := storetest.ReadSelectedExecutionStorage(wait, selected, checkpoint.ForkRun)
 				if err != nil || !reflect.DeepEqual(stateBefore, stateAfter) || process.ActiveCount() != baseline {

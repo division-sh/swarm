@@ -225,7 +225,11 @@ func insertSQLiteRunForkSelectedContractBranchDivergence(ctx context.Context, tx
 
 func (s *RunForkSQLiteOwner) ensureSQLiteRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string, source semanticview.Source) error {
 	allowedEvents := uniqueNonEmptyStrings(allowedSourceEventIDs)
-	if len(allowedEvents) == 0 {
+	timerEvents, err := selectedContractWorkflowTimerLineage(ctx, tx, forkRunID, false, s.PipelineSQLiteOwner.ReadWorkflowTimerActivationTx)
+	if err != nil {
+		return err
+	}
+	if len(allowedEvents) == 0 && len(timerEvents) == 0 {
 		feed, err := selectedDeploymentFeedPresentTx(ctx, tx, forkRunID)
 		if err != nil {
 			return fmt.Errorf("check selected deployment feed: %w", err)
@@ -303,12 +307,15 @@ func (s *RunForkSQLiteOwner) ensureSQLiteRunForkSelectedContractExecutionForkSta
 		return err
 	}
 	observationsJSON, _ := json.Marshal(observations)
+	timerJSON, _ := json.Marshal(timerEvents)
 	var strayEvents int
 	var strayEventEvidence string
 	if err := tx.QueryRowContext(ctx, `
 		WITH RECURSIVE selected_agents(run_id, agent_id, flow_instance) AS (
 			SELECT json_extract(value, '$.run_id'), json_extract(value, '$.agent_id'), json_extract(value, '$.flow_instance') FROM json_each($4)
 		), selected_tree(event_id) AS (
+			SELECT e.event_id FROM events e WHERE e.run_id=$1 AND e.event_id IN (SELECT value FROM json_each($7))
+			UNION
 			SELECT e.event_id FROM events e
 			JOIN run_fork_selected_contract_executions x ON x.fork_event_id = e.event_id AND x.fork_run_id = $1
 			WHERE e.run_id = $1 AND x.source_event_id IN (SELECT value FROM json_each($2))
@@ -330,7 +337,7 @@ func (s *RunForkSQLiteOwner) ensureSQLiteRunForkSelectedContractExecutionForkSta
 		FROM events e
 		WHERE e.run_id = $1 AND NOT EXISTS (SELECT 1 FROM selected_tree tree WHERE tree.event_id = e.event_id)
 		  AND e.event_id NOT IN (SELECT value FROM json_each($6))
-	`, forkRunID, string(allowedJSON), string(platformJSON), string(agentsJSON), string(activityJSON), string(observationsJSON)).Scan(&strayEvents, &strayEventEvidence); err != nil {
+	`, forkRunID, string(allowedJSON), string(platformJSON), string(agentsJSON), string(activityJSON), string(observationsJSON), string(timerJSON)).Scan(&strayEvents, &strayEventEvidence); err != nil {
 		return fmt.Errorf("check selected-contract fork event lineage: %w", err)
 	}
 	if strayEvents > 0 {

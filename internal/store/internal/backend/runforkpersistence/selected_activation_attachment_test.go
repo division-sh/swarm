@@ -283,6 +283,8 @@ func TestSelectedActivationSettlementEmptyInputRequiresNoInventedFeed(t *testing
 			child := uuid.NewString()
 			mock.ExpectQuery(`SELECT COUNT\(\*\) FROM fan_out_intents`).WithArgs(child).
 				WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+			mock.ExpectQuery(`SELECT event_id, task_id FROM events`).WithArgs(child).
+				WillReturnRows(sqlmock.NewRows([]string{"event", "task"}))
 			mock.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM fan_out_intents`).WithArgs(child).
 				WillReturnRows(sqlmock.NewRows([]string{"present"}).AddRow(false))
 			for _, table := range []string{"event_deliveries", "events", "agent_sessions", "agent_conversation_audits", "agent_turns"} {
@@ -439,10 +441,14 @@ func TestSelectedActivationSettlementPreservesDrainAndLineageBothDialects(t *tes
 					want = "unfinished feed"
 					mock.ExpectQuery(`status<>'closed'`).WithArgs(child).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 					mock.ExpectQuery(`SELECT status,cursor,cardinality`).WithArgs(child).WillReturnRows(sqlmock.NewRows([]string{"status", "cursor", "cardinality"}).AddRow("open", 0, 1))
-				} else if postgres {
-					mock.ExpectQuery(`FROM unnest`).WillReturnRows(sqlmock.NewRows([]string{"missing"}).AddRow(1))
 				} else {
-					mock.ExpectQuery(`FROM run_fork_selected_contract_executions WHERE fork_run_id`).WithArgs(child, event).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+					mock.ExpectQuery(`SELECT event_id, task_id FROM events`).WithArgs(child).
+						WillReturnRows(sqlmock.NewRows([]string{"event", "task"}))
+					if postgres {
+						mock.ExpectQuery(`FROM unnest`).WillReturnRows(sqlmock.NewRows([]string{"missing"}).AddRow(1))
+					} else {
+						mock.ExpectQuery(`FROM run_fork_selected_contract_executions WHERE fork_run_id`).WithArgs(child, event).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+					}
 				}
 				var err error
 				if postgres {
