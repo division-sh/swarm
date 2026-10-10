@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +14,9 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/operatorread"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -62,6 +65,10 @@ func TestServedWhatsAppLaunchedProcessDeathBothStores(t *testing.T) {
 					peer.text("/inbox", "PROCESS_DEATH_INBOX")
 				}
 				message := awaitServedNativeProcessSend(t, peer, text)
+				var original pipeline.ActivityAttemptRecord
+				if activity {
+					original = readServedNativeActivityAttempt(t, backend, location, message.ID)
+				}
 				if err := process.kill(); err != nil {
 					t.Fatal("owned launched SDK process did not die and join", err)
 				}
@@ -78,19 +85,101 @@ func TestServedWhatsAppLaunchedProcessDeathBothStores(t *testing.T) {
 					t.Fatal("process death replaced original enabled authority or lost readiness", restored)
 				}
 				if activity {
-					requireServedNativeActivityOutcome(t, endpoint, message.ID, "15551234571@s.whatsapp.net", text, "effect_recovery_outcome_unconfirmed")
+					requireServedNativeStartedActivity(t, endpoint, backend, location, message, original)
 				} else {
 					requireServedNativeUncertainInbox(t, reader, message)
 				}
-				select {
-				case resent := <-peer.sent:
-					t.Fatal("ordinary restart replayed an unconfirmed native effect", resent.ID, resent.Body.GetConversation())
-				default:
-				}
+				requireServedNativeNoResend(t, peer, message)
 				if err := process.stop(); err != nil {
 					t.Fatal("recovered SDK process did not join", err, process.output.String())
 				}
+				requireServedNativeNoResend(t, peer, message)
+				process = startServedNativeSDKProcess(t, opts, peer)
+				endpoint = process.endpoint(t) + "/v1/rpc"
+				peer.awaitPostLogin()
+				if activity {
+					requireServedNativeStartedActivity(t, endpoint, backend, location, message, original)
+				} else {
+					requireServedNativeUncertainInbox(t, reader, message)
+				}
+				requireServedNativeNoResend(t, peer, message)
+				if err := process.stop(); err != nil {
+					t.Fatal("ordinary restarted SDK process did not join", err, process.output.String())
+				}
+				requireServedNativeNoResend(t, peer, message)
 			})
+		}
+	}
+}
+
+func readServedNativeActivityAttempt(t *testing.T, backend, location, messageID string) pipeline.ActivityAttemptRecord {
+	t.Helper()
+	id, err := uuid.Parse(messageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspection, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := inspection.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	var record pipeline.ActivityAttemptRecord
+	var found bool
+	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		record, found, err = storetest.ReadServedActivityAttempt(ctx, inspection, id.String())
+		return err
+	}); err != nil || !found {
+		t.Fatal("original activity attempt is absent or unreadable", found, err)
+	}
+	if record.Status != pipeline.ActivityAttemptStatusStarted || record.Tool != "whatsapp.send_text" || record.Attempt != 1 ||
+		record.StartedAt.IsZero() || record.CompletedAt != nil || record.ResultEventID != "" || record.Failure != nil {
+		t.Fatal("unconfirmed provider acceptance lost its sole started activity journal", record)
+	}
+	return record
+}
+
+func requireServedNativeStartedActivity(t *testing.T, endpoint, backend, location string, message servedNativeMessage, original pipeline.ActivityAttemptRecord) {
+	t.Helper()
+	if current := readServedNativeActivityAttempt(t, backend, location, message.ID); !reflect.DeepEqual(current, original) {
+		t.Fatal("restart rewrote the surviving indeterminate activity attempt", original, current)
+	}
+	var requests operatorread.OperatorEventListResult
+	requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
+		"filter": map[string]any{"run_id": original.RunID, "event_name": "platform.activity_requested"}, "limit": 10}, &requests)
+	if len(requests.Events) != 1 || requests.Events[0].EventID != original.RequestEventID {
+		t.Fatal("restart duplicated or replaced the frozen activity request", requests)
+	}
+	request := requests.Events[0]
+	input, _ := request.Payload["input"].(map[string]any)
+	if request.Payload["tool"] != original.Tool || request.Payload["source_event_id"] != original.SourceEventID ||
+		input["destination"] != "15551234571@s.whatsapp.net" || input["text"] != message.Body.GetConversation() {
+		t.Fatal("surviving request lost its original customer input/lineage", request)
+	}
+	for _, name := range []string{original.SuccessEvent, original.FailureEvent} {
+		var results operatorread.OperatorEventListResult
+		requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
+			"filter": map[string]any{"run_id": original.RunID, "event_name": name}, "limit": 10}, &results)
+		if len(results.Events) != 0 {
+			t.Fatal("restart fabricated a terminal result for an indeterminate native attempt", results)
+		}
+	}
+}
+
+func requireServedNativeNoResend(t *testing.T, peer *serveNativeProtocolPeer, original servedNativeMessage) {
+	t.Helper()
+	for {
+		select {
+		case sent := <-peer.sent:
+			if sent.ID == original.ID || sent.Body.GetConversation() == original.Body.GetConversation() {
+				t.Fatal("restart replayed the original unconfirmed native effect", sent.ID, original.ID)
+			}
+		default:
+			return
 		}
 	}
 }
