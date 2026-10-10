@@ -39,6 +39,25 @@ func constructionPublicationFieldsFixture(t *testing.T) (workflowInitialMaterial
 	}, owner
 }
 
+func TestFlowConstructionReceiptRequiresFiniteModeAndExactKeyPresence(t *testing.T) {
+	for _, test := range []struct {
+		mode, key string
+		valid     bool
+	}{
+		{"static", "", true}, {"template", "business-key", true},
+		{"template", "", false}, {"static", "business-key", false},
+		{"", "", false}, {"unknown", "", false},
+		{" static", "", false}, {"TEMPLATE", "business-key", false},
+	} {
+		t.Run(test.mode+"/"+test.key, func(t *testing.T) {
+			receipt := FlowConstructionReceipt{InstanceKey: test.key}
+			if err := receipt.ValidateStoredMode(test.mode); (err == nil) != test.valid {
+				t.Fatalf("mode=%q key=%q error=%v want valid=%t", test.mode, test.key, err, test.valid)
+			}
+		})
+	}
+}
+
 func TestFlowConstructionPublicationFieldsPreservesKindsAndIsolation(t *testing.T) {
 	receipt, owner := constructionPublicationFieldsFixture(t)
 	raw, err := canonicaljson.MarshalPreservingNumberKinds(receipt)

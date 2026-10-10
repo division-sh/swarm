@@ -72,8 +72,8 @@ func FixedConstructionEvidenceForRoute(plan runfork.RunForkPlan, route flowident
 			metadata.ParentInstance != constructed.ParentRoute.FlowInstance || metadata.InstanceKey != receipt.InstanceKey {
 			return flowidentity.Instance{}, matched, false, fmt.Errorf("fixed header/config contradicts immutable construction identity")
 		}
-		if (metadata.Mode == "template") != (receipt.InstanceKey != "") {
-			return flowidentity.Instance{}, matched, false, fmt.Errorf("fixed header key presence contradicts captured construction mode")
+		if err := receipt.ValidateStoredMode(metadata.Mode); err != nil {
+			return flowidentity.Instance{}, matched, false, fmt.Errorf("fixed header construction mode: %w", err)
 		}
 		matched = entity
 		found = true
