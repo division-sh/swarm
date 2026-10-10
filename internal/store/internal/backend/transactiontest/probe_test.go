@@ -3,9 +3,83 @@ package transactiontest
 import (
 	"context"
 	"errors"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestCollectorStopJoinsCapturedAttemptRegistration(t *testing.T) {
+	var slot Slot
+	collector, _, err := slot.Install(Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pause Begin after it captures this collector, before Active registration.
+	collector.mu.Lock()
+	locked := true
+	begun := make(chan *Attempt, 1)
+	go func() { begun <- slot.Begin(false, true) }()
+	var attempt *Attempt
+	defer func() {
+		if locked {
+			collector.mu.Unlock()
+		}
+		collector.Stop()
+		if attempt == nil {
+			attempt = <-begun
+		}
+		attempt.Finish(errors.New("test cleanup"))
+	}()
+	waitProbeMutexBlocked(t, "(*Slot).Begin", nil)
+	stopped := make(chan struct{})
+	go func() {
+		collector.Stop()
+		close(stopped)
+	}()
+	waitProbeMutexBlocked(t, "(*Collector).Stop", stopped)
+	collector.mu.Unlock()
+	locked = false
+	attempt = <-begun
+	<-stopped
+	if attempt == nil || collector.Snapshot().Active != 1 || slot.Begin(false, false) != nil {
+		t.Fatal("Stop lost the captured attempt or accepted an uncaptured successor")
+	}
+	attempt.Begun()
+	BeginWorkflowHeaderJSON(WithAttempt(context.Background(), attempt), 17).End(nil)
+	attempt.BeforeCommit()
+	attempt.Committed()
+	attempt.Finish(nil)
+	got := collector.Snapshot()
+	if got.Active != 0 || got.Total.BeginAttempts != 1 || got.Total.WriteCommits != 1 || got.Total.JSONCopies.WorkflowHeader.CommittedBytes != 17 {
+		t.Fatalf("Stop published an incomplete captured receipt: %+v", got)
+	}
+}
+
+// Mutex waits are not durably blocked under synctest. Observe the controlled
+// blocked frame instead of relying on a wall-clock sleep or a production hook.
+func waitProbeMutexBlocked(t *testing.T, method string, returned <-chan struct{}) {
+	t.Helper()
+	stack := make([]byte, 1<<20)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		select {
+		case <-returned:
+			t.Fatalf("%s returned before the captured attempt registered", method)
+		default:
+		}
+		n := runtime.Stack(stack, true)
+		for _, goroutine := range strings.Split(string(stack[:n]), "\n\n") {
+			if strings.Contains(goroutine, "[sync.Mutex.Lock]") && strings.Contains(goroutine, method) {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s did not reach its controlled mutex wait", method)
+		}
+		runtime.Gosched()
+	}
+}
 
 func TestProbeCommitOutcomesAndDelaySelection(t *testing.T) {
 	for _, scope := range []DelayScope{DelayAllCommits, DelayAllWrites, DelayServingWrites} {
