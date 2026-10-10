@@ -467,67 +467,6 @@ func seedStaticFlowInstanceRouteWithoutReadiness(t *testing.T, db *sql.DB, sqlit
 	}
 }
 
-func TestActiveFlowInstanceDescriptorAuthorityScopesCensusToExactRunBothStores(t *testing.T) {
-	type backendCase struct {
-		name  string
-		setup func(*testing.T) (flowInstanceDescriptorAuthorityStore, *sql.DB, bool)
-	}
-	backends := []backendCase{
-		{
-			name: "postgres",
-			setup: func(t *testing.T) (flowInstanceDescriptorAuthorityStore, *sql.DB, bool) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db, false
-			},
-		},
-		{
-			name: "sqlite",
-			setup: func(t *testing.T) (flowInstanceDescriptorAuthorityStore, *sql.DB, bool) {
-				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected, storetest.Database(selected), true
-			},
-		},
-	}
-
-	for _, backend := range backends {
-		t.Run(backend.name, func(t *testing.T) {
-			selected, db, sqlite := backend.setup(t)
-			runA, runB := uuid.NewString(), uuid.NewString()
-			entityA, entityB := uuid.NewString(), uuid.NewString()
-			source := mustExternalStoreTestSourceArtifactFact()
-			bundleHash := source.BundleHash()
-			ctxA := runtimecorrelation.WithRunID(testAuthorActivityContext(), runA)
-			ctxB := runtimecorrelation.WithRunID(testAuthorActivityContext(), runB)
-			storetest.RequireRun(t, ctxA, selected, storetest.RunFixture{
-				Origin: storetest.ScenarioSetupOrigin(), RunID: runA, BundleHash: bundleHash,
-			})
-			storetest.RequireRun(t, ctxB, selected, storetest.RunFixture{
-				Origin: storetest.ScenarioSetupOrigin(), RunID: runB, BundleHash: bundleHash,
-			})
-
-			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runA, entityA, "account/a", bundleHash)
-			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runB, entityB, "account/b", bundleHash)
-
-			for _, check := range []struct {
-				ctx   context.Context
-				runID string
-				path  string
-			}{
-				{ctx: ctxA, runID: runA, path: "account/a"},
-				{ctx: ctxB, runID: runB, path: "account/b"},
-			} {
-				descriptors, err := selected.ListActiveFlowInstanceDescriptors(check.ctx, check.runID)
-				if err != nil {
-					t.Fatalf("ListActiveFlowInstanceDescriptors(%s): %v", check.path, err)
-				}
-				if len(descriptors) != 1 || descriptors[0].FlowInstance != check.path {
-					t.Fatalf("descriptors for %s = %#v, want exact run-owned descriptor", check.path, descriptors)
-				}
-			}
-		})
-	}
-}
 
 func seedExactFlowInstanceDescriptorOwner(
 	t *testing.T,

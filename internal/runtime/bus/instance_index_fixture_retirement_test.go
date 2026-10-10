@@ -33,3 +33,10 @@ func TestFlowInstanceFixturesHaveNoRetiredDescriptorReader(t *testing.T) {
 		}
 	}
 }
+
+func TestFinalAuthoringFixtureHasNoDescriptorMirror(t *testing.T) {
+	owner := reflect.TypeOf(finalFlowInstanceAuthoringLifecycleStore{})
+	if _, present := owner.FieldByName("flowInstances"); present {
+		t.Fatal("authoring fixture retains a descriptor mirror beside its native index")
+	}
+}
