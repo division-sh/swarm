@@ -122,6 +122,13 @@ func issue2353H2ObserveCommitStages(t *testing.T, rt issue2564H2Fixture, runID s
 		if err != nil || len(selections) != 1 {
 			t.Fatalf("H2 exact committed bump selection: event=%s rows=%+v err=%v", event, selections, err)
 		}
+		label := "in_s2"
+		if paths["c1"] > 0 {
+			label = "in_s1"
+		}
+		if selections[0].Context != "handler_rules" || selections[0].Disposition != "selected" || selections[0].FlowPath != "hub" || selections[0].Family != "handler_rule" || selections[0].DisplayLabel != label {
+			t.Fatalf("H2 exact rule does not agree with committed stage effect: event=%s paths=%v selection=%+v", event, paths, selections[0])
+		}
 		t.Logf("H2_BUMP_SELECTION hub=%s event=%s commit_revision=%d delivery=%s context=%s disposition=%s flow=%s family=%s semantic_path=%s label=%s", hubID, event, stageRevision, selections[0].DeliveryID, selections[0].Context, selections[0].Disposition, selections[0].FlowPath, selections[0].Family, selections[0].SemanticPath, selections[0].DisplayLabel)
 	}
 }
