@@ -133,24 +133,8 @@ func withNativeChannelActivityLaunch(ctx context.Context, started ActivityAttemp
 	if err := tool.InputSchema().Validate(intent.Input.Interface()); err != nil {
 		return nil, nil, err
 	}
-	fields, object := intent.Input.ObjectMap()
-	if !object {
-		return nil, nil, fmt.Errorf("native activity requires exact object input")
-	}
-	if intent.NativeSessionTarget != "" {
-		target, private := activityChannelTargetFromContext(ctx)
-		if !private || target.value == nil || target.value.authored.AuthoredToolID() != intent.Tool {
-			return nil, nil, fmt.Errorf("native business activity has no compiler-owned declaration projection")
-		}
-		projection := target.value.authored
-		selected := projection.Activation()
-		if selected.OnboardingOperationID != activation.OnboardingOperationID || selected.SessionAccount != activation.SessionAccount ||
-			selected.Coordinate != activation.Coordinate || projection.Operation() != operation ||
-			projection.PrivateTarget().ToolID() != privateTool || !projection.PublicationGeneration().Equal(intent.ChannelActivationGeneration) {
-			return nil, nil, fmt.Errorf("native business activity substituted its original responsibility")
-		}
-	} else if !fields["destination"].Equal(activation.Plan.Destination()) {
-		return nil, nil, fmt.Errorf("native activity destination differs from its compiled binding")
+	if err := admitNativeActivityDestination(ctx, intent, activation, operation, privateTool); err != nil {
+		return nil, nil, err
 	}
 	hash, err := tool.CanonicalHash()
 	if err != nil {
@@ -169,6 +153,31 @@ func withNativeChannelActivityLaunch(ctx context.Context, started ActivityAttemp
 		toolHash: hash, inputHash: started.InputHash, input: intent.Input, current: current}
 	launch.live.Store(true)
 	return context.WithValue(ctx, nativeChannelActivityKey{}, launch), func() { launch.live.Store(false) }, nil
+}
+
+func admitNativeActivityDestination(ctx context.Context, intent runtimeengine.ActivityIntent, activation channelonboarding.CompiledActivation,
+	operation, privateTool string,
+) error {
+	fields, object := intent.Input.ObjectMap()
+	if !object {
+		return fmt.Errorf("native activity requires exact object input")
+	}
+	if intent.NativeSessionTarget != "" {
+		target, private := activityChannelTargetFromContext(ctx)
+		if !private || target.value == nil || target.value.authored.AuthoredToolID() != intent.Tool {
+			return fmt.Errorf("native business activity has no compiler-owned declaration projection")
+		}
+		projection := target.value.authored
+		selected := projection.Activation()
+		if selected.OnboardingOperationID != activation.OnboardingOperationID || selected.SessionAccount != activation.SessionAccount ||
+			selected.Coordinate != activation.Coordinate || projection.Operation() != operation ||
+			projection.PrivateTarget().ToolID() != privateTool || !projection.PublicationGeneration().Equal(intent.ChannelActivationGeneration) {
+			return fmt.Errorf("native business activity substituted its original responsibility")
+		}
+	} else if !fields["destination"].Equal(activation.Plan.Destination()) {
+		return fmt.Errorf("native activity destination differs from its compiled binding")
+	}
+	return nil
 }
 
 // NativeChannelActivityPermit has no public constructor or serializable authority.

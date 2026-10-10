@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packs"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -31,6 +32,28 @@ func (p CompiledSessionActivityTarget) PrivateTarget() packs.PrivateActivityTarg
 }
 func (p CompiledSessionActivityTarget) PublicationGeneration() ChannelActivationGeneration {
 	return p.publication
+}
+
+// Qualification checks declaration ownership only; it cannot select a session.
+func QualifySessionActivityDeclaration(source semanticview.Source, site contracts.ActivitySite) error {
+	_, _, _, err := compileSessionActivityDeclaration(source, site)
+	return err
+}
+
+func ResolveSessionActivitySite(source semanticview.Source, node identity.ExecutableNode, handler, toolID, activityID string) (contracts.ActivitySite, error) {
+	var matches []contracts.ActivitySite
+	if source == nil || !node.Valid() {
+		return contracts.ActivitySite{}, fmt.Errorf("session activity requires its exact declaration source")
+	}
+	for _, site := range contracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node)) {
+		if site.HandlerEventKey == handler && site.Spec.Tool == toolID && contracts.ActivityResultEventsForSite(site).ActivityID == activityID {
+			matches = append(matches, site)
+		}
+	}
+	if len(matches) != 1 {
+		return contracts.ActivitySite{}, fmt.Errorf("session activity requires exactly one authored site, found %d", len(matches))
+	}
+	return matches[0], nil
 }
 
 func CompileSessionActivityTarget(source semanticview.Source, bundleHash string, site contracts.ActivitySite,
@@ -59,33 +82,50 @@ func CompileSessionActivityTarget(source semanticview.Source, bundleHash string,
 		if packID != "" && activation.Plan.TriggerIdentity().ID() != packID {
 			return absent, fmt.Errorf("session activity ingress pack contradicts its admitted trigger")
 		}
-		for _, name := range activation.Plan.OperationNames() {
-			id, connector, err := activation.Plan.ConnectorOperation(name)
-			if err != nil {
-				return absent, err
-			}
-			if id != site.Spec.Tool {
-				continue
-			}
-			hash, err := connector.CanonicalHash()
-			if err != nil {
-				return absent, err
-			}
-			if hash != toolHash {
-				return absent, fmt.Errorf("session activity connector contradicts its admitted declaration")
-			}
-			private, err := activation.Plan.RuntimeActivityTarget(name)
-			if err != nil {
-				return absent, err
-			}
-			matches = append(matches, CompiledSessionActivityTarget{authoredTool: site.Spec.Tool, operation: name,
-				activation: activation, private: private, publication: publication.Generation()})
+		selected, found, err := matchSessionActivityConnector(activation, site.Spec.Tool, toolHash)
+		if err != nil {
+			return absent, err
+		}
+		if found {
+			selected.publication = publication.Generation()
+			matches = append(matches, selected)
 		}
 	}
 	if len(matches) != 1 {
 		return absent, fmt.Errorf("session activity requires exactly one admitted connector/ingress responsibility, found %d", len(matches))
 	}
 	return matches[0], nil
+}
+
+func matchSessionActivityConnector(activation CompiledActivation, toolID, toolHash string) (CompiledSessionActivityTarget, bool, error) {
+	var selected CompiledSessionActivityTarget
+	found := false
+	for _, name := range activation.Plan.OperationNames() {
+		id, connector, err := activation.Plan.ConnectorOperation(name)
+		if err != nil {
+			return selected, false, err
+		}
+		if id != toolID {
+			continue
+		}
+		if found {
+			return selected, false, fmt.Errorf("session activity connector has ambiguous operation ownership")
+		}
+		hash, err := connector.CanonicalHash()
+		if err != nil {
+			return selected, false, err
+		}
+		if hash != toolHash {
+			return selected, false, fmt.Errorf("session activity connector contradicts its admitted declaration")
+		}
+		private, err := activation.Plan.RuntimeActivityTarget(name)
+		if err != nil {
+			return selected, false, err
+		}
+		selected = CompiledSessionActivityTarget{authoredTool: toolID, operation: name, activation: activation, private: private}
+		found = true
+	}
+	return selected, found, nil
 }
 
 func compileSessionActivityDeclaration(source semanticview.Source, site contracts.ActivitySite) (contracts.ToolSchemaEntry, string, string, error) {

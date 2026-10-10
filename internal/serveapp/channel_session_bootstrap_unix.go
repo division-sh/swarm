@@ -311,23 +311,7 @@ func (s *serveSessionBootstrap) RetireInactiveSessions(ctx context.Context) erro
 		if ctx.Err() != nil {
 			return errors.Join(result, context.Cause(ctx))
 		}
-		op, err := s.store.GetChannelOnboarding(ctx, entry.id)
-		if ctx.Err() != nil {
-			return errors.Join(result, context.Cause(ctx))
-		}
-		removed := errors.Is(err, channelonboarding.ErrNotFound)
-		if err != nil && !removed {
-			result = errors.Join(result, fmt.Errorf("observe retained session %s: %w", entry.id, err))
-			continue
-		}
-		retired := removed
-		if removed {
-			// Construction evidence identifies cleanup, not executable authority.
-			op = entry.attempt.operation
-			err = nil
-		} else {
-			retired, err = serveSessionRetirementRequired(ctx, s.store, op)
-		}
+		op, retired, err := s.observeSessionRetirement(ctx, entry.id, entry.attempt.operation)
 		if err != nil {
 			result = errors.Join(result, fmt.Errorf("observe session retirement %s: %w", entry.id, err))
 			continue
@@ -354,6 +338,22 @@ func (s *serveSessionBootstrap) RetireInactiveSessions(ctx context.Context) erro
 		}
 	}
 	return errors.Join(result, context.Cause(ctx))
+}
+
+func (s *serveSessionBootstrap) observeSessionRetirement(ctx context.Context, id string, original channelonboarding.Operation) (channelonboarding.Operation, bool, error) {
+	op, err := s.store.GetChannelOnboarding(ctx, id)
+	if ctx.Err() != nil {
+		return op, false, context.Cause(ctx)
+	}
+	if errors.Is(err, channelonboarding.ErrNotFound) {
+		// Construction evidence identifies cleanup, not executable authority.
+		return original, true, nil
+	}
+	if err != nil {
+		return op, false, err
+	}
+	retired, err := serveSessionRetirementRequired(ctx, s.store, op)
+	return op, retired, err
 }
 
 func serveSessionRetirementRequired(ctx context.Context, store channelonboarding.Store, op channelonboarding.Operation) (bool, error) {

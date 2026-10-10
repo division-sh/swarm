@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -39,6 +40,10 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 		_, hasManagedCredential := entry.ManagedCredentialExecution()
 		_, hasHTTP := entry.HTTPExecution()
 		switch entry.Handler() {
+		case runtimecontracts.ToolHandlerInProcess:
+			if err := qualifyNativeActivityImplementation(source, name, entry); err != nil {
+				return warnings, err
+			}
 		case runtimecontracts.ToolHandlerWasm, runtimecontracts.ToolHandlerPython:
 			if err := entry.Validate(); err != nil {
 				return warnings, fmt.Errorf("module tool %s: %w", name, err)
@@ -75,4 +80,30 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 		}
 	}
 	return warnings, nil
+}
+
+func qualifyNativeActivityImplementation(source semanticview.Source, name string, entry runtimecontracts.ToolSchemaEntry) error {
+	if err := entry.Validate(); err != nil {
+		return fmt.Errorf("native activity tool %s: %w", name, err)
+	}
+	sites := 0
+	for _, record := range source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			return err
+		}
+		for _, site := range runtimecontracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node)) {
+			if site.Spec.Tool != name {
+				continue
+			}
+			if err := channelonboarding.QualifySessionActivityDeclaration(source, site); err != nil {
+				return fmt.Errorf("native activity tool %s: %w", name, err)
+			}
+			sites++
+		}
+	}
+	if sites == 0 {
+		return fmt.Errorf("tool %s has no qualified private activity/ingress declaration", name)
+	}
+	return nil
 }
