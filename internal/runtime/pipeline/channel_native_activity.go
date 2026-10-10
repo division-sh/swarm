@@ -93,8 +93,12 @@ type nativeChannelActivityLaunch struct {
 func withNativeChannelActivityLaunch(ctx context.Context, started ActivityAttemptRecord, intent runtimeengine.ActivityIntent,
 	activation channelonboarding.CompiledActivation, operation string, tool runtimecontracts.ToolSchemaEntry, current func(context.Context) error,
 ) (context.Context, func(), error) {
+	privateTool := intent.Tool
+	if intent.NativeSessionTarget != "" {
+		privateTool = intent.NativeSessionTarget
+	}
 	if ctx == nil || ctx.Err() != nil || current == nil || started.Status != ActivityAttemptStatusStarted || started.StartedAt.IsZero() ||
-		!strings.HasPrefix(intent.Tool, runtimecontracts.PrivateChannelActivityPrefix) || intent.BundleHash != activation.Coordinate.BundleHash ||
+		!strings.HasPrefix(privateTool, runtimecontracts.PrivateChannelActivityPrefix) || intent.BundleHash != activation.Coordinate.BundleHash ||
 		intent.ExecutionMode != runtimeeffects.ExecutionModeLive {
 		return nil, nil, fmt.Errorf("native activity requires its exact newly claimed private attempt")
 	}
@@ -105,7 +109,7 @@ func withNativeChannelActivityLaunch(ctx context.Context, started ActivityAttemp
 		return nil, nil, err
 	}
 	privateTarget, err := activation.Plan.RuntimeActivityTarget(operation)
-	if err != nil || intent.Tool != privateTarget.ToolID() || !intent.PlanGeneration.Equal(privateTarget.Generation()) {
+	if err != nil || privateTool != privateTarget.ToolID() || !intent.PlanGeneration.Equal(privateTarget.Generation()) {
 		return nil, nil, fmt.Errorf("native activity differs from its exact compiled private target")
 	}
 	compiled, err := activation.Plan.OperationTool(operation)
@@ -130,7 +134,22 @@ func withNativeChannelActivityLaunch(ctx context.Context, started ActivityAttemp
 		return nil, nil, err
 	}
 	fields, object := intent.Input.ObjectMap()
-	if !object || !fields["destination"].Equal(activation.Plan.Destination()) {
+	if !object {
+		return nil, nil, fmt.Errorf("native activity requires exact object input")
+	}
+	if intent.NativeSessionTarget != "" {
+		target, private := activityChannelTargetFromContext(ctx)
+		if !private || target.value == nil || target.value.authored.AuthoredToolID() != intent.Tool {
+			return nil, nil, fmt.Errorf("native business activity has no compiler-owned declaration projection")
+		}
+		projection := target.value.authored
+		selected := projection.Activation()
+		if selected.OnboardingOperationID != activation.OnboardingOperationID || selected.SessionAccount != activation.SessionAccount ||
+			selected.Coordinate != activation.Coordinate || projection.Operation() != operation ||
+			projection.PrivateTarget().ToolID() != privateTool || !projection.PublicationGeneration().Equal(intent.ChannelActivationGeneration) {
+			return nil, nil, fmt.Errorf("native business activity substituted its original responsibility")
+		}
+	} else if !fields["destination"].Equal(activation.Plan.Destination()) {
 		return nil, nil, fmt.Errorf("native activity destination differs from its compiled binding")
 	}
 	hash, err := tool.CanonicalHash()

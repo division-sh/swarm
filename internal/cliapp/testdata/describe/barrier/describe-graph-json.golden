@@ -25881,6 +25881,36 @@
       }
     },
     {
+      "path": "platform.events[\"platform.activity_requested\"].payload.channel_activation_generation",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "platform.events[\"platform.activity_requested\"].payload.channel_activation_generation.description",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.events[\"platform.activity_requested\"].payload.channel_activation_generation.type",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
       "path": "platform.events[\"platform.activity_requested\"].payload.effect_class",
       "provenance": {
         "origin": "authored",
@@ -26041,6 +26071,36 @@
       }
     },
     {
+      "path": "platform.events[\"platform.activity_requested\"].payload.native_session_target",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "platform.events[\"platform.activity_requested\"].payload.native_session_target.description",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.events[\"platform.activity_requested\"].payload.native_session_target.type",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
       "path": "platform.events[\"platform.activity_requested\"].payload.node_id",
       "provenance": {
         "origin": "authored",
@@ -26052,6 +26112,36 @@
     },
     {
       "path": "platform.events[\"platform.activity_requested\"].payload.parent_event_id",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.events[\"platform.activity_requested\"].payload.plan_generation",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "platform.events[\"platform.activity_requested\"].payload.plan_generation.description",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.events[\"platform.activity_requested\"].payload.plan_generation.type",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",

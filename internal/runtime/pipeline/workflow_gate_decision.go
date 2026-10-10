@@ -159,6 +159,7 @@ func activityIntentFromProposedEffect(continuation decisioncard.ProposedEffectCo
 	}
 	intent := runtimeengine.ActivityIntent{
 		Context: events.DeliveryContext{}, ActivityID: continuation.ActivityID, Tool: continuation.Tool,
+		NativeSessionTarget: continuation.NativeSessionTarget, PlanGeneration: continuation.PlanGeneration, ChannelActivationGeneration: continuation.ChannelActivationGeneration,
 		BundleHash: continuation.BundleHash, WorkflowVersion: continuation.WorkflowVersion,
 		Input: continuation.Input, EffectClass: continuation.EffectClass,
 		SuccessEvent: continuation.SuccessEvent, FailureEvent: continuation.FailureEvent,

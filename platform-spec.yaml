@@ -5076,7 +5076,16 @@ handler_specification:
         platform_builtin: Not callable from activity in Stage 1; fail closed. Retired handler actions have no activity replacement.
         mcp: Not callable from activity in Stage 1. MCP-discovered/self-described effect classes are not authoritative; an
           authored registration-site override is required in a future slice before MCP tools can be activity-callable.
-        native_or_generated_tools: Not callable from activity in Stage 1; fail closed.
+        native_or_generated_tools: >
+          Only installed session-private provider_connector non_idempotent_write activities are callable in Stage 1,
+          through the exact compiled declaration/connector/explicit-ingress projection and the original enabled
+          session/activation owners described by session_outbound_tool_target. Source, plan, target and publication
+          identity remain frozen in the existing activity request and approval continuation; a process-local
+          single-use launch is required after the existing activity-attempt journal claim. The authored business
+          destination is admitted by the activity input schema and flow, never inferred from the operator mailbox
+          audience. Missing, ambiguous, withdrawn or foreign installation fails closed, with no provider-name,
+          first-match or ambient-connection fallback. Session read-account activities and all other native/generated
+          targets remain unsupported; this exception grants no agent or LLM tool access.
         credentialed_http_tools: Static credentials are admitted only for authored HTTP non_idempotent_write activities and
           only through the existing credential-store/import-boundary owner. Managed credentials are admitted only for
           non_idempotent_write provider_connector HTTP activities and only through `tool_model.managed_credential_store`.
@@ -11272,6 +11281,10 @@ tool_model:
         terminalizes successful history to drive cleanup. Currentness observation errors or cancellation retain
         the original cleanup responsibility and cannot authorize a replacement;
         observation or join failure preserves its cache entry and cleanup evidence and refuses publication.
+        Canonical selected-store removal of the exact onboarding row during reset is withdrawn responsibility,
+        not an observation failure. Refresh uses the original retained construction identity solely to close
+        and join that same connection; it does not recreate the row, select a successor, or erase pairing.
+        Lookup cancellation and non-absence observation errors remain fail-closed and retain cleanup ownership.
         No refresh constructs a replacement, logs out, or deletes pairing. Current sibling responsibilities remain
         owned. Successful repeated cleanup joins the same original connection before activation reconciliation.
         Concurrent close callers wait through cancellation-aware serialization; expiration returns the caller's
@@ -11536,6 +11549,14 @@ tool_model:
         compiled result projection before settling that same journal. A send error or malformed acknowledgment
         remains uncertain; replay and restart use the recorded attempt without another SDK call. An absent or
         foreign runtime installation fails closed, with no HTTP, credential, builtin or MCP fallback.
+        Authored session-write activities retain their authored tool and exact node/handler/activity identity.
+        The compiler joins that scoped connector contract and explicit canonical owning-flow ingress target to
+        exactly one enabled original activation; the immutable request and any proposed-effect continuation carry
+        its private activity target and exact plan/publication generations. Launch recompares those frozen facts
+        against the held original owner, never rebinding to a same-provider sibling or replacement connection.
+        The destination is the immutable authored activity input under its declared schema and flow authority,
+        not the operator mailbox destination. Runtime channel operations retain their separately compiled binding
+        destination checks. Neither declaration nor stored selection materializes native launch permission.
         These provider operations are private activities, never agent grants or LLM tool definitions. A nearest
         native declaration blocks same-name builtin fallback and discovered MCP substitution without losing its
         immutable intent projection. Before alias normalization or emit routing, dispatch retains the exact
@@ -21763,12 +21784,21 @@ platform_events:
       payload:
         activity_id: string
         tool: string
+        native_session_target:
+          type: string?
+          description: Exact compiler-selected private target for an authored session-write activity; requires both generations and the source pin, and is never launch permission.
+        plan_generation:
+          type: string?
+          description: Frozen compiled channel plan identity; required for private channel or authored session-write targets.
+        channel_activation_generation:
+          type: string?
+          description: Frozen admitted channel publication identity; required for private channel or authored session-write targets.
         bundle_hash:
           type: string?
-          description: Required for a request released by proposed_effect approval; omitted for an immediate unapproved request.
+          description: Required for a request released by proposed_effect approval or an authored session-write request; omitted for ordinary immediate unapproved requests.
         workflow_version:
           type: string?
-          description: Required for a request released by proposed_effect approval; omitted for an immediate unapproved request.
+          description: Required for a request released by proposed_effect approval or an authored session-write request; omitted for ordinary immediate unapproved requests.
         input: object
         effect_class: string
         success_event: string

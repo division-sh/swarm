@@ -153,6 +153,7 @@ type channelActivityTargetValue struct {
 	projection     *runtimecredentials.SecretBindingProjection
 	activation     channelonboarding.CompiledActivation
 	operation      string
+	authored       channelonboarding.CompiledSessionActivityTarget
 }
 
 func NewChannelActivityTarget(tool runtimecontracts.ToolSchemaEntry, generation plangeneration.Generation) (ChannelActivityTarget, error) {

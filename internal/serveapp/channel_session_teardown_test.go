@@ -18,6 +18,35 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestServeSessionCanonicalRemovalJoinsOnlyOriginalOwnerBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f, op, _ := pairedServeSessionObserver(t, backend)
+			original := f.adapter.connection(op.OperationID)
+			path := filepath.Join(f.adapter.directory, op.SessionConnectionID, "session.json")
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fault := &serveSessionReadFaultStore{Store: f.adapter.store, cause: channelonboarding.ErrNotFound}
+			fault.failAt.Store(1)
+			f.adapter.store = fault
+			if err := f.adapter.RetireInactiveSessions(f.ctx); err != nil || f.owner.ActiveCount() != 0 ||
+				f.adapter.connection(op.OperationID) != original || original.Connect(f.ctx) == nil {
+				t.Fatal("authoritative removal lost the original cleanup owner or retained SDK execution", err)
+			}
+			fault.failAt.Store(2)
+			if err := f.adapter.RetireInactiveSessions(f.ctx); err != nil {
+				t.Fatal("removed original connection could not be joined repeatedly", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatal("authoritative removal modified private pairing evidence", err)
+			}
+		})
+	}
+}
+
 func TestServeSessionTeardownJoinsOriginalOwnerAndPreservesPairingBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, kind := range []channelonboarding.TeardownKind{channelonboarding.TeardownInterfaceRetirement, channelonboarding.TeardownContextRetirement} {

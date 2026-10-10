@@ -26,7 +26,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func nativeActivityHandoffFixture(t *testing.T) (channelonboarding.CompiledActivation, contracts.ToolSchemaEntry, engine.ActivityIntent, ActivityAttemptRecord, map[string]any) {
+func nativeActivityStructuralPlan(t *testing.T) packs.SatisfactionPlan {
 	t.Helper()
 	root := filepath.Join("..", "..", "..")
 	body, err := os.ReadFile(filepath.Join(root, "packs/provider-triggers/whatsapp/trigger.yaml"))
@@ -42,7 +42,12 @@ func nativeActivityHandoffFixture(t *testing.T) (channelonboarding.CompiledActiv
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := packfixture.WhatsAppSessionChannel(t, filepath.Join(root, "platform-spec.yaml"), catalog)
+	return packfixture.WhatsAppSessionChannel(t, filepath.Join(root, "platform-spec.yaml"), catalog)
+}
+
+func nativeActivityHandoffFixture(t *testing.T) (channelonboarding.CompiledActivation, contracts.ToolSchemaEntry, engine.ActivityIntent, ActivityAttemptRecord, map[string]any) {
+	t.Helper()
+	plan := nativeActivityStructuralPlan(t)
 	binding, err := packs.NewOutboundBindingPlanWithRegistration("native-activity", plan, "15551234568@s.whatsapp.net", nil, nil, "ingress:.:whatsapp")
 	if err != nil {
 		t.Fatal(err)
