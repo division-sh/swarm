@@ -59,6 +59,53 @@ func pairedServeSessionObserver(t *testing.T, backend string) (*serveBootstrapTe
 	return f, op, observer
 }
 
+func TestServePairedSessionObservationCancelsPendingResumeBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f, op, observer := pairedServeSessionObserver(t, backend)
+			if err := f.adapter.connection(op.OperationID).Close(f.ctx); err != nil {
+				t.Fatal(err)
+			}
+			entered := serveBootstrapWireFixture(t, "blocked_handshake", f.owner)
+			caller, cancel := context.WithCancel(f.ctx)
+			defer cancel()
+			result := make(chan error, 1)
+			go func() { result <- f.adapter.ResumeSession(caller, op, f.candidate) }()
+			select {
+			case <-entered:
+			case err := <-result:
+				t.Fatal("paired resume did not retain its pending original attempt", err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("paired resume did not reach the SDK handshake")
+			}
+			wait, stop := context.WithTimeout(f.ctx, 50*time.Millisecond)
+			provider, observation, current, err := observer.ObserveSession(wait, op)
+			provider.CloseExecution()
+			stop()
+			if !errors.Is(err, context.DeadlineExceeded) || current || observation.Connected {
+				t.Fatal("pending paired readiness ignored cancellation or granted health", err, current, observation)
+			}
+			cancel()
+			select {
+			case err := <-result:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatal("original paired resume lost caller cancellation", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("paired resume caller waits inline for retained cleanup")
+			}
+			join, finish := context.WithTimeout(f.ctx, 30*time.Second)
+			defer finish()
+			if err := f.adapter.connection(op.OperationID).Close(join); err != nil {
+				t.Fatal("paired observation discarded original cleanup ownership", err)
+			}
+			if err := f.owner.WaitForQuiescence(join); err != nil {
+				t.Fatal("paired observation released unresolved original work", err)
+			}
+		})
+	}
+}
+
 func TestServeSessionReadinessUsesOriginalOwnedObservationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

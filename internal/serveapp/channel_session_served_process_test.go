@@ -13,6 +13,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/pprof"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -43,7 +46,32 @@ func startServedNativeSDKProcess(t *testing.T, opts cliapp.ServeOptions, peer *s
 	if err != nil {
 		t.Fatal(err)
 	}
-	return startServedCrashProcess(t, "TestServedWhatsAppSDKProcessHelper", []string{servedNativeProcessEnv + "=" + string(config)})
+	process := startServedCrashProcess(t, "TestServedWhatsAppSDKProcessHelper", []string{servedNativeProcessEnv + "=" + string(config)})
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		select {
+		case <-process.exited:
+			return
+		default:
+		}
+		// Signal only this fixture's created child, before its ordinary cleanup.
+		if err := process.cmd.Process.Signal(syscall.SIGUSR2); err != nil {
+			t.Log("child wait stack diagnostic:", err)
+			return
+		}
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			if output := process.output.String(); strings.Contains(output, "native SDK child stacks END") {
+				t.Logf("child phase evidence at original failed wait:\n%s", output)
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Log("child stack diagnostic did not complete; original failure is retained")
+	})
+	return process
 }
 
 func TestServedWhatsAppSDKProcessHelper(t *testing.T) {
@@ -98,6 +126,24 @@ func TestServedWhatsAppSDKProcessHelper(t *testing.T) {
 	opts.Output, opts.ErrorOutput = os.Stdout, os.Stderr
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	diagnostics, done, joined := make(chan os.Signal, 1), make(chan struct{}), make(chan struct{})
+	signal.Notify(diagnostics, syscall.SIGUSR2)
+	go func() {
+		defer close(joined)
+		for {
+			select {
+			case <-diagnostics:
+				fmt.Fprintln(os.Stderr, "native SDK child stacks BEGIN")
+				if err := pprof.Lookup("goroutine").WriteTo(os.Stderr, 2); err != nil {
+					fmt.Fprintln(os.Stderr, "child stack observation:", err)
+				}
+				fmt.Fprintln(os.Stderr, "native SDK child stacks END")
+			case <-done:
+				return
+			}
+		}
+	}()
+	t.Cleanup(func() { signal.Stop(diagnostics); close(done); <-joined })
 	if code := runFrom(ctx, repoRootForTest(), opts); code != 0 {
 		t.Fatalf("native SDK served process exited %d", code)
 	}
