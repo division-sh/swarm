@@ -48,6 +48,7 @@ type SelectedContractForkLifecycle interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	MaterializeRunForkForSelectedContractExecution(context.Context, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
+	RequireMaterializedRunForkForSelectedContractExecution(context.Context, string, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
 	DiscardMaterializedSelectedContractExecutionFork(context.Context, string) error
 	ActivateRunForkForSelectedContractExecution(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)
 	LoadRunForkSelectedContractBinding(context.Context, string) (runfork.RunForkSelectedContractBinding, bool, error)
@@ -72,7 +73,6 @@ type SelectedContractRuntimeExecutionLifecycle interface {
 // SelectedContractReplayPersistence owns source replay admission and exact
 // selected-fork event commit.
 type SelectedContractReplayPersistence interface {
-	EnsureRunForkNoPostForkCommittedReplayScopeMarkers(context.Context, string, string) error
 	LoadRunForkSelectedContractSourceEventModes(context.Context, string, []string) ([]executionmode.Mode, error)
 	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error)
 	RequireSelectedForkInputPublished(context.Context, runtimeeffects.Authority, runfork.RunForkSelectedContractSourceEvent, events.PayloadSchemaBinding) (bool, error)

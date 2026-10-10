@@ -236,13 +236,13 @@ func TestRunForkWorkflowTimerAdmissionReadbackIsRequireOnlyAndComplete(t *testin
 			selection := workflowTimerMaterializerSelection{removed: map[string]bool{source.Ref.DeclarationKey: removed}}
 			owner := &workflowTimerMaterializerOwner{rows: make(map[string]pipeline.WorkflowTimerActivation)}
 			if _, err := materializeRunForkWorkflowTimers(context.Background(), new(mutationprotocol.Attempt), plan,
-				workflowTimerProjectionChildRun, selection, owner, bornAt, false); err != nil {
+				workflowTimerProjectionChildRun, selection, owner, bornAt); err != nil {
 				t.Fatal(err)
 			}
-			if len(owner.rows) != 1 || owner.inserts != 1 {
+			if len(owner.rows) != 1 || owner.inserts != 1 || removed && owner.cancels != 1 || !removed && owner.cancels != 0 {
 				t.Fatal("terminal source facts were rearmed")
 			}
-			writes := owner.writes
+			writes, cancels := owner.writes, owner.cancels
 			before, _ := json.Marshal(plan.ReplayResumeAdmission)
 			withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
 				for i := 0; i < 2; i++ {
@@ -254,9 +254,18 @@ func TestRunForkWorkflowTimerAdmissionReadbackIsRequireOnlyAndComplete(t *testin
 					assertWorkflowTimerAppliedDisposition(t, admitted, runfork.RunForkReplayResumeDispositionReconstruct)
 					admitted.Dispositions[0].Message = "caller-local"
 				}
+				for id := range owner.rows {
+					delete(owner.rows, id)
+				}
+				admitted, err := requireMaterializedRunForkWorkflowTimers(ctx, attempt, plan, workflowTimerProjectionChildRun,
+					selection, owner, bornAt, plan.ReplayResumeAdmission)
+				if err == nil || !reflect.DeepEqual(admitted, plan.ReplayResumeAdmission) || len(owner.rows) != 0 ||
+					owner.inserts != 1 || owner.cancels != cancels || owner.writes != writes {
+					t.Fatalf("complete inventory reuse repaired a missing timer or cancellation: owner=%+v err=%v", owner, err)
+				}
 			})
 			after, _ := json.Marshal(plan.ReplayResumeAdmission)
-			if owner.writes != writes || owner.requires != 2 || string(before) != string(after) {
+			if owner.writes != writes || owner.cancels != cancels || owner.inserts != 1 || owner.reads != 3 || string(before) != string(after) {
 				t.Fatal("require-only admission wrote, skipped a readback, or aliased source admission")
 			}
 		})
@@ -291,7 +300,7 @@ func TestRunForkWorkflowTimerAdmissionTerminalOnlyNeverRearms(t *testing.T) {
 		}
 		assertWorkflowTimerAppliedDisposition(t, admitted, runfork.RunForkReplayResumeDispositionNoHistoricalAction)
 	})
-	if owner.requires != 0 || owner.writes != 0 || len(owner.rows) != 0 {
+	if owner.reads != 1 || owner.writes != 0 || len(owner.rows) != 0 {
 		t.Fatal("terminal-only history created or required a child activation")
 	}
 }
@@ -312,12 +321,12 @@ func TestRunForkWorkflowTimerAdmissionReadbackRequiresEveryActiveSourceRow(t *te
 	}}
 	withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
 		got, err := requireMaterializedRunForkWorkflowTimers(ctx, attempt, plan, workflowTimerProjectionChildRun, selection, owner, bornAt, plan.ReplayResumeAdmission)
-		if err == nil || !reflect.DeepEqual(got, plan.ReplayResumeAdmission) || owner.requires != 2 || owner.writes != 0 {
+		if err == nil || !reflect.DeepEqual(got, plan.ReplayResumeAdmission) || owner.reads != 1 || owner.writes != 0 {
 			t.Fatalf("partial readback discharged complete inventory: admission=%+v owner=%+v err=%v", got, owner, err)
 		}
 		owner.rows[projected[1].activation.Ref.ActivationID] = projected[1].activation
 		got, err = requireMaterializedRunForkWorkflowTimers(ctx, attempt, plan, workflowTimerProjectionChildRun, selection, owner, bornAt, plan.ReplayResumeAdmission)
-		if err != nil || len(got.UnsupportedBlockers) != 0 || owner.requires != 4 || owner.writes != 0 {
+		if err != nil || len(got.UnsupportedBlockers) != 0 || owner.reads != 2 || owner.writes != 0 {
 			t.Fatalf("complete require-only inventory failed: admission=%+v owner=%+v err=%v", got, owner, err)
 		}
 	})
@@ -413,7 +422,7 @@ func TestRunForkWorkflowTimerAdmissionRequiresExactLiveFrameIncludingTerminalOnl
 				})
 			})
 			if _, err := requireMaterializedRunForkWorkflowTimers(staleCtx, staleAttempt, plan, workflowTimerProjectionChildRun,
-				selection, owner, bornAt, plan.ReplayResumeAdmission); err == nil || owner.requires != 0 || owner.writes != 0 {
+				selection, owner, bornAt, plan.ReplayResumeAdmission); err == nil || owner.reads != 0 || owner.writes != 0 {
 				t.Fatal("stale frame acquired discharge or refused frame reached the owner")
 			}
 		})
