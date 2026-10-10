@@ -28,7 +28,6 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
@@ -92,19 +91,14 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	catalog := testProviderTriggerCatalog(t)
 	source := processIngressTransportSource(t, bundle, catalog)
 	persistence := &processIngressProofStore{}
-	eventsStore := &processIngressEventStore{}
-	persistence.store = eventsStore
-	bundleHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+	bundleHash := bundle.SourceArtifact.BundleHash()
 	const runID = "41000000-0000-0000-0000-000000000001"
-	owner, err := runtimeflowidentity.StandingForGeneration(source, ".", runID)
-	if err != nil {
-		t.Fatalf("construct transport fixture owner: %v", err)
-	}
-	eventsStore.construction = runtimepipeline.FlowConstructionPublicationEvidence{Identity: owner}
+	eventsStore := newProcessIngressEventStore(t, source, runID)
+	persistence.store = eventsStore
 	workOwner := newSupervisorTestRuntimeOccurrence(t, bundleHash)
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{
 		ContractBundle:         source,
-		Durable:                runtimebus.DurableDependencies{ConstructionPublications: eventsStore},
+		Durable:                runtimebus.DurableDependencies{Instances: eventsStore, ConstructionPublications: eventsStore},
 		SourceArtifactFact:     mustServeTestEphemeralSourceArtifactFact(bundleHash),
 		ProviderOutputVerifier: catalog,
 		WorkOwner:              workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
