@@ -8,6 +8,14 @@ mapfile -t units < <(jq -er --arg id "$BATCH_ID" '.batches[] | select(.id == $id
 test "${#units[@]}" -gt 0
 failed=0
 for UNIT_ID in "${units[@]}"; do
+  # Corpus correspondence consumes immutable Git inputs, wherever the planner places it.
+  if jq -e --arg id "$UNIT_ID" '.units[] | select(.id == $id) | any(.selected_roots[]?; .package == "github.com/division-sh/swarm/scripts/rewrite-stages-2566")' "$plan" >/dev/null; then
+    shallow=$(git rev-parse --is-shallow-repository)
+    test "$shallow" = true || test "$shallow" = false
+    if [ "$shallow" = true ]; then
+      git fetch --no-tags --unshallow origin "$(git rev-parse HEAD)"
+    fi
+  fi
   # Prepare the fixture, never let the admission observer pull an image.
   if jq -e --arg id "$UNIT_ID" '.units[] | select(.id == $id) | any(.required_tests[]?; .package == "github.com/division-sh/swarm/internal/runtime/workspace" and .name == "TestVerifyCLIImageProbeLifecycleRealDocker")' "$plan" >/dev/null; then
     docker pull golang:1.25-bookworm
