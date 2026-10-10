@@ -2,6 +2,7 @@ package channelonboarding
 
 import (
 	"context"
+	"errors"
 	"slices"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -18,6 +19,29 @@ type AdmissionResponsibility struct {
 	Provider           string
 	Credentials        []CredentialAdmission
 	SessionAccount     operatorchannel.SessionAccountAdmission
+}
+
+// RetainedSessionCurrent admits restoration for a completed native operation's
+// own current slot. Historical/superseded slots grant no reconnect instruction.
+func RetainedSessionCurrent(ctx context.Context, store Store, op Operation) (bool, error) {
+	activation, err := store.GetConnectedChannelActivation(ctx, op.SlotKey)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if activation.OperationID != op.OperationID || activation.Status != ActivationCurrent {
+		return false, nil
+	}
+	expected := AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
+		ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
+		Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
+	if activation.ValidateSessionAccount() != nil || activation.PrincipalID != op.PrincipalID ||
+		activation.Interface.Normalized() != op.Interface.Normalized() || !expected.MatchesActivation(op, activation) {
+		return false, ErrRevisionConflict
+	}
+	return true, nil
 }
 
 func (p Phase) SupportsPrebindingRegistration() bool {

@@ -170,6 +170,28 @@ func (f *runtimeBootstrapFixture) BootstrapSession(_ context.Context, op channel
 	}
 	return nil
 }
+func (f *runtimeBootstrapFixture) ResumeSession(ctx context.Context, op channelonboarding.Operation, c channelonboarding.Candidate) error {
+	if f.connection != nil && f.connection.CheckBootstrap(ctx) == nil {
+		return nil
+	}
+	if f.connection != nil {
+		if err := f.connection.Close(ctx); err != nil {
+			return err
+		}
+	}
+	var err error
+	opts := RuntimeConnectionOptions{Directory: f.directory, OperationID: op.OperationID, Store: f.store, Plan: c.Plan}
+	if op.SessionAccount == (operatorchannel.SessionAccountAdmission{}) {
+		f.connection, err = OpenRuntimeBootstrap(f.ctx, opts)
+	} else {
+		f.connection, err = OpenRuntimeConnection(f.ctx, opts)
+	}
+	if err != nil {
+		return err
+	}
+	f.peer.attach(f.t, f.connection.state.currentOccurrence().client)
+	return f.connection.Connect(ctx)
+}
 func (f *runtimeBootstrapFixture) ReadSessionPairing(ctx context.Context, op channelonboarding.Operation, principal operatorchannel.Principal) (channelonboarding.PairingReadback, error) {
 	if f.connection == nil {
 		return channelonboarding.PairingReadback{Status: "not_started"}, nil

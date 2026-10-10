@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store/sessionstate"
+	"github.com/division-sh/swarm/internal/testutil/whatsappfixture"
 
-	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
@@ -35,26 +35,7 @@ func openSDKStoreFixture(t *testing.T, path string) (*sessionstate.Fixture, *ses
 
 func newSDKDeviceFixture(t *testing.T, container *sessionstate.Owner) *store.Device {
 	t.Helper()
-	device := container.NewDevice()
-	jid := types.NewJID("synthetic_test_account", types.DefaultUserServer)
-	device.ID = &jid
-	device.Account = &waAdv.ADVSignedDeviceIdentity{
-		Details: []byte{1}, AccountSignature: make([]byte, 64),
-		AccountSignatureKey: make([]byte, 32), DeviceSignature: make([]byte, 64),
-	}
-	if err := device.Save(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	// This fixture represents an already paired account. Materialize its
-	// uploaded prekeys rather than making authentication generate a fresh batch.
-	prekeys, err := device.PreKeys.GetOrGenPreKeys(context.Background(), uint32(whatsmeow.MinPreKeyCount))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := device.PreKeys.MarkPreKeysAsUploaded(context.Background(), prekeys[len(prekeys)-1].KeyID); err != nil {
-		t.Fatal(err)
-	}
-	return device
+	return whatsappfixture.PairedDevice(t, container)
 }
 
 func TestWhatsAppPrivateSDKCapabilitiesCannotExportContainerAdministration(t *testing.T) {

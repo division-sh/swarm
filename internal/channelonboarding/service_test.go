@@ -2004,10 +2004,15 @@ func (s *cancellationTestStore) ReserveChannelOnboarding(ctx context.Context, re
 
 func (s *cancellationTestStore) GetChannelOnboarding(ctx context.Context, operationID string) (Operation, error) {
 	s.observe(ctx)
-	if s.op.OperationID != operationID {
-		return Operation{}, ErrNotFound
+	if s.op.OperationID == operationID {
+		return s.op, nil
 	}
-	return s.op, nil
+	for _, operation := range s.history {
+		if operation.OperationID == operationID {
+			return operation, nil
+		}
+	}
+	return Operation{}, ErrNotFound
 }
 
 func (s *cancellationTestStore) SetChannelClientLocale(ctx context.Context, req SetClientLocaleRequest) (Operation, error) {

@@ -122,6 +122,7 @@ type ReadinessProjector interface {
 type SessionBootstrapOwner interface {
 	QualifySessionPlan(Candidate) error
 	BootstrapSession(context.Context, Operation, Candidate) error
+	ResumeSession(context.Context, Operation, Candidate) error
 	CheckpointSessionPairing(context.Context, Operation) (Operation, bool, error)
 	ReadSessionPairing(context.Context, Operation, operatorchannel.Principal) (PairingReadback, error)
 }
@@ -194,7 +195,7 @@ type Service struct {
 }
 
 type operationDriveLock struct {
-	mu   sync.Mutex
+	held chan struct{}
 	refs int
 }
 
@@ -307,7 +308,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 		if err != nil {
 			return Result{Operation: existing}, err
 		}
-		return s.drive(context.WithoutCancel(ctx), existing, candidate, input.ProviderCredential)
+		return s.drive(ctx, existing, candidate, input.ProviderCredential)
 	}
 	state, err := s.slotState(ctx, start)
 	if err != nil {
@@ -321,7 +322,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return s.drive(context.WithoutCancel(ctx), op, candidate, input.ProviderCredential)
+	return s.drive(ctx, op, candidate, input.ProviderCredential)
 }
 
 func (s *Service) Get(ctx context.Context, operationID string) (Result, error) {
@@ -522,7 +523,10 @@ func (s *Service) activationRecovery(identity operatorchannel.InterfaceIdentity)
 
 func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 	operationID := strings.TrimSpace(input.OperationID)
-	unlock := s.lockDrive(operationID)
+	unlock, err := s.lockDrive(ctx, operationID)
+	if err != nil {
+		return Result{}, err
+	}
 	defer unlock()
 
 	op, err := s.store.GetChannelOnboarding(ctx, operationID)
@@ -578,7 +582,10 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 			return Result{Operation: op}, err
 		}
 	}
-	result, err := s.driveLocked(context.WithoutCancel(ctx), rebound, candidate, input.ProviderCredential)
+	if err := s.resumeSession(ctx, rebound, candidate); err != nil {
+		return Result{Operation: rebound, Candidate: &candidate}, fmt.Errorf("restore onboarding session: %w", err)
+	}
+	result, err := s.driveLocked(ctx, rebound, candidate, input.ProviderCredential)
 	if err != nil {
 		return result, fmt.Errorf("drive onboarding retry: %w", err)
 	}
@@ -597,7 +604,10 @@ func (s *Service) ConfirmIdentity(ctx context.Context, operationID string, expec
 	if parentID == "" {
 		return operatorchannel.Operation{}, operatorchannel.Binding{}, fmt.Errorf("%w: identity operation has no durable onboarding parent", ErrConflict)
 	}
-	unlocks := s.lockDrive(parentID)
+	unlocks, err := s.lockDrive(ctx, parentID)
+	if err != nil {
+		return operatorchannel.Operation{}, operatorchannel.Binding{}, err
+	}
 	defer unlocks()
 	parent, err := s.store.GetChannelOnboarding(ctx, parentID)
 	if err != nil {
@@ -780,45 +790,63 @@ func (s *Service) Recover(ctx context.Context) error {
 		return err
 	}
 	for _, op := range operations {
-		if op.Phase.Terminal() {
-			if err := s.recoverTerminalCredentials(ctx, op); err != nil {
-				return err
-			}
-			continue
-		}
-		rebound, candidate, err := s.bindCurrentCandidate(context.WithoutCancel(ctx), op)
-		if err != nil {
-			var blocked *EffectRetryBlockedError
-			if errors.As(err, &blocked) {
-				continue
-			}
-			if errors.Is(err, errOnboardingRuntimeContextRetired) {
-				_, failErr := s.failOperation(
-					context.WithoutCancel(ctx),
-					op,
-					"runtime_context_retired",
-					fmt.Sprintf("onboarding runtime context for operation %s is no longer current", op.OperationID),
-				)
-				if failErr != nil {
-					return fmt.Errorf("retire obsolete channel onboarding %s: %w", op.OperationID, failErr)
-				}
-				continue
-			}
+		if err := s.recoverOperation(ctx, op.OperationID); err != nil {
 			return err
 		}
-		op = rebound
-		if recoveryNeedsFreshTargetAdmission(op, candidate) {
-			// Local recovery may settle historical responsibility, but cannot
-			// execute a declaration-only candidate or adopt its default keys.
-			continue
+	}
+	return nil
+}
+
+func (s *Service) recoverOperation(ctx context.Context, id string) error {
+	unlock, err := s.lockDrive(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	op, err := s.store.GetChannelOnboarding(ctx, id)
+	if err != nil {
+		return err
+	}
+	if op.Phase.Terminal() {
+		if op.Phase != PhaseSucceeded || op.Posture != ActivationSessionConnection {
+			return s.recoverTerminalCredentials(ctx, op)
 		}
-		if _, err := s.drive(context.WithoutCancel(ctx), op, candidate, ""); err != nil {
-			var credentialRequired *CredentialRequiredError
-			if errors.As(err, &credentialRequired) {
-				continue
+		eligible, err := RetainedSessionCurrent(ctx, s.store, op)
+		if err != nil || !eligible {
+			return err
+		}
+	}
+	rebound, candidate, err := s.bindCurrentCandidate(context.WithoutCancel(ctx), op)
+	if err != nil {
+		var blocked *EffectRetryBlockedError
+		if errors.As(err, &blocked) {
+			return nil
+		}
+		if errors.Is(err, errOnboardingRuntimeContextRetired) {
+			if op.Phase.Terminal() {
+				return nil
 			}
-			return fmt.Errorf("recover channel onboarding %s: %w", op.OperationID, err)
+			_, err := s.failOperation(context.WithoutCancel(ctx), op, "runtime_context_retired",
+				fmt.Sprintf("onboarding runtime context for operation %s is no longer current", op.OperationID))
+			return err
 		}
+		return err
+	}
+	op = rebound
+	if err := s.resumeSession(ctx, op, candidate); err != nil {
+		return fmt.Errorf("restore channel onboarding %s: %w", op.OperationID, err)
+	}
+	if recoveryNeedsFreshTargetAdmission(op, candidate) {
+		// Restoring paired control work does not admit a replacement target or
+		// execute the retained declaration's historical business generation.
+		return nil
+	}
+	if _, err := s.driveLocked(ctx, op, candidate, ""); err != nil {
+		var credentialRequired *CredentialRequiredError
+		if errors.As(err, &credentialRequired) {
+			return nil
+		}
+		return fmt.Errorf("recover channel onboarding %s: %w", op.OperationID, err)
 	}
 	return nil
 }
@@ -836,13 +864,43 @@ func recoveryNeedsFreshTargetAdmission(op Operation, candidate Candidate) bool {
 	return candidate.Target.Generation == 0 && (op.Phase == PhasePreparing || op.Phase.RequiresExecutableTarget(op.Posture))
 }
 
+func (s *Service) resumeSession(ctx context.Context, op Operation, candidate Candidate) error {
+	if op.Posture != ActivationSessionConnection || op.Phase != PhaseActivatingProvider && op.SessionAccount == (operatorchannel.SessionAccountAdmission{}) {
+		return nil
+	}
+	if s.sessions == nil {
+		return &operatorchannel.SessionProviderUnavailableError{Provider: op.Provider}
+	}
+	if op.Phase == PhaseSucceeded {
+		eligible, err := RetainedSessionCurrent(ctx, s.store, op)
+		if err != nil {
+			return err
+		}
+		if !eligible {
+			return ErrRevisionConflict
+		}
+	}
+	return s.sessions.ResumeSession(ctx, op, candidate)
+}
+
 func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, providerCredential string) (Result, error) {
-	unlock := s.lockDrive(op.OperationID)
+	wait := ctx
+	if op.Posture != ActivationSessionConnection {
+		wait = context.WithoutCancel(ctx)
+	}
+	unlock, err := s.lockDrive(wait, op.OperationID)
+	if err != nil {
+		return Result{}, err
+	}
 	defer unlock()
 	return s.driveLocked(ctx, op, candidate, providerCredential)
 }
 
 func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candidate, providerCredential string) (Result, error) {
+	caller := ctx
+	// Durable post-reservation settlement retains its existing lifetime. Native
+	// connection waits/checkpoints still honor the requesting caller's deadline.
+	ctx = context.WithoutCancel(ctx)
 	if err := s.qualifyProvider(candidate); err != nil {
 		return Result{Operation: op, Candidate: &candidate}, err
 	}
@@ -941,10 +999,10 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			op = next
 		case PhaseActivatingProvider:
 			if op.Posture == ActivationSessionConnection {
-				if err := s.sessions.BootstrapSession(ctx, op, candidate); err != nil {
+				if err := s.sessions.BootstrapSession(caller, op, candidate); err != nil {
 					return s.blockedResult(ctx, op, candidate, err)
 				}
-				next, paired, err := s.sessions.CheckpointSessionPairing(ctx, op)
+				next, paired, err := s.sessions.CheckpointSessionPairing(caller, op)
 				if err != nil {
 					return s.blockedResult(ctx, op, candidate, err)
 				}
@@ -1166,28 +1224,44 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 	}
 }
 
-func (s *Service) lockDrive(operationID string) func() {
+func (s *Service) lockDrive(ctx context.Context, operationID string) (func(), error) {
+	if ctx == nil {
+		return nil, ErrInvalidRequest
+	}
+	if ctx.Err() != nil {
+		return nil, context.Cause(ctx)
+	}
 	s.driveMu.Lock()
 	if s.driveLocks == nil {
 		s.driveLocks = map[string]*operationDriveLock{}
 	}
 	lock := s.driveLocks[operationID]
 	if lock == nil {
-		lock = &operationDriveLock{}
+		lock = &operationDriveLock{held: make(chan struct{}, 1)}
 		s.driveLocks[operationID] = lock
 	}
 	lock.refs++
 	s.driveMu.Unlock()
 
-	lock.mu.Lock()
-	return func() {
-		lock.mu.Unlock()
+	releaseReference := func() {
 		s.driveMu.Lock()
 		lock.refs--
 		if lock.refs == 0 && s.driveLocks[operationID] == lock {
 			delete(s.driveLocks, operationID)
 		}
 		s.driveMu.Unlock()
+	}
+	select {
+	case lock.held <- struct{}{}:
+		if ctx.Err() != nil {
+			<-lock.held
+			releaseReference()
+			return nil, context.Cause(ctx)
+		}
+		return func() { <-lock.held; releaseReference() }, nil
+	case <-ctx.Done():
+		releaseReference()
+		return nil, context.Cause(ctx)
 	}
 }
 
@@ -1209,7 +1283,10 @@ func (s *Service) releaseCandidateCredentials(ctx context.Context, admissions []
 }
 
 func (s *Service) reconcileAdmittedCredentials(ctx context.Context, operationID string) (Operation, bool, error) {
-	unlock := s.lockDrive(operationID)
+	unlock, err := s.lockDrive(ctx, operationID)
+	if err != nil {
+		return Operation{}, false, err
+	}
 	defer unlock()
 	op, err := s.store.GetChannelOnboarding(ctx, operationID)
 	if err != nil || op.Phase != PhaseCredentialsAdmitted {
@@ -1961,7 +2038,10 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 }
 
 func (s *Service) qualifyProvider(candidate Candidate) error {
-	if candidate.Posture == ActivationSessionConnection && s.sessions != nil {
+	if candidate.Posture == ActivationSessionConnection {
+		if s.sessions == nil {
+			return &operatorchannel.SessionProviderUnavailableError{Provider: candidate.Provider}
+		}
 		return s.sessions.QualifySessionPlan(candidate)
 	}
 	return candidate.Plan.RequireExecutableProvider()

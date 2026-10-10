@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 )
@@ -120,6 +121,88 @@ func (s *serveSessionBootstrap) BootstrapSession(ctx context.Context, op channel
 		_, err := attempt.current(ctx)
 		return err
 	}
+	return s.openSessionAttempt(ctx, op, candidate, attempt, true)
+}
+
+// Resume is an explicit onboarding/recovery instruction, not cache reuse. The
+// original owner's complete join precedes construction on the same reservation.
+func (s *serveSessionBootstrap) ResumeSession(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) error {
+	if err := s.validateResumeSession(ctx, op, candidate); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	previous := s.connections[op.OperationID]
+	s.mu.Unlock()
+	if previous != nil {
+		select {
+		case <-previous.done:
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		}
+		if previous.connection != nil {
+			if previous.err == nil {
+				reused, err := previous.connection.CheckSessionReuse(ctx, op)
+				if err != nil || reused {
+					return err
+				}
+			}
+			if err := previous.connection.Close(ctx); err != nil {
+				return err
+			}
+		}
+	}
+	s.mu.Lock()
+	if current := s.connections[op.OperationID]; current != previous {
+		s.mu.Unlock()
+		_, err := current.current(ctx)
+		return err
+	}
+	attempt := &serveSessionBootstrapAttempt{done: make(chan struct{})}
+	s.connections[op.OperationID] = attempt
+	s.mu.Unlock()
+	return s.openSessionAttempt(ctx, op, candidate, attempt, op.SessionAccount == (operatorchannel.SessionAccountAdmission{}))
+}
+
+func (s *serveSessionBootstrap) validateResumeSession(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) error {
+	if ctx == nil {
+		return channelonboarding.ErrInvalidRequest
+	}
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
+	if err := s.QualifySessionPlan(candidate); err != nil {
+		return err
+	}
+	if op.Provider != candidate.Provider || op.Posture != candidate.Posture || op.Interface.Normalized() != candidate.Interface.Normalized() ||
+		!op.Coordinate.MatchesRuntimeContext(candidate.Coordinate) || op.TargetSelector != candidate.Target.Selector ||
+		op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired || op.ValidateSessionAccount() != nil ||
+		op.SessionAccount == (operatorchannel.SessionAccountAdmission{}) && op.Phase != channelonboarding.PhaseActivatingProvider {
+		return channelonboarding.ErrRevisionConflict
+	}
+	current, err := s.store.GetChannelOnboarding(ctx, op.OperationID)
+	if err != nil {
+		return err
+	}
+	if current.Revision != op.Revision || current.Phase != op.Phase || current.RequestHash != op.RequestHash ||
+		current.Provider != op.Provider || current.Posture != op.Posture ||
+		current.PrincipalID != op.PrincipalID || current.SessionAccount != op.SessionAccount || current.SessionConnectionID != op.SessionConnectionID ||
+		current.TargetSelector != op.TargetSelector || current.Interface.Normalized() != op.Interface.Normalized() ||
+		!current.Coordinate.MatchesDeclaration(op.Coordinate) {
+		return channelonboarding.ErrRevisionConflict
+	}
+	if op.Phase == channelonboarding.PhaseSucceeded {
+		eligible, err := channelonboarding.RetainedSessionCurrent(ctx, s.store, op)
+		if err != nil {
+			return err
+		}
+		if !eligible {
+			return channelonboarding.ErrRevisionConflict
+		}
+	}
+	return nil
+}
+
+func (s *serveSessionBootstrap) openSessionAttempt(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, attempt *serveSessionBootstrapAttempt, bootstrap bool) (err error) {
 	// The retained entry owns partial construction and cleanup even when the
 	// caller stops waiting. It is never an instruction to retry Connect.
 	defer func() {
@@ -130,12 +213,24 @@ func (s *serveSessionBootstrap) BootstrapSession(ctx context.Context, op channel
 	if err != nil {
 		return err
 	}
+	if release == nil {
+		return channelonboarding.ErrInvalidRequest
+	}
 	defer func() { err = errors.Join(err, release()) }()
+	if owned == nil {
+		return channelonboarding.ErrInvalidRequest
+	}
 	if err := ctx.Err(); err != nil {
 		return context.Cause(ctx)
 	}
-	connection, err := sessionprovider.OpenRuntimeBootstrap(owned, sessionprovider.RuntimeConnectionOptions{
-		Directory: s.directory, OperationID: op.OperationID, Store: s.store, Credentials: s.credentials, Plan: candidate.Plan, Incoming: incoming})
+	options := sessionprovider.RuntimeConnectionOptions{Directory: s.directory, OperationID: op.OperationID,
+		Store: s.store, Credentials: s.credentials, Plan: candidate.Plan, Incoming: incoming}
+	var connection *sessionprovider.RuntimeConnection
+	if bootstrap {
+		connection, err = sessionprovider.OpenRuntimeBootstrap(owned, options)
+	} else {
+		connection, err = sessionprovider.OpenRuntimeConnection(owned, options)
+	}
 	s.mu.Lock()
 	attempt.connection = connection
 	s.mu.Unlock()
@@ -148,6 +243,12 @@ func (s *serveSessionBootstrap) BootstrapSession(ctx context.Context, op channel
 	if err == nil {
 		err = connection.CheckBootstrap(ctx)
 	}
+	if err == nil && incoming != nil {
+		err = connection.ReconcileIncoming(ctx)
+		if err != nil {
+			err = errors.Join(err, connection.Close(ctx))
+		}
+	}
 	return err
 }
 
@@ -157,6 +258,10 @@ func (s *serveSessionBootstrap) CheckpointSessionPairing(ctx context.Context, op
 		return op, false, err
 	}
 	return connection.CheckpointPairing(ctx, op.Revision)
+}
+
+func (s *serveSessionBootstrap) CurrentValueMatchesSeal(ctx context.Context, expected credentials.ValueEvidence) (bool, error) {
+	return s.credentials.CurrentValueMatchesSeal(ctx, expected)
 }
 
 func (s *serveSessionBootstrap) AdmitSessionAccount(ctx context.Context, account operatorchannel.SessionAccountAdmission) (authority.Admission, error) {
