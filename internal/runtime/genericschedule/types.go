@@ -531,9 +531,6 @@ func (a Activation) Validate() error {
 		if hasCancelCause || hasFailureCode {
 			return errors.New("fired generic schedule carries another terminal family's facts")
 		}
-		if hasOccurrenceAdmission && a.AcceptedAt.Before(a.CurrentEventAdmittedAt) {
-			return errors.New("fired generic schedule acceptance precedes occurrence admission")
-		}
 	case StatusCancelled:
 		if !hasCancelCause || hasFailureCode {
 			return errors.New("cancelled generic schedule requires typed cause and time")
@@ -548,7 +545,28 @@ func (a Activation) Validate() error {
 	if a.CurrentEventID != "" && a.CurrentEventID != OccurrenceEventID(a.ID, a.CurrentDueAt) {
 		return errors.New("generic schedule occurrence event identity is not deterministic")
 	}
+	if err := a.validateTerminalOccurrenceChronology(); err != nil {
+		return err
+	}
 	return validateForkJoinOrigin(a)
+}
+
+func (a Activation) validateTerminalOccurrenceChronology() error {
+	if a.CurrentEventAdmittedAt.IsZero() {
+		return nil
+	}
+	times := []time.Time{a.CancelledAt, a.FailedAt}
+	// Recurring schedules retain the preceding occurrence's accepted history.
+	// Only one-shot firing belongs to this retained occurrence.
+	if !a.Command.Due.Recurring() {
+		times = append(times, a.FiredAt, a.AcceptedAt)
+	}
+	for _, at := range times {
+		if !at.IsZero() && at.Before(a.CurrentEventAdmittedAt) {
+			return errors.New("generic schedule terminal disposition precedes its retained occurrence admission")
+		}
+	}
+	return nil
 }
 
 // EvidenceDigest binds a decoded row without sending a semantic payload through
