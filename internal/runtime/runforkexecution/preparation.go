@@ -245,6 +245,10 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 	if err := runforkadmission.ValidateFixedConstructionTree(owned.originalSource.Source, plan); err != nil {
 		return nil, fmt.Errorf("admit original atomic construction tree: %w", err)
 	}
+	original, err = retainOriginalFanOutHistory(ctx, req.SourceLoader, original, owned.originalSource.SourceArtifactFact.BundleHash(), plan)
+	if err != nil {
+		return nil, err
+	}
 	deferredWorkAdmission, err := admitSelectedContractDeferredWork(plan, loadedSource.Source)
 	if err != nil {
 		return nil, err

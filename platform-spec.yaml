@@ -4585,6 +4585,15 @@ handler_specification:
           The selected compiled plan must validate its own digest, accept the frozen item type
           through the catalog assignment owner, and admit the retained cardinality within its bound. Historical
           ordinal facts are never reissued because the selected plan changed.
+          Fixed-cut admission distinguishes closed issuance from settled history: unissued ordinals, pending
+          recipients and nonterminal barriers still require the exact selected executable declaration. An inert
+          settled or canceled history retains its original executable reference without requiring a replacement
+          declaration. This decision is per intent, not per declaration: a settled sibling cannot excuse an owed
+          intent. Original source integrity and complete ordinal evidence remain mandatory in both cases.
+          A subsequent fork consumes the exact archived artifact for a retained historical declaration and its
+          loop role, through detached original-source carriage. It neither infers the role from the current
+          artifact nor changes the primary source identity or grants execution authority. Each distinct archive
+          is admitted once per preparation, with its temporary projection released before continuing.
           The semantic-view owner supplies detached compiled evidence from the exact selected artifact to every
           native materialization path. Caller-authored plan references or decoded JSON cannot mint that evidence;
           native writers recheck artifact identity, declaration, source integrity and selected interpretation.
