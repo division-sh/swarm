@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 
@@ -272,6 +273,7 @@ type RunForkPlan struct {
 	StartFirstTurn            *InputPublication                               `json:"-"`
 	ReplyContexts             []replycontext.Record                           `json:"-"`
 	WorkflowTimers            []timerobligation.WorkflowTimerActivationRecord `json:"-"`
+	JoinSchedules             []genericschedule.Activation                    `json:"-"`
 	EventCountAtFork          int                                             `json:"event_count_at_fork"`
 	ReconstructedEntityCount  int                                             `json:"reconstructed_entity_count"`
 	PendingWorkCount          int                                             `json:"pending_work_count"`

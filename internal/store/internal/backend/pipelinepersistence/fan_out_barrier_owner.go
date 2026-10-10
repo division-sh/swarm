@@ -940,12 +940,13 @@ func (s *PipelinePostgresOwner) MaterializeRunForkFanOutBarrierTx(
 	attempt *mutationprotocol.Attempt,
 	forkRunID string,
 	source fanoutbarrier.Barrier,
+	sourceSchedule *runtimegenericschedule.Activation,
 	selectedRef runtimecontracts.FanOutPlanRef,
 	generation *loopruntime.ForkChildReference,
 	at time.Time,
 ) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return materializeRunForkFanOutBarrierTx(ctx, tx, attempt, true, s.genericSchedules, forkRunID, source, selectedRef, generation, at)
+		return materializeRunForkFanOutBarrierTx(ctx, tx, attempt, true, s.genericSchedules, forkRunID, source, sourceSchedule, selectedRef, generation, at)
 	})
 }
 
@@ -954,12 +955,13 @@ func (s *PipelineSQLiteOwner) MaterializeRunForkFanOutBarrierTx(
 	attempt *mutationprotocol.Attempt,
 	forkRunID string,
 	source fanoutbarrier.Barrier,
+	sourceSchedule *runtimegenericschedule.Activation,
 	selectedRef runtimecontracts.FanOutPlanRef,
 	generation *loopruntime.ForkChildReference,
 	at time.Time,
 ) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return materializeRunForkFanOutBarrierTx(ctx, tx, attempt, false, s.genericSchedules, forkRunID, source, selectedRef, generation, at)
+		return materializeRunForkFanOutBarrierTx(ctx, tx, attempt, false, s.genericSchedules, forkRunID, source, sourceSchedule, selectedRef, generation, at)
 	})
 }
 
@@ -971,6 +973,7 @@ func materializeRunForkFanOutBarrierTx(
 	genericSchedules GenericScheduleTxOwner,
 	forkRunID string,
 	source fanoutbarrier.Barrier,
+	sourceSchedule *runtimegenericschedule.Activation,
 	selectedRef runtimecontracts.FanOutPlanRef,
 	generation *loopruntime.ForkChildReference,
 	at time.Time,
@@ -980,6 +983,10 @@ func materializeRunForkFanOutBarrierTx(
 	}
 	if strings.TrimSpace(forkRunID) == "" || at.IsZero() || attempt == nil {
 		return fmt.Errorf("fork fan-out barrier materialization requires run, time, and revision owner")
+	}
+	due, err := runForkFanOutBarrierDue(source, sourceSchedule)
+	if err != nil {
+		return err
 	}
 	sourceJoin, _ := source.Registration.Handle.JoinRef()
 	var childGeneration attemptgeneration.Generation
@@ -1057,7 +1064,7 @@ func materializeRunForkFanOutBarrierTx(
 		if genericSchedules == nil || source.Summary == nil {
 			return fmt.Errorf("closed fork fan-out barrier requires generic schedule owner and summary")
 		}
-		command, err := runtimegenericschedule.FanOutBarrierAdmission(registration, *source.Summary, at)
+		command, err := runtimegenericschedule.FanOutBarrierAdmission(registration, *source.Summary, due)
 		if err != nil {
 			return err
 		}
@@ -1090,6 +1097,22 @@ func materializeRunForkFanOutBarrierTx(
 		return fmt.Errorf("fork fan-out barrier materialization lost exact armed owner")
 	}
 	return addFanOutBarrierRevisionEffect(attempt, registration.IntentKey)
+}
+
+func runForkFanOutBarrierDue(source fanoutbarrier.Barrier, schedule *runtimegenericschedule.Activation) (time.Time, error) {
+	if source.Status != fanoutbarrier.StatusClosedPending {
+		return time.Time{}, nil
+	}
+	if schedule == nil {
+		return time.Time{}, fmt.Errorf("pending fork barrier requires its captured schedule")
+	}
+	if err := runtimegenericschedule.ValidateFanOutBarrierScheduleRelation(source, *schedule); err != nil {
+		return time.Time{}, fmt.Errorf("pending fork barrier schedule: %w", err)
+	}
+	if schedule.Status != runtimegenericschedule.StatusActive {
+		return time.Time{}, fmt.Errorf("published fork barrier occurrence requires historical event continuation, not rearming")
+	}
+	return schedule.CurrentDueAt, nil
 }
 
 func commitFanOutBarrierRegistrationTx(

@@ -182,7 +182,11 @@ func testJoinScheduleCommand(t *testing.T, flowID, flowInstance string, generati
 	} else {
 		entityID, instancePath = runID, runID
 	}
-	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.RouteForInstancePath(instancePath))
+	route := flowidentity.RouteForInstancePath(instancePath)
+	if flowID == "" {
+		route = flowidentity.StoredRoute(".", runID, runID)
+	}
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, route)
 	if err != nil {
 		t.Fatal(err)
 	}

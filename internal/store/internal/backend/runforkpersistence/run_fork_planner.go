@@ -231,6 +231,10 @@ func planRunForkSnapshot(
 	}
 	plan.Entities = entities
 	plan.ReconstructedEntityCount = len(entities)
+	plan.JoinSchedules, err = loadRunForkArrivalJoinSchedules(snapshot, entities)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
 
 	pending, err := loadRunForkPendingWorkFromRevision(snapshot)
 	if err != nil {
