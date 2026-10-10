@@ -20974,7 +20974,11 @@ run_model:
         child inventory through the canonical timer owner in their exact native mutation attempt. Before activation,
         every retained arm has its original due coordinate and no child firing or cancellation. Recovery of an activated
         child accepts only lawful occurrence progress under immutable cause replay; pause alone does not prove an
-        unactivated child. A removed declaration is canceled at child materialization as rule_removed, retaining
+        unactivated child. Successor timer admission replans using the permanent operation''s full resolved point,
+        including its start selector, not event metadata reconstructed from the minimal child binding. The sealed
+        readiness projection includes every recorded root and descendant attachment even without an immediate
+        delivery frontier; it persists fresh child readiness, not source attachment phases, and creates no dummy
+        delivery or additional root agent. A removed declaration is canceled at child materialization as rule_removed, retaining
         original arming lineage and child birth; terminal source timers are never rearmed. Extra, missing, duplicate,
         corrupt or foreign inherited rows cannot discharge admission. Source certificates alone grant no execution,
         and wakeups/publication require activated current selected authority. Changed delay applies only to newly

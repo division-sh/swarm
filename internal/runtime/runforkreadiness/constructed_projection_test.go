@@ -16,12 +16,53 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
+
+func TestSelectedRecordedRootAttachmentWithoutDispatch(t *testing.T) {
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo,
+		filepath.Join(repo, "tests/tier5-flow-lifecycle/test-timer-fire"), contracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, runID := semanticview.Wrap(bundle), uuid.NewString()
+	root := flowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")
+	entered := time.Now().UTC()
+	entity := runfork.RunForkEntityState{EntityID: runID, CurrentState: "waiting", EnteredStateAt: &entered,
+		MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
+			Mode: "static", EntityType: "test_entity", FlowTemplate: root.TemplateID, FlowInstance: runID,
+			FlowConfig: selectedAgentHeaderConfig(t, root),
+		}}
+	entity.MaterializationMetadata.InitialMaterialization = selectedConstructionReceipt(t, source, runID, root, nil, entered)
+	plan := runfork.RunForkPlan{SourceRunID: runID, Entities: []runfork.RunForkEntityState{entity}}
+	before, _ := json.Marshal(plan)
+	options := templateAdmissionRequest(t).ModelOptions
+	options.ExecutionPosture = executionposture.MockOnly
+	projection, err := Project(plan, source, runfork.RunForkSelectedContractRecipientPlanning{}, nil, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states, err := projection.MaterializationStates()
+	if err != nil || len(states) != 1 || len(projection.States) != 0 || len(projection.Flows) != 0 || len(projection.Blueprints) != 0 {
+		t.Fatalf("recorded root readiness was lost or invented dispatch/actors: %+v err=%v", projection, err)
+	}
+	rootState := states[0]
+	if rootState.EntityID != runID || rootState.AddressKind != runfork.RunForkSelectedContractWorkflowStateRunScope ||
+		rootState.SourceEventID != "" || len(rootState.SourceEvents) != 0 || len(rootState.Agents) != 0 || rootState.ExecutionMode != executionmode.Mock {
+		t.Fatalf("root attachment changed its construction or invented work: %+v", rootState)
+	}
+	after, _ := json.Marshal(plan)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("root attachment mutated the source plan")
+	}
+}
 
 // Component projection proof. Source headers are explicit construction fixtures,
 // not evidence of selected execution or public-launcher qualification.

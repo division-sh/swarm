@@ -41,8 +41,13 @@ func requireSelectedSuccessorWorkflowTimers(ctx context.Context, attempt *mutati
 		if binding.SourceRunID != req.Admission.SourceRunID || binding.ForkPoint != req.Admission.ForkPoint || snapshot.BundleHash != req.DeclarationPlan.BundleHash {
 			return fmt.Errorf("selected timer continuation differs from its permanent child binding")
 		}
-		point := binding.ForkPoint
-		plan, err := port.plan(ctx, tx, runfork.RunForkPlanRequest{SourceRunID: binding.SourceRunID, ResolvedPoint: &point})
+		// The binding retains cut identity; the permanent operation retains its
+		// full resolved selector and event evidence. Do not reconstruct one from
+		// the other during successor admission.
+		point := *operation.Request.ResolvedPoint
+		plan, err := port.plan(ctx, tx, runfork.RunForkPlanRequest{
+			SourceRunID: binding.SourceRunID, AtStart: point.Kind == runfork.RunForkPointRunStart, ResolvedPoint: &point,
+		})
 		if err != nil {
 			return err
 		}
