@@ -32,6 +32,9 @@ func WithRuntimeTools(source Source, tools map[string]runtimecontracts.ToolSchem
 	existing := source.ToolEntries()
 	cloned := make(map[string]runtimecontracts.ToolSchemaEntry, len(tools))
 	for rawID, tool := range tools {
+		if err := tool.ValidateDeclarationName(rawID); err != nil {
+			return nil, err
+		}
 		id := strings.TrimSpace(rawID)
 		if id == "" {
 			return nil, fmt.Errorf("runtime tool id is required")
@@ -60,6 +63,9 @@ func WithChannelRuntimeToolProjection(source Source, tools map[string]runtimecon
 	existing := source.ToolEntries()
 	projected := make(map[string]runtimecontracts.ToolSchemaEntry, len(tools))
 	for rawID, tool := range tools {
+		if err := tool.ValidateDeclarationName(rawID); err != nil {
+			return nil, err
+		}
 		id := strings.TrimSpace(rawID)
 		if id == "" {
 			return nil, fmt.Errorf("channel runtime tool id is required")

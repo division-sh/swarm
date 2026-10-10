@@ -1,0 +1,21 @@
+provider: whatsapp
+tools:
+  whatsapp.send_text:
+    category: provider_connector
+    description: send English text through the owned WhatsApp connection
+    handler_type: in_process
+    in_process: whatsapp.send_text
+    effect_class: non_idempotent_write
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [destination, text]
+      properties:
+        destination: {type: string, minLength: 1}
+        text: {type: string, minLength: 1, maxLength: 2000}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: {type: string, minLength: 1}
