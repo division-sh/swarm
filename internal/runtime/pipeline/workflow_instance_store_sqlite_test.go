@@ -232,3 +232,4 @@ func assertNativeInitialValueMutationCountForTest(t *testing.T, rows []PipelineN
 		t.Fatalf("mutation count for field=%s writer=%s step=%s old=%s new=%s = %d, want %d", field, writerID, handlerStep, oldValue, newValue, got, want)
 	}
 }
+
