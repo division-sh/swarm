@@ -1480,8 +1480,10 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(20, "channel_onboarding", err)
 		return 1
 	}
+	confirmationDispatcher.sessions = sessionBootstrap
 	channelActivationRefresher := &serveChannelActivationRefresher{
 		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
+		sessions:    sessionBootstrap,
 		credentials: providerCredentialOwner, ingress: ready,
 		testBarrier: opts.TestChannelOnboardingBarrier,
 	}
