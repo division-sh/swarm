@@ -136,8 +136,9 @@ func (s *serveSessionBootstrap) ResumeSession(ctx context.Context, op channelonb
 	if previous != nil {
 		select {
 		case <-previous.done:
-		case <-ctx.Done():
-			return context.Cause(ctx)
+		default:
+			_, err := previous.current(ctx)
+			return err
 		}
 		if previous.connection != nil {
 			if previous.err == nil {

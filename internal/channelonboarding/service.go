@@ -539,24 +539,8 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 		}
 		return s.Get(ctx, op.OperationID)
 	}
-	if input.ClientLanguage == "" && input.ExpectedLocaleRevision != 0 {
-		return Result{Operation: op}, fmt.Errorf("%w: locale revision requires an explicit language", ErrInvalidRequest)
-	}
-	if input.ClientLanguage != "" {
-		candidate, err := s.currentCandidate(op)
-		if err != nil {
-			return Result{Operation: op}, err
-		}
-		profile, err := candidate.Plan.NativeInboxProfile()
-		if err != nil {
-			return Result{Operation: op}, err
-		}
-		if err := profile.ValidateLanguage(input.ClientLanguage); err != nil {
-			return Result{Operation: op}, fmt.Errorf("%w: %v", ErrInvalidRequest, err)
-		}
-		if input.ExpectedLocaleRevision < 1 {
-			return Result{Operation: op}, fmt.Errorf("%w: client language requires its observed locale revision", ErrInvalidRequest)
-		}
+	if err := s.validateRetryLocale(op, input); err != nil {
+		return Result{Operation: op}, err
 	}
 	rebound, candidate, err := s.bindCurrentCandidate(context.WithoutCancel(ctx), op)
 	if err != nil {
@@ -590,6 +574,31 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 		return result, fmt.Errorf("drive onboarding retry: %w", err)
 	}
 	return result, nil
+}
+
+// Locale input is admitted before canonical rebind or any provider side effect.
+func (s *Service) validateRetryLocale(op Operation, input RetryInput) error {
+	if input.ClientLanguage == "" {
+		if input.ExpectedLocaleRevision != 0 {
+			return fmt.Errorf("%w: locale revision requires an explicit language", ErrInvalidRequest)
+		}
+		return nil
+	}
+	candidate, err := s.currentCandidate(op)
+	if err != nil {
+		return err
+	}
+	profile, err := candidate.Plan.NativeInboxProfile()
+	if err != nil {
+		return err
+	}
+	if err := profile.ValidateLanguage(input.ClientLanguage); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidRequest, err)
+	}
+	if input.ExpectedLocaleRevision < 1 {
+		return fmt.Errorf("%w: client language requires its observed locale revision", ErrInvalidRequest)
+	}
+	return nil
 }
 
 // ConfirmIdentity coordinates public claimant confirmation with its durable

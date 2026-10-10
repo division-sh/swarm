@@ -141,13 +141,63 @@ type serveSessionReadFaultStore struct {
 	reads  atomic.Int64
 	failAt atomic.Int64
 	cause  error
+	onRead func()
 }
 
 func (s *serveSessionReadFaultStore) GetChannelOnboarding(ctx context.Context, id string) (channelonboarding.Operation, error) {
+	if s.onRead != nil {
+		s.onRead()
+	}
 	if n := s.reads.Add(1); s.failAt.Load() != 0 && n == s.failAt.Load() {
 		return channelonboarding.Operation{}, s.cause
 	}
 	return s.Store.GetChannelOnboarding(ctx, id)
+}
+
+func TestServeSessionPendingResumeSharesFailedAttemptBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newServeBootstrapTestFixture(t, backend)
+			entered, release := make(chan struct{}), make(chan struct{})
+			var enteredOnce sync.Once
+			cause := errors.New("original runtime selection failed")
+			f.adapter.selectRuntime = func(ctx context.Context, _ channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error) {
+				f.selections.Add(1)
+				enteredOnce.Do(func() { close(entered) })
+				select {
+				case <-release:
+					return nil, nil, nil, cause
+				case <-ctx.Done():
+					return nil, nil, nil, context.Cause(ctx)
+				}
+			}
+			first := make(chan error, 1)
+			go func() { first <- f.adapter.ResumeSession(f.ctx, f.op, f.candidate) }()
+			<-entered
+			lookup := make(chan struct{})
+			var once sync.Once
+			f.adapter.store = &serveSessionReadFaultStore{Store: f.adapter.store, onRead: func() { once.Do(func() { close(lookup) }) }}
+			second := make(chan error, 1)
+			go func() { second <- f.adapter.ResumeSession(f.ctx, f.op, f.candidate) }()
+			<-lookup
+			select {
+			case err := <-second:
+				close(release)
+				<-first
+				t.Fatal("overlapping resume escaped a pending original attempt", err)
+			case <-time.After(50 * time.Millisecond):
+			}
+			close(release)
+			for _, result := range []<-chan error{first, second} {
+				if err := <-result; !errors.Is(err, cause) {
+					t.Fatal("overlap discarded the original attempt result", err)
+				}
+			}
+			if f.selections.Load() != 1 {
+				t.Fatal("overlapping failed attempt automatically launched another selection")
+			}
+		})
+	}
 }
 
 func TestServeSessionResumePreservesObservationErrorWithoutReconnectBothStores(t *testing.T) {

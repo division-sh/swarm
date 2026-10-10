@@ -116,12 +116,14 @@ func TestWhatsAppPairingCommitCancellationRemainsRecoverableBothStores(t *testin
 			if err := f.connection.Close(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			closedView, err := f.service.Retry(f.ctx, channelonboarding.RetryInput{OperationID: retained.OperationID})
+			closedView, err := f.service.Get(f.ctx, retained.OperationID)
 			if err != nil || closedView.IdentityOperation == nil || closedView.IdentityOperation.OperationID != resumed.IdentityOperation.OperationID ||
 				closedView.Operation.Revision != resumed.Operation.Revision || closedView.Binding != nil {
 				t.Fatal("closed pending-identity readback changed durable authority", closedView, err)
 			}
-			if _, err := f.connection.AdmitSessionAccount(f.ctx, account); err == nil {
+			held, err := f.connection.AdmitSessionAccount(f.ctx, account)
+			held.Close()
+			if err == nil {
 				t.Fatal("closed connection issued native account authority")
 			}
 			if err := f.connection.CheckBootstrap(f.ctx); err == nil {
