@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
@@ -80,6 +82,22 @@ func TestSelectedAuthorityLeaseClockExpiresInsideNativeTransactionBothStores(t *
 						if setupErr == nil {
 							setupErr = errors.New("actual selected lease was not current before waiting")
 						}
+						return errors.Join(rollback, setupErr)
+					}
+					// A real current grant is still not child activation. Source
+					// admission and a running execution row cannot start a paused run.
+					var runEligible bool
+					var scopeErr, executionErr error
+					switch owner := selected.(type) {
+					case *PostgresStore:
+						runEligible, scopeErr = owner.runLifecyclePostgresOwner.ObserveRunExecution(txctx, tx, fixture.forkRun)
+						executionErr = owner.runLifecyclePostgresOwner.RequireRunExecutionTx(txctx, tx, fixture.forkRun)
+					case *SQLiteRuntimeStore:
+						runEligible, scopeErr = owner.runLifecycleSQLiteOwner.ObserveRunExecution(txctx, tx, fixture.forkRun)
+						executionErr = owner.runLifecycleSQLiteOwner.RequireRunExecutionTx(txctx, tx, fixture.forkRun)
+					}
+					if scopeErr != nil || runEligible || !errors.Is(executionErr, runtimerunlifecycle.ErrRunExecutionAuthority) {
+						setupErr = fmt.Errorf("paused child accepted claimed execution: eligible=%t observe=%v mutation=%v", runEligible, scopeErr, executionErr)
 						return errors.Join(rollback, setupErr)
 					}
 					timer := time.NewTimer(wait)
