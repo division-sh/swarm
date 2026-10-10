@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -294,7 +295,11 @@ func validateSelectedContractStagedConstruction(evidence runForkSelectedContract
 		}
 		expected = append(expected, projection.Fork.EntityID)
 	}
-	if !equalTrimmedStrings(expected, evidence.lineage.EntityIDs) {
+	// Construction is an exact owner inventory, not map or header iteration order.
+	actual := slices.Clone(evidence.lineage.EntityIDs)
+	slices.Sort(expected)
+	slices.Sort(actual)
+	if !slices.Equal(expected, actual) {
 		return fmt.Errorf("selected-contract staged construction differs from exact fixed-cut child inventory")
 	}
 	return nil

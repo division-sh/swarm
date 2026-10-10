@@ -134,6 +134,36 @@ func TestSelectedActivationAttachmentRequiresExactConstructedCensus(t *testing.T
 	}
 }
 
+func TestSelectedActivationConstructionCensusIsOrderIndependent(t *testing.T) {
+	f := newSelectedAttachmentFixture(t, runfork.RunForkPointRunStart)
+	member := uuid.NewString()
+	f.evidence.plan.Entities = append(f.evidence.plan.Entities, runfork.RunForkEntityState{
+		EntityID: member, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
+			FlowInstance: "orders/member", FlowTemplate: "orders",
+		},
+	})
+	root := f.evidence.lineage.ForkRunID
+	for _, ids := range [][]string{{root, member}, {member, root}} {
+		for i := 0; i < 16; i++ {
+			f.evidence.lineage.EntityIDs = ids
+			before := append([]string(nil), ids...)
+			if err := validateSelectedContractStagedConstruction(f.evidence); err != nil {
+				t.Fatalf("same exact construction inventory changed with order %v: %v", ids, err)
+			}
+			if !reflect.DeepEqual(ids, before) {
+				t.Fatal("construction validation mutated retained native inventory")
+			}
+		}
+	}
+	for _, ids := range [][]string{{root}, {member}, {root, root}, {member, member}, {root, uuid.NewString()}, {root, member, uuid.NewString()}, {" " + root, member}} {
+		f.evidence.lineage.EntityIDs = ids
+		if err := validateSelectedContractStagedConstruction(f.evidence); err == nil {
+			t.Fatalf("inexact construction inventory admitted: %v", ids)
+		}
+	}
+}
+
 func TestSelectedActivationAttachmentRequiresExactAuthorityAndCancellation(t *testing.T) {
 	f := newSelectedAttachmentFixture(t, runfork.RunForkPointEvent)
 	ctx := effects.WithAuthority(context.Background(), f.authority)

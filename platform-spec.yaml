@@ -20995,7 +20995,9 @@ run_model:
         including its start selector, not event metadata reconstructed from the minimal child binding. The sealed
         readiness projection includes every recorded root and descendant attachment even without an immediate
         delivery frontier; it persists fresh child readiness, not source attachment phases, and creates no dummy
-        delivery or additional root agent. Final selected settlement recognizes a workflow timer or accepted one-shot
+        delivery or additional root agent. Staged construction admission compares the exact physical owner inventory
+        independently of map or native header iteration order, without deduplication or mutation of retained evidence;
+        missing, duplicate, extra and foreign owners still refuse. Final selected settlement recognizes a workflow timer or accepted one-shot
         generic schedule publication only through its exact occurrence, canonical child activation and admitted event
         record, consuming the family''s immutable publication validator within the settlement transaction. Generic
         publication evidence uses the same semantic payload projection as ordinary emission and proves exact run,
