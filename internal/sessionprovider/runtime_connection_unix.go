@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -50,6 +51,7 @@ type RuntimeConnection struct {
 	directory   string
 	store       channelonboarding.Store
 	operation   channelonboarding.Operation
+	account     atomic.Pointer[operatorchannel.SessionAccountAdmission]
 	plan        packs.SatisfactionPlan
 	credentials operatorchannel.CredentialCurrentness
 }
@@ -88,6 +90,7 @@ func openRuntimeConnection(ctx context.Context, opts RuntimeConnectionOptions, b
 	owned, cancel := context.WithCancel(work.Context())
 	c := &RuntimeConnection{parent: parent, work: work, ctx: owned, cancel: cancel, closed: make(chan struct{}), lifecycle: make(chan struct{}, 1),
 		store: opts.Store, operation: op, plan: opts.Plan, credentials: opts.Credentials, directory: opts.Directory}
+	c.account.Store(&op.SessionAccount)
 	go c.joinRetirement()
 	if err := c.open(); err != nil {
 		return c, errors.Join(err, c.Close(context.WithoutCancel(ctx)))
@@ -205,6 +208,24 @@ func (c *RuntimeConnection) begin(ctx context.Context) (*worklifetime.Lease, err
 }
 
 func (c *RuntimeConnection) currentOperation(ctx context.Context) (channelonboarding.Operation, error) {
+	op, err := c.currentOperationScope(ctx)
+	if err != nil {
+		return op, err
+	}
+	if op.SessionAccount != c.sessionAccount() {
+		return op, errRuntimeConnection
+	}
+	return op, nil
+}
+
+func (c *RuntimeConnection) sessionAccount() operatorchannel.SessionAccountAdmission {
+	if account := c.account.Load(); account != nil {
+		return *account
+	}
+	return operatorchannel.SessionAccountAdmission{}
+}
+
+func (c *RuntimeConnection) currentOperationScope(ctx context.Context) (channelonboarding.Operation, error) {
 	op, err := c.store.GetChannelOnboarding(ctx, c.operation.OperationID)
 	if err != nil {
 		return op, err
@@ -213,10 +234,9 @@ func (c *RuntimeConnection) currentOperation(ctx context.Context) (channelonboar
 		op.Revision < c.operation.Revision ||
 		op.Provider != c.operation.Provider || op.Posture != c.operation.Posture ||
 		op.PrincipalID != c.operation.PrincipalID || op.Interface.Normalized() != c.operation.Interface.Normalized() ||
-		op.TargetSelector != c.operation.TargetSelector || op.SessionAccount != c.operation.SessionAccount ||
+		op.TargetSelector != c.operation.TargetSelector ||
 		op.SessionConnectionID != c.operation.SessionConnectionID ||
-		!op.Coordinate.MatchesDurableIdentity(c.operation.Coordinate) ||
-		op.Coordinate.RuntimeInstanceID != c.operation.Coordinate.RuntimeInstanceID ||
+		!op.Coordinate.MatchesDeclaration(c.operation.Coordinate) ||
 		op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired || op.ValidateSessionAccount() != nil {
 		return op, errRuntimeConnection
 	}
@@ -269,6 +289,41 @@ func (c *RuntimeConnection) CurrentValueMatchesSeal(ctx context.Context, expecte
 	return c.credentials.CurrentValueMatchesSeal(ctx, expected)
 }
 
+func (c *RuntimeConnection) ConnectionID() string {
+	if c == nil {
+		return ""
+	}
+	return c.operation.SessionConnectionID
+}
+
+// CheckBootstrap proves this original attempt remains connected. A retained
+// pointer, completed Close or failed Connect is never successful bootstrap.
+func (c *RuntimeConnection) CheckBootstrap(ctx context.Context) (err error) {
+	work, err := c.begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, work.Done()) }()
+	if err := c.lockLifecycle(work.Context()); err != nil {
+		return err
+	}
+	defer func() { <-c.lifecycle }()
+	if _, err := c.currentOperation(work.Context()); err != nil {
+		return err
+	}
+	occurrence := c.state.currentOccurrence()
+	if occurrence == nil {
+		return errClientOccurrenceFenced
+	}
+	occurrence.mu.Lock()
+	current := occurrence.started && !occurrence.fenced && occurrence.ctx.Err() == nil && occurrence.client.IsConnected()
+	occurrence.mu.Unlock()
+	if !current {
+		return errClientOccurrenceFenced
+	}
+	return nil
+}
+
 func (c *RuntimeConnection) AdmitSessionAccount(ctx context.Context, expected operatorchannel.SessionAccountAdmission) (authority.Admission, error) {
 	if c == nil || c.ctx == nil || c.ctx.Err() != nil || ctx == nil || ctx.Err() != nil {
 		return authority.Admission{}, errRuntimeConnection
@@ -288,7 +343,7 @@ func (c *RuntimeConnection) ChannelExecution(ctx context.Context) (execution.Cha
 	if c == nil {
 		return execution.Channel{}, errRuntimeConnection
 	}
-	admitted, err := c.AdmitSessionAccount(ctx, c.operation.SessionAccount)
+	admitted, err := c.AdmitSessionAccount(ctx, c.sessionAccount())
 	if err != nil {
 		return execution.Channel{}, err
 	}
@@ -303,7 +358,8 @@ func (c *RuntimeConnection) ObserveSession(ctx context.Context) (operatorchannel
 	if c == nil {
 		return operatorchannel.ProviderAuthority{}, empty, errRuntimeConnection
 	}
-	provider := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: c.operation.SessionAccount}
+	account := c.sessionAccount()
+	provider := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: account}
 	admitted, current, err := provider.AdmitExecution(ctx, c)
 	if err != nil || !current {
 		return operatorchannel.ProviderAuthority{}, empty, errors.Join(errRuntimeConnection, err)
@@ -313,7 +369,7 @@ func (c *RuntimeConnection) ObserveSession(ctx context.Context) (operatorchannel
 		admitted.CloseExecution()
 		return operatorchannel.ProviderAuthority{}, empty, errClientOccurrenceFenced
 	}
-	return admitted, operatorchannel.SessionConnectionObservation{Admission: c.operation.SessionAccount,
+	return admitted, operatorchannel.SessionConnectionObservation{Admission: account,
 		OccurrenceID: occurrence.occurrenceID, Connected: true, ObservedAt: time.Now().UTC()}, nil
 }
 
