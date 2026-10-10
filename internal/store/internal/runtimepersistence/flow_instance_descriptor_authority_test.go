@@ -32,7 +32,6 @@ type flowInstanceDescriptorAuthorityStore interface {
 	externalStoreTestDurableEventBusStore
 	runtimebus.FlowInstanceRouteRecordReader
 	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.ScopedActiveFlowInstanceDescriptorLister
 }
 
 type dynamicFlowSourceProjectionStore interface {

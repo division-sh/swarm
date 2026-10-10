@@ -18348,6 +18348,9 @@ platform_tables:
         FlowInstanceIndexReader, never through persisted route membership. Fixed-revision observations consume admitted
         historical construction evidence; missing native receipt or readiness evidence is corruption, not an absent route.
         ListSelectedRunTargetOwners and ListSelectedRunTargetOwnersForScope are unsupported orphan inventories.
+        ListActiveFlowInstanceDescriptorsForScope and ListActiveFlowInstanceDescriptorsForKey are unsupported;
+        normalized entity-field descriptor matching cannot elect an instance. Bounded compiled declaration or exact
+        coordinate lookup consumes immutable construction keys and stored identities, including terminal occupancy.
         Receiver observations consume exact admitted coordinates or compiled declaration scopes, including actual
         structural parents and typed keys; source-entity scans cannot substitute for that selection.
         A non-executable receiver remains occupied and historically readable; availability is not instance absence.

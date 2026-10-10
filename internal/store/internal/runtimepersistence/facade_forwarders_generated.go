@@ -495,14 +495,6 @@ func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context, r
 	return s.pipelinePostgresOwner.ListActiveFlowInstanceDescriptors(ctx, runID)
 }
 
-func (s *PostgresStore) ListActiveFlowInstanceDescriptorsForKey(ctx context.Context, runID string, templateID string, keyField string, keyValue string) ([]bus.ActiveFlowInstanceDescriptor, error) {
-	return s.pipelinePostgresOwner.ListActiveFlowInstanceDescriptorsForKey(ctx, runID, templateID, keyField, keyValue)
-}
-
-func (s *PostgresStore) ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs []string, instancePaths []string) ([]bus.ActiveFlowInstanceDescriptor, error) {
-	return s.pipelinePostgresOwner.ListActiveFlowInstanceDescriptorsForScope(ctx, runID, templateIDs, instancePaths)
-}
-
 func (s *PostgresStore) ListActiveWorkflowTimerActivationsForRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) ([]pipeline.WorkflowTimerActivation, error) {
 	return s.pipelinePostgresOwner.ListActiveWorkflowTimerActivationsForRoute(ctx, identity)
 }
@@ -1741,14 +1733,6 @@ func (s *SQLiteRuntimeStore) ListActiveAgentDescriptors(ctx context.Context, run
 
 func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]bus.ActiveFlowInstanceDescriptor, error) {
 	return s.pipelineSQLiteOwner.ListActiveFlowInstanceDescriptors(ctx, runID)
-}
-
-func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptorsForKey(ctx context.Context, runID string, templateID string, keyField string, keyValue string) ([]bus.ActiveFlowInstanceDescriptor, error) {
-	return s.pipelineSQLiteOwner.ListActiveFlowInstanceDescriptorsForKey(ctx, runID, templateID, keyField, keyValue)
-}
-
-func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs []string, instancePaths []string) ([]bus.ActiveFlowInstanceDescriptor, error) {
-	return s.pipelineSQLiteOwner.ListActiveFlowInstanceDescriptorsForScope(ctx, runID, templateIDs, instancePaths)
 }
 
 func (s *SQLiteRuntimeStore) ListActiveWorkflowTimerActivationsForRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) ([]pipeline.WorkflowTimerActivation, error) {

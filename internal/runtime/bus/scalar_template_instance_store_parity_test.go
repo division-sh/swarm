@@ -32,64 +32,46 @@ import (
 
 type postgresScalarTemplateInstanceStore struct {
 	*store.PostgresStore
-	descriptors     []runtimebus.ActiveFlowInstanceDescriptor
-	descriptorCalls int
-	descriptorErr   error
+	indexCalls int
+	indexErr   error
 }
 
-func (s *postgresScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	s.descriptorCalls++
-	if s.descriptorErr != nil {
-		return nil, s.descriptorErr
+func (s *postgresScalarTemplateInstanceStore) LookupFlowInstance(ctx context.Context, request runtimepipeline.FlowInstanceLookupRequest) (runtimepipeline.FlowInstanceObservation, bool, error) {
+	s.indexCalls++
+	if s.indexErr != nil {
+		return runtimepipeline.FlowInstanceObservation{}, false, s.indexErr
 	}
-	return slices.Clone(s.descriptors), nil
+	return s.PostgresStore.LookupFlowInstance(ctx, request)
 }
 
-func (s *postgresScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptorsForScope(_ context.Context, _ string, templateIDs, instancePaths []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	s.descriptorCalls++
-	if s.descriptorErr != nil {
-		return nil, s.descriptorErr
+func (s *postgresScalarTemplateInstanceStore) ListFlowInstances(ctx context.Context, scope runtimepipeline.FlowInstanceLookupScope) ([]runtimepipeline.FlowInstanceObservation, error) {
+	s.indexCalls++
+	if s.indexErr != nil {
+		return nil, s.indexErr
 	}
-	return scalarTemplateScopedDescriptors(s.descriptors, templateIDs, instancePaths), nil
-}
-
-func (s *postgresScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptorsForKey(_ context.Context, _ string, templateID, keyField, keyValue string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	s.descriptorCalls++
-	if s.descriptorErr != nil {
-		return nil, s.descriptorErr
-	}
-	return scalarTemplateKeyedDescriptors(s.descriptors, templateID, keyField, keyValue), nil
+	return s.PostgresStore.ListFlowInstances(ctx, scope)
 }
 
 type sqliteScalarTemplateInstanceStore struct {
 	*store.SQLiteRuntimeStore
-	descriptors     []runtimebus.ActiveFlowInstanceDescriptor
-	descriptorCalls int
-	descriptorErr   error
+	indexCalls int
+	indexErr   error
 }
 
-func (s *sqliteScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	s.descriptorCalls++
-	if s.descriptorErr != nil {
-		return nil, s.descriptorErr
+func (s *sqliteScalarTemplateInstanceStore) LookupFlowInstance(ctx context.Context, request runtimepipeline.FlowInstanceLookupRequest) (runtimepipeline.FlowInstanceObservation, bool, error) {
+	s.indexCalls++
+	if s.indexErr != nil {
+		return runtimepipeline.FlowInstanceObservation{}, false, s.indexErr
 	}
-	return slices.Clone(s.descriptors), nil
+	return s.SQLiteRuntimeStore.LookupFlowInstance(ctx, request)
 }
 
-func (s *sqliteScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptorsForScope(_ context.Context, _ string, templateIDs, instancePaths []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	s.descriptorCalls++
-	if s.descriptorErr != nil {
-		return nil, s.descriptorErr
+func (s *sqliteScalarTemplateInstanceStore) ListFlowInstances(ctx context.Context, scope runtimepipeline.FlowInstanceLookupScope) ([]runtimepipeline.FlowInstanceObservation, error) {
+	s.indexCalls++
+	if s.indexErr != nil {
+		return nil, s.indexErr
 	}
-	return scalarTemplateScopedDescriptors(s.descriptors, templateIDs, instancePaths), nil
-}
-
-func (s *sqliteScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptorsForKey(_ context.Context, _ string, templateID, keyField, keyValue string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	s.descriptorCalls++
-	if s.descriptorErr != nil {
-		return nil, s.descriptorErr
-	}
-	return scalarTemplateKeyedDescriptors(s.descriptors, templateID, keyField, keyValue), nil
+	return s.SQLiteRuntimeStore.ListFlowInstances(ctx, scope)
 }
 
 func scalarTemplateScopedDescriptors(descriptors []runtimebus.ActiveFlowInstanceDescriptor, templateIDs, instancePaths []string) []runtimebus.ActiveFlowInstanceDescriptor {
@@ -120,45 +102,36 @@ func scalarTemplateKeyedDescriptors(descriptors []runtimebus.ActiveFlowInstanceD
 type scalarTemplateInstanceParityStore interface {
 	componentFlowConstructionStore
 	storetest.RunFixtureStore
-	runtimebus.ActiveFlowInstanceDescriptorLister
+	runtimepipeline.FlowInstanceIndexReader
 	runtimebus.PreparedPublishEventReader
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
-	setScalarTemplateInstanceDescriptors([]runtimebus.ActiveFlowInstanceDescriptor)
-	setScalarTemplateInstanceDescriptorError(error)
-	resetScalarTemplateInstanceDescriptorCalls()
-	scalarTemplateInstanceDescriptorCalls() int
+	setScalarTemplateInstanceIndexError(error)
+	resetScalarTemplateInstanceIndexCalls()
+	scalarTemplateInstanceIndexCalls() int
 }
 
-func (s *postgresScalarTemplateInstanceStore) setScalarTemplateInstanceDescriptors(descriptors []runtimebus.ActiveFlowInstanceDescriptor) {
-	s.descriptors = slices.Clone(descriptors)
+func (s *postgresScalarTemplateInstanceStore) setScalarTemplateInstanceIndexError(err error) {
+	s.indexErr = err
 }
 
-func (s *postgresScalarTemplateInstanceStore) setScalarTemplateInstanceDescriptorError(err error) {
-	s.descriptorErr = err
+func (s *postgresScalarTemplateInstanceStore) resetScalarTemplateInstanceIndexCalls() {
+	s.indexCalls = 0
 }
 
-func (s *postgresScalarTemplateInstanceStore) resetScalarTemplateInstanceDescriptorCalls() {
-	s.descriptorCalls = 0
+func (s *postgresScalarTemplateInstanceStore) scalarTemplateInstanceIndexCalls() int {
+	return s.indexCalls
 }
 
-func (s *postgresScalarTemplateInstanceStore) scalarTemplateInstanceDescriptorCalls() int {
-	return s.descriptorCalls
+func (s *sqliteScalarTemplateInstanceStore) setScalarTemplateInstanceIndexError(err error) {
+	s.indexErr = err
 }
 
-func (s *sqliteScalarTemplateInstanceStore) setScalarTemplateInstanceDescriptors(descriptors []runtimebus.ActiveFlowInstanceDescriptor) {
-	s.descriptors = slices.Clone(descriptors)
+func (s *sqliteScalarTemplateInstanceStore) resetScalarTemplateInstanceIndexCalls() {
+	s.indexCalls = 0
 }
 
-func (s *sqliteScalarTemplateInstanceStore) setScalarTemplateInstanceDescriptorError(err error) {
-	s.descriptorErr = err
-}
-
-func (s *sqliteScalarTemplateInstanceStore) resetScalarTemplateInstanceDescriptorCalls() {
-	s.descriptorCalls = 0
-}
-
-func (s *sqliteScalarTemplateInstanceStore) scalarTemplateInstanceDescriptorCalls() int {
-	return s.descriptorCalls
+func (s *sqliteScalarTemplateInstanceStore) scalarTemplateInstanceIndexCalls() int {
+	return s.indexCalls
 }
 
 func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t *testing.T) {
@@ -172,7 +145,6 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			}
 			source := semanticview.Wrap(bundle)
 			sourceFact := testSourceArtifactFact(source)
-			sourceBundleHash := sourceFact.BundleHash()
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
 			selected, db := newScalarTemplateInstanceParityStore(t, backend, ctx)
@@ -210,17 +182,6 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 				ParentFlowID: ".", ParentFlowInstance: runID, ParentEntityID: runtimeflowidentity.EntityID(runID),
 				Fields: fields, EnteredStageAt: at, CreatedAt: at,
 			})
-			selected.setScalarTemplateInstanceDescriptors([]runtimebus.ActiveFlowInstanceDescriptor{{
-				Identity:        runtimebus.ConstructedFlowInstanceIdentityFixture(source, "account", "one", runID),
-				RunID:           runID,
-				InstanceID:      "one",
-				EntityID:        entityID,
-				FlowInstance:    "account/one",
-				FlowTemplate:    "account",
-				BundleHash:      sourceBundleHash,
-				WorkflowVersion: source.WorkflowVersion(),
-				AddressFields:   map[string]string{"entity.account_id": "acct-1"},
-			}})
 			eventBus, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -259,13 +220,13 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 				t.Fatalf("persisted routes = %#v, want account-node at %#v", persistedRoutes, wantTarget)
 			}
 
-			selected.setScalarTemplateInstanceDescriptorError(errors.New("descriptor lookup must not run for a durable duplicate"))
-			selected.resetScalarTemplateInstanceDescriptorCalls()
+			selected.setScalarTemplateInstanceIndexError(errors.New("instance lookup must not run for a durable duplicate"))
+			selected.resetScalarTemplateInstanceIndexCalls()
 			if err := eventBus.Publish(ctx, evt); err != nil {
-				t.Fatalf("Publish exact duplicate after descriptor failure: %v", err)
+				t.Fatalf("Publish exact duplicate after index failure: %v", err)
 			}
-			if calls := selected.scalarTemplateInstanceDescriptorCalls(); calls != 0 {
-				t.Fatalf("duplicate descriptor calls = %d, want durable identity short-circuit", calls)
+			if calls := selected.scalarTemplateInstanceIndexCalls(); calls != 0 {
+				t.Fatalf("duplicate index calls = %d, want durable identity short-circuit", calls)
 			}
 			conflicting := eventtest.ExistingRunRootIngressWithRoutingSource(
 				eventID,
@@ -281,22 +242,15 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			if err := eventBus.Publish(ctx, conflicting); !errors.Is(err, events.ErrEventIdentityConflict) {
 				t.Fatalf("Publish conflicting duplicate error = %v, want event identity conflict", err)
 			}
-			if calls := selected.scalarTemplateInstanceDescriptorCalls(); calls != 0 {
-				t.Fatalf("conflicting duplicate descriptor calls = %d, want durable identity short-circuit", calls)
+			if calls := selected.scalarTemplateInstanceIndexCalls(); calls != 0 {
+				t.Fatalf("conflicting duplicate index calls = %d, want durable identity short-circuit", calls)
 			}
-			selected.setScalarTemplateInstanceDescriptorError(nil)
+			selected.setScalarTemplateInstanceIndexError(nil)
 
 			replayed := subscribeInternalDeliveriesForTest(t, eventBus, persistedRoutes[0].Recipient.ID())
-			selected.setScalarTemplateInstanceDescriptors([]runtimebus.ActiveFlowInstanceDescriptor{{
-				RunID:           runID,
-				InstanceID:      "drift",
-				EntityID:        uuid.NewString(),
-				FlowInstance:    "account/drift",
-				BundleHash:      sourceBundleHash,
-				WorkflowVersion: source.WorkflowVersion(),
-				AddressFields:   map[string]string{"entity.account_id": "acct-1"},
-			}})
-			selected.resetScalarTemplateInstanceDescriptorCalls()
+			indexFailure := errors.New("committed scalar replay must not query the current instance index")
+			selected.setScalarTemplateInstanceIndexError(indexFailure)
+			selected.resetScalarTemplateInstanceIndexCalls()
 			if _, err := eventBus.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{
 				Event: evt,
 				Scope: runtimepipelineobligation.ScopeSubscribed,
@@ -306,15 +260,25 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			select {
 			case delivery := <-replayed:
 				replayEvent := delivery.Event()
-				_ = delivery.Complete()
+				if err := delivery.Complete(); err != nil {
+					t.Fatal(err)
+				}
 				if replayEvent.FlowInstance() != "account/one" || replayEvent.EntityID() != entityID {
 					t.Fatalf("replayed target = %q/%q, want account/one/%s", replayEvent.FlowInstance(), replayEvent.EntityID(), entityID)
 				}
 			case <-time.After(time.Second):
 				t.Fatal("timed out waiting for committed scalar-resolution replay")
 			}
-			if calls := selected.scalarTemplateInstanceDescriptorCalls(); calls != 0 {
-				t.Fatalf("replay descriptor calls = %d, want persisted route authority", calls)
+			if calls := selected.scalarTemplateInstanceIndexCalls(); calls != 0 {
+				t.Fatalf("replay index calls = %d, want persisted route authority", calls)
+			}
+			fresh := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), evt.Type(), "producer", "", evt.Payload(), 0, runID,
+				events.EnvelopeForSourceRoute(events.EventEnvelope{}, evt.RoutingSource().Route()), evt.RoutingSource(), eventTime)
+			if _, err := eventBus.CheckPublishRecipientPlan(ctx, fresh); !errors.Is(err, indexFailure) || selected.scalarTemplateInstanceIndexCalls() == 0 {
+				t.Fatalf("fresh scalar plan bypassed poisoned index: calls=%d err=%v", selected.scalarTemplateInstanceIndexCalls(), err)
+			}
+			if persisted, found, err := selected.LoadPreparedPublishEvent(ctx, fresh.ID()); err != nil || found || len(persisted.DeliveryRoutes) != 0 {
+				t.Fatalf("refused scalar preflight mutated storage: %+v found=%t err=%v", persisted, found, err)
 			}
 		})
 	}
@@ -398,8 +362,9 @@ func TestParentLocalReturnPersistsExactNativeReceiverBothStores(t *testing.T) {
 				t.Fatalf("persisted parent-local routes=%+v err=%v", routes, err)
 			}
 			carrier := subscribeInternalDeliveriesForTest(t, eventBus, routes[0].Recipient.ID())
-			selected.setScalarTemplateInstanceDescriptorError(errors.New("committed parent-local replay must not query descriptors"))
-			selected.resetScalarTemplateInstanceDescriptorCalls()
+			indexFailure := errors.New("committed parent-local replay must not query the current instance index")
+			selected.setScalarTemplateInstanceIndexError(indexFailure)
+			selected.resetScalarTemplateInstanceIndexCalls()
 			if _, err := eventBus.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{Event: event, Scope: runtimepipelineobligation.ScopeSubscribed}, nil); err != nil {
 				t.Fatal(err)
 			}
@@ -414,10 +379,17 @@ func TestParentLocalReturnPersistsExactNativeReceiverBothStores(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("parent-local replay did not reach its committed receiver")
 			}
-			if calls := selected.scalarTemplateInstanceDescriptorCalls(); calls != 0 {
-				t.Fatalf("committed parent-local replay consulted mutable descriptors %d times", calls)
+			if calls := selected.scalarTemplateInstanceIndexCalls(); calls != 0 {
+				t.Fatalf("committed parent-local replay consulted the current instance index %d times", calls)
 			}
-			selected.setScalarTemplateInstanceDescriptorError(nil)
+			fresh := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), event.Type(), "test", "", event.Payload(), 0, runID, events.EventEnvelope{}, sender, at)
+			if _, err := eventBus.CheckPublishRecipientPlan(ctx, fresh); !errors.Is(err, indexFailure) || selected.scalarTemplateInstanceIndexCalls() == 0 {
+				t.Fatalf("fresh parent-local plan bypassed poisoned index: calls=%d err=%v", selected.scalarTemplateInstanceIndexCalls(), err)
+			}
+			if persisted, found, err := selected.LoadPreparedPublishEvent(ctx, fresh.ID()); err != nil || found || len(persisted.DeliveryRoutes) != 0 {
+				t.Fatalf("refused parent-local preflight mutated storage: %+v found=%t err=%v", persisted, found, err)
+			}
+			selected.setScalarTemplateInstanceIndexError(nil)
 			foreign := eventtest.StaticFlowRoutingSource("child/grandchild", "child/grandchild", uuid.NewString())
 			rejected := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "child/grandchild/micro.done", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, foreign, at)
 			if err := eventBus.Publish(ctx, rejected); err == nil || !strings.Contains(err.Error(), "contradicts") {
