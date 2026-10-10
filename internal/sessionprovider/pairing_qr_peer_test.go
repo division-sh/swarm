@@ -21,7 +21,7 @@ func TestWhatsAppDirectQRPublicSDKRepeatedBatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := o.connect(); err == nil || o.started {
+	if err := o.connect(o.ctx); err == nil || o.started {
 		t.Fatal("pairing network boot preceded installation of the guarded QR consumer")
 	}
 	if _, err := o.bindCallbacks(func(context.Context, any) error { return nil },
@@ -34,7 +34,7 @@ func TestWhatsAppDirectQRPublicSDKRepeatedBatches(t *testing.T) {
 			observed <- append([]string(nil), event.Codes...)
 		}
 	})
-	if err := o.connect(); err != nil {
+	if err := o.connect(o.ctx); err != nil {
 		t.Fatal(err)
 	}
 	socket := pairingSocketFixture(t, peer)

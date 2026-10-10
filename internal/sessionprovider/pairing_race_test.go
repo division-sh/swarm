@@ -63,7 +63,7 @@ func TestWhatsAppSDKPairingRejectionAndRemoteClose(t *testing.T) {
 					errorsSeen <- event.Error
 				}
 			})
-			if err := o.connect(); err != nil {
+			if err := o.connect(o.ctx); err != nil {
 				t.Fatal(err)
 			}
 			socket := pairingSocketFixture(t, peer)

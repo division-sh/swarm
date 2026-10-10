@@ -168,7 +168,7 @@ func runOwnedSessionInputBootstrapBothStores(t *testing.T, targetGeneration uint
 				t.Fatal(err)
 			}
 			peer.attach(t, occurrence.client)
-			if err := occurrence.connect(); err != nil || !occurrence.client.WaitForConnection(5*time.Second) {
+			if err := occurrence.connect(occurrence.ctx); err != nil || !occurrence.client.WaitForConnection(5*time.Second) {
 				t.Fatal("native SDK authentication failed", err)
 			}
 			from := types.NewJID("100000000003", types.DefaultUserServer)

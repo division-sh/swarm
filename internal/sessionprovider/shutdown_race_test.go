@@ -32,7 +32,7 @@ func TestWhatsAppClientOccurrenceShutdownInterleavings(t *testing.T) {
 					}
 				})
 				peer.attach(t, o.client)
-				if err := o.connect(); err != nil || !o.client.WaitForConnection(5*time.Second) {
+				if err := o.connect(o.ctx); err != nil || !o.client.WaitForConnection(5*time.Second) {
 					t.Fatalf("synthetic SDK authentication: %v", err)
 				}
 				done := make(chan error, 1)
