@@ -29,6 +29,7 @@ type runForkEventCursor struct {
 type runForkAdmissionEvidence struct {
 	Pending                 []runfork.RunForkPendingWork
 	RelevantTimer           bool
+	TimerHistory            runForkTimerHistoryInventory
 	RelevantRoute           bool
 	RouteHistory            runfork.RunForkRouteHistoryProjection
 	ActiveSession           bool
@@ -250,6 +251,7 @@ func planRunForkSnapshot(
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}
+	evidence.TimerHistory.Point = plan.ForkPoint
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmission(evidence)
 	plan.RouteHistory = evidence.RouteHistory
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmissionWithMaterializedEntitySnapshotMetadata(plan.ReplayResumeAdmission, entitySnapshotMetadataAdmission)

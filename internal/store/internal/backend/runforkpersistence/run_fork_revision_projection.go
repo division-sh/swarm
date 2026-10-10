@@ -1,11 +1,13 @@
 package runforkpersistence
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -126,25 +128,9 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	if err := admitRunForkTerminalBarrierHistory(snapshot, fanOut, pending); err != nil {
 		return runForkAdmissionEvidence{}, err
 	}
-	relevantTimer := false
-	entityIDs := stringSliceSet(facts.EntityIDs)
-	flowInstances := stringSliceSet(facts.FlowInstances)
-	for _, timer := range snapshot.Timers {
-		if _, owned := ownedSchedules[timer.TimerID]; owned {
-			continue
-		}
-		if timer.RunID == snapshot.RunID {
-			relevantTimer = true
-			break
-		}
-		if _, ok := entityIDs[strings.TrimSpace(timer.EntityID)]; ok && strings.TrimSpace(timer.EntityID) != "" {
-			relevantTimer = true
-			break
-		}
-		if _, ok := flowInstances[strings.TrimSpace(timer.FlowInstance)]; ok && strings.TrimSpace(timer.FlowInstance) != "" {
-			relevantTimer = true
-			break
-		}
+	timerHistory, err := loadRunForkTimerHistoryInventory(snapshot, facts, ownedSchedules)
+	if err != nil {
+		return runForkAdmissionEvidence{}, err
 	}
 	routeState := runfork.RunForkRouteHistoryNotApplicable
 	if len(facts.FlowInstances) > 0 || len(facts.SourceFlows) > 0 {
@@ -175,13 +161,54 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	}
 	return runForkAdmissionEvidence{
 		Pending:                 pending,
-		RelevantTimer:           relevantTimer,
+		RelevantTimer:           len(timerHistory.WorkflowTimerIDs)+len(timerHistory.UnresolvedTimerIDs) != 0,
+		TimerHistory:            timerHistory,
 		RouteHistory:            runfork.RunForkRouteHistoryProjection{State: routeState},
 		ActiveSession:           activeSession,
 		ActiveConversationAudit: len(snapshot.ConversationAudits) > 0,
 		ActiveTurn:              activeTurn,
 		OpenReplyContext:        openReplyContext,
 	}, nil
+}
+
+func loadRunForkTimerHistoryInventory(snapshot *runForkRevisionSnapshot, facts runForkSourceFacts, ownedSchedules map[string]struct{}) (runForkTimerHistoryInventory, error) {
+	entityIDs, flowInstances := stringSliceSet(facts.EntityIDs), stringSliceSet(facts.FlowInstances)
+	seen := make(map[string]struct{}, len(snapshot.Timers))
+	var records []pipeline.WorkflowTimerActivationPersistenceRecord
+	var unresolved []string
+	for _, timer := range snapshot.Timers {
+		if _, owned := ownedSchedules[timer.TimerID]; owned {
+			continue
+		}
+		_, entityRelevant := entityIDs[strings.TrimSpace(timer.EntityID)]
+		_, flowRelevant := flowInstances[strings.TrimSpace(timer.FlowInstance)]
+		if timer.RunID != snapshot.RunID && !(entityRelevant && strings.TrimSpace(timer.EntityID) != "") && !(flowRelevant && strings.TrimSpace(timer.FlowInstance) != "") {
+			continue
+		}
+		if timer.TimerID == "" || timer.TimerID != strings.TrimSpace(timer.TimerID) {
+			return runForkTimerHistoryInventory{}, fmt.Errorf("relevant timer history requires exact row identity")
+		}
+		if _, duplicate := seen[timer.TimerID]; duplicate {
+			return runForkTimerHistoryInventory{}, fmt.Errorf("relevant timer history repeats row identity %s", timer.TimerID)
+		}
+		seen[timer.TimerID] = struct{}{}
+		if timer.TaskType != "workflow_timer" || timer.RunID != snapshot.RunID {
+			unresolved = append(unresolved, timer.TimerID)
+			continue
+		}
+		activation, err := workflowTimerActivationFromSnapshot(timer.TimerSnapshot)
+		if err != nil {
+			return runForkTimerHistoryInventory{}, err
+		}
+		records = append(records, activation.PersistenceRecord())
+	}
+	inventory, err := runForkWorkflowTimerRecordInventory(snapshot.RunID, records)
+	if err != nil {
+		return runForkTimerHistoryInventory{}, err
+	}
+	sort.Strings(unresolved)
+	inventory.Complete, inventory.UnresolvedTimerIDs = true, unresolved
+	return inventory, nil
 }
 
 func loadRunForkSourceFactsFromRevision(snapshot *runForkRevisionSnapshot, entities []runfork.RunForkEntityState) runForkSourceFacts {
