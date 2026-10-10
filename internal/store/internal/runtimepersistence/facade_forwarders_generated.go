@@ -491,10 +491,6 @@ func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context, runID st
 	return s.operatorAgentPostgres.ListActiveAgentDescriptors(ctx, runID)
 }
 
-func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]bus.ActiveFlowInstanceDescriptor, error) {
-	return s.pipelinePostgresOwner.ListActiveFlowInstanceDescriptors(ctx, runID)
-}
-
 func (s *PostgresStore) ListActiveWorkflowTimerActivationsForRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) ([]pipeline.WorkflowTimerActivation, error) {
 	return s.pipelinePostgresOwner.ListActiveWorkflowTimerActivationsForRoute(ctx, identity)
 }
@@ -1725,10 +1721,6 @@ func (s *SQLiteRuntimeStore) IssueRunForkSelectedContractRuntimeExecution(ctx co
 
 func (s *SQLiteRuntimeStore) ListActiveAgentDescriptors(ctx context.Context, runID string) ([]bus.ActiveAgentDescriptor, error) {
 	return s.operatorAgentSQLite.ListActiveAgentDescriptors(ctx, runID)
-}
-
-func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]bus.ActiveFlowInstanceDescriptor, error) {
-	return s.pipelineSQLiteOwner.ListActiveFlowInstanceDescriptors(ctx, runID)
 }
 
 func (s *SQLiteRuntimeStore) ListActiveWorkflowTimerActivationsForRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) ([]pipeline.WorkflowTimerActivation, error) {

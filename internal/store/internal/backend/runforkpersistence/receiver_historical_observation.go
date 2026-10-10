@@ -3,6 +3,7 @@ package runforkpersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -22,45 +23,100 @@ func (s *RunForkSQLiteOwner) ReadHistoricalFlowInstanceConstructionTx(ctx contex
 	return readHistoricalFlowInstanceConstructionTx(ctx, tx, source, run, instance)
 }
 
+func (s *RunForkPostgresOwner) ReadHistoricalFlowInstanceConstructionEvidenceTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instance pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error) {
+	return readHistoricalFlowInstanceConstructionEvidenceTx(ctx, tx, run, instance)
+}
+
+func (s *RunForkSQLiteOwner) ReadHistoricalFlowInstanceConstructionEvidenceTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instance pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error) {
+	return readHistoricalFlowInstanceConstructionEvidenceTx(ctx, tx, run, instance)
+}
+
 func readHistoricalFlowInstanceConstructionTx(ctx context.Context, tx *sql.Tx, source semanticview.Source, run runlifecycle.Snapshot, instance pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error) {
-	if tx == nil || source == nil || run.Validate() != nil {
+	if source == nil {
 		return pipeline.HistoricalFlowInstanceConstruction{}, false, fmt.Errorf("historical instance observation requires its admitted snapshot")
 	}
-	if run.Origin.Kind() != runlifecycle.OriginForkMaterialization {
-		return pipeline.HistoricalFlowInstanceConstruction{}, false, nil
-	}
-	sourceRunID, revision := run.Origin.SourceRunID(), run.Origin.ForkRevision()
-	var recorded int64
-	if err := tx.QueryRowContext(ctx, `SELECT revision FROM run_fork_revisions WHERE run_id=$1 AND revision=$2`, sourceRunID, revision).Scan(&recorded); err != nil {
-		return pipeline.HistoricalFlowInstanceConstruction{}, false, fmt.Errorf("read admitted historical instance cut: %w", err)
-	}
-	snapshot, err := loadRunForkRevisionSnapshot(ctx, tx, sourceRunID, recorded)
-	if err != nil {
-		return pipeline.HistoricalFlowInstanceConstruction{}, false, err
-	}
-	metadata, found, err := findProjectedFlowInstanceMetadata(snapshot, run.RunID, instance.StorageRef)
+	cut, found, err := loadHistoricalFlowInstanceConstructionCutTx(ctx, tx, run, instance)
 	if err != nil || !found {
 		return pipeline.HistoricalFlowInstanceConstruction{}, false, err
 	}
-	state, err := loadRunForkConstructedEntityState(snapshot, metadata.EntityID)
+	fixed, _, found, err := runforkadmission.FixedConstructionForRoute(source, cut.plan, cut.route)
 	if err != nil {
-		return pipeline.HistoricalFlowInstanceConstruction{}, false, err
-	}
-	route := flowidentity.StoredRoute(flowidentity.ScopeKey(source, metadata.FlowTemplate), flowidentity.LogicalInstanceID(metadata.FlowInstance), metadata.FlowInstance)
-	fixed, _, found, err := runforkadmission.FixedConstructionForRoute(source, runfork.RunForkPlan{SourceRunID: sourceRunID, Entities: []runfork.RunForkEntityState{state}}, route)
-	if err != nil {
-		return pipeline.HistoricalFlowInstanceConstruction{}, false, fmt.Errorf("admit historical construction: %w", err)
+		return pipeline.HistoricalFlowInstanceConstruction{}, false, fmt.Errorf("admit historical construction: fixed header refusal: %w", err)
 	}
 	if !found {
 		return pipeline.HistoricalFlowInstanceConstruction{}, false, fmt.Errorf("admit historical construction: fixed header disappeared")
 	}
-	projected, err := projectHistoricalFlowInstanceIdentity(sourceRunID, run.RunID, fixed)
+	return cut.project(run, instance, fixed)
+}
+
+func readHistoricalFlowInstanceConstructionEvidenceTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instance pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error) {
+	cut, found, err := loadHistoricalFlowInstanceConstructionCutTx(ctx, tx, run, instance)
+	if err != nil || !found {
+		return pipeline.HistoricalFlowInstanceConstruction{}, false, err
+	}
+	fixed, _, found, err := runforkadmission.FixedConstructionEvidenceForRoute(cut.plan, cut.route)
+	if err != nil {
+		return pipeline.HistoricalFlowInstanceConstruction{}, false, fmt.Errorf("inspect historical construction: fixed header refusal: %w", err)
+	}
+	if !found {
+		return pipeline.HistoricalFlowInstanceConstruction{}, false, fmt.Errorf("inspect historical construction: fixed header disappeared")
+	}
+	return cut.project(run, instance, fixed)
+}
+
+type historicalFlowInstanceConstructionCut struct {
+	plan  runfork.RunForkPlan
+	route flowidentity.Route
+	key   string
+}
+
+func loadHistoricalFlowInstanceConstructionCutTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instance pipeline.WorkflowInstance) (historicalFlowInstanceConstructionCut, bool, error) {
+	if tx == nil || run.Validate() != nil {
+		return historicalFlowInstanceConstructionCut{}, false, fmt.Errorf("historical construction evidence requires its admitted read snapshot")
+	}
+	if run.Origin.Kind() != runlifecycle.OriginForkMaterialization {
+		return historicalFlowInstanceConstructionCut{}, false, nil
+	}
+	sourceRunID, revision := run.Origin.SourceRunID(), run.Origin.ForkRevision()
+	var recorded int64
+	if err := tx.QueryRowContext(ctx, `SELECT revision FROM run_fork_revisions WHERE run_id=$1 AND revision=$2`, sourceRunID, revision).Scan(&recorded); err != nil {
+		return historicalFlowInstanceConstructionCut{}, false, fmt.Errorf("read admitted historical instance cut: %w", err)
+	}
+	snapshot, err := loadRunForkRevisionSnapshot(ctx, tx, sourceRunID, recorded)
+	if err != nil {
+		return historicalFlowInstanceConstructionCut{}, false, err
+	}
+	metadata, found, err := findProjectedFlowInstanceMetadata(snapshot, run.RunID, instance.StorageRef)
+	if err != nil || !found {
+		return historicalFlowInstanceConstructionCut{}, false, err
+	}
+	state, err := loadRunForkConstructedEntityState(snapshot, metadata.EntityID)
+	if err != nil {
+		return historicalFlowInstanceConstructionCut{}, false, err
+	}
+	receipt, err := pipeline.DecodeStoredFlowConstructionReceipt(metadata.InitialMaterialization, sourceRunID, metadata.EntityID, metadata.FlowInstance, metadata.FlowTemplate)
+	if err != nil {
+		return historicalFlowInstanceConstructionCut{}, false, fmt.Errorf("read captured historical construction: %w", err)
+	}
+	return historicalFlowInstanceConstructionCut{
+		plan:  runfork.RunForkPlan{SourceRunID: sourceRunID, ForkPoint: runfork.RunForkPoint{Revision: recorded}, Entities: []runfork.RunForkEntityState{state}},
+		route: receipt.Identity.Route(), key: receipt.InstanceKey,
+	}, true, nil
+}
+
+func (cut historicalFlowInstanceConstructionCut) project(run runlifecycle.Snapshot, instance pipeline.WorkflowInstance, fixed flowidentity.Instance) (pipeline.HistoricalFlowInstanceConstruction, bool, error) {
+	projected, err := projectHistoricalFlowInstanceIdentity(cut.plan.SourceRunID, run.RunID, fixed)
 	if err != nil {
 		return pipeline.HistoricalFlowInstanceConstruction{}, false, err
 	}
+	header, err := instance.ConstructionIdentity(flowidentity.RunScopedFlowInstance{RunID: run.RunID, Route: projected.Route()})
+	metadata := cut.plan.Entities[0].MaterializationMetadata
+	if err != nil || header != projected || instance.InstanceKey != cut.key || instance.Mode != metadata.Mode || instance.EntityType != metadata.EntityType {
+		return pipeline.HistoricalFlowInstanceConstruction{}, false, &pipeline.FlowInstanceConstructionCorruption{RunID: run.RunID, FlowID: instance.WorkflowName, InstancePath: instance.StorageRef, Cause: errors.Join(fmt.Errorf("header contradicts its exact projected historical construction"), err)}
+	}
 	return pipeline.HistoricalFlowInstanceConstruction{
-		Identity: projected, InstanceKey: metadata.InstanceKey, SourceRevision: recorded,
-		SourceOwner: flowidentity.RunScopedFlowInstance{RunID: sourceRunID, Route: fixed.Route()},
+		Identity: projected, InstanceKey: cut.key, SourceRevision: cut.plan.ForkPoint.Revision,
+		SourceOwner: flowidentity.RunScopedFlowInstance{RunID: cut.plan.SourceRunID, Route: fixed.Route()},
 	}, true, nil
 }
 

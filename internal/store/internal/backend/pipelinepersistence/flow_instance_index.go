@@ -19,6 +19,7 @@ import (
 // before the native reader checks any constructor or readiness companions.
 type HistoricalFlowInstanceReader interface {
 	ReadHistoricalFlowInstanceConstructionTx(context.Context, *sql.Tx, semanticview.Source, runlifecycle.Snapshot, pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error)
+	ReadHistoricalFlowInstanceConstructionEvidenceTx(context.Context, *sql.Tx, runlifecycle.Snapshot, pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error)
 }
 
 func (s *PipelinePostgresOwner) BindHistoricalFlowInstanceReader(owner HistoricalFlowInstanceReader) error {

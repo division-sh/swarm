@@ -26,16 +26,16 @@ func constructionPublicationFieldsFixture(t *testing.T) (workflowInitialMaterial
 		Version: workflowInitialMaterializationProjectionVersion,
 		RunID:   run, FlowInstance: path, EntityID: entity, WorkflowName: "account", WorkflowVersion: "1",
 		InstanceKey:   "business-key",
+		InitialState:  "pending",
+		BundleHash:    "bundle-v2:sha256:" + strings.Repeat("a", 64),
+		ExecutionMode: executionmode.Live,
 		OccurredAt:    time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC),
 		CreatingInput: FlowConstructionInput{EventID: "22222222-2222-4222-8222-222222222222", Input: "account.initialized"},
 		Persisted: workflowInstancePersistedProjection{
 			Fields:  map[string]any{"integer": int64(7), "double": float64(7), "nested": map[string]any{"values": []any{int64(7), float64(7), nil}}, "literal": "${x}"},
-			Control: workflowInstancePersistedControl{StorageRef: path, EntityID: entity},
+			Control: workflowInstancePersistedControl{StorageRef: path, FlowPath: path, InstanceID: "item", EntityID: entity},
 		},
-		Readiness: &DynamicFlowRuntimeReadinessPlan{
-			RunID: run, WorkflowVersion: "1", BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), ExecutionMode: executionmode.Live,
-			Identity: flowidentity.Instance{TemplateID: "account", ScopeKey: "account", InstanceID: "item", InstancePath: path, EntityID: entity, HasStoredPath: true},
-		},
+		Identity: flowidentity.Instance{TemplateID: "account", ScopeKey: "account", InstanceID: "item", InstancePath: path, EntityID: entity, HasStoredPath: true},
 	}, owner
 }
 
@@ -184,12 +184,12 @@ func TestFlowConstructionPublicationFieldsSharesStrictReceiptAdmission(t *testin
 			r.CreatingInput.EventID = "33333333-3333-4333-8333-333333333333"
 		}},
 		{"foreign_header", func(r *workflowInitialMaterializationProjection) { r.Persisted.Control.StorageRef = "account/foreign" }},
-		{"missing_readiness", func(r *workflowInitialMaterializationProjection) { r.Readiness = nil }},
-		{"foreign_readiness_run", func(r *workflowInitialMaterializationProjection) {
-			r.Readiness.RunID = "33333333-3333-4333-8333-333333333333"
+		{"missing_identity", func(r *workflowInitialMaterializationProjection) { r.Identity = flowidentity.Instance{} }},
+		{"foreign_captured_scope", func(r *workflowInitialMaterializationProjection) {
+			r.Identity.ScopeKey = "foreign"
 		}},
-		{"foreign_readiness_entity", func(r *workflowInitialMaterializationProjection) {
-			r.Readiness.Identity.EntityID = "33333333-3333-4333-8333-333333333333"
+		{"foreign_captured_entity", func(r *workflowInitialMaterializationProjection) {
+			r.Identity.EntityID = "33333333-3333-4333-8333-333333333333"
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
