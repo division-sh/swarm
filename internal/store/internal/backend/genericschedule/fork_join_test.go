@@ -256,9 +256,9 @@ func TestForkJoinRequestRejectsSelfConsistentForeignEvidence(t *testing.T) {
 				forkJoinStampPreparedSource(r)
 				r.Source.CurrentEventAdmittedAt = r.BornAt.Add(time.Minute)
 			}},
-			{"cancelled_prepared_source", func(t *testing.T, r *ForkJoinRequest) {
-				r.Source.Status, r.Source.CancelCause, r.Source.CancelledAt = runtimegenericschedule.StatusCancelled, "join_stage_exit", r.Source.AdmittedAt.Add(time.Minute)
+			{"cancelled_prepared_after_child_birth", func(t *testing.T, r *ForkJoinRequest) {
 				forkJoinStampPreparedSource(r)
+				r.Source.Status, r.Source.CancelCause, r.Source.CancelledAt = runtimegenericschedule.StatusCancelled, "join_stage_exit", r.BornAt.Add(time.Microsecond)
 			}},
 			{"fired_source", func(t *testing.T, r *ForkJoinRequest) {
 				forkJoinStampPreparedSource(r)
