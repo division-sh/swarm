@@ -30,6 +30,7 @@ const debtRefreshEnv = "SWARM_REFRESH_PERSISTENCE_AUTHORITY_DEBT"
 const debtG01CollectorFrom = "494fd3b6300c4163241395ef9e3aa59ce58eb32f45e9f5d8bc5a5078401303d5"
 const debtQuiescenceCollectorFrom = "65fe2e66c01eb0e19ce2b44d53f545cc76dd823f5f8b58562e139a362cc9c267"
 const debtRunFixtureCollectorFrom = "4ab44a86253d3b09474c20463ca1a4e5c6296f4a4694e4d80d904832757ae047"
+const debtQ10CollectorFrom = "3958381013996586ea697cd868abcacec29e9316706276f603f32523f74b5cb6"
 
 // The reviewed, unlanded bootstrap cannot move when its guard PR is rebased.
 const debtBootstrapSource = "52b954ec26c85a47605cefb8d7030f2a842f8c24"
@@ -152,6 +153,10 @@ func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDeb
 		base = debtForwardQuiescenceUncertainty(base, old, current)
 		baseActual = debtForwardQuiescenceUncertainty(baseActual, old, current)
 	}
+	head, base, baseActual, failures = debtQ10NullableComparisons(actual, head, base, baseActual)
+	if len(failures) != 0 {
+		return failures
+	}
 	failures = authorityDebtSubset(actual, head, "actual -> head baseline")
 	failures = append(failures, authorityDebtSubset(head, base, "head -> trusted baseline")...)
 	failures = append(failures, authorityDebtSubset(actual, baseActual, "actual -> trusted source (resurrection)")...)
@@ -230,6 +235,38 @@ func debtForwardQuiescenceUncertainty(sites map[string]authorityDebtSite, old, c
 	delete(forward, old.identity())
 	forward[current.identity()] = current
 	return forward
+}
+
+// Q10 adds only the nullable assertion to the landed owned-quiescence source.
+func debtQ10NullableUncertaintyTransition() (authorityDebtSite, authorityDebtSite) {
+	old := authorityDebtSite{
+		Kind: "unresolved-excluded-source", File: "internal/serveapp/a2_nested_portfolio_isolation_test.go",
+		Declaration: "TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores",
+		Operation:   "declaration:02a974ebc762c71be9999ece645b4d35076f0518811a05b09851433a9a67ff06",
+		Resolved:    "unresolved|source-context:4b4e4348dc36ff1ca795a129d908f43ec58f41675314b93feca26224afffc5b4",
+		Family:      "excluded-source-uncertainty", Replacement: "existing canonical owner or narrow source-evidenced classification; never a file exemption or baseline increase",
+		Multiplicity: 1,
+	}
+	current := old
+	current.Operation = "declaration:59105d417c6210ce551c0cef53ce4fc965e87f8273f883a5c85b6222a104ad71"
+	return old, current
+}
+
+func debtQ10NullableComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
+	old, current := debtQ10NullableUncertaintyTransition()
+	for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
+		if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
+			return head, base, source, []string{"both reviewed Q10 uncertainty identities survive; owner=exact nullable lifecycle assertion"}
+		}
+	}
+	if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
+		base[old.identity()] == old && base[current.identity()].Multiplicity == 0 &&
+		source[old.identity()] == old && source[current.identity()].Multiplicity == 0 {
+		head = debtForwardQuiescenceUncertainty(head, old, current)
+		base = debtForwardQuiescenceUncertainty(base, old, current)
+		source = debtForwardQuiescenceUncertainty(source, old, current)
+	}
+	return head, base, source, nil
 }
 
 func parseAuthorityDebtBaseline(data []byte) (authorityDebtBaseline, error) {
@@ -650,6 +687,7 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	if refresh == "downward" {
 		removed := authorityDebtCount(head.Sites) - authorityDebtCount(actual)
 		normalized, _, _, _ := debtRunFixtureSignatureComparisons(actual, head.Sites, trusted.Sites, baseActual)
+		normalized, _, _, _ = debtQ10NullableComparisons(actual, normalized, trusted.Sites, baseActual)
 		for _, key := range debtSortedKeys(normalized) {
 			before := normalized[key]
 			after := actual[key].Multiplicity
@@ -704,6 +742,14 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return fmt.Errorf("debt baseline bootstrap source changed")
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
+		return nil
+	}
+	q10Old, q10Forward := debtQ10NullableUncertaintyTransition()
+	if base == debtQ10CollectorFrom && trusted.Collector == debtQ10CollectorFrom &&
+		current == debtQ10CollectorTo && head.Collector == debtQ10CollectorTo &&
+		trusted.Sites[q10Old.identity()] == q10Old && trusted.Sites[q10Forward.identity()].Multiplicity == 0 &&
+		(head.Sites[q10Old.identity()] == q10Old || head.Sites[q10Forward.identity()] == q10Forward) &&
+		len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0 {
 		return nil
 	}
 	if current == debtFixtureRoleCollectorTo && head.Collector == current {
