@@ -70,6 +70,16 @@ func migrate(write bool) error {
 	if err != nil {
 		return err
 	}
+	if err := applyPendingFiles(root, files, write); err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(struct {
+		Write   bool
+		Changes []recipe
+	}{write, changed})
+}
+
+func applyPendingFiles(root string, files []pendingFile, write bool) error {
 	if len(files) != 0 {
 		if err := checkTypes(root, files); err != nil {
 			return err
@@ -82,10 +92,7 @@ func migrate(write bool) error {
 			}
 		}
 	}
-	return json.NewEncoder(os.Stdout).Encode(struct {
-		Write   bool
-		Changes []recipe
-	}{write, changed})
+	return nil
 }
 
 func prepareFiles(root string, recipes []recipe) ([]pendingFile, []recipe, error) {
@@ -352,19 +359,67 @@ func canonicalFunction(source string) (string, error) {
 }
 
 func checkTypes(root string, files []pendingFile) error {
-	overlay := map[string][]byte{}
-	for _, file := range files {
-		overlay[file.path] = file.data
+	overlay, patterns, err := candidateTypeCheckInputs(root, files)
+	if err != nil {
+		return fmt.Errorf("candidate type checking failed: %w; no files written", err)
 	}
 	pkgs, err := packages.Load(&packages.Config{
 		Dir: root, Tests: true, Overlay: overlay,
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedTypes | packages.NeedImports,
-	}, "./internal/runtime", "./internal/runtime/pipeline", "./internal/runtime/tools", "./internal/apiv1")
+	}, patterns...)
 	if err != nil {
-		return err
+		return fmt.Errorf("candidate type checking failed: %w; no files written", err)
 	}
 	if len(pkgs) == 0 || packages.PrintErrors(pkgs) != 0 {
 		return fmt.Errorf("candidate type checking failed; no files written")
 	}
+	covered := make(map[string]bool)
+	for _, pkg := range pkgs {
+		if pkg.Types == nil {
+			continue
+		}
+		for _, path := range pkg.CompiledGoFiles {
+			covered[filepath.Clean(path)] = true
+		}
+	}
+	for _, file := range files {
+		path, err := filepath.Abs(file.path)
+		if err != nil || !covered[path] {
+			return fmt.Errorf("candidate type checking failed: %s is not represented in a typed package variant; no files written", file.path)
+		}
+	}
 	return nil
+}
+
+func candidateTypeCheckInputs(root string, files []pendingFile) (map[string][]byte, []string, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(files) == 0 {
+		return nil, nil, fmt.Errorf("no pending Go files")
+	}
+	overlay := make(map[string][]byte)
+	directories := make(map[string]bool)
+	for _, file := range files {
+		path, err := filepath.Abs(file.path)
+		if err != nil {
+			return nil, nil, err
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil || !filepath.IsLocal(relative) || !strings.HasSuffix(relative, ".go") {
+			return nil, nil, fmt.Errorf("candidate must be a Go file within the checkout: %s", file.path)
+		}
+		if _, duplicate := overlay[path]; duplicate {
+			return nil, nil, fmt.Errorf("duplicate candidate file: %s", file.path)
+		}
+		overlay[path] = file.data
+		directories["./"+filepath.ToSlash(filepath.Dir(relative))] = true
+	}
+	patterns := make([]string, 0, len(directories))
+	for path := range directories {
+		patterns = append(patterns, path)
+	}
+	sort.Strings(patterns)
+	return overlay, patterns, nil
 }

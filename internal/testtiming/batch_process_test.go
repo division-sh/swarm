@@ -180,7 +180,7 @@ func TestProofBatchCollectsLaterUnitAfterFailureWithFreshProcessesAndTemps(t *te
 			if err := os.MkdirAll(filepath.Join(root, "test-results/plan"), 0700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(root, "test-results/plan/proof-plan.json"), []byte(`{"batches":[{"id":"batch","units":["one","two"]}]}`), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "test-results/plan/proof-plan.json"), []byte(`{"batches":[{"id":"batch","units":["one","two"]}],"units":[{"id":"one"},{"id":"two"}]}`), 0600); err != nil {
 				t.Fatal(err)
 			}
 			goShim := `#!/usr/bin/env bash
