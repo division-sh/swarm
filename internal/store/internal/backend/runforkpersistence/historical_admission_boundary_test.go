@@ -78,7 +78,6 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 	allowed[historicalBoundaryOwner+"loadRunForkStartFirstTurn/reference:"+historicalBoundaryOwner+"appendRunForkHistoricalFact"] = historicalBoundaryAllowance{1, "real first-turn input uses canonical historical identity and payload/schema admission without becoming an already-admitted start event"}
 	for _, caller := range []string{
 		"resolveSQLiteRunForkRevisionPoint", "lockRunForkSourceRevisionFrontier",
-		"RunForkPostgresOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers", "RunForkSQLiteOwner.EnsureRunForkNoPostForkCommittedReplayScopeMarkers",
 		"RunForkPostgresOwner.PlanRunFork", "RunForkPostgresOwner.ReadEntityAtEventCutForTest", "RunForkPostgresOwner.LoadRunForkSelectedContractSourceEvents",
 		"postgresRunForkSelectedContractActivationPort", "postgresRunForkSelectedContractMaterializationPort", "postgresRunForkWorkflowTimerReadbackPort",
 	} {

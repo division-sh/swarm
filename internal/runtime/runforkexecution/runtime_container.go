@@ -425,13 +425,13 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 		return errors.Join(errors.New("selected-contract fork-local lifecycle manager was not materialized"), lease.Done())
 	}
 	lifecycleManager = agentRuntime.manager
-	if err := pipeline.BindTurnCancellationDispatcher(lifecycleManager); err != nil {
-		return nil, err
-	}
-	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(lifecycleManager.FinalizeCommittedAgentReadiness))
 	agentRuntime.executionLease, agentRuntime.cancelExecution = lease, cancelRuntime
 	agentRuntime.scheduler, agentRuntime.timerLifecycle = scheduler, pipeline
 	agentRuntime.genericSchedules = schedules
+	if err := pipeline.BindTurnCancellationDispatcher(lifecycleManager); err != nil {
+		return errors.Join(err, agentRuntime.Shutdown())
+	}
+	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(lifecycleManager.FinalizeCommittedAgentReadiness))
 	if err := c.prepareCompletionOwner(runCtx, forkOwner, agentRuntime); err != nil {
 		return errors.Join(err, agentRuntime.Shutdown())
 	}

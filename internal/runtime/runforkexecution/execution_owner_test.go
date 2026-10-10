@@ -35,6 +35,7 @@ func TestSelectedContractExecutionOwnerRequiresEmitFeedback(t *testing.T) {
 				ports.effects, ports.completion, ports.completionHeartbeat, ports.liveSessions, ports.managedCapabilities,
 				ports.budget, ports.logs, ports.decisionCards, ports.proposedEffects, ports.humanTasks,
 				ports.decisionCardDraftExpiry, ports.humanTaskExpiry,
+				ports.candidates, ports.genericSchedules,
 			)
 			if err == nil || !strings.Contains(err.Error(), "event emit feedback") {
 				t.Fatalf("missing emit feedback admitted past selected construction: %v", err)

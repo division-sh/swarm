@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
@@ -69,6 +72,28 @@ func TestSelectedRecoveryBootActionsAreClosed(t *testing.T) {
 		if action, err := selectedRecoveryActionFor(runfork.SelectedForkRecoveryResult{RunID: entry.Binding.ForkRunID, Disposition: disposition}, entry); err == nil || action != 0 {
 			t.Fatalf("unadmitted disposition %q became boot action %d: %v", disposition, action, err)
 		}
+	}
+}
+
+func TestSelectedCancellationRecoveryPreservesPermanentOperationBinding(t *testing.T) {
+	result, entry := selectedRecoveryEvidence()
+	origin, err := effects.DirectiveCompletionOrigin(agentcontrol.DirectiveExecutionOrigin{
+		OperationID: uuid.NewString(), ExecutionOwnerID: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result.PendingCancellations = []effects.TurnExecutionResult{{
+		Attempt: effects.Attempt{Origin: origin},
+		Cancellation: effects.TurnCancellation{Committed: true, Requested: true, Origin: origin,
+			Reason: deliverylifecycle.CancellationTerminate, CauseEvent: uuid.NewString(), RequestedAt: time.Now().UTC()},
+	}}
+	if action, err := selectedRecoveryActionFor(result, entry); err != nil || action != selectedRecoverySettleCancellations {
+		t.Fatalf("exact prelaunch cancellation lost settlement recovery: action=%d err=%v", action, err)
+	}
+	result.Operation.ForkRunID = uuid.NewString()
+	if action, err := selectedRecoveryActionFor(result, entry); err == nil || action != 0 {
+		t.Fatalf("cancellation bypassed permanent operation binding: action=%d err=%v", action, err)
 	}
 }
 
