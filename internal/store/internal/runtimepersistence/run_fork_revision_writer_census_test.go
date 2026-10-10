@@ -438,7 +438,8 @@ func productionFunctionBody(t *testing.T, source, functionName string) string {
 func runForkRevisionPhysicalTables() map[string]struct{} {
 	return map[string]struct{}{
 		"events": {}, "entity_mutations": {}, "entity_state": {}, "flow_instances": {},
-		"event_deliveries": {}, "event_delivery_attempts": {},
+		"workflow_instance_initial_materializations": {},
+		"event_deliveries":                           {}, "event_delivery_attempts": {},
 		"event_delivery_handler_rule_selections": {},
 		"committed_replay_scopes":                {}, "event_receipts": {}, "dead_letters": {}, "timers": {},
 		"agent_sessions": {}, "agent_turns": {}, "agent_conversation_audits": {}, "reply_contexts": {},
@@ -555,7 +556,8 @@ func runForkRevisionWriterCensus() []runForkRevisionWriterCensusRow {
 		return runForkRevisionWriterCensusRow{Path: path, Symbols: symbols, Tables: tables, Family: family, Transaction: transaction, Branch: branch, RunDerivation: runDerivation, Finalizer: finalizer, Proof: proof}
 	}
 	return []runForkRevisionWriterCensusRow{
-		row("internal/store/internal/adminpersistence/destructive_reset_cleanup.go", []string{"destructiveResetCleanupStatementsForTable"}, []string{"flow_instances"}, "entity_metadata joined companion config", "ApplyDestructiveResetCleanup", "whole-parent destructive cleanup", "validated cleanup plan run IDs", "parent deletion cascades complete revision ledger", "TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores"),
+		row("internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go", []string{"insertFlowConstructionReceipt"}, []string{"workflow_instance_initial_materializations"}, "entity_metadata immutable construction receipt", "canonical flow construction or fixed-cut fork materialization attempt", "exact initial materialization insert", "admitted constructed run/entity/instance identity", "outer mutation captures joined entity metadata and immutable constructor evidence", "TestIssue642RetainedForkCrashRestartBothStores; TestSelectedCompletionActualScopeBothStores"),
+		row("internal/store/internal/adminpersistence/destructive_reset_cleanup.go", []string{"destructiveResetCleanupStatementsForTable"}, []string{"flow_instances", "workflow_instance_initial_materializations"}, "entity_metadata joined companion config and immutable construction receipt", "ApplyDestructiveResetCleanup", "whole-parent destructive cleanup", "validated cleanup plan run IDs", "parent deletion cascades complete revision ledger", "TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores"),
 		row("internal/store/internal/adminpersistence/destructive_reset_cleanup.go", []string{"destructiveResetCleanupSeverPreservedReferences"}, []string{"agent_sessions", "entity_mutations", "timers"}, "parent-owned cleanup references", "ApplyDestructiveResetCleanup", "whole-parent destructive cleanup", "validated cleanup plan run IDs", "parent deletion cascades complete revision ledger", "TestDestructiveResetCleanup"),
 		row("internal/store/internal/adminpersistence/destructive_reset_cleanup.go", []string{"destructiveResetCleanupStatementsForTable"}, []string{"events", "entity_mutations", "entity_state", "event_deliveries", "event_delivery_attempts", "committed_replay_scopes", "event_receipts", "dead_letters", "timers", "agent_sessions", "agent_turns", "agent_conversation_audits", "reply_contexts", "fan_out_intents", "fan_out_obligation_barriers", "fan_out_outcomes"}, "parent-owned cleanup rows", "ApplyDestructiveResetCleanup", "whole-parent destructive cleanup", "validated cleanup plan run IDs", "parent deletion cascades complete revision ledger", "TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores; TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPreservesBoundaries"),
 
