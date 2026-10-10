@@ -83,11 +83,12 @@ func TestEventBusDurableDependenciesAreExplicit(t *testing.T) {
 	source := readOwnershipSource(t, root, "internal/runtime/bus/eventbus.go")
 	assertOwnershipStructFields(t, root, "internal/runtime/bus/eventbus.go", "DurableDependencies", map[string]string{
 		"ConstructionPublications": "runtimepipeline.FlowConstructionPublicationReader",
-		"FlowRouteTopology":        "FlowInstanceRouteTopologyPersistence",
 		"RunLifecycle":             "runtimerunlifecycle.OperationOwner",
 		"DeliveryLifecycle":        "runtimedelivery.Store",
 	})
 	assertOwnershipSourceExcludes(t, source,
+		"FlowRouteTopology",
+		"StageFlowInstanceRouteContext",
 		"RuntimeMutations",
 		"RuntimeMutationRunner",
 		"RunRuntimeMutationContext",
@@ -106,9 +107,8 @@ func TestEventBusConstructorsDoNotClassifyStoreCapabilities(t *testing.T) {
 func TestEventBusRoutePersistenceDependenciesAreExplicit(t *testing.T) {
 	root := persistenceOwnershipRepoRoot(t)
 	assertOwnershipStructFields(t, root, "internal/runtime/bus/eventbus.go", "DurableDependencies", map[string]string{
-		"FlowRouteTopology": "FlowInstanceRouteTopologyPersistence",
-		"ActiveAgents":      "ActiveAgentDescriptorLister",
-		"ActiveFlows":       "ActiveFlowInstanceDescriptorLister",
+		"ActiveAgents": "ActiveAgentDescriptorLister",
+		"ActiveFlows":  "ActiveFlowInstanceDescriptorLister",
 	})
 }
 

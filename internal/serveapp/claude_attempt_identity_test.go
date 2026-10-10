@@ -764,8 +764,8 @@ func newClaudeAttemptProofEventBus(
 		Durable: runtimebus.DurableDependencies{
 			ReplyContext: backend.store, RunLifecycle: backend.store,
 			DeliveryLifecycle: backend.store,
-			FlowRouteTopology: backend.store, ActiveAgents: backend.store,
-			ActiveFlows: backend.store, TargetOwners: backend.store, PreparedEvents: backend.store,
+			ActiveAgents:      backend.store,
+			ActiveFlows:       backend.store, TargetOwners: backend.store, PreparedEvents: backend.store,
 			TargetFailureRecorder: backend.store, RunOrigins: backend.store, StandingRestarts: backend.store,
 			Instances: backend.workflow, ConstructionPublications: backend.workflow,
 		},

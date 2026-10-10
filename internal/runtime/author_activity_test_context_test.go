@@ -499,8 +499,8 @@ func runtimeTestDurableDependencies(durable runtimeTestDurableEventStore) runtim
 		ConstructionPublications: durable,
 		ReplyContext:             durable, RunLifecycle: durable,
 		DeliveryLifecycle: durable,
-		FlowRouteTopology: durable, ActiveAgents: durable,
-		ActiveFlows: durable, TargetOwners: durable, PreparedEvents: durable,
+		ActiveAgents:      durable,
+		ActiveFlows:       durable, TargetOwners: durable, PreparedEvents: durable,
 		TargetFailureRecorder: durable, RunOrigins: durable, StandingRestarts: durable,
 	}
 }

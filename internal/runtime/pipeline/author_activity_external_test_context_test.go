@@ -163,7 +163,6 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 		RunLifecycle:             eventStore,
 		DeliveryLifecycle:        eventStore,
 
-		FlowRouteTopology:     eventStore,
 		ActiveAgents:          eventStore,
 		ActiveFlows:           eventStore,
 		TargetOwners:          eventStore,

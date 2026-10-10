@@ -430,8 +430,8 @@ func externalRuntimeTestDurableDependencies(durable externalRuntimeTestDurableEv
 		EmitFeedback:             durable,
 		ReplyContext:             durable, RunLifecycle: durable,
 		DeliveryLifecycle: durable,
-		FlowRouteTopology: durable, ActiveAgents: durable,
-		ActiveFlows: durable, TargetOwners: durable, PreparedEvents: durable,
+		ActiveAgents:      durable,
+		ActiveFlows:       durable, TargetOwners: durable, PreparedEvents: durable,
 		TargetFailureRecorder: durable, RunOrigins: durable, StandingRestarts: durable,
 	}
 }
@@ -572,7 +572,7 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 		}
 	}
 	if opts.PipelineObligations != nil {
-		if opts.Durable.FlowRouteTopology == nil {
+		if opts.Durable.Instances == nil {
 			durable, ok := store.(externalRuntimeTestDurableEventStore)
 			if !ok {
 				return nil, fmt.Errorf("external runtime durable event-store fixture %T lacks exact durable roles", store)

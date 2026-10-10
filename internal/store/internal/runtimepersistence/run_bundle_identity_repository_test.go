@@ -518,7 +518,6 @@ func eventBusSourceOperationLedger() map[string]string {
 		"SetRuntimeIngressDispatchGate":               operationRetained,
 		"SetStandingRunWorkOwner":                     operationRetained,
 		"StartOutboxSweeper":                          operationRetained,
-		"StageFlowInstanceRouteContext":               operationMutation,
 		"StartDeploymentRunAcknowledged":              operationMutation,
 		"Store":                                       operationRetained,
 		"SubscribeInternal":                           operationRetained,

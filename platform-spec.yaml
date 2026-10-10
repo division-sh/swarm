@@ -18325,6 +18325,9 @@ platform_tables:
         conversation context (all messages, all tool results) in one row.'
     routing_rules:
       retired_api: 'Standalone UpsertFlowInstanceRoute, DeleteFlowInstanceRoute and ListFlowInstanceRoutes are unsupported.
+        EventBus.StageFlowInstanceRouteContext and the injected FlowRouteTopology persistence role are unsupported;
+        EventBus neither stages nor acknowledges a persisted instance-membership mirror. Construction and attachment
+        acknowledgment belong to their native commit owners, independently of any process route table.
         Publication preflight consumes the explicitly injected RunLifecycle.RequireActiveRun and PreparedEvents owners;
         discovering run authority from EventStore or the redundant RequirePublicationRunActive alias is unsupported.
         Constructed existence, immutable parent/key selection and terminal occupancy are observed through the native
