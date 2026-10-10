@@ -134,6 +134,7 @@ func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, inte
 	continuation := decisioncard.ProposedEffectContinuation{
 		CardID: decisioncard.ProposedEffectCardID(requestEventID, intent.ApprovalDecision), RunID: runID,
 		RequestEventID: requestEventID, ActivityID: intent.ActivityID, Tool: intent.Tool,
+		NativeSessionTarget: intent.NativeSessionTarget, PlanGeneration: intent.PlanGeneration, ChannelActivationGeneration: intent.ChannelActivationGeneration,
 		BundleHash: bundleHash, WorkflowVersion: workflowVersion, Input: intent.Input,
 		EffectClass: intent.EffectClass, SuccessEvent: intent.SuccessEvent, FailureEvent: intent.FailureEvent,
 		RevisionEvent: intent.RevisionEvent, RejectedEvent: intent.RejectedEvent,
@@ -219,13 +220,27 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	if source == nil {
 		return runtimefailures.New(runtimefailures.ClassInternalFailure, "activity_semantic_source_missing", "activity-runtime", "execute_activity", nil)
 	}
-	target, privateTarget, activationLease, targetErr := d.coordinator.channelActivityTarget(ctx, intent.Tool, intent.ChannelActivationGeneration)
+	targetID := intent.Tool
+	if intent.NativeSessionTarget != "" {
+		targetID = intent.NativeSessionTarget
+	}
+	target, privateTarget, activationLease, targetErr := d.coordinator.channelActivityTarget(ctx, targetID, intent.ChannelActivationGeneration)
 	ctx = runtimechannelactivation.WithoutExecutionLease(ctx)
 	if targetErr != nil {
 		return d.publishActivityFailure(ctx, intent, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "channel_activity_plan_invalid", "activity-runtime", "resolve_private_target", map[string]any{"tool": intent.Tool}, targetErr))
 	}
 	if activationLease != nil {
 		defer activationLease.Release()
+	}
+	if intent.NativeSessionTarget != "" {
+		if !privateTarget {
+			return d.rejectChannelActivityTarget(ctx, intent, fmt.Errorf("authored session activity lost its frozen private target"))
+		}
+		projection, err := d.coordinator.validateAuthoredSessionActivity(ctx, intent, activationLease)
+		if err != nil {
+			return d.rejectChannelActivityTarget(ctx, intent, err)
+		}
+		target.value.authored = projection
 	}
 	ctx = withActivityChannelTarget(ctx, target, privateTarget)
 	tool, ok := target.Tool()
@@ -514,6 +529,9 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 		stored, committed, err := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
 		return d.publishCommittedActivityAttempt(ctx, intent, stored, committed, err, "complete_activity_attempt")
 	}
+	if _, native := tool.InProcess(); native {
+		return d.executeClaimedNativeActivity(ctx, intent, tool, started, success, failure)
+	}
 	client := d.client
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
@@ -684,6 +702,7 @@ func (pc *PipelineCoordinator) handleActivityRequestEventWithEmissionPlan(ctx co
 type activityRequestPayload struct {
 	ActivityID                  string                                         `json:"activity_id"`
 	Tool                        string                                         `json:"tool"`
+	NativeSessionTarget         string                                         `json:"native_session_target,omitempty"`
 	PlanGeneration              *plangeneration.Generation                     `json:"plan_generation,omitempty"`
 	ChannelActivationGeneration *channelonboarding.ChannelActivationGeneration `json:"channel_activation_generation,omitempty"`
 	BundleHash                  string                                         `json:"bundle_hash,omitempty"`
@@ -789,6 +808,9 @@ func (pc *PipelineCoordinator) ExecuteDurableActivity(ctx context.Context, inten
 
 func activityRequestEmitIntentFromAdmittedSource(intent runtimeengine.ActivityIntent) (runtimeengine.EmitIntent, error) {
 	intent = intent.Normalized()
+	if err := validateSessionActivityRequestSelection(intent); err != nil {
+		return runtimeengine.EmitIntent{}, err
+	}
 	if !intent.ExecutionMode.Valid() {
 		return runtimeengine.EmitIntent{}, fmt.Errorf("activity %s requires typed causal execution mode", intent.ActivityID)
 	}
@@ -923,6 +945,7 @@ func activityRequestPayloadFromIntent(intent runtimeengine.ActivityIntent) activ
 	return activityRequestPayload{
 		ActivityID:                  intent.ActivityID,
 		Tool:                        intent.Tool,
+		NativeSessionTarget:         intent.NativeSessionTarget,
 		PlanGeneration:              planGeneration,
 		ChannelActivationGeneration: activationGeneration,
 		BundleHash:                  intent.BundleHash,
@@ -963,7 +986,7 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 	if err := canonicaljson.ValueInto(semanticPayload, &payload); err != nil {
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("decode activity request %s: %w", evt.ID(), err)
 	}
-	if strings.HasPrefix(strings.TrimSpace(payload.Tool), runtimecontracts.PrivateChannelActivityPrefix) && (payload.PlanGeneration == nil || payload.ChannelActivationGeneration == nil) {
+	if (strings.HasPrefix(strings.TrimSpace(payload.Tool), runtimecontracts.PrivateChannelActivityPrefix) || payload.NativeSessionTarget != "") && (payload.PlanGeneration == nil || payload.ChannelActivationGeneration == nil) {
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s for private channel target requires plan_generation and channel_activation_generation", evt.ID())
 	}
 	input, ok := semanticPayload.Lookup("input")
@@ -979,39 +1002,43 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s owner identity: %w", evt.ID(), err)
 	}
 	intent := runtimeengine.ActivityIntent{
-		Context:          evt.DeliveryContext(),
-		RoutingSource:    evt.RoutingSource(),
-		ActivityID:       payload.ActivityID,
-		Tool:             payload.Tool,
-		PlanGeneration:   planGeneration,
-		BundleHash:       payload.BundleHash,
-		WorkflowVersion:  payload.WorkflowVersion,
-		Input:            input,
-		EffectClass:      runtimecontracts.NormalizeActivityEffectClass(payload.EffectClass),
-		SuccessEvent:     payload.SuccessEvent,
-		FailureEvent:     payload.FailureEvent,
-		RevisionEvent:    payload.RevisionEvent,
-		RejectedEvent:    payload.RejectedEvent,
-		RetryMaxAttempts: payload.RetryMaxAttempts,
-		RetryBackoff:     payload.RetryBackoff,
-		ForkPolicy:       runtimecontracts.ActivityForkPolicy(strings.TrimSpace(payload.ForkPolicy)),
-		EntityID:         identity.NormalizeEntityID(payload.EntityID),
-		Owner:            owner,
-		ExecutionFlowID:  identity.NormalizeFlowID(payload.FlowID),
-		FlowInstance:     payload.FlowInstance,
-		HandlerEventKey:  payload.HandlerEventKey,
-		SourceEventID:    payload.SourceEventID,
-		SourceRunID:      payload.SourceRunID,
-		SourceTaskID:     payload.SourceTaskID,
-		ParentEventID:    payload.ParentEventID,
-		ChainDepth:       payload.ChainDepth,
-		Attempt:          payload.Attempt,
-		Generation:       payload.Generation,
-		LoopStage:        payload.LoopStage,
-		ExecutionMode:    evt.ExecutionMode(),
+		Context:             evt.DeliveryContext(),
+		RoutingSource:       evt.RoutingSource(),
+		ActivityID:          payload.ActivityID,
+		Tool:                payload.Tool,
+		NativeSessionTarget: payload.NativeSessionTarget,
+		PlanGeneration:      planGeneration,
+		BundleHash:          payload.BundleHash,
+		WorkflowVersion:     payload.WorkflowVersion,
+		Input:               input,
+		EffectClass:         runtimecontracts.NormalizeActivityEffectClass(payload.EffectClass),
+		SuccessEvent:        payload.SuccessEvent,
+		FailureEvent:        payload.FailureEvent,
+		RevisionEvent:       payload.RevisionEvent,
+		RejectedEvent:       payload.RejectedEvent,
+		RetryMaxAttempts:    payload.RetryMaxAttempts,
+		RetryBackoff:        payload.RetryBackoff,
+		ForkPolicy:          runtimecontracts.ActivityForkPolicy(strings.TrimSpace(payload.ForkPolicy)),
+		EntityID:            identity.NormalizeEntityID(payload.EntityID),
+		Owner:               owner,
+		ExecutionFlowID:     identity.NormalizeFlowID(payload.FlowID),
+		FlowInstance:        payload.FlowInstance,
+		HandlerEventKey:     payload.HandlerEventKey,
+		SourceEventID:       payload.SourceEventID,
+		SourceRunID:         payload.SourceRunID,
+		SourceTaskID:        payload.SourceTaskID,
+		ParentEventID:       payload.ParentEventID,
+		ChainDepth:          payload.ChainDepth,
+		Attempt:             payload.Attempt,
+		Generation:          payload.Generation,
+		LoopStage:           payload.LoopStage,
+		ExecutionMode:       evt.ExecutionMode(),
 	}.Normalized()
 	if payload.ChannelActivationGeneration != nil {
 		intent.ChannelActivationGeneration = *payload.ChannelActivationGeneration
+	}
+	if err := validateSessionActivityRequestSelection(intent); err != nil {
+		return runtimeengine.ActivityIntent{}, err
 	}
 	if intent.ActivityID == "" || intent.Tool == "" || intent.SuccessEvent == "" || intent.FailureEvent == "" {
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s is missing required activity identity", evt.ID())
