@@ -147,7 +147,7 @@ func (c CommitCommand) RequireOperatorAdmission(ctx context.Context) error {
 	if !found || source.BundleHash() != c.operator.admission.SourceBundleHash() {
 		return fmt.Errorf("operator input no longer owns its admitted source")
 	}
-	return c.Admission.ValidateOperatorOutput(ctx, source.BundleHash(), c.Request.FlowPath, c.Request.Provider, c.operator.source.output)
+	return c.Admission.ValidateOperatorOutput(ctx, source.BundleHash(), c.Request.FlowPath, c.Request.Provider, c.Request.ProviderEventID, c.operator.source.output)
 }
 
 func operatorOutputAuthorization(output providertriggers.DeliveryEvent) string {

@@ -13,11 +13,13 @@ import (
 )
 
 // PublicationAdmission transfers an authenticated plan's exact outputs. It is
-// neither receiver permission nor a provider-delivery receipt identity.
+// not receiver permission. HTTP receipts consume its authenticated delivery ID;
+// native receipt coordinates remain owned by the original capture.
 type PublicationAdmission struct {
 	bundleHash  string
 	flowID      string
 	provider    string
+	deliveryID  string
 	outputs     []admittedPublicationOutput
 	nativeInput *nativeinput.Admission
 	generation  triggergeneration.Generation
@@ -54,7 +56,7 @@ func (p InboundAdmissionPlan) ProjectPublication(admitted AdmittedRequest, bundl
 		return Delivery{}, PublicationAdmission{}, fmt.Errorf("publication requires the exact admitted delivery, not a challenge or changed identity")
 	}
 	admission := PublicationAdmission{bundleHash: bundleHash, flowID: flowID, provider: p.provider,
-		nativeInput: admitted.sessionInput, generation: p.generation}
+		deliveryID: delivery.ProviderEventID, nativeInput: admitted.sessionInput, generation: p.generation}
 	for _, output := range delivery.Events {
 		payload, err := canonicaljson.Bytes(output.Payload)
 		if err != nil {
@@ -100,10 +102,13 @@ func (a PublicationAdmission) SameOwner(other PublicationAdmission) bool {
 
 // Operator input consumes one authenticated normalized output without publishing
 // business events. SQL owners separately fence its selected native responsibility.
-func (a PublicationAdmission) ValidateOperatorOutput(ctx context.Context, bundleHash, flowID, provider string, output DeliveryEvent) error {
+func (a PublicationAdmission) ValidateOperatorOutput(ctx context.Context, bundleHash, flowID, provider, receiptID string, output DeliveryEvent) error {
 	if ctx == nil || ctx.Err() != nil || a.bundleHash == "" || a.bundleHash != bundleHash || a.flowID != flowID ||
 		a.provider != provider || output.Kind != OutputKindNormalized {
 		return fmt.Errorf("operator input requires its exact authenticated normalized output")
+	}
+	if a.nativeInput == nil && (a.deliveryID == "" || a.deliveryID != receiptID) {
+		return fmt.Errorf("HTTP operator input changed its authenticated provider delivery identity")
 	}
 	if a.nativeInput != nil && !a.nativeInput.LifetimeCurrent(ctx) {
 		return fmt.Errorf("operator input no longer owns its native lifetime")

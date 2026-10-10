@@ -11622,6 +11622,15 @@ tool_model:
         Operator input commits zero business events through one private projection receipt binding the original
         request, exact authenticated normalized output and compiled channel mapping. Exported input fields cannot
         reconstruct that receipt, replace its source or output admission, or change its text, sender or conversation.
+        Common native publication admission additionally consumes the original capture/request identity validator
+        through the opaque input owner's immutable captured evidence, before both operator and business commit.
+        The first unstaged request is not exempt: receipt IDs, fingerprint, original received time and capture
+        provenance must match that genuine input. Freezing caller-chosen fields or checking publication sequence
+        alone grants no receipt identity. The private captured-request verifier performs no store or provider I/O
+        under selected mutation ownership. Staged original bytes remain immutable while current lifetime, target
+        and standing-publication fences advance independently through authorized recovery. HTTP operator input
+        instead consumes the exact authenticated provider delivery ID; native capture evidence is not required
+        or fabricated for webhook input.
         Native operator publication retains the same live SDK input and selected account, principal, binding,
         activation, source and target fences as native business publication; zero outputs alone are not admission.
         An explicit text /inbox entry and genuine provider replies require no fabricated native menu or interaction ACK.

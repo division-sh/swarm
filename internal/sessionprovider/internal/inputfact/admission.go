@@ -13,6 +13,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
+// CapturedRequestVerifier consumes immutable evidence through the existing
+// capture/request semantic owner. It performs no store or provider I/O.
+type CapturedRequestVerifier interface {
+	ValidatePublicationRequest([]byte) error
+}
+
 // Capture is accessible only inside the native owner's Go internal boundary.
 // It is not exported through the read-only consumption facade.
 type Capture struct {
@@ -31,6 +37,7 @@ type Capture struct {
 	Release                    func()
 	RunCurrent                 func(context.Context) error
 	NativeCurrent              func() bool
+	PublicationVerifier        CapturedRequestVerifier
 }
 
 type admittedInput struct {
@@ -155,6 +162,13 @@ func (a Admission) OriginalPublicationRequest() []byte {
 		return nil
 	}
 	return bytes.Clone(a.value.capture.OriginalPublicationRequest)
+}
+
+func (a Admission) RequireCapturedPublicationRequest(raw []byte) error {
+	if a.value == nil || a.value.capture.PublicationVerifier == nil {
+		return fmt.Errorf("native publication requires its original captured-request owner")
+	}
+	return a.value.capture.PublicationVerifier.ValidatePublicationRequest(raw)
 }
 
 func (a Admission) PublicationSequence() int64 {

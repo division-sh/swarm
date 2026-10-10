@@ -1,6 +1,7 @@
 package sessionprovider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,7 +9,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	inbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/sessioncapture"
 	"github.com/division-sh/swarm/internal/sessionprovider/input"
 	"github.com/division-sh/swarm/internal/sessionprovider/internal/inputfact"
 )
@@ -110,11 +114,29 @@ func (o *sessionInputOwner) admitRetainedInput(ctx context.Context, reference Se
 		return input.Admission{}, err
 	}
 	retained = true
+	frozen := native.OriginalCapture
+	frozen.Body = bytes.Clone(frozen.Body)
 	return inputfact.SealOwnedCapture(inputfact.Capture{Store: o.store, Responsibility: responsibility,
 		Scope: native.Scope, BindingRevision: native.BindingRevision, PublicationRunID: native.PublicationBinding.RunID,
 		PublicationSequence: sequence, OriginalPublicationRequest: native.OriginalPublicationRequest,
 		Body: native.Body, OriginalCapture: original, ReceivedAt: native.ReceivedAt, Generation: native.SourceContext.CatalogGeneration, Context: ownedContext,
-		Release: func() { cancel(); native.Release() }, NativeCurrent: native.NativeCurrent, RunCurrent: runCurrent}), nil
+		Release: func() { cancel(); native.Release() }, NativeCurrent: native.NativeCurrent, RunCurrent: runCurrent,
+		PublicationVerifier: capturedRequestVerifier{event: frozen}}), nil
+}
+
+type capturedRequestVerifier struct{ event capturedEvent }
+
+func (v capturedRequestVerifier) ValidatePublicationRequest(raw []byte) error {
+	if _, err := canonicaljson.Decode(raw); err != nil {
+		return err
+	}
+	var request inbound.Request
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return err
+	}
+	return sessioncapture.ValidateCapturePublication(v.event, request)
 }
 
 func (o *sessionInputOwner) inputResponsibility(ctx context.Context, native nativeSessionInput, op channelonboarding.Operation, recovery bool) (channelonboarding.AdmissionResponsibility, error) {

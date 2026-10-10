@@ -27,6 +27,9 @@ func admitNativeInboundPublicationTx(ctx context.Context, tx *sql.Tx, postgres b
 	if err := channelonboarding.RequireSessionBusinessInputTx(ctx, tx, postgres, input); err != nil {
 		return err
 	}
+	if err := command.RequireNativePublicationRequest(); err != nil {
+		return err
+	}
 	for index, event := range command.Finalization.Events {
 		if err := command.Admission.ValidateCommitOutput(ctx, source.BundleHash(), request.Provider, index, len(command.Finalization.Events), event.Event, event.Kind, event.Authorization); err != nil {
 			return err
