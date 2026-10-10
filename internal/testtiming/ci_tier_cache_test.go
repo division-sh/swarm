@@ -91,6 +91,74 @@ func TestDebtAnalysisCIUsesExactReadOnlyRestoreAndProtectedProducer(t *testing.T
 	}
 }
 
+func TestDebtAnalysisCIPublisherPreservesArchiveContract(t *testing.T) {
+	job := loadAdmissionWorkflow(t).Jobs["publish-debt-analysis"]
+	if !slices.Equal(job.Needs, []string{"ci-plan", "required-tests"}) || job.TimeoutMinutes != 20 || len(job.Permissions) != 1 || job.Permissions["contents"] != "read" {
+		t.Fatal("producer dependencies, deadline or permissions changed")
+	}
+	restore := findWorkflowStep(job.Steps, "Restore exact immutable analysis")
+	save := findWorkflowStep(job.Steps, "Publish exact immutable analysis")
+	if restore == nil || save == nil {
+		t.Fatal("producer must retain the existing restore and save owners")
+	}
+	if restore.Uses != "actions/cache/restore@v4" || restore.With["key"] != "${{ steps.identity.outputs.key }}" || restore.With["restore-keys"] != nil || save.If != "steps.analysis.outputs.cache-hit != 'true' && success()" {
+		t.Fatal("producer must restore and save only its exact successful immutable archive")
+	}
+	if len(job.Steps) != 6 || job.Steps[0].Uses != "actions/checkout@v4" || job.Steps[0].With["ref"] != "${{ needs.ci-plan.outputs.execution_sha }}" || job.Steps[0].With["fetch-depth"] != 0 {
+		t.Fatal("producer checkout must retain the qualified execution source and full archive history")
+	}
+}
+
+func TestDebtAnalysisCIPublisherReplayAdmission(t *testing.T) {
+	job := loadAdmissionWorkflow(t).Jobs["publish-debt-analysis"]
+	for _, tc := range []struct {
+		name, event, ref               string
+		needsSucceeded, canceled, want bool
+	}{
+		{"master-replay", "push", "refs/heads/master", false, false, true},
+		{"master-push", "push", "refs/heads/master", true, false, true},
+		{"master-schedule", "schedule", "refs/heads/master", true, false, true},
+		{"canceled-replay", "push", "refs/heads/master", false, true, false},
+		{"canceled-push", "push", "refs/heads/master", true, true, false},
+		{"canceled-schedule", "schedule", "refs/heads/master", true, true, false},
+		{"PR-master-ref", "pull_request", "refs/heads/master", true, false, false},
+		{"fork-PR", "pull_request", "refs/pull/1/merge", true, false, false},
+		{"topic-push", "push", "refs/heads/topic", true, false, false},
+		{"main-push", "push", "refs/heads/main", true, false, false},
+		{"topic-schedule", "schedule", "refs/heads/topic", true, false, false},
+		{"manual-master", "workflow_dispatch", "refs/heads/master", true, false, false},
+		{"missing-ref", "push", "", true, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			facts := ciEventFacts(tc.event, false, "")
+			facts["github.ref"] = strconv.Quote(tc.ref)
+			facts["needs.ci-plan.result"] = strconv.Quote("success")
+			facts["cancelled()"] = strconv.FormatBool(tc.canceled)
+			if got := evaluateCICondition(t, job.If, facts, tc.needsSucceeded); got != tc.want {
+				t.Fatalf("publisher admitted=%v want=%v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDebtAnalysisCIPublisherRejectsUnsuccessfulAuthorities(t *testing.T) {
+	job := loadAdmissionWorkflow(t).Jobs["publish-debt-analysis"]
+	for _, owner := range []string{"ci-plan", "required-tests"} {
+		for _, status := range []string{"", "skipped", "failure", "cancelled", "unknown"} {
+			t.Run(owner+"/"+status, func(t *testing.T) {
+				facts := ciEventFacts("push", false, "")
+				facts["github.ref"] = strconv.Quote("refs/heads/master")
+				facts["needs.ci-plan.result"] = strconv.Quote("success")
+				facts["needs."+owner+".result"] = strconv.Quote(status)
+				facts["cancelled()"] = "false"
+				if evaluateCICondition(t, job.If, facts, true) {
+					t.Fatal("unsuccessful authority admitted publication")
+				}
+			})
+		}
+	}
+}
+
 func TestNightlyProofReusesExhaustiveOwnerWithoutRemovingPRProof(t *testing.T) {
 	workflow := loadAdmissionWorkflow(t)
 	job := workflow.Jobs["nightly-proof"]

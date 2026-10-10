@@ -210,6 +210,7 @@ type ciWorkflowJob struct {
 	Needs          []string          `yaml:"needs"`
 	Environment    string            `yaml:"environment"`
 	Env            map[string]string `yaml:"env"`
+	Permissions    map[string]string `yaml:"permissions"`
 	Steps          []ciWorkflowStep  `yaml:"steps"`
 	TimeoutMinutes any               `yaml:"timeout-minutes"`
 	RunsOn         string            `yaml:"runs-on"`
