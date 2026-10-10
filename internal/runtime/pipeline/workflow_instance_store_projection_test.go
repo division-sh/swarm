@@ -65,47 +65,63 @@ func TestWorkflowInstanceFixtureListUsesConstructedHeadersBothStores(t *testing.
 			} else {
 				ctx = testWorkflowStoreRunContext(t, store)
 			}
-			for _, fielded := range []bool{false, true} {
-				path, entityType := "fieldless", ""
+			cases := []struct {
+				path, entityType, stage string
+				stageDefined            bool
+			}{
+				{"fieldless", "", "active", true},
+				{"fielded", "subject", "active", true},
+				{"no-stage", "subject", "pending", false},
+				{"named-unknown", "", "unknown", true},
+			}
+			for _, tc := range cases {
 				var fields map[string]any
-				if fielded {
-					path, entityType = "fielded", "subject"
+				if tc.entityType != "" {
 					fields = map[string]any{"value": "business"}
 				}
 				instance := materializedWorkflowInstanceForTest(WorkflowInstance{
-					StorageRef: path, WorkflowName: path, WorkflowVersion: "fixture", CurrentState: "active", StageDefined: true,
-					EntityType: entityType, Fields: fields, Gates: map[string]bool{"ready": true},
+					StorageRef: tc.path, WorkflowName: tc.path, WorkflowVersion: "fixture", CurrentState: tc.stage, StageDefined: tc.stageDefined,
+					EntityType: tc.entityType, Fields: fields, Gates: map[string]bool{"ready": true},
 					Bookkeeping: map[string]any{"authority": "header"}, StateBuckets: map[string]any{"count": int64(1)},
 				})
 				if err := store.create(ctx, instance); err != nil {
-					t.Fatalf("construct fixture %s: %v", path, err)
+					t.Fatalf("construct fixture %s: %v", tc.path, err)
+				}
+				identity := testRunScopedWorkflowInstanceFromContext(ctx, tc.path)
+				if err := trackedMutationStateMatchesEntityState(t, store, identity, instance.EntityID); err != nil {
+					t.Fatalf("header/history fixture %s: %v", tc.path, err)
 				}
 			}
 			query := `UPDATE entity_state SET current_state = 'obsolete', gates = '{}', bookkeeping = '{}', accumulator = '{}' WHERE run_id = ?`
 			if backend == "postgres" {
 				query = `UPDATE entity_state SET current_state = 'obsolete', gates = '{}'::jsonb, bookkeeping = '{}'::jsonb, accumulator = '{}'::jsonb WHERE run_id = $1::uuid`
 			}
-			result, err := store.testDB().ExecContext(ctx, query, testPipelineRunID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if changed, err := result.RowsAffected(); err != nil || changed != 1 {
-				t.Fatalf("obsolete shadow fixture: rows=%d err=%v", changed, err)
+			if _, err := store.testDB().ExecContext(ctx, query, testPipelineRunID); err == nil || !strings.Contains(err.Error(), "current_state") {
+				t.Fatalf("retired lifecycle shadow columns remained writable: %v", err)
 			}
 			instances, err := store.list(ctx, testPipelineRunID)
-			if err != nil || len(instances) != 2 {
+			if err != nil || len(instances) != len(cases) {
 				t.Fatalf("list constructed headers: count=%d err=%v", len(instances), err)
 			}
+			seen := map[string]bool{}
 			for _, instance := range instances {
-				if instance.CurrentState != "active" || !instance.StageDefined || !instance.Gates["ready"] || instance.Bookkeeping["authority"] != "header" || instance.StateBuckets["count"] != int64(1) {
-					t.Fatalf("list consumed obsolete field-row lifecycle: %+v", instance)
+				matched := false
+				for _, tc := range cases {
+					if instance.StorageRef != tc.path {
+						continue
+					}
+					matched = true
+					if instance.CurrentState != tc.stage || instance.StageDefined != tc.stageDefined || !instance.Gates["ready"] || instance.Bookkeeping["authority"] != "header" || instance.StateBuckets["count"] != int64(1) {
+						t.Fatalf("list changed header lifecycle: %+v", instance)
+					}
+					if instance.EntityType != tc.entityType || (tc.entityType == "" && len(instance.Fields) != 0) || (tc.entityType != "" && instance.Fields["value"] != "business") {
+						t.Fatalf("declared field presence/projection changed: %+v", instance)
+					}
 				}
-				if instance.StorageRef == "fieldless" && (instance.EntityType != "" || len(instance.Fields) != 0) {
-					t.Fatalf("fieldless header acquired fields: %+v", instance)
+				if !matched || seen[instance.StorageRef] {
+					t.Fatalf("unexpected or duplicate fixture membership: %+v", instance)
 				}
-				if instance.StorageRef == "fielded" && (instance.EntityType != "subject" || instance.Fields["value"] != "business") {
-					t.Fatalf("declared field projection changed: %+v", instance)
-				}
+				seen[instance.StorageRef] = true
 			}
 		})
 	}

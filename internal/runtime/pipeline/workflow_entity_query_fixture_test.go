@@ -10,6 +10,7 @@ import (
 
 	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	"github.com/division-sh/swarm/internal/runtime/entityquery"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -133,30 +134,29 @@ func (r *recordingRuntimeMutationRunner) CountWorkflowEntities(ctx context.Conte
 	if err != nil {
 		return 0, err
 	}
-	query := `SELECT fields, current_state, flow_instance FROM entity_state WHERE run_id = $1::uuid ORDER BY entity_id`
-	if r.dialect != workflowStoreDialectPostgres {
-		query = `SELECT fields, current_state, flow_instance FROM entity_state WHERE run_id = ? ORDER BY entity_id`
-	}
-	rows, err := r.db.QueryContext(ctx, query, runID)
+	owner, err := AdmitWorkflowEntityCollectionOwner(request.Source, request.Contract.FlowID, request.Contract.EntityType, runID)
 	if err != nil {
 		return 0, err
 	}
-	defer rows.Close()
+	rows, err := r.QueryWorkflowEntityCollection(ctx, owner)
+	if err != nil {
+		return 0, err
+	}
 	flowRoot := runtimeflowidentity.ScopeKey(request.Source, request.Contract.FlowID)
 	count := 0
-	for rows.Next() {
-		var fieldsRaw []byte
-		var currentState string
-		var flowInstance string
-		if err := rows.Scan(&fieldsRaw, &currentState, &flowInstance); err != nil {
+	for _, row := range rows {
+		identity := runtimeflowidentity.RunScopedFlowInstance{RunID: runID,
+			Route: runtimeflowidentity.StoredRoute(flowRoot, runtimeflowidentity.LogicalInstanceID(row.FlowInstance), row.FlowInstance)}
+		target, err := r.LoadWorkflowTargetPersistence(ctx, identity, runtimeidentity.NormalizeEntityID(row.EntityID))
+		if err != nil {
 			return 0, err
 		}
-		flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
-		if flowRoot != "" && flowInstance != flowRoot && !strings.HasPrefix(flowInstance, flowRoot+"/") {
-			continue
+		var currentState any
+		if target.Presence.Constructed() && target.Lifecycle.StageDefined {
+			currentState = target.Lifecycle.State.CurrentState
 		}
 		fields := map[string]any{}
-		if err := json.Unmarshal(fieldsRaw, &fields); err != nil {
+		if err := json.Unmarshal(target.State.Fields, &fields); err != nil {
 			return 0, err
 		}
 		materialized, err := entityruntime.NormalizeState(request.Contract, entityruntime.DeclaredValues(request.Contract, fields))
@@ -165,11 +165,11 @@ func (r *recordingRuntimeMutationRunner) CountWorkflowEntities(ctx context.Conte
 		}
 		matches, err := entityquery.Matches(map[string]any{
 			"fields":         materialized,
-			"current_state":  strings.TrimSpace(currentState),
+			"current_state":  currentState,
 			"entity_type":    request.Contract.EntityType,
 			"flow_instance":  flowRoot,
 			"workflow_name":  request.Contract.FlowID,
-			"workflow_state": strings.TrimSpace(currentState),
+			"workflow_state": currentState,
 		}, request.Predicate)
 		if err != nil {
 			return 0, err
@@ -178,7 +178,7 @@ func (r *recordingRuntimeMutationRunner) CountWorkflowEntities(ctx context.Conte
 			count++
 		}
 	}
-	return count, rows.Err()
+	return count, nil
 }
 
 func (r *recordingRuntimeMutationRunner) RequireGateRouteAdmitted(ctx context.Context, runID string) error {

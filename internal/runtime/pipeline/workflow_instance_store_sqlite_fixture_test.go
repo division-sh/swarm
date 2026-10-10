@@ -17,48 +17,6 @@ import (
 	"github.com/google/uuid"
 )
 
-func (s *workflowInstanceStore) loadTrackedEntityStateProjectionSQLite(ctx context.Context, tx *sql.Tx, runID, entityID string) (runtimemutationlog.EntityStateProjection, error) {
-	if tx == nil || strings.TrimSpace(entityID) == "" {
-		return runtimemutationlog.EntityStateProjection{}, nil
-	}
-	var currentState sql.NullString
-	var fieldsRaw, bookkeepingRaw, gatesRaw, accRaw any
-	err := tx.QueryRowContext(ctx, `
-		SELECT current_state, COALESCE(fields, '{}'), COALESCE(bookkeeping, '{}'), COALESCE(gates, '{}'), COALESCE(accumulator, '{}')
-		FROM entity_state
-		WHERE run_id = ? AND entity_id = ?
-	`, runID, entityID).Scan(&currentState, &fieldsRaw, &bookkeepingRaw, &gatesRaw, &accRaw)
-	if err == sql.ErrNoRows {
-		return runtimemutationlog.EntityStateProjection{}, nil
-	}
-	if err != nil {
-		return runtimemutationlog.EntityStateProjection{}, err
-	}
-	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", sqliteWorkflowJSONBytes(fieldsRaw))
-	if err != nil {
-		return runtimemutationlog.EntityStateProjection{}, err
-	}
-	bookkeeping, err := decodeWorkflowInstanceJSONMap("entity_state.bookkeeping", sqliteWorkflowJSONBytes(bookkeepingRaw))
-	if err != nil {
-		return runtimemutationlog.EntityStateProjection{}, err
-	}
-	gates, err := decodeWorkflowInstanceJSONBoolMap("entity_state.gates", sqliteWorkflowJSONBytes(gatesRaw))
-	if err != nil {
-		return runtimemutationlog.EntityStateProjection{}, err
-	}
-	accumulator, err := decodeWorkflowInstanceJSONMap("entity_state.accumulator", sqliteWorkflowJSONBytes(accRaw))
-	if err != nil {
-		return runtimemutationlog.EntityStateProjection{}, err
-	}
-	return runtimemutationlog.EntityStateProjection{
-		CurrentState: runtimemutationlog.PresentLifecycleState(currentState.String),
-		Fields:       fields,
-		Bookkeeping:  bookkeeping,
-		Gates:        workflowBoolGatesAsMap(gates),
-		Accumulator:  accumulator,
-	}, nil
-}
-
 func insertSQLiteWorkflowCreateEntityInitialValueMutations(
 	ctx context.Context,
 	tx *sql.Tx,

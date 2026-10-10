@@ -564,13 +564,20 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 			return err
 		}
 	}
-	var before runtimemutationlog.EntityStateProjection
-	var err error
-	if store.testDialect() == workflowStoreDialectPostgres {
-		before, err = loadTrackedEntityStateProjection(ctx, tx, record.Identity.RunID, record.EntityID)
-	} else {
-		before, err = store.loadTrackedEntityStateProjectionSQLite(ctx, tx, record.Identity.RunID, record.EntityID)
+	target, err := store.LoadTargetPersistence(ctx, record.Identity, identity.NormalizeEntityID(record.EntityID))
+	if err != nil {
+		return err
 	}
+	if target.Presence != WorkflowTargetPersistenceAbsent && !target.Presence.Constructed() {
+		return fmt.Errorf("pipeline unit fixture cannot repair missing construction")
+	}
+	if target.Presence.Constructed() && record.EntityType != target.Lifecycle.State.EntityType {
+		return fmt.Errorf("pipeline unit fixture cannot replace the constructed entity contract")
+	}
+	if target.Presence.HasState() && record.UpdatedAt.Before(target.State.UpdatedAt) {
+		return fmt.Errorf("pipeline unit fixture cannot move authored-data time backwards")
+	}
+	before, err := trackedWorkflowTargetProjectionForTest(target)
 	if err != nil {
 		return err
 	}
@@ -579,18 +586,16 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 		entityQuery := `
 			INSERT INTO entity_state (
 				run_id, entity_id, flow_instance, entity_type, slug, name,
-				current_state, gates, fields, bookkeeping, accumulator, revision,
-				entered_state_at, created_at, updated_at
-			) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, 1, ?, ?, ?)
+				fields, created_at, updated_at
+			) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)
 		`
 		if store.testDialect() == workflowStoreDialectPostgres {
 			flowQuery = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at, entity_id, entity_type, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, updated_at, stage_defined, slug, name, terminated_at) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7, $8::uuid, NULLIF($9, ''), $10, $11::jsonb, $12::jsonb, $13::jsonb, 1, $14, $15, $16, NULLIF($17, ''), NULLIF($18, ''), $19) ON CONFLICT (run_id, instance_path) DO NOTHING`
 			entityQuery = `
 				INSERT INTO entity_state (
 					run_id, entity_id, flow_instance, entity_type, slug, name,
-					current_state, gates, fields, bookkeeping, accumulator, revision,
-					entered_state_at, created_at, updated_at
-				) VALUES ($1::uuid, $2::uuid, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, 1, $12, $13, $13)
+					fields, created_at, updated_at
+				) VALUES ($1::uuid, $2::uuid, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7::jsonb, $8, $9)
 			`
 		}
 		result, err := tx.ExecContext(ctx, flowQuery, record.Identity.RunID, record.Identity.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt, record.EntityID, record.EntityType, record.CurrentState, string(record.Gates), string(record.Bookkeeping), string(record.Accumulator), record.EnteredStageAt, record.UpdatedAt, record.StageDefined, record.Slug, record.Name, nullablePipelineTestWorkflowTerminationTime(record.TerminatedAt))
@@ -618,46 +623,33 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 		}
 		entityArgs := []any{
 			record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.EntityType, record.Slug, record.Name,
-			record.CurrentState, string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
-			record.EnteredStageAt, record.CreatedAt,
-		}
-		if store.testDialect() == workflowStoreDialectSQLite {
-			entityArgs = append(entityArgs, record.CreatedAt)
+			string(record.Fields), record.CreatedAt, record.CreatedAt,
 		}
 		if record.EntityType != "" {
 			if _, err := tx.ExecContext(ctx, entityQuery, entityArgs...); err != nil {
 				return fmt.Errorf("insert pipeline test workflow entity state with %d arguments: %w", len(entityArgs), err)
 			}
 		}
-		if err := commitPipelineTestWorkflowBookkeeping(ctx, tx, store, record); err != nil {
-			return err
-		}
 		return commitPipelineTestWorkflowMutationLog(ctx, tx, store, record, before)
 	}
 	stateQuery := `
 		UPDATE entity_state
-		SET entity_type = ?, slug = NULLIF(?, ''), name = NULLIF(?, ''), current_state = ?,
-		    gates = ?, fields = ?, bookkeeping = ?, accumulator = ?, revision = revision + 1,
-		    entered_state_at = ?, updated_at = ?
-		WHERE run_id = ? AND entity_id = ? AND flow_instance = ? AND revision = ? AND current_state = ?
+		SET slug = NULLIF(?, ''), name = NULLIF(?, ''), fields = ?, updated_at = ?
+		WHERE run_id = ? AND entity_id = ? AND flow_instance = ? AND entity_type = ?
 	`
 	flowQuery := `UPDATE flow_instances SET config = ?, status = ?, current_state = ?, gates = ?, bookkeeping = ?, accumulator = ?, revision = revision + 1, entered_state_at = ?, updated_at = ?, terminated_at = ?, slug = NULLIF(?, ''), name = NULLIF(?, '') WHERE run_id = ? AND instance_path = ? AND entity_id = ? AND revision = ? AND current_state = ?`
 	if store.testDialect() == workflowStoreDialectPostgres {
 		stateQuery = `
 			UPDATE entity_state
-			SET entity_type = $1, slug = NULLIF($2, ''), name = NULLIF($3, ''), current_state = $4,
-			    gates = $5::jsonb, fields = $6::jsonb, bookkeeping = $7::jsonb, accumulator = $8::jsonb, revision = revision + 1,
-			    entered_state_at = $9, updated_at = $10
-			WHERE run_id = $11::uuid AND entity_id = $12::uuid AND flow_instance = $13 AND revision = $14 AND current_state = $15
+			SET slug = NULLIF($1, ''), name = NULLIF($2, ''), fields = $3::jsonb, updated_at = $4
+			WHERE run_id = $5::uuid AND entity_id = $6::uuid AND flow_instance = $7 AND entity_type = $8
 		`
 		flowQuery = `UPDATE flow_instances SET config = $1::jsonb, status = $2, current_state = $3, gates = $4::jsonb, bookkeeping = $5::jsonb, accumulator = $6::jsonb, revision = revision + 1, entered_state_at = $7, updated_at = $8, terminated_at = $9, slug = NULLIF($10, ''), name = NULLIF($11, '') WHERE run_id = $12::uuid AND instance_path = $13 AND entity_id = $14::uuid AND revision = $15 AND current_state = $16`
 	}
-	if record.EntityType != "" {
+	if record.EntityType != "" && (record.Slug != target.State.Slug || record.Name != target.State.Name || !pipelineTestJSONEqual(record.Fields, target.State.Fields)) {
 		result, err := tx.ExecContext(ctx, stateQuery,
-			record.EntityType, record.Slug, record.Name, record.CurrentState,
-			string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
-			record.EnteredStageAt, record.UpdatedAt, record.Identity.RunID, record.EntityID,
-			record.Identity.Route.InstancePath, record.ExpectedRevision, record.ExpectedState,
+			record.Slug, record.Name, string(record.Fields), record.UpdatedAt, record.Identity.RunID, record.EntityID,
+			record.Identity.Route.InstancePath, record.EntityType,
 		)
 		if err != nil {
 			return fmt.Errorf("update pipeline test workflow entity state: %w", err)
@@ -686,15 +678,6 @@ func commitPipelineTestWorkflowState(ctx context.Context, store *workflowInstanc
 		return fmt.Errorf("commit pipeline test workflow mutation log: %w", err)
 	}
 	return nil
-}
-
-func commitPipelineTestWorkflowBookkeeping(ctx context.Context, tx *sql.Tx, store *workflowInstanceStore, record WorkflowEngineStateRecord) error {
-	query := `UPDATE entity_state SET bookkeeping=? WHERE run_id=? AND entity_id=?`
-	if store.testDialect() == workflowStoreDialectPostgres {
-		query = `UPDATE entity_state SET bookkeeping=$1::jsonb WHERE run_id=$2::uuid AND entity_id=$3::uuid`
-	}
-	_, err := tx.ExecContext(ctx, query, string(record.Bookkeeping), record.Identity.RunID, record.EntityID)
-	return err
 }
 
 func nullablePipelineTestWorkflowTerminationTime(value time.Time) any {
@@ -730,11 +713,15 @@ func commitPipelineTestWorkflowMutationLog(
 	if err != nil {
 		return err
 	}
+	bookkeeping, err := decode("bookkeeping", record.Bookkeeping)
+	if err != nil {
+		return err
+	}
 	after := runtimemutationlog.EntityStateProjection{
-		CurrentState: runtimemutationlog.PresentLifecycleState(record.CurrentState),
-		Fields:       fields,
-		Gates:        gates,
-		Accumulator:  accumulator,
+		Fields: fields, Gates: gates, Accumulator: accumulator, Bookkeeping: bookkeeping,
+	}
+	if record.StageDefined {
+		after.CurrentState = runtimemutationlog.PresentLifecycleState(record.CurrentState)
 	}
 	initial := map[string]any{}
 	if err := json.Unmarshal(record.InitialFields, &initial); err != nil {

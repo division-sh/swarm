@@ -575,13 +575,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			entity_type TEXT,
 			slug TEXT,
 			name TEXT,
-			current_state TEXT,
-			gates TEXT,
 			fields TEXT,
-			bookkeeping TEXT,
-			accumulator TEXT,
-			revision INTEGER,
-			entered_state_at TIMESTAMP,
 			created_at TIMESTAMP,
 			updated_at TIMESTAMP,
 			PRIMARY KEY (run_id, entity_id)
