@@ -1414,12 +1414,12 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 					if _, err := db.Exec(`
 						CREATE FUNCTION fail_notify_route_retirement() RETURNS trigger AS $$
 						BEGIN
-							RAISE EXCEPTION 'injected postgres exact route replacement failure';
+							RAISE EXCEPTION 'injected postgres flow terminalization failure';
 						END;
 						$$ LANGUAGE plpgsql;
 						CREATE TRIGGER fail_notify_route_retirement
-						BEFORE UPDATE OF status ON routing_rules
-						FOR EACH ROW WHEN (NEW.status = 'inactive')
+						BEFORE UPDATE OF status ON flow_instances
+						FOR EACH ROW WHEN (NEW.status = 'terminated')
 						EXECUTE FUNCTION fail_notify_route_retirement();
 					`); err != nil {
 						t.Fatalf("install postgres route-retirement failure: %v", err)
@@ -1436,10 +1436,10 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 				return selected, db, func() {
 					if _, err := db.Exec(`
 						CREATE TRIGGER fail_notify_route_retirement
-						BEFORE UPDATE OF status ON routing_rules
-						FOR EACH ROW WHEN NEW.status = 'inactive'
+						BEFORE UPDATE OF status ON flow_instances
+						FOR EACH ROW WHEN NEW.status = 'terminated'
 						BEGIN
-							SELECT RAISE(ABORT, 'injected sqlite exact route replacement failure');
+							SELECT RAISE(ABORT, 'injected sqlite flow terminalization failure');
 						END
 					`); err != nil {
 						t.Fatalf("install sqlite route-retirement failure: %v", err)
@@ -1474,42 +1474,44 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 					descriptor.FlowInstance,
 				),
 			}
-			before, err := selected.ListFlowInstanceRouteRecords(ctx, route)
-			if err != nil || len(before) == 0 {
-				t.Fatalf("load prior exact route set: routes=%#v err=%v", before, err)
+			request, err := runtimepipeline.NewExactFlowInstanceLookup(source, runtime.sourceArtifactFact, route)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if !runtime.bus.HasFlowInstanceRoute(route) {
-				t.Fatal("created process route is not active before terminalization")
+			before, found, err := selected.LookupFlowInstance(ctx, request)
+			if err != nil || !found {
+				t.Fatalf("load constructed receiver before terminalization: found=%t err=%v", found, err)
+			}
+			beforeHeader, err := before.WorkflowInstance()
+			if err != nil || beforeHeader.Status != "active" {
+				t.Fatalf("created receiver is not active: header=%+v err=%v", beforeHeader, err)
 			}
 
 			failReplacement()
 			err = runtime.manager.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
 				ContractBundle: source,
-				Instance: runtimeflowidentity.Stored(
-					source,
-					notifyallchildren.ChildFlowID,
-					descriptor.FlowInstance,
-					descriptor.InstanceID,
-					descriptor.EntityID,
-					"",
-				),
-				FinalState: "active",
+				Instance:       before.Identity(),
+				FinalState:     "active",
 			})
-			if err == nil || !strings.Contains(err.Error(), "exact route replacement failure") {
-				t.Fatalf("DeactivateFlowInstanceModel error = %v, want injected route replacement failure", err)
+			if err == nil || !strings.Contains(err.Error(), "flow terminalization failure") {
+				t.Fatalf("DeactivateFlowInstanceModel error = %v, want injected native termination failure", err)
 			}
 
 			if got := loadNotifyAllChildrenFlowInstanceStatus(t, ctx, selected, db, descriptor.FlowInstance); got != "active" {
 				t.Fatalf("flow instance status after replacement rollback = %q, want active", got)
 			}
-			after, err := selected.ListFlowInstanceRouteRecords(ctx, route)
-			if err != nil || !slices.EqualFunc(after, before, func(a, b runtimebus.FlowInstanceRouteRecord) bool {
-				return a == b
-			}) {
-				t.Fatalf("exact route set after replacement rollback: before=%#v after=%#v err=%v", before, after, err)
+			after, found, err := selected.LookupFlowInstance(ctx, request)
+			if err != nil || !found || after.Identity() != before.Identity() {
+				t.Fatalf("constructed receiver after termination rollback: actual=%+v found=%t err=%v", after.Identity(), found, err)
 			}
-			if !runtime.bus.HasFlowInstanceRoute(route) {
-				t.Fatal("process route retired despite selected mutation rollback")
+			afterHeader, err := after.WorkflowInstance()
+			if err != nil || !reflect.DeepEqual(afterHeader, beforeHeader) {
+				t.Fatalf("native header after termination rollback: before=%+v after=%+v err=%v", beforeHeader, afterHeader, err)
+			}
+			beforeReadiness, beforeReady := before.Readiness()
+			afterReadiness, afterReady := after.Readiness()
+			if !beforeReady || !afterReady || !reflect.DeepEqual(beforeReadiness, afterReadiness) {
+				t.Fatal("readiness changed despite selected termination rollback")
 			}
 		})
 	}

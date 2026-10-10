@@ -83,13 +83,6 @@ func (eb *EventBus) PublishPersistedFlowInstanceRouteFixture(req FlowInstanceRou
 	return table.AddConstructedFlowInstanceRouteFixture(req.Normalized())
 }
 
-func (eb *EventBus) RetirePublishedFlowInstanceRouteFixture(identity runtimeflowidentity.RunScopedFlowInstance) error {
-	if eb == nil || eb.RouteTable() == nil {
-		return errors.New("route table is not initialized")
-	}
-	return eb.RouteTable().RemoveFlowInstanceRoute(identity)
-}
-
 func (eb *EventBus) AddFlowInstanceRouteContextFixture(ctx context.Context, req FlowInstanceRouteMaterializationRequest) error {
 	if eb != nil && eb.RouteTable() != nil {
 		req = eb.RouteTable().ConstructedRouteRequestFixture(req)
@@ -106,24 +99,4 @@ func (eb *EventBus) AddFlowInstanceRouteContextFixture(ctx context.Context, req 
 		reader.installConstructionReceipt(req.Identity, runtimepipeline.FlowConstructionPublicationEvidence{Identity: req.Instance})
 	}
 	return eb.PublishPersistedFlowInstanceRouteFixture(req)
-}
-
-func (eb *EventBus) RemoveFlowInstanceRouteFixture(identity runtimeflowidentity.RunScopedFlowInstance) error {
-	return eb.RemoveFlowInstanceRouteContextFixture(context.Background(), identity)
-}
-
-func (eb *EventBus) RemoveFlowInstanceRouteContextFixture(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	if eb == nil {
-		return errors.New("event bus is required")
-	}
-	var err error
-	ctx, err = eb.admitSourceArtifactFact(ctx)
-	if err != nil {
-		return err
-	}
-	table := eb.RouteTable()
-	if table == nil {
-		return errors.New("route table is not initialized")
-	}
-	return table.RemoveFlowInstanceRoute(identity)
 }

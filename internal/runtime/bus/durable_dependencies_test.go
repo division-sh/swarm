@@ -32,10 +32,13 @@ func TestEventBusHasNoPersistedTopologyOwner(t *testing.T) {
 }
 
 func TestCompiledRoutesCannotExportMaterializedMembership(t *testing.T) {
-	for _, name := range []string{"MaterializedRoutes", "Resolve", "ResolveForRun"} {
+	for _, name := range []string{"MaterializedRoutes", "Resolve", "ResolveForRun", "HasFlowInstanceRoute", "RemoveFlowInstanceRoute"} {
 		if _, present := reflect.TypeOf((*RouteTable)(nil)).MethodByName(name); present {
 			t.Errorf("compiled source table still exports retired membership API %s", name)
 		}
+	}
+	if _, present := reflect.TypeOf((*EventBus)(nil)).MethodByName("HasFlowInstanceRoute"); present {
+		t.Error("EventBus still exports process membership as native instance existence")
 	}
 	for _, name := range []string{"routes", "patterns", "eventPath", "instanceEventPath", "resolutionIndexDirty", "exactPatternIndexes", "wildcardPatternIndexes"} {
 		if _, present := reflect.TypeOf(RouteTable{}).FieldByName(name); present {

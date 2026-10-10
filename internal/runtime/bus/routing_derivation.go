@@ -349,45 +349,6 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 	return nil
 }
 
-func (rt *RouteTable) HasFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) bool {
-	if rt == nil {
-		return false
-	}
-	identity, err := normalizeFlowInstanceRouteIdentity(identity)
-	if err != nil {
-		return false
-	}
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	owner, exists := rt.instanceOwners[identity]
-	return exists && owner.Route() == identity.Route
-}
-
-func (rt *RouteTable) RemoveFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
-	if rt == nil {
-		return fmt.Errorf("route table is required")
-	}
-	return rt.removeFlowInstanceRoute(identity)
-}
-
-func (rt *RouteTable) removeFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
-	identity, err := normalizeFlowInstanceRouteIdentity(identity)
-	if err != nil {
-		return err
-	}
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
-	owner, exists, err := rt.matchFlowInstanceRouteOwnerLocked(identity)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return nil
-	}
-	delete(rt.instanceOwners, owner)
-	return nil
-}
-
 func newRouteTable(source semanticview.Source) *RouteTable {
 	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
 	rt := newRouteTableWithGraph(source, graph)
