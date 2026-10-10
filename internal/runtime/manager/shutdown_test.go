@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,13 +28,16 @@ func (a shutdownTestAgent) OnEvent(ctx context.Context, evt events.Event) ([]eve
 	return a.onEvent(ctx, evt)
 }
 
-func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
+func ProveNativeShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+	native := newNativeDelivery(t)
 	bus, err := newTestManagerEventBus(t)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
 	ctxErrCh := make(chan error, 1)
 
 	agent := shutdownTestAgent{
@@ -51,12 +55,12 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 		},
 	}
 
-	am := newTestAgentManager(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		if cfg.ID != agent.id {
 			t.Fatalf("unexpected agent id: %q", cfg.ID)
 		}
 		return agent, nil
-	})
+	}, AgentManagerOptions{DeliveryStore: native})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
 	}, false); err != nil {
@@ -67,6 +71,7 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 	event := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
 		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	native.seedAgentDeliveries(t, agent.id, []events.Event{event})
 	if err := bus.Publish(testAuthorActivityContext(context.Background()), event); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -76,6 +81,7 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for in-flight work to start")
 	}
+	requireManagerNativeBlockedClaim(t, native, event, agent.id)
 
 	shutdownErrCh := make(chan error, 1)
 	go func() {
@@ -102,7 +108,7 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 		t.Fatalf("Shutdown returned before canceled work completed: %v", err)
 	case <-time.After(50 * time.Millisecond):
 	}
-	close(release)
+	unblock()
 
 	select {
 	case err := <-shutdownErrCh:
@@ -114,7 +120,8 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 	}
 }
 
-func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t *testing.T) {
+func ProveNativeShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+	native := newNativeDelivery(t)
 	bus, err := newTestManagerEventBus(t)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -122,6 +129,8 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 	started := make(chan struct{}, 1)
 	ctxErrCh := make(chan error, 1)
 	release := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
 
 	agent := shutdownTestAgent{
 		id:            "agent-1",
@@ -138,9 +147,9 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 		},
 	}
 
-	am := newTestAgentManager(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	})
+	}, AgentManagerOptions{DeliveryStore: native})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
 	}, false); err != nil {
@@ -148,9 +157,11 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 	}
 
 	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
+	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
-		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
+		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	native.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -159,6 +170,7 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for in-flight work to start")
 	}
+	requireManagerNativeBlockedClaim(t, native, inbound, agent.id)
 
 	grace := 25 * time.Millisecond
 	shutdownErrCh := make(chan error, 1)
@@ -177,7 +189,7 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 		t.Fatalf("ShutdownWithOptions abandoned accepted work after timeout: %v", err)
 	case <-time.After(2 * grace):
 	}
-	close(release)
+	unblock()
 	select {
 	case err := <-shutdownErrCh:
 		if err == nil || !strings.Contains(err.Error(), "agent manager shutdown drain timed out after 25ms") {
@@ -201,7 +213,8 @@ func TestShutdownWithOptions_RejectsNegativeGrace(t *testing.T) {
 	}
 }
 
-func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
+func ProveNativeShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+	native := newNativeDelivery(t)
 	bus, err := newTestManagerEventBus(t)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -209,6 +222,8 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 
 	firstStarted := make(chan struct{}, 1)
 	releaseFirst := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(releaseFirst) })
+	defer unblock()
 	var processed atomic.Int32
 
 	agent := shutdownTestAgent{
@@ -229,9 +244,9 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 		},
 	}
 
-	am := newTestAgentManager(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	})
+	}, AgentManagerOptions{DeliveryStore: native})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
 	}, false); err != nil {
@@ -239,9 +254,11 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 	}
 
 	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
+	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
-		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
+		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	native.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish(first): %v", err)
 	}
 
@@ -250,6 +267,7 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for first event to start")
 	}
+	requireManagerNativeBlockedClaim(t, native, inbound, agent.id)
 
 	shutdownErrCh := make(chan error, 1)
 	go func() {
@@ -274,7 +292,7 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	close(releaseFirst)
+	unblock()
 
 	select {
 	case err := <-shutdownErrCh:
@@ -290,7 +308,8 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 	}
 }
 
-func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing.T) {
+func ProveNativeShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+	native := newNativeDelivery(t)
 	bus, err := newTestManagerEventBus(t)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -298,6 +317,8 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 
 	firstStarted := make(chan struct{}, 1)
 	releaseFirst := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(releaseFirst) })
+	defer unblock()
 
 	agent := shutdownTestAgent{
 		id:            "agent-1",
@@ -313,9 +334,9 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 		},
 	}
 
-	am := newTestAgentManager(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	})
+	}, AgentManagerOptions{DeliveryStore: native})
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
 		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
 	}, false); err != nil {
@@ -328,9 +349,11 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 		t.Fatal("expected initial run context")
 	}
 
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
+	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
-		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
+		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	native.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -339,6 +362,7 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for first event to start")
 	}
+	requireManagerNativeBlockedClaim(t, native, inbound, agent.id)
 
 	shutdownErrCh := make(chan error, 1)
 	go func() {
@@ -367,7 +391,7 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 		t.Fatal("shutdown drain state was cleared by concurrent Run")
 	}
 
-	close(releaseFirst)
+	unblock()
 
 	select {
 	case err := <-shutdownErrCh:
