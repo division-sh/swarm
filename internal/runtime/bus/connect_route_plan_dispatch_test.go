@@ -735,9 +735,6 @@ func installConnectionSourceConstructionForRun(t testing.TB, eb *EventBus, sourc
 			t.Fatalf("source construction %s: %v", declaringFlow, err)
 		}
 		owner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: instance.Route()}
-		if err := eb.RouteTable().AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: instance}); err != nil {
-			t.Fatalf("install exact source construction %s: %v", declaringFlow, err)
-		}
 		if reader, ok := eb.durable.ConstructionPublications.(interface {
 			installConstructionReceipt(runtimeflowidentity.RunScopedFlowInstance, runtimepipeline.FlowConstructionPublicationEvidence)
 		}); ok {
@@ -4139,7 +4136,7 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 		}},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
-		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{}},
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
