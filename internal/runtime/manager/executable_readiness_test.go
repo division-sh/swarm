@@ -673,7 +673,7 @@ func TestPersistedAdoptionOwnerFenceCompensatesWithoutRouteOrLoop(t *testing.T) 
 func TestDynamicReadinessRejectsRegisteredStoppedAsProcessReady(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
-	firstBus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	firstBus := &flowActivationTestBus{}
 	first := newFlowActivationManager(t, firstBus, instances, agents)
 	bundle := testFlowBundle(t, "")
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
@@ -686,7 +686,7 @@ func TestDynamicReadinessRejectsRegisteredStoppedAsProcessReady(t *testing.T) {
 		t.Fatalf("persisted agents = %#v err=%v", persisted, err)
 	}
 
-	restartBus := &flowActivationTestBus{routeStore: firstBus.routeStore}
+	restartBus := &flowActivationTestBus{}
 	restarted := newFlowActivationManager(t, restartBus, instances, agents)
 	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
 	runCtx, cancelRun := context.WithCancel(ctx)
@@ -720,7 +720,7 @@ func TestDynamicReadinessRejectsRegisteredStoppedAsProcessReady(t *testing.T) {
 func TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
-	firstBus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	firstBus := &flowActivationTestBus{}
 	first := newFlowActivationManager(t, firstBus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
@@ -732,7 +732,7 @@ func TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence(t *t
 		t.Fatalf("retire first process before reconstruction: %v", err)
 	}
 
-	restartBus := &flowActivationTestBus{routeStore: firstBus.routeStore}
+	restartBus := &flowActivationTestBus{}
 	restarted := newFlowActivationManager(t, restartBus, instances, agents)
 	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
 	runCtx, cancelRun := context.WithCancel(ctx)
@@ -781,8 +781,7 @@ func TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence(t *t
 func TestSourceScopedStartupPreparesEverySiblingBeforeFirstPendingFinalizer(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
-	routeStore := &flowActivationTestRouteStore{}
-	firstBus := &flowActivationTestBus{routeStore: routeStore}
+	firstBus := &flowActivationTestBus{}
 	first := newFlowActivationManager(t, firstBus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "")
 	requests := []runtimepipeline.FlowInstanceActivationRequest{
@@ -809,7 +808,7 @@ func TestSourceScopedStartupPreparesEverySiblingBeforeFirstPendingFinalizer(t *t
 	instances.readinessMu.Unlock()
 	armsBefore := len(instances.armedEntries)
 
-	restartBus := &flowActivationTestBus{routeStore: routeStore}
+	restartBus := &flowActivationTestBus{}
 	restarted := newFlowActivationManager(t, restartBus, instances, agents)
 	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
 	startup, err := restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestSourceArtifactFact, true)

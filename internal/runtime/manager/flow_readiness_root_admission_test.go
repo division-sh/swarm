@@ -112,7 +112,7 @@ func TestStandingPreparationDefersRunningPredecessor(t *testing.T) {
 		LifecyclePhase: AgentLifecycleRunning, LifecycleRunMode: AgentRunModeStandard,
 	}
 	agents := &flowActivationTestStore{upserts: []PersistedAgent{predecessor}}
-	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	bus := &flowActivationTestBus{}
 	next := newFlowActivationManager(t, bus, instances, agents)
 	setFlowActivationManagerSemanticSource(next, req.ContractBundle)
 	before, err := json.Marshal(agents.upserts)
@@ -138,7 +138,7 @@ func TestStandingPreparationDefersRunningPredecessor(t *testing.T) {
 func prepareConstructedRootAgentForTest(t *testing.T) (*AgentManager, *flowActivationTestInstanceStore, *flowActivationTestBus, runtimepipeline.FlowInstanceActivationRequest) {
 	t.Helper()
 	instances := &flowActivationTestInstanceStore{}
-	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, instances)
 	root := t.TempDir()
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-agent-preparation\n")
