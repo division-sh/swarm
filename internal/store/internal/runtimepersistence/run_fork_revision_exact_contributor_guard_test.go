@@ -371,7 +371,8 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 		{"genericschedule/fork_join.go", "RestoreForkJoinTx", []string{
 			"admitTx(ctx, tx, attempt, postgres, request.Child, func() time.Time { return request.BornAt }, nil)",
 			"stampForkJoinOrigin(ctx, tx, postgres, child.ID, request)",
-			"cancelLoadedTx(ctx, tx, dialectFor(postgres), child, request.Source.CancelCause, request.BornAt)",
+			"request.Expected(child.ID)",
+			"cancelLoadedTx(ctx, tx, dialectFor(postgres), child, expected.CancelCause, request.BornAt)",
 			"requireForkJoinTx(ctx, tx, postgres, request)",
 		}},
 		{"genericschedule/owner.go", "addTimerEffect", []string{"attempt.AddFact(runID, privaterunforkrevision.FamilyTimers, activationID)"}},

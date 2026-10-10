@@ -14,6 +14,7 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -144,18 +145,19 @@ func (s *RunForkSQLiteOwner) RequireMaterializedRunForkForSelectedContractExecut
 }
 
 type selectedContractWorkflowState struct {
-	SourceRunID     string
-	RunID           string
-	EntityID        string
-	EntityType      string
-	WorkflowName    string
-	WorkflowVersion string
-	ExecutionMode   executionmode.Mode
-	Mode            string
-	Route           string
-	Agents          []runfork.RunForkSelectedContractAgentExpectation
-	OwedCreation    *runtimepipeline.DynamicFlowRuntimeCreationEventPlan
-	History         runfork.RunForkEntityState
+	SourceRunID        string
+	RunID              string
+	EntityID           string
+	EntityType         string
+	WorkflowName       string
+	WorkflowVersion    string
+	ExecutionMode      executionmode.Mode
+	Mode               string
+	Route              string
+	Agents             []runfork.RunForkSelectedContractAgentExpectation
+	OwedCreation       *runtimepipeline.DynamicFlowRuntimeCreationEventPlan
+	History            runfork.RunForkEntityState
+	RemovedArrivalRefs []timeridentity.JoinRef
 }
 
 func selectedContractAdmittedWorkflowStates(plan runfork.RunForkPlan, forkRunID string, admission runforkreadiness.Admission) ([]selectedContractWorkflowState, error) {
@@ -175,6 +177,14 @@ func selectedContractAdmittedWorkflowStates(plan runfork.RunForkPlan, forkRunID 
 		history[entity.EntityID] = entity
 	}
 	states, err := projection.MaterializationStates()
+	if err != nil {
+		return nil, err
+	}
+	removed, err := admission.RemovedInheritedArrivalRefs()
+	if err != nil {
+		return nil, err
+	}
+	removedByEntity, err := projectRunForkRemovedArrivalRefs(plan, forkRunID, removed)
 	if err != nil {
 		return nil, err
 	}
@@ -213,6 +223,7 @@ func selectedContractAdmittedWorkflowStates(plan runfork.RunForkPlan, forkRunID 
 			WorkflowName: state.FlowID, WorkflowVersion: state.WorkflowVersion,
 			ExecutionMode: state.ExecutionMode, Mode: state.Mode, Route: route.InstancePath,
 			Agents: state.Agents, OwedCreation: creation, History: entity,
+			RemovedArrivalRefs: removedByEntity[entity.EntityID],
 		})
 	}
 	return out, nil
@@ -419,6 +430,9 @@ func selectedContractHistoricalHeader(state selectedContractWorkflowState, confi
 	}
 	accumulator, _, err = forkGateActivationState(accumulator, state.RunID, state.Route, state.EntityID, targetBundleHash)
 	if err != nil {
+		return runtimepipeline.WorkflowEngineStateRecord{}, err
+	}
+	if err := cancelRunForkRemovedArrivalState(accumulator, state.RemovedArrivalRefs); err != nil {
 		return runtimepipeline.WorkflowEngineStateRecord{}, err
 	}
 	record := runtimepipeline.WorkflowEngineStateRecord{

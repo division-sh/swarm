@@ -400,6 +400,7 @@ func TestForkJoinRequestExpectedRetainsEarliestOriginAndImmediateSource(t *testi
 	forkJoinBindCommandRef(t, &child, ref.Declaration(), entry, ref.Generation())
 	r := ForkJoinRequest{
 		Source: first, Child: child, PointKind: forkpoint.DeploymentRevision, PointRevision: 11, BornAt: first.AdmittedAt.Add(time.Hour),
+		Disposition: runtimegenericschedule.ForkJoinRetained,
 	}
 	second, err := r.Expected(uuid.NewString())
 	if err != nil {
@@ -506,7 +507,8 @@ func forkJoinRequestFixture(t *testing.T, flow string, timeout, cancelled, inher
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := ForkJoinRequest{Source: source, Child: child, PointKind: forkpoint.Event, PointRevision: 7, PointEventID: uuid.NewString(), BornAt: arm.Add(2 * time.Hour)}
+	r := ForkJoinRequest{Source: source, Child: child, PointKind: forkpoint.Event, PointRevision: 7, PointEventID: uuid.NewString(), BornAt: arm.Add(2 * time.Hour),
+		Disposition: runtimegenericschedule.ForkJoinRetained}
 	if err := r.Validate(); err != nil {
 		t.Fatalf("canonical request fixture: %v", err)
 	}

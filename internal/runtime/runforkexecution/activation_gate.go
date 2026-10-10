@@ -411,14 +411,14 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		}
 		ctx = runtimeeffects.WithAuthority(ctx, container.authority)
 		activation, err := executionPorts.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-			InheritedWorkflowTimers: readiness,
-			ExecutionSource:         loadedSource.Source,
-			ForkRunID:               forkRunID,
-			AllowSourceFreeze:       req.AllowSourceFreeze,
-			AllowedSourceEventIDs:   sourceEventIDs,
-			FrontierAdmission:       frontier,
-			RouteTopology:           routeTopology,
-			RecipientPlanning:       *model.RecipientPlanning,
+			InheritedSchedules:    readiness,
+			ExecutionSource:       loadedSource.Source,
+			ForkRunID:             forkRunID,
+			AllowSourceFreeze:     req.AllowSourceFreeze,
+			AllowedSourceEventIDs: sourceEventIDs,
+			FrontierAdmission:     frontier,
+			RouteTopology:         routeTopology,
+			RecipientPlanning:     *model.RecipientPlanning,
 		})
 		result.RunForkActivation = activation
 		if activation.Activated {

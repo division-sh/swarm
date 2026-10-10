@@ -66,7 +66,7 @@ func TestArrivalInventoryGapProbe(t *testing.T) {
 	}
 	owner := &arrivalGapProbeOwner{rows: []genericschedule.Activation{exact, extra}}
 	withWorkflowTimerReadbackAttempt(t, func(ctx context.Context, attempt *mutationprotocol.Attempt) {
-		if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, owner, runForkArrivalScheduleAtCut); err == nil {
+		if _, err := readRunForkArrivalJoinInventory(ctx, attempt, plan, workflowTimerProjectionChildRun, bornAt, workflowTimerMaterializerSelection{}, owner, runForkArrivalScheduleAtCut); err == nil {
 			t.Fatal("expected-only readback accepted an unrequested inherited row")
 		}
 	})

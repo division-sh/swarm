@@ -145,7 +145,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			return err
 		}
 		result.ReplayResumeAdmission, err = requireMaterializedRunForkTimerHistory(runtimecorrelation.WithRunID(txctx, lineage.ForkRunID), attempt,
-			plan, lineage.ForkRunID, req.InheritedWorkflowTimers, port.workflowTimers, port.arrivalSchedules, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), result.ReplayResumeAdmission)
+			plan, lineage.ForkRunID, req.InheritedSchedules, port.workflowTimers, port.arrivalSchedules, runtimerunlifecycle.CanonicalTimestamp(snapshot.StartedAt), result.ReplayResumeAdmission)
 		if err != nil {
 			return err
 		}

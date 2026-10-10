@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -19,6 +20,17 @@ import (
 type workflowTimerMaterializerSelection struct {
 	removed map[string]bool
 	fail    string
+}
+
+func (workflowTimerMaterializerSelection) SelectInheritedArrivalJoin(source genericschedule.Activation) (genericschedule.ForkJoinDisposition, error) {
+	if err := source.ValidateForkJoinRestorationSource(); err != nil {
+		return "", err
+	}
+	return genericschedule.ForkJoinRetained, nil
+}
+
+func (workflowTimerMaterializerSelection) RemovedInheritedArrivalRefs() ([]timeridentity.JoinRef, error) {
+	return nil, nil
 }
 
 func (s workflowTimerMaterializerSelection) SelectInheritedWorkflowTimerRecord(record pipeline.WorkflowTimerActivationPersistenceRecord) (*pipeline.WorkflowTimerActivationPersistenceRecord, error) {

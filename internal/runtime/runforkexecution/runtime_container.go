@@ -229,7 +229,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
 	issued, err := ports.runtimeExecution.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
-		InheritedWorkflowTimers: req.Prepared.readiness,
+		InheritedSchedules:      req.Prepared.readiness,
 		Preparation:             preparation,
 		RecoveryFromExecutionID: req.Prepared.recoveryFromExecutionID,
 		DeclarationPlan:         req.AgentRuntime.Declarations,

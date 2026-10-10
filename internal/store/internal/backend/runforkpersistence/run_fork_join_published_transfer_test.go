@@ -191,7 +191,7 @@ func TestPublishedArrivalTransferConsumesExactUnfinishedSourceAtCut(t *testing.T
 						t.Fatalf("child publication: %+v err=%v", event, err)
 					}
 					request := storegenericschedule.ForkJoinRequest{Source: source, Child: child, PointKind: plan.ForkPoint.Kind,
-						PointRevision: plan.ForkPoint.Revision, BornAt: source.AcceptedAt.Add(time.Second)}
+						PointRevision: plan.ForkPoint.Revision, BornAt: source.AcceptedAt.Add(time.Second), Disposition: genericschedule.ForkJoinRetained}
 					if err := request.Validate(); err == nil || !strings.Contains(err.Error(), "published") {
 						t.Fatalf("published transfer became a fresh schedule request: %v", err)
 					}
