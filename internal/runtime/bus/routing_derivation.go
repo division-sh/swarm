@@ -686,10 +686,6 @@ func (rt *RouteTable) matchFlowInstanceRouteOwnerLocked(identity runtimeflowiden
 	return runtimeflowidentity.RunScopedFlowInstance{}, false, nil
 }
 
-func flowInstanceRouteIdentityEqual(left, right runtimeflowidentity.RunScopedFlowInstance) bool {
-	return left == right
-}
-
 func (rt *RouteTable) flowInstanceRouteCollisionLocked(templateScope, instancePath string) string {
 	templateScope = eventidentity.Normalize(templateScope)
 	instancePath = eventidentity.Normalize(instancePath)
