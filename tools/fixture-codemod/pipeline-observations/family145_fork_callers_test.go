@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 259 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "528f8d8674c91ba9e4edf0a0a348491c8261c1ec18026c1b0cd29c72e1d9e039" {
+	if err != nil || len(rows) != 272 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "fee2df4328eaee89338750f179d66b94c5eb28aa436934c969072344939d3f7a" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -83,6 +83,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if row.File == "internal/runtime/template_instance_delivery_test.go" && (row.Function == "waitRuntimeDBCount" || row.Function == "assertRuntimeDBCount" || row.Function == "waitRuntimeEventID") {
 			if err := family145TemplateWaitAssertions(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.File == "internal/runtime/conformance/fan_out_supplemental_helpers_test.go" && row.Function == "assertSupplementalHistory" {
+			if err := family145SupplementalHistoryProofError(row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

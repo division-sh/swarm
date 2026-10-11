@@ -1,11 +1,13 @@
 package conformance
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // A finite suffix control complements, but does not replace, the staged soak.
@@ -26,11 +28,13 @@ func TestIssue2394TwoTenLostWakeSuffixBothStores(t *testing.T) {
 			submitSupplementalIntent(t, f, run, 1, 10)
 			waitServingMatrixIntentCount(t, f, 2)
 			lastSuppressedWake := requireSupplementalWake(t, p, 2)
-			var cardinality, cursor, outcomes int
-			if err := f.db.QueryRow(`SELECT SUM(cardinality),SUM(cursor) FROM fan_out_intents`).Scan(&cardinality, &cursor); err != nil {
+			state, err := storetest.ReadSupplementalGlobalIntentCardinality(context.Background(), f.selected)
+			cardinality, cursor := state.Cardinality, state.Cursor
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := f.db.QueryRow(`SELECT COUNT(*) FROM fan_out_outcomes`).Scan(&outcomes); err != nil {
+			outcomes, err := storetest.CountSupplementalGlobalOutcomes(context.Background(), f.selected)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if cardinality != 20 || cursor != 0 || outcomes != 0 {

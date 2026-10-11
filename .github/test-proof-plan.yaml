@@ -1265,6 +1265,8 @@ units:
     required_children:
       TestTemplateStorageObservationsKeepOriginalAbsenceAndIndependentCutsBothStores: [sqlite, postgres]
       TestTemplateStorageObservationsRefuseRawCancelledAndClosedOwnersBothStores: [sqlite, postgres]
+      TestSupplementalFanOutStorageRetainsStrictNullAbsenceAndSeparateReadCutsBothStores: [sqlite, postgres]
+      TestSupplementalFanOutStorageRefusesRawCancelledAndClosedOwnersBothStores: [sqlite, postgres]
       TestTemplateEventObservationsKeepGlobalNameAndExactParentBothStores: [sqlite, postgres]
       TestUnstartedClaimedTurnTerminationBothStores: [waiting/sqlite, waiting/postgres, waiting_restart/sqlite, waiting_restart/postgres, rollback/sqlite, rollback/postgres, authorization_wins/sqlite, authorization_wins/postgres]
       TestUnstartedDirectiveTurnRecoveryBothStores: [root/restart/sqlite, root/restart/postgres, root/rollback/sqlite, root/rollback/postgres, completion/restart/sqlite, completion/restart/postgres, completion/rollback/sqlite, completion/rollback/postgres]

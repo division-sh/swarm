@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestFanOutServingM04CrossRunHeldTurnCapacityOnBothBackends(t *testing.T) {
@@ -76,11 +77,13 @@ func proveServingMatrixCapacity(t *testing.T, backend string, sameRun bool) {
 	if err != nil || summary.Cursor != 0 || summary.Committed != 0 {
 		t.Fatalf("control/read access while all permits held: summary=%+v err=%v", summary, err)
 	}
-	var leased, untouched, cursor, outcomes int
-	if err := f.db.QueryRow(`SELECT SUM(CASE WHEN claim_owner IS NOT NULL THEN 1 ELSE 0 END),SUM(CASE WHEN claim_generation=0 THEN 1 ELSE 0 END),SUM(cursor) FROM fan_out_intents`).Scan(&leased, &untouched, &cursor); err != nil {
+	state, err := storetest.ReadServingGlobalCapacity(context.Background(), f.selected)
+	leased, untouched, cursor := state.Leased, state.Untouched, state.Cursor
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.db.QueryRow(`SELECT COUNT(*) FROM fan_out_outcomes`).Scan(&outcomes); err != nil {
+	outcomes, err := storetest.CountSupplementalGlobalOutcomes(context.Background(), f.selected)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if leased != capacity || untouched != count-capacity || cursor != 0 || outcomes != 0 {
@@ -128,8 +131,8 @@ func waitServingMatrixIntentCount(t *testing.T, f *servingMatrixFixture, count i
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		var actual int
-		if err := f.db.QueryRow(`SELECT COUNT(*) FROM fan_out_intents`).Scan(&actual); err != nil {
+		actual, err := storetest.CountServingGlobalIntents(context.Background(), f.selected)
+		if err != nil {
 			t.Fatal(err)
 		}
 		if actual == count {

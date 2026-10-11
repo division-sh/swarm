@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "528f8d8674c91ba9e4edf0a0a348491c8261c1ec18026c1b0cd29c72e1d9e039"
+const targetDigest = "fee2df4328eaee89338750f179d66b94c5eb28aa436934c969072344939d3f7a"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -67,9 +67,14 @@ var files = []string{
 	"internal/runtime/conformance/fan_out_resource_source_proof_test.go",
 	"internal/runtime/conformance/fan_out_semantic_proof_helpers_test.go",
 	"internal/runtime/conformance/fan_out_serving_generation_replacement_test.go",
+	"internal/runtime/conformance/fan_out_serving_capacity_conformance_test.go",
 	"internal/runtime/conformance/fan_out_serving_matrix_helpers_test.go",
 	"internal/runtime/conformance/fan_out_shared_serving_conformance_test.go",
 	"internal/runtime/conformance/fan_out_supplemental_helpers_test.go",
+	"internal/runtime/conformance/fan_out_two_ten_suffix_test.go",
+	"internal/runtime/conformance/fan_out_twenty_intent_contention_test.go",
+	"internal/runtime/conformance/fan_out_pressure_reservation_test.go",
+	"internal/runtime/conformance/fan_out_pressure_soak_test.go",
 	"internal/runtime/conformance/lifecycle_diagnostic_overlap_test.go",
 	"internal/runtime/conformance/notify_all_children_runtime_conformance_test.go",
 	"internal/runtime/deliverylifecycle/claim_commit_runtime_test.go",

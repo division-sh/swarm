@@ -14,8 +14,8 @@ import (
 
 const originalRuntimeSZRun = `^Test[S-Z].*$`
 
-// Original full-06 children plus the three new native template storage controls.
-const pinnedRuntimeSZChildren = "25840bbce41c6d0d95a48e754309feaed1d8f2afc573407925e8147337ad51da"
+// Original full-06 children plus three template and two supplemental controls.
+const pinnedRuntimeSZChildren = "19740b886a96d1fc893094b9c2e5435f06037d82292d783c73bcd86dcac70218"
 
 var runtimeSZUnits = []string{"store-runtime-selected", "store-runtime-s-z-rest"}
 

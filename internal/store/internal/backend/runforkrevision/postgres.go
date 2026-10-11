@@ -123,7 +123,15 @@ type FanOutObligationHistoryStorage struct {
 // Preserve the complete physical revision witness. These bytes are not
 // historical payload admission or authority to restore executable work.
 func ReadFanOutObligationHistoryStorageForTestTx(ctx context.Context, tx *sql.Tx, runID string) ([]FanOutObligationHistoryStorage, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT fact_key,fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations' ORDER BY revision,fact_key`, runID)
+	return readFanOutObligationHistoryStorageTx(ctx, tx, runID, `SELECT fact_key,fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations' ORDER BY revision,fact_key`)
+}
+
+func ReadSupplementalFanOutObligationHistoryTx(ctx context.Context, tx *sql.Tx, runID string) ([]FanOutObligationHistoryStorage, error) {
+	return readFanOutObligationHistoryStorageTx(ctx, tx, runID, `SELECT fact_key,fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations' ORDER BY fact_key,revision`)
+}
+
+func readFanOutObligationHistoryStorageTx(ctx context.Context, tx *sql.Tx, runID, query string) ([]FanOutObligationHistoryStorage, error) {
+	rows, err := tx.QueryContext(ctx, query, runID)
 	if err != nil {
 		return nil, err
 	}

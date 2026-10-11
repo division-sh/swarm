@@ -6929,6 +6929,22 @@ engine:
                 failures provide no provisional evidence. Public ports expose detached scalars or rows only. Polling keeps its
                 original deadline, spacing, cardinality and error refusals; diagnostic observations cannot grant success.
                 The exact rollback SQL-trigger fixture remains separately tracked until its original live-fault owner is proven.
+              supplemental_serving_fixture_observation: >-
+                The complete supplemental-serving fixture and observer caller chain constructs its original selected
+                native store without a pool return, preserving real source admission, generation/turn ownership,
+                withheld selection, wake loss, lease expiration, cancellation and joined cleanup. Fixed pipeline
+                observation ports retain global physical intent/outcome scopes rather than substituting run summaries
+                or live/eligible rows. Original strict SUM NULL failure and explicit COALESCE zero semantics remain
+                distinct. Exact expired-claim readback retains all five intent-key coordinates, correlated outcome
+                count, nullable owner/lease/retry fields and unchanged stored clocks; it grants no claim authority.
+                Committed outcome cardinality retains exact run, outcome kind and DISTINCT event identity. The
+                original revision owner returns every obligation fact ordered by fact_key then revision for the
+                creation/single-commit history proof, separate from the reporter's revision-major read. Each operation
+                is an independent original native read cut and returns detached values only, with no provisional
+                evidence on invalid/raw/cancelled/closed ownership or storage failure. Public bridges expose no pool,
+                SQL, query/ordering selector or callback. Full and continuous workload placement and all cardinality,
+                version, numeric, timing and fairness assertions remain unchanged; exact D3/process-loss faults and
+                unrelated shared-fixture pool consumers remain separately tracked until their owners are migrated.
               nested_fan_out_fixture_observation: >-
                 Nested serving and repeated-trigger fixtures retain the original selected owner, not a returned pool,
                 in every constructor, readback helper and execution-boundary observer. Event identity discovery
