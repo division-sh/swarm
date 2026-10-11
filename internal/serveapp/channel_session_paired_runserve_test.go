@@ -40,6 +40,10 @@ func TestRunServeWhatsAppAuthoredUncertainReplyRestartBothStores(t *testing.T) {
 	testRunServeWhatsAppSignedPairing(t, servedNativeJourneyProof{authoredReply: true, uncertainReply: true})
 }
 
+func TestRunServeWhatsAppNoticeAcknowledgmentBothStores(t *testing.T) {
+	testRunServeWhatsAppSignedPairing(t, servedNativeJourneyProof{noticeAcknowledgment: true})
+}
+
 func TestRunServeWhatsAppPublicResetRetainsPairingBothStores(t *testing.T) {
 	for _, clearSource := range []bool{false, true} {
 		name := "retained_source"
@@ -53,11 +57,12 @@ func TestRunServeWhatsAppPublicResetRetainsPairingBothStores(t *testing.T) {
 }
 
 type servedNativeJourneyProof struct {
-	quotedRetirement bool
-	explicitLogout   bool
-	resetSources     *bool
-	authoredReply    bool
-	uncertainReply   bool
+	quotedRetirement     bool
+	explicitLogout       bool
+	resetSources         *bool
+	authoredReply        bool
+	uncertainReply       bool
+	noticeAcknowledgment bool
 }
 
 func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyProof) {
@@ -87,6 +92,9 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			if authoredReply {
 				opts.SourceRoot = filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session-reply")
 			}
+			if proof.noticeAcknowledgment {
+				opts.SourceRoot = filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session-notice")
+			}
 			if err := os.Chmod(opts.SwarmDir, 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -106,6 +114,10 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			} else {
 				storeDSN = testutil.StartEmptyPostgresDSN(t)
 				opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, storeDSN)
+			}
+			var noticeCalls *atomic.Int32
+			if proof.noticeAcknowledgment {
+				noticeCalls = configureNativeNoticeProvider(t, opts.ConfigPath)
 			}
 			process := startServeRuntimeTestProcess(t, opts)
 			process.waitForReadyLine()
@@ -236,6 +248,35 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 					t.Error(err)
 				}
 			})
+			if proof.noticeAcknowledgment {
+				notice := requireServedNativeNoticeAcknowledgment(t, endpoint, peer, reader, result.Operation)
+				if code := process.stop(); code != 0 {
+					t.Fatal("native notice RunServe did not join before restart", code, process.outputString())
+				}
+				requireServedNativeDisconnect(t, peer)
+				process = startServeRuntimeTestProcess(t, opts)
+				process.waitForReadyLine()
+				endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+				peer.awaitPostLogin()
+				requireNativeNoticeReadback(t, endpoint, 0)
+				if noticeCalls.Load() != 2 {
+					t.Fatal("notice producer did not use its authenticated provider exactly once per turn", noticeCalls.Load())
+				}
+				if code := process.stop(); code != 0 {
+					t.Fatal("acknowledged native notice failed its restart join", code, process.outputString())
+				}
+				requireServedNativeDisconnect(t, peer)
+				for {
+					select {
+					case resent := <-peer.sent:
+						if resent.ID == notice.ID || strings.Contains(resent.Body.GetConversation(), "Notice: Observed native notice") {
+							t.Fatal("restart resent the acknowledged native notice", resent)
+						}
+					default:
+						return
+					}
+				}
+			}
 			if authoredReply {
 				message := requireServedNativeAuthoredCustomerReply(t, endpoint, peer, uncertainReply)
 				if code := process.stop(); code != 0 {
