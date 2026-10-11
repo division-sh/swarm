@@ -35,6 +35,17 @@ func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
 			"planIndependentPubsubBranch":    false,
 			"composeIndependentPubsubBranch": false,
 		},
+		"selectedRunTargetOwnerProjection.resolveRoutePlan": {
+			"admitAgentTarget":               false,
+			"validateAdmittedAgentTarget":    false,
+			"validateConnectIntentReceivers": false,
+		},
+		"filterDeliveryRecipientCandidates": {
+			"admitAgentTarget": false,
+		},
+		"agentDeliveryRoutesForCandidates": {
+			"admitAgentTarget": false,
+		},
 		"resolveRoutePlanEventProjection": {
 			"DeliveryRoutes":                              false,
 			"preparedEventTargetProjectionForRoutes":      false,
@@ -73,6 +84,9 @@ func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
 		"deliveryTargetsForManifest":               {},
 		"deliveryTargetsForEvent":                  {},
 		"cloneRouteTargetMap":                      {},
+		"resolveActiveAgentTarget":                 {},
+		"sameFlowAgentTargetBlueprint":             {},
+		"resolveConnectEvaluation":                 {},
 	}
 
 	for path, file := range files {

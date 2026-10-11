@@ -972,15 +972,14 @@ func filterDeliveryRecipientCandidates(
 			allowed = append(allowed, scoped.ID)
 			allowedCandidates = append(allowedCandidates, scoped)
 			persisted = append(persisted, scoped.ID)
-			owner, err := projection.resolveActiveAgentTarget(descriptor, target)
+			admitted, err := projection.admitAgentTarget(evt, RoutePlanDeliveryIntent{
+				Recipient: events.MustAgentDeliveryRecipient(scoped.ID), AgentIdentity: scoped.AgentIdentity,
+				TargetBlueprint: target, AgentLifecycle: scoped.AgentLifecycle,
+			})
 			if err != nil {
 				return deliveryRecipientManifest{}, err
 			}
-			deliveryRoutes = append(deliveryRoutes, events.DeliveryRoute{
-				Recipient:     events.MustAgentDeliveryRecipient(scoped.ID),
-				AgentIdentity: scoped.AgentIdentity,
-				Target:        owner,
-			})
+			deliveryRoutes = append(deliveryRoutes, admitted.deliveryRoute())
 		}
 	}
 	persisted = uniqueStrings(persisted)
@@ -1043,19 +1042,14 @@ func agentDeliveryRoutesForCandidates(
 		if err := recipient.AgentIdentity.Validate(); err != nil {
 			continue
 		}
-		owner := events.DeliveryTargetOwnership{}
-		if !target.Empty() {
-			var err error
-			owner, err = projection.resolveSelectedRoute(target)
-			if err != nil {
-				return nil, err
-			}
-		}
-		out = append(out, events.DeliveryRoute{
-			Recipient:     events.MustAgentDeliveryRecipient(recipient.ID),
-			AgentIdentity: recipient.AgentIdentity,
-			Target:        owner,
+		admitted, err := projection.admitAgentTarget(evt, RoutePlanDeliveryIntent{
+			Recipient: events.MustAgentDeliveryRecipient(recipient.ID), AgentIdentity: recipient.AgentIdentity,
+			TargetBlueprint: target, AgentLifecycle: recipient.AgentLifecycle,
 		})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, admitted.deliveryRoute())
 	}
 	return events.NormalizeDeliveryRoutes(out), nil
 }

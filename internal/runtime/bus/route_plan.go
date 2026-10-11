@@ -260,14 +260,11 @@ func (a agentLifecycleAdmission) validate() error {
 	}
 }
 
-func (a agentLifecycleAdmission) requiresMaterializingEntity() bool {
-	return a == agentLifecycleAdmissionMaterializingFlow
-}
-
 type RoutePlanDeliveryIntent struct {
 	Recipient         events.DeliveryRecipient
 	AgentIdentity     agentidentity.Identity
 	TargetBlueprint   events.RouteIdentity
+	ReceiverBlueprint events.RouteIdentity
 	TargetOwnership   events.DeliveryTargetOwnership
 	Initialization    events.ReceiverInitialization
 	Handler           runtimepipeline.DeliveryTargetHandler
@@ -725,6 +722,10 @@ func routePlanDeliveryIntentsFromConnectRoutes(runID string, routes []runtimepin
 			Handler: handler, Context: route.Context, PayloadProjection: route.PayloadProjection, ConnectClaim: route.ConnectClaim,
 			Producer: producer, Persist: true,
 		})
+		if route.Recipient.IsAgent() {
+			out[len(out)-1].ReceiverBlueprint = route.Target
+			out[len(out)-1].TargetBlueprint = events.RouteIdentity{}
+		}
 	}
 	return normalizeRoutePlanDeliveryIntents(out), nil
 }
@@ -865,6 +866,7 @@ type deliveryIntentKey struct {
 	recipient       events.DeliveryRecipient
 	agentIdentity   agentidentity.Identity
 	target          events.RouteIdentity
+	receiver        events.RouteIdentity
 	targetOwner     events.DeliveryTargetOwnership
 	handler         runtimepipeline.DeliveryTargetHandler
 	contextIdentity string
@@ -884,6 +886,7 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 	for _, intent := range in {
 		intent.AgentIdentity = intent.AgentIdentity.Normalize()
 		intent.TargetBlueprint = intent.TargetBlueprint.Normalized()
+		intent.ReceiverBlueprint = intent.ReceiverBlueprint.Normalized()
 		intent.Context = intent.Context.Normalized()
 		intent.PayloadProjection = intent.PayloadProjection.Normalized()
 		intent.Producer = intent.Producer.Normalized()
@@ -931,6 +934,7 @@ func deliveryIntentDeduplicationKey(intent RoutePlanDeliveryIntent) (deliveryInt
 		recipient:       intent.Recipient,
 		agentIdentity:   intent.AgentIdentity,
 		target:          intent.TargetBlueprint,
+		receiver:        intent.ReceiverBlueprint,
 		targetOwner:     intent.TargetOwnership,
 		handler:         intent.Handler,
 		contextIdentity: contextIdentity,

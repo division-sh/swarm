@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 )
 
 func TestReceiverCompositionLedgerExactPlanAndIndependentOwners(t *testing.T) {
@@ -20,7 +21,17 @@ func TestReceiverCompositionLedgerExactPlanAndIndependentOwners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := events.NewConnectPlanEvaluation(planA, events.ConnectPlanResolved, []events.RouteIdentity{blueprint}, []events.ConnectCandidateEvidence{evidence})
+	agent := agentidentitytest.Declared(t, "worker", "ledger", "receiver", "receiver", "receiver")
+	agentPlan, err := agent.Plan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentRecipient := events.MustAgentDeliveryRecipient(agent.AgentID())
+	agentEvidence, err := events.NewConnectCandidateEvidence(events.AdmitConnectReceiverIdentity(sha256.Sum256([]byte("agent-pin"))), agentRecipient, "receiver", agentPlan, events.ConnectCandidateAccepted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := events.NewConnectPlanEvaluation(planA, events.ConnectPlanResolved, []events.RouteIdentity{blueprint}, []events.ConnectCandidateEvidence{evidence, agentEvidence})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,9 +46,13 @@ func TestReceiverCompositionLedgerExactPlanAndIndependentOwners(t *testing.T) {
 	ownerA := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: eventtest.UUID("owner-a")})
 	ownerB := events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: eventtest.UUID("owner-b")})
 	entityless := events.MustEntitylessReceiverTarget(blueprint)
+	dependency, err := events.AdmitStoredFlowReceiverInitialization(agent.RunID, "", ownerA, agent.Route)
+	if err != nil {
+		t.Fatal(err)
+	}
 	intents := []RoutePlanDeliveryIntent{
 		{Recipient: recipient, ConnectPlan: planA, TargetBlueprint: ownerA.Route(), TargetOwnership: ownerA},
-		{Recipient: recipient, ConnectPlan: planA, TargetBlueprint: entityless.Route(), TargetOwnership: entityless},
+		{Recipient: agentRecipient, AgentIdentity: agent, ConnectPlan: planA, TargetBlueprint: entityless.Route(), TargetOwnership: entityless, ReceiverBlueprint: ownerA.Route(), Initialization: dependency},
 		{Recipient: recipient, ConnectPlan: planB, TargetBlueprint: ownerB.Route(), TargetOwnership: ownerB},
 		// A non-connect route with identical scope cannot become either plan's owner.
 		{Recipient: recipient, TargetOwnership: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: eventtest.UUID("foreign-direct")})},
@@ -48,21 +63,12 @@ func TestReceiverCompositionLedgerExactPlanAndIndependentOwners(t *testing.T) {
 				intents[i], intents[j] = intents[j], intents[i]
 			}
 		}
-		got, err := (selectedRunTargetOwnerProjection{}).resolveConnectEvaluation(ledger, intents)
-		if err != nil {
+		if err := validateConnectIntentReceivers(RoutePlan{ConnectEvaluation: ledger, DeliveryIntents: intents}, nil); err != nil {
 			t.Fatal(err)
 		}
-		for _, plan := range got.Plans() {
-			want := map[events.RouteIdentity]bool{ownerB.Route(): true}
-			if plan.PlanIdentity() == planA {
-				want = map[events.RouteIdentity]bool{ownerA.Route(): true, entityless.Route(): true}
-			}
-			actual := map[events.RouteIdentity]bool{}
-			for _, route := range plan.Targets() {
-				actual[route] = true
-			}
-			if !reflect.DeepEqual(actual, want) {
-				t.Fatalf("plan %s borrowed another owner: %#v want %#v", plan.PlanIdentity().String(), actual, want)
+		for _, plan := range ledger.Plans() {
+			if !reflect.DeepEqual(plan.Targets(), []events.RouteIdentity{blueprint}) {
+				t.Fatal("actor state projection changed the compiled selected-flow ledger")
 			}
 		}
 	}
@@ -82,7 +88,7 @@ func TestReceiverCompositionLedgerExactPlanAndIndependentOwners(t *testing.T) {
 		{"foreign_instance", planA, events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver/two"})},
 	} {
 		t.Run(hostile.name, func(t *testing.T) {
-			if _, err := (selectedRunTargetOwnerProjection{}).resolveConnectEvaluation(ledger, []RoutePlanDeliveryIntent{{Recipient: recipient, ConnectPlan: hostile.plan, TargetOwnership: hostile.owner}}); err == nil {
+			if err := validateConnectIntentReceivers(RoutePlan{ConnectEvaluation: ledger, DeliveryIntents: []RoutePlanDeliveryIntent{{Recipient: recipient, ConnectPlan: hostile.plan, TargetOwnership: hostile.owner}}}, nil); err == nil {
 				t.Fatal("contradictory recipient silently disappeared from ledger")
 			}
 		})

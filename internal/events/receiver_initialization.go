@@ -140,6 +140,15 @@ func decodeReceiverInitialization(raw []byte, decoded semanticvalue.Value) (Rece
 			return ReceiverInitialization{}, fmt.Errorf("receiver initialization missing %s", field)
 		}
 	}
+	receiver, _ := decoded.Lookup("receiver_route")
+	if receiver.Kind() != semanticvalue.KindObject || receiver.Len() != 4 {
+		return ReceiverInitialization{}, fmt.Errorf("receiver initialization requires complete captured coordinates")
+	}
+	for _, field := range []string{"presence", "scope_key", "instance_id", "instance_path"} {
+		if value, present := receiver.Lookup(field); !present || value.Kind() != semanticvalue.KindString {
+			return ReceiverInitialization{}, fmt.Errorf("receiver initialization has invalid %s", field)
+		}
+	}
 	var wire receiverInitializationWire
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
