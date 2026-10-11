@@ -175,7 +175,9 @@ func m16RequireEntity(t *testing.T, db *sql.DB, runID, entityID, wantState strin
 	var state string
 	var raw []byte
 	var revision int
-	if err := db.QueryRow(`SELECT current_state,fields,revision FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, entityID).Scan(&state, &raw, &revision); err != nil {
+	if err := db.QueryRow(`SELECT f.current_state,e.fields,f.revision FROM entity_state e
+		JOIN flow_instances f ON f.run_id=e.run_id AND f.entity_id=e.entity_id AND f.instance_path=e.flow_instance AND f.entity_type=e.entity_type
+		WHERE e.run_id=$1 AND e.entity_id=$2`, runID, entityID).Scan(&state, &raw, &revision); err != nil {
 		t.Fatal(err)
 	}
 	var fields map[string]any
