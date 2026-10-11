@@ -366,6 +366,8 @@ type publicationAuditStore interface {
 	runtimebus.APIEventPublicationCommitOwner
 	runtimebus.DeploymentRunCreationCommitOwner
 	runtimebus.FlowInstanceActivationCommitOwner
+	runtimebus.FlowInstanceRoutePersistence
+	runtimebus.FlowInstanceRouteRecordReader
 	runtimebus.PreparedPublishEventReader
 	pipeline.WorkflowTargetPersistenceReader
 	pipeline.WorkflowPersistenceOwner
