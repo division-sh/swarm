@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,10 +24,18 @@ import (
 func TestReceiverInitializationPublicProviderSchemaIngressBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			probe := newExactOriginPublicationProbe(t)
+			release := make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(release) })
+			defer unblock()
+			hold := &exactOriginDiagnosticHold{eventType: "inbound.telegram.text_message", entered: make(chan string, 1), release: release}
 			opts, start := lifecycleRestartHarness(t, backend, canonicalrouting.CopyProviderReceiverInitialization(t))
 			var source semanticview.Source
 			opts.TestRuntimeReadyHook = func(runtime *runtimepkg.Runtime) { source = runtime.Options.WorkflowModule.SemanticSource() }
-			_, rt := start()
+			process, rt := start()
+			runtime := servedTestProcessRuntime(t, process)
+			hold.logger = runtime.Logger
+			runtime.Bus.SetLoggerHook(hold)
 			const input = "inbound.telegram.text_message"
 			requireProviderTriggerEventSource(t, source, input)
 			if _, authored := source.AuthoredEventEntries()[input]; authored {
@@ -44,6 +53,13 @@ func TestReceiverInitializationPublicProviderSchemaIngressBothStores(t *testing.
 					t.Fatalf("private flow %s introduced another connection: %+v", path, schema.Connect)
 				}
 			}
+			rt.WaitReceiverOrigin = func(t *testing.T, seed servedEventPublishRPCResult) {
+				t.Helper()
+				requireReceiverInitializationHeldOrigin(t, rt.ReceiverStateReader, rt.Endpoint, probe, hold, seed, unblock)
+				if err := waitExactOriginPublications(t.Context(), probe, seed.EventID); err != nil {
+					t.Fatal(err)
+				}
+			}
 			requireReceiverInitializationPublicProviderIngressCases(t, rt)
 		})
 	}
@@ -53,6 +69,10 @@ func TestReceiverInitializationPublicProviderSchemaIngressBothStores(t *testing.
 // in-process server and the independently built release executable.
 func requireReceiverInitializationPublicProviderIngressCases(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
+	waitOrigin := rt.WaitReceiverOrigin
+	if waitOrigin == nil {
+		t.Fatal("provider-input duplicate conservation requires its exact-origin snapshot-writer fence")
+	}
 	const input = "inbound.telegram.text_message"
 	payload := map[string]any{"conversation_reference": "2307", "conversation_scope": "direct", "external_account_reference": "2307", "provider_message_reference": 7, "text": "direct initialization"}
 	for _, tc := range []struct {
@@ -160,6 +180,7 @@ func requireReceiverInitializationPublicProviderIngressCases(t *testing.T, rt se
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	waitOrigin(t, seed)
 	before := receiverIngressApplicationSnapshot(t, rt.ReceiverStateReader)
 	duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 	if duplicate.RunID != seed.RunID || duplicate.EventID != seed.EventID {

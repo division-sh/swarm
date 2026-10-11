@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/apiv1"
@@ -16,8 +17,27 @@ import (
 func TestServedTypedReceiverInitializationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			probe := newExactOriginPublicationProbe(t)
+			release := make(chan struct{})
+			unblock := sync.OnceFunc(func() { close(release) })
+			defer unblock()
+			hold := &exactOriginDiagnosticHold{eventType: "work.requested", entered: make(chan string, 1), release: release}
 			_, start := lifecycleRestartHarness(t, backend, canonicalrouting.CopyServedReceiverInitialization(t))
-			_, rt := start()
+			process, rt := start()
+			runtime := servedTestProcessRuntime(t, process)
+			hold.logger = runtime.Logger
+			runtime.Bus.SetLoggerHook(hold)
+			first := true
+			rt.WaitReceiverOrigin = func(t *testing.T, seed servedEventPublishRPCResult) {
+				t.Helper()
+				if first {
+					first = false
+					requireReceiverInitializationHeldOrigin(t, rt.ReceiverStateReader, rt.Endpoint, probe, hold, seed, unblock)
+				}
+				if err := waitExactOriginPublications(t.Context(), probe, seed.EventID); err != nil {
+					t.Fatal(err)
+				}
+			}
 			requireTypedReceiverInitializationCases(t, rt)
 		})
 	}
@@ -26,6 +46,10 @@ func TestServedTypedReceiverInitializationBothStores(t *testing.T) {
 // Shared assertions run unchanged through both in-process HTTP and release-process HTTP.
 func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
+	waitOrigin := rt.WaitReceiverOrigin
+	if waitOrigin == nil {
+		t.Fatal("receiver duplicate conservation requires its exact-origin snapshot-writer fence")
+	}
 	for _, missing := range []string{"account_id", "values"} {
 		t.Run("missing_required_"+missing, func(t *testing.T) {
 			params := receiverInitializationPublishParams(rt, "missing-"+missing, "missing-"+missing, `{}`)
@@ -82,6 +106,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 			t.Run("inspection_cleanup_boundary", func(t *testing.T) {
 				requireReceiverInspectionCleanupFailures(t, rt.ReceiverStateReader, seed.RunID, "account", path, entityID)
 			})
+			waitOrigin(t, seed)
 			before := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
 			companions := readForkReceiverCompanions(t, rt, seed.RunID)
 			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
