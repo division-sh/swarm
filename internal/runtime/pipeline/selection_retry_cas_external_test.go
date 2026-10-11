@@ -40,21 +40,21 @@ func (p *selectionCASPersistence) CommitWorkflowEngineMutation(ctx context.Conte
 		if !p.fired {
 			p.selection = command.DeliverySuccess.RuleSelection
 		}
-		// Model a different writer after the real engine's read, not a forged
-		// command revision or a synthetic CAS error returned by the test.
+		// Model a different writer after the real engine's read: CAS the exact
+		// lifecycle header and change authored fields in the same transaction.
 		tx, err := p.db.BeginTx(ctx, nil)
 		if err != nil {
 			return pipeline.CommittedWorkflowEngineMutation{}, err
 		}
 		defer tx.Rollback()
-		result, err := tx.ExecContext(ctx, `UPDATE flow_instances SET revision=revision+1 WHERE run_id=$1 AND entity_id=$2 AND revision=$3`, command.State.Identity.RunID, command.State.EntityID, command.State.ExpectedRevision)
+		result, err := tx.ExecContext(ctx, `UPDATE flow_instances SET revision=revision+1 WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3 AND revision=$4`, command.State.Identity.RunID, command.State.EntityID, command.State.Identity.Route.InstancePath, command.State.ExpectedRevision)
 		if err != nil {
 			return pipeline.CommittedWorkflowEngineMutation{}, err
 		}
 		if n, err := result.RowsAffected(); err != nil || n != 1 {
 			return pipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("competing writer rows=%d: %v", n, err)
 		}
-		result, err = tx.ExecContext(ctx, `UPDATE entity_state SET revision=revision+1, fields='{"marker":"second"}' WHERE run_id=$1 AND entity_id=$2 AND revision=$3`, command.State.Identity.RunID, command.State.EntityID, command.State.ExpectedRevision)
+		result, err = tx.ExecContext(ctx, `UPDATE entity_state SET fields='{"marker":"second"}' WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3`, command.State.Identity.RunID, command.State.EntityID, command.State.Identity.Route.InstancePath)
 		if err != nil {
 			return pipeline.CommittedWorkflowEngineMutation{}, err
 		}

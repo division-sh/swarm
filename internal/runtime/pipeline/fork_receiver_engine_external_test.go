@@ -193,8 +193,11 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				target := snapshot.Route.Target.Route()
 				var before string
 				var beforeRevision int64
-				if err := db.QueryRow(`SELECT CAST(fields AS TEXT),revision FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, claim.RunID(), target.EntityID).Scan(&before, &beforeRevision); err != nil || forkEngineMarker(t, before) != "consumer-owned" {
-					t.Fatalf("fixed-revision receiver was not reconstructed independently of current source: %s err=%v", before, err)
+				if err := db.QueryRow(`SELECT CAST(es.fields AS TEXT), fi.revision
+FROM entity_state es JOIN flow_instances fi
+ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+WHERE es.run_id=$1 AND es.entity_id=$2 AND es.flow_instance='consumer'`, claim.RunID(), target.EntityID).Scan(&before, &beforeRevision); err != nil || forkEngineMarker(t, before) != "consumer-owned" || beforeRevision != 1 {
+					t.Fatalf("fixed-revision receiver was not reconstructed independently of current source: %s header revision=%d err=%v", before, beforeRevision, err)
 				}
 				if missing {
 					result, err := db.Exec(`DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, claim.RunID(), target.EntityID)
@@ -299,7 +302,10 @@ func assertForkEngineRows(t *testing.T, db *sql.DB, sourceRun, childRun, receive
 	t.Helper()
 	var fields string
 	var revision int64
-	err := db.QueryRow(`SELECT CAST(fields AS TEXT),revision FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, childRun, receiver).Scan(&fields, &revision)
+	err := db.QueryRow(`SELECT CAST(es.fields AS TEXT), fi.revision
+FROM entity_state es JOIN flow_instances fi
+ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+WHERE es.run_id=$1 AND es.entity_id=$2 AND es.flow_instance='consumer'`, childRun, receiver).Scan(&fields, &revision)
 	if missing {
 		if err != sql.ErrNoRows {
 			t.Fatalf("required-state failure recreated the receiver: %s err=%v", fields, err)

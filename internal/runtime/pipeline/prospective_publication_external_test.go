@@ -55,7 +55,7 @@ func (p *observedProspectivePersistence) CommitWorkflowEngineMutation(ctx contex
 		command.Lifecycle.RequestCompletionCandidate = !command.Lifecycle.RequestCompletionCandidate
 	case "competing_revision":
 		if p.armRace && !p.raced {
-			// Advance persisted state after the real planner has read it, without
+			// Advance the lifecycle header after the real planner has read it, without
 			// altering the prepared command or its prospective evidence.
 			tx, err := p.db.BeginTx(ctx, nil)
 			if err != nil {
@@ -68,13 +68,6 @@ func (p *observedProspectivePersistence) CommitWorkflowEngineMutation(ctx contex
 			}
 			if count, err := result.RowsAffected(); err != nil || count != 1 {
 				return runtimepipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("competing revision cut rows=%d err=%v", count, err)
-			}
-			result, err = tx.ExecContext(ctx, `UPDATE entity_state SET revision=revision+1 WHERE run_id=$1 AND flow_instance=$2 AND entity_id=$3 AND revision=$4`, command.State.Identity.RunID, command.State.Identity.Route.InstancePath, command.State.EntityID, command.State.ExpectedRevision)
-			if err != nil {
-				return runtimepipeline.CommittedWorkflowEngineMutation{}, err
-			}
-			if count, err := result.RowsAffected(); err != nil || count != 1 {
-				return runtimepipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("competing field revision cut rows=%d err=%v", count, err)
 			}
 			if err := tx.Commit(); err != nil {
 				return runtimepipeline.CommittedWorkflowEngineMutation{}, err
@@ -138,21 +131,27 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 				commitKeylessConstructorComponent(t, ctx, selected, coordinator, source)
 				var initialFields string
 				var initialRevision int64
-				if err := selected.db.QueryRow(`SELECT CAST(fields AS TEXT), revision FROM entity_state WHERE run_id=$1`, runID).Scan(&initialFields, &initialRevision); err != nil {
+				if err := selected.db.QueryRow(`SELECT CAST(es.fields AS TEXT), fi.revision
+FROM entity_state es JOIN flow_instances fi
+ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+WHERE es.run_id=$1 AND es.flow_instance=$2`, runID, runID).Scan(&initialFields, &initialRevision); err != nil {
 					t.Fatal(err)
+				}
+				if initialRevision != 1 {
+					t.Fatalf("construction header revision=%d, want 1", initialRevision)
 				}
 				assertUnchangedConstruction := func() {
 					t.Helper()
 					var fields string
-					var fieldRevision, headerRevision int64
-					if err := selected.db.QueryRow(`SELECT CAST(fields AS TEXT), revision FROM entity_state WHERE run_id=$1`, runID).Scan(&fields, &fieldRevision); err != nil {
+					var headerRevision int64
+					if err := selected.db.QueryRow(`SELECT CAST(es.fields AS TEXT), fi.revision
+FROM entity_state es JOIN flow_instances fi
+ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+WHERE es.run_id=$1 AND es.flow_instance=$2`, runID, runID).Scan(&fields, &headerRevision); err != nil {
 						t.Fatal(err)
 					}
-					if err := selected.db.QueryRow(`SELECT revision FROM flow_instances WHERE run_id=$1`, runID).Scan(&headerRevision); err != nil {
-						t.Fatal(err)
-					}
-					if fields != initialFields || fieldRevision != initialRevision || headerRevision != initialRevision {
-						t.Fatalf("failed handler changed construction: fields=%s field revision=%d header revision=%d; want %s at %d", fields, fieldRevision, headerRevision, initialFields, initialRevision)
+					if fields != initialFields || headerRevision != initialRevision {
+						t.Fatalf("failed handler changed construction: fields=%s header revision=%d; want %s at %d", fields, headerRevision, initialFields, initialRevision)
 					}
 				}
 				if name == "publication_failure" {
