@@ -330,15 +330,16 @@ func (eb *EventBus) StartDeploymentRunAcknowledged(
 		return CommittedDeploymentRunCreation{}, err
 	}
 	committed, commitErr := owner.CommitDeploymentRunCreation(ctx, DeploymentRunCreationCommand{RunCreation: canonical, Idempotency: request, Root: FlowInstanceActivationCommand{Plan: root, RouteTopology: topology}})
+	validationErr := durabledata.ValidateRunCreationReceiptForCommand(committed.Record, canonical)
 	if !committed.Acknowledged {
-		return committed, errors.Join(commitErr, errors.New("deployment run creation commit was not acknowledged"))
+		return committed, errors.Join(commitErr, validationErr, errors.New("deployment run creation commit was not acknowledged"))
 	}
-	if !committed.Replay && committed.Record.Summary.Outcome == "created" {
+	if !committed.Replay && (validationErr != nil || committed.Record.Summary.Outcome == "created") {
 		acceptedCtx := runtimeeffects.WithExecutionMode(eb.publicCompletionContext(ctx, lease, canonical.RunID), mode)
 		transferred = true
 		go eb.finishPublicDeploymentStart(acceptedCtx, lease, committed)
 	}
-	return committed, commitErr
+	return committed, errors.Join(commitErr, validationErr)
 }
 
 // PublishAPIEventWithRunCreationAcknowledged adds the method-neutral durable

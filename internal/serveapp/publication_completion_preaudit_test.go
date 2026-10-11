@@ -376,7 +376,7 @@ func (s *publicationAuditSQLite) CommitAPIEventPublication(ctx context.Context, 
 func (s *publicationAuditSQLite) CommitDeploymentRunCreation(ctx context.Context, command runtimebus.DeploymentRunCreationCommand) (runtimebus.CommittedDeploymentRunCreation, error) {
 	result, err := s.SQLiteRuntimeStore.CommitDeploymentRunCreation(ctx, command)
 	s.probe.observeDeployment(ctx, command, result)
-	return result, err
+	return s.probe.corruptDeployment(result, err)
 }
 
 type publicationAuditPostgres struct {
@@ -391,7 +391,7 @@ func (s *publicationAuditPostgres) CommitAPIEventPublication(ctx context.Context
 func (s *publicationAuditPostgres) CommitDeploymentRunCreation(ctx context.Context, command runtimebus.DeploymentRunCreationCommand) (runtimebus.CommittedDeploymentRunCreation, error) {
 	result, err := s.PostgresStore.CommitDeploymentRunCreation(ctx, command)
 	s.probe.observeDeployment(ctx, command, result)
-	return result, err
+	return s.probe.corruptDeployment(result, err)
 }
 
 func (p *publicationCompletionAudit) observeDeployment(ctx context.Context, command runtimebus.DeploymentRunCreationCommand, result runtimebus.CommittedDeploymentRunCreation) {
@@ -400,6 +400,7 @@ func (p *publicationCompletionAudit) observeDeployment(ctx context.Context, comm
 	p.deployment = &result
 	p.request = command.Idempotency
 	p.process, _ = worklifetime.ProcessFromContext(ctx)
+	p.run = command.RunCreation.RunID
 }
 
 type publicationAuditReadiness struct {
@@ -409,8 +410,9 @@ type publicationAuditReadiness struct {
 
 func (s *publicationAuditReadiness) BeginDynamicFlowRuntimeActivation(ctx context.Context, request pipeline.DynamicFlowRuntimeActivationRequest) (pipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
 	s.probe.mu.Lock()
-	hold := s.probe.hold && s.probe.committed.Acknowledged && request.Plan().RunID == s.probe.run
-	if s.probe.committed.Acknowledged && request.Plan().RunID == s.probe.run && s.probe.plan.RunID == "" {
+	acknowledged := s.probe.committed.Acknowledged || s.probe.deployment != nil && s.probe.deployment.Acknowledged
+	hold := s.probe.hold && acknowledged && request.Plan().RunID == s.probe.run
+	if acknowledged && request.Plan().RunID == s.probe.run && s.probe.plan.RunID == "" {
 		s.probe.plan = request.Plan()
 	}
 	s.probe.mu.Unlock()

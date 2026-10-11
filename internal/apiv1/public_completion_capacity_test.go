@@ -316,10 +316,6 @@ func TestPublicCompletionCapacityNativeMixedBothStores(t *testing.T) {
 	})
 }
 
-func publicCompletionRPC(t *testing.T, handler *Handler, body string) rpcResponse {
-	return publicCompletionRPCWithToken(t, handler, body, testToken)
-}
-
 func publicCompletionRPCWithToken(t *testing.T, handler *Handler, body, token string) rpcResponse {
 	return publicCompletionObservedRPC(t, handler, body, token).rpcResponse
 }
