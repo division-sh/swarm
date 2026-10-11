@@ -18,6 +18,10 @@ var exactOriginSuccessors = []struct {
 	priorSuccessor    bool
 	edits             []publicationSuccessorEdit
 }{
+	{"TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores", "a4f998e7a74bd3679b029eb3cc5cfac11b6fdec524975b23118864a392a2852a", true, []publicationSuccessorEdit{
+		{"\t\t\t\trt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleSelectedCarriers(t, reordered))", "\t\t\t\tprobe := newExactOriginPublicationProbe(t)\n\t\t\t\trt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleSelectedCarriers(t, reordered))"},
+		{"\t\t\t\t\t\t\t// One root input reaches all four flows through explicit", "\t\t\t\t\t\t\tif err := waitLifecycleCarrierSeedSettlement(t.Context(), probe, seed); err != nil {\n\t\t\t\t\t\t\t\tt.Fatal(err)\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// One root input reaches all four flows through explicit"},
+	}},
 	{"TestServedForkSourceCompletionWithoutForkBothStores", "c39c80d0a1287e62369224647b85719fc1a2d4858963a312800e78522b0e01d1", false, []publicationSuccessorEdit{
 		{"func TestServedForkSourceCompletionWithoutForkBothStores(t *testing.T) {\n\tfor _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {\n\t\tt.Run(string(backend), func(t *testing.T) {\n\t\t\trt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))\n\t\t\tseed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{\"event_name\": \"parent.seeded\", \"bundle_hash\": rt.BundleHash,\n\t\t\t\t\"payload\": map[string]any{\"work_id\": \"no-fork-completion\"}, \"idempotency_key\": \"no-fork-seed\"})\n\t\t\twaitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)\n\t\t\tearly := readServedForkRecipientSourceDomain(t, rt, seed.RunID)\n\t\t\twaitForkReceiverSourceCompletion(t, rt, seed.RunID)\n\t\t\tsettled := readServedForkRecipientSourceDomain(t, rt, seed.RunID)\n\t\t\tcolumnsRows, err := rt.DB.Query(`SELECT * FROM event_deliveries WHERE 1=0`)\n\t\t\tif err != nil {\n\t\t\t\tt.Fatal(err)\n", "func TestServedForkSourceCompletionWithoutForkBothStores(t *testing.T) {\n\tfor _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {\n\t\tt.Run(string(backend), func(t *testing.T) {\n\t\t\tpublication := newExactOriginPublicationProbe(t)\n\t\t\trt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))\n\t\t\tseed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{\"event_name\": \"parent.seeded\", \"bundle_hash\": rt.BundleHash,\n\t\t\t\t\"payload\": map[string]any{\"work_id\": \"no-fork-completion\"}, \"idempotency_key\": \"no-fork-seed\"})\n\t\t\twaitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)\n\t\t\tif err := waitExactOriginPublications(t.Context(), publication, seed.EventID); err != nil {\n\t\t\t\tt.Fatal(err)\n\t\t\t}\n\t\t\tearlyRoot := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), rt.ReceiverStateReader, seed.RunID, seed.EventID)\n\t\t\tearly := readServedForkRecipientSourceDomain(t, rt, seed.RunID)\n\t\t\twaitForkReceiverSourceCompletion(t, rt, seed.RunID)\n\t\t\tsettled := readServedForkRecipientSourceDomain(t, rt, seed.RunID)\n\t\t\tsettledRoot := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), rt.ReceiverStateReader, seed.RunID, seed.EventID)\n\t\t\tif earlyRoot.PipelineReceiptCount != 1 || settledRoot.PipelineReceiptCount != 1 {\n\t\t\t\tt.Fatalf(\"joined root publication lost its settled receipt: %d->%d\", earlyRoot.PipelineReceiptCount, settledRoot.PipelineReceiptCount)\n\t\t\t}\n\t\t\tcolumnsRows, err := rt.DB.Query(`SELECT * FROM event_deliveries WHERE 1=0`)\n\t\t\tif err != nil {\n\t\t\t\tt.Fatal(err)\n"},
 		{"\t\t\t\t}\n\t\t\t}\n\t\t\tsort.Strings(changed)\n\t\t\tt.Logf(\"NO FORK INVOKED: delivery-only quiescence -> pipeline completion changed=%v receipts=%d->%d\", changed, len(early[\"event_receipts\"]), len(settled[\"event_receipts\"]))\n\t\t\twaitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)\n\t\t\tif after := readServedForkRecipientSourceDomain(t, rt, seed.RunID); !reflect.DeepEqual(settled, after) {\n", "\t\t\t\t}\n\t\t\t}\n\t\t\tsort.Strings(changed)\n\t\t\t// Root handoff 0->1 is witnessed by the separate held-publication proof.\n\t\t\t// Child handoffs may still settle between these original snapshots.\n\t\t\tt.Logf(\"JOINED ROOT: receipts=%d->%d; root delta is zero, not positive handoff proof\", earlyRoot.PipelineReceiptCount, settledRoot.PipelineReceiptCount)\n\t\t\tt.Logf(\"NO FORK INVOKED: delivery-only quiescence -> pipeline completion changed=%v receipts=%d->%d\", changed, len(early[\"event_receipts\"]), len(settled[\"event_receipts\"]))\n\t\t\twaitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)\n\t\t\tif after := readServedForkRecipientSourceDomain(t, rt, seed.RunID); !reflect.DeepEqual(settled, after) {\n"},
@@ -185,6 +189,24 @@ func TestExactOriginPublicationSuccessorsPreserveReviewedCuts(t *testing.T) {
 
 func exactOriginOrderingMutants(t *testing.T, source string) map[string]string {
 	t.Helper()
+	if strings.HasPrefix(source, "func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(") {
+		const gate = "\t\t\t\t\t\t\tif err := waitLifecycleCarrierSeedSettlement(t.Context(), probe, seed); err != nil {\n\t\t\t\t\t\t\t\tt.Fatal(err)\n\t\t\t\t\t\t\t}\n"
+		const setup = "\t\t\t\tprobe := newExactOriginPublicationProbe(t)\n"
+		const selected = "\t\t\t\t\t\t\tselected := requireServedEventPublishRPCResult(t, rt.Endpoint, params)\n"
+		if strings.Count(source, gate) != 1 || strings.Count(source, setup) != 1 || strings.Count(source, selected) != 1 {
+			t.Fatal("missing exact selected-carrier prerequisite")
+		}
+		withoutGate := strings.Replace(source, gate, "", 1)
+		withoutSetup := strings.Replace(source, setup, "", 1)
+		return map[string]string{
+			"wait_after_selected":     strings.Replace(withoutGate, selected, selected+gate, 1),
+			"omitted_seed":            withoutGate,
+			"wrong_seed":              strings.Replace(source, "waitLifecycleCarrierSeedSettlement(t.Context(), probe, seed)", "waitLifecycleCarrierSeedSettlement(t.Context(), probe, selected)", 1),
+			"late_probe_installation": strings.Replace(withoutSetup, gate, setup+gate, 1),
+			"business_assertion":      strings.Replace(source, "history[0].From != \"active\"", "history[0].From != \"waiting\"", 1),
+			"unrelated_setup":         strings.Replace(source, "{\n", "{\n\tunreviewedSetup()\n", 1),
+		}
+	}
 	if strings.HasPrefix(source, "func mailboxCompletionNotice(") {
 		return map[string]string{
 			"omitted_receipt":    strings.Replace(source, "*out = seed", "*out = servedEventPublishRPCResult{}", 1),
