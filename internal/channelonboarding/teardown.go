@@ -362,11 +362,17 @@ func (s *DestructiveService) RetireInterface(ctx context.Context, identity opera
 }
 
 func (s *DestructiveService) Recover(ctx context.Context) error {
+	if ctx == nil {
+		return ErrInvalidRequest
+	}
 	operations, err := InspectPendingTeardowns(ctx, s.store)
 	if err != nil {
 		return err
 	}
 	for _, op := range operations {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		resumeCtx := context.WithoutCancel(ctx)
 		switch op.Kind {
 		case TeardownUnbind:
@@ -389,7 +395,7 @@ func (s *DestructiveService) Recover(ctx context.Context) error {
 			return fmt.Errorf("recover channel teardown %s: %w", op.TeardownID, err)
 		}
 	}
-	return nil
+	return ctx.Err()
 }
 
 func (s *DestructiveService) retireAuthority(ctx context.Context, op TeardownOperation, reason string) (TeardownOperation, error) {
