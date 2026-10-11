@@ -75,6 +75,13 @@ func validateRuntimeSZChildren(policy Policy) error {
 			children[root] = cells
 		}
 	}
+	// Reviewed addition: preserve the original partition inventory unchanged.
+	readFenceRoot := "TestSelectedContinuationReadFenceBothStores"
+	readFenceCells := []string{"sqlite/existing_busy", "sqlite/existing_retry", "sqlite/entityless_pending", "postgres/existing_busy", "postgres/existing_retry", "postgres/entityless_pending"}
+	if !reflect.DeepEqual(children[readFenceRoot], readFenceCells) {
+		return fmt.Errorf("selected continuation read-fence required children changed: %v", children[readFenceRoot])
+	}
+	delete(children, readFenceRoot)
 	// Freeze the original backend/fault obligations, including their order,
 	// without maintaining a second executable child inventory.
 	data, err := json.Marshal(children)
@@ -121,7 +128,7 @@ func TestRuntimeSZPartitionOwnsProspectivePrefixRoots(t *testing.T) {
 }
 
 func TestRuntimeSZPartitionRejectsScopeAndBackendDrift(t *testing.T) {
-	for _, change := range []string{"omit", "overlap", "foreign", "partial", "skip", "cached", "budget", "timeout", "environment", "optional", "duplicate", "core", "backend_loss", "extra_child", "duplicate_child", "retired"} {
+	for _, change := range []string{"omit", "overlap", "foreign", "partial", "skip", "cached", "budget", "timeout", "environment", "optional", "duplicate", "core", "backend_loss", "extra_child", "duplicate_child", "retired", "read_fence_missing", "read_fence_backend_loss", "read_fence_extra_child"} {
 		t.Run(change, func(t *testing.T) {
 			policy := loadPersistenceDebtPolicy(t)
 			unit := policy.Units[runtimeSZUnits[0]]
@@ -172,6 +179,12 @@ func TestRuntimeSZPartitionRejectsScopeAndBackendDrift(t *testing.T) {
 				policy.Units[runtimeSZUnits[1]] = other
 			case "retired":
 				policy.Units["store-runtime-full-06"] = unit
+			case "read_fence_missing":
+				delete(unit.RequiredChildren, "TestSelectedContinuationReadFenceBothStores")
+			case "read_fence_backend_loss":
+				unit.RequiredChildren["TestSelectedContinuationReadFenceBothStores"] = unit.RequiredChildren["TestSelectedContinuationReadFenceBothStores"][:3]
+			case "read_fence_extra_child":
+				unit.RequiredChildren["TestSelectedContinuationReadFenceBothStores"] = append(unit.RequiredChildren["TestSelectedContinuationReadFenceBothStores"], "postgres/foreign")
 			}
 			policy.Units[runtimeSZUnits[0]] = unit
 			if validateRuntimeSZEnvelopes(policy) != nil || validateRuntimeSZChildren(policy) != nil ||
