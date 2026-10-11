@@ -3,6 +3,7 @@ package bus
 import (
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -14,23 +15,9 @@ func validateConnectIntentReceivers(plan RoutePlan, source semanticview.Source) 
 		if intent.ConnectPlan.Empty() {
 			continue
 		}
-		if intent.TargetOwnership.Empty() || intent.TargetOwnership.Validate() != nil {
-			return fmt.Errorf("connect recipient has no admitted target ownership")
-		}
-		receiver := intent.TargetOwnership.Route()
-		root := false
-		if intent.Recipient.IsAgent() {
-			receiver = intent.ReceiverBlueprint
-			if !intent.Initialization.Empty() {
-				bound := intent.Initialization.ConstructionTarget().Route()
-				if !receiver.Empty() && receiver != bound {
-					return fmt.Errorf("connect receiver contradicts construction dependency")
-				}
-				receiver = bound
-			}
-			root = intent.AgentIdentity.Route.Presence == agentidentity.RouteRoot
-		} else if source != nil {
-			root = intent.Handler.ExecutionFlowID(source) == semanticview.RootExecutionFlowID(source)
+		receiver, root, err := connectIntentReceiver(intent, source)
+		if err != nil {
+			return err
 		}
 		matched := false
 		for _, selection := range plan.ConnectEvaluation.Plans() {
@@ -48,4 +35,23 @@ func validateConnectIntentReceivers(plan RoutePlan, source semanticview.Source) 
 		}
 	}
 	return nil
+}
+
+func connectIntentReceiver(intent RoutePlanDeliveryIntent, source semanticview.Source) (events.RouteIdentity, bool, error) {
+	if intent.TargetOwnership.Empty() || intent.TargetOwnership.Validate() != nil {
+		return events.RouteIdentity{}, false, fmt.Errorf("connect recipient has no admitted target ownership")
+	}
+	if !intent.Recipient.IsAgent() {
+		root := source != nil && intent.Handler.ExecutionFlowID(source) == semanticview.RootExecutionFlowID(source)
+		return intent.TargetOwnership.Route(), root, nil
+	}
+	receiver := intent.ReceiverBlueprint
+	if !intent.Initialization.Empty() {
+		bound := intent.Initialization.ConstructionTarget().Route()
+		if !receiver.Empty() && receiver != bound {
+			return events.RouteIdentity{}, false, fmt.Errorf("connect receiver contradicts construction dependency")
+		}
+		receiver = bound
+	}
+	return receiver, intent.AgentIdentity.Route.Presence == agentidentity.RouteRoot, nil
 }
