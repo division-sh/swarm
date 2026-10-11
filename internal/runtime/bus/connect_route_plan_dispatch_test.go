@@ -2235,12 +2235,6 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		flowInstances: []ActiveFlowInstanceDescriptor{{
-			InstanceID:    "one",
-			EntityID:      eventtest.UUID("ent-1"),
-			FlowInstance:  "consumer/one",
-			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-		}},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
@@ -2397,12 +2391,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	}
 
 	replayTarget := subscribeInternalDeliveriesForTest(t, eb, want.Recipient.ID())
-	store.flowInstances = []ActiveFlowInstanceDescriptor{{
-		InstanceID:    "drift",
-		EntityID:      eventtest.UUID("ent-drift"),
-		FlowInstance:  "consumer/drift",
-		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-	}}
 	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "drift")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "consumer", "drift", busInternalTestRunID, eventtest.UUID("ent-drift"))})
 	store.refuseInstanceIndexReads(t)
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
@@ -2965,13 +2953,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
-			flowInstances: []ActiveFlowInstanceDescriptor{{
-				InstanceID:    "one",
-				EntityID:      eventtest.UUID("ent-1"),
-				FlowInstance:  "account/one",
-				FlowTemplate:  "account",
-				AddressFields: map[string]string{"entity.account_id": "acct-1"},
-			}},
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -3015,12 +2996,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	}
 	committedRoute := store.routes[eventID][0]
 
-	store.flowInstances = []ActiveFlowInstanceDescriptor{{
-		InstanceID:    "drift",
-		EntityID:      eventtest.UUID("ent-drift"),
-		FlowInstance:  "account/drift",
-		AddressFields: map[string]string{"entity.account_id": "acct-1"},
-	}}
 	restarted, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
@@ -3162,13 +3137,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
-			flowInstances: []ActiveFlowInstanceDescriptor{{
-				InstanceID:    "one",
-				EntityID:      eventtest.UUID("ent-1"),
-				FlowInstance:  "account/one",
-				FlowTemplate:  "account",
-				AddressFields: map[string]string{"entity.account_id": "acct-1"},
-			}},
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -3272,12 +3240,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	}
 
 	replayTarget := subscribeInternalDeliveriesForTest(t, eb, createdWant.Recipient.ID())
-	store.flowInstances = []ActiveFlowInstanceDescriptor{{
-		InstanceID:    "drift",
-		EntityID:      eventtest.UUID("ent-drift"),
-		FlowInstance:  "account/drift",
-		AddressFields: map[string]string{"entity.account_id": "acct-2"},
-	}}
 	store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "drift")), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "account", "drift", busInternalTestRunID, eventtest.UUID("ent-drift"))})
 	store.refuseInstanceIndexReads(t)
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
@@ -3340,10 +3302,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForA
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
-			flowInstances: []ActiveFlowInstanceDescriptor{
-				{InstanceID: "one", EntityID: eventtest.UUID("ent-1"), FlowInstance: "account/one", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
-				{InstanceID: "two", EntityID: eventtest.UUID("ent-2"), FlowInstance: "account/two", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
-			},
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -3355,8 +3313,9 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForA
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
 	for index, instanceID := range []string{"one", "two"} {
-		store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID), "acct-1"))
-		store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID)), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)})
+		instance := StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, []string{eventtest.UUID("ent-1"), eventtest.UUID("ent-2")}[index])
+		store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, instance, "acct-1"))
+		store.installConstructionReceipt(testRunScopedFlowRoute(instance.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: instance})
 	}
 	eventID := uuid.NewString()
 	evt := connectRoutePlanStaticProducerEvent(eventID,
@@ -3815,12 +3774,6 @@ func TestEventBusPublish_ConnectRoutePlanRejectsCreateConflict(t *testing.T) {
 	store := &connectRoutePlanLifecycleStore{
 		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 			targetRouteMemoryStore: newTargetRouteMemoryStore(),
-			flowInstances: []ActiveFlowInstanceDescriptor{{
-				InstanceID:    "one",
-				EntityID:      eventtest.UUID("ent-1"),
-				FlowInstance:  "consumer/one",
-				AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-			}},
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -3900,12 +3853,6 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		flowInstances: []ActiveFlowInstanceDescriptor{{
-			InstanceID:    "one",
-			EntityID:      eventtest.UUID("ent-1"),
-			FlowInstance:  "consumer/one",
-			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-		}},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source,
 		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
@@ -3934,12 +3881,6 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 		t.Fatalf("persisted delivery routes = %#v, want instance-key route %#v", store.routes[eventID], wantOne)
 	}
 
-	store.flowInstances = []ActiveFlowInstanceDescriptor{{
-		InstanceID:    "two",
-		EntityID:      eventtest.UUID("ent-2"),
-		FlowInstance:  "consumer/two",
-		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-	}}
 	store.refuseInstanceIndexReads(t)
 
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
@@ -3964,12 +3905,6 @@ func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarge
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, true)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		flowInstances: []ActiveFlowInstanceDescriptor{{
-			InstanceID:    "one",
-			EntityID:      eventtest.UUID("ent-1"),
-			FlowInstance:  "consumer/one",
-			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-		}},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
@@ -4029,12 +3964,6 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, true)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		flowInstances: []ActiveFlowInstanceDescriptor{{
-			InstanceID:    "one",
-			EntityID:      eventtest.UUID("ent-1"),
-			FlowInstance:  "consumer/one",
-			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-		}},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
@@ -4085,11 +4014,11 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 
 func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t *testing.T) {
 	tests := []struct {
-		name          string
-		payload       string
-		flowInstances []ActiveFlowInstanceDescriptor
-		addRoutes     []string
-		wantFailure   runtimepinrouting.TargetFailure
+		name        string
+		payload     string
+		entityIDs   []string
+		instanceIDs []string
+		wantFailure runtimepinrouting.TargetFailure
 	}{
 		{
 			name:        "missing source key value",
@@ -4097,25 +4026,17 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 			wantFailure: runtimepinrouting.TargetFailureFromConnect(runtimepinrouting.ConnectFailureInstanceSourceValueMissing),
 		},
 		{
-			name:    "no receiver instance under rejecting policy",
-			payload: `{"vertical_id":"v-1"}`,
-			flowInstances: []ActiveFlowInstanceDescriptor{{
-				InstanceID:    "two",
-				EntityID:      eventtest.UUID("ent-2"),
-				FlowInstance:  "consumer/two",
-				AddressFields: map[string]string{"entity.vertical_id": "v-2"},
-			}},
-			addRoutes:   []string{"two"},
+			name:        "no receiver instance under rejecting policy",
+			payload:     `{"vertical_id":"v-1"}`,
+			entityIDs:   []string{eventtest.UUID("ent-2")},
+			instanceIDs: []string{"two"},
 			wantFailure: runtimepinrouting.TargetFailureFromConnect(runtimepinrouting.ConnectFailureTargetUnresolved),
 		},
 		{
-			name:    "ambiguous receiver instance key",
-			payload: `{"vertical_id":"v-1"}`,
-			flowInstances: []ActiveFlowInstanceDescriptor{
-				{InstanceID: "one", EntityID: eventtest.UUID("ent-1"), FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
-				{InstanceID: "two", EntityID: eventtest.UUID("ent-2"), FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
-			},
-			addRoutes:   []string{"one", "two"},
+			name:        "ambiguous receiver instance key",
+			payload:     `{"vertical_id":"v-1"}`,
+			entityIDs:   []string{eventtest.UUID("ent-1"), eventtest.UUID("ent-2")},
+			instanceIDs: []string{"one", "two"},
 			wantFailure: runtimepinrouting.TargetFailureFromConnect(runtimepinrouting.ConnectFailureTargetAmbiguous),
 		},
 	}
@@ -4124,20 +4045,20 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 			source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
 			store := &connectRoutePlanDescriptorStore{
 				targetRouteMemoryStore: newTargetRouteMemoryStore(),
-				flowInstances:          tc.flowInstances,
 			}
 			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			installConnectionSourceConstruction(t, eb, source, "producer")
-			for index, instanceID := range tc.addRoutes {
+			for index, instanceID := range tc.instanceIDs {
 				key := "v-1"
 				if tc.name == "no receiver instance under rejecting policy" {
 					key = "v-2"
 				}
-				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "consumer", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID), key))
-				store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", instanceID)), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "consumer", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)})
+				instance := StoredFlowInstanceIdentityFixture(source, "consumer", instanceID, busInternalTestRunID, tc.entityIDs[index])
+				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, instance, key))
+				store.installConstructionReceipt(testRunScopedFlowRoute(instance.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: instance})
 			}
 			eventID := uuid.NewString()
 			evt := connectRoutePlanStaticProducerEvent(eventID,
