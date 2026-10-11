@@ -283,12 +283,13 @@ func (eb *EventBus) StartDeploymentRunAcknowledged(
 	if err != nil || initiation != durabledata.RunCreationFeedOnly || request.Method != "run.start" {
 		return CommittedDeploymentRunCreation{}, errors.New("deployment run start requires an eventless feed-only command and run.start authority")
 	}
-	ctx, lease, err := eb.beginPublicCompletion(ctx)
+	ctx, lease, finishPrecommit, err := eb.beginPublicCompletion(ctx)
 	if err != nil {
 		return CommittedDeploymentRunCreation{}, err
 	}
 	transferred := false
 	defer func() {
+		finishPrecommit()
 		if !transferred {
 			err = errors.Join(err, lease.Done())
 		}
@@ -352,12 +353,13 @@ func (eb *EventBus) PublishAPIEventWithRunCreationAcknowledged(
 	completion apiidempotency.Completion,
 	runCreation *durabledata.RunCreationCommand,
 ) (result apiidempotency.Completion, replay bool, err error) {
-	ctx, lease, err := eb.beginPublicCompletion(ctx)
+	ctx, lease, finishPrecommit, err := eb.beginPublicCompletion(ctx)
 	if err != nil {
 		return apiidempotency.Completion{}, false, err
 	}
 	transferred := false
 	defer func() {
+		finishPrecommit()
 		if !transferred {
 			err = errors.Join(err, lease.Done())
 		}

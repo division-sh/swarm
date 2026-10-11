@@ -10,23 +10,39 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 )
 
-func (eb *EventBus) beginPublicCompletion(ctx context.Context) (context.Context, *worklifetime.Lease, error) {
+func (eb *EventBus) beginPublicCompletion(ctx context.Context) (context.Context, *worklifetime.Lease, func(), error) {
 	ctx, err := eb.admitSourceArtifactFact(ctx)
 	if err != nil {
-		return ctx, nil, err
+		return ctx, nil, nil, err
 	}
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	owner := eb.workOwnerForContext(ctx)
 	lease, err := worklifetime.BeginPublicCompletion(ctx, owner)
 	if err != nil {
-		return ctx, nil, err
+		return ctx, nil, nil, err
 	}
-	// Native preparation/COMMIT still uses the original cancellable request.
+	// Preparation/COMMIT observes both the caller and exact retirement. Only
+	// acknowledged consequences use the independent accepted lease context.
+	ctx, cancel := context.WithCancelCause(ctx)
+	bridgeDone := make(chan struct{})
+	stop := context.AfterFunc(lease.Context(), func() {
+		defer close(bridgeDone)
+		cancel(context.Cause(lease.Context()))
+	})
+	if cause := context.Cause(lease.Context()); cause != nil {
+		cancel(cause)
+	}
+	finishPrecommit := func() {
+		if !stop() {
+			<-bridgeDone
+		}
+		cancel(nil)
+	}
 	ctx = worklifetime.WithOccurrence(worklifetime.CarryAcceptedLease(ctx, lease.Context()), owner)
 	process, _ := worklifetime.ProcessFromContext(lease.Context())
 	ctx = worklifetime.WithProcess(ctx, process)
 	ctx = context.WithValue(ctx, runtimeWorkAdmissionContextKey{}, runtimeWorkAdmission{owner: owner, context: ctx})
-	return ctx, lease, nil
+	return ctx, lease, finishPrecommit, nil
 }
 
 func (eb *EventBus) finishPublicPublication(ctx context.Context, lease *worklifetime.Lease, prepared PreparedPublish, committed CommittedPublication) {
