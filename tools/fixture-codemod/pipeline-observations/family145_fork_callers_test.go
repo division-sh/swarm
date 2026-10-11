@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 272 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "fee2df4328eaee89338750f179d66b94c5eb28aa436934c969072344939d3f7a" {
+	if err != nil || len(rows) != 292 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "586632d2e5c9f319e8b7bdf74c4893d7d48f59d89290b41cedbbb44b61a58ce2" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -89,6 +89,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if row.File == "internal/runtime/conformance/fan_out_supplemental_helpers_test.go" && row.Function == "assertSupplementalHistory" {
 			if err := family145SupplementalHistoryProofError(row.Before, row.After); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if _, ok := family145DescriptorReadinessCalls[row.Function]; ok {
+			if err := family145DescriptorReadinessProofError(row.Function, row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue

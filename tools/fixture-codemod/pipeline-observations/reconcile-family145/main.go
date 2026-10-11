@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "fee2df4328eaee89338750f179d66b94c5eb28aa436934c969072344939d3f7a"
+const targetDigest = "586632d2e5c9f319e8b7bdf74c4893d7d48f59d89290b41cedbbb44b61a58ce2"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -111,6 +111,11 @@ var files = []string{
 	"internal/serveapp/run_fork_runtime_test.go",
 	"internal/serveapp/reset_projection_real_docker_test.go",
 	"internal/serveapp/startup_integrity_test.go",
+	"internal/store/internal/runtimepersistence/flow_activation_attempt_test.go",
+	"internal/store/internal/runtimepersistence/flow_activation_rebind_test.go",
+	"internal/store/internal/runtimepersistence/flow_instance_descriptor_authority_test.go",
+	"internal/store/internal/runtimepersistence/flow_route_topology_ack_consumer_external_test.go",
+	"internal/store/internal/runtimepersistence/workflow_route_recovery_owner_test.go",
 	"internal/store/storetest/event.go",
 }
 

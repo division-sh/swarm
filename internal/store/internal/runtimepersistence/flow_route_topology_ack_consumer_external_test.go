@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -41,16 +40,11 @@ func TestFlowRouteTopologyAcknowledgedFaultCompletesProcessFollowupBothStores(t 
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected flowInstanceDescriptorAuthorityStore
-			var sqlite bool
 			if backend == "sqlite" {
 				selected = storetest.StartSQLiteRuntimeStore(t)
-				sqlite = true
 			} else {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			}
-			db := storetest.Database(selected)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 			bundle := notifyallchildren.LoadBundle(t, notifyallchildren.Options{})
@@ -60,7 +54,7 @@ func TestFlowRouteTopologyAcknowledgedFaultCompletesProcessFollowupBothStores(t 
 			scope, _ := runtimeauthoractivity.ScopeFromContext(ctx)
 			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(scope.RuntimeInstanceID, fact.BundleHash()))
 			storetest.RequireBundleDataCatalog(t, ctx, selected, bundle)
-			seedFlowInstanceDescriptorAuthorityCase(t, ctx, selected, db, sqlite, runID, uuid.NewString(), fact.BundleHash(), fact.BundleHash(), source.WorkflowVersion(), "exact", false)
+			seedFlowInstanceDescriptorAuthorityCase(t, ctx, selected, runID, uuid.NewString(), fact.BundleHash(), fact.BundleHash(), source.WorkflowVersion(), "exact", false)
 			fault := errors.New("injected route topology postcommit cleanup failure")
 			wrapped := &routeTopologyAfterCommitFaultStore{flowInstanceDescriptorAuthorityStore: selected, fault: fault}
 			eventBus, err := newStoreTestEventBus(t, wrapped, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact})

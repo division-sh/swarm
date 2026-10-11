@@ -2569,3 +2569,70 @@ fixture type, private descriptor/activation family or #2542/#2151 parent. Existi
 watchlist/architecture tracking remains sufficient. Next whole ready dependency
 is descriptor/readiness13, keeping its deliberate malformed/transaction/lineage
 cuts apart and replacing invalid incidental setup only through native owners.
+
+## Whole private descriptor/readiness construction and caller chain
+
+All13 supplied-pool openings across descriptor/readiness7, attachment admission2,
+rebind1, topology acknowledgment1 and route-recovery/schema2 are retired together.
+The five caller files expose no pool, dialect flag, query, transaction or raw
+getter. SQLite consumers migrate with their PostgreSQL peers. Contextual lineage
+and destructive dynamic-construction atomicity remain the two private S calls;
+this checkpoint does not dispose of them or the wider parent.
+
+The existing flowactivationfixture.Command and selected CommitFlowInstanceActivation
+now write the complete prepared component header/state/materialization/readiness
+aggregate. This is adapter-reader/attachment component setup, not public constructor
+eligibility, topology installation, business execution or process-restart proof.
+Exact admitted artifacts and explicit structural parents are retained. Actual
+attachment admission continues to use genuinely issued capabilities and grants.
+Historical source-transition rows are constructed under their predecessor source,
+then changed through ReviseRunSource; no mismatching source is written by inference.
+Retired and paused recovery siblings are constructed before their canonical state
+transition rather than inserted into an already cancelled run.
+
+| Canonical owner | Complete affected consumption / surviving distinction |
+| --- | --- |
+| prepared-flow command and original selected construction | Every seedExactFlowInstanceDescriptorOwner, descriptor-case, missing-readiness static-route and recovery-header consumer uses the canonical construction transaction; handwritten companion-row scaffolds and DB/dialect arguments are gone. |
+| existing flow-route owner | Missing-readiness route setup uses exact ReplaceFlowInstanceRouteRecords; the empty replacement marks materialized routes inactive, preserving the original inactive-row filter witness rather than deleting it. Topology acknowledgment/refusal follow-up and complete route comparisons remain. |
+| existing projection-fault/write coordinator | Named readiness JSON/plan-hash/creation-clock/absence and later-row trigger cuts use runWorkflowProjectionFault; existing ambiguous-fields, draining/terminated-header and historical-retirement ports are reused. Trigger installation and cleanup include exact run plus path, and cleanup runs before store close. |
+| pipeline physical readiness stamp | Independent native read retains all five original columns: nullable grant/request, exact stored clock, phase and physical JSON text. Full duplicate-readback equality and the independently read successor phase are preserved; errors return no provisional stamp. |
+| entity-state physical schema | Two fixed omitted/blank-contract probes execute the original rejecting INSERT shape through the exact selected writer. Success still fails the schema assertion; the production-writer census explicitly classifies these invalid probes, not a general SQL allowance. |
+| finite codemod | Twenty exact source mappings, including all13 roots and seven shared helpers, extend the existing corpus to292 transitions /1121 recipes. All immutable original Before tuples and receipts remain. Guarded propagation retains every behavioral condition/refusal in order and rejects lost cuts, altered conditions and restored raw authority. Simple delegated SQL/serialization error gates are transport, not dropped business assertions. |
+
+| Manifestation | Disposition / exact executed proof |
+| --- | --- |
+| Source-owned census, transition classification and malformed foreign source | reproduced and fixed: ForSourceScopesInSQL and ProjectionClassifiesSourceTransitions roots on both stores under race; exact current/pending/foreign counts and source refusal retained |
+| Stale observation and A-B-A, batch validation/conflict/later UPDATE rollback | execution-proven through the same corrected path: ObservedStateGuard, RejectsABAObservation and PlanBatchIsAtomic roots on both stores under race; all original versions, ordinals and no-partial-update checks retained |
+| Descriptor exact-run census and invalid provenance | execution-proven through the same corrected path: both ActiveFlowInstanceDescriptorAuthority roots under race; wrong-run, missing/malformed/version/foreign-source cases and complete route equality retained |
+| Attachment admission/retirement, rebind and topology post-ack fault | execution-proven through the same corrected path: both FlowActivationAttempt roots, FlowActivationSourceSetRebind and FlowRouteTopologyAcknowledgedFaultCompletesProcessFollowup on both stores under race; all grant/source/identity/order/cleanup/replay cuts retained |
+| Recovery same-path run owners, paused/cancelled siblings and ambiguous fields | reproduced and fixed: TestActiveWorkflowRouteRecoveryUsesExactRunOwnerOnBothStores under race, including exact selected entity, ambiguity refusal and canonical terminalization |
+| Omitted/blank entity-contract schema rejection | execution-proven through the same corrected path: TestEntityStateSchemaRequiresExplicitNonblankEntityContractOnBothStores under race; actual adapter constraint errors, not preflight refusal substitutes |
+| Physical stamp, corrupt wire, exact trigger scope, cancellation, absence and closure | reproduced and fixed: TestDynamicFlowRuntimeReadinessStorageFaultsKeepNativeScopeBothStores under race; foreign same-path run unchanged, stored timestamps exact, three reads/writes independently counted, trigger rollback and cleanup proven |
+| Fault writer ownership and cancellation while queued | execution-proven through the same corrected path: TestDynamicFlowRuntimeReadinessFaultsRespectOriginalSQLiteWriterAdmission for malformed plan, creation clock and absence; existing channel-gated holder, queued writer count, cancellation and joined settlement checks |
+
+Receipts in /home/youmew/.cache/swarm-2542-family145/:
+descriptor-readiness-native-chain PASS68.703s (11 roots, both stores, race);
+recovery/schema roots passed in descriptor-readiness-recovery-guards (its one
+writer-census bookkeeping RED was repaired, then final-writer-census PASS0.358s).
+Native hostile controls PASS20.424s; expanded exact-clock/closed-owner controls
+PASS11.100s. Final owner/event/lifecycle/revision guards PASS6.482s and retired
+semantic-reference guard PASS5.072s. Finite corpus/caller/hostile guards PASS5.411s,
+candidate overlay type-check PASS116.926s, planner binding/partition conservation
+PASS21.251s. The one additive backend child row updates the existing exact
+partition digest; no owner, tier, selection, timeout or budget is changed.
+Codemod dry-run Changes=[]; affected U1000 and whitespace checks clean.
+
+Authoritative downward ratchet PASS28.565s:9197 ->9184, exactly13 selected-store
+construction debt occurrences removed, added0; raw-operation debt6641 and67
+excluded uncertainties unchanged. Broader scanner54775 findings /39070 raw sites
+includes legitimate owners, not debt. Queue117 ->104 =102 external +2 private,
+provisional M0/D67/S37, delivery-reset cumulative qualified openings30.
+Editing/investigation dominated this roughly34-minute group; behavioral executions
+were68.7s plus recovery/schema cells, hostile controls20.4s, overlay116.9s,
+partition21.3s and warm ratchet28.6s. These are receipt costs, not added CI time.
+
+No push/PR/server2/local tier. Existing watchlist and architecture tracking remain
+sufficient; no new abstraction, compatibility path or spec/runtime behavior is
+introduced. Collector and exact retained stage-completion occurrence are unchanged.
+M01, Docker, semantic drain, D3 SQL-order, M07 possession loss and rollback holds
+remain unwaived. Next ready shared dependency is connector6/twelve backend arms.

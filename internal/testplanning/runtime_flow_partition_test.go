@@ -10,7 +10,7 @@ import (
 )
 
 const originalRuntime02Selection = `^Test([D-E].*|F($|[^ao].*|a($|[^n].*|n($|[^O].*|O($|[^u].*|u($|[^t].*))))|o($|[^r].*|r($|[^k].*|k($|[^G].*)))))$`
-const originalRuntime02RequiredEvidence = "6abc0e274dae375592588471f77b26a9293470bb13489491e27429e0b9c4b81b"
+const originalRuntime02RequiredEvidence = "254945a257cf58784207c16e60a7c803d4f317d376b4a3d8841b51aabe3bdcaa"
 
 func TestRuntime02RequiredEvidenceRemainsExact(t *testing.T) {
 	if err := validateRuntime02RequiredEvidence(loadPersistenceDebtPolicy(t)); err != nil {

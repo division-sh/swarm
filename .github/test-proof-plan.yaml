@@ -1061,6 +1061,7 @@ units:
     # Positive RE2 complement of TestFanOut, TestFlow and TestForkG within D-F.
     run: '^Test([D-E].*|F($|[^alo].*|a($|[^n].*|n($|[^O].*|O($|[^u].*|u($|[^t].*))))|l($|[^o].*|o($|[^w].*))|o($|[^r].*|r($|[^k].*|k($|[^G].*)))))$'
     required_children:
+      TestDynamicFlowRuntimeReadinessStorageFaultsKeepNativeScopeBothStores: [sqlite, postgres]
       TestDormantStandingPreparationDoesNotConstructBothStores: [sqlite, postgres]
       TestForkActivationInventoriesConstructedHeadersBothStores: [sqlite/fieldless, sqlite/fields, postgres/fieldless, postgres/fields]
       TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBothStores: [postgres/creation_wins, postgres/terminal_wins, sqlite/creation_wins, sqlite/terminal_wins]

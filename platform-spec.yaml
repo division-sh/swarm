@@ -6945,6 +6945,21 @@ engine:
                 SQL, query/ordering selector or callback. Full and continuous workload placement and all cardinality,
                 version, numeric, timing and fairness assertions remain unchanged; exact D3/process-loss faults and
                 unrelated shared-fixture pool consumers remain separately tracked until their owners are migrated.
+              descriptor_readiness_fixture_construction: >-
+                Descriptor, readiness, attachment and route-recovery components use the existing prepared-flow
+                command and the original selected construction owner for headers, fields, initial materialization
+                and readiness. Prepared reader components do not qualify public constructor eligibility, installed
+                topology or executable authority; attachment proofs retain genuinely issued process capabilities
+                and generation grants. Historical source transitions construct under the predecessor source before
+                the canonical run-source revision. Malformed or absent readiness, creation-clock changes, ambiguous
+                fields and terminated/draining headers are named exact faults on an existing constructed owner,
+                never handwritten companion-row seeds or a reconstructed coordinator. Independent physical stamp
+                readback preserves grant/request NULLs, raw stored plan text, phase and the complete stored clock.
+                Exact later-row UPDATE failures are installed and removed through the same selected writer; the
+                trigger includes both run and path, and failed batches roll back every earlier row. Omitted/blank
+                entity-contract schema probes preserve the actual SQL rejection without granting construction or
+                revision permission. Raw, invalid, cancelled, unavailable or closed ownership yields no provisional
+                observation or mutation success. Fault resources are removed before selected-store teardown.
               nested_fan_out_fixture_observation: >-
                 Nested serving and repeated-trigger fixtures retain the original selected owner, not a returned pool,
                 in every constructor, readback helper and execution-boundary observer. Event identity discovery
