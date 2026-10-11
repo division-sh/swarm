@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -299,9 +300,16 @@ func TestServeSessionResumeCancellationRetainsJoinAndPossessionBothStores(t *tes
 			select {
 			case <-entered:
 			case <-time.After(5 * time.Second):
+				var stacks bytes.Buffer
+				if err := pprof.Lookup("goroutine").WriteTo(&stacks, 2); err != nil {
+					t.Log("resume original wait stack diagnostic:", err)
+				} else {
+					t.Logf("resume original wait stacks:\n%s", stacks.String())
+				}
 				cancel()
-				<-done
-				t.Fatal("resume did not enter the actual SDK handshake")
+				err := <-done
+				t.Fatal("resume did not enter the actual SDK handshake", "result", err,
+					"selections", f.selections.Load(), "constructed", f.adapter.connection(f.op.OperationID) != nil)
 			}
 			cancel()
 			select {
