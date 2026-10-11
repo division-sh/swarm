@@ -2,6 +2,7 @@ package bus
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -146,7 +147,7 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 		return nil, fmt.Errorf("compile declared agent names: %w", err)
 	}
 	for _, scope := range semanticview.FlowScopes(source) {
-		agents, err := routeAgentDeclarationsForOwner(source, scope.ID)
+		agents, err := routeAgentDeclarations(source, scope.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -157,15 +158,12 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 		}
 		rt.templates[runtimeflowidentity.ScopeKey(source, scope.ID)] = routeFlowTemplate{
 			FlowID:      scope.ID,
-			LocalEvents: cloneStringSet(localEvents),
+			LocalEvents: maps.Clone(localEvents),
 			Subscribers: subscribers,
 		}
 		definitions, staticPlans, err := compileRouteConnectDefinitions(graph, scope, subscribers)
 		if err != nil {
 			return nil, err
-		}
-		if rt.connectDefinitions == nil {
-			rt.connectDefinitions = make(map[string][]runtimepinrouting.ConnectRecipientRegistration)
 		}
 		rt.connectDefinitions[scope.ID] = definitions
 		for _, plan := range staticPlans {
@@ -310,10 +308,11 @@ func connectRecipientSubscribers(evaluation runtimepinrouting.ConnectRecipientEv
 
 func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.CompiledConnectGraph) *RouteTable {
 	return &RouteTable{
-		source:           source,
-		templates:        make(map[string]routeFlowTemplate),
-		staticAgentPlans: make(map[agentidentity.Plan]struct{}),
-		connectGraph:     graph,
+		source:             source,
+		templates:          make(map[string]routeFlowTemplate),
+		connectDefinitions: make(map[string][]runtimepinrouting.ConnectRecipientRegistration),
+		staticAgentPlans:   make(map[agentidentity.Plan]struct{}),
+		connectGraph:       graph,
 	}
 }
 
@@ -322,11 +321,8 @@ type routeAgentDeclaration struct {
 	NamePlan    semanticview.AgentNamePlan
 }
 
-func routeAgentDeclarationsForOwner(source semanticview.Source, ownerFlowID string) ([]routeAgentDeclaration, error) {
-	return routeAgentDeclarations(source, semanticview.AgentDeclarationsForOwner(source, ownerFlowID))
-}
-
-func routeAgentDeclarations(source semanticview.Source, declarations []semanticview.AgentDeclaration) ([]routeAgentDeclaration, error) {
+func routeAgentDeclarations(source semanticview.Source, ownerFlowID string) ([]routeAgentDeclaration, error) {
+	declarations := semanticview.AgentDeclarationsForOwner(source, ownerFlowID)
 	out := make([]routeAgentDeclaration, 0, len(declarations))
 	for _, declaration := range declarations {
 		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
@@ -368,23 +364,16 @@ func routeFlowLocalEventSetWithInputProducers(scope semanticview.FlowScope, inpu
 }
 
 func routeFlowInputProducerIsExternal(resolution runtimecontracts.FlowInputProducerResolution) bool {
-	switch {
-	case resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress):
-		return true
-	case resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress):
-		return true
-	case resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect):
-		return true
-	case resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerPlatformSource):
-		return true
-	default:
-		return false
-	}
+	return resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) ||
+		resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) ||
+		resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) ||
+		resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerPlatformSource)
 }
 
 func routeEventKeys(events map[string]runtimecontracts.EventCatalogEntry) map[string]struct{} {
 	out := make(map[string]struct{}, len(events))
-	for _, eventType := range sortedStringKeys(events) {
+	for eventType := range events {
+		eventType = strings.TrimSpace(eventType)
 		if eventType != "" {
 			out[eventType] = struct{}{}
 		}
@@ -423,8 +412,7 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 	if err != nil {
 		return nil, err
 	}
-	for _, declaration := range nodes {
-		handlerNode := declaration.Node
+	for _, handlerNode := range nodes {
 		semanticNodeID := handlerNode.NodeID()
 		patterns := source.ExecutableNodeRuntimeSubscriptions(handlerNode)
 		if len(patterns) == 0 {
@@ -455,14 +443,10 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 	return out, nil
 }
 
-type routeExecutableNodeDeclaration struct {
-	Node runtimeidentity.ExecutableNode
-}
-
-func routeExecutableNodeDeclarations(source semanticview.Source, flowPath string, expected map[string]runtimecontracts.SystemNodeContract) ([]routeExecutableNodeDeclaration, error) {
+func routeExecutableNodeDeclarations(source semanticview.Source, flowPath string, expected map[string]runtimecontracts.SystemNodeContract) ([]runtimeidentity.ExecutableNode, error) {
 	flowPath = strings.TrimSpace(flowPath)
 	found := make(map[string]struct{}, len(expected))
-	out := make([]routeExecutableNodeDeclaration, 0, len(expected))
+	out := make([]runtimeidentity.ExecutableNode, 0, len(expected))
 	for _, record := range source.ExecutableNodeRecords() {
 		node, err := record.Identity()
 		if err != nil {
@@ -478,14 +462,14 @@ func routeExecutableNodeDeclarations(source semanticview.Source, flowPath string
 			return nil, fmt.Errorf("route subscriber node %q has multiple exact declaration owners in flow %q", record.LogicalID, flowPath)
 		}
 		found[record.LogicalID] = struct{}{}
-		out = append(out, routeExecutableNodeDeclaration{Node: node})
+		out = append(out, node)
 	}
 	for nodeID := range expected {
 		if _, ok := found[nodeID]; !ok {
 			return nil, fmt.Errorf("route subscriber node %q has no exact declaration owner in flow %q", nodeID, flowPath)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Node.Key() < out[j].Node.Key() })
+	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
 	return out, nil
 }
 
@@ -605,32 +589,6 @@ func subscriberMatchEvidenceRank(pattern string) int {
 		return 1
 	}
 	return 2
-}
-
-func cloneStringSet(in map[string]struct{}) map[string]struct{} {
-	if len(in) == 0 {
-		return map[string]struct{}{}
-	}
-	out := make(map[string]struct{}, len(in))
-	for key := range in {
-		out[key] = struct{}{}
-	}
-	return out
-}
-
-func sortedStringKeys[T any](m map[string]T) []string {
-	if len(m) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(m))
-	for key := range m {
-		key = strings.TrimSpace(key)
-		if key != "" {
-			out = append(out, key)
-		}
-	}
-	sort.Strings(out)
-	return out
 }
 
 func normalizeStringList(in []string) []string {
