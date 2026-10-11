@@ -537,7 +537,6 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"ready"'::jsonb, $3::uuid, 'platform', 'cli-test', 'seed', $4),
 			($1::uuid, $2::uuid, 'authored_field', 'name', 'null'::jsonb, '"CLI Entity"'::jsonb, $3::uuid, 'platform', 'cli-test', 'seed', $4)
 	`, runID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed mutations: %v", err)
@@ -554,6 +553,9 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	`, runID, entityID, at); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
+	// Prove historical lifecycle through real declared construction; the
+	// independent import supplies business fields, not a fictional stage.
+	seedRunForkCLIConstruction(t, db, runID, bundleHash, at)
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	forkPointEventID := stageRunForkCLIForkPoint(t, db, runID, entityID, at.Add(time.Millisecond))
 	var buf bytes.Buffer
@@ -617,8 +619,12 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 		records = append(records, mutationlog.ProjectionMutation{Domain: mutationlog.Domain(mutation.Domain), Path: mutation.Path, NewValue: value})
 	}
 	historical, err := mutationlog.ReconstructEntityStateProjection(records)
-	if err != nil || historical.CurrentState == nil || *historical.CurrentState != "ready" || !reflect.DeepEqual(historical.Fields, forkFields) {
+	if err != nil || historical.CurrentState != nil || !reflect.DeepEqual(historical.Fields, forkFields) {
 		t.Fatalf("fork historical cut changed: %+v err=%v", historical, err)
+	}
+	var forkRootStage string
+	if err := db.QueryRowContext(ctx, `SELECT current_state FROM flow_instances WHERE run_id=$1::uuid AND entity_id=$1::uuid AND instance_path=$2`, result.ForkRunID, result.ForkRunID).Scan(&forkRootStage); err != nil || forkRootStage != "idle" {
+		t.Fatalf("fork lost the actual declared root's fixed stage: stage=%q err=%v", forkRootStage, err)
 	}
 	var persistedBindingMode string
 	if err := db.QueryRowContext(ctx, `
