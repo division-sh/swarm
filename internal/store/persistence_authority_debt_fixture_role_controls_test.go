@@ -75,8 +75,8 @@ func TestPersistenceAuthorityDebtFixtureRoleTransitionIsExactAndMetadataOnly(t *
 func TestPersistenceAuthorityDebtFixtureRoleFingerprintIsRequired(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	digest, err := debtCollectorDigest(root)
-	if err != nil || digest != debtForkProofCollectorTo {
-		t.Fatalf("source-pinned fork-proof destination=%s actual=%s error=%v", debtForkProofCollectorTo, digest, err)
+	if err != nil || (digest != debtForkProofCollectorTo && digest != debtProcessLeaseCollectorTo) {
+		t.Fatalf("source-pinned fork/process destination=%s/%s actual=%s error=%v", debtForkProofCollectorTo, debtProcessLeaseCollectorTo, digest, err)
 	}
 	copy := t.TempDir()
 	for _, path := range []string{
@@ -84,6 +84,7 @@ func TestPersistenceAuthorityDebtFixtureRoleFingerprintIsRequired(t *testing.T) 
 		"internal/store/persistence_authority_debt_test.go",
 		"internal/store/persistence_authority_debt_cache_test.go",
 		"internal/store/persistence_authority_debt_sidecar_test.go",
+		"internal/store/persistence_authority_debt_process_lease_test.go",
 		"internal/checkoutsource/fixture_role.go",
 	} {
 		data, err := os.ReadFile(filepath.Join(root, path))
