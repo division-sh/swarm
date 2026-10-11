@@ -24,6 +24,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -457,6 +458,10 @@ func seedActivityEvidenceReuse(t *testing.T, fixture authorActivityReceiptFixtur
 }
 
 func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixture, postgres, approved bool, status string, loopAttempt int, ordinaryReplay, pendingCard bool) (runfork.RunForkMaterialization, events.Event, runtimepipeline.ActivityAttemptRecord) {
+	return seedActivityEvidenceForForkWithReply(t, fixture, postgres, approved, status, loopAttempt, ordinaryReplay, pendingCard, false)
+}
+
+func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityReceiptFixture, postgres, approved bool, status string, loopAttempt int, ordinaryReplay, pendingCard, carryReply bool) (runfork.RunForkMaterialization, events.Event, runtimepipeline.ActivityAttemptRecord) {
 	t.Helper()
 	runID, parentID := uuid.NewString(), uuid.NewString()
 	entityID := ""
@@ -507,6 +512,16 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 	}
 	constructed := constructSelectedActivityProducerFixture(t, ctx, fixture.store.(agentFixtureFlowStore), declarations, parent, flow, at)
 	instance, entityID = constructed.InstancePath, constructed.EntityID
+	var replyID string
+	if carryReply {
+		record := replyContextFreezeTestRecord(parent.ID(), runID, "activity", at)
+		record.RequesterFlowID, record.Origin = flow, events.RouteIdentity{FlowID: flow, FlowInstance: instance, EntityID: entityID}
+		record.ID = replycontext.DeterministicID(record.RequestEventID, record.RequesterFlowID, record.RequestOutputPin, record.ReplyInputPin, record.ProviderFlowID, record.Origin)
+		if err := fixture.store.(replycontext.Store).CreateReplyContext(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+		replyID = record.ID
+	}
 	if !approved {
 		if ordinaryReplay {
 			source = eventtest.RootRoutingSource(runID)
@@ -598,7 +613,7 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 		RequestEventID: requestID, RunID: runID, SourceEventID: parentID, ExecutionMode: executionmode.Live,
 		EntityID: entityID, FlowInstance: instance, NodeID: owner.Key(), HandlerEventKey: handler, ActivityID: activity, Tool: tool,
 		EffectClass: "non_idempotent_write", Attempt: 1, SuccessEvent: success, FailureEvent: failure, InputHash: "recorded-input-hash",
-		Generation: generation, LoopStage: loopStage,
+		Generation: generation, LoopStage: loopStage, ReplyContextID: replyID,
 	})
 	if err != nil || !inserted {
 		t.Fatalf("canonical journal start: inserted=%v err=%v", inserted, err)
