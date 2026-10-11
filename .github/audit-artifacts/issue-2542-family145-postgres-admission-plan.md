@@ -2422,10 +2422,13 @@ private descriptor/readiness13, keeping its remaining two private S calls apart.
 Checkpoint qualification limits: the one fresh global ratchet is RED181.424s,
 actual9232 versus trusted/head10688, on one new SQLite concrete-construction
 identity in the earlier stage-completion cohort. Its independently owned native
-reopen closure moved construction into the root; PostgreSQL already returns
-the opaque owned fixture. This is not a Template9 addition, nor one of the
-previously authorized signature transitions. Baseline/collector unchanged;
-bounded aperture-versus-exact-transition disposition requested on #2542. No
+reopen closure moved construction into the root. The original request incorrectly
+claimed PostgreSQL returns an opaque fixture: both native APIs return concrete
+adapters. The trusted PostgreSQL root already owned its constructor occurrence,
+while the SQLite predecessor was counted only in stageCompletionRehydrate.
+This is not a Template9 addition, nor one of the previously authorized signature
+transitions. Baseline/collector were unchanged at that checkpoint; ruling
+6112778624 subsequently authorized the exact bookkeeping repair below. No
 retry, baseline payment, general allowance or parent-closure claim.
 
 The text-retirement inventory also finds four new immutable/current diagnostic
@@ -2435,3 +2438,59 @@ with the existing extra-reference/changed-field/body hostile controls retained.
 No whole-file or prefix exemption, code restoration or historical-text edit.
 Expected reference multiplicity grows by two per corpus, not authority debt.
 The global ratchet blocker remains separate from this lexical classification.
+
+## Exact stage-completion debt relocation (6112778624)
+
+The existing finite comparison owner authorizes exactly one SQLite occurrence:
+stageCompletionRehydrate -> TestExactStageCompletionRealWriterAndRehydratedSourceBothStores
+in operator_stage_completion_journey_test.go, selected-store-construction,
+construction:*store.SQLiteRuntimeStore. The full resolved type, authority-carrier
+family and replacement-owner text remain identical, with multiplicity1 ->1.
+This is retained debt with ZERO deletion credit. It is not folded into the nine
+run-signature transitions, and no PostgreSQL donor or general move is admitted.
+
+Actual/head/trusted-baseline/trusted-source comparisons normalize only the exact
+forward pair. Both reviewed whole journey sources pin declaration bodies and
+imports; the unchanged runtime_reopen.go pin retains independent factory
+construction and reverse-order joined cleanup. Missing, changed or duplicate
+predecessors, multiplicity2, coexistence in any of the four states, reverse and
+resurrection, foreign identity fields, PostgreSQL donors and unrelated added
+authority despite a lower total all refuse. Source/factory mutation controls
+also refuse; landed no-op and genuine subsequent deletion remain possible.
+Neither native API nor stage-completion execution source changed.
+
+Collector rotation is pinned3958381013996586ea697cd868abcacec29e9316706276f603f32523f74b5cb6
+->fc9b79436920f7984a42bafc04a40dd463568bdc056891d38dc1149e926af0b9,
+only for that exact retained occurrence and existing downward subset checks.
+The immutable predecessor digest is independently recomputed from2b2079761.
+The existing history-input inventory provisions this exact source object for
+internal/store; its ordering/fetch/refusal/head-preservation tests pass. No
+collector discovery relaxation, scan narrowing, arbitrary hash acceptance,
+baseline payment, test-source exemption or new framework is introduced.
+platform-spec.yaml structural_enforcement.temporary_debt_ratchet records the
+exact reviewed accounting authorization, not new runtime or reopen semantics.
+
+Vemew receipts, stage-relocation-* under ~/.cache/swarm-2542-family145:
+all affected old/new transition and sidecar controls PASS1.299s; final new
+hostiles including the explicit PostgreSQL donor PASS0.110s; carried finite
+stage/reopen/caller/historical controls PASS4.830s; native plan binding and
+pipeline/RunFork partition controls PASS18.607s; exact history and actual
+codemod timing-placement controls PASS0.833s. U1000 clean. Unchanged runtime
+and independent reopening receipts carry; no duplicate tier or runtime rerun.
+
+One fresh authoritative census/downward refresh PASS440.670s (package441.422s):
+trusted integration base2b2079761, baseline10688 ->9232, genuine removals1456,
+added0. The SQLite root occurrence remains exactly1, and its moved predecessor
+is NOT logged as removed. Full census54880 findings /39131 raw-operation sites
+(including legitimate owner implementations); remaining debt9232 contains6672
+confirmed raw-operation occurrences plus67 unresolved excluded occurrences.
+Those are different metrics, not9232 raw SQL bugs or39131 migration sites.
+Generated TSV and checksum-bound sidecar come only from the supported refresh.
+
+Named admission queue remains118 =103 external +15 private, M0/D81/S37.
+This repair earns zero migration credit. Template9 is independently approved
+at6b9e7e308; the aggregate ratchet is now qualified, not parent closure or
+landing readiness. D3 SQL-order, M07 possession loss, rollback, M01, Docker and
+semantic-drain holds remain unwaived. Continue the whole ready serving/supplemental
+dependency, otherwise descriptor/readiness13; keep exact held-child, cancellation,
+acknowledgment uncertainty, receipt, identity and fault temporal cuts.

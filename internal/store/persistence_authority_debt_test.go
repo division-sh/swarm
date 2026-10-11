@@ -134,7 +134,11 @@ func authorityDebtSubset(actual, allowed map[string]authorityDebtSite, label str
 }
 
 func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDebtSite) []string {
-	head, base, baseActual, failures := debtRunFixtureSignatureComparisons(actual, head, base, baseActual)
+	head, base, baseActual, failures := debtStageCompletionComparisons(actual, head, base, baseActual)
+	if len(failures) != 0 {
+		return failures
+	}
+	head, base, baseActual, failures = debtRunFixtureSignatureComparisons(actual, head, base, baseActual)
 	if len(failures) != 0 {
 		return failures
 	}
@@ -156,6 +160,83 @@ func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDeb
 	failures = append(failures, authorityDebtSubset(head, base, "head -> trusted baseline")...)
 	failures = append(failures, authorityDebtSubset(actual, baseActual, "actual -> trusted source (resurrection)")...)
 	return failures
+}
+
+// Ruling 6112778624 authorizes one declaration relocation, not a debt removal.
+func debtStageCompletionTransition() (authorityDebtSite, authorityDebtSite) {
+	old := authorityDebtSite{
+		Kind: "selected-store-construction", File: "internal/apiv1/operator_stage_completion_journey_test.go",
+		Declaration: "stageCompletionRehydrate",
+		Operation:   "construction:*github.com/division-sh/swarm/internal/store.SQLiteRuntimeStore",
+		Resolved:    "*github.com/division-sh/swarm/internal/store.SQLiteRuntimeStore", Family: "authority-carrier",
+		Replacement: "original selected construction/work-lifetime owner; no getter or transaction-context recovery", Multiplicity: 1,
+	}
+	current := old
+	current.Declaration = "TestExactStageCompletionRealWriterAndRehydratedSourceBothStores"
+	return old, current
+}
+
+func debtStageCompletionComparisons(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
+	old, current := debtStageCompletionTransition()
+	for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
+		if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
+			return head, base, source, []string{"both reviewed stage-completion construction identities survive"}
+		}
+	}
+	if actual[current.identity()] == current && actual[old.identity()].Multiplicity == 0 &&
+		base[old.identity()] == old && base[current.identity()].Multiplicity == 0 &&
+		source[old.identity()] == old && source[current.identity()].Multiplicity == 0 {
+		head = debtForwardQuiescenceUncertainty(head, old, current)
+		base = debtForwardQuiescenceUncertainty(base, old, current)
+		source = debtForwardQuiescenceUncertainty(source, old, current)
+	}
+	return head, base, source, nil
+}
+
+func debtStageCompletionSourcePins(root string, forward bool) error {
+	// Whole-file pins include both declaration bodies, imports and the factory's
+	// independent construction and reverse-order cleanup. No product code moves.
+	journey := "1dbe3fb4fae40329c6e3dff70e7e8f0ab10eda60dfa205f1c1e244bd1582cae7"
+	if forward {
+		journey = "c4d8f0768a8b8e0988b97196b2c7dc0df4db593bcaac32783c553204ef298ee8"
+	}
+	for _, pin := range [][2]string{
+		{"internal/apiv1/operator_stage_completion_journey_test.go", journey},
+		{"internal/store/storetest/runtime_reopen.go", "5dd3752bfbb96b53916e428f056be160751456fd2cf7414d8cbaad00b9808a89"},
+	} {
+		data, err := os.ReadFile(filepath.Join(root, pin[0]))
+		if err != nil {
+			return err
+		}
+		if debtBaselineChecksum(data) != pin[1] {
+			return fmt.Errorf("reviewed stage-completion relocation source changed: %s", pin[0])
+		}
+	}
+	return nil
+}
+
+func debtStageCompletionSourceTransition(root, baseRoot string, actual, source map[string]authorityDebtSite) error {
+	old, current := debtStageCompletionTransition()
+	if actual[current.identity()] != current || source[old.identity()] != old {
+		return nil // Landed no-op and genuine subsequent deletion need no relocation.
+	}
+	if err := debtStageCompletionSourcePins(root, true); err != nil {
+		return err
+	}
+	return debtStageCompletionSourcePins(baseRoot, false)
+}
+
+func debtStageCompletionCollectorTransition(base, current string, trusted, head authorityDebtBaseline) bool {
+	old, forward := debtStageCompletionTransition()
+	if base != debtFixtureRoleCollectorTo || trusted.Collector != base ||
+		current != debtStageCompletionCollectorTo || head.Collector != current {
+		return false
+	}
+	if trusted.Sites[old.identity()] != old || trusted.Sites[forward.identity()].Multiplicity != 0 ||
+		(head.Sites[old.identity()] != old && head.Sites[forward.identity()] != forward) {
+		return false
+	}
+	return len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0
 }
 
 // Reviewed at 2b699b9af7c05fb8f319ae190f9c2f802bd7bd10 ->
@@ -643,13 +724,17 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	if bootstrap && !debtSitesEqual(head.Sites, trusted.Sites) {
 		t.Fatal("bootstrap baseline must equal actual extraction-base debt exactly")
 	}
+	if err := debtStageCompletionSourceTransition(root, baseRoot, actual, baseActual); err != nil {
+		t.Fatal(err)
+	}
 	failures := authorityDebtRatchet(actual, head.Sites, trusted.Sites, baseActual)
 	if len(failures) > 0 {
 		t.Fatalf("authority debt ratchet failed: base=%s old=%d head=%d actual=%d\n%s", base, authorityDebtCount(trusted.Sites), authorityDebtCount(head.Sites), authorityDebtCount(actual), strings.Join(failures, "\n"))
 	}
 	if refresh == "downward" {
 		removed := authorityDebtCount(head.Sites) - authorityDebtCount(actual)
-		normalized, _, _, _ := debtRunFixtureSignatureComparisons(actual, head.Sites, trusted.Sites, baseActual)
+		normalized, normalizedBase, normalizedSource, _ := debtStageCompletionComparisons(actual, head.Sites, trusted.Sites, baseActual)
+		normalized, _, _, _ = debtRunFixtureSignatureComparisons(actual, normalized, normalizedBase, normalizedSource)
 		for _, key := range debtSortedKeys(normalized) {
 			before := normalized[key]
 			after := actual[key].Multiplicity
@@ -704,6 +789,9 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return fmt.Errorf("debt baseline bootstrap source changed")
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
+		return nil
+	}
+	if debtStageCompletionCollectorTransition(base, current, trusted, head) {
 		return nil
 	}
 	if current == debtFixtureRoleCollectorTo && head.Collector == current {
