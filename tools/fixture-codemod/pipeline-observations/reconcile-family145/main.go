@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "31a6dde7d1b6f2ec10d29f31be60028f5eb0eec59478a353d87d34f6f1f21fb7"
+const targetDigest = "a8dc10b83319b019b7e916e4ac2e805c3c08f9a9e1518d50ad99057f9618c468"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -93,6 +93,7 @@ var files = []string{
 	"internal/runtime/github_app_issue_comment_supported_surface_test.go",
 	"internal/runtime/github_app_issue_workflow_supported_surface_test.go",
 	"internal/runtime/channel_runtime_supported_surface_test.go",
+	"internal/runtime/operator_channel_inbound_supported_surface_test.go",
 	"internal/runtime/template_flow_pilot_runtime_test.go",
 	"internal/runtime/final_flow_instance_authoring_runtime_test.go",
 	"internal/runtime/artifact_action_result_delivery_test.go",

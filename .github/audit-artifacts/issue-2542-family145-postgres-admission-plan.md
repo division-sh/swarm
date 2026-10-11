@@ -2784,3 +2784,51 @@ unchanged; signed-head complexity is recorded alongside these receipts.
 This closes only this whole caller/observer carrier. Parent and M01/Docker/drain/
 D3/M07/rollback qualifications remain open, unwaived. Existing architecture and
 watchlist tracking remains sufficient. No new issue/framework, push, PR or server2.
+
+## Whole signed operator-channel inbound carrier
+
+The complete signed Telegram operator-channel fixture now opens native owners
+at its original location and passes only the original selected role to the
+shared setup. Existing source-aware standing-target constructors, principal,
+sealed credential, binding, signed gateway traffic and bus quiescence remain.
+The caller/helper chain contains no supplied-pool admission, DB getter,
+dialect transport or raw query. Factory cleanup is registered before consumers,
+preserving their existing joined teardown before native store/sandbox close.
+
+| Owner | Complete changed consumption / original physical contract |
+| --- | --- |
+| Native selected construction and existing inbound recipes | Both original backend arms and the shared supported-surface helper; concrete native role selection replaces the independent dialect argument without inferring authority. |
+| operatorchannel | Two fixed read ports preserve separate snapshots: all physical action-intent rows, and raw fact bytes filtered by provider_event_id alone. No provider, principal, interface, run, status or readiness filter, ordering, decoder or eligibility rule is added. |
+| Original selected read coordinator | Private bridges validate original initialized ownership, execute each fixed read on that owner's read transaction and discard provisional results on failure. Native transaction receipts prove one read commit and no writer commit for each original gateway observation. |
+| Finite codemod and historical predicate owner | Two additional exact transitions; corpus327 / recipes1153. Immutable Before inputs and original behavioral assertions remain. Hostile loss of signed traffic, selected scope, constructors, transaction counters or any original assertion is rejected; fixed SQL is compared against the two historical predicates, including the explicitly bound original provider event. |
+
+| Manifestation | Disposition / exact proof |
+| --- | --- |
+| Signed callbacks cannot claim ownership; valid direct/shared claims, confirmation and text preserve identity | reproduced and fixed: TestInboundGatewaySignedTelegramOperatorChannelClaimSelectedStoreParity, both stores under race PASS14.860s; all original provider bodies and assertions retained, plus complete three-callback physical inventory and original-coordinator read receipts |
+| Missing text, empty count, invalid/raw/typed-nil/cancelled/closed owners | execution-proven through the same corrected path: TestOperatorChannelStorageObservationRejectsInvalidCancelledAndClosedOwnersBothStores, both stores under race PASS9.170s; original sql.ErrNoRows/zero and no provisional facts on error |
+| Entire helper/caller chain and precise physical predicates | execution-proven through the same corrected path: TestFamily145OperatorChannelWholeChainPreservesSignedTrafficAndAssertions and TestFamily145OperatorChannelReadOwnersKeepExactPhysicalScope with hostile controls; all family145 guards and immutable recipe/idempotency/source controls PASS9.581s |
+
+Receipts /home/youmew/.cache/swarm-2542-family145/operator-channel-*.
+Daily rebase onto26701e7b1 preserves all signed cohorts without conflicts;
+affected native transaction-ordering and author-activity controls PASS under race.
+Boundary/revision/writer guards PASS3.488s, retired-reference guards PASS6.196s,
+proof-plan binding PASS11.042s, dry-run Changes=[], affected U1000 clean.
+Unchanged wider matrix/corpus-overlay receipts carry; no local tier/full.
+
+Local development failures were repaired before these receipts: an incorrect
+internal dialect helper name, unquoted YAML punctuation and the new finite
+assertion dispatch. The real ratchet additionally rejected two typed-nil cast
+construction occurrences. Zero-valued typed pointer declarations retain those
+hostile controls without constructing authority; no classifier exception,
+baseline increase, occurrence transition or assertion loss is used.
+
+Final downward ratchet PASS23.330s:9033 ->9021,12 removals,0 additions;
+confirmed raw-operation debt6518 ->6509, excluded uncertainty67 unchanged.
+Broader collector54737 findings /39034 raw sites includes legitimate owners
+and master additions, not the migration denominator. Supplied-pool queue96 ->95
+=93 external +2 private, provisional M0/D58/S37; qualified openings39.
+Collector/policy and retained one-way debt are unchanged. Signed-head complexity
+is recorded with the receipts. Parent/M01/Docker/drain/D3/M07/rollback remain
+open and unwaived; no process-restart, parent closure or merge qualification is
+claimed. Existing watchlist/architecture disposition is sufficient. No new
+issue, framework, PR, push or server2. Next ready chain is native bus routing.

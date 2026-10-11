@@ -2,7 +2,6 @@ package runtime_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,7 +20,6 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -34,32 +32,33 @@ type operatorChannelInboundSelectedStore interface {
 
 func TestInboundGatewaySignedTelegramOperatorChannelClaimSelectedStoreParity(t *testing.T) {
 	t.Run("postgres", func(t *testing.T) {
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		selected := storetest.AdmitPostgresRuntimeStore(t, db)
+		selected := storetest.StartPostgresRuntimeStore(t)
 		runID, entityID := boundedInboundTestCoordinates()
-		runOperatorChannelInboundSupportedSurface(t, selected, db, false,
+		runOperatorChannelInboundSupportedSurface(t, selected,
 			runID, entityID,
 			boundedProviderFlowID)
 	})
 	t.Run("sqlite", func(t *testing.T) {
 		selected := storetest.StartSQLiteRuntimeStore(t)
 		runID, entityID := boundedInboundTestCoordinates()
-		runOperatorChannelInboundSupportedSurface(t, selected, storetest.DatabaseForTest(selected), true,
+		runOperatorChannelInboundSupportedSurface(t, selected,
 			runID, entityID,
 			boundedProviderFlowID)
 	})
 }
 
-func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorChannelInboundSelectedStore, db *sql.DB, sqlite bool, runID, entityID, flowInstance string) {
+func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorChannelInboundSelectedStore, runID, entityID, flowInstance string) {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	source := providerRawSettlementSemanticSource(t, runtimepkg.InboundTarget{FlowPath: flowInstance, Alias: entityID}, providerRawSettlementCase{provider: "telegram", eventName: "inbound.telegram"}, "telegram-secret")
 	var inboundTarget runtimepkg.InboundTarget
-	if sqlite {
-		inboundTarget = seedSQLiteInboundGatewayRuntime(t, ctx, selected.(*store.SQLiteRuntimeStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer", source)
-	} else {
-		inboundTarget = seedPostgresInboundGatewayRuntime(t, ctx, selected.(*store.PostgresStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer", source)
+	switch owner := selected.(type) {
+	case *store.SQLiteRuntimeStore:
+		inboundTarget = seedSQLiteInboundGatewayRuntime(t, ctx, owner, runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer", source)
+	case *store.PostgresStore:
+		inboundTarget = seedPostgresInboundGatewayRuntime(t, ctx, owner, runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer", source)
+	default:
+		t.Fatalf("operator inbound fixture requires an original native owner, got %T", selected)
 	}
 
 	plan := compileEmbeddedTelegramOperatorChannelPlan(t)
@@ -163,6 +162,7 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 			body: fmt.Sprintf(`{"update_id":7309,"message":{"message_id":15,"from":{"id":777000},"sender_chat":{"id":-100201,"type":"channel","title":"Ops"},"chat":{"id":-43,"type":"supergroup"},"text":"%s"}}`, operation.Challenge),
 		},
 	}
+	probe := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 	for _, tc := range negativeBodies {
 		t.Run(tc.name, func(t *testing.T) {
 			response := publishOperatorChannelTelegramUpdate(t, gateway, bus, inboundTarget, ctx, []byte(tc.body))
@@ -178,9 +178,14 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 				t.Fatalf("non-proof response = %#v, want events %v without setup claim", response, wantEvents)
 			}
 			if tc.actionIntent {
-				var count int
-				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM operator_channel_action_intents`).Scan(&count); err != nil || count < 1 {
+				before := probe.Snapshot()
+				count, err := storetest.CountOperatorChannelActionIntentStorage(ctx, selected)
+				if err != nil || count < 1 {
 					t.Fatalf("verified callback intent count = %d, err=%v", count, err)
+				}
+				after := probe.Snapshot()
+				if after.Total.ReadCommits-before.Total.ReadCommits != 1 || after.Total.WriteCommits != before.Total.WriteCommits {
+					t.Fatalf("action observation escaped the original read coordinator: before=%+v after=%+v", before, after)
 				}
 			}
 			requireOperatorChannelOperationState(t, selected, principal.ID, operation.OperationID, operatorchannel.StateAwaitingClaim, 1)
@@ -239,13 +244,21 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 	if textResponse.TextDisposition != "pending" || len(textResponse.EventNames) != 0 {
 		t.Fatalf("verified operator text disposition = %#v", textResponse)
 	}
-	var textFact []byte
-	if err := db.QueryRowContext(ctx, `SELECT fact FROM operator_channel_text_intents WHERE provider_event_id='7320'`).Scan(&textFact); err != nil {
+	before := probe.Snapshot()
+	textFact, err := storetest.ReadOperatorChannelTextIntentFactStorage(ctx, selected, "7320")
+	if err != nil {
 		t.Fatal(err)
+	}
+	after := probe.Snapshot()
+	if after.Total.ReadCommits-before.Total.ReadCommits != 1 || after.Total.WriteCommits != before.Total.WriteCommits {
+		t.Fatalf("text observation escaped the original read coordinator: before=%+v after=%+v", before, after)
 	}
 	var projected operatorchannel.TextFact
 	if err := json.Unmarshal(textFact, &projected); err != nil || projected.MessageReference != `{"id":20}` || projected.ReplyToReference != `{"id":19}` || projected.Text != "reason text" {
 		t.Fatalf("durable verified operator text = %#v, err=%v", projected, err)
+	}
+	if count, err := storetest.CountOperatorChannelActionIntentStorage(ctx, selected); err != nil || count != 3 {
+		t.Fatalf("complete physical callback inventory = %d, err=%v", count, err)
 	}
 }
 
