@@ -558,6 +558,11 @@ func (s *recordingTeardownStore) CompleteChannelTeardown(ctx context.Context, re
 	return TeardownOperation{}, ErrNotFound
 }
 
+func (s *recordingTeardownStore) RecoverUnlaunchedChannelLogout(ctx context.Context, _ string, _ int64, _ time.Time) (TeardownOperation, error) {
+	s.observe(ctx)
+	return TeardownOperation{}, ErrConflict
+}
+
 type recordingDestructiveIdentities struct {
 	calls              *[]string
 	principal          operatorchannel.Principal
