@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 91 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "faed9b91cb0240c4e75ebd3f693da97090f0da9792214003877427884776f7ce" {
+	if err != nil || len(rows) != 92 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "40f2674454a39193feee705a18000dc3bb9446b518ff45d44d04dbf932970c02" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -54,6 +54,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 			t.Fatalf("changed binding/workload accepted: %s", row.Function)
 		}
 		if family145SemanticOwner(row.Function) {
+			assertFamily145SemanticProofs(t, row.Function, row.Before, row.After)
 			continue
 		}
 		beforeAssertions, beforeErr := runSetupAssertions(row.Before)
@@ -64,6 +65,37 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 	}
 }
 
+func assertFamily145SemanticProofs(t testing.TB, function, beforeSource, afterSource string) {
+	t.Helper()
+	if function != "TestTerminalPanicFinalizationBothStores" {
+		return
+	}
+	before, after := family145PanicLifecycleCalls(beforeSource), family145PanicLifecycleCalls(afterSource)
+	if len(before) != 2 || strings.Join(before, "\n") != strings.Join(after, "\n") {
+		t.Fatal("terminal panic migration changed or removed its real lifecycle proofs")
+	}
+}
+
+func family145PanicLifecycleCalls(source string) []string {
+	file, err := parser.ParseFile(token.NewFileSet(), "panic.go", "package proof\n"+source, parser.AllErrors)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		member, ok := call.Fun.(*ast.SelectorExpr)
+		if ok && (member.Sel.Name == "ProveTerminalPanicFinalization" || member.Sel.Name == "ProveTerminalPanicMutationFailure") {
+			out = append(out, family145NodeString(call))
+		}
+		return true
+	})
+	return out
+}
+
 func family145SemanticOwner(function string) bool {
 	switch function {
 	case "captureSelectedExecutionSourceRevision", "admitSelectedExecutionSourceArtifact",
@@ -71,7 +103,7 @@ func family145SemanticOwner(function string) bool {
 		"selectedForkExecutableMutationSnapshotForTest", "selectedContractDynamicRuntimeGlobalSnapshot",
 		"assertSelectedContractDeferredWorkRejectionHasNoForkMutation",
 		"postgresEventDeliveryTargetRoutes", "scanDeliveryTargetRoutes", "seedEventPublishConstructedFlow",
-		"assertRunStartPersistence":
+		"assertRunStartPersistence", "TestTerminalPanicFinalizationBothStores":
 		return true
 	}
 	return false

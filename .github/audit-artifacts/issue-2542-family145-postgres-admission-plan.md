@@ -313,6 +313,33 @@ New focused receipts on vemew, Go1.25.0 / race / count1 / GOMAXPROCS=2:
 No broad tier, global census, baseline rewrite, push or PR was run. Whole-family
 retirement, zero-added downward ratchet and final supported-surface obligations
 remain open; these local receipts do not claim their completion.
+
+## Terminal Panic Fault Cohort
+
+The terminal-panic family now uses native construction and a named agent-owner
+fault under the original selected mutation coordinator. No raw getter, caller
+SQL, trigger predicate or separate shutdown/sandbox cleanup remains in the test.
+The existing admitted declaration is checked before installing either fixed
+failed-only or failed-plus-registered trigger. The exact rollback message and
+both original real lifecycle proof calls are preserved; their exact call shapes
+are independently compared in the finite transition control. PostgreSQL function
+and trigger installation commit together; SQLite joins original writer admission.
+Missing-agent, cancelled and foreign-owner cuts refuse before valid installation.
+The four fault cells each count one acknowledged original native write, no
+historical revision finalization and no active installation after completion.
+
+terminal-panic-native-final.jsonl: all six both-backend success/commit-failure/
+commit-and-finalizer-failure cells passed under race, 19.474s. The unchanged real
+manager proof still verifies failed durable mutation, finalization and joined
+cleanup rather than a simulated result. terminal-panic-writer-guard.jsonl passed
+the affected closed writer census, 0.333s. terminal-panic-unused.log passed native
+U1000 for the caller, agent fault owner, private operation and public bridge.
+
+The finite corpus now has 963 rows / 92 current transitions, preserving all 893
+immutable historical records. Digest:
+40f2674454a39193feee705a18000dc3bb9446b518ff45d44d04dbf932970c02.
+Named live Admit calls: 158 -> 157 (202 initially). No fresh global census,
+baseline decrease, broader tier, push, PR or full-family closure is claimed.
 No fresh global census, zero additions, lowered baseline or final systematic
 consumption closure is asserted; those belong to the single whole-family
 checkpoint. The committed 10698/7754/67 census remains the last qualified global

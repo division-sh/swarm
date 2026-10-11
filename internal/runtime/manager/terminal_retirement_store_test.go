@@ -2,13 +2,12 @@ package manager_test
 
 import (
 	"context"
-	"strings"
+	"errors"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestTerminalPanicFinalizationBothStores(t *testing.T) {
@@ -17,9 +16,7 @@ func TestTerminalPanicFinalizationBothStores(t *testing.T) {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
 				var selected storetest.AgentFixtureStore
 				if backend == "postgres" {
-					_, db, cleanup := testutil.StartPostgres(t)
-					t.Cleanup(cleanup)
-					selected = storetest.AdmitPostgresRuntimeStore(t, db)
+					selected = storetest.StartPostgresRuntimeStore(t)
 				} else {
 					selected = storetest.StartSQLiteRuntimeStore(t)
 				}
@@ -44,21 +41,25 @@ func TestTerminalPanicFinalizationBothStores(t *testing.T) {
 					return
 				}
 				const failure = "exact panic terminal mutation rollback"
-				condition := "NEW.agent_id = '" + strings.ReplaceAll(rec.Config.ID, "'", "''") + "' AND NEW.lifecycle_phase = 'failed'"
-				if mode == "commit_and_finalizer_failure" {
-					condition = "NEW.agent_id = '" + strings.ReplaceAll(rec.Config.ID, "'", "''") + "' AND NEW.lifecycle_phase IN ('failed', 'registered')"
+				cancelled, cancel := context.WithCancel(context.Background())
+				cancel()
+				if err := storetest.InstallTerminalPanicMutationFailure(cancelled, selected, rec.Config.ID, false); !errors.Is(err, context.Canceled) {
+					t.Fatalf("cancelled panic fault was installed: %v", err)
 				}
-				db := storetest.Database(selected)
-				ddl := "CREATE TRIGGER panic_terminal_failure BEFORE UPDATE ON agents WHEN " + condition + " BEGIN SELECT RAISE(ABORT, '" + failure + "'); END"
-				if backend == "postgres" {
-					if _, err := db.ExecContext(context.Background(), "CREATE FUNCTION panic_terminal_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION '"+failure+"'; END $$"); err != nil {
-						t.Fatal(err)
-					}
-					ddl = "CREATE TRIGGER panic_terminal_failure BEFORE UPDATE ON agents FOR EACH ROW WHEN (" + condition + ") EXECUTE FUNCTION panic_terminal_failure()"
+				if err := storetest.InstallTerminalPanicMutationFailure(context.Background(), selected, "missing-panic-agent", false); err == nil {
+					t.Fatal("missing agent accepted a panic fault")
 				}
-				if _, err := db.ExecContext(context.Background(), ddl); err != nil {
+				if err := storetest.InstallTerminalPanicMutationFailure(context.Background(), struct{}{}, rec.Config.ID, false); err == nil {
+					t.Fatal("foreign owner accepted a panic fault")
+				}
+				probe := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
+				if err := storetest.InstallTerminalPanicMutationFailure(context.Background(), selected, rec.Config.ID, mode == "commit_and_finalizer_failure"); err != nil {
 					t.Fatal(err)
 				}
+				if counts := probe.Snapshot(); counts.Total.Begun != 1 || counts.Total.WriteCommits != 1 || counts.Total.Revision.Finalizations != 0 || counts.Active != 0 {
+					t.Fatalf("panic fault bypassed original writer or leaked installation: %+v", counts)
+				}
+				probe.Stop()
 				manager.ProveTerminalPanicMutationFailure(t, persistence, selected, rec, failure, mode == "commit_and_finalizer_failure")
 			})
 		}
