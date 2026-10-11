@@ -11,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
-func requireCorruptConnectSelectionNoMutation(t testing.TB, bus *EventBus, store *connectRoutePlanDescriptorStore, event events.Event) {
+func requireCorruptConnectSelectionNoMutation(t testing.TB, bus *EventBus, store *targetRouteMemoryStore, event events.Event) {
 	t.Helper()
 	observations := slices.Clone(store.instanceObservations)
 	plan, err := bus.planSubscribedRoutePlan(context.Background(), event, false)

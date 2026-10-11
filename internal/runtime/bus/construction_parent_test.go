@@ -287,7 +287,7 @@ func TestA9ConnectionAncestorCandidatesAreResolvedOnlyByDependentPaths(t *testin
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyConnectionAncestorCandidates(t, test.dependentEvent, test.competing))
-			store := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}}
+			store := &connectRoutePlanLifecycleStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
 			eb, err := newScopedTestEventBus(store, EventBusOptions{
 				ContractBundle: source,
 				Durable: DurableDependencies{

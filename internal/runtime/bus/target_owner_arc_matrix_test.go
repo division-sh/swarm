@@ -91,9 +91,7 @@ func TestNestedChildToConcreteTemplateReceiverUsesSelectedOwner(t *testing.T) {
 	source := loadConnectRoutePlanCanonicalSource(t, root)
 	selectedEntityID := eventtest.UUID("nested-template-selected-owner")
 	store := &connectRoutePlanLifecycleStore{
-		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
-			targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		},
+		targetRouteMemoryStore: newTargetRouteMemoryStore(),
 	}
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	runID := uuid.NewString()
@@ -775,9 +773,7 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 	hostileRoute := events.RouteIdentity{
 		FlowID: "hostile", FlowInstance: "unrelated/worker/result", EntityID: eventtest.UUID("diamond-hostile-owner"),
 	}.Normalized()
-	store := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
-		targetRouteMemoryStore: newTargetRouteMemoryStore(),
-	}}
+	store := &connectRoutePlanLifecycleStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
 	staticRoute := events.RouteIdentity{FlowID: "branch/worker/result-static", FlowInstance: "branch/worker/result-static", EntityID: runtimeflowidentity.EntityID("branch/worker/result-static")}
 	singletonRoute := events.RouteIdentity{FlowID: "branch/worker/result", FlowInstance: "branch/worker/result", EntityID: runtimeflowidentity.EntityID("branch/worker/result")}
 	store.setTargetOwnerRoutes(rootRoute, leftRoute, rightRoute, hostileRoute, staticRoute, singletonRoute)

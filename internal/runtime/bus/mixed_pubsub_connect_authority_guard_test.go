@@ -12,11 +12,6 @@ import (
 )
 
 func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
-	for _, name := range []string{"HasSemanticSource", "TargetDescriptor"} {
-		if _, present := reflect.TypeOf((*ActiveFlowInstanceDescriptor)(nil)).MethodByName(name); present {
-			t.Errorf("active-flow descriptor retains retired target interpretation %s", name)
-		}
-	}
 	for owner, retired := range map[reflect.Type][]string{
 		reflect.TypeOf(RouteTable{}):              {"templateObservers"},
 		reflect.TypeOf(routeResolvedPattern{}):    {"SourceTemplatePath", "SourceLocalEvent", "RoutePath", "MatchPattern"},
@@ -55,6 +50,7 @@ func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
 		},
 	}
 	forbiddenIdentifiers := map[string]struct{}{
+		"ActiveFlowInstanceDescriptor":             {},
 		"FlowInstanceRouteRecord":                  {},
 		"FlowInstanceRouteMaterializationRequest":  {},
 		"FlowInstanceRouteTopologyResult":          {},
