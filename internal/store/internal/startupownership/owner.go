@@ -111,11 +111,18 @@ func (s *StartupPostgresOwner) AcquireProcessCapability(ctx context.Context, req
 		return nil, errors.Join(err, releaseErr)
 	}
 	var authority runtimestartupownership.Authority
-	if err := lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	committed, err := lease.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var acquireErr error
 		authority, acquireErr = acquireAuthorityTx(txctx, tx, req, "postgres_retained_session", false)
 		return acquireErr
-	}); err != nil {
+	})
+	if err == nil && !committed {
+		err = errors.New("process acquisition has no acknowledged commit")
+	}
+	if err == nil {
+		err = lease.ProveCurrent(ctx)
+	}
+	if err != nil {
 		releaseErr := lease.Release(ctx)
 		releaseCapacity()
 		return nil, errors.Join(err, releaseErr)
@@ -131,6 +138,9 @@ func (s *StartupPostgresOwner) AcquireProcessCapability(ctx context.Context, req
 		releaseErr := lease.Release(ctx)
 		releaseCapacity()
 		return nil, errors.Join(err, releaseErr)
+	}
+	if err := contextError(ctx); err != nil {
+		return nil, errors.Join(err, capability.Release(context.WithoutCancel(ctx)))
 	}
 	return capability, nil
 }
@@ -165,11 +175,17 @@ func (s *StartupSQLiteOwner) AcquireProcessCapability(ctx context.Context, req r
 	}
 	var authority runtimestartupownership.Authority
 	session := &sqliteSession{owner: s, authority: authority, possession: possession, proof: proof}
-	err = s.backend.RunTransaction(ctx, "acquire runtime process capability", func(txctx context.Context, tx *sql.Tx) error {
+	committed, err := s.backend.RunTransactionOutcome(ctx, "acquire runtime process capability", func(txctx context.Context, tx *sql.Tx) error {
 		var acquireErr error
 		authority, acquireErr = acquireAuthorityTx(txctx, tx, req, "sqlite_retained_owner", true)
 		return acquireErr
 	})
+	if err == nil && !committed {
+		err = errors.New("process acquisition has no acknowledged commit")
+	}
+	if err == nil {
+		err = possession.ProveCurrent(ctx)
+	}
 	if err != nil {
 		return nil, cleanup(err)
 	}
@@ -181,6 +197,9 @@ func (s *StartupSQLiteOwner) AcquireProcessCapability(ctx context.Context, req r
 	capability, err := runtimestartupownership.NewProcessCapability(session)
 	if err != nil {
 		return nil, cleanup(err)
+	}
+	if err := contextError(ctx); err != nil {
+		return nil, errors.Join(err, capability.Release(context.WithoutCancel(ctx)))
 	}
 	return capability, nil
 }
