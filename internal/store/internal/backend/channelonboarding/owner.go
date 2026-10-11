@@ -193,13 +193,13 @@ func reserve(ctx context.Context, r runner, req domain.StartRequest) (domain.Ope
 			interface_key,interface_ref,channel_pack_id,channel_pack_version,channel_manifest_hash,semantic_generation,
 			bundle_hash,bundle_identity,pack_inventory_generation,runtime_instance_id,context_publication_generation,plan_generation,
 			target_selector,target_generation,activation_posture,identity_ceremony,phase,operation_revision,save_proof,client_language,client_locale_revision,
-			credential_reservations,credential_admissions,session_connection_id,requested_at,updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,1,?,'[]',?,?,?)`),
+			credential_reservations,credential_admissions,session_connection_id,connect_fence_revision,requested_at,updated_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,1,?,'[]',?,?,?,?)`),
 			req.OperationID, req.RequestKeyHash, req.RequestHash, req.SlotKey(), req.PrincipalID, string(req.Verb), req.Provider,
 			i.Key(), i.InterfaceRef, i.ChannelPackID, i.ChannelPackVersion, i.ChannelManifestHash, i.SemanticGeneration,
 			c.BundleHash, c.BundleIdentity, c.PackInventoryGeneration, c.RuntimeInstanceID, c.ContextPublicationGeneration, c.PlanGeneration.Diagnostic(),
 			req.TargetSelector, c.TargetGeneration, string(req.Posture), string(req.Ceremony), string(domain.PhasePreparing), req.SaveProof, req.ClientLanguage, string(reservations),
-			nullable(connectionID), req.RequestedAt, req.RequestedAt)
+			nullable(connectionID), req.ConnectFenceRevision, req.RequestedAt, req.RequestedAt)
 		if err != nil {
 			return fmt.Errorf("insert channel onboarding operation: %w", err)
 		}
@@ -924,7 +924,7 @@ const operationSelect = `SELECT operation_id,request_key_hash,request_hash,slot_
 	interface_ref,channel_pack_id,channel_pack_version,channel_manifest_hash,semantic_generation,
 	bundle_hash,bundle_identity,pack_inventory_generation,runtime_instance_id,context_publication_generation,plan_generation,
 	target_selector,target_generation,activation_posture,identity_ceremony,phase,operation_revision,save_proof,client_language,client_locale_revision,
-	credential_reservations,credential_admissions,session_connection_id,session_account_admission,identity_operation_id,binding_revision,activation_revision,confirmation_operation_id,
+	credential_reservations,credential_admissions,session_connection_id,session_account_admission,identity_operation_id,binding_revision,connect_fence_revision,activation_revision,confirmation_operation_id,
 	failure_code,failure_message,requested_at,updated_at,completed_at FROM channel_onboarding_operations`
 
 func loadOperationByRequestKey(ctx context.Context, q queryer, d dialect, key string, lock bool) (domain.Operation, bool, error) {
@@ -969,7 +969,7 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 		&op.Interface.InterfaceRef, &op.Interface.ChannelPackID, &op.Interface.ChannelPackVersion, &op.Interface.ChannelManifestHash, &op.Interface.SemanticGeneration,
 		&op.Coordinate.BundleHash, &op.Coordinate.BundleIdentity, &op.Coordinate.PackInventoryGeneration, &op.Coordinate.RuntimeInstanceID, &op.Coordinate.ContextPublicationGeneration, &planGeneration,
 		&op.TargetSelector, &op.Coordinate.TargetGeneration, &posture, &ceremony, &phase, &op.Revision, &op.SaveProof, &op.ClientLanguage, &op.ClientLocaleRevision,
-		&reservations, &admissions, &connection, &session, &identityOp, &bindingRevision, &activationRevision, &confirmationOp, &failureCode, &failureMessage, &requested, &updated, &completed)
+		&reservations, &admissions, &connection, &session, &identityOp, &bindingRevision, &op.ConnectFenceRevision, &activationRevision, &confirmationOp, &failureCode, &failureMessage, &requested, &updated, &completed)
 	if err == sql.ErrNoRows {
 		return domain.Operation{}, false, nil
 	}
@@ -977,6 +977,9 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 		return domain.Operation{}, false, err
 	}
 	op.Verb, op.Posture, op.Ceremony, op.Phase = domain.Verb(verb), domain.ActivationPosture(posture), domain.IdentityCeremony(ceremony), domain.Phase(phase)
+	if op.ConnectFenceRevision < 0 || op.Verb != domain.VerbConnect && op.ConnectFenceRevision != 0 {
+		return domain.Operation{}, false, fmt.Errorf("decode channel onboarding predecessor fence: %w", domain.ErrRevisionConflict)
+	}
 	op.Coordinate.PlanGeneration, err = plangeneration.Parse(planGeneration)
 	if err != nil {
 		return domain.Operation{}, false, fmt.Errorf("decode channel onboarding plan generation: %w", err)
