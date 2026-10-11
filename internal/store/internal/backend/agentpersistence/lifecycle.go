@@ -628,9 +628,7 @@ func validateLifecycleExpectation(req runtimemanager.AgentLifecycleTransition, p
 			return lifecycleConflict(req, previous, true)
 		}
 	case "source_set_rebind", "source_set_retire":
-		if previous.Binding.ProcessAuthorityID != req.ProcessBinding.ProcessAuthorityID ||
-			previous.Binding.ProcessOwnerID != req.ProcessBinding.ProcessOwnerID ||
-			previous.Binding.ProcessBootID != req.ProcessBinding.ProcessBootID {
+		if !previous.Binding.SameProcessLease(req.ProcessBinding) {
 			return lifecycleConflict(req, previous, true)
 		}
 	default:

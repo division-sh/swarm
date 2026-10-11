@@ -277,7 +277,7 @@ func (am *AgentManager) retireRemovedStaticTopology(
 		return fmt.Errorf("static topology retirement generation exhausted for %s", identity.Description())
 	}
 	operationKind := "source_set_retire"
-	if !sameProcessExecutionOwner(current.ProcessBinding, target) {
+	if !current.ProcessBinding.SameProcessLease(target) {
 		operationKind = "process_takeover"
 	}
 	operationID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join([]string{
@@ -406,9 +406,7 @@ func lifecycleStateMatchesCell(state AgentLifecycleState, cell *agentLifecycleCe
 }
 
 func sourceSetBindingIsAdjacent(predecessor, successor ProcessExecutionBinding) bool {
-	return sameProcessExecutionOwner(predecessor, successor) &&
-		predecessor.BundleHash == successor.BundleHash &&
-		predecessor.RuntimeInstanceID == successor.RuntimeInstanceID &&
+	return predecessor.SameProcessExecution(successor) &&
 		predecessor.RuntimeGeneration != ^uint64(0) && successor.RuntimeGeneration == predecessor.RuntimeGeneration+1 &&
 		predecessor.GenerationGrantID != successor.GenerationGrantID
 }
@@ -1131,7 +1129,7 @@ func (am *AgentManager) commitStaticTopologyReconciliation(ctx context.Context, 
 		}
 		if !current.ProcessBinding.Equal(target) {
 			operationKind = "process_takeover"
-			if sameProcessExecutionOwner(current.ProcessBinding, target) {
+			if current.ProcessBinding.SameProcessLease(target) {
 				operationKind = "source_set_rebind"
 			}
 		}
@@ -1156,10 +1154,4 @@ func (am *AgentManager) commitStaticTopologyReconciliation(ctx context.Context, 
 		Subordinate: plan, Topology: admission, Now: time.Now().UTC(),
 	})
 	return err
-}
-
-func sameProcessExecutionOwner(left, right ProcessExecutionBinding) bool {
-	return left.ProcessAuthorityID == right.ProcessAuthorityID &&
-		left.ProcessOwnerID == right.ProcessOwnerID &&
-		left.ProcessBootID == right.ProcessBootID
 }
