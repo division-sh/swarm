@@ -71,6 +71,20 @@ func (p selectedForkRecipientPlan) allowsConnectPlan(plan pinrouting.ConnectRout
 	return false
 }
 
+func selectedForkConnectPlans(ctx context.Context, event events.Event, plans []pinrouting.ConnectRoutePlan) []pinrouting.ConnectRoutePlan {
+	selected, ok := selectedForkRecipientPlanFromContext(ctx, event)
+	if !ok {
+		return plans
+	}
+	included := make([]pinrouting.ConnectRoutePlan, 0, len(plans))
+	for _, plan := range plans {
+		if selected.allowsConnectPlan(plan) {
+			included = append(included, plan)
+		}
+	}
+	return included
+}
+
 func (p selectedForkRecipientPlan) allowsRegistration(plan pinrouting.ConnectRoutePlan, registration pinrouting.ConnectRecipientRegistration) bool {
 	identity, err := pinrouting.ConnectPlanIdentity(plan)
 	if err != nil {
