@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -14,12 +15,8 @@ import (
 
 func selectedRecoveryRequestForPoint(t *testing.T, point runfork.RunForkPoint) SelectedForkRecoveryRequest {
 	t.Helper()
-	process, err := startupownership.NewColdAuthority(startupownership.AcquireRequest{
-		OwnerID: "selected-recovery", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
-	}, "sqlite")
-	if err != nil {
-		t.Fatal(err)
-	}
+	process := startupownership.Authority{AuthorityID: uuid.NewString(), AuthorityGeneration: 1,
+		OwnerID: "selected-recovery", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.SQLiteLeaseBackend}
 	return SelectedForkRecoveryRequest{
 		Entry: runfork.SelectedForkRecoveryEntry{
 			BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64),

@@ -65,9 +65,9 @@ type managedNativeLifecycleStore struct {
 
 func newManagedNativeLifecycleStore(t testing.TB, agents ...runtimemanager.PersistedAgent) *managedNativeLifecycleStore {
 	t.Helper()
-	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+	authority, err := runtimeTestProcessAttribution(runtimestartupownership.AcquireRequest{
 		OwnerID: "managed-native-lifecycle-test", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-	}, "runtime_test")
+	})
 	if err != nil {
 		t.Fatalf("construct managed-native retained session: %v", err)
 	}

@@ -68,17 +68,6 @@ func OpenSQLiteRuntime(path string) (*private.SQLiteRuntimeStore, *sql.DB, error
 	return store, backend.ConstructionHandle(), nil
 }
 
-// OpenSQLiteRuntimeWithOwnershipBinding is the mutable process/repair
-// construction path. It binds the opened pool to the exact database and
-// possession-coordinate identities that later retained possession must prove.
-func OpenSQLiteRuntimeWithOwnershipBinding(path string) (*private.SQLiteRuntimeStore, *sql.DB, error) {
-	constructionGuard, err := storestartupownership.AcquireSQLiteConstructionGuard(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	return openSQLiteUnderPossession(context.Background(), path, constructionGuard)
-}
-
 func OpenSQLiteRuntimeForServing(ctx context.Context, path string) (*private.SQLiteRuntimeStore, *sql.DB, error) {
 	constructionGuard, err := storestartupownership.WaitSQLiteConstructionGuard(ctx, path)
 	if err != nil {

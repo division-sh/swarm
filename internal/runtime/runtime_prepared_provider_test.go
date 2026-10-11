@@ -72,7 +72,7 @@ func (p *preparedProtocolProbe) ProbeStartupVisibleToolSurface(ctx context.Conte
 
 func newPreparedProviderTestPlans(t *testing.T) (startupownership.ProcessCapability, []PreparedSelectedForkProviderProbe) {
 	t.Helper()
-	evidence, err := startupownership.NewColdAuthority(startupownership.AcquireRequest{OwnerID: "prepared-process", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}, "runtime_test")
+	evidence, err := runtimeTestProcessAttribution(startupownership.AcquireRequest{OwnerID: "prepared-process", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()})
 	if err != nil {
 		t.Fatal(err)
 	}

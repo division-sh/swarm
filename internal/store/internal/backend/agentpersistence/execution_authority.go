@@ -107,6 +107,9 @@ func authorizeDynamicFlowGrantTx(ctx context.Context, tx *sql.Tx, binding runtim
 	if !binding.Equal(processBindingForGrant(evidence)) {
 		return errors.New("flow activation requires the exact generation grant binding")
 	}
+	if err := proveGrantProcessTx(ctx, tx, evidence, sqlite, true); err != nil {
+		return err
+	}
 	switch use {
 	case flowGrantExecution:
 		if evidence.State != startupownership.GrantAdmitted {
@@ -304,6 +307,9 @@ func inspectRunExecutionOwnershipModeTx(ctx context.Context, tx *sql.Tx, evidenc
 	if evidence.State == startupownership.GrantRetired {
 		return 0, errors.New("run execution generation grant is retired")
 	}
+	if err := proveGrantProcessTx(ctx, tx, evidence, sqlite, lock); err != nil {
+		return 0, err
+	}
 	hash, bindingID, err := loadRunExecutionBindingModeTx(ctx, tx, runID, sqlite, lock)
 	if err != nil {
 		return 0, err
@@ -318,6 +324,23 @@ func inspectRunExecutionOwnershipModeTx(ctx context.Context, tx *sql.Tx, evidenc
 		return manager.RunExecutionForeign, nil
 	}
 	return manager.RunExecutionOwned, nil
+}
+
+func proveGrantProcessTx(ctx context.Context, tx *sql.Tx, evidence startupownership.GrantEvidence, sqlite, lock bool) error {
+	var current bool
+	var err error
+	if lock {
+		current, err = generationauthority.ProcessCoordinatesCurrentTx(ctx, tx, evidence.ProcessCoordinates(), sqlite)
+	} else {
+		current, err = generationauthority.ProcessCoordinatesCurrent(ctx, tx, evidence.ProcessCoordinates(), sqlite)
+	}
+	if err != nil {
+		return err
+	}
+	if !current {
+		return errors.New("generation grant process is no longer current")
+	}
+	return nil
 }
 
 func classifyOrdinaryRunSource(hash string, bindingID sql.NullString, sourceHash string) manager.RunExecutionOwnership {
