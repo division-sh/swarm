@@ -11,8 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/google/uuid"
 )
 
@@ -142,7 +145,7 @@ func TestConversationForkSourceFixtureAtomicBothStores(t *testing.T) {
 			if _, err := SeedConversationForkSourceForTest(ctx, store, fixture); err == nil {
 				t.Fatal("invalid second event accepted")
 			}
-			for _, table := range []string{"agent_sessions", "entity_state", "entity_mutations", "events"} {
+			for _, table := range []string{"agent_sessions", "flow_instances", "entity_state", "entity_mutations", "events"} {
 				var count int
 				if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
 					t.Fatal(err)
@@ -158,6 +161,39 @@ func TestConversationForkSourceFixtureAtomicBothStores(t *testing.T) {
 			}
 			if result[0].ID() != fixture.Event1ID || result[1].ID() != fixture.Event2ID || !result[0].CreatedAt().Equal(fixture.Turn1At) || !result[1].CreatedAt().Equal(fixture.Turn2At) {
 				t.Fatal("historical event identities/timestamps changed")
+			}
+			reader := store.(interface {
+				LoadOperatorEntity(context.Context, string, string) (operatorread.OperatorEntityFull, error)
+			})
+			current, err := reader.LoadOperatorEntity(ctx, fixture.EntityID, fixture.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if current.Entity.CurrentState == nil || *current.Entity.CurrentState != "after" || current.Entity.Revision == nil || *current.Entity.Revision != 2 || current.Fields["name"] != "After" {
+				t.Fatalf("current fixture lost header/data ownership: %+v", current)
+			}
+			advancedAt, bornAt := fixture.Turn1At.Add(10*time.Second), fixture.Turn1At.Add(-30*time.Second)
+			if !current.Entity.CreatedAt.Equal(advancedAt) || !current.Entity.UpdatedAt.Equal(advancedAt) ||
+				current.Entity.LifecycleCreatedAt == nil || !current.Entity.LifecycleCreatedAt.Equal(bornAt) ||
+				current.Entity.EnteredStateAt == nil || !current.Entity.EnteredStateAt.Equal(advancedAt) ||
+				current.Entity.LifecycleUpdatedAt == nil || !current.Entity.LifecycleUpdatedAt.Equal(advancedAt) {
+				t.Fatalf("current fixture mixed data and lifecycle clocks: %+v", current.Entity)
+			}
+			evidence, err := ReadTrackedEntityMutationProjectionStorageForTest(ctx, store, fixture.RunID, fixture.EntityID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutations := make([]mutationlog.ProjectionMutation, 0, len(evidence.Mutations))
+			for _, row := range evidence.Mutations {
+				var value any
+				if err := canonicaljson.DecodePreservingNumberLexemes(row.NewValue, &value); err != nil {
+					t.Fatal(err)
+				}
+				mutations = append(mutations, mutationlog.ProjectionMutation{Domain: mutationlog.Domain(row.Domain), Path: row.Path, NewValue: value})
+			}
+			reconstructed, err := mutationlog.ReconstructEntityStateProjection(mutations)
+			if err != nil || len(mutations) != 4 || reconstructed.CurrentState == nil || *reconstructed.CurrentState != "after" || reconstructed.Fields["name"] != "After" {
+				t.Fatalf("current fixture disagrees with original history fold: %+v mutations=%v err=%v", reconstructed, mutations, err)
 			}
 		})
 	}
