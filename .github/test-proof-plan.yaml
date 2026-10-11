@@ -5,6 +5,7 @@ planning:
   max_shards: 12
   unknown_package_seconds: 30
 special_packages:
+- github.com/division-sh/swarm/cmd/swarm-unused
 - github.com/division-sh/swarm/internal/apiv1
 - github.com/division-sh/swarm/internal/cliapp
 - github.com/division-sh/swarm/internal/releasee2e
@@ -29,6 +30,7 @@ profiles:
       ci: ci-postgres-gateway-empty-v1
       local: local-postgres-gateway-empty-v1
     units:
+    - unused-controls
     - catalog-required-inventory
     - catalog-required-verify
     - verify-run-native
@@ -60,6 +62,7 @@ profiles:
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     units:
+    - unused-controls
     - codemod-owner-guards
     - codemod-pipeline-mutation
     - codemod-bus-mutation
@@ -129,6 +132,8 @@ profiles:
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     units:
+    - unused-controls
+    - unused-attempt-transport
     - codemod-owner-guards
     - codemod-pipeline-mutation
     - codemod-bus-mutation
@@ -210,6 +215,32 @@ profiles:
     - pipeline-timer-join
     - pipeline-rest
 units:
+  unused-controls:
+    packages: [github.com/division-sh/swarm/cmd/swarm-unused]
+    run: '^(?:Test(?:[^A].*|A(?:[^t].*|t(?:[^t].*|t(?:[^e].*|e(?:[^m].*|m(?:[^p].*|p(?:[^t].*|t(?:[^Q].*|Q(?:[^u].*|u(?:[^a].*|a(?:[^l].*|l(?:[^i].*|i(?:[^f].*|f(?:[^i].*|i(?:[^e].*|e(?:[^d].*|d(?:[^N].*|N(?:[^a].*|a(?:[^t].*|t(?:[^i].*|i(?:[^v].*|v(?:[^e].*|e(?:[^D].*|D(?:[^o].*|o(?:[^w].*|w(?:[^n].*|n(?:[^l].*|l(?:[^o].*|o(?:[^a].*|a(?:[^d].*|d(?:[^s].*|s(?:[^U].*|U(?:[^s].*|s(?:[^e].*|e(?:[^R].*|R(?:[^e].*|e(?:[^a].*|a(?:[^l].*|l(?:[^U].*|U(?:[^n].*|n(?:[^i].*|i(?:[^o].*|o(?:[^n].*|n(?:[^A].*|A(?:[^n].*|n(?:[^d].*|d(?:[^R].*|R(?:[^e].*|e(?:[^f].*|f(?:[^u].*|u(?:[^s].*|s(?:[^e].*|e(?:[^O].*|O(?:[^l].*|l(?:[^d].*|d(?:[^P].*|P(?:[^a].*|a(?:[^r].*|r(?:[^t].*|t(?:[^n].*|n(?:[^e].*|e(?:[^r].*|r(?:[^s].*|s.+|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|)|Fuzz.*|Example.*)$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  unused-attempt-transport:
+    packages: [github.com/division-sh/swarm/cmd/swarm-unused]
+    run: '^TestAttemptQualifiedNativeDownloadsUseRealUnionAndRefuseOldPartners$'
+    required_children:
+      TestAttemptQualifiedNativeDownloadsUseRealUnionAndRefuseOldPartners:
+      - current_pair
+      - no_current_pair
+      - missing_linux
+      - missing_darwin
+      - failed_linux
+      - failed_darwin
+      - skipped_linux
+      - skipped_darwin
+      - cancelled_linux
+      - cancelled_darwin
+      - partial_linux
+      - partial_darwin
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
   pipeline-activation:
     packages: [github.com/division-sh/swarm/internal/runtime/pipeline]
     run: '^Test(A2|CompiledTransition|Guard|PipelineCompiled|WorkflowCurrentTransition|JoinCapturedLoop).*$'
