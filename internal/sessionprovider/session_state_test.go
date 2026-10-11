@@ -157,7 +157,7 @@ func TestWhatsAppSessionStateFailedJoinRetainsDatabaseAndPossession(t *testing.T
 }
 
 func TestWhatsAppSessionStateRefusesUnsafeOrConflictingState(t *testing.T) {
-	for _, cell := range []string{"missing_database", "missing_account", "foreign_account", "multiple_accounts", "database_symlink", "database_mode", "database_hardlink", "journal_symlink", "journal_mode", "corrupt_database", "invalid_account_reference"} {
+	for _, cell := range []string{"missing_database", "missing_account", "foreign_account", "multiple_accounts", "database_symlink", "database_mode", "database_hardlink", "journal_symlink", "journal_mode", "wal_symlink", "wal_mode", "shm_symlink", "shm_mode", "corrupt_database", "invalid_account_reference"} {
 		t.Run(cell, func(t *testing.T) {
 			base, connectionID := t.TempDir(), uuid.NewString()
 			if err := os.Chmod(base, 0o700); err != nil {
@@ -203,12 +203,14 @@ func TestWhatsAppSessionStateRefusesUnsafeOrConflictingState(t *testing.T) {
 				if err := os.Link(path, path+"-linked"); err != nil {
 					t.Fatal(err)
 				}
-			case "journal_symlink":
-				if err := os.Symlink(path, path+"-journal"); err != nil {
+			case "journal_symlink", "wal_symlink", "shm_symlink":
+				suffix := map[string]string{"journal_symlink": "-journal", "wal_symlink": "-wal", "shm_symlink": "-shm"}[cell]
+				if err := os.Symlink(path, path+suffix); err != nil {
 					t.Fatal(err)
 				}
-			case "journal_mode":
-				if err := os.WriteFile(path+"-journal", []byte("unsafe journal"), 0o644); err != nil {
+			case "journal_mode", "wal_mode", "shm_mode":
+				suffix := map[string]string{"journal_mode": "-journal", "wal_mode": "-wal", "shm_mode": "-shm"}[cell]
+				if err := os.WriteFile(path+suffix, []byte("unsafe journal"), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			case "corrupt_database":
