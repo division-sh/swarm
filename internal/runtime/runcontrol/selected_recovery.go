@@ -38,9 +38,6 @@ func (r SelectedForkRecoveryRequest) Validate() error {
 	if err := r.Process.Validate(); err != nil {
 		return err
 	}
-	if r.Process.State != startupownership.StateActive {
-		return fmt.Errorf("selected recovery requires active process possession")
-	}
 	if err := r.Effects.Validate(); err != nil {
 		return err
 	}

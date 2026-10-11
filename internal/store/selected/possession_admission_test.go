@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestAdmissionPossessionDoesNotMaskCorruptLineageBothStores(t *testing.T) {
+func TestAdmissionPossessionDoesNotMaskCorruptProcessGenerationBothStores(t *testing.T) {
 	spec, err := contracts.LoadPlatformSpecDocument(filepath.Join(selectedStoreRepoRoot(t), "platform-spec.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +42,7 @@ func TestAdmissionPossessionDoesNotMaskCorruptLineageBothStores(t *testing.T) {
 			var db *sql.DB
 			if backend == backendselection.BackendSQLite {
 				request.Selection.SQLitePath = filepath.Join(t.TempDir(), "store.db")
-				selected, handle, err := construction.OpenSQLiteRuntimeWithOwnershipBinding(request.Selection.SQLitePath)
+				selected, handle, err := construction.OpenSQLiteRuntimeForServing(ctx, request.Selection.SQLitePath)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -69,15 +70,12 @@ func TestAdmissionPossessionDoesNotMaskCorruptLineageBothStores(t *testing.T) {
 			if err := capability.Release(ctx); err != nil {
 				t.Fatal(err)
 			}
-			query := "UPDATE runtime_startup_authority_facts SET snapshot='{}' WHERE transition_ordinal=(SELECT MAX(transition_ordinal) FROM runtime_startup_authority_facts)"
-			if backend == backendselection.BackendPostgres {
-				query = "UPDATE runtime_startup_authority_facts SET snapshot='{}'::jsonb WHERE transition_ordinal=(SELECT MAX(transition_ordinal) FROM runtime_startup_authority_facts)"
-			}
+			query := "UPDATE runtime_process_generation SET owner_id=''"
 			if _, err := db.ExecContext(ctx, query); err != nil {
 				t.Fatal(err)
 			}
 			var before int
-			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_startup_authority_facts").Scan(&before); err != nil {
+			if err := db.QueryRowContext(ctx, "SELECT generation FROM runtime_process_generation").Scan(&before); err != nil {
 				t.Fatal(err)
 			}
 			inspection, err := OpenAdmissionInspection(ctx, request)
@@ -94,12 +92,9 @@ func TestAdmissionPossessionDoesNotMaskCorruptLineageBothStores(t *testing.T) {
 				t.Fatalf("free kernel observation: %+v %v", possession, err)
 			}
 			_, err = inspection.Inspect(ctx, schema, func(snapshot *AdmissionSnapshot) error {
-				lineage, err := snapshot.InspectAuthority(ctx)
-				if err != nil {
-					return err
-				}
-				if lineage.Status != startupownership.AuthorityInspectionCorrupt || startupownership.AdmitAuthorityInspection(lineage) == nil {
-					t.Fatalf("free kernel state masked corrupt lineage: %+v", lineage)
+				_, err := snapshot.InspectAuthority(ctx)
+				if err == nil || !strings.Contains(err.Error(), "process lease owner_id must be nonempty and canonical") {
+					t.Fatalf("free kernel state masked corrupt process stamp: %v", err)
 				}
 				return nil
 			})
@@ -107,11 +102,11 @@ func TestAdmissionPossessionDoesNotMaskCorruptLineageBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			var after int
-			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_startup_authority_facts").Scan(&after); err != nil || after != before {
+			if err := db.QueryRowContext(ctx, "SELECT generation FROM runtime_process_generation").Scan(&after); err != nil || after != before {
 				t.Fatalf("observation altered lineage: %d -> %d %v", before, after, err)
 			}
-			if _, err := owner.AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "must-refuse", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}); err == nil {
-				t.Fatal("boot accepted corrupt lineage after a free observation")
+			if _, err := owner.AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "must-refuse", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}); err == nil || !strings.Contains(err.Error(), "process lease owner_id must be nonempty and canonical") {
+				t.Fatalf("boot accepted or misclassified corrupt process stamp after a free observation: %v", err)
 			}
 		})
 	}

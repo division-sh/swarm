@@ -23,11 +23,18 @@ type LeaseIdentity struct {
 	Backend           string `json:"backend"`
 }
 
-func (i LeaseIdentity) Validate() error {
+// LeaseCoordinates are the process attribution retained by both ordinary and
+// selected grants; their runtime/source coordinates remain separate concepts.
+type LeaseCoordinates struct {
+	LeaseID string
+	OwnerID string
+	BootID  string
+}
+
+func (i LeaseCoordinates) Validate() error {
 	for _, field := range []struct{ name, value string }{
 		{"lease_id", i.LeaseID},
 		{"boot_id", i.BootID},
-		{"runtime_instance_id", i.RuntimeInstanceID},
 	} {
 		id, err := uuid.Parse(field.value)
 		if err != nil || id == uuid.Nil || id.String() != field.value {
@@ -36,6 +43,21 @@ func (i LeaseIdentity) Validate() error {
 	}
 	if i.OwnerID == "" || i.OwnerID != strings.TrimSpace(i.OwnerID) {
 		return errors.New("process lease owner_id must be nonempty and canonical")
+	}
+	return nil
+}
+
+func (i LeaseIdentity) Coordinates() LeaseCoordinates {
+	return LeaseCoordinates{LeaseID: i.LeaseID, OwnerID: i.OwnerID, BootID: i.BootID}
+}
+
+func (i LeaseIdentity) Validate() error {
+	if err := i.Coordinates().Validate(); err != nil {
+		return err
+	}
+	id, err := uuid.Parse(i.RuntimeInstanceID)
+	if err != nil || id == uuid.Nil || id.String() != i.RuntimeInstanceID {
+		return errors.New("process lease runtime_instance_id must be a canonical nonzero UUID")
 	}
 	if i.Backend != PostgresLeaseBackend && i.Backend != SQLiteLeaseBackend {
 		return fmt.Errorf("process lease backend %q is unsupported", i.Backend)

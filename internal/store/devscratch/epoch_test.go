@@ -41,7 +41,7 @@ func TestDevScratchEpochHelperProcess(t *testing.T) {
 		if err := authority.PrepareFreshStore(); err != nil {
 			t.Fatal(err)
 		}
-		selected, _, err := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(coordinate.DatabasePath)
+		selected, _, err := storeconstruction.OpenSQLiteRuntimeForServing(context.Background(), coordinate.DatabasePath)
 		if err != nil {
 			t.Fatal(err)
 		}

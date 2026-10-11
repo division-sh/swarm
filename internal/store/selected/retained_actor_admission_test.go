@@ -52,7 +52,7 @@ func TestRetainedActorAdmissionRealSnapshotBothStores(t *testing.T) {
 			var db *sql.DB
 			if backend == backendselection.BackendSQLite {
 				request.Selection.SQLitePath = filepath.Join(t.TempDir(), "store.db")
-				selected, handle, err := construction.OpenSQLiteRuntimeWithOwnershipBinding(request.Selection.SQLitePath)
+				selected, handle, err := construction.OpenSQLiteRuntimeForServing(ctx, request.Selection.SQLitePath)
 				if err != nil {
 					t.Fatal(err)
 				}
