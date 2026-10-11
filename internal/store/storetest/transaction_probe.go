@@ -64,6 +64,16 @@ func CollectTransactions(t testing.TB, selected any, options TransactionProbeOpt
 	return collector
 }
 
+func ReplaceTransactions(t testing.TB, previous *TransactionCollector, options TransactionProbeOptions) *TransactionCollector {
+	t.Helper()
+	collector, restore, err := previous.Replace(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(restore)
+	return collector
+}
+
 func ValidateReporterIssuance(receipt TransactionSnapshot, submitted time.Time, chunks uint64, delay time.Duration) error {
 	return transactiontest.ValidateReporterIssuance(receipt, submitted, chunks, delay)
 }
@@ -72,6 +82,14 @@ func ValidateReporterContinuation(issuance, detached, successor TransactionSnaps
 	return transactiontest.ValidateReporterContinuation(issuance, detached, successor)
 }
 
+func ValidateReporterJoined(issuance, detached, successor TransactionSnapshot) error {
+	return transactiontest.ValidateReporterJoined(issuance, detached, successor)
+}
+
 func ValidateReporterStress(issuance, final TransactionSnapshot, delay time.Duration) error {
 	return transactiontest.ValidateReporterStress(issuance, final, delay)
+}
+
+func ValidateReporterDrain(issuance, detached, successor TransactionSnapshot, settledBeforeHandoff bool) error {
+	return transactiontest.ValidateReporterDrain(issuance, detached, successor, settledBeforeHandoff)
 }

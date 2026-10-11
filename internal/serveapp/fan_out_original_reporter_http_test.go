@@ -111,6 +111,7 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var transactions, continuation *storetest.TransactionCollector
+			var issuanceReceipt storetest.TransactionSnapshot
 			// Registered before the harness: inspect captured attempts only after
 			// serve and selected-store cleanup have joined, not immediately at Stop.
 			if servingWindow {
@@ -122,6 +123,11 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 							if receipt.Active != 0 {
 								t.Errorf("reporter cleanup lost captured attempts: %+v", receipt)
 							}
+						}
+					}
+					if transactions != nil && continuation != nil {
+						if err := storetest.ValidateReporterJoined(issuanceReceipt, transactions.Snapshot(), continuation.Snapshot()); err != nil {
+							t.Error(err)
 						}
 					}
 				})
@@ -232,16 +238,27 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 			if transactionOptions.Delay > 0 && (chunks.DelayedCommits != 20 || chunks.InjectedDelay != 20*transactionOptions.Delay) {
 				t.Errorf("original all-commit delay not applied to every chunk: %+v", chunks)
 			}
+			settledBeforeHandoff := false
 			if servingWindow {
 				if err := storetest.ValidateReporterIssuance(receipt, issuanceStarted, 20, transactionOptions.Delay); err != nil {
 					t.Fatal(err)
 				}
-				transactions.Stop()
-				continuation = storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
+				issuanceReceipt = receipt
+				var atCut cliapp.DiagnosticRunDiagnosisResult
+				issue2394ReporterRPC(t, rt, "run.diagnose", map[string]any{"run_id": runID}, &atCut)
+				settledBeforeHandoff = atCut.FanOut.Settled == 500 && atCut.FanOut.Unsettled == 0 && atCut.FanOut.Owed == 0
+				t.Logf("pre-handoff descendant disposition: settled=%d unsettled=%d owed=%d native_settlements=%d", atCut.FanOut.Settled, atCut.FanOut.Unsettled, atCut.FanOut.Owed, receipt.ByOperation[storetest.TransactionDeliverySettle].WriteCommits)
+				continuation = storetest.ReplaceTransactions(t, transactions, storetest.TransactionProbeOptions{})
 			}
 			drainStarted := time.Now()
 			valid := waitIssue2394ReporterDiagnosisWithin(t, rt, runID, 500, validDrainCeiling)
 			assertIssue2394ReporterSummary(t, valid.FanOut, runID, false)
+			if servingWindow {
+				if err := storetest.ValidateReporterDrain(receipt, transactions.Snapshot(), continuation.Snapshot(), settledBeforeHandoff); err != nil {
+					t.Fatal(err)
+				}
+				t.Logf("post-issuance descendant settlement receipts: detached=%+v successor=%+v", transactions.Snapshot().ByOperation[storetest.TransactionDeliverySettle], continuation.Snapshot().ByOperation[storetest.TransactionDeliverySettle])
+			}
 			assertIssue2394ReporterHistory(t, rt.DB, runID)
 			validEvents := assertIssue2394ReporterEvents(t, rt, runID, portfolio, wanted)
 			for _, id := range []string{"numeric-000", "numeric-499"} {
