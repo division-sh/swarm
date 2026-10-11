@@ -74,12 +74,18 @@ func TestNativeCatalogWorkflowStateOwnerPreservesPhysicalRowsAndErrors(t *testin
 		t.Fatal(err)
 	}
 	for _, fragment := range []string{
-		"SELECT entity_id::text, COALESCE(flow_instance, ''), current_state FROM entity_state ORDER BY created_at ASC",
-		"SELECT entity_id, COALESCE(flow_instance, ''), current_state FROM entity_state ORDER BY created_at ASC",
+		"SELECT es.entity_id::text, COALESCE(es.flow_instance, ''), fi.current_state",
+		"SELECT es.entity_id, COALESCE(es.flow_instance, ''), fi.current_state",
+		"FROM entity_state es LEFT JOIN flow_instances fi",
+		"ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id",
+		"ORDER BY es.created_at ASC",
 		"defer rows.Close()", "if err := rows.Err(); err != nil", "rows.Scan(&row.EntityID, &row.FlowInstance, &row.CurrentState)",
 	} {
 		if !strings.Contains(string(data), fragment) {
 			t.Fatalf("physical state diagnostic contract missing %q", fragment)
 		}
+	}
+	if !strings.Contains(strings.Join(strings.Fields(string(data)), " "), "CurrentState *string") {
+		t.Fatal("physical state observation must retain explicit header absence")
 	}
 }

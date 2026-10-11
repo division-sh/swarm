@@ -54,13 +54,21 @@ type WorkflowDuplicateProjectionStorage struct {
 }
 
 type WorkflowStateObservationRow struct {
-	EntityID, FlowInstance, CurrentState string
+	EntityID, FlowInstance string
+	// Optional internal header posture, not public named-stage metadata.
+	CurrentState *string
 }
 
 func ReadWorkflowStateObservationRows(ctx context.Context, tx *sql.Tx, postgres bool) ([]WorkflowStateObservationRow, error) {
-	query := `SELECT entity_id::text, COALESCE(flow_instance, ''), current_state FROM entity_state ORDER BY created_at ASC`
+	query := `SELECT es.entity_id::text, COALESCE(es.flow_instance, ''), fi.current_state
+		FROM entity_state es LEFT JOIN flow_instances fi
+		ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+		ORDER BY es.created_at ASC`
 	if !postgres {
-		query = `SELECT entity_id, COALESCE(flow_instance, ''), current_state FROM entity_state ORDER BY created_at ASC`
+		query = `SELECT es.entity_id, COALESCE(es.flow_instance, ''), fi.current_state
+			FROM entity_state es LEFT JOIN flow_instances fi
+			ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+			ORDER BY es.created_at ASC`
 	}
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {

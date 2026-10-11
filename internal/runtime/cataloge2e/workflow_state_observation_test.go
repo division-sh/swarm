@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -44,10 +45,14 @@ func TestCatalogWorkflowStateDiagnosticUsesSelectedProjectionBothStores(t *testi
 			var parts []string
 			foundRoot := false
 			for _, row := range rows {
-				parts = append(parts, fmt.Sprintf("{entity_id:%s flow_instance:%s state:%s}", row.EntityID, row.FlowInstance, row.CurrentState))
+				state := "null"
+				if row.CurrentState != nil {
+					state = strconv.Quote(*row.CurrentState)
+				}
+				parts = append(parts, fmt.Sprintf("{entity_id:%s flow_instance:%s state:%s}", row.EntityID, row.FlowInstance, state))
 				if row.EntityID == catalogRuntimeRunID {
 					foundRoot = true
-					if row.FlowInstance != catalogRuntimeRunID || row.CurrentState != "waiting" {
+					if row.FlowInstance != catalogRuntimeRunID || row.CurrentState == nil || *row.CurrentState != "waiting" {
 						t.Fatalf("root physical diagnostic changed: %+v", row)
 					}
 				}
