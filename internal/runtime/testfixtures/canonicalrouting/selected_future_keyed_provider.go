@@ -6,9 +6,20 @@ import "testing"
 // receives its run-creating input. The authored provider finishes that instance.
 func CopySelectedFutureKeyedProviderInput(t testing.TB) string {
 	t.Helper()
+	return copySelectedFutureProviderInput(t, false)
+}
+
+// CopySelectedFutureMintedProviderInput exercises the distinct create mode:
+// business work_id is retained while construction mints its own case_id.
+func CopySelectedFutureMintedProviderInput(t testing.TB) string {
+	t.Helper()
+	return copySelectedFutureProviderInput(t, true)
+}
+
+func copySelectedFutureProviderInput(t testing.TB, minted bool) string {
+	t.Helper()
 	root := t.TempDir()
-	for path, body := range map[string]string{
-		"schema.yaml": `name: selected-future-keyed-provider
+	schema := `name: selected-future-keyed-provider
 stages:
   pending: {}
   done: {final: true}
@@ -18,7 +29,53 @@ pins:
 connect:
   - {event: work.assigned, from: ., to: work, resolution: select-or-create}
   - {event: work.finished, from: work, to: .}
-`,
+`
+	workSchema := `name: work
+instance: work_id
+stages:
+  pending: {}
+  done: {final: true}
+pins:
+  inputs: [work.assigned]
+  outputs: [work.finished]
+required_agents:
+  - {role: worker, subscribes_to: [work.assigned]}
+`
+	workEntity := `job:
+  work_id: text
+  result: text
+`
+	if minted {
+		schema = `name: selected-future-minted-provider
+stages:
+  pending: {}
+  done: {final: true}
+pins:
+  inputs: [start.requested, work.finished]
+  outputs: [work.assigned]
+connect:
+  - {event: work.assigned, from: ., to: work, resolution: create, key_from: generated.uuid}
+  - {event: work.finished, from: work, to: .}
+`
+		workSchema = `name: work
+instance: case_id
+stages:
+  pending: {}
+  done: {final: true}
+pins:
+  inputs: [work.assigned]
+  outputs: [work.finished]
+required_agents:
+  - {role: worker, subscribes_to: [work.assigned]}
+`
+		workEntity = `job:
+  case_id: text
+  work_id: text
+  result: text
+`
+	}
+	for path, body := range map[string]string{
+		"schema.yaml": schema,
 		"entities.yaml": `run:
   counter: {type: integer, initial: 0}
 `,
@@ -43,21 +100,8 @@ work.assigned:
         writes:
           - {target_field: counter, value: entity.counter + 1}
 `,
-		"work/schema.yaml": `name: work
-instance: work_id
-stages:
-  pending: {}
-  done: {final: true}
-pins:
-  inputs: [work.assigned]
-  outputs: [work.finished]
-required_agents:
-  - {role: worker, subscribes_to: [work.assigned]}
-`,
-		"work/entities.yaml": `job:
-  work_id: text
-  result: text
-`,
+		"work/schema.yaml":   workSchema,
+		"work/entities.yaml": workEntity,
 		"work/events.yaml": `work.finished:
   work_id: text
   result: text
