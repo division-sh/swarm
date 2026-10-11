@@ -14,12 +14,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/google/uuid"
 )
 
 func TestCreatingPredecessorAdmissionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, scenario := range []string{"pending", "claimed", "retry", "delivered", "dead_letter", "no_delivery", "different_sender"} {
+		for _, scenario := range []string{"pending", "claimed", "retry", "delivered", "dead_letter", "no_delivery", "different_sender", "missing_receipt"} {
 			t.Run(backend+"/"+scenario, func(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithAgents(t, backend, false)
 				ctx, cancel := context.WithTimeout(f.ctx, 25*time.Second)
@@ -81,6 +82,49 @@ func TestCreatingPredecessorAdmissionBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				before := loadDeliverySnapshotFixture(t, ctx, store, follower.ID(), route)
+				if scenario == "missing_receipt" {
+					err := runDeliveryFixtureAttempt(ctx, store, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+						adapter := sqliteDeliveryAdapter
+						if backend == "postgres" {
+							adapter = postgresDeliveryAdapter
+						}
+						if err := adapter.CommitPipelineHandoff(txctx, attempt, follower.ID()); err != nil {
+							return err
+						}
+						return pipelinepersistence.RemoveReceiverConstructionReceiptForTest(txctx, attempt, flowidentity.RunScopedFlowInstance{RunID: creator.RunID(), Route: plan.Identity.Route()}, plan.Identity.EntityID)
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					before = loadDeliverySnapshotFixture(t, ctx, store, follower.ID(), route)
+					batch, err := store.ObserveDeliveryContinuations(ctx, before.Authority, []string{before.DeliveryID})
+					if err != nil || len(batch) != 1 || batch[0].Disposition != deliverylifecycle.ClaimInvariantInvalid || batch[0].Invariant == nil {
+						t.Fatalf("missing native receipt was admitted by batch: %+v err=%v", batch, err)
+					}
+					observation, err := store.ObserveDeliveryContinuation(ctx, before.Authority, before.DeliveryID)
+					if err != nil || observation.Disposition != deliverylifecycle.ClaimInvariantInvalid || observation.Invariant == nil {
+						t.Fatalf("missing native receipt was admitted by observation: %+v err=%v", observation, err)
+					}
+					claim, err := store.ClaimDelivery(ctx, before.Authority, follower, route)
+					if err != nil || claim.Disposition != deliverylifecycle.ClaimInvariantInvalid || claim.Invariant == nil {
+						t.Fatalf("missing native receipt was admitted by direct claim: %+v err=%v", claim, err)
+					}
+					page, err := store.ScanDeliveryContinuations(ctx, before.Authority, deliverylifecycle.ContinuationCursor{}, 64)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var found bool
+					for _, item := range page.Items {
+						if item.DeliveryID == before.DeliveryID {
+							found = item.Disposition == deliverylifecycle.ClaimInvariantInvalid && item.Invariant != nil
+						}
+					}
+					after, err := store.Snapshot(ctx, before.DeliveryID)
+					if !found || err != nil || !reflect.DeepEqual(before, after) || after.ClaimVersion != 0 {
+						t.Fatalf("corrupt receipt scan admitted or mutated follower: page=%+v before=%+v after=%+v err=%v", page, before, after, err)
+					}
+					return
+				}
 				blocked := scenario == "pending" || scenario == "claimed" || scenario == "retry"
 				want := deliverylifecycle.ClaimAcquired
 				if blocked {

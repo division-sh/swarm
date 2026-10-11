@@ -293,6 +293,9 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.runForkPostgresOwner = runForkOwner
+	if err := pipelineOwner.BindReceiverConstructionHistory(runForkOwner); err != nil {
+		return nil, err
+	}
 	if err := runForkOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
@@ -590,6 +593,9 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.runForkSQLiteOwner = runForkOwner
+	if err := pipelineOwner.BindReceiverConstructionHistory(runForkOwner); err != nil {
+		return nil, err
+	}
 	if err := runForkOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}

@@ -7366,6 +7366,12 @@ engine:
           delivery outcomes; no new schema, queue, process-local ordering cache or compatibility reader
           is introduced. Exact terminal settlement signals the existing continuation owner after commit.
           Construction supplies identity only and cannot reinterpret outcomes or change the actor target.
+          Selected-contract delivery admission first validates its exact live execution fence. A receiver
+          projected from the durable fork origin's exact fixed revision has no fork-local creating delivery;
+          the fixed-snapshot owner must positively validate its captured declaration, entity, key, parent
+          and mode in the original claim or continuation transaction. Receipt absence alone is not history.
+          A later native construction still requires its native receipt; contradictory native and historical
+          construction evidence, or a missing normal-runtime native receipt, fails closed.
         bounded_execution_and_atomic_renewal: |
           The generation-owned delivery continuation coordinator enumerates the selected-store backlog to explicit
           exhaustion before startup readiness, but executable handlers run through a fixed, finite worker set.

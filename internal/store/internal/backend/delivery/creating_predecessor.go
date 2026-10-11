@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
 // The constructor's first authored turn precedes later turns from its sender
@@ -24,7 +25,20 @@ func (a *Adapter) creatingPredecessorReady(ctx context.Context, q queryer, recor
 	if !ok || a.receiverTarget == nil {
 		return false, fmt.Errorf("creating-turn admission requires canonical transactional construction ownership")
 	}
-	creatingEventID, err := a.receiverTarget.ReceiverCreatingEventTx(ctx, tx, record.RunID, record.Route)
+	var creatingEventID string
+	var err error
+	if record.Authority.Kind() == deliverylifecycle.ExecutionAuthoritySelectedContractFork {
+		current, fenceErr := a.selectedExecutionCurrentRead(ctx, tx, record.Authority)
+		if fenceErr != nil {
+			return false, fenceErr
+		}
+		if !current || record.Authority.ForkRunID() != record.RunID {
+			return false, fmt.Errorf("selected creating-turn admission requires its current exact execution fence")
+		}
+		creatingEventID, err = a.receiverTarget.SelectedReceiverCreatingEventTx(ctx, tx, record.Authority, record.Route)
+	} else {
+		creatingEventID, err = a.receiverTarget.ReceiverCreatingEventTx(ctx, tx, record.RunID, record.Route)
+	}
 	if err != nil {
 		return false, err
 	}
