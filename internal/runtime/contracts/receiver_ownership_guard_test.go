@@ -20,7 +20,8 @@ func receiverOwnerConstructorBudget() map[string]int {
 		// #2413 child 2: actor ownership and header dependency have distinct
 		// canonical projections; the old agent reclassification is retired.
 		"runtime/bus::selectedRunTargetOwnerProjection.admitAgentTarget":                  3,
-		"runtime/bus::selectedRunTargetOwnerProjection.agentConstructionDependency":       2,
+		"runtime/bus::selectedRunTargetOwnerProjection.agentConstructionDependency":       1,
+		"runtime/bus::admitObservedAgentConstructionDependency":                           1,
 		"runtime/bus::selectedRunTargetOwnerProjection.resolveSelectedRoute":              2,
 		"runtime/bus::selectedRunTargetOwnerProjection.resolveSelectedRoute [descriptor]": 1,
 		"runtime/bus::deliveryTargetOwnershipFromDescriptor":                              2,

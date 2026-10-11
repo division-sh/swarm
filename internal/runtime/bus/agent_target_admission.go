@@ -94,16 +94,6 @@ func (p selectedRunTargetOwnerProjection) admitAgentTarget(event events.Event, i
 	}
 	if route.Empty() {
 		route = selected
-		if route.Empty() && identity.Route.Presence == agentidentity.RoutePresent {
-			route = events.RouteIdentity{FlowID: identity.Route.ScopeKey, FlowInstance: identity.Route.InstancePath}
-		}
-		if route.Empty() && p.source != nil {
-			root, err := semanticview.AdmitRootExecutionCoordinate(p.source, identity.RunID)
-			if err != nil {
-				return intent, err
-			}
-			route = events.RouteIdentity{FlowID: root.FlowID(), FlowInstance: root.RunID()}
-		}
 		// Selected construction is context, not a caller's actor-entity request.
 		route.EntityID = descriptor.EntityID
 	} else if route.EntityID != descriptor.EntityID {
@@ -112,16 +102,12 @@ func (p selectedRunTargetOwnerProjection) admitAgentTarget(event events.Event, i
 		}
 		return intent, fmt.Errorf("target entity %q disagrees with exact active agent entity %q", route.EntityID, descriptor.EntityID)
 	}
-	if route.Empty() {
-		return intent, nil
-	}
 	if err := p.validateAgentTargetCoordinates(identity, route); err != nil {
 		return intent, err
 	}
 	if !selected.Empty() && (route.FlowID != selected.FlowID || route.FlowInstance != selected.FlowInstance) {
 		return intent, fmt.Errorf("actor target contradicts selected flow construction")
 	}
-	route.EntityID = descriptor.EntityID
 	switch {
 	case descriptor.EntityID == "":
 		intent.TargetOwnership, err = events.NewEntitylessReceiverTarget(route)
@@ -208,31 +194,33 @@ func (p selectedRunTargetOwnerProjection) agentConstructionDependency(event even
 			selected = observation
 		}
 		if selected.Valid() {
-			observation := selected
-			identity := observation.Identity()
-			target := events.RouteIdentity{FlowID: identity.TemplateID, FlowInstance: identity.InstancePath, EntityID: identity.EntityID}
-			if !requested.Empty() && requested.Normalized() != target {
-				return events.ReceiverInitialization{}, events.RouteIdentity{}, fmt.Errorf("agent receiver contradicts recorded construction")
-			}
-			receipt, native, err := observation.NativeConstruction()
-			if err != nil {
-				return events.ReceiverInitialization{}, events.RouteIdentity{}, err
-			}
-			if !native {
-				// Historical construction is already admitted by its fixed-cut owner;
-				// it must not be converted into a fresh native creating publication.
-				return events.ReceiverInitialization{}, target, nil
-			}
-			receiver, err := identity.Route().AgentIdentityRoute()
-			if err != nil {
-				return events.ReceiverInitialization{}, events.RouteIdentity{}, err
-			}
-			dependency, err := events.AdmitStoredFlowReceiverInitialization(actor.RunID, receipt.CreatingInput.EventID, events.MustExistingEntityTarget(target), receiver)
-			return dependency, target, err
+			return admitObservedAgentConstructionDependency(actor.RunID, selected, requested)
 		}
 	}
 	if p.source != nil && actor.Name.Source == agentidentity.NameSourceDeclared {
 		return events.ReceiverInitialization{}, events.RouteIdentity{}, fmt.Errorf("declared agent has no exact admitted flow construction")
 	}
 	return events.ReceiverInitialization{}, events.RouteIdentity{}, nil
+}
+
+func admitObservedAgentConstructionDependency(runID string, observation pipeline.FlowInstanceObservation, requested events.RouteIdentity) (events.ReceiverInitialization, events.RouteIdentity, error) {
+	identity := observation.Identity()
+	target := events.RouteIdentity{FlowID: identity.TemplateID, FlowInstance: identity.InstancePath, EntityID: identity.EntityID}
+	if !requested.Empty() && requested.Normalized() != target {
+		return events.ReceiverInitialization{}, events.RouteIdentity{}, fmt.Errorf("agent receiver contradicts recorded construction")
+	}
+	receipt, native, err := observation.NativeConstruction()
+	if err != nil {
+		return events.ReceiverInitialization{}, events.RouteIdentity{}, err
+	}
+	if !native {
+		// Fixed-cut historical admission is not a fresh native publication.
+		return events.ReceiverInitialization{}, target, nil
+	}
+	receiver, err := identity.Route().AgentIdentityRoute()
+	if err != nil {
+		return events.ReceiverInitialization{}, events.RouteIdentity{}, err
+	}
+	dependency, err := events.AdmitStoredFlowReceiverInitialization(runID, receipt.CreatingInput.EventID, events.MustExistingEntityTarget(target), receiver)
+	return dependency, target, err
 }
