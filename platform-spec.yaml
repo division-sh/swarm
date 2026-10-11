@@ -12807,7 +12807,12 @@ tool_model:
         recovery verb admission, inherited/reconnect/rebind revision selection, confirmed-child reconciliation,
         non-destructive unbind/credential cleanup and historical readback. It rejects missing or contradictory
         principal/interface/revision evidence, duplicate rows, cancellation and observation errors rather than
-        guessing an absent binding. Retained facts grant neither SDK execution nor READY. Strict current binding,
+        guessing an absent binding. The same exact retained selection projects a non-executable mutation fence for
+        explicit connect: true absence is revision zero, structurally valid unbound state retains its positive
+        revision without current identity, and retained current identity remains current rather than absent even
+        when its execution is stale. An unbound fence must have its operation and update identity but no provider,
+        claimant, conversation or proof authority. This fence does not widen the current-binding readers.
+        Retained facts grant neither SDK execution nor READY. Strict current binding,
         proof-reuse readiness, Begin/Confirm, proof materialization, confirmation effects and business admission
         retain their live provider checks. Known unavailable session execution is stale readback with retained
         identity and actionable explicit reconnect guidance, not an unknown-error waiver or invented absence.
@@ -12964,7 +12969,15 @@ tool_model:
         semantic input and target-slot responsibility before credential writes or provider effects. Same-key/same-input
         replay returns that operation, changed input conflicts, and a second same-slot operation conflicts. Client
         cancellation stops response narration only; admitted work continues or is recovered from its persisted phase.
-        connect requires absent identity and activation, reconnect preserves current account/conversation identity while
+        connect requires absent current identity and activation, not the absence of a historical unbound revision fence.
+        The operator identity owner projects true absence as revision zero and validates retained unbound state as an
+        exact positive revision without provider, claimant, proof or executable authority. Onboarding freezes that
+        connect predecessor revision separately from confirmed binding evidence; child creation consumes its exact CAS
+        and retry never refreshes a changed fence. Existing parent/child replay precedes mutable fence observations.
+        Same-process reset and startup reset reconstruction install the process's original native admission owner
+        into fresh runtimes, refusing any replacement issuer. Installation preserves the recovery path only; retired
+        connections, prior claims, proofs and activations remain non-executable until fresh authorized admission.
+        reconnect preserves current account/conversation identity while
         repairing deployment activation, and rebind requires a new authenticated identity ceremony. A public resume
         command consumes one exact durable operation ID and continues that responsibility; a client wait
         timeout must name that command and cannot imply that a new connect replaces the pending operation. Expired or
@@ -18011,6 +18024,7 @@ platform_tables:
             session_account_admission TEXT,
             identity_operation_id UUID,
             binding_revision BIGINT CHECK (binding_revision IS NULL OR binding_revision > 0),
+            connect_fence_revision BIGINT NOT NULL DEFAULT 0 CHECK (connect_fence_revision >= 0 AND (verb = 'connect' OR connect_fence_revision = 0)),
             activation_revision BIGINT CHECK (activation_revision IS NULL OR activation_revision > 0),
             confirmation_operation_id UUID,
             failure_code TEXT,
