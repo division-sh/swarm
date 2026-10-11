@@ -25,6 +25,7 @@ func TestDeleteSelectedContractForkStatePreservesCompletionTombstones(t *testing
 			}
 			defer db.Close()
 			runID := uuid.NewString()
+			foreignRunID := uuid.NewString()
 			for _, table := range []string{
 				"agent_lifecycle_diagnostic_outbox", "fan_out_obligation_barriers", "fan_out_outcomes", "fan_out_intents",
 				"dead_letters", "run_fork_delivery_event_replays", "event_delivery_handler_rule_selections",
@@ -41,11 +42,7 @@ func TestDeleteSelectedContractForkStatePreservesCompletionTombstones(t *testing
 					t.Fatal(err)
 				}
 			}
-			if _, err := db.Exec(`CREATE TABLE routing_rules (run_id TEXT, is_materialized BOOLEAN)`); err != nil {
-				t.Fatal(err)
-			}
-			foreignRunID := uuid.NewString()
-			if _, err := db.Exec(`INSERT INTO routing_rules (run_id, is_materialized) VALUES ($1, TRUE), ($2, TRUE), (NULL, FALSE)`, runID, foreignRunID); err != nil {
+			if _, err := db.Exec(`INSERT INTO flow_instances (run_id, fork_run_id) VALUES ($1, $1)`, foreignRunID); err != nil {
 				t.Fatal(err)
 			}
 			tx, err := db.BeginTx(context.Background(), nil)
@@ -59,18 +56,15 @@ func TestDeleteSelectedContractForkStatePreservesCompletionTombstones(t *testing
 			if err := tx.Commit(); err != nil {
 				t.Fatal(err)
 			}
-			var discardedRoutes, foreignRoutes, sourcePatterns int
-			if err := db.QueryRow(`SELECT COUNT(*) FROM routing_rules WHERE run_id=$1`, runID).Scan(&discardedRoutes); err != nil {
+			var discardedInstances, foreignInstances int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, runID).Scan(&discardedInstances); err != nil {
 				t.Fatal(err)
 			}
-			if err := db.QueryRow(`SELECT COUNT(*) FROM routing_rules WHERE run_id=$1`, foreignRunID).Scan(&foreignRoutes); err != nil {
+			if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, foreignRunID).Scan(&foreignInstances); err != nil {
 				t.Fatal(err)
 			}
-			if err := db.QueryRow(`SELECT COUNT(*) FROM routing_rules WHERE run_id IS NULL AND is_materialized=FALSE`).Scan(&sourcePatterns); err != nil {
-				t.Fatal(err)
-			}
-			if discardedRoutes != 0 || foreignRoutes != 1 || sourcePatterns != 1 {
-				t.Fatalf("route ownership after discard: fork=%d foreign=%d global=%d", discardedRoutes, foreignRoutes, sourcePatterns)
+			if discardedInstances != 0 || foreignInstances != 1 {
+				t.Fatalf("instance ownership after discard: fork=%d foreign=%d", discardedInstances, foreignInstances)
 			}
 			for _, table := range []string{"agent_turns", "agent_conversation_audits", "author_activity_occurrences", "agents", "activity_attempts", "entity_mutations", "flow_instances"} {
 				var count int
