@@ -81,7 +81,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	rootNodeID := identitytest.FlowNode(t, ".", "root-completion").Key()
 	assertSystemNodeOutcomePersisted(t, db, eventID, rootNodeID)
 	assertSystemNodeDeliverySettled(t, db, eventID, rootNodeID)
-	assertFlowEntityTerminal(t, db, runID, runtimepipeline.FlowInstanceEntityID("discovery"), "discovery", "discovery", "done")
+	assertFlowEntityTerminal(t, pg, runID, runtimepipeline.FlowInstanceEntityID("discovery"), "discovery", "discovery", "done")
 
 	diagnose := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"diagnose","method":"run.diagnose","params":{"run_id":%q}}`, runID))
 	if diagnose.Error != nil {
@@ -288,23 +288,21 @@ func assertPipelineReceiptSucceeded(t *testing.T, db *sql.DB, eventID string) {
 	}
 }
 
-func assertFlowEntityTerminal(t *testing.T, db *sql.DB, runID, entityID, flowInstance, wantEntityType, wantState string) {
+func assertFlowEntityTerminal(t *testing.T, selected EntityReadStore, runID, entityID, flowInstance, wantEntityType, wantState string) {
 	t.Helper()
-	var entityType, state string
-	if err := db.QueryRow(`
-		SELECT entity_type, COALESCE(current_state, '')
-		FROM entity_state
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-		  AND flow_instance = $3
-	`, runID, entityID, flowInstance).Scan(&entityType, &state); err != nil {
+	full, err := selected.LoadOperatorEntity(context.Background(), entityID, runID)
+	if err != nil {
 		t.Fatalf("load flow entity terminal state: %v", err)
 	}
-	if entityType != wantEntityType {
-		t.Fatalf("flow entity entity_type = %q, want %q", entityType, wantEntityType)
+	entity := full.Entity
+	if entity.RunID != runID || entity.EntityID != entityID || entity.FlowInstance != flowInstance || entity.EntityType != wantEntityType {
+		t.Fatalf("flow entity identity = %+v, want %s/%s/%s/%s", entity, runID, entityID, flowInstance, wantEntityType)
 	}
-	if state != wantState {
-		t.Fatalf("flow entity current_state = %q, want %q", state, wantState)
+	if entity.StageDefined == nil || !*entity.StageDefined || entity.CurrentState == nil || *entity.CurrentState != wantState ||
+		entity.Revision == nil || *entity.Revision < 1 || entity.EnteredStateAt == nil || entity.EnteredStateAt.IsZero() ||
+		entity.LifecycleCreatedAt == nil || entity.LifecycleCreatedAt.IsZero() ||
+		entity.LifecycleUpdatedAt == nil || entity.LifecycleUpdatedAt.IsZero() {
+		t.Fatalf("flow entity terminal lifecycle = %+v, want present named stage %q", entity, wantState)
 	}
 }
 
