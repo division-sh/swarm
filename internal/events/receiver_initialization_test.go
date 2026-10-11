@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -185,6 +187,49 @@ func TestReceiverInitializationReusedConstructionKeepsOriginalPublication(t *tes
 	}
 }
 
+func TestReceiverInitializationPreservesRootAndNestedKeyedCoordinates(t *testing.T) {
+	event, _, agents := receiverMaterializationFixture(t)
+	for _, shape := range []struct {
+		name, flow, path string
+		receiver         agentidentity.Route
+	}{
+		{"root", ".", event.RunID(), agentidentity.RootRoute()},
+		{"nested_keyless_under_keyed", "templ/child", "templ/42/child", agentidentity.Route{Presence: agentidentity.RoutePresent, ScopeKey: "templ/child", InstanceID: "child", InstancePath: "templ/42/child"}},
+	} {
+		for _, stored := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stored=%t", shape.name, stored), func(t *testing.T) {
+				identity, err := agentidentity.New(event.RunID(), agents[0].AgentIdentity.Name, shape.receiver)
+				if err != nil {
+					t.Fatal(err)
+				}
+				target := RouteIdentity{FlowID: shape.flow, FlowInstance: shape.path, EntityID: uuid.NewString()}
+				var dependency ReceiverInitialization
+				if stored {
+					dependency, err = AdmitStoredFlowReceiverInitialization(event.RunID(), "", MustExistingEntityTarget(target), shape.receiver)
+				} else {
+					dependency, err = AdmitFlowReceiverInitialization(event, MustMaterializingEntityTarget(target), shape.receiver)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				target.EntityID = ""
+				route := DeliveryRoute{Recipient: MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity, Target: MustEntitylessReceiverTarget(target), Initialization: dependency}
+				if err := ValidateReceiverMaterializations(event, []DeliveryRoute{route}); err != nil {
+					t.Fatal(err)
+				}
+				raw, err := json.Marshal(route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var restored DeliveryRoute
+				if err := json.Unmarshal(raw, &restored); err != nil || !SameDeliveryRouteIdentity(route, restored) {
+					t.Fatalf("captured coordinate roundtrip: %v", err)
+				}
+			})
+		}
+	}
+}
+
 func TestReceiverInitializationStoredStartupRetainsTypedAbsence(t *testing.T) {
 	event, _, agents := receiverMaterializationFixture(t)
 	agent := agents[0]
@@ -214,6 +259,56 @@ func TestReceiverInitializationStoredStartupRetainsTypedAbsence(t *testing.T) {
 	restored, err := RestoreReceiverMaterializationRecord(bare, raw)
 	if err != nil || !SameDeliveryRouteIdentity(restored, agent) {
 		t.Fatalf("startup absence roundtrip: %v", err)
+	}
+}
+
+func TestReceiverInitializationRootWireRequiresEveryCoordinate(t *testing.T) {
+	event, _, _ := receiverMaterializationFixture(t)
+	target := MustExistingEntityTarget(RouteIdentity{FlowID: ".", FlowInstance: event.RunID(), EntityID: uuid.NewString()})
+	dependency, err := AdmitStoredFlowReceiverInitialization(event.RunID(), "", target, agentidentity.RootRoute())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(dependency)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"presence", "scope_key", "instance_id", "instance_path"} {
+		for _, variant := range []string{"missing", "wrong_case", "null", "wrong_type"} {
+			t.Run(key+"/"+variant, func(t *testing.T) {
+				var document map[string]json.RawMessage
+				if err := json.Unmarshal(raw, &document); err != nil {
+					t.Fatal(err)
+				}
+				var coordinates map[string]json.RawMessage
+				if err := json.Unmarshal(document["receiver_route"], &coordinates); err != nil {
+					t.Fatal(err)
+				}
+				switch variant {
+				case "missing":
+					delete(coordinates, key)
+				case "wrong_case":
+					coordinates[strings.ToUpper(key)] = coordinates[key]
+					delete(coordinates, key)
+				case "null":
+					coordinates[key] = json.RawMessage(`null`)
+				case "wrong_type":
+					coordinates[key] = json.RawMessage(`1`)
+				}
+				document["receiver_route"], err = json.Marshal(coordinates)
+				if err != nil {
+					t.Fatal(err)
+				}
+				hostile, err := json.Marshal(document)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var restored ReceiverInitialization
+				if err := json.Unmarshal(hostile, &restored); err == nil {
+					t.Fatal("partial or alternate coordinate admitted")
+				}
+			})
+		}
 	}
 }
 
