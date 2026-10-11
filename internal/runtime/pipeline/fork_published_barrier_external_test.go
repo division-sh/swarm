@@ -191,6 +191,13 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, failingCompletion bo
 				}
 			}
 			baselineWork := rt.Options.ProcessWorkOwner.ActiveCount()
+			var sourceDomain map[string]storetest.SelectedForkStorageTableSnapshot
+			if failingCompletion {
+				sourceDomain, err = storetest.ReadSelectedForkSourceDomain(phase, selected.RuntimeDeps().DeliveryStore, runID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			result, err := family.Execute(phase, request)
 			defer func() {
 				cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
@@ -219,6 +226,10 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, failingCompletion bo
 				verifyPublishedBarrierCompletionRollback(t, phase, selected, family, result, plan, original, childClaim, childProbe, runID, before)
 				if active := rt.Options.ProcessWorkOwner.ActiveCount(); active != baselineWork {
 					t.Fatalf("failed barrier completion retained owned process work: active=%d baseline=%d", active, baselineWork)
+				}
+				after, err := storetest.ReadSelectedForkSourceDomain(phase, selected.RuntimeDeps().DeliveryStore, runID)
+				if err != nil || !reflect.DeepEqual(sourceDomain, after) {
+					t.Fatalf("failed barrier transfer changed source business evidence: %v", err)
 				}
 				return
 			}

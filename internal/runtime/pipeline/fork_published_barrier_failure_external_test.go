@@ -101,6 +101,7 @@ func verifyPublishedBarrierCompletionRollback(t *testing.T, ctx context.Context,
 		t.Fatalf("failed completion published a success output: count=%d err=%v", count, err)
 	}
 	physical := readForkEngineExecutionProof(t, ctx, selected, forkEngineExecutionProofRequest(t, result, original.id, observed.id, claim))
+	assertForkEnginePipelineSettlement(t, physical, settled)
 	if physical.DeadLetterCount != 1 || physical.DeliveryHandoff || physical.PipelineOutcome != "dead_letter" || physical.PipelineReason != settled.ReasonCode {
 		t.Fatalf("rollback lost its one DL or fabricated a success handoff: %+v", physical)
 	}
@@ -118,6 +119,7 @@ func verifyPublishedBarrierCompletionRollback(t *testing.T, ctx context.Context,
 		t.Fatalf("explicit retirement rewrote dead-letter business history: %+v err=%v", retired, err)
 	}
 	joined := readForkEngineExecutionProof(t, cleanup, selected, forkEngineExecutionProofRequest(t, result, original.id, observed.id, claim))
+	assertForkEnginePipelineSettlement(t, joined, settled)
 	if joined.DeadLetterCount != physical.DeadLetterCount || joined.DeliveryHandoff || joined.PipelineOutcome != physical.PipelineOutcome || joined.PipelineReason != physical.PipelineReason ||
 		!reflect.DeepEqual(joined.PipelineFailure, physical.PipelineFailure) || joined.ExecutionState != "running" || joined.RunStatus != "running" || len(joined.Failure) != 0 {
 		t.Fatalf("retirement changed the exact DL or converted delivery terminality to run failure: %+v", joined)
