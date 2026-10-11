@@ -130,7 +130,8 @@ func requireServedUnboundConnectAcrossRestart(t *testing.T, endpoint string, pee
 	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id}, &result)
 	if result.IdentityOperation == nil || result.IdentityOperation.Kind != operatorchannel.OperationConnect ||
 		result.IdentityOperation.State != operatorchannel.StateAwaitingClaim || result.Operation.BindingRevision != 0 ||
-		result.Operation.ActivationRevision != 0 || result.Operation.Coordinate.TargetGeneration != 0 ||
+		result.Operation.ActivationRevision != 0 || result.Readiness != nil && result.Readiness.Ready ||
+		result.Binding != nil && result.Binding.Status == operatorchannel.BindingCurrent ||
 		result.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity {
 		t.Fatal("unbound predecessor became confirmed identity or inherited reconnect", result)
 	}
