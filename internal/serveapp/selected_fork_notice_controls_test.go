@@ -14,9 +14,11 @@ import (
 func TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			publication := newExactOriginPublicationProbe(t)
 			f := newMailboxCompletionFixture(t, backend)
 			rt, runID := f.rt, f.base.RunID
-			noticeID := mailboxCompletionNotice(t, f)
+			var noticePublication servedEventPublishRPCResult
+			noticeID := mailboxCompletionNotice(t, f, &noticePublication)
 			var childEvent, sourceEntity string
 			if err := rt.DB.QueryRow(`SELECT m.source_event_id,COALESCE(CAST(m.entity_id AS TEXT),'') FROM mailbox m JOIN events e ON e.event_id=m.source_event_id WHERE m.item_id=$1 AND e.run_id=$2`, noticeID, runID).Scan(&childEvent, &sourceEntity); err != nil {
 				t.Fatal(err)
@@ -57,6 +59,9 @@ func TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores(t *testing.
 			// rows. Notice acknowledgment remains available without a live context.
 			var stopped map[string]any
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.stop", map[string]any{"run_id": runID}, &stopped)
+			if err := waitExactOriginPublications(t.Context(), publication, f.eventID, noticePublication.EventID); err != nil {
+				t.Fatal(err)
+			}
 			before := snapshotForkReceiverApplication(t, rt)
 			var notified bool
 			if err := rt.DB.QueryRow(`SELECT notified FROM mailbox WHERE item_id=$1`, noticeID).Scan(&notified); err != nil || notified {

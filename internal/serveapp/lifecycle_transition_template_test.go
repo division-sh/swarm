@@ -23,6 +23,7 @@ type lifecycleTemplateSibling struct {
 	side, flow, instance, entity, revision, gateInstance, gateEntity string
 	decision                                                         map[string]any
 	gate                                                             gateruntime.Activation
+	publications                                                     []string
 }
 
 func startLifecycleTemplateRuntime(t *testing.T, backend servedparity.Backend, root string) servedControlProofRuntime {
@@ -141,7 +142,9 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 			} else {
 				params["run_id"], params["source_event_id"] = runID, sourceEvent
 			}
-			return requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			published := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			s.publications = append(s.publications, published.EventID)
+			return published
 		}
 		requireStep := func(command string, published servedEventPublishRPCResult, from, to string) pipeline.WorkflowTransitionRecord {
 			t.Helper()
@@ -345,12 +348,23 @@ func TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores(t *test
 func TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			publication := newExactOriginPublicationProbe(t)
 			rt := startLifecycleTemplateRuntime(t, backend, canonicalrouting.CopyLifecycleNestedTemplates(t))
 			runID, sourceEvent, siblings := prepareLifecycleTemplateSiblings(t, rt)
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "template-pause"})
 			frontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.observed", "run_id": runID, "source_event_id": sourceEvent, "payload": map[string]any{"seed": true}, "idempotency_key": "template-frontier"})
 			waitServedEventPublishedLog(t, rt.Endpoint, runID, frontier.EventID)
+			origins := []string{frontier.EventID}
+			for _, sibling := range siblings {
+				if len(sibling.publications) != 5 {
+					t.Fatalf("sibling %s did not retain all five acknowledged commands: %v", sibling.side, sibling.publications)
+				}
+				origins = append(origins, sibling.publications...)
+			}
+			if err := waitExactOriginPublications(t.Context(), publication, origins...); err != nil {
+				t.Fatal(err)
+			}
 			before := snapshotForkReceiverApplication(t, rt)
 			params := map[string]any{"source_run_id": runID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "template-fork"}
 			for attempt := 0; attempt < 2; attempt++ {

@@ -31,6 +31,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				return previous(owner)
 			}
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+			publication := newExactOriginPublicationProbe(t)
 			root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
@@ -38,7 +39,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-seed",
 			})
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
-			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-request",
 			})
@@ -54,6 +55,9 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-sibling",
 			})
 			waitForkReceiverSourceCompletion(t, rt, sibling.RunID)
+			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, started.EventID, sibling.EventID); err != nil {
+				t.Fatal(err)
+			}
 			family, ok := selected.RunFork()
 			if !ok {
 				t.Fatal("missing real selected fork owner")

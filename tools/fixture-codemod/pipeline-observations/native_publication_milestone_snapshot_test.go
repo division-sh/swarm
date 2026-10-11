@@ -52,6 +52,9 @@ func TestNativePublicationMilestoneSuccessorsPreserveReviewedAssertions(t *testi
 			if selected == nil || selected.Family != "native-served-delivery-quiescence-caller" || selected.Successor == "" {
 				t.Fatal("missing exact milestone successor")
 			}
+			current := *selected
+			reviewed := reviewedMilestoneRow(t, current)
+			selected = &reviewed
 			restored := selected.Successor
 			for index, change := range target.cuts {
 				if strings.Count(restored, change.after) != 1 {
@@ -117,7 +120,7 @@ func TestNativePublicationMilestoneSuccessorsPreserveReviewedAssertions(t *testi
 			if err != nil || fmt.Sprintf("%x", sha256.Sum256([]byte(canonical))) != target.predecessor {
 				t.Fatal("milestone successor changed reviewed setup, state, refusal or snapshot assertions")
 			}
-			if files, changes, err := prepareFiles("../../..", []recipe{*selected}); err != nil || len(files) != 0 || len(changes) != 0 {
+			if files, changes, err := prepareFiles("../../..", []recipe{current}); err != nil || len(files) != 0 || len(changes) != 0 {
 				t.Fatalf("current milestone successor is not inert: %v", err)
 			}
 		})
@@ -142,6 +145,14 @@ func TestNativeRootForkMilestoneSuccessorRejectsHostileCuts(t *testing.T) {
 		t.Fatal("root-fork successor changed its migration identity")
 	}
 	actual := selectedCausalObservationBody(t, selected.File, selected.Function)
+	current, err := canonicalFunction(actual)
+	want, wantErr := canonicalFunction(selected.Successor)
+	if err != nil || wantErr != nil || current != want {
+		t.Fatal("root-fork source differs from its current successor")
+	}
+	reviewed := reviewedMilestoneRow(t, *selected)
+	selected = &reviewed
+	actual = reviewed.Successor
 	const gate = "\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, frontier.EventID)\n"
 	const snapshot = "\t\t\tbefore := lifecycleStoredSnapshot(t, rt, seed.RunID)\n"
 	const fork = "\t\t\trequireServedJSONRPCResult(t, rt.Endpoint, \"run.fork\", params, &fork)\n"

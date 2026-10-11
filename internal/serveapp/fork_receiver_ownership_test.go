@@ -445,6 +445,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			return events.DeliveryRoute{}
 		}
 	}
+	publication := newExactOriginPublicationProbe(t)
 	rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name": seedName, "bundle_hash": rt.BundleHash,
@@ -468,6 +469,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	if started.RunID != seed.RunID {
 		t.Fatal("second source ingress escaped the seeded run")
 	}
+	origins := []string{seed.EventID, started.EventID}
 	var frontier string
 	if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2`, seed.RunID, prefix+"producer/work.ready").Scan(&frontier); err != nil {
 		t.Fatalf("actual producer did not emit fork frontier: %v", err)
@@ -485,6 +487,10 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			t.Fatal(err)
 		}
 		frontiers = append(frontiers, frontier)
+		origins = append(origins, second.EventID)
+		if err := waitExactOriginPublications(t.Context(), publication, origins...); err != nil {
+			t.Fatal(err)
+		}
 		beforeDuplicate := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
 		beforeDuplicateNotices := readForkReceiverNoticeDomain(t, rt, seed.RunID)
 		duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, request)
@@ -584,7 +590,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-seed"})
 		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, siblingSeed.RunID)
 		waitForkReceiverSourceCompletion(t, rt, siblingSeed.RunID)
-		requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": requestName, "run_id": siblingSeed.RunID, "source_event_id": siblingSeed.EventID,
+		siblingRequest := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": requestName, "run_id": siblingSeed.RunID, "source_event_id": siblingSeed.EventID,
 			"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-request"})
 		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, siblingSeed.RunID)
 		waitForkReceiverSourceCompletion(t, rt, siblingSeed.RunID)
@@ -603,6 +609,9 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			}
 			requireEffect(t, rt, siblingSeed.RunID, siblingFrontier, path, receiver.Path, "existing_entity", siblingRows[path].ID)
 		}
+		if err := waitExactOriginPublications(t.Context(), publication, siblingSeed.EventID, siblingRequest.EventID); err != nil {
+			t.Fatal(err)
+		}
 		siblingDomain, siblingCompanions := readServedForkRecipientSourceDomain(t, rt, siblingSeed.RunID), readForkReceiverCompanions(t, rt, siblingSeed.RunID)
 		siblingNotices := readForkReceiverNoticeDomain(t, rt, siblingSeed.RunID)
 		defer func() {
@@ -610,6 +619,9 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 				t.Error("fork mutated the independently executed sibling run")
 			}
 		}()
+	}
+	if err := waitExactOriginPublications(t.Context(), publication, origins...); err != nil {
+		t.Fatal(err)
 	}
 	before := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
 	beforeCompanions := readForkReceiverCompanions(t, rt, seed.RunID)
@@ -743,6 +755,7 @@ func TestSelectedForkCanonicalReceiverAcquisitionStateEffectBothStores(t *testin
 func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend)+"/template_resolution_create", func(t *testing.T) {
+			publication := newExactOriginPublicationProbe(t)
 			root := canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintUUID})
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "validation.triggered", "bundle_hash": rt.BundleHash,
@@ -764,6 +777,9 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 				t.Fatalf("dynamic source did not settle: %d %v", incomplete, err)
 			}
 			requireReceiverPublicReadback(t, rt, seed.RunID)
+			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID); err != nil {
+				t.Fatal(err)
+			}
 			before := snapshotForkReceiverApplication(t, rt)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "capability-fork"}
 			for attempt := 0; attempt < 2; attempt++ {
@@ -1049,6 +1065,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		for _, entityless := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/entityless_producer=%t", backend, entityless), func(t *testing.T) {
+				publication := newExactOriginPublicationProbe(t)
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, entityless))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "business-seed"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
@@ -1085,6 +1102,9 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 					t.Fatalf("immutable producer evidence: %+v", sourceEvidence)
 				}
 				sourceRoute := requireForkReceiverBusinessMutation(t, rt, seed.RunID, frontier, consumer.ID)
+				if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, started.EventID); err != nil {
+					t.Fatal(err)
+				}
 				before, companions := readServedForkRecipientSourceDomain(t, rt, seed.RunID), readForkReceiverCompanions(t, rt, seed.RunID)
 				defer func() {
 					if !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(companions, readForkReceiverCompanions(t, rt, seed.RunID)) {

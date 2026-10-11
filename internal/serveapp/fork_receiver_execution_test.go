@@ -78,6 +78,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 			unavailable := name == "unavailable_after_commit" || name == "newer_claim_store_fence"
 			newerClaim := name == "newer_claim_store_fence"
 			t.Run(string(backend)+"/"+name, func(t *testing.T) {
+				publication := newExactOriginPublicationProbe(t)
 				var selected *selectedStoreOwner
 				previous := projectRuntimePersistenceForServe
 				projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
@@ -119,7 +120,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "fork-settlement-seed",
 				})
 				waitWorkspaceProofPipelineHandoff(t, servedWorkspaceProofRuntime{Events: selected.RuntimeDeps().EventStore}, seed.RunID)
-				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+				requested := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 					"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "fork-settlement-request",
 				})
@@ -127,6 +128,9 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				frontier := requireWorkspaceProofWorkReadyEvent(t, rt.Endpoint, selected.RuntimeDeps().EventStore, seed.RunID)
 				sourceRows := readWorkspaceProofReceiverRows(t, selected.RuntimeDeps().EventStore, seed.RunID)
 				requireWorkspaceProofBusinessMutation(t, rt.Endpoint, selected.RuntimeDeps().EventStore, selected.RuntimeDeps().DeliveryStore, seed.RunID, frontier, sourceRows["consumer"].ID)
+				if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, requested.EventID); err != nil {
+					t.Fatal(err)
+				}
 				sourceBefore := readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)
 				family, ok := selected.RunFork()
 				if !ok {

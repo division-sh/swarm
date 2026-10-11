@@ -167,6 +167,7 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 				return previous(owner)
 			}
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+			publication := newExactOriginPublicationProbe(t)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
@@ -194,6 +195,9 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 			}
 			requireServedForkConsumerAuthority(t, rt, seed.RunID, plan.ForkPoint.EventID)
 			t.Logf("source consumer settled before fork: source_run=%s source_event=%s", seed.RunID, plan.ForkPoint.EventID)
+			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID); err != nil {
+				t.Fatal(err)
+			}
 			before := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
 			t.Logf("source entity-state rows run=%s: %v", seed.RunID, before["entity_state"])
 			checkSource := func() {

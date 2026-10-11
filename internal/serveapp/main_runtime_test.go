@@ -62,6 +62,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -1714,6 +1715,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
 		return canonicalrouting.CopyRootIngressServedFollowUp(t)
 	})
+	publication := rt.Probe.Raw()
 	started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"bundle_hash":     rt.BundleHash,
 		"event_name":      "item.received",
@@ -1791,6 +1793,9 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 			t.Fatalf("fork completion candidate did not settle before refusal baseline: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, fork.ForkRunID))
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	if err := waitExactOriginPublications(t.Context(), publication, started.EventID, published.EventID); err != nil {
+		t.Fatal(err)
 	}
 	beforeRefusal := snapshotForkReceiverApplication(t, rt)
 	// A selected fork cannot acquire future ordinary ingress from the loaded
@@ -8967,6 +8972,11 @@ func startOwnedMockLifecycleTestProcess(t *testing.T, repo, retainedRoot string,
 
 func startRuntimeTestProcessWithRunner(t *testing.T, repo string, opts cliapp.ServeOptions, run func(context.Context, string, cliapp.ServeOptions) int) *serveRuntimeTestProcess {
 	t.Helper()
+	if opts.TestLifecycleProbe == nil {
+		if observer, ok := ownedMockLifecycleProbes.Load(t); ok {
+			opts.TestLifecycleProbe = observer.(lifecycleprobe.Observer)
+		}
+	}
 	if opts.PublicWebhookListener != nil {
 		file, err := opts.PublicWebhookListener.File()
 		if err != nil {

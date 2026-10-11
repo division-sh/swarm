@@ -40,6 +40,7 @@ func TestSelectedForkReceiverPostRevisionPolicyRefusalBothStores(t *testing.T) {
 				return previous(owner)
 			}
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+			publication := newExactOriginPublicationProbe(t)
 			root := canonicalrouting.CopyForkReceiverOwnership(t, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredExisting}}, false)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
@@ -47,7 +48,7 @@ func TestSelectedForkReceiverPostRevisionPolicyRefusalBothStores(t *testing.T) {
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "fork-refusal-seed",
 			})
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
-			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+			requested := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "fork-refusal-request",
 			})
@@ -61,6 +62,9 @@ func TestSelectedForkReceiverPostRevisionPolicyRefusalBothStores(t *testing.T) {
 			}
 			sourceRows := readForkReceiverRows(t, rt, seed.RunID)
 			requireForkReceiverEffect(t, rt, seed.RunID, frontier, "consumer", "consumer", "existing_entity", sourceRows["consumer"].ID)
+			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, requested.EventID); err != nil {
+				t.Fatal(err)
+			}
 			requireForkReceiverPostRevisionPolicyRefusal(t, rt, selected, root, seed.RunID, frontier, finished)
 		})
 	}

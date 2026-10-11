@@ -21,6 +21,7 @@ import (
 func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			publication := newExactOriginPublicationProbe(t)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverRecordedConfig(t))
 			params := receiverInitializationPublishParams(rt, "recorded-config-source", "business-key", `{"count":7,"ratio":7.0,"active":false,"label":"recorded business config","attributes":{"nested":[7,7.0]}}`)
 			requestWire, err := json.Marshal(params)
@@ -30,6 +31,9 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 			t.Logf("public input wire with explicit integral decimals: %s", requestWire)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID); err != nil {
+				t.Fatal(err)
+			}
 			const path = "account/ti-138096d2b56ac1568ac40ea7"
 			entityID := flowidentity.EntityID(path)
 			var creating, consumed string

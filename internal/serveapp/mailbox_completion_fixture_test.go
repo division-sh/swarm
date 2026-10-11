@@ -181,7 +181,7 @@ func mailboxCompletionAnchorCard(t *testing.T, f cursorMailboxFixture, kind deci
 	return card
 }
 
-func mailboxCompletionNotice(t *testing.T, f cursorMailboxFixture) string {
+func mailboxCompletionNotice(t *testing.T, f cursorMailboxFixture, publicationOut ...*servedEventPublishRPCResult) string {
 	t.Helper()
 	seed := requireServedEventPublishRPCResult(t, f.rt.Endpoint, map[string]any{"event_name": "notice.requested", "run_id": f.base.RunID, "source_event_id": f.eventID, "payload": map[string]any{"seed": true}, "idempotency_key": "notice-seed-" + uuid.NewString()})
 	waitServedRunDeliveryQuiescence(t, f.rt.ReadRunDeliveries, f.base.RunID)
@@ -192,6 +192,9 @@ func mailboxCompletionNotice(t *testing.T, f cursorMailboxFixture) string {
 	}
 	if summary != "Observed notice" || from != "observer" {
 		t.Fatalf("wrong real notice producer: summary=%q from=%q", summary, from)
+	}
+	for _, out := range publicationOut {
+		*out = seed
 	}
 	return id
 }

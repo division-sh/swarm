@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -14,6 +15,7 @@ import (
 func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			publication := newExactOriginPublicationProbe(t)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyRootIngressServedFollowUp(t))
 			var started struct {
 				RunID string `json:"run_id"`
@@ -21,6 +23,14 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.start", map[string]any{
 				"bundle_hash": rt.BundleHash, "event_name": "item.received", "payload": map[string]any{"item_id": "ordinary-start"},
 			}, &started)
+			var receipt durabledata.OperationSummary
+			requireServedJSONRPCResult(t, rt.Endpoint, "data.show", map[string]any{
+				"view": "operation", "detail": "summary", "operation_ref": map[string]any{"kind": "run_creation", "run_id": started.RunID},
+			}, &receipt)
+			if receipt.RunCreation == nil || receipt.RunCreation.RunID != started.RunID || receipt.RunCreation.Outcome != "created" || receipt.RunCreation.EventID == "" {
+				t.Fatal("run.start lacks exact acknowledged initial publication evidence")
+			}
+			initialEventID := receipt.RunCreation.EventID
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"bundle_hash": rt.BundleHash, "run_id": started.RunID, "event_name": "item.processed",
@@ -38,6 +48,9 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 			}
 			if kind != "root" || source != (events.RouteIdentity{EntityID: started.RunID}) {
 				t.Fatalf("ordinary API admission lost selected-root authority: %s %s", kind, sourceRoute)
+			}
+			if err := waitExactOriginPublications(t.Context(), publication, initialEventID, published.EventID); err != nil {
+				t.Fatal(err)
 			}
 			before := readServedForkRecipientSourceDomain(t, rt, started.RunID)
 			params := map[string]any{"source_run_id": started.RunID, "fork_event_id": published.EventID, "allow_source_freeze": true, "idempotency_key": "root-source-fork"}
