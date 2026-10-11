@@ -600,9 +600,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	}
 	source := semanticview.Wrap(bundle)
 	module := newFixtureWorkflowModule(t, bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := eventBusTestRunContextForSource(t, pg, semanticview.Wrap(bundle))
 	instanceRoute := runtimeflowidentity.DeriveRoute("account", "one")
 	accountConstruction := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "account", "one", eventBusTestRunID)
@@ -727,14 +725,8 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for agent-only connect delivery")
 	}
-	var nodeDeliveries int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = 'account-setup-node-one'
-	`, evt.ID()).Scan(&nodeDeliveries); err != nil {
+	nodeDeliveries, err := storetest.CountTemplateNodeDelivery(ctx, pg, evt.ID(), "account-setup-node-one")
+	if err != nil {
 		t.Fatalf("count node deliveries: %v", err)
 	}
 	if nodeDeliveries != 0 {

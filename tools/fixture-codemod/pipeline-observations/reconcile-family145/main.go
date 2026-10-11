@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "a8dc10b83319b019b7e916e4ac2e805c3c08f9a9e1518d50ad99057f9618c468"
+const targetDigest = "edd095d75b02251edaa97c43239419315140e39e0af46d1f087e4488d851dbf4"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -94,6 +94,7 @@ var files = []string{
 	"internal/runtime/github_app_issue_workflow_supported_surface_test.go",
 	"internal/runtime/channel_runtime_supported_surface_test.go",
 	"internal/runtime/operator_channel_inbound_supported_surface_test.go",
+	"internal/runtime/bus/eventbus_publish_test.go",
 	"internal/runtime/template_flow_pilot_runtime_test.go",
 	"internal/runtime/final_flow_instance_authoring_runtime_test.go",
 	"internal/runtime/artifact_action_result_delivery_test.go",
@@ -143,6 +144,9 @@ func main() {
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
+			if path == "internal/runtime/bus/eventbus_publish_test.go" && key != "TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode" {
+				continue
+			}
 			original := before[key]
 			replacement, removed := currentReplacement(path, key, after)
 			if original == replacement {

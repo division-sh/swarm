@@ -2832,3 +2832,44 @@ is recorded with the receipts. Parent/M01/Docker/drain/D3/M07/rollback remain
 open and unwaived; no process-restart, parent closure or merge qualification is
 claimed. Existing watchlist/architecture disposition is sufficient. No new
 issue, framework, PR, push or server2. Next ready chain is native bus routing.
+
+## Native agent-only bus construction and node-exclusion boundary
+
+The complete agent-only-connect witness consumes original-location native
+construction plus the existing source-aware run, initial-entry, activation,
+route materialization and agent-subscription owners. The unrelated-node zero
+count reuses CountTemplateNodeDelivery, not a new facade or independent SQL
+interpreter. Its closed delivery predicate remains exact event ID, node type
+and account-setup-node-one, with no run/status/eligibility/chronology filter.
+The original preflight, single agent route, exact delivery/completion, node
+exclusion, unsubscribe and cleanup cuts remain unchanged. No new raw carrier,
+transaction, schema, lease or source fingerprint is introduced.
+
+| Manifestation | Disposition / exact proof |
+| --- | --- |
+| Agent-only connect must never authorize unrelated node dispatch | reproduced and fixed: TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode, original PostgreSQL surface under race PASS8.020s; no timeout, workload, publication or assertion change |
+| Exact native constructor/activation/source/subscription/completion/readback consumption | execution-proven through the same corrected path: TestFamily145NativeBusRoutingRetainsConstructionPublicationAndNodeExclusion; hostile removal of each owner, recipient/lifetime cut and original assertion rejected; immutable SQL compared against the reused closed owner's bound exact node predicate |
+| Historical reviewed source and finite propagation | execution-proven through the same corrected path: all family145 guards plus recipe/idempotency and mechanical source controls PASS7.250s; dry-run Changes=[] and U1000 clean |
+
+This is an exact Successor on one existing reviewed mechanical receipt. All
+24 historical receipts, original Before/After/Mechanical values and source
+commits remain immutable. The current-receipt digest is updated to the inspected
+Successor, not by changing historical expectations. Corpus328 transitions /
+1153 recipes; the bus file's finite reconciler scope names only this exact root
+so unrelated master changes are not swept into the transformation. Initial
+count/digest failures were corrected through those owners, not relaxed.
+
+Receipts /home/youmew/.cache/swarm-2542-family145/native-bus-agent-*;
+unchanged wider owner/backend/counterexample receipts carry. Affected boundary,
+revision, writer and retirement guards are rechecked before checkpoint.
+Final ratchet PASS37.180s:9021 ->9015,6 removals,0 additions; raw-operation debt
+6509 ->6505, excluded uncertainty67 unchanged. Broader collector54731/39030 is
+not the debt denominator. Supplied-pool queue95 ->94 =92 external +2 private,
+M0/D57/S37; qualified openings40. Collector/policy and retained one-way debt
+are unchanged; signed-head complexity is recorded with the receipts.
+
+Closure is this construction/publication/exclusion boundary only. Two other
+bus supplied-pool openings and their global/descendant diagnostic read chains
+remain explicitly pending, not claimed migrated or qualified. Parent and all
+M01/Docker/drain/D3/M07/rollback holds remain open; no process-restart claim,
+new framework, architecture issue, watchlist node, PR, push, tier or server2.
