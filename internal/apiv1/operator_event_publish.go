@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/durabledata"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/testutil/sqlite2353"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -114,7 +115,9 @@ func OperatorEventPublishHandlers(opts EventPublishHandlerOptions) map[string]Me
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	return map[string]MethodHandler{
-		"event.publish": func(ctx context.Context, req Request) (any, error) {
+		"event.publish": func(ctx context.Context, req Request) (result any, err error) {
+			finish2353 := sqlite2353.Request(ctx, "event.publish")
+			defer func() { finish2353(err) }()
 			return executeEventPublish(ctx, req, opts.Publication, now().UTC())
 		},
 	}

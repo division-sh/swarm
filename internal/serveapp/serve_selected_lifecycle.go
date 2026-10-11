@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/testutil/sqlite2353"
 	"time"
 
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -83,8 +84,13 @@ func (l *activatedServeLifecycle) Finalize(joinCtx context.Context, diagnostics 
 			}
 		}
 	}
+	sqlite2353.Record("process.join.enter", map[string]any{"active": l.process.ActiveCount(), "cause": fmt.Sprint(context.Cause(joinCtx))})
 	receipt, joinErr := l.process.Join(joinCtx)
+	sqlite2353.Record("process.join.return", map[string]any{"active": l.process.ActiveCount(), "error": fmt.Sprint(joinErr), "cause": fmt.Sprint(context.Cause(joinCtx))})
 	if joinErr != nil {
+		if sqlite2353.Enabled() {
+			sqlite2353.Sample("process.join_failed")
+		}
 		diagnostics = errors.Join(diagnostics, fmt.Errorf("process work join exceeded shutdown budget: %w", joinErr))
 		receipt, joinErr = l.process.Join(context.Background())
 	}
