@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -208,7 +210,7 @@ func TestUpdateWeightModelIsMaterialDiffOnly(t *testing.T) {
 			report.Summary.Packages++
 			report.Summary.PackageElapsedSec++
 		}
-		evidence := testtiming.CommandEvidence{Version: testtiming.CommandEvidenceVersion, WorkflowRunID: 1, WorkflowAttempt: 1, PlanDigest: plan.Digest, Profile: plan.Profile, HeadSHA: plan.HeadSHA, UnitID: unit.ID, Surface: unit.ID, Attempt: testtiming.AttemptPrimary, Packages: unit.Packages, EnvironmentID: unit.EnvironmentID, CountMode: unit.CountMode, Report: report}
+		evidence := testtiming.CommandEvidence{Version: testtiming.CommandEvidenceVersion, WorkflowRunID: 1, WorkflowAttempt: 1, PlanDigest: plan.Digest, Profile: plan.Profile, WorkloadProfile: unit.WorkloadProfile, ExecutionTier: unit.ExecutionTier, BuildContext: plan.BuildContext, HeadSHA: plan.HeadSHA, UnitID: unit.ID, Surface: unit.ID, Attempt: testtiming.AttemptPrimary, Packages: unit.Packages, EnvironmentID: unit.EnvironmentID, CountMode: unit.CountMode, Report: report}
 		if err := writeJSON(filepath.Join(evidenceRoot, unit.ID+"-primary-evidence.json"), evidence); err != nil {
 			t.Fatal(err)
 		}
@@ -385,6 +387,17 @@ func writeSyntheticPlan(t *testing.T, dir, policyPath, modelPath, packagesPath, 
 	if err != nil {
 		t.Fatal(err)
 	}
+	plan.BuildContext, err = testplanning.EffectiveBuildContext(context.Background(), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Digest = ""
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(raw)
+	plan.Digest = hex.EncodeToString(digest[:])
 	path := filepath.Join(dir, "plan.json")
 	if err := writeJSON(path, plan); err != nil {
 		t.Fatal(err)

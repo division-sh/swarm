@@ -24120,6 +24120,17 @@ test_specification:
         relabeled or aliased; changed recipe identity requires fresh plan-bound proof. The pinned full reference and
         frozen tier memberships remain unchanged. Historical package weights outside a selected tier are advisory
         unselected-plan diagnostics, not proof that full coverage was removed or timing savings were earned.
+        Effective build scope includes nonempty GOVERSION observed from the producing go env, alongside
+        GOOS, GOARCH, CGO_ENABLED and GOWORK. The module minimum, observing host and a cache identity cannot
+        reconstruct a missing compiler version. Execution binding, pre-run admission, command receipts,
+        reference comparison and replay refuse missing or differing versions, including jointly unversioned
+        inputs; no legacy receipt fallback is admitted. Pure policy selection is not executable qualification.
+        The reviewed reference38086512667 retains its original measurements, frozen membership, run, source,
+        policy and approval epoch; its compiler metadata is the independently observed go1.25.0 from jobs
+        114314066863 and114315037673, with only the metadata byte digest refreshed under reviewer-g6112738747.
+        A toolchain switch requires a separate complete observed-version full measurement, independent delta
+        review and explicit versioned anchor in the switch PR before final-head full qualification. Metadata
+        enrichment grants no numeric, membership, allowance or automatic reference refresh authority.
         A supplemented lower-tier plan adds the frozen full projection as a cost-accounting row, without reprojecting the frozen lower-tier
         reference membership or changing the timing anchor/thresholds. Absent full cells remain removal-neutral and earn no execution credit;
         new/promoted roots retain the unchanged placement rule. The trusted workflow event selects cost enforcement:

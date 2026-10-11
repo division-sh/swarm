@@ -281,7 +281,7 @@ func rootEvidenceFixture(t *testing.T) (testplanning.RunPlan, CommandEvidence) {
 	plan.Packages = unit.Packages
 	plan.Profile = "full"
 	plan.DeferredRoots = nil
-	plan.BuildContext = testplanning.BuildContext{GOOS: "linux", GOARCH: "amd64", CGOEnabled: "1"}
+	plan.BuildContext = testplanning.BuildContext{GOOS: "linux", GOARCH: "amd64", CGOEnabled: "1", GOVERSION: "go1.25.0"}
 	plan.HeadSHA = TestTimeReferenceSource
 	plan.Digest = ""
 	raw, _ := json.Marshal(plan)

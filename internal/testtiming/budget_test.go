@@ -219,6 +219,7 @@ func committedBroadBudgetPlan(t *testing.T, proof testplanning.Policy) testplann
 	if err != nil {
 		t.Fatal(err)
 	}
+	bindTimingFixtureBuild(t, &plan)
 	return plan
 }
 
@@ -231,6 +232,7 @@ func TestCommittedCLICommandBudgetBoundariesAndIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bindTimingFixtureBuild(t, &plan)
 	for _, tc := range []struct {
 		name                       string
 		cliSeconds, siblingSeconds float64
@@ -767,7 +769,14 @@ func timingTestPlan(t *testing.T) testplanning.RunPlan {
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
+	bindTimingFixtureBuild(t, &plan)
 	return plan
+}
+
+func bindTimingFixtureBuild(t *testing.T, plan *testplanning.RunPlan) {
+	t.Helper()
+	plan.BuildContext = testplanning.BuildContext{GOOS: "linux", GOARCH: "amd64", CGOEnabled: "1", GOVERSION: "go1.25.0"}
+	rebindTimingFixture(t, plan, &CommandEvidence{})
 }
 
 func timingTestPolicy() BudgetPolicy {
@@ -799,6 +808,9 @@ func timingTestEvidence(plan testplanning.RunPlan, unitID, attempt string, elaps
 		Version:         CommandEvidenceVersion,
 		PlanDigest:      plan.Digest,
 		Profile:         plan.Profile,
+		WorkloadProfile: unit.WorkloadProfile,
+		ExecutionTier:   unit.ExecutionTier,
+		BuildContext:    plan.BuildContext,
 		HeadSHA:         plan.HeadSHA,
 		UnitID:          unit.ID,
 		Surface:         unit.ID,

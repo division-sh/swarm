@@ -30,6 +30,7 @@ func TestBatchJobEvidenceCountsPhysicalCostOnceAndEveryCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bindTimingFixtureBuild(t, &plan)
 	start := time.Date(2026, 10, 3, 1, 0, 0, 0, time.UTC)
 	job := ActionJob{ID: 100, RunID: 1, RunAttempt: 1, HeadSHA: "head", Name: "Go proof " + plan.Batches[0].ID,
 		Status: "completed", Conclusion: "success", CreatedAt: start, StartedAt: start, CompletedAt: start.Add(time.Minute),

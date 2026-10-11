@@ -23,7 +23,7 @@ const (
 	TestTimeReferencePolicy = "1173c9a9f1bf40bce34df26c866aa355deee187867f149f8e5d5a79f022881f2"
 	// Changing the anchor requires a reviewed versioned policy adjustment, not
 	// a Test-Time body line, automatic publisher, or each new merge base.
-	TestTimeReferenceDigest = "f195969f9056e3c1e26605d114b50e61c8c2efddec55bdee0745f3de516a9db4"
+	TestTimeReferenceDigest = "c784737d62a250fa87eab2948bc8cc8f69ce64cf43e0cda86d2244dd54bce961"
 	// User-ratified finite placement, independently reviewed against this full
 	// execution. This does not grant an aggregate allowance or approve core.
 	testTimeCodemodPlacementApproval   = "https://github.com/division-sh/swarm/pull/2604#issuecomment-6104099093"
@@ -142,6 +142,9 @@ func LoadTestTimeReference(r io.Reader) (TestTimeReference, error) {
 	}
 	if reference.Version != 2 || reference.Approval != TestTimeApproval || reference.RunID != TestTimeReferenceRunID || reference.Attempt != 1 || reference.WorkflowHead != TestTimeReferenceHead || reference.Source != TestTimeReferenceSource || reference.PolicySHA256 != TestTimeReferencePolicy || len(reference.Roots) == 0 {
 		return reference, fmt.Errorf("test-time reference identity is not the approved full run")
+	}
+	if err := reference.BuildContext.Validate(); err != nil {
+		return reference, err
 	}
 	return reference, nil
 }
@@ -264,8 +267,16 @@ func timingCellKey(cell TimingCell) string {
 
 func EvaluateTestTime(reference TestTimeReference, policy testplanning.Policy, plan testplanning.RunPlan, runID int64, attempt int, evidence []CommandEvidence, mode TestTimeMode) TestTimeResult {
 	result := TestTimeResult{ReferenceRunID: reference.RunID, ReferenceSource: reference.Source, Mode: mode, Status: BudgetPass}
+	if err := reference.BuildContext.Validate(); err != nil {
+		result.Status = BudgetIncomplete
+		result.Problems = append(result.Problems, "reference "+err.Error())
+		return result
+	}
 	roots, err := observedRootTimes(plan, runID, attempt, evidence)
-	if err != nil || plan.Venue != testplanning.VenueCI || plan.BuildContext != reference.BuildContext {
+	if err == nil && (plan.Venue != testplanning.VenueCI || plan.BuildContext != reference.BuildContext) {
+		err = fmt.Errorf("hosted build context differs from reference: observed %+v, reference %+v", plan.BuildContext, reference.BuildContext)
+	}
+	if err != nil {
 		result.Status = BudgetIncomplete
 		result.Problems = append(result.Problems, fmt.Sprintf("test-time proof scope mismatch or incomplete: %v", err))
 		return result

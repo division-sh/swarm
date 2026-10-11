@@ -202,7 +202,17 @@ func run(cfg config) error {
 		if err != nil {
 			return err
 		}
-		return plan.ValidateExecutionSHA(cfg.executionSHA)
+		if err := plan.ValidateExecutionSHA(cfg.executionSHA); err != nil {
+			return err
+		}
+		actual, err := testplanning.EffectiveBuildContext(context.Background(), ".")
+		if err != nil {
+			return err
+		}
+		if actual != plan.BuildContext {
+			return fmt.Errorf("effective Go build context differs from the executable plan")
+		}
+		return nil
 	default:
 		return writeTimingReport(cfg)
 	}
