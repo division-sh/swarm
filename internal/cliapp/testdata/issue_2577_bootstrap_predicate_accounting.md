@@ -52,3 +52,54 @@ served logout journey remain unfinished in the same #2577 PR.
 This accounts for the changed A10/A27 consumer body before regeneration; it
 does not alter the scanner, its scope rules or the existing P08/P10/P21 proof
 obligations, and does not claim their full N66 execution closure.
+
+## N66 Journal And Original-Transport Retention
+
+`serveSessionRetirementRequired` now consumes the canonical
+`channelonboarding.RetainedSessionLogoutPending` decision before disconnecting
+retired session operations. This exception is only cleanup possession: pending
+logout still rejects business execution and standing republication. The exact
+frozen responsibility retains its original SDK until the existing journal
+settles; unrelated ordinary retirement retains its previous join/retention
+behavior. No source lookup, replacement account or fresh connection is adopted.
+
+`TestServeSessionLogoutDispatcherRetainsOriginalUntilSettlementBothStores`
+proves pending transport retention, business refusal, real SDK unlink, atomic
+teardown settlement and subsequent cleanup on SQLite/PostgreSQL under `-race`.
+`TestServeSessionDestructiveLogoutUsesJournalAndExactReplayBothStores` exercises
+the real destructive service, original connection and effect journal, including
+revision refusal, exact replay, changed-key refusal and canceled readback.
+`TestServeSessionCanonicalRemovalJoinsOnlyOriginalOwnerBothStores` and
+`TestServeSessionTeardownJoinsOriginalOwnerAndPreservesPairingBothStores` retain
+the ordinary removal/interface/context controls.
+
+`TestSessionLogoutJournalBothStores` separately observes committed launch before
+the actual SDK unlink frame and proves acknowledged versus lost-result outcomes.
+`TestSessionLogoutJournalRecoveryAndRollbackBothStores` proves authorized,
+launched and response-observed recovery, repeated recovery, no dispatch/deletion,
+exact historical target retention, and rollback for incomplete success evidence.
+`TestSessionLogoutJournalRejectsForeignAuthorityBothStores` covers ten authority
+contradictions and byte substitution without journal persistence or SDK effects.
+These are executed component/service proofs, not physical interoperability,
+public RunServe logout, process-death or the complete N66 closure matrix.
+
+The source-derived primitive census now explicitly includes the logout launch
+file and its `sdk_logout` primitive, just as it includes the native send file.
+The owner remains operator infrastructure, with distinct `channel_logout`
+registration, typed attempt, and `MarkLaunched` before unlink. The unjournaled
+convenience method exists only in component test code. No scanner exemption,
+read-only classification, baseline ratchet relaxation or test deadline changes.
+
+`buildRuntimeComposition` installs the exact serve-session dispatcher and
+selected effect owner into the existing destructive service. The existing
+`TestRunServeWhatsAppSignedPairingBothStores` boot/auth/pairing journey and
+`TestServeRestoresNativeOwnershipBeforeRetainedProofExecution` startup-order
+control pass with that construction. This does not claim a public RunServe
+logout/interruption matrix merely because the component dispatch path passes.
+
+`TestSessionLogoutJournalDrainsAndCancelsWaitBothStores` additionally holds a
+real SDK decryption transaction through journal authorization. Launch must stay
+authorized until the drain finishes; original-caller cancellation releases its
+wait, preserves unresolved cleanup possession, and joins the counted settlement
+without unlink/deletion. The setup performs account observation before holding
+the private transaction; otherwise the setup's own read cannot reach dispatch.
