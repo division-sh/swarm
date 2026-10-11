@@ -49,10 +49,6 @@ func workflowProjectionFaultResult(result sql.Result, err error) (int64, error) 
 	return changed, nil
 }
 
-func SetWorkflowProjectionObsoleteFieldRowsForTest(ctx context.Context, tx *sql.Tx, run string) (int64, error) {
-	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE entity_state SET current_state = 'obsolete', gates = '{}', bookkeeping = '{}', accumulator = '{}' WHERE run_id = $1`, run))
-}
-
 func SetWorkflowProjectionPlatformBookkeepingForTest(ctx context.Context, tx *sql.Tx, run, path string) (int64, error) {
 	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE flow_instances SET bookkeeping = '{"platform_fact":"preserve"}' WHERE run_id = $2 AND instance_path = $1`, path, run))
 }

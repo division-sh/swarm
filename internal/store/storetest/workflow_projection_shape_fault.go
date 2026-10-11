@@ -32,10 +32,6 @@ func SetWorkflowProjectionSlashOnlyFlowPath(ctx context.Context, selected any, r
 	return private.SetWorkflowProjectionSlashOnlyFlowPathForTest(ctx, selected, run, key)
 }
 
-func SetWorkflowProjectionObsoleteFieldRows(ctx context.Context, selected any, run string) (int64, error) {
-	return private.SetWorkflowProjectionObsoleteFieldRowsForTest(ctx, selected, run)
-}
-
 func SetWorkflowProjectionPlatformBookkeeping(ctx context.Context, selected any, run, path string) (int64, error) {
 	return private.SetWorkflowProjectionPlatformBookkeepingForTest(ctx, selected, run, path)
 }
