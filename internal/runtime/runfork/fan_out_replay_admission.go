@@ -120,6 +120,27 @@ func selectedFanOutReplayDispositionMatches(disposition RunForkReplayResumeDispo
 		disposition.Classification == item.Classification && disposition.Fact == selectedFanOutReplayFact(item.Classification)
 }
 
+// SelectedFanOutReplayDeliveryAdmitted consumes the canonical partition admission,
+// not a source attempt or permission to resume its provider/session execution.
+func SelectedFanOutReplayDeliveryAdmitted(admission RunForkReplayResumeAdmission, item RunForkPendingWork) bool {
+	if admission.Owner != RunForkReplayResumeAdmissionOwner || item.DeliveryID == "" {
+		return false
+	}
+	matches := 0
+	for _, disposition := range admission.Dispositions {
+		if ReplayResumeDispositionKey(disposition) != PendingWorkKey(item) {
+			continue
+		}
+		if !selectedFanOutReplayDispositionMatches(disposition, item, true) ||
+			disposition.Owner != RunForkSelectedFanOutReplayAdmissionOwner ||
+			disposition.Disposition != RunForkReplayResumeDispositionForkReplay || disposition.BlockerCode != "" {
+			return false
+		}
+		matches++
+	}
+	return matches == 1
+}
+
 func selectedFanOutReplayValidateDispositionState(disposition RunForkReplayResumeDisposition, item RunForkPendingWork, owed bool) error {
 	if owed && item.SubscriberType != "node" && item.SubscriberType != "agent" {
 		return fmt.Errorf("selected fan-out delivery %s has an unsupported recipient", item.DeliveryID)
