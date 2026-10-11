@@ -2846,23 +2846,6 @@ func deterministicResolutionUUID(plan ConnectRoutePlan, eventID string) string {
 	return fmt.Sprintf("%s-%s-%s-%s-%s", encoded[0:8], encoded[8:12], encoded[12:16], encoded[16:20], encoded[20:32])
 }
 
-func InstanceKeyDescriptorRoutesForConnectRoutePlan(plan ConnectRoutePlan, keyMaterial []runtimecontracts.TemplateInstanceKeyValue, descriptors []Descriptor) []events.RouteIdentity {
-	if len(keyMaterial) == 0 {
-		return nil
-	}
-	routes := make([]events.RouteIdentity, 0, len(descriptors))
-	for _, descriptor := range descriptors {
-		route := descriptorRouteForReceiver(plan, descriptor)
-		if route.Empty() {
-			continue
-		}
-		if ConnectInstanceKeyDescriptorMatches(keyMaterial, descriptor) {
-			routes = append(routes, route)
-		}
-	}
-	return uniqueRoutes(routes)
-}
-
 func connectInstanceKey(source semanticview.Source, connect runtimecontracts.FlowConnect, inputPin runtimecontracts.CompiledFlowInputPin, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
 	if source == nil {
 		return nil, ConnectRoutePlanIssue{}
