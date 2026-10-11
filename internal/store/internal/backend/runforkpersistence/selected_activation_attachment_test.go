@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -441,7 +442,7 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 					t.Fatal("unexpected divergence")
 					return nil
 				},
-				freeze: func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkActivationLineage, time.Time, bool) error {
+				freeze: func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkActivationLineage, time.Time, bool, *privaterunlifecycle.ChannelCardChanges) error {
 					steps = append(steps, "activate")
 					return nil
 				},

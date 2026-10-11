@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,15 +12,16 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 )
 
 type selectedExecutionFailureOwner interface {
 	RequireCurrentExternalEffectAuthorityTx(context.Context, *sql.Tx, effects.Authority) error
 	RequireCompletionAuthorityNoLiveAttemptsTx(context.Context, *sql.Tx, effects.Authority) error
-	MarkTerminalTx(context.Context, *mutationprotocol.Attempt, runlifecycle.TerminalRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error)
+	MarkTerminalTx(context.Context, *mutationprotocol.Attempt, runlifecycle.TerminalRequest, *privaterunlifecycle.ChannelCardChanges) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error)
 }
 
-func settleActivatedSelectedExecutionFailure(ctx context.Context, attempt *mutationprotocol.Attempt, authority effects.Authority, raw json.RawMessage, owner selectedExecutionFailureOwner, loadSnapshot runForkLifecycleSnapshotLoader, postgres bool) error {
+func settleActivatedSelectedExecutionFailure(ctx context.Context, attempt *mutationprotocol.Attempt, authority effects.Authority, raw json.RawMessage, owner selectedExecutionFailureOwner, loadSnapshot runForkLifecycleSnapshotLoader, postgres bool, changes *privaterunlifecycle.ChannelCardChanges) error {
 	if authority.Kind != effects.AuthoritySelectedContractFork || !authority.Valid() {
 		return fmt.Errorf("selected execution failure requires exact current authority")
 	}
@@ -42,7 +44,7 @@ func settleActivatedSelectedExecutionFailure(ctx context.Context, attempt *mutat
 		if !snapshot.State.Terminal() {
 			if _, _, err := owner.MarkTerminalTx(ctx, attempt, runlifecycle.TerminalRequest{
 				RunID: snapshot.RunID, State: runlifecycle.StateFailed, Failure: &failure, EndedAt: time.Now().UTC(),
-			}); err != nil {
+			}, changes); err != nil {
 				return err
 			}
 		}
@@ -66,14 +68,16 @@ func (s *RunForkPostgresOwner) FailActivatedRunForkSelectedContractRuntimeExecut
 	if err := s.requireCurrentSchema(); err != nil {
 		return false, err
 	}
+	var changes privaterunlifecycle.ChannelCardChanges
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates,
 		func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+			changes = privaterunlifecycle.ChannelCardChanges{}
 			return struct{}{}, settleActivatedSelectedExecutionFailure(ctx, attempt, authority, failure, s,
 				func(ctx context.Context, tx *sql.Tx, runID string) (runlifecycle.Snapshot, error) {
 					return s.RunLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, runID, true)
-				}, true)
+				}, true, &changes)
 		})
-	return result.Acknowledged(), result.Err()
+	return result.Acknowledged(), errors.Join(result.Err(), s.publishChannelChanges(result.Acknowledged(), changes.Changed))
 }
 
 func (s *RunForkSQLiteOwner) FailActivatedRunForkSelectedContractRuntimeExecution(ctx context.Context, authority effects.Authority, failure json.RawMessage) (bool, error) {
@@ -83,9 +87,11 @@ func (s *RunForkSQLiteOwner) FailActivatedRunForkSelectedContractRuntimeExecutio
 	if err := s.requireCurrentSchema(); err != nil {
 		return false, err
 	}
+	var changes privaterunlifecycle.ChannelCardChanges
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "settle activated selected execution failure", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates,
 		func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-			return struct{}{}, settleActivatedSelectedExecutionFailure(ctx, attempt, authority, failure, s, s.RunLifecycleSQLiteOwner.LoadSnapshotTx, false)
+			changes = privaterunlifecycle.ChannelCardChanges{}
+			return struct{}{}, settleActivatedSelectedExecutionFailure(ctx, attempt, authority, failure, s, s.RunLifecycleSQLiteOwner.LoadSnapshotTx, false, &changes)
 		})
-	return result.Acknowledged(), result.Err()
+	return result.Acknowledged(), errors.Join(result.Err(), s.publishChannelChanges(result.Acknowledged(), changes.Changed))
 }
