@@ -62,7 +62,7 @@ func TestDescriptorFixedReadsFreshFactsAndCanonicalErrors(t *testing.T) {
 	for _, ddl := range []string{
 		`CREATE TABLE flow_instances (run_id TEXT, instance_path TEXT, flow_template TEXT, status TEXT, mode TEXT, terminated_at TIMESTAMP, entity_id TEXT, current_state TEXT)`,
 		`CREATE TABLE flow_instance_runtime_readiness (run_id TEXT, instance_path TEXT, plan TEXT, plan_hash TEXT, activation_attempt_id INTEGER, phase TEXT DEFAULT 'planned', activation_attempt_state TEXT DEFAULT 'planned')`,
-		`CREATE TABLE entity_state (run_id TEXT, flow_instance TEXT, entity_id TEXT, current_state TEXT, fields TEXT)`,
+		`CREATE TABLE entity_state (run_id TEXT, flow_instance TEXT, entity_id TEXT, fields TEXT)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {
 			t.Fatal(err)
@@ -111,6 +111,9 @@ func TestDescriptorFixedReadsFreshFactsAndCanonicalErrors(t *testing.T) {
 		if (targetErr != nil) != targetFailure || fmt.Sprint(rawErr) != fmt.Sprint(targetErr) || reflect.TypeOf(rawErr) != reflect.TypeOf(targetErr) || rawErr == nil && !reflect.DeepEqual(raw, targets) {
 			t.Fatalf("targets raw=%v/%v prepared=%v/%v want failure=%v", raw, rawErr, targets, targetErr, targetFailure)
 		}
+		if targetErr == nil && len(targets) == 1 && targets[0].Availability != runtimepipeline.NewDeliveryTargetAvailability("ready", "active", false) {
+			t.Fatalf("authored fields changed header-owned target availability: %+v", targets[0])
+		}
 	}
 	compare(false, false)
 	for _, tc := range []struct {
@@ -118,17 +121,17 @@ func TestDescriptorFixedReadsFreshFactsAndCanonicalErrors(t *testing.T) {
 		args                       []any
 		flowFailure, targetFailure bool
 	}{
-		{`INSERT INTO entity_state VALUES ('run','review/one',?,'ready','{"address":"first"}')`, []any{entityID}, false, false},
+		{`INSERT INTO entity_state VALUES ('run','review/one',?,'{"address":"first"}')`, []any{entityID}, false, false},
 		{`INSERT INTO flow_instances VALUES ('run','review/one','review','active','template',NULL,?,'ready')`, []any{entityID}, true, false},
 		{`INSERT INTO flow_instance_runtime_readiness VALUES ('run','review/one',?,?,1,'planned','planned')`, []any{string(planRaw), planHash}, false, false},
-		{`UPDATE entity_state SET fields='{"address":"second"}', current_state='done'`, nil, false, false},
+		{`UPDATE entity_state SET fields='{"address":"second","current_state":"done"}'`, nil, false, false},
 		{`UPDATE entity_state SET fields='[]'`, nil, true, false},
 		{`UPDATE entity_state SET fields='{}'`, nil, false, false},
 		{`UPDATE flow_instance_runtime_readiness SET plan='{}'`, nil, true, false},
 		{`UPDATE flow_instance_runtime_readiness SET plan=?`, []any{string(planRaw)}, false, false},
 		{`UPDATE entity_state SET entity_id=''`, nil, true, false},
 		{`UPDATE entity_state SET entity_id=?`, []any{entityID}, false, false},
-		{`INSERT INTO entity_state VALUES ('foreign','foreign/path','','ready','[]')`, nil, false, false},
+		{`INSERT INTO entity_state VALUES ('foreign','foreign/path','','[]')`, nil, false, false},
 		{`ALTER TABLE entity_state RENAME COLUMN fields TO missing_fields`, nil, true, false},
 		{`ALTER TABLE entity_state RENAME COLUMN missing_fields TO fields`, nil, false, false},
 		{`DROP TABLE flow_instance_runtime_readiness`, nil, true, false},
