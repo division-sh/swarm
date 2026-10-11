@@ -28,6 +28,7 @@ type IdentityLifecycle interface {
 	ExpireOperation(context.Context, string, int64, time.Time) (operatorchannel.Operation, error)
 	CurrentBinding(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error)
 	RetainedCurrentBinding(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error)
+	RetainedBindingFence(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.BindingFence, error)
 	CurrentBindingReadiness(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, bool, error)
 	Readback(context.Context) ([]operatorchannel.Readback, error)
 }
@@ -312,13 +313,16 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 		}
 		return s.drive(ctx, existing, candidate, input.ProviderCredential)
 	}
-	state, err := s.slotState(ctx, start)
+	state, fence, err := s.slotState(ctx, start)
 	if err != nil {
 		return Result{}, err
 	}
 	decision := AdmitVerb(input.Verb, state)
 	if decision != AdmissionStart && decision != AdmissionStartPreservingIdentity && decision != AdmissionStartReplacingIdentity {
 		return Result{}, admissionError(input.Verb, state, decision)
+	}
+	if input.Verb == VerbConnect {
+		start.ConnectFenceRevision = fence.Revision
 	}
 	op, err := s.store.ReserveChannelOnboarding(ctx, start)
 	if err != nil {
@@ -1674,7 +1678,7 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 		return op, false, err
 	}
 	identityKind := operatorchannel.OperationConnect
-	expectedRevision := int64(0)
+	expectedRevision := op.ConnectFenceRevision
 	boundCredentialRestart := op.Phase == PhaseAwaitingExternalIdentity && op.BindingRevision > 0
 	if boundCredentialRestart {
 		binding, bindingErr := s.identities.RetainedCurrentBinding(ctx, op.Interface)
@@ -1942,54 +1946,55 @@ func (s *Service) reconcileConfirmedBinding(ctx context.Context, op Operation) (
 	return decision, nil
 }
 
-func (s *Service) slotState(ctx context.Context, req StartRequest) (SlotState, error) {
+func (s *Service) slotState(ctx context.Context, req StartRequest) (SlotState, operatorchannel.BindingFence, error) {
+	var empty operatorchannel.BindingFence
 	operations, err := s.store.ListChannelOnboardingOperations(ctx)
 	if err != nil {
-		return "", err
+		return "", empty, err
 	}
 	for _, op := range operations {
 		if op.SlotKey == req.SlotKey() && !op.Phase.Terminal() {
-			return SlotOperationPending, nil
+			return SlotOperationPending, empty, nil
 		}
 	}
-	binding, bindingErr := s.identities.RetainedCurrentBinding(ctx, req.Interface)
-	bindingCurrent := bindingErr == nil && binding.Status == operatorchannel.BindingCurrent
+	fence, bindingErr := s.identities.RetainedBindingFence(ctx, req.Interface)
+	binding, bindingCurrent := fence.CurrentBinding()
 	bindingStale := false
-	if bindingErr != nil && !errors.Is(bindingErr, operatorchannel.ErrNotFound) {
-		return "", bindingErr
+	if bindingErr != nil {
+		return "", empty, bindingErr
 	}
 	if bindingCurrent && binding.ProviderAuthority.Kind == operatorchannel.ProviderAuthorityCredential {
 		_, err := s.identities.CurrentBinding(ctx, req.Interface)
 		bindingStale = errors.Is(err, operatorchannel.ErrCredentialStale)
 		if err != nil && !bindingStale {
-			return "", err
+			return "", empty, err
 		}
 		bindingCurrent = err == nil
 	}
 	activation, activationErr := s.store.GetConnectedChannelActivation(ctx, req.SlotKey())
 	activationCurrent := activationErr == nil && activation.Status == ActivationCurrent
 	if activationErr != nil && !errors.Is(activationErr, ErrNotFound) {
-		return "", activationErr
+		return "", empty, activationErr
 	}
 	if !bindingCurrent && !activationCurrent {
 		if bindingStale {
-			return SlotActivationStale, nil
+			return SlotActivationStale, fence, nil
 		}
-		return SlotAbsent, nil
+		return SlotAbsent, fence, nil
 	}
 	if bindingCurrent && !activationCurrent {
-		return SlotIdentityCurrentActivationAbsent, nil
+		return SlotIdentityCurrentActivationAbsent, fence, nil
 	}
 	if !bindingCurrent {
 		if bindingStale {
-			return SlotActivationStale, nil
+			return SlotActivationStale, fence, nil
 		}
-		return SlotUncertain, nil
+		return SlotUncertain, fence, nil
 	}
 	if !activation.Coordinate.Matches(req.Coordinate) || activation.BindingRevision != binding.Revision {
-		return SlotActivationStale, nil
+		return SlotActivationStale, fence, nil
 	}
-	return SlotReady, nil
+	return SlotReady, fence, nil
 }
 
 func (s *Service) currentCandidate(op Operation) (Candidate, error) {
