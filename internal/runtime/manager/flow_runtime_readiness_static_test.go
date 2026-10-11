@@ -182,6 +182,7 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 		"agent_manager.go": 1,
 	})
 	requireStaticReadinessCalls(t, calls, "LoadDynamicFlowRuntimeReadiness", map[string]int{
+		"activation_gateway.go":        1,
 		"flow_attachment_execution.go": 1,
 		"flow_readiness_admission.go":  2,
 		"flow_readiness_plan.go":       1,
