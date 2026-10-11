@@ -8,6 +8,7 @@ import (
 
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sessionprovider"
 )
 
 const serveCapabilityReleaseRetryDelay = 100 * time.Millisecond
@@ -28,10 +29,23 @@ type serveProcessCapability interface {
 }
 
 type activatedServeLifecycle struct {
-	store      activatedSelectedStore
-	process    *worklifetime.Process
-	capability serveProcessCapability
-	selected   selectedForkContextRetirement
+	store       activatedSelectedStore
+	process     *worklifetime.Process
+	capability  serveProcessCapability
+	selected    selectedForkContextRetirement
+	nativeState nativeInvocationRetirement
+}
+
+type nativeInvocationRetirement interface {
+	Retire(*worklifetime.ProcessJoinReceipt) error
+}
+
+func (l *activatedServeLifecycle) SetNativeInvocationState(state *sessionprovider.InvocationState) error {
+	if l == nil || state == nil || l.nativeState != nil {
+		return errors.New("serve native invocation state must be installed exactly once")
+	}
+	l.nativeState = state
+	return nil
 }
 
 type selectedForkContextRetirement interface {
@@ -97,7 +111,11 @@ func (l *activatedServeLifecycle) Finalize(joinCtx context.Context, diagnostics 
 	if !settled {
 		return diagnostics
 	}
-	return errors.Join(diagnostics, closeActivatedServeStore(l.store, receipt))
+	diagnostics = errors.Join(diagnostics, closeActivatedServeStore(l.store, receipt))
+	if l.nativeState != nil {
+		diagnostics = errors.Join(diagnostics, l.nativeState.Retire(receipt))
+	}
+	return diagnostics
 }
 
 func releaseServeProcessCapability(capability serveProcessCapability) (bool, error) {
