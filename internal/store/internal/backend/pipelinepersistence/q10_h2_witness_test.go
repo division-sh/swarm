@@ -29,7 +29,7 @@ func TestQ10H2HubWitnessUsesCanonicalHeaderBothStores(t *testing.T) {
 			at := time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)
 			record := pipeline.WorkflowEngineStateRecord{
 				Identity: flowidentity.RunScopedFlowInstance{RunID: run, Route: flowidentity.StoredRoute("hub", "h01", "hub/h01")},
-				EntityID: entity, EntityType: "hub", WorkflowName: "hub", Mode: "template", Status: "active", StageDefined: true,
+				EntityID: entity, EntityType: "hub", WorkflowName: "hub", Mode: "template", InstanceKey: "h01", Status: "active", StageDefined: true,
 				CurrentState: "active", Fields: []byte(`{"hub_id":"h01","count":0,"c1":0,"c2":0}`),
 				Gates: []byte(`{}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
 				Config:    []byte(`{"instance_id":"h01","storage_ref":"hub/h01","flow_path":"hub/h01"}`),
