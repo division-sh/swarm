@@ -24037,6 +24037,10 @@ test_specification:
         Stale cleanup cannot detach the successor.
         Both regimes revalidate final native receipts after joined runtime/store teardown;
         an active pre-teardown snapshot cannot provide final stress or serving-window credit.
+        After complete stress drain, mixed/history, public and CLI readback assertions,
+        the fixture detaches future capture and boundedly joins every captured attempt
+        before runtime cancellation. A join timeout fails the proof; cancellation cannot
+        erase or discount a captured failed receipt. The strict post-teardown oracle remains.
         Serving claims/chunks require zero Failed; all collectors require zero CommitFailures
         and CleanupFailures. Non-serving Failed/RollbackAttempts remain raw unacknowledged
         evidence, never successful or declared harmless; global Failed-zero is not the oracle.
@@ -24052,6 +24056,16 @@ test_specification:
         manual/local full and supplemental selection. Original stress stays in this change's ordinary PR
         qualification through explicit CI-Units until a fresh complete healthy master-nightly and strict
         merge-time nightly blocking are attested; absent operational evidence holds the cutover at review.
+        Finite placement approval is issue #2535 comment6106221574 at measured source
+        dd0ed42ac877c3e974926a5731a8c9f75d943ef1, local plan
+        47311fabc6f046391ab4255a9b7b764af8693917f4496cf720f9b03fcab2b614. It admits only
+        internal/serveapp.TestIssue2394ServedOriginalReporterMeasuredIssuanceBothStores and
+        internal/runtime/conformance.TestIssue2394ReporterFiveHundredServingWindowBothStores,
+        as top-level backend-empty, ci-postgres-gateway-empty-v1/count-1 cells in lifecycle/full.
+        The timing owner retains the exact measured receipt SHA256, source and approval in its warning,
+        not an invented hosted run. The whole parent cost remains charged once under the existing
+        conservative direct-child fallback; core promotion, aliases, foreign execution cells, aggregate
+        allowances, command budgets and pinned-reference refresh do not inherit this approval.
       fixture_codemod_qualification: >-
         The pipeline-observations codemod package has an exhaustive explicit special-package partition.
         codemod-owner-guards runs every remaining root in core, lifecycle and full, including the small real-loader

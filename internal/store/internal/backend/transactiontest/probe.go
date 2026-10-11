@@ -5,6 +5,7 @@ package transactiontest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -101,6 +102,30 @@ func (c *Collector) Stop() {
 	defer c.slot.mu.Unlock()
 	if c.slot.collector == c {
 		c.slot.collector = nil
+	}
+}
+
+// StopAndJoin closes capture, then joins its exact registered attempts. Callers
+// retain the final receipt and must validate failures separately from completion.
+func (c *Collector) StopAndJoin(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("transaction probe join requires a context")
+	}
+	c.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		c.mu.Lock()
+		active := c.snapshot.Active
+		c.mu.Unlock()
+		if active == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("join transaction probe with %d captured attempts: %w", active, ctx.Err())
+		case <-ticker.C:
+		}
 	}
 }
 

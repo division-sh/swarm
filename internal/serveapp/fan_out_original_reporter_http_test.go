@@ -311,6 +311,8 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 					t.Logf("reporter serving window: issuance=%s drain_mixed_readback=%s detached=%+v successor=%+v", elapsed, time.Since(drainStarted), transactions.Snapshot(), continuation.Snapshot())
 				} else if err := storetest.ValidateReporterStress(receipt, transactions.Snapshot(), transactionOptions.Delay); err != nil {
 					t.Fatal(err)
+				} else {
+					storetest.JoinReporterTransactions(t, transactions)
 				}
 			}
 		})

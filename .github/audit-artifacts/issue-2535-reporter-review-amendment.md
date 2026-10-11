@@ -78,6 +78,35 @@ standalone storetest compile passes. No such receipt is exact-head qualification
 
 ## Unchanged Holds
 
+The fresh dd0 conformance PostgreSQL stress failed only the stable final oracle:
+one captured `fan_out_observation` read had CommitFailures1 after teardown.
+The served stress also failed its stable oracle on both stores, with one Other
+read CommitFailure each. These are retained red receipts, not the permitted
+rollback-only case. Actual original errors were not recorded. A disposable
+real-PG native delay/Stop/cancel control reproduces the count shape3/3 under
+race; Stop/join/cancel acknowledges3/3. Cancellation attribution is causal
+inference, not recovery of a particular original error.
+
+Reviewer-g approved bounded test-fixture ordering at6106294149: both old stress
+fixtures consume the existing Collector's bounded StopAndJoin only AFTER all
+original drain/mixed/history/public/CLI assertions. Captured native attempts
+join before runtime cancellation; timeout fails, failures remain in receipts,
+and post-runtime/store strict validation remains. No production shutdown or
+backend transaction semantics change. The real-PG counterexample/control and
+held genuine cleanup-error refusal qualify this exact ordering; supported
+both-store stress roots must run afresh. #2612 accepted-consequence authority
+is a different class and receives no credit from this fixture repair.
+
+Finite placement approval6106221574 covers only the two named top-level window
+roots, lifecycle/full, ci-postgres-gateway-empty-v1/count-1, backend-empty. The
+existing timing owner records approval, measured dd0 source/local plan and
+individual receipt SHA256; no hosted run is invented. Parent elapsed is0 for
+the parallel roots; existing conservative direct-child fallback charges37.63s
+served and36.50s conformance once each, never adding both backend leaves.
+Foreign cells/core promotion refuse, aggregate cost stays fully charged, and
+codemod approvals/reference/budgets are unchanged. This is placement permission,
+not a timing waiver, fresh-head execution receipt or operational acceptance.
+
 The original stress roots and64-row one-second proof stay intact. New backend
 children/selectors, 780s identity transfer, all original bounds and the two
 full stress supplements remain required. No baseline, buffer, skip, legacy
