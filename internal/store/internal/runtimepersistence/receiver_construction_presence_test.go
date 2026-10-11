@@ -73,7 +73,12 @@ func TestReceiverReadinessRequiresConstructedHeaderBothStores(t *testing.T) {
 				agent := mustTestAgentIdentityForRun(runID, "worker", "review")
 				route := events.DeliveryRoute{
 					Recipient: events.MustAgentDeliveryRecipient(agent.AgentID()), AgentIdentity: agent,
-					Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "review", EntityID: req.Instance.EntityID, FlowInstance: "review"}),
+					Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "review", FlowInstance: "review"}),
+				}
+				dependency := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: req.Instance.TemplateID, EntityID: req.Instance.EntityID, FlowInstance: req.Instance.InstancePath})
+				route.Initialization, err = events.AdmitStoredFlowReceiverInitialization(runID, plan.Children[0].CreatingInput.EventID, dependency, agent.Route)
+				if err != nil {
+					t.Fatal(err)
 				}
 				ready, err := readReceiverConstructionReady(t, f, route)
 				if test.refusal != "" {
@@ -120,7 +125,7 @@ func readReceiverConstructionReady(t *testing.T, f receiverConfigActivationFixtu
 func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, shape := range []string{"root", "keyed", "fieldless_descendant"} {
-			for _, variant := range []string{"exact", "unrelated_event", "missing_receipt", "partial_receipt", "contradictory_control", "contradictory_origin", "crossed_agent_scope"} {
+			for _, variant := range []string{"exact", "stored_exact", "crossed_flow", "stored_crossed_flow", "unrelated_event", "missing_receipt", "partial_receipt", "contradictory_control", "contradictory_origin", "crossed_agent_scope"} {
 				t.Run(backend+"/"+shape+"/"+variant, func(t *testing.T) {
 					var f receiverConfigActivationFixture
 					if shape == "root" {
@@ -220,15 +225,25 @@ func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testin
 					if err != nil {
 						t.Fatal(err)
 					}
+					dependencyTarget := events.RouteIdentity{FlowID: target.TemplateID, EntityID: target.EntityID, FlowInstance: target.InstancePath}
+					if strings.HasSuffix(variant, "crossed_flow") {
+						dependencyTarget.FlowID = "foreign"
+					}
+					actorTarget := dependencyTarget
+					actorTarget.EntityID = ""
 					route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agent.AgentID()), AgentIdentity: agent,
-						Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: target.TemplateID, EntityID: target.EntityID, FlowInstance: target.InstancePath})}
-					route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target, receiverRoute)
+						Target: events.MustEntitylessReceiverTarget(actorTarget)}
+					if strings.HasPrefix(variant, "stored_") {
+						route.Initialization, err = events.AdmitStoredFlowReceiverInitialization(runID, req.TriggerEvent.ID(), events.MustExistingEntityTarget(dependencyTarget), receiverRoute)
+					} else {
+						route.Initialization, err = events.AdmitFlowReceiverInitialization(event, events.MustMaterializingEntityTarget(dependencyTarget), receiverRoute)
+					}
 					if err != nil {
 						t.Fatal(err)
 					}
 					before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
 					ready, err := readReceiverConstructionReady(t, f, route)
-					if variant == "exact" {
+					if variant == "exact" || variant == "stored_exact" {
 						if !ready || err != nil {
 							t.Fatalf("exact constructor receipt refused: ready=%t %v", ready, err)
 						}
