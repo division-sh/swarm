@@ -159,6 +159,15 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	}
 
 	matched := r.matchedPlans(ctx, evt)
+	if selected, ok := selectedForkRecipientPlanFromContext(ctx, evt); ok {
+		included := make([]runtimepinrouting.ConnectRoutePlan, 0, len(matched))
+		for _, plan := range matched {
+			if selected.allowsConnectPlan(plan) {
+				included = append(included, plan)
+			}
+		}
+		matched = included
+	}
 	if len(matched) == 0 {
 		return connectRoutePlanDispatch{Evaluation: emptyEvaluation}, nil
 	}
@@ -1079,6 +1088,15 @@ func (r connectRoutePlanResolver) evaluateSelectedReceiverCarriers(ctx context.C
 			continue
 		}
 		registrations = append(registrations, routeTable.connectRecipientAdmissionsForTargets(runID, plan, targets)...)
+	}
+	if selected, ok := selectedForkRecipientPlanForInbound(ctx); ok {
+		included := registrations[:0]
+		for _, registration := range registrations {
+			if selected.allowsRegistration(plan, registration) {
+				included = append(included, registration)
+			}
+		}
+		registrations = included
 	}
 	return r.graph.EvaluateMaterializedRecipients(plan, targets, registrations)
 }

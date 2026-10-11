@@ -667,6 +667,19 @@ func (c selectedContractForkLocalRuntimeContainer) publishCommittedInputs() erro
 			}
 		}
 		eventCtx := runtimecorrelation.WithRuntimeLineageSubject(runCtx, forkEventID, sourceEvent.EventName)
+		if _, continuing, err := req.SourcePlan.FanOutPendingRecipientPartition(sourceEvent.SourceEventID); err != nil {
+			return err
+		} else if continuing {
+			for _, plan := range req.RecipientPlanning.RecipientPlanEvents {
+				if plan.SourceEventID != sourceEvent.SourceEventID {
+					continue
+				}
+				eventCtx, err = runtimebus.WithSelectedForkRecipientPlan(eventCtx, evt, plan.Recipients)
+				if err != nil {
+					return err
+				}
+			}
+		}
 		if req.Prepared.recoveryChildRunID != "" {
 			admittedCtx, admitted, err := bus.AdmitSelectedForkPublishInput(eventCtx, evt, input)
 			if err != nil {

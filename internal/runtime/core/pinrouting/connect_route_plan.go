@@ -642,6 +642,22 @@ type ConnectRecipientRegistration struct {
 	recipient   ConnectRecipient
 }
 
+func (r ConnectRecipientRegistration) Recipient() ConnectRecipient { return r.recipient }
+func (r ConnectRecipientRegistration) ReceiverIdentity() events.ConnectReceiverIdentity {
+	return r.receiverPin.EvidenceIdentity()
+}
+
+// RecipientForPlan projects the handler event from its exact compiled receiver
+// pin. It does not admit a target; materialized-target evaluation still does that.
+func (r ConnectRecipientRegistration) RecipientForPlan(plan ConnectRoutePlan) (ConnectRecipient, bool) {
+	if r.receiverPin.Empty() || !r.receiverPin.Equal(plan.ReceiverPinIdentity()) || plan.ReceiverLocalEvent() == "" {
+		return ConnectRecipient{}, false
+	}
+	recipient := r.recipient
+	recipient.handlerEvent = plan.ReceiverLocalEvent()
+	return recipient, true
+}
+
 // ConnectRecipientAssociation retains the compiled plan and receiver pin that
 // admitted a recipient, before recipients are flattened across plans.
 type ConnectRecipientAssociation struct {
@@ -1820,7 +1836,11 @@ func evaluateConnectPlanRecipients(plan ConnectRoutePlan, targets []events.Route
 		}
 		recipient := registration.recipient
 		if matchedTarget {
-			recipient.handlerEvent = plan.ReceiverLocalEvent()
+			var projected bool
+			recipient, projected = registration.RecipientForPlan(plan)
+			if !projected {
+				return nil, nil, fmt.Errorf("connect recipient lacks its exact compiled receiver projection")
+			}
 			out = append(out, recipient)
 		}
 		deliveryRecipient, err := connectEvidenceRecipient(recipient)

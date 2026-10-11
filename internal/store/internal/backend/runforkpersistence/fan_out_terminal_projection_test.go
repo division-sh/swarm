@@ -66,7 +66,7 @@ func TestIssue642FanOutTerminalRecipientDisposition(t *testing.T) {
 				}
 				deliveryRows[event] = append(deliveryRows[event], runForkRevisionDelivery{Snapshot: row})
 			}
-			terminal, disposition, pending, _, err := fixedRunForkFanOutEventDisposition(event, run, nil, eventRows, deliveryRows, nil, nil)
+			terminal, disposition, pending, _, err := fixedRunForkFanOutEventDisposition(event, run, nil, "", eventRows, deliveryRows, nil, nil)
 			if err != nil || !terminal || disposition != test.want || len(pending) != 0 {
 				t.Fatalf("terminal recipient disposition lost: terminal=%t disposition=%q pending=%v err=%v; want %q", terminal, disposition, pending, err, test.want)
 			}

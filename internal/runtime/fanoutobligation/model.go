@@ -581,8 +581,16 @@ type OutcomeKind string
 const (
 	OutcomeCommitted        OutcomeKind = "committed"
 	OutcomeSemanticRejected OutcomeKind = "semantic_rejected"
+	// OutcomeContinued records a child event and its immediate source publication,
+	// not execution permission. Projection and binding owners must prove the exact
+	// original ordinal, event, and unfinished recipient subset.
+	OutcomeContinued OutcomeKind = "continued"
 )
 
+// A continued outcome's inherited disposition describes ended source-partition
+// work, not whole-ordinal settlement. It cannot close an unfinished child: count
+// exactly one ordinal and reduce failure > canceled > success only after all
+// child recipients settle, through the canonical recipient-disposition owner.
 type Outcome struct {
 	Ordinal              int                          `json:"ordinal"`
 	Kind                 OutcomeKind                  `json:"kind"`
@@ -617,6 +625,14 @@ func (o Outcome) Validate() error {
 		}
 		if strings.TrimSpace(o.SourceEventID) == "" && o.InheritedDisposition != "" || strings.TrimSpace(o.SourceEventID) != "" && !o.InheritedDisposition.Valid() {
 			return errors.New("fan-out inherited event requires its exact terminal disposition")
+		}
+	case OutcomeContinued:
+		childEventID, sourceEventID := strings.TrimSpace(o.EventID), strings.TrimSpace(o.SourceEventID)
+		if childEventID == "" || sourceEventID == "" || childEventID == sourceEventID || len(o.Failure) != 0 {
+			return errors.New("continued fan-out outcome requires distinct child and immediate source events without failure")
+		}
+		if o.InheritedDisposition != "" && (!o.InheritedDisposition.Valid() || o.InheritedDisposition == InheritedNoRoute) {
+			return errors.New("continued fan-out outcome permits only a terminal source-partition delivery contribution")
 		}
 	case OutcomeSemanticRejected:
 		if o.EventID != "" || o.SourceEventID != "" || o.InheritedDisposition != "" {

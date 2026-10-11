@@ -4754,8 +4754,30 @@ handler_specification:
           cursor, terminal prefix, and exact delivery-barrier state at the selected revision, resets operational
           claim/tuning facts, and never reissues the prefix. An armed barrier resumes against the child-local intent;
           closed-unfired work receives one child-local schedule; fired, dead-lettered, and suppressed states remain
-          terminal. Same-contract and selected-contract execution require the same stable element identity and semantic
-          digest. Unsupported historical prefix work, a missing retained source artifact, or digest disagreement fails closed;
+          terminal.
+          An already-published unfinished ordinal continues through precisely its unfinished fixed-cut recipient
+          partition, not re-emission of the ordinal or replay of settled recipients. Admission carries explicit
+          source delivery IDs and retains the terminal source contribution. Selected routing resolves those exact
+          executable slots before receiver preparation, while current child grants, claims and generation checks
+          still authorize execution. Publication, child delivery obligations, selected execution lineage and the
+          continued ordinal outcome commit together. The outcome pairs the child event with its distinct immediate
+          source event; it never fabricates terminal child deliveries. An unfinished child keeps the ordinal pending
+          even when its retained contribution is failure or cancellation. Once all continuing recipients settle,
+          reduce the ordinal once with dead-letter, cancellation, then success precedence. Re-fork combines retained
+          terminal contributions with the new cut's settled recipients and anchors to the immediate child's event.
+          Both handler and deployment pending-publication carriers consume that same partition law. A same-version
+          deployment continuation binds the original ordinal in the child's feed. A changed pin preserves the old
+          publication and delivery lineage separately from the new version's fresh feed; it never assigns an old
+          ordinal to the new version. Compiled receiver-pin projection supplies the handler event before selected
+          filtering; the filter cannot infer it or authorize a target outside canonical route evaluation.
+          Exact duplicate publication and successor recovery require the retained event, lineage, recipient set and
+          outcome timestamp to agree. Readback never inserts missing continuation evidence or substitutes a retry's
+          later timestamp for the original publication time.
+          Generic node historical replay remains unsupported; this relation alone grants no execution authority.
+          Same-artifact execution requires exact source/selected digest agreement. A selected artifact may change
+          semantics only through the existing source-integrity and selected-plan correspondence owners, retaining
+          stable declaration identity and the immutable source projection. Contradictory same-artifact digests,
+          unsupported historical prefix work or a missing retained source artifact fail closed;
           source event and delivery rows are never copied.
           Capsule node/declaration, handler, current state, chain depth, ancestor lineage and all frozen business,
           computed and state maps retain their exact values. Only execution entity/route, typed producer source,
@@ -19724,12 +19746,18 @@ platform_tables:
         );
     fan_out_outcomes:
       description: >-
-        Immutable per-ordinal terminal issuance evidence for either exact handler key or exact deployment feed key.
+        Immutable per-ordinal issuance and continuation evidence for either exact handler key or exact deployment feed key.
         Committed events and deterministic semantic rejections advance the same contiguous cursor. Cancellation is
         represented compactly by the intent's canceled status and remaining cursor range, without invented outcomes.
+        A continued outcome binds a child event_id to its distinct immediate source publication source_event_id for an
+        already-issued ordinal, with no failure and an optional succeeded, dead_lettered, or canceled inherited
+        contribution from ended local source-partition work; no_route cannot describe a partial recipient partition.
+        This is a fact shape, never execution permission: existing projection and binding owners must prove the exact
+        original ordinal, publication event, and unfinished recipient subset. An inherited terminal contribution
+        cannot close an unfinished child, and continuation still counts exactly one ordinal, not a second issuance.
         An issued ordinal retains its actual recipient settlement separately: canceled recipients are never
-        reclassified as inherited success. Recipient reduction waits for every recipient, then uses dead-letter,
-        canceled, success precedence, identically in native barrier folds and fixed-cut fork projection.
+        reclassified as inherited success. Whole-ordinal reduction waits for all child recipients to settle, then uses
+        failure (dead-letter) > canceled > success precedence, identically in native barrier folds and fixed-cut fork projection.
       ddl: |
         CREATE TABLE fan_out_outcomes (
             outcome_id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -19740,7 +19768,7 @@ platform_tables:
             declaration_family        TEXT,
             semantic_path             TEXT,
             ordinal                   BIGINT NOT NULL CHECK (ordinal >= 0),
-            outcome_kind              TEXT NOT NULL CHECK (outcome_kind IN ('committed', 'semantic_rejected')),
+            outcome_kind              TEXT NOT NULL CHECK (outcome_kind IN ('committed', 'semantic_rejected', 'continued')),
             event_id                  UUID REFERENCES events(event_id),
             source_event_id           UUID REFERENCES events(event_id),
             inherited_disposition     TEXT CHECK (inherited_disposition IN ('succeeded', 'dead_lettered', 'canceled', 'no_route')),
@@ -19751,8 +19779,8 @@ platform_tables:
             CHECK ((deployment_feed_id IS NULL AND triggering_delivery_id IS NOT NULL AND flow_path IS NOT NULL AND declaration_family IS NOT NULL AND semantic_path IS NOT NULL) OR (deployment_feed_id IS NOT NULL AND triggering_delivery_id IS NULL AND flow_path IS NULL AND declaration_family IS NULL AND semantic_path IS NULL)),
             FOREIGN KEY (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path) REFERENCES fan_out_intents(run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path),
             FOREIGN KEY (run_id, deployment_feed_id) REFERENCES fan_out_intents(run_id, deployment_feed_id),
-            CHECK ((outcome_kind = 'committed') = ((event_id IS NOT NULL) <> (source_event_id IS NOT NULL))),
-            CHECK ((source_event_id IS NULL AND inherited_disposition IS NULL) OR (source_event_id IS NOT NULL AND inherited_disposition IS NOT NULL)),
+            CHECK ((outcome_kind = 'committed' AND ((event_id IS NOT NULL) <> (source_event_id IS NOT NULL))) OR (outcome_kind = 'continued' AND event_id IS NOT NULL AND source_event_id IS NOT NULL AND event_id <> source_event_id) OR (outcome_kind = 'semantic_rejected' AND event_id IS NULL AND source_event_id IS NULL)),
+            CHECK ((outcome_kind = 'continued' AND (inherited_disposition IS NULL OR inherited_disposition IN ('succeeded', 'dead_lettered', 'canceled'))) OR (outcome_kind <> 'continued' AND ((source_event_id IS NULL AND inherited_disposition IS NULL) OR (source_event_id IS NOT NULL AND inherited_disposition IS NOT NULL)))),
             CHECK ((outcome_kind = 'semantic_rejected') = (failure IS NOT NULL)),
             UNIQUE (event_id),
             INDEX idx_fan_out_outcomes_run (run_id, outcome_kind)

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -34,7 +35,8 @@ import (
 
 type selectedForkLineageOwner interface {
 	ValidateLifecycleDiagnosticOriginTx(context.Context, *sql.Tx, runtimemanager.AgentLifecycleTransitionResult, bool) (string, error)
-	InsertSelectedForkExecutionLineageTx(context.Context, *sql.Tx, runtimerunfork.RunForkSelectedContractExecutionLineage) error
+	CommitSelectedForkExecutionEvidenceTx(context.Context, *mutationprotocol.Attempt, runtimerunfork.RunForkSelectedContractExecutionLineage, events.AdmittedEvent, []events.DeliveryRoute) error
+	RequireSelectedForkExecutionEvidenceTx(context.Context, *mutationprotocol.Attempt, runtimerunfork.RunForkSelectedContractExecutionLineage) error
 }
 
 type operatorChannelClaimPostgresOwner interface {
