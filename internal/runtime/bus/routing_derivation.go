@@ -137,9 +137,15 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 }
 
 func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtimepinrouting.CompiledConnectGraph, inputProducers runtimepinrouting.FlowInputProducerResolver) (*RouteTable, error) {
-	rt := newRouteTableWithGraph(source, graph)
-	rt.inputProducers = inputProducers
-	rt.compiledSourceReady = true
+	rt := &RouteTable{
+		source:              source,
+		templates:           make(map[string]routeFlowTemplate),
+		connectDefinitions:  make(map[string][]runtimepinrouting.ConnectRecipientRegistration),
+		staticAgentPlans:    make(map[agentidentity.Plan]struct{}),
+		connectGraph:        graph,
+		inputProducers:      inputProducers,
+		compiledSourceReady: true,
+	}
 	if source == nil {
 		return rt, nil
 	}
@@ -147,10 +153,7 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 		return nil, fmt.Errorf("compile declared agent names: %w", err)
 	}
 	for _, scope := range semanticview.FlowScopes(source) {
-		agents, err := routeAgentDeclarations(source, scope.ID)
-		if err != nil {
-			return nil, err
-		}
+		agents := semanticview.AgentDeclarationsForOwner(source, scope.ID)
 		localEvents := routeFlowLocalEventSetWithInputProducers(scope, inputProducers)
 		subscribers, err := routeSubscriberTemplates(source, scope, agents, localEvents)
 		if err != nil {
@@ -254,14 +257,10 @@ func (rt *RouteTable) ConnectReceiverDefinitions(runID string, instance runtimef
 }
 
 func (rt *RouteTable) staticAgentDeclarationPlans() map[agentidentity.Plan]struct{} {
-	plans := make(map[agentidentity.Plan]struct{})
-	if rt == nil {
-		return plans
+	if rt == nil || rt.staticAgentPlans == nil {
+		return make(map[agentidentity.Plan]struct{})
 	}
-	for plan := range rt.staticAgentPlans {
-		plans[plan] = struct{}{}
-	}
-	return plans
+	return maps.Clone(rt.staticAgentPlans)
 }
 
 func projectSubscriberEvents(subscribers []Subscriber, eventType string) []Subscriber {
@@ -304,34 +303,6 @@ func connectRecipientSubscribers(evaluation runtimepinrouting.ConnectRecipientEv
 		})
 	}
 	return dedupeSubscribers(out)
-}
-
-func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.CompiledConnectGraph) *RouteTable {
-	return &RouteTable{
-		source:             source,
-		templates:          make(map[string]routeFlowTemplate),
-		connectDefinitions: make(map[string][]runtimepinrouting.ConnectRecipientRegistration),
-		staticAgentPlans:   make(map[agentidentity.Plan]struct{}),
-		connectGraph:       graph,
-	}
-}
-
-type routeAgentDeclaration struct {
-	Declaration semanticview.AgentDeclaration
-	NamePlan    semanticview.AgentNamePlan
-}
-
-func routeAgentDeclarations(source semanticview.Source, ownerFlowID string) ([]routeAgentDeclaration, error) {
-	declarations := semanticview.AgentDeclarationsForOwner(source, ownerFlowID)
-	out := make([]routeAgentDeclaration, 0, len(declarations))
-	for _, declaration := range declarations {
-		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
-		if err != nil {
-			return nil, fmt.Errorf("route subscriber %s declaration name: %w", declaration.Label(true), err)
-		}
-		out = append(out, routeAgentDeclaration{Declaration: declaration, NamePlan: plan})
-	}
-	return out, nil
 }
 
 func routeApplyResolvedPattern(subscriber Subscriber, resolved routeResolvedPattern) Subscriber {
@@ -381,31 +352,27 @@ func routeEventKeys(events map[string]runtimecontracts.EventCatalogEntry) map[st
 	return out
 }
 
-func routeSubscriberTemplates(source semanticview.Source, scope semanticview.FlowScope, agents []routeAgentDeclaration, localEvents map[string]struct{}) ([]routeSubscriberTemplate, error) {
+func routeSubscriberTemplates(source semanticview.Source, scope semanticview.FlowScope, agents []semanticview.AgentDeclaration, localEvents map[string]struct{}) ([]routeSubscriberTemplate, error) {
 	out := make([]routeSubscriberTemplate, 0, len(agents)+len(scope.Nodes))
-	for _, agent := range agents {
-		declaration := agent.Declaration
+	for _, declaration := range agents {
+		namePlan, err := semanticview.ScopedAgentNamePlan(source, declaration)
+		if err != nil {
+			return nil, fmt.Errorf("route subscriber %s declaration name: %w", declaration.Label(true), err)
+		}
 		key := strings.TrimSpace(declaration.LocalID)
 		entry := declaration.Entry
 		patterns := normalizeStringList(entry.Subscriptions)
 		if len(patterns) == 0 {
 			continue
 		}
-		compiled := make([]routeSubscriberTemplatePattern, 0, len(patterns))
-		for _, pattern := range patterns {
-			admission := routeClassifyAuthoredSubscription(source, subscriberAgent, scope.ID, scope.InputEvents, scope.Path, localEvents, pattern)
-			if !admission.Admitted() {
-				return nil, fmt.Errorf("route subscriber agent %s in flow %s: %s", key, scope.ID, admission.Message())
-			}
-			compiled = append(compiled, routeSubscriberTemplatePattern{
-				raw: pattern, admission: admission,
-				inputEvent: !admission.Pattern() && scope.ID != "" && source.FlowHasInputEvent(scope.ID, admission.LocalEvent()),
-			})
+		compiled, err := routeSubscriberPatterns(source, subscriberAgent, scope, localEvents, patterns)
+		if err != nil {
+			return nil, fmt.Errorf("route subscriber agent %s in flow %s: %w", key, scope.ID, err)
 		}
 		out = append(out, routeSubscriberTemplate{
 			Kind:          subscriberAgent,
 			Patterns:      compiled,
-			AgentNamePlan: agent.NamePlan,
+			AgentNamePlan: namePlan,
 		})
 	}
 	nodes, err := routeExecutableNodeDeclarations(source, scope.ID, scope.Nodes)
@@ -422,16 +389,9 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 		if err != nil {
 			return nil, fmt.Errorf("route subscriber node %s in flow %s: %w", semanticNodeID, scope.ID, err)
 		}
-		compiled := make([]routeSubscriberTemplatePattern, 0, len(patterns))
-		for _, pattern := range patterns {
-			admission := routeClassifyAuthoredSubscription(source, subscriberNode, scope.ID, scope.InputEvents, scope.Path, localEvents, pattern)
-			if !admission.Admitted() {
-				return nil, fmt.Errorf("route subscriber node %s in flow %s: %s", semanticNodeID, scope.ID, admission.Message())
-			}
-			compiled = append(compiled, routeSubscriberTemplatePattern{
-				raw: pattern, admission: admission,
-				inputEvent: !admission.Pattern() && scope.ID != "" && source.FlowHasInputEvent(scope.ID, admission.LocalEvent()),
-			})
+		compiled, err := routeSubscriberPatterns(source, subscriberNode, scope, localEvents, patterns)
+		if err != nil {
+			return nil, fmt.Errorf("route subscriber node %s in flow %s: %w", semanticNodeID, scope.ID, err)
 		}
 		out = append(out, routeSubscriberTemplate{
 			Kind:          subscriberNode,
@@ -441,6 +401,21 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 		})
 	}
 	return out, nil
+}
+
+func routeSubscriberPatterns(source semanticview.Source, kind subscriberKind, scope semanticview.FlowScope, localEvents map[string]struct{}, patterns []string) ([]routeSubscriberTemplatePattern, error) {
+	compiled := make([]routeSubscriberTemplatePattern, 0, len(patterns))
+	for _, pattern := range patterns {
+		admission := routeClassifyAuthoredSubscription(source, kind, scope.ID, scope.InputEvents, scope.Path, localEvents, pattern)
+		if !admission.Admitted() {
+			return nil, fmt.Errorf("%s", admission.Message())
+		}
+		compiled = append(compiled, routeSubscriberTemplatePattern{
+			raw: pattern, admission: admission,
+			inputEvent: !admission.Pattern() && scope.ID != "" && source.FlowHasInputEvent(scope.ID, admission.LocalEvent()),
+		})
+	}
+	return compiled, nil
 }
 
 func routeExecutableNodeDeclarations(source semanticview.Source, flowPath string, expected map[string]runtimecontracts.SystemNodeContract) ([]runtimeidentity.ExecutableNode, error) {
