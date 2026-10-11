@@ -3,11 +3,9 @@ package runforkpersistence
 import (
 	"context"
 	"database/sql"
-	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	storestartup "github.com/division-sh/swarm/internal/store/internal/startupownership"
 )
 
 func (s *RunForkPostgresOwner) InspectSelectedForkRecovery(ctx context.Context, entry runfork.SelectedForkRecoveryEntry) (runfork.SelectedForkRecoveryInspection, error) {
@@ -54,13 +52,9 @@ func inspectSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, snapshot runlife
 		inspection.Plan = settled
 		return inspection, nil
 	}
-	recorded, err := storestartup.PreparedProcessRecorded(ctx, tx, record.preparation.Coordinates, record.preparation.ProcessGeneration, sqlite)
-	if err != nil {
-		return inspection, err
-	}
-	if !recorded {
-		return inspection, fmt.Errorf("selected recovery preparation has no matching recorded process lineage")
-	}
+	// loadSelectedRecoveryRecordTx proved the original admitted preparation and
+	// its exact native binding/fingerprint. Historical observation does not gain
+	// permission from a current process row or a newly acquired serving lease.
 	plan, err := planSelectedRecoveryTx(ctx, tx, snapshot, record, sqlite, false)
 	if err != nil {
 		return inspection, err
