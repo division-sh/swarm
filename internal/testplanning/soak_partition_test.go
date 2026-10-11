@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -91,6 +92,45 @@ func TestServedReporterTimeoutEnvelopeIsExact(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := validateSoakSelection(tc.packages, tc.run, tc.skip, tc.timeout, tc.count, tc.budget); err == nil {
 				t.Fatal("changed served reporter proof envelope accepted")
+			}
+		})
+	}
+}
+
+func TestServedReporterStressTimeoutEnvelopeIsExact(t *testing.T) {
+	packages, run, timeout, count, budget := []string{ServedReporterPackage}, ServedReporterStressRun, ServedReporterGoTimeout, "count-1", "full"
+	if err := validateSoakSelection(packages, run, "", timeout, count, budget); err != nil {
+		t.Fatalf("approved whole stress proof rejected: %v", err)
+	}
+	for _, tc := range []struct {
+		name, wantPrefix                  string
+		packages                          []string
+		run, skip, timeout, count, budget string
+	}{
+		{name: "missing package", packages: nil, run: run, timeout: timeout, count: count, budget: budget},
+		{name: "empty package list", packages: []string{}, run: run, timeout: timeout, count: count, budget: budget},
+		{name: "multiple packages", packages: []string{ServedReporterPackage, SoakPackage}, run: run, timeout: timeout, count: count, budget: budget},
+		{name: "foreign package", packages: []string{SoakPackage}, run: run, timeout: timeout, count: count, budget: budget},
+		{name: "short timeout", packages: packages, run: run, timeout: "10m", count: count, budget: budget},
+		{name: "long timeout", packages: packages, run: run, timeout: "22m", count: count, budget: budget},
+		{name: "empty selector", packages: packages, timeout: timeout, count: count, budget: budget},
+		{name: "broader selector", packages: packages, run: "^TestIssue2394.*$", timeout: timeout, count: count, budget: budget},
+		{name: "partial backend", packages: packages, run: run + "/sqlite", timeout: timeout, count: count, budget: budget},
+		{name: "excluded root", packages: packages, run: run, skip: run, timeout: timeout, count: count, budget: budget},
+		{name: "foreign exclusion", packages: packages, run: run, skip: SoakRun, timeout: timeout, count: count, budget: budget},
+		{name: "cached count", packages: packages, run: run, timeout: timeout, count: "cache-default", budget: budget},
+		{name: "missing count", packages: packages, run: run, timeout: timeout, budget: budget},
+		{name: "repeated count", packages: packages, run: run, timeout: timeout, count: "count-3", budget: budget},
+		{name: "foreign budget", packages: packages, run: run, timeout: timeout, count: count, budget: "broad"},
+		{name: "soak error precedence", packages: packages, run: run, timeout: timeout, count: count, budget: "soak", wantPrefix: "soak requires one exact backend"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wantPrefix := tc.wantPrefix
+			if wantPrefix == "" {
+				wantPrefix = "only the exact soak, served reporter or persistence census"
+			}
+			if err := validateSoakSelection(tc.packages, tc.run, tc.skip, tc.timeout, tc.count, tc.budget); err == nil || !strings.HasPrefix(err.Error(), wantPrefix) {
+				t.Fatalf("changed stress proof envelope error = %v, want prefix %q", err, wantPrefix)
 			}
 		})
 	}
