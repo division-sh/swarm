@@ -7,12 +7,29 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 )
 
 type routePlanSource uint8
 type routePlanReason uint8
+
+// Consumers receive the planner's typed refusal, not a generic target-detail
+// string. Caller diagnostics do not change the canonical failure taxonomy.
+func (p PublishRecipientPlan) TargetFailureError(component, operation string, attributes map[string]any) error {
+	if p.TargetFailure == "" {
+		return nil
+	}
+	failure, err := runtimepinrouting.ParseTargetFailure(p.TargetFailure)
+	if err != nil || failure.Empty() || failure.Code() != p.TargetFailure {
+		if err == nil {
+			err = fmt.Errorf("recipient plan contains noncanonical target failure %q", p.TargetFailure)
+		}
+		return runtimefailures.WrapDetail("route_plan_preflight_failed", component, operation, attributes, err)
+	}
+	return canonicalTargetDeliveryFailure(failure, component, operation, attributes)
+}
 
 const (
 	routePlanSourceAgentPolicy routePlanSource = iota + 1

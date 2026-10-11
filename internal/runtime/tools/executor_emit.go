@@ -54,8 +54,7 @@ func (e *Executor) preflightPinnedEmit(ctx context.Context, actor models.AgentCo
 		}
 		if plan.UsesCanonicalRouteAuthority() {
 			if plan.TargetFailure != "" {
-				wrapped := failures.NewTarget(
-					plan.TargetFailure,
+				wrapped := plan.TargetFailureError(
 					"tool-executor",
 					"handle_emit_tool.route_plan_preflight",
 					map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},

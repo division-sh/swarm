@@ -40,7 +40,7 @@ func targetDeliveryFailureEnvelope(failure runtimepinrouting.TargetFailure) *run
 	if failure.Empty() {
 		return nil
 	}
-	canonical := canonicalTargetDeliveryFailure(failure, nil).Failure
+	canonical := canonicalTargetDeliveryFailure(failure, "eventbus", "resolve_delivery_target", nil).Failure
 	return &canonical
 }
 
@@ -3035,7 +3035,7 @@ func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runti
 		"persisted_recipients": plan.PersistedRecipientIDs(),
 		"delivery_routes":      plan.DeliveryRoutes(),
 	}
-	canonical := canonicalTargetDeliveryFailure(failure, detail)
+	canonical := canonicalTargetDeliveryFailure(failure, "eventbus", "resolve_delivery_target", detail)
 	detail["failure"] = canonical.Failure
 	deadLetterRoute := target
 	if deadLetterRoute.Empty() && len(targetSet) > 0 {
@@ -3058,17 +3058,17 @@ func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runti
 	}
 }
 
-func canonicalTargetDeliveryFailure(failure runtimepinrouting.TargetFailure, detail map[string]any) *runtimefailures.Error {
+func canonicalTargetDeliveryFailure(failure runtimepinrouting.TargetFailure, component, operation string, detail map[string]any) *runtimefailures.Error {
 	var err error
 	switch failure {
 	case runtimepinrouting.FailureStaleArrival:
-		err = runtimefailures.New(runtimefailures.ClassStaleArrival, "stale_arrival", "eventbus", "resolve_delivery_target", detail)
+		err = runtimefailures.New(runtimefailures.ClassStaleArrival, "stale_arrival", component, operation, detail)
 	case runtimepinrouting.FailureReplyAlreadyTerminal:
-		err = runtimefailures.New(runtimefailures.ClassReplyAlreadyTerminal, "reply_already_terminal", "eventbus", "resolve_delivery_target", detail)
+		err = runtimefailures.New(runtimefailures.ClassReplyAlreadyTerminal, "reply_already_terminal", component, operation, detail)
 	default:
-		err = runtimefailures.NewTarget(failure.Code(), "eventbus", "resolve_delivery_target", detail)
+		err = runtimefailures.NewTarget(failure.Code(), component, operation, detail)
 	}
-	return runtimefailures.FromError(err, "eventbus", "resolve_delivery_target")
+	return runtimefailures.FromError(err, component, operation)
 }
 
 func firstNonEmptyString(vals ...string) string {

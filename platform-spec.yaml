@@ -1008,6 +1008,10 @@ contract_formats:
         A terminal reply publication refusal retains the same canonical failure class
         and detail in its pipeline receipt and dead letter. Reply-already-terminal
         and stale-arrival refusals are not generic target or internal-construction failures.
+        Emit-tool recipient preflight consumes that same canonical refusal mapping,
+        retaining its tool/event diagnostics and refusing before publication. Unknown
+        or noncanonical planner failure codes fail closed; generic target validation
+        remains strict and does not admit reply classes as target details.
         Ordinary and selected materialization consume the same exact captured-row
         projection and native readback. Prospective validation can admit reconstruction
         of the open-reply family only; it cannot discharge any other capability blocker.
