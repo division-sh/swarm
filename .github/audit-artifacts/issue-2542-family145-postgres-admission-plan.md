@@ -845,3 +845,53 @@ under #2353; no attribution beyond the reviewed pre-cohort M01 reproduction.
 No new census/baseline, aggregate codemod, local tier, restart, push, PR or whole-
 family/parent closure. New owner construction here is measured separately from
 the finite caller propagation; unchanged evidence is not rerun as a whole matrix.
+
+## Settled Reporter And Shared Serving History Dependencies
+
+The entire numeric reporter opening and its consumer chain are pool-free. The
+original native location, parallel-backend policy, actual delay collector and
+500/502-item workloads are unchanged. Four reporter helper calls and the shared
+serving-matrix history call now consume their original selected owner. The
+complete fan_out_chunk_history_test.go file has no SQL, pool or raw getter.
+Serving-matrix construction still has independent raw witnesses and remains in
+the migration tail; this cohort does not label that entire fixture migrated.
+
+Run-lifecycle counterprojection owns the original single stored-versus-physical
+event-count statement. There is no recount writer, unknown-zero inference or
+split snapshot. Pipelinepersistence owns exact run-scoped semantic_rejected rows,
+ordinal ordering and native failure text without deduplication or extra intent
+filters. Envelope decode and duplicate-ordinal refusal remain unchanged. The
+existing classified runforkrevision/postgres.go owner contains the portable
+physical fan_out_obligations key/fact read for both stores; every row retains
+revision/fact-key order and native bytes. Reporter and serving consumers retain
+their exact intent-kind, cardinality and two-cursor assertions. No inventory
+exemption, historical payload admission, capture or execution authority added.
+
+All three original independent read cuts are original selected native reads;
+storage failure, cancellation or closed/raw/invalid ownership yields no partial
+evidence. The committed finite recipe mechanism pins all five caller changes,
+four shared owner/helper rewrites and complete reporter construction against
+the immutable original source. Only scan/iteration transport assertions move
+into the actual row owners; every business assertion remains source-exact.
+
+Measured proof breakdown on vemew: reporter-native-consumers.jsonl PASS211.962s
+under race/count1 (actual valid500/mixed502 reporter plus shared-generation
+replacement; four backend cells). This proves the original20 successful25-item
+commits, typed rejections and creation-plus-publication history through the new
+ports; it does not claim the separate normal non-race reporter timing ceiling.
+reporter-native-storage-owners.jsonl PASS14.839s: genuine zero and three committed
+event counter evidence, exact foreign-run exclusion and original read counters,
+plus all three ports empty/invalid/raw/cancelled/closed refusal. Nonempty history
+and refusal facts are proved through real runtime execution, not raw test seeds.
+reporter-finite-controls.jsonl PASS1.274s; seven adjacent delivery/event/revision/
+lifecycle inventories PASS5.867s; counter retirement controls PASS0.436s. Seven-
+package U1000 passes; complete codemod dry run is Changes=[]. No full recipe
+collection, aggregate package, local tier or unchanged matrix is repeated.
+
+The corpus is1016 rows /152 transitions, digest
+d0f6aaed62623bc542fde5c8102a2d04b32493bbd205039fbed9cccf9707dd52.
+All893 immutable original records retain their exact0064a225... hash and the
+approved24-receipt pin remains unchanged. Named supplied-pool admissions now140,
+or141 excluding Docker's unqualified removal. M01 is not rerun or reclassified;
+both M01 and Docker remain separate qualification-open #2353 obligations. No
+global census/baseline, restart, push, PR or family/parent closure claim.

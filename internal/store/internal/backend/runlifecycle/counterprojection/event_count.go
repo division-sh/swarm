@@ -18,6 +18,20 @@ type Delta struct {
 	Amount int64
 }
 
+type StorageConsistency struct {
+	Stored, Actual int
+}
+
+// One physical statement retains the original projection-versus-event-row cut.
+// This is evidence only: it neither repairs a counter nor treats zero as unknown.
+func ReadStorageConsistencyForTestTx(ctx context.Context, tx *sql.Tx, runID string) (StorageConsistency, error) {
+	var out StorageConsistency
+	if err := tx.QueryRowContext(ctx, `SELECT r.event_count, (SELECT COUNT(*) FROM events e WHERE e.run_id=r.run_id) FROM runs r WHERE r.run_id=$1`, runID).Scan(&out.Stored, &out.Actual); err != nil {
+		return StorageConsistency{}, err
+	}
+	return out, nil
+}
+
 func ApplyAll(ctx context.Context, tx *sql.Tx, dialect authoractivity.Dialect, deltas []Delta) error {
 	for _, delta := range deltas {
 		if err := Apply(ctx, tx, dialect, delta.RunID, delta.Amount); err != nil {

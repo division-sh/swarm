@@ -324,23 +324,18 @@ func (f *servingMatrixFixture) assertSettled(t *testing.T, runtimeIndex int, run
 			t.Fatalf("publication %s differs from evaluated input: %+v", key, registration)
 		}
 	}
-	assertServingMatrixHistory(t, ctx, f.db, runID, cardinality)
+	assertServingMatrixHistory(t, ctx, f.selected, runID, cardinality)
 }
 
-func assertServingMatrixHistory(t *testing.T, ctx context.Context, db *sql.DB, runID string, intents int) {
+func assertServingMatrixHistory(t *testing.T, ctx context.Context, selected notifyAllChildrenStore, runID string, intents int) {
 	t.Helper()
-	rows, err := db.QueryContext(ctx, `SELECT fact_key,fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations' ORDER BY revision,fact_key`, runID)
+	rows, err := storetest.ReadFanOutObligationHistoryStorage(ctx, notifyAllChildrenNativeObservationOwner(selected), runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	observed := make(map[string][]int)
-	for rows.Next() {
-		var key string
-		var raw []byte
-		if err := rows.Scan(&key, &raw); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range rows {
+		key, raw := row.Key, row.Fact
 		var fact struct {
 			Kind        string `json:"fact_kind"`
 			Cursor      int    `json:"cursor"`
@@ -356,9 +351,6 @@ func assertServingMatrixHistory(t *testing.T, ctx context.Context, db *sql.DB, r
 			t.Fatalf("short intent %s cardinality=%d", key, fact.Cardinality)
 		}
 		observed[key] = append(observed[key], fact.Cursor)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	if len(observed) != intents {
 		t.Fatalf("history intent identities=%d want=%d", len(observed), intents)

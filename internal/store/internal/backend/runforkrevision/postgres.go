@@ -3,6 +3,7 @@ package runforkrevision
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
@@ -112,4 +113,32 @@ func CountActivityJournalRevisionsForTest(ctx context.Context, tx *sql.Tx, runID
 		return 0, err
 	}
 	return count, nil
+}
+
+type FanOutObligationHistoryStorage struct {
+	Key  string
+	Fact []byte
+}
+
+// Preserve the complete physical revision witness. These bytes are not
+// historical payload admission or authority to restore executable work.
+func ReadFanOutObligationHistoryStorageForTestTx(ctx context.Context, tx *sql.Tx, runID string) ([]FanOutObligationHistoryStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT fact_key,fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations' ORDER BY revision,fact_key`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FanOutObligationHistoryStorage
+	for rows.Next() {
+		var row FanOutObligationHistoryStorage
+		if err := rows.Scan(&row.Key, &row.Fact); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		row.Fact = append([]byte(nil), row.Fact...)
+		out = append(out, row)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

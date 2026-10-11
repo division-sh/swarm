@@ -626,21 +626,18 @@ func TestNumericReporterIssuanceMergeCeilingIsolation(t *testing.T) {
 func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.TransactionProbeOptions, issuanceBudget time.Duration, parallelBackends, servingWindow bool) {
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
+		setup func(*testing.T) notifyAllChildrenStore
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			setup: func(t *testing.T) notifyAllChildrenStore {
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected, storetest.DatabaseForTest(selected)
+			setup: func(t *testing.T) notifyAllChildrenStore {
+				return storetest.StartSQLiteRuntimeStore(t)
 			},
 		},
 	} {
@@ -675,7 +672,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 					}
 				})
 			}
-			selected, db := tc.setup(t)
+			selected := tc.setup(t)
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{
 				NumericRegistrationRows: true,
 				NumericReporterSink:     true,
@@ -768,7 +765,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				}
 				t.Logf("post-issuance descendant settlement receipts: detached=%+v successor=%+v", transactions.Snapshot().ByOperation[storetest.TransactionDeliverySettle], continuation.Snapshot().ByOperation[storetest.TransactionDeliverySettle])
 			}
-			assertNotifyAllChildrenRunEventCount(t, validCtx, db, validRunID)
+			assertNotifyAllChildrenRunEventCount(t, validCtx, selected, validRunID)
 
 			validSummary, err := selected.FanOutRunSummary(validCtx, validRunID, time.Now().UTC())
 			if err != nil {
@@ -777,7 +774,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 			if validSummary.Intents != 20 || validSummary.Cardinality != 500 || validSummary.Cursor != 500 || validSummary.Committed != 500 || validSummary.SemanticRejected != 0 || validSummary.SemanticRejectionSample != nil || validSummary.Settled != 500 || validSummary.Unsettled != 0 || validSummary.Owed != 0 {
 				t.Fatalf("valid numeric reporter summary = %#v", validSummary)
 			}
-			assertReporterFanOutSingleChunkHistory(t, validCtx, db, validRunID)
+			assertReporterFanOutSingleChunkHistory(t, validCtx, selected, validRunID)
 			registrations := loadNotifyAllChildrenNumericRegistrations(t, validCtx, selected, validRunID)
 			if len(registrations) != 500 {
 				t.Fatalf("valid numeric registration events = %d, want 500", len(registrations))
@@ -817,7 +814,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				},
 			})
 			waitNotifyAllChildrenRuntimeWithin(t, runtime, mixedRunID, 5*time.Minute)
-			assertNotifyAllChildrenRunEventCount(t, mixedCtx, db, mixedRunID)
+			assertNotifyAllChildrenRunEventCount(t, mixedCtx, selected, mixedRunID)
 			mixedSummary, err := selected.FanOutRunSummary(mixedCtx, mixedRunID, time.Now().UTC())
 			if err != nil {
 				t.Fatalf("mixed FanOutRunSummary: %v", err)
@@ -834,7 +831,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 			if attrs["event"] != "portfolio/account.registered" || attrs["kind"] != "schema_mismatch" || attrs["path"] != "$.external_id" || attrs["constraint"] != "format" || attrs["expected"] != "uuid" || !actualPresent || actual != "" {
 				t.Fatalf("mixed semantic rejection evidence = %#v", attrs)
 			}
-			rejections := loadNotifyAllChildrenSemanticRejections(t, mixedCtx, selected, db, mixedRunID)
+			rejections := loadNotifyAllChildrenSemanticRejections(t, mixedCtx, selected, mixedRunID)
 			if len(rejections) != 2 {
 				t.Fatalf("durable semantic rejections = %#v, want ordinals 1 and 2", rejections)
 			}
@@ -892,13 +889,13 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 	}
 }
 
-func assertNotifyAllChildrenRunEventCount(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
+func assertNotifyAllChildrenRunEventCount(t *testing.T, ctx context.Context, selected notifyAllChildrenStore, runID string) {
 	t.Helper()
-	var stored, actual int
-	err := db.QueryRowContext(ctx, `SELECT r.event_count, (SELECT COUNT(*) FROM events e WHERE e.run_id = r.run_id) FROM runs r WHERE r.run_id = $1`, runID).Scan(&stored, &actual)
+	counts, err := storetest.ReadRunEventCounterStorageConsistency(ctx, notifyAllChildrenNativeObservationOwner(selected), runID)
 	if err != nil {
 		t.Fatalf("read run event counter: %v", err)
 	}
+	stored, actual := counts.Stored, counts.Actual
 	if stored != actual {
 		t.Fatalf("run event_count = %d, want %d durable events", stored, actual)
 	}
@@ -1112,24 +1109,15 @@ type notifyAllChildrenNumericRegistration struct {
 	GemScore float64
 }
 
-func loadNotifyAllChildrenSemanticRejections(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID string) map[int]runtimefailures.Envelope {
+func loadNotifyAllChildrenSemanticRejections(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, runID string) map[int]runtimefailures.Envelope {
 	t.Helper()
-	query := `SELECT ordinal,failure::text FROM fan_out_outcomes WHERE run_id=$1::uuid AND outcome_kind='semantic_rejected' ORDER BY ordinal`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT ordinal,failure FROM fan_out_outcomes WHERE run_id=? AND outcome_kind='semantic_rejected' ORDER BY ordinal`
-	}
-	rows, err := db.QueryContext(ctx, query, runID)
+	rows, err := storetest.ReadFanOutSemanticRejectionStorage(ctx, notifyAllChildrenNativeObservationOwner(backend), runID)
 	if err != nil {
 		t.Fatalf("query semantic rejection outcomes: %v", err)
 	}
-	defer rows.Close()
 	out := map[int]runtimefailures.Envelope{}
-	for rows.Next() {
-		var ordinal int
-		var raw string
-		if err := rows.Scan(&ordinal, &raw); err != nil {
-			t.Fatalf("scan semantic rejection outcome: %v", err)
-		}
+	for _, row := range rows {
+		ordinal, raw := row.Ordinal, row.Failure
 		failure, err := runtimefailures.UnmarshalEnvelope([]byte(raw))
 		if err != nil {
 			t.Fatalf("decode semantic rejection outcome %d: %v", ordinal, err)
@@ -1138,9 +1126,6 @@ func loadNotifyAllChildrenSemanticRejections(t *testing.T, ctx context.Context, 
 			t.Fatalf("duplicate semantic rejection ordinal %d", ordinal)
 		}
 		out[ordinal] = failure
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate semantic rejection outcomes: %v", err)
 	}
 	return out
 }
