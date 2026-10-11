@@ -12,6 +12,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
+	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
@@ -164,13 +166,29 @@ func seedConversationForkFixture(ctx context.Context, selected any, fixture Conv
 			if err != nil {
 				return err
 			}
+			var inserted bool
 			if dialect == authoractivity.DialectPostgres {
-				_, err = insertCanonicalFixtureRecordForTest(ctx, attempt, "postgres", record)
+				inserted, err = eventrecordpostgres.Insert(ctx, attempt, record)
 			} else {
-				_, err = insertCanonicalFixtureRecordForTest(ctx, attempt, "sqlite", record)
+				inserted, err = eventrecordsqlite.Insert(ctx, attempt, record)
 			}
 			if err != nil {
 				return err
+			}
+			if !inserted {
+				var existing eventrecord.Record
+				var found bool
+				if dialect == authoractivity.DialectPostgres {
+					existing, found, err = eventrecordpostgres.Load(ctx, tx, record.EventID)
+				} else {
+					existing, found, err = eventrecordsqlite.Load(ctx, tx, record.EventID)
+				}
+				if err != nil {
+					return err
+				}
+				if !found || !record.Equal(existing) {
+					return fmt.Errorf("canonical conversation event %s conflicts with its persisted record", record.EventID)
+				}
 			}
 			result[i] = event
 		}
