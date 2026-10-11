@@ -2,6 +2,7 @@ package schemastore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -9,7 +10,16 @@ import (
 
 type Postgres struct {
 	backend         *postgresbackend.Backend
+	processLease    *postgresbackend.AdvisoryLockLease
 	schemaAdmission schemaAdmission
+}
+
+func (s *Postgres) BindProcessLease(lease *postgresbackend.AdvisoryLockLease) error {
+	if s == nil || lease == nil || lease.Session() == nil || s.processLease != nil {
+		return errors.New("PostgreSQL schema process lease must be bound exactly once")
+	}
+	s.processLease = lease
+	return nil
 }
 
 func (s *Postgres) CatalogEmpty(ctx context.Context) (bool, error) {
