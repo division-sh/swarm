@@ -73,6 +73,15 @@ func RemoveWorkflowProjectionFieldsForTest(ctx context.Context, tx *sql.Tx, run,
 	return workflowProjectionFaultResult(tx.ExecContext(ctx, `DELETE FROM entity_state WHERE run_id = $1 AND entity_id = $2`, run, entity))
 }
 
+// This is a closed physical fixture, not construction or field-write admission.
+// Its empty payload and identity/display/clocks come only from one kept header.
+func AddWorkflowProjectionEmptyFieldsForTest(ctx context.Context, tx *sql.Tx, run, entity string) (int64, error) {
+	return workflowProjectionFaultResult(tx.ExecContext(ctx, `INSERT INTO entity_state
+		(run_id,entity_id,flow_instance,entity_type,slug,name,fields,created_at,updated_at)
+		SELECT run_id,entity_id,instance_path,entity_type,slug,name,'{}',created_at,updated_at
+		FROM flow_instances WHERE run_id=$1 AND entity_id=$2 AND entity_type IS NOT NULL`, run, entity))
+}
+
 func SetWorkflowProjectionDrainingForTest(ctx context.Context, tx *sql.Tx, run, path string) (int64, error) {
 	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE flow_instances SET status = 'draining', terminated_at = NULL WHERE run_id = $1 AND instance_path = $2`, run, path))
 }

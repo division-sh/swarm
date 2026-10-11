@@ -149,6 +149,10 @@ func AddAmbiguousWorkflowProjectionFieldsForTest(ctx context.Context, selected a
 	return applyWorkflowProjectionShapeFault(ctx, selected, run, entity, true, pipelinepersistence.AddAmbiguousWorkflowProjectionFieldsForTest)
 }
 
+func AddWorkflowProjectionEmptyFieldsForTest(ctx context.Context, selected any, run, entity string) (int64, error) {
+	return applyWorkflowProjectionShapeFault(ctx, selected, run, entity, true, pipelinepersistence.AddWorkflowProjectionEmptyFieldsForTest)
+}
+
 func SetWorkflowTransitionEvidenceWireForTest(ctx context.Context, selected any, run, path string, wire json.RawMessage) (int64, error) {
 	postgres, err := workflowProjectionNativePostgres(selected)
 	if err != nil {

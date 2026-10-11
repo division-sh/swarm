@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
 )
@@ -85,6 +87,61 @@ func TestWorkflowPrivateBookkeepingWitnessPreservesOtherFactsBothStores(t *testi
 			expected[4] = bookkeeping
 			if actual := readProjectionShapeStorage(t, f, run, entity); !reflect.DeepEqual(actual, expected) {
 				t.Fatalf("bookkeeping witness lost a kept fact: actual=%+v expected=%+v", actual, expected)
+			}
+		})
+	}
+}
+
+func TestWorkflowEmptyFieldFixturePreservesHeaderAndHistoryBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f, plan := newWorkflowTargetConstructionFixture(t, backend)
+			if committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, plan); err != nil || !committed.Created || !committed.Acknowledged {
+				t.Fatalf("lawful construction: %+v err=%v", committed, err)
+			}
+			record, err := plan.PersistenceRecord()
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, entity := record.Identity.RunID, record.State.EntityID
+			reader := f.store.(pipeline.WorkflowTargetPersistenceReader)
+			before, err := reader.LoadWorkflowTargetPersistence(f.ctx, record.Identity, identity.NormalizeEntityID(entity))
+			if err != nil {
+				t.Fatal(err)
+			}
+			historyBefore, err := ReadTrackedEntityMutationProjectionStorageForTest(f.ctx, f.store, run, entity)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range [][2]string{{uuid.NewString(), entity}, {run, uuid.NewString()}, {run, run}, {run, entity}} {
+				if changed, err := AddWorkflowProjectionEmptyFieldsForTest(f.ctx, f.store, key[0], key[1]); err == nil || changed != 0 {
+					t.Fatalf("empty-field fixture admitted absent/fieldless/duplicate scope: rows=%d err=%v", changed, err)
+				}
+			}
+			if changed, err := RemoveWorkflowProjectionFieldsForTest(f.ctx, f.store, run, entity); err != nil || changed != 1 {
+				t.Fatalf("remove original field row: rows=%d err=%v", changed, err)
+			}
+			cancelled, cancel := context.WithCancel(f.ctx)
+			cancel()
+			if changed, err := AddWorkflowProjectionEmptyFieldsForTest(cancelled, f.store, run, entity); !errors.Is(err, context.Canceled) || changed != 0 {
+				t.Fatalf("cancelled empty-field fixture: rows=%d err=%v", changed, err)
+			}
+			if changed, err := AddWorkflowProjectionEmptyFieldsForTest(f.ctx, f.store, run, entity); err != nil || changed != 1 {
+				t.Fatalf("exact empty-field fixture: rows=%d err=%v", changed, err)
+			}
+			after, err := reader.LoadWorkflowTargetPersistence(f.ctx, record.Identity, identity.NormalizeEntityID(entity))
+			if err != nil || !reflect.DeepEqual(after.Lifecycle, before.Lifecycle) {
+				t.Fatalf("empty-field fixture changed a kept header fact: before=%+v after=%+v err=%v", before.Lifecycle, after.Lifecycle, err)
+			}
+			expected := before.State
+			expected.Fields = json.RawMessage(`{}`)
+			expected.CreatedAt, expected.UpdatedAt = before.Lifecycle.CreatedAt, before.Lifecycle.State.UpdatedAt
+			if !reflect.DeepEqual(after.State, expected) {
+				t.Fatalf("empty-field fixture changed identity/display/clocks: after=%+v expected=%+v", after.State, expected)
+			}
+			historyAfter, err := ReadTrackedEntityMutationProjectionStorageForTest(f.ctx, f.store, run, entity)
+			if err != nil || !reflect.DeepEqual(historyAfter.Mutations, historyBefore.Mutations) {
+				t.Fatalf("physical fixture invented or changed immutable history: before=%+v after=%+v err=%v", historyBefore.Mutations, historyAfter.Mutations, err)
 			}
 		})
 	}

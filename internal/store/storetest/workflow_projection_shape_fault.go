@@ -89,6 +89,10 @@ func AddAmbiguousWorkflowProjectionFields(ctx context.Context, selected any, run
 	return private.AddAmbiguousWorkflowProjectionFieldsForTest(ctx, selected, run, entity)
 }
 
+func AddWorkflowProjectionEmptyFields(ctx context.Context, selected any, run, entity string) (int64, error) {
+	return private.AddWorkflowProjectionEmptyFieldsForTest(ctx, selected, run, entity)
+}
+
 func SetWorkflowTransitionEvidenceWire(ctx context.Context, selected any, run, path string, wire json.RawMessage) (int64, error) {
 	return private.SetWorkflowTransitionEvidenceWireForTest(ctx, selected, run, path, wire)
 }
