@@ -29,6 +29,9 @@ const (
 	testTimeCodemodPlacementApproval   = "https://github.com/division-sh/swarm/pull/2604#issuecomment-6104099093"
 	testTimeCodemodPlacementSource     = "bd2d853e3417db3981fca9ca60f6cad5980773e6"
 	testTimeCodemodPlacementRun        = int64(38097201316)
+	testTimeNativePlacementApproval    = "https://github.com/division-sh/swarm/issues/2535#issuecomment-6111657283"
+	testTimeNativePlacementSource      = "9db87f88b2d3b1cec1833c57b12edb974dbe6ba4"
+	testTimeNativePlacementRun         = int64(38155342859)
 	testTimeReporterPlacementApproval  = "https://github.com/division-sh/swarm/issues/2535#issuecomment-6106221574"
 	testTimeReporterPlacementSource    = "dd0ed42ac877c3e974926a5731a8c9f75d943ef1"
 	testTimeReporterPlacementPlan      = "47311fabc6f046391ab4255a9b7b764af8693917f4496cf720f9b03fcab2b614"
@@ -370,6 +373,9 @@ func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, poli
 }
 
 func reviewedTimingPlacement(cell TimingCell, tier string) string {
+	if tier == testplanning.ProfileFull && cell == (TimingCell{Package: "github.com/division-sh/swarm/cmd/swarm-unused", Root: "TestAttemptQualifiedNativeDownloadsUseRealUnionAndRefuseOldPartners", Environment: "ci-postgres-gateway-empty-v1", Count: "count-1"}) {
+		return fmt.Sprintf("%s (measurement run %d attempt 1, source %s; original timing verdict RED)", testTimeNativePlacementApproval, testTimeNativePlacementRun, testTimeNativePlacementSource)
+	}
 	if hasReviewedCodemodPlacement(cell, tier) {
 		return fmt.Sprintf("%s (run %d, source %s)", testTimeCodemodPlacementApproval, testTimeCodemodPlacementRun, testTimeCodemodPlacementSource)
 	}

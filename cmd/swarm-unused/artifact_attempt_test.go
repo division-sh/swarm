@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -49,10 +50,22 @@ func nativeAttemptDownloads(t *testing.T) map[string]string {
 func TestAttemptQualifiedNativeDownloadsUseRealUnionAndRefuseOldPartners(t *testing.T) {
 	names := nativeAttemptDownloads(t)
 	root := fixtureRepo(t, nil)
+	// Transport/merge needs a real matrix binary, not an unrelated Go test-main
+	// import graph. Keep all production/tagged/race sources and the full matrix.
+	if err := os.Remove(filepath.Join(root, "fixture_test.go")); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-u"}, {"-c", "user.name=Guard Fixture", "-c", "user.email=fixture@example.com", "commit", "--quiet", "--no-gpg-sign", "-m", "fixture: native transport library"}} {
+		if _, err := gitOutput(root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
 	var stdout, stderr bytes.Buffer
 	g := guard{root: root, stdout: &stdout, stderr: &stderr}
 	binary := filepath.Join(t.TempDir(), resultFile)
+	analysisStart := time.Now()
 	n, err := g.analyze(binary)
+	t.Logf("real native matrix analysis: %s", time.Since(analysisStart))
 	if err != nil {
 		t.Fatalf("real upstream binary: %v %s", err, &stderr)
 	}

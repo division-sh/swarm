@@ -24081,6 +24081,20 @@ test_specification:
         not an invented hosted run. The whole parent cost remains charged once under the existing
         conservative direct-child fallback; core promotion, aliases, foreign execution cells, aggregate
         allowances, command budgets and pinned-reference refresh do not inherit this approval.
+      native_attempt_transport_qualification: >-
+        The cmd/swarm-unused package has two explicit special-package owners. unused-controls owns every
+        root except exactly TestAttemptQualifiedNativeDownloadsUseRealUnionAndRefuseOldPartners in core,
+        lifecycle and full; future ordinary Test/Fuzz/Example roots enter that owner. unused-attempt-transport
+        owns exactly that whole root in full, retaining all twelve current, old, missing, failed, skipped,
+        cancelled and partial Linux/Darwin partner cases through the real pinned native matrix and CLI merge.
+        Lower tiers defer that one complete root to its full owner, never omit other roots or acquire execution
+        credit for the deferred proof. Active declaration and execution census enforce exactly one owner.
+        The finite placement ruling is #2535 comment 6111657283, measured in run 38155342859 attempt 1 at source
+        9db87f88b2d3b1cec1833c57b12edb974dbe6ba4 (56.170 seconds); that original timing verdict remains red.
+        Only this exact package/root, ci-postgres-gateway-empty-v1/count-1/no-backend/full cell receives placement
+        approval. Core/lifecycle promotions and foreign cells do not inherit it. All full-tier seconds remain
+        charged under unchanged command ceilings, reference and added-cost allowances. Native required Linux,
+        Darwin and real-union jobs remain unchanged; test-fixture optimization cannot substitute for those collectors.
       fixture_codemod_qualification: >-
         The pipeline-observations codemod package has an exhaustive explicit special-package partition.
         codemod-owner-guards runs every remaining root in core, lifecycle and full, including the small real-loader
