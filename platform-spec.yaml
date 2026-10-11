@@ -24020,6 +24020,20 @@ test_specification:
         900-second soak cells, and the hosted native Linux/Darwin unused-check union. All hosted tiers retain macOS
         SQLite possession. Every lower-tier omitted root explicitly names its minimum tier and retained full owner;
         it earns no execution credit. New ordinary roots enter core; an unowned special root blocks every tier.
+      fixture_codemod_qualification: >-
+        The pipeline-observations codemod package has an exhaustive explicit special-package partition.
+        codemod-owner-guards runs every remaining root in core, lifecycle and full, including the small real-loader
+        preflight controls, finite source/provenance/retirement oracles and the conversation reconstruction canary.
+        Lifecycle and full additionally retain codemod-pipeline-mutation (successor duplicate/stale-generation and
+        premature handler dispatch), codemod-bus-mutation (independent lost claim/settlement source facts and
+        PostgreSQL blocked-SQL assertion-failure joining), and codemod-candidate-overlay (the complete actual
+        candidate with all affected package/test variants and its explicit issue2413 build profile).
+        All roots have exactly one owner in lifecycle and full; core defers exactly those five integration roots,
+        never other or newly added ordinary roots. Original fault cuts, separate mutation executions, backend cases,
+        injection/refusal/cleanup evidence, count-1, environments and deadlines remain unchanged. No combined faults,
+        shared stores/lifetimes, persistent proof cache, narrowed type preflight or source-only execution substitute
+        supplies this qualification. This placement does not waive the independent Test-Time new-work or placement
+        limits; any over-threshold disposition still requires an explicitly approved versioned policy adjustment.
       execution: >-
         Proof policy resolves each profile shard and named unit's environment from its explicit ci/local recipe
         declaration before plan hashing, weighting, batching or receipt production. Hosted selection of a local-named
@@ -24093,16 +24107,24 @@ test_specification:
       timing_publication_and_cadence: >-
         PR command-latency overruns become advisory only after complete successful plan-bound proof is admitted;
         missing, failed, corrupt, duplicate or foreign evidence remains fatal. Schedule/manual/master timing stays enforced.
-        The independent test-time ratchet uses the one-time approved initialization anchor from full hosted proof run
-        37937174260 attempt 1, workflow head a4c1027c2204063b04565102a271a90db0134029 and exact execution source
-        04cd8aa0eb6e2ec77c5295b551164bf63bd4b011, approved by issue #2535 comment 6082942278. All 82 proof units passed,
-        while the prior anchor made that overall workflow red; that failed comparison remains recorded and is not
-        relabeled as a passing run or measured speed improvement. Retain all 11,556 measured cells, exact plan/policy
-        identity, native build context, count and environment in the immutable approved inventory.
-        The inherited TestA9ReleaseKeyedIngressConstructionBothStores root measured 41.820 seconds and has independent
-        lifecycle/full-only placement approval: its release-binary, dual-store construction journey is not core proof.
-        The original reference and exact-master counterfactual remain audit evidence, and longitudinal performance
-        debt remains open under #2535. This initialization authorizes no automatic or recurring re-pin.
+        The independent test-time ratchet uses the single reviewed exact-source re-pin approved by issue #2535
+        comment 6103962032: full hosted run 38086512667 attempt 1, workflow head
+        3d87f2ba3598b0728e754512c8e7f57e9a96d17a and exact execution source
+        c293cda6b003dc50519e2b861af5fbbeeffd7421. Its tree 54e6eee85de9d4928bfe130d8ba440adf48f59d9 equals
+        landed master b7b046701a3400f8c9f28abd7962e460ba3065a6. All 83 units, both unchanged 900-second soaks,
+        full-tier check, timing budget and required summary passed in that actual execution, not a replay-skipped push.
+        CaptureTestTimeReference consumes every original successful receipt and the exact source policy, SHA256
+        1173c9a9f1bf40bce34df26c866aa355deee187867f149f8e5d5a79f022881f2, with plan digest
+        ec5fee61b8f63c74570b64289e6358ea8da2b9a29201cb922fe67bd24c581da7. Retain all 11,809 measured cells,
+        exact run/head/source/plan/policy/build/count/environment identity and unchanged observed seconds.
+        This corrects stale-reference new-work attribution for roots already admitted on merged master; it does
+        not approve costly new roots, reduce coverage, grant measured speedup or change any threshold.
+        The original initialization anchor, run 37937174260/source 04cd8aa0eb6e2ec77c5295b551164bf63bd4b011,
+        its 11,556 cells and approval #2535 comment 6082942278 remain historical audit evidence. Neither its red
+        predecessor comparison nor #2604 run 38097201316's red timing verdict is relabeled green. The independent
+        lifecycle/full-only A9 release-construction placement is preserved, with its new anchor observation 43.920 seconds.
+        Longitudinal performance debt remains open under #2535. This one correction authorizes no automatic,
+        recurring, periodic or per-merge-base re-pin and no dynamic merge-base comparison.
         Pin each reference cell's core/lifecycle/full membership from the exact policy at that reference execution
         source. Current selectors project candidate cells only; they must never reclassify the baseline. A promotion
         into a tier counts as added cost, while a demotion remains reported removed work without granting savings.

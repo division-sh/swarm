@@ -447,6 +447,18 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		"store-runtime-full-03", "store-runtime-full-03-i-l", "store-runtime-full-04",
 		"store-runtime-full-05", "store-runtime-full-07-fork", "store-runtime-selected", "store-runtime-s-z-rest",
 	}
+	codemodUnits := []string{"codemod-owner-guards", "codemod-pipeline-mutation", "codemod-bus-mutation", "codemod-candidate-overlay"}
+	var codemodPartitions []testplanning.ProofUnit
+	for _, id := range codemodUnits {
+		unit, ok := policy.Units[id]
+		if !ok || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations"}) || unit.CountMode != "count-1" || unit.BudgetClass != "broad" {
+			t.Fatalf("invalid codemod proof owner %s: %+v", id, unit)
+		}
+		codemodPartitions = append(codemodPartitions, testplanning.ProofUnit{ID: id, Packages: unit.Packages, Run: unit.Run, Skip: unit.Skip})
+	}
+	if err := testplanning.ValidateGoProofUnitPartition(filepath.Join(catalogRepoRoot(t), "tools/fixture-codemod/pipeline-observations"), codemodPartitions); err != nil {
+		t.Fatal(err)
+	}
 	for pkg, ids := range map[string][]string{"serveapp": serveUnits, "runtime/cataloge2e": catalogUnits, "store/internal/runtimepersistence": storeRuntimeUnits} {
 		var units []testplanning.ProofUnit
 		for _, id := range ids {

@@ -20,6 +20,7 @@ special_packages:
 - github.com/division-sh/swarm/internal/testcatalog
 - github.com/division-sh/swarm/internal/testpostgres
 - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+- github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations
 profiles:
   core:
     count_mode: count-1
@@ -33,6 +34,7 @@ profiles:
     - verify-run-registry
     - catalog-oracle-guards
     - core-structural-owner-guards
+    - codemod-owner-guards
     - local-generated-fanout-fixture
     - local-fanout-handoff-ack-loss
     - local-api-matrix-registry
@@ -54,6 +56,10 @@ profiles:
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     units:
+    - codemod-owner-guards
+    - codemod-pipeline-mutation
+    - codemod-bus-mutation
+    - codemod-candidate-overlay
     - serveapp-i-reporter
     - catalog-required-inventory
     - catalog-required-verify
@@ -116,6 +122,10 @@ profiles:
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     units:
+    - codemod-owner-guards
+    - codemod-pipeline-mutation
+    - codemod-bus-mutation
+    - codemod-candidate-overlay
     - catalog-required-inventory
     - catalog-required-verify
     - catalog-replay-1
@@ -188,6 +198,35 @@ profiles:
     - store-runtime-selected
     - store-runtime-s-z-rest
 units:
+  codemod-owner-guards:
+    packages: [github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations]
+    run: '^(?:T(?:e(?:s(?:t(?:N(?:a(?:t(?:i(?:v(?:e(?:B(?:u(?:s(?:O(?:r(?:i(?:g(?:i(?:n(?:A(?:s(?:s(?:e(?:r(?:t(?:i(?:o(?:n(?:F(?:a(?:i(?:l(?:u(?:r(?:e(?:J(?:o(?:i(?:n(?:s(?:B(?:l(?:o(?:c(?:k(?:e(?:d(?:S(?:Q(?:L(?:A(?:n(?:d(?:R(?:u(?:n(?:t(?:i(?:m(?:e(?:O(?:w(?:n(?:e(?:r(?:s.+|[^s].*)?|[^r].*)?|[^e].*)?|[^n].*)?|[^w].*)?|[^O].*)?|[^e].*)?|[^m].*)?|[^i].*)?|[^t].*)?|[^n].*)?|[^u].*)?|[^R].*)?|[^d].*)?|[^n].*)?|[^A].*)?|[^L].*)?|[^Q].*)?|[^S].*)?|[^d].*)?|[^e].*)?|[^k].*)?|[^c].*)?|[^o].*)?|[^l].*)?|[^B].*)?|[^s].*)?|[^n].*)?|[^i].*)?|[^o].*)?|[^J].*)?|[^e].*)?|[^r].*)?|[^u].*)?|[^l].*)?|[^i].*)?|[^a].*)?|[^F].*)?|[^n].*)?|[^o].*)?|[^i].*)?|[^t].*)?|[^r].*)?|[^e].*)?|[^s].*)?|[^s].*)?|[^A].*)?|[^n].*)?|[^i].*)?|[^g].*)?|[^i].*)?|[^r].*)?|S(?:o(?:u(?:r(?:c(?:e(?:B(?:o(?:u(?:n(?:d(?:a(?:r(?:y(?:R(?:e(?:j(?:e(?:c(?:t(?:s(?:L(?:o(?:s(?:t(?:P(?:r(?:o(?:d(?:u(?:c(?:t(?:i(?:o(?:n(?:C(?:l(?:a(?:i(?:m(?:A(?:n(?:d(?:S(?:e(?:t(?:t(?:l(?:e(?:m(?:e(?:n(?:t(?:F(?:a(?:c(?:t(?:s.+|[^s].*)?|[^t].*)?|[^c].*)?|[^a].*)?|[^F].*)?|[^t].*)?|[^n].*)?|[^e].*)?|[^m].*)?|[^e].*)?|[^l].*)?|[^t].*)?|[^t].*)?|[^e].*)?|[^S].*)?|[^d].*)?|[^n].*)?|[^A].*)?|[^m].*)?|[^i].*)?|[^a].*)?|[^l].*)?|[^C].*)?|[^n].*)?|[^o].*)?|[^i].*)?|[^t].*)?|[^c].*)?|[^u].*)?|[^d].*)?|[^o].*)?|[^r].*)?|[^P].*)?|[^t].*)?|[^s].*)?|[^o].*)?|[^L].*)?|[^s].*)?|[^t].*)?|[^c].*)?|[^e].*)?|[^j].*)?|[^e].*)?|[^R].*)?|[^y].*)?|[^r].*)?|[^a].*)?|[^d].*)?|[^n].*)?|[^u].*)?|[^o].*)?|[^B].*)?|[^e].*)?|[^c].*)?|[^r].*)?|[^u].*)?|[^o].*)?|[^OS].*)?|[^s].*)?|[^u].*)?|H(?:a(?:n(?:d(?:l(?:e(?:r(?:E(?:x(?:e(?:c(?:u(?:t(?:i(?:o(?:n(?:W(?:i(?:n(?:d(?:o(?:w(?:R(?:e(?:j(?:e(?:c(?:t(?:s(?:E(?:a(?:r(?:l(?:y(?:P(?:r(?:o(?:d(?:u(?:c(?:t(?:i(?:o(?:n(?:D(?:i(?:s(?:p(?:a(?:t(?:c(?:h(?:B(?:o(?:t(?:h(?:S(?:t(?:o(?:r(?:e(?:s.+|[^s].*)?|[^e].*)?|[^r].*)?|[^o].*)?|[^t].*)?|[^S].*)?|[^h].*)?|[^t].*)?|[^o].*)?|[^B].*)?|[^h].*)?|[^c].*)?|[^t].*)?|[^a].*)?|[^p].*)?|[^s].*)?|[^i].*)?|[^D].*)?|[^n].*)?|[^o].*)?|[^i].*)?|[^t].*)?|[^c].*)?|[^u].*)?|[^d].*)?|[^o].*)?|[^r].*)?|[^P].*)?|[^y].*)?|[^l].*)?|[^r].*)?|[^a].*)?|[^E].*)?|[^s].*)?|[^t].*)?|[^c].*)?|[^e].*)?|[^j].*)?|[^e].*)?|[^R].*)?|[^w].*)?|[^o].*)?|[^d].*)?|[^n].*)?|[^i].*)?|[^W].*)?|[^n].*)?|[^o].*)?|[^i].*)?|[^t].*)?|[^u].*)?|[^c].*)?|[^e].*)?|[^x].*)?|[^E].*)?|[^r].*)?|[^e].*)?|[^l].*)?|[^d].*)?|[^n].*)?|[^a].*)?|T(?:i(?:m(?:e(?:r(?:S(?:u(?:c(?:c(?:e(?:s(?:s(?:o(?:r(?:O(?:b(?:s(?:e(?:r(?:v(?:e(?:r(?:R(?:e(?:j(?:e(?:c(?:t(?:s(?:R(?:e(?:p(?:u(?:b(?:l(?:i(?:c(?:a(?:t(?:i(?:o(?:n(?:B(?:o(?:t(?:h(?:S(?:t(?:o(?:r(?:e(?:s.+|[^s].*)?|[^e].*)?|[^r].*)?|[^o].*)?|[^t].*)?|[^S].*)?|[^h].*)?|[^t].*)?|[^o].*)?|[^B].*)?|[^n].*)?|[^o].*)?|[^i].*)?|[^t].*)?|[^a].*)?|[^c].*)?|[^i].*)?|[^l].*)?|[^b].*)?|[^u].*)?|[^p].*)?|[^e].*)?|[^R].*)?|[^s].*)?|[^t].*)?|[^c].*)?|[^e].*)?|[^j].*)?|[^e].*)?|[^R].*)?|[^r].*)?|[^e].*)?|[^v].*)?|[^r].*)?|[^e].*)?|[^s].*)?|[^b].*)?|[^O].*)?|[^r].*)?|[^o].*)?|[^s].*)?|[^s].*)?|[^e].*)?|[^c].*)?|[^c].*)?|[^u].*)?|[^S].*)?|[^r].*)?|[^e].*)?|[^m].*)?|[^i].*)?|[^BHT].*)?|[^e].*)?|[^v].*)?|[^i].*)?|[^t].*)?|[^a].*)?|R(?:e(?:v(?:i(?:e(?:w(?:e(?:d(?:S(?:n(?:a(?:p(?:s(?:h(?:o(?:t(?:C(?:a(?:n(?:d(?:i(?:d(?:a(?:t(?:e(?:O(?:v(?:e(?:r(?:l(?:a(?:y(?:T(?:y(?:p(?:e(?:C(?:h(?:e(?:c(?:k(?:s.+|[^s].*)?|[^k].*)?|[^c].*)?|[^e].*)?|[^h].*)?|[^C].*)?|[^e].*)?|[^p].*)?|[^y].*)?|[^T].*)?|[^y].*)?|[^a].*)?|[^l].*)?|[^r].*)?|[^e].*)?|[^v].*)?|[^O].*)?|[^e].*)?|[^t].*)?|[^a].*)?|[^d].*)?|[^i].*)?|[^d].*)?|[^n].*)?|[^a].*)?|[^C].*)?|[^t].*)?|[^o].*)?|[^h].*)?|[^s].*)?|[^p].*)?|[^a].*)?|[^n].*)?|[^S].*)?|[^d].*)?|[^e].*)?|[^w].*)?|[^e].*)?|[^i].*)?|[^v].*)?|[^e].*)?|[^NR].*)?|[^t].*)?|[^s].*)?|[^e].*)?|[^T].*)?$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  codemod-pipeline-mutation:
+    packages: [github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations]
+    run: '^(TestNativeTimerSuccessorObserverRejectsRepublicationBothStores|TestNativeHandlerExecutionWindowRejectsEarlyProductionDispatchBothStores)$'
+    required_children:
+      TestNativeTimerSuccessorObserverRejectsRepublicationBothStores: [duplicate, stale_generation]
+      TestNativeHandlerExecutionWindowRejectsEarlyProductionDispatchBothStores: [sqlite, postgres]
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  codemod-bus-mutation:
+    packages: [github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations]
+    run: '^(TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts|TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners)$'
+    required_children:
+      TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts: [claim, settle]
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  codemod-candidate-overlay:
+    packages: [github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations]
+    run: '^TestReviewedSnapshotCandidateOverlayTypeChecks$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
   core-structural-owner-guards:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e

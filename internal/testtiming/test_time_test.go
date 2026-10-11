@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -127,7 +128,7 @@ func TestTestTimePinnedReferenceRejectsReplacementAndUnauthorizedException(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reference.Roots) != 11556 || reference.PlanDigest != "033294796270ddff56f716548fcb53820d6f932099131202fedf44b34060f8ab" {
+	if len(reference.Roots) != 11809 || reference.PlanDigest != "ec5fee61b8f63c74570b64289e6358ea8da2b9a29201cb922fe67bd24c581da7" {
 		t.Fatal("incomplete reference")
 	}
 	var total float64
@@ -139,13 +140,13 @@ func TestTestTimePinnedReferenceRejectsReplacementAndUnauthorizedException(t *te
 			soakCells++
 		}
 		if root.Package == "github.com/division-sh/swarm/internal/serveapp" && root.Root == "TestA9ReleaseKeyedIngressConstructionBothStores" {
-			if root.Seconds != 41.82 || root.Count != "count-1" || root.Environment != "ci-postgres-gateway-empty-v1" || !slices.Equal(root.Tiers, []string{"lifecycle", "full"}) {
+			if root.Seconds != 43.92 || root.Count != "count-1" || root.Environment != "ci-postgres-gateway-empty-v1" || !slices.Equal(root.Tiers, []string{"lifecycle", "full"}) {
 				t.Fatalf("approved A9 placement or observation changed: %+v", root)
 			}
 			approvedA9 = true
 		}
 	}
-	if math.Abs(total-16414.28) > 1e-6 || soakCells != 2 || !approvedA9 {
+	if math.Abs(total-15907.75) > 1e-6 || soakCells != 2 || !approvedA9 {
 		t.Fatalf("total=%f soak=%d approvedA9=%v", total, soakCells, approvedA9)
 	}
 	for _, want := range []struct {
@@ -153,9 +154,9 @@ func TestTestTimePinnedReferenceRejectsReplacementAndUnauthorizedException(t *te
 		cells   int
 		seconds float64
 	}{
-		{"core", 7420, 2569.89},
-		{"lifecycle", 11455, 13009.42},
-		{"full", 11556, 16414.28},
+		{"core", 7610, 2385.24},
+		{"lifecycle", 11708, 12374.57},
+		{"full", 11809, 15907.75},
 	} {
 		roots, problems := projectReferenceTimingRoots(reference.Roots, want.tier)
 		var seconds float64
@@ -175,7 +176,7 @@ func TestTestTimePinnedReferenceRejectsReplacementAndUnauthorizedException(t *te
 	}
 	for _, edit := range []func([]byte) []byte{
 		func(raw []byte) []byte {
-			return bytes.Replace(raw, []byte(`"run_id":37937174260`), []byte(`"run_id":37706007387`), 1)
+			return bytes.Replace(raw, []byte(fmt.Sprintf(`"run_id":%d`, TestTimeReferenceRunID)), []byte(`"run_id":37706007387`), 1)
 		},
 		func(raw []byte) []byte {
 			return bytes.Replace(raw, []byte(`"attempt":1`), []byte(`"attempt":2`), 1)
@@ -224,6 +225,37 @@ func TestTestTimePinnedReferenceRejectsReplacementAndUnauthorizedException(t *te
 		}
 		if _, err := LoadTestTimeReference(bytes.NewReader(changed)); err == nil {
 			t.Fatal("replacement or author-declared exception accepted")
+		}
+	}
+}
+
+func TestTestTimeRepinPreservesUnchangedSuccessorAndCostlyNewRootControls(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "test-time-reference.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference, err := LoadTestTimeReference(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var core []ReferenceRootTime
+	var unchanged []RootTime
+	for _, root := range reference.Roots {
+		if slices.Contains(root.Tiers, "core") {
+			core = append(core, root)
+			unchanged = append(unchanged, root.RootTime)
+		}
+	}
+	for _, mode := range []TestTimeMode{TestTimePR, TestTimeStrict} {
+		row, problems := compareTimingTier(core, unchanged, rootTimingPolicy(), "core", mode)
+		if len(problems) != 0 || len(row.Added) != 0 || len(row.Removed) != 0 || row.Growth != 0 || row.Retained != len(core) {
+			t.Fatalf("unchanged successor of the admitted core population: %+v / %v", row, problems)
+		}
+		// Synthetic additional work is not a new hosted receipt or placement approval.
+		added := append(slices.Clone(unchanged), timingRoot("TestUnapprovedCostlySuccessorProof", 30.001))
+		row, problems = compareTimingTier(core, added, rootTimingPolicy(), "core", mode)
+		if row.AddedSeconds != 30.001 || row.AddedSeconds >= row.Allowance || len(problems) != 1 || !strings.Contains(problems[0], ">30s") {
+			t.Fatalf("re-pin waived the individual-root rule despite sufficient aggregate room: %+v / %v", row, problems)
 		}
 	}
 }

@@ -16,14 +16,14 @@ import (
 )
 
 const (
-	TestTimeReferenceRunID  = int64(37937174260)
-	TestTimeReferenceHead   = "a4c1027c2204063b04565102a271a90db0134029"
-	TestTimeReferenceSource = "04cd8aa0eb6e2ec77c5295b551164bf63bd4b011"
-	TestTimeApproval        = "https://github.com/division-sh/swarm/issues/2535#issuecomment-6082942278"
-	TestTimeReferencePolicy = "c5179845ce6eb6798523126f196b04e960136a19d199008fe458b318d6fa123b"
+	TestTimeReferenceRunID  = int64(38086512667)
+	TestTimeReferenceHead   = "3d87f2ba3598b0728e754512c8e7f57e9a96d17a"
+	TestTimeReferenceSource = "c293cda6b003dc50519e2b861af5fbbeeffd7421"
+	TestTimeApproval        = "https://github.com/division-sh/swarm/issues/2535#issuecomment-6103962032"
+	TestTimeReferencePolicy = "1173c9a9f1bf40bce34df26c866aa355deee187867f149f8e5d5a79f022881f2"
 	// Changing the anchor requires a reviewed versioned policy adjustment, not
 	// a Test-Time body line, automatic publisher, or each new merge base.
-	TestTimeReferenceDigest = "02affac9993e2d9f767b861fd746cfecf3e318b562e5fd6e0d20691618079591"
+	TestTimeReferenceDigest = "f195969f9056e3c1e26605d114b50e61c8c2efddec55bdee0745f3de516a9db4"
 )
 
 type TimingCell struct {
