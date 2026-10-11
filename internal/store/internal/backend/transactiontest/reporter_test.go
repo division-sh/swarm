@@ -76,11 +76,11 @@ func TestReporterWindowRequiresFinalReceiptAndPreservesSuccessor(t *testing.T) {
 	captured := slot.Begin(false, true)
 	captured.Begun()
 	Mark(WithAttempt(context.Background(), captured), FanOutChunk)
-	successor, stopSuccessor, err := old.Replace(Options{})
+	successor, err := old.Replace(Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stopSuccessor()
+	defer successor.Stop()
 	if err := ValidateReporterContinuation(issuance, old.Snapshot(), successor.Snapshot()); err == nil {
 		t.Fatal("empty successor earned continuation credit")
 	}
@@ -184,11 +184,11 @@ func TestReporterJoinedRejectsHeldCleanupErrorAfterEarlyAssertion(t *testing.T) 
 			commit(FanOutChunk, true)
 			issuance := old.Snapshot()
 			held := commit(Other, false)
-			next, stopNext, err := old.Replace(Options{})
+			next, err := old.Replace(Options{})
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer stopNext()
+			defer next.Stop()
 			commit(FanOutClaim, true)
 			commit(FanOutChunk, true)
 			if err := ValidateReporterContinuation(issuance, old.Snapshot(), next.Snapshot()); err != nil {
@@ -205,6 +205,54 @@ func TestReporterJoinedRejectsHeldCleanupErrorAfterEarlyAssertion(t *testing.T) 
 			err = ValidateReporterJoined(issuance, old.Snapshot(), next.Snapshot())
 			if (err != nil) != fail {
 				t.Fatalf("joined proof did not retain late cleanup outcome: fail=%t err=%v old=%+v", fail, err, old.Snapshot())
+			}
+		})
+	}
+}
+
+func TestReporterStressJoinedRejectsHeldCleanupError(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(map[bool]string{false: "joined_success", true: "held_error"}[fail], func(t *testing.T) {
+			var slot Slot
+			const delay = time.Millisecond
+			collector, restore, err := slot.Install(Options{Delay: delay, DelayScope: DelayAllCommits})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restore()
+			commit := func(operation Operation, readOnly, finish bool) *Attempt {
+				a := slot.Begin(readOnly, false)
+				a.Begun()
+				Mark(WithAttempt(context.Background(), a), operation)
+				a.BeforeCommit()
+				a.Committed()
+				if finish {
+					a.Finish(nil)
+				}
+				return a
+			}
+			for chunk := 0; chunk < 20; chunk++ {
+				commit(FanOutClaim, false, true)
+				commit(FanOutChunk, false, true)
+			}
+			issuance := collector.Snapshot()
+			commit(FanOutClaim, false, true)
+			commit(FanOutChunk, false, true)
+			held := commit(FanOutObservation, true, false)
+			if err := ValidateReporterStress(issuance, collector.Snapshot(), delay); err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidateReporterStressJoined(issuance, collector.Snapshot(), delay); err == nil {
+				t.Fatal("unfinished all-commit attempt earned final stress credit")
+			}
+			var finalErr error
+			if fail {
+				finalErr = errors.New("held all-commit cleanup error")
+			}
+			held.Finish(finalErr)
+			err = ValidateReporterStressJoined(issuance, collector.Snapshot(), delay)
+			if (err != nil) != fail {
+				t.Fatalf("all-commit joined outcome lost: fail=%t err=%v receipt=%+v", fail, err, collector.Snapshot())
 			}
 		})
 	}

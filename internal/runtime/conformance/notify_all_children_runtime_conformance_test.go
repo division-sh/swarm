@@ -657,7 +657,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 			}
 			var transactions, continuation *storetest.TransactionCollector
 			var issuanceReceipt storetest.TransactionSnapshot
-			if servingWindow {
+			if transactionOptions.Delay > 0 {
 				t.Cleanup(func() {
 					for _, collector := range []*storetest.TransactionCollector{transactions, continuation} {
 						if collector != nil {
@@ -670,6 +670,11 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 					}
 					if transactions != nil && continuation != nil {
 						if err := storetest.ValidateReporterJoined(issuanceReceipt, transactions.Snapshot(), continuation.Snapshot()); err != nil {
+							t.Error(err)
+						}
+					}
+					if transactions != nil && !servingWindow && !issuanceReceipt.ByOperation[storetest.TransactionFanOutChunk].LastCommitAt.IsZero() {
+						if err := storetest.ValidateReporterStressJoined(issuanceReceipt, transactions.Snapshot(), transactionOptions.Delay); err != nil {
 							t.Error(err)
 						}
 					}
@@ -747,11 +752,11 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				t.Errorf("500-row issuance exceeded %s merge ceiling (original target %s): %s (transaction probe %+v)", mergeCeiling, issuanceBudget, issuanceElapsed, transactionOptions)
 			}
 			settledBeforeHandoff := false
+			issuanceReceipt = receipt
 			if servingWindow {
 				if err := storetest.ValidateReporterIssuance(receipt, issuanceStarted, 20, transactionOptions.Delay); err != nil {
 					t.Fatal(err)
 				}
-				issuanceReceipt = receipt
 				atCut, err := selected.FanOutRunSummary(validCtx, validRunID, time.Now().UTC())
 				if err != nil {
 					t.Fatal(err)

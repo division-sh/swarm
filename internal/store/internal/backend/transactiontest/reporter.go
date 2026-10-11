@@ -91,3 +91,10 @@ func ValidateReporterStress(issuance, final Snapshot, delay time.Duration) error
 	}
 	return nil
 }
+
+func ValidateReporterStressJoined(issuance, final Snapshot, delay time.Duration) error {
+	if final.Active != 0 {
+		return fmt.Errorf("all-commit reporter still owns captured attempts: %+v", final)
+	}
+	return ValidateReporterStress(issuance, final, delay)
+}

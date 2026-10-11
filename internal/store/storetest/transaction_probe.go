@@ -66,11 +66,11 @@ func CollectTransactions(t testing.TB, selected any, options TransactionProbeOpt
 
 func ReplaceTransactions(t testing.TB, previous *TransactionCollector, options TransactionProbeOptions) *TransactionCollector {
 	t.Helper()
-	collector, restore, err := previous.Replace(options)
+	collector, err := previous.Replace(options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(restore)
+	t.Cleanup(collector.Stop)
 	return collector
 }
 
@@ -88,6 +88,10 @@ func ValidateReporterJoined(issuance, detached, successor TransactionSnapshot) e
 
 func ValidateReporterStress(issuance, final TransactionSnapshot, delay time.Duration) error {
 	return transactiontest.ValidateReporterStress(issuance, final, delay)
+}
+
+func ValidateReporterStressJoined(issuance, final TransactionSnapshot, delay time.Duration) error {
+	return transactiontest.ValidateReporterStressJoined(issuance, final, delay)
 }
 
 func ValidateReporterDrain(issuance, detached, successor TransactionSnapshot, settledBeforeHandoff bool) error {
