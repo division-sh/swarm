@@ -685,8 +685,30 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 		}
 	}()
 	repo := invocationRoot.Path()
-	ctx, cancelServe := context.WithCancel(ctx)
-	defer cancelServe()
+	ctx, cancelChild := context.WithCancel(ctx)
+	notifyStop := sync.OnceFunc(func() {
+		if opts.ProcessStop != nil {
+			opts.ProcessStop()
+		}
+	})
+	cancelServe := func() {
+		notifyStop()
+		cancelChild()
+	}
+	stopJoined := make(chan struct{})
+	stopNotification := context.AfterFunc(ctx, func() {
+		defer close(stopJoined)
+		notifyStop()
+	})
+	defer func() {
+		cancelServe()
+		if !stopNotification() {
+			<-stopJoined
+		}
+	}()
+	if opts.TestServingStop != nil {
+		opts.TestServingStop(cancelServe)
+	}
 	bootStartedAt := time.Now().UTC()
 	runtimeInstanceID := uuid.NewString()
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
@@ -935,8 +957,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	processWorkOwner := worklifetime.NewProcess()
 	apiProbe, err := startServeProcessProbe(ctx, processWorkOwner, opts.APIListenAddr, func(subject string, failure error) {
-		presenter.runtimeFailure(subject, failure)
 		cancelServe()
+		presenter.runtimeFailure(subject, failure)
 	})
 	if err != nil {
 		presenter.fail(20, "http_listener_bind", err)
@@ -1578,8 +1600,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	defer projectContextRegistration.Unregister()
 	runtimeFailure := func(subject string, err error) {
-		presenter.runtimeFailure(subject, err)
 		cancelServe()
+		presenter.runtimeFailure(subject, err)
 	}
 	var reconcilePublicIngress func(context.Context, runtimepublicingress.Generation) error
 	if publicIngressEnabled {
@@ -1993,11 +2015,11 @@ func startServeOwnershipWatch(
 		if !ok || result.Cause == runtimestartupownership.TerminalReleased {
 			return
 		}
+		ownershipLoss <- result
+		cancel()
 		presenter.ownershipLost(result)
 		_ = lease.Done()
 		settled = true
-		ownershipLoss <- result
-		cancel()
 	}()
 	return ownershipLoss, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -41,19 +42,21 @@ func runServingProcess(ctx context.Context, root cliapp.InvocationRoot, opts cli
 	if err != nil {
 		return serveapp.Run(ctx, root, opts)
 	}
-	return withServingExitDeadline(ctx, grace, func() int { return serveapp.Run(ctx, root, opts) })
+	stopped := make(chan struct{})
+	opts.ProcessStop = sync.OnceFunc(func() { close(stopped) })
+	return withServingExitDeadline(stopped, grace, func() int { return serveapp.Run(ctx, root, opts) })
 }
 
 // The deadline bounds actual process death, never an internal join or lease
 // release. A stuck native waiter or accepted producer keeps ownership until exit.
-func withServingExitDeadline(ctx context.Context, grace time.Duration, run func() int) int {
+func withServingExitDeadline(stopped <-chan struct{}, grace time.Duration, run func() int) int {
 	done, joined := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(joined)
 		select {
 		case <-done:
 			return
-		case <-ctx.Done():
+		case <-stopped:
 		}
 		timer := time.NewTimer(grace)
 		defer timer.Stop()
