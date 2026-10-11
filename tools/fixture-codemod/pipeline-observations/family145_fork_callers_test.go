@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 175 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "a427ff0c1f238b661ade53a692a5b0d8e25bb2c5dc00b9adfd43f29e45e6f7a9" {
+	if err != nil || len(rows) != 182 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "14d6d74a47ad17dca032cd508cc55d638b4130a9896a4d90b11ce9e87d4d6d39" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -67,6 +67,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 
 func assertFamily145SemanticProofs(t testing.TB, function, beforeSource, afterSource string) {
 	t.Helper()
+	if family145ActivitySetupOwner(function) {
+		if err := family145ActivitySetupProofError(function, beforeSource, afterSource); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
 	if family145ActivityReadOwner(function) {
 		if err := family145ActivityReadChainProofError(function, beforeSource, afterSource); err != nil {
 			t.Fatal(err)
@@ -169,7 +175,7 @@ func family145PanicLifecycleCalls(source string) []string {
 }
 
 func family145SemanticOwner(function string) bool {
-	if family145ActivityReadOwner(function) {
+	if family145ActivityReadOwner(function) || family145ActivitySetupOwner(function) {
 		return true
 	}
 	switch function {

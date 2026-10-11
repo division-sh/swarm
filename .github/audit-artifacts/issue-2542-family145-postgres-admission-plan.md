@@ -1513,3 +1513,73 @@ Named supplied-pool admissions remain131/132 excluding unqualified Docker.
 No fresh global census/ratchet, entire activity fixture or parent closure,
 restart/flake/performance claim, push/PR/tier/server2 run. M01/Docker remain open
 under #2353; existing #2542/#2151/watchlist mapping and unchanged receipts carry.
+
+## Entire Activity-Fork Setup And Raw Shim Retirement
+
+The remaining three setup writers and their complete caller chain are migrated.
+activityForkFixture now contains only its native SelectedContractExecutionOwner.
+PostgreSQL opens at the original constructor through StartPostgresRuntimeStore;
+SQLite continues through StartSQLiteRuntimeStore. The original process-capability
+and joined runtime teardown owners remain unchanged. The Database getter,
+embedded pool, regex/dialect translator, ExecContext delegate, immutable-request
+payload retrofit and JSON serialization helper are deleted, not hidden behind
+another facade. All reader/capture proofs approved at 653d240ea/8477fb8bd carry.
+
+The request's exact original composite payload is created before source setup
+and admitted once by the existing semantic event owner. Its source artifact,
+run, event ID, producer, routing envelope, route scope and structural child
+identity are unchanged. No arbitrary payload-update port replaces the deleted
+writer. Loop historical setup consumes the original selected coordinator and
+fixed pipeline row helpers; accumulator replacement and handler_loops history
+remain two independent unrevisioned commits. Recorded terminal evidence consumes
+the existing activityjournal row owner and pipeline.ActivityAttemptRecord,
+with existing start/terminal validation, exact generation and original clock.
+It is one unrevisioned insert after complete capture, not a live claim/completion,
+new source revision, replay/overwrite or authority to execute. No generic SQL,
+query, selector, pool, dialect or callback crosses either public bridge.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Native PostgreSQL constructor / SQLite raw getter and entire dialect shim | execution-proven through the same corrected path | All ten activity execution cases under race on both stores; TestFamily145ActivitySetupRetiresWholePoolShimAndKeepsOriginalSequence rejects every retired escape |
+| Immutable request payload retrofit | reproduced and fixed | Identical original request composite is admitted once; finite sequence/source controls reject partial payload, foreign owner and moved capture; existing real admission/runtime/no-redispatch assertions remain |
+| Loop accumulator and mutation history | execution-proven through the same corrected path | TestHistoricalActivityForkSetupKeepsClocksCutsAndCapturedFrontierBothStores: two selected unrevisioned commits, exact loop identity/clocks/mutation fields, all other entity columns and all unrelated tables unchanged |
+| Late second loop write failure | execution-proven through the same corrected path | TestHistoricalActivityForkLoopLateFailurePreservesFirstCommittedCutBothStores: exact selected-store table fault, first accumulator commit survives, second transaction fails and joins, original mutation history preserved, table restored |
+| Recorded success / typed failure / uncertainty after capture | execution-proven through the same corrected path | Existing ten activity cases plus physical complete-row oracle; identical mode, IDs, input hash, full generation, result/failure, start/completion/update clock and unchanged captured-frontier tables |
+| Duplicate, invalid/raw/cancelled/closed setup | execution-proven through the same corrected path | Historical setup native control rejects all owners/invalid status/generation/clocks, duplicate remains error, whole-store durable snapshot unchanged after refusals |
+| Historical clock mutation | reproduced and fixed | Actual journal writer updated_at +1s fails exact physical-clock witness on SQLite and PostgreSQL; restore passes, with no tolerance or timestamp normalization |
+| Finite owner/caller mapping and historical evidence | execution-proven through the same corrected path | Complete cheap TestFamily145 prefix, historical/finite/successor guards and hostile owner/clock/field/payload/sequence controls; codemod Changes=[] |
+
+Vemew receipts (GOFLAGS empty, Go1.25, GOMAXPROCS2, race for native executions):
+activity-writer-native-consumers GREEN32.627s (ten cells); history/affected
+closed-owner guards GREEN31.831s; late-failure controls GREEN19.275s; actual
+clock counterexample expected RED11.092s, restored final history proof
+GREEN13.547s; final complete cheap family controls GREEN5.767s. No unchanged
+full recipe/type-overlay or integrated tier was repeated. U1000 affected
+packages and diff clean; committed-head complexity is checked separately.
+
+Development reds are disclosed: initial physical-history control mistakenly
+used the general journal decoder, which rejects SQLite's original driver-rendered
+historical timestamp. The replacement is the existing exact physical snapshot
+oracle, retaining original stored bytes/rendering and exact clock assertions;
+no production decoder or clock encoding changed. New structural controls first
+miscounted method arguments and compared gofmt spacing; repaired to exact AST
+argument/record-field identities. A final source-control variable collision was
+a build error, fixed. The source successor control now compares the preserved
+reviewed After to its new Successor, not the older raw Before. None is a waived
+behavioral red, retry-until-green or permission to alter expected semantics.
+
+Corpus1040/182 transitions, digest
+14d6d74a47ad17dca032cd508cc55d638b4130a9896a4d90b11ce9e87d4d6d39.
+Original893 tuples and24 mechanical receipts remain unchanged. Six exact new
+rows account for native construction, two historical owners and the explicit
+retirements; existing source/reader/root mappings retain historical inputs.
+Source setup uses an exact Successor; family145-only mappings update candidate
+After. No blanket disappearance, classifier relaxation or baseline increase.
+
+Named supplied-pool survey131 ->130 calls (131 excluding unqualified Docker).
+The entire activity fixture's ordinary construction/raw authority is retired;
+the wider supplied-pool family and #2542/#2151 remain open. No fresh global
+census/ratchet, restart/flake/performance or parent-closure claim, push/PR/tier
+or server2 run. M01 and Docker remain qualification-open in #2353. Existing
+watchlist mapping and architectural disposition stand: use native construction
+and existing bounded row/revision owners, no new framework or compatibility.

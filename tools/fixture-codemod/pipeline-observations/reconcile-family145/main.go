@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "a427ff0c1f238b661ade53a692a5b0d8e25bb2c5dc00b9adfd43f29e45e6f7a9"
+const targetDigest = "14d6d74a47ad17dca032cd508cc55d638b4130a9896a4d90b11ce9e87d4d6d39"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -145,8 +145,11 @@ func currentReplacement(path, key string, after map[string]string) (string, bool
 	if path == "internal/store/storetest/event.go" && key == "InsertDiagnosticDirectEventRecordForRun" {
 		return "", true
 	}
-	if path == "internal/runtime/runforkexecution/activity_fork_execution_test.go" && key == "QueryRowContext/activityForkFixtureDB" {
-		return "", true
+	if path == "internal/runtime/runforkexecution/activity_fork_execution_test.go" {
+		switch key {
+		case "QueryRowContext/activityForkFixtureDB", "ExecContext/activityForkFixtureDB", "query/activityForkFixtureDB", "seedSelectedContractActivityRequest", "selectedContractActivityJSON":
+			return "", true
+		}
 	}
 	panic("unreviewed retirement: " + path + "/" + key)
 }

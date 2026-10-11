@@ -3,14 +3,12 @@ package runforkexecution
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -32,11 +30,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntimeContainer(t *testing.T) {
@@ -48,7 +46,6 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 }
 
 func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixture) {
-	db := fixture.db
 	selected := fixture.owner.ports.fork
 	ctx := runForkTestContext(t)
 
@@ -132,19 +129,19 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				Recipient: events.MustNodeDeliveryRecipient(activityNode),
 				Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow_a", FlowInstance: "flow_a", EntityID: entityID}),
 			}
-			fixture.seedSource(t, loaded, sourceRunID, entityID, sourceRequestEventID, at, activityRoute, routingSource)
-			seedSelectedContractActivityLoop(t, db, sourceRunID, entityID, sourceRequestEventID, activation, at)
-			seedSelectedContractActivityRequest(t, db, sourceRunID, sourceRequestEventID, selectedContractActivityRequestPayload{
+			requestPayload := selectedContractActivityRequestPayload{
 				ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"},
 				EffectClass: string(tt.effectClass), SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
 				RetryMaxAttempts: 1, ForkPolicy: string(tt.forkPolicy), EntityID: entityID, FlowInstance: "flow_a",
 				NodeID: activityidentity.MustNodeOwner(activityNode).Key(), FlowID: "flow_a", HandlerEventKey: "review.requested",
 				SourceEventID: initiatingEventID, SourceRunID: sourceRunID, Attempt: 1,
 				Generation: sourceGeneration, LoopStage: "review",
-			})
+			}
+			fixture.seedSource(t, loaded, sourceRunID, entityID, sourceRequestEventID, at, activityRoute, routingSource, requestPayload)
+			seedSelectedContractActivityLoop(t, selected, sourceRunID, entityID, sourceRequestEventID, activation, at)
 			fixture.capture(t, sourceRunID)
 			if tt.sourceAttemptStatus != "" {
-				seedSelectedContractActivityAttempt(t, db, sourceFact, sourceGeneration, tt.sourceAttemptStatus, tt.resultEventType, tt.failureClass, tt.failureCode, at)
+				seedSelectedContractActivityAttempt(t, selected, sourceFact, sourceGeneration, tt.sourceAttemptStatus, tt.resultEventType, tt.failureClass, tt.failureCode, at)
 			}
 			sourceBefore := readActivityForkSourceEvidence(t, selected, sourceRunID, entityID, sourceRequestEventID)
 			if sourceBefore.AttemptStatus != tt.sourceAttemptStatus {
@@ -258,13 +255,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 // The source state and activity journal are explicit fixtures. Fork admission,
 // materialization, runtime execution, connector calls and final publication are real.
 type activityForkFixture struct {
-	db    activityForkFixtureDB
 	owner SelectedContractExecutionOwner
-}
-
-type activityForkFixtureDB struct {
-	*sql.DB
-	sqlite bool
 }
 
 type activityForkSourceEvidence = storetest.ActivityForkSourceStorage
@@ -278,41 +269,22 @@ func readActivityForkSourceEvidence(t *testing.T, selected any, runID, entityID,
 	return out
 }
 
-var activityForkFixtureParameter = regexp.MustCompile(`\$([0-9]+)`)
-
-func (db activityForkFixtureDB) query(query string) string {
-	if !db.sqlite {
-		return query
-	}
-	// Only the fixture SQL below is adapted, never production SQL or evidence.
-	query = strings.NewReplacer("::uuid", "", "::jsonb", "", "::bytea", "", "::text", "").Replace(query)
-	return activityForkFixtureParameter.ReplaceAllString(query, `?$1`)
-}
-
-func (db activityForkFixtureDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	return db.DB.ExecContext(ctx, db.query(query), args...)
-}
-
 func newActivityForkFixture(t *testing.T, backend string) activityForkFixture {
 	t.Helper()
 	switch backend {
 	case "sqlite":
 		selected := storetest.StartSQLiteRuntimeStore(t)
-		return activityForkFixture{
-			db:    activityForkFixtureDB{DB: storetest.Database(selected), sqlite: true},
-			owner: selectedContractSQLiteExecutionOwnerForTest(t, selected),
-		}
+		return activityForkFixture{owner: selectedContractSQLiteExecutionOwnerForTest(t, selected)}
 	case "postgres":
-		_, db, _ := testutil.StartPostgres(t)
-		selected := storetest.AdmitPostgresRuntimeStore(t, db)
-		return activityForkFixture{db: activityForkFixtureDB{DB: db}, owner: selectedContractExecutionOwnerForTest(t, selected)}
+		selected := storetest.StartPostgresRuntimeStore(t)
+		return activityForkFixture{owner: selectedContractExecutionOwnerForTest(t, selected)}
 	default:
 		t.Fatalf("unknown activity proof backend %q", backend)
 		return activityForkFixture{}
 	}
 }
 
-func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContractSource, runID, entityID, eventID string, at time.Time, route events.DeliveryRoute, source events.RoutingSource) {
+func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContractSource, runID, entityID, eventID string, at time.Time, route events.DeliveryRoute, source events.RoutingSource, request selectedContractActivityRequestPayload) {
 	t.Helper()
 	envelope := events.EnvelopeForSourceRoute(events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow_a"), source.Route())
 	ctx := runtimecorrelation.WithSourceArtifactFact(runForkTestContext(t), loaded.SourceArtifactFact)
@@ -321,7 +293,7 @@ func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContr
 	storetest.RequireRun(t, ctx, f.owner.ports.fork.(storetest.RunFixtureStore), storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: artifact,
 	})
-	payload, err := json.Marshal(map[string]any{"entity_id": entityID})
+	payload, err := json.Marshal(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,44 +480,20 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 	return semanticview.Wrap(bundle)
 }
 
-func seedSelectedContractActivityLoop(t *testing.T, db activityForkFixtureDB, runID, entityID, requestEventID string, activation loopruntime.Activation, at time.Time) {
+func seedSelectedContractActivityLoop(t *testing.T, selected any, runID, entityID, requestEventID string, activation loopruntime.Activation, at time.Time) {
 	t.Helper()
-	buckets := map[string]map[string]any{}
-	if err := loopruntime.Store(buckets, activation); err != nil {
-		t.Fatalf("store source loop activation: %v", err)
-	}
-	accumulator := selectedContractActivityJSON(t, buckets)
-	handlerLoops := selectedContractActivityJSON(t, buckets[loopruntime.BucketKey])
-	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET accumulator = $3::jsonb WHERE run_id = $1::uuid AND entity_id = $2::uuid`, runID, entityID, accumulator); err != nil {
-		t.Fatalf("seed source loop accumulator: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, caused_by_event,
-			writer_type, writer_id, handler_step, created_at
-		) VALUES ($1::uuid, $2::uuid, 'accumulator', 'handler_loops', 'null'::jsonb, $3::jsonb, $4::uuid, 'platform', 'activity-fork-proof', 'seed', $5)
-	`, runID, entityID, handlerLoops, requestEventID, at); err != nil {
-		t.Fatalf("seed source loop mutation: %v", err)
+	if err := storetest.SeedHistoricalActivityForkLoop(context.Background(), selected, runID, entityID, requestEventID, activation, at); err != nil {
+		t.Fatalf("seed source loop history: %v", err)
 	}
 }
 
-func seedSelectedContractActivityRequest(t *testing.T, db activityForkFixtureDB, runID, requestEventID string, payload selectedContractActivityRequestPayload) {
-	t.Helper()
-	raw := selectedContractActivityJSON(t, payload)
-	if _, err := db.ExecContext(context.Background(), `UPDATE events SET payload = $3::jsonb, payload_bytes = $4::bytea WHERE run_id = $1::uuid AND event_id = $2::uuid`, runID, requestEventID, raw, []byte(raw)); err != nil {
-		t.Fatalf("seed source activity request: %v", err)
-	}
-}
-
-func seedSelectedContractActivityAttempt(t *testing.T, db activityForkFixtureDB, fact activityidentity.Fact, generation attemptgeneration.Generation, status, resultEventType, failureClass, failureCode string, at time.Time) {
+func seedSelectedContractActivityAttempt(t *testing.T, selected any, fact activityidentity.Fact, generation attemptgeneration.Generation, status, resultEventType, failureClass, failureCode string, at time.Time) {
 	t.Helper()
 	resultPayload := map[string]any{
 		"activity_id": "connector", "tool": "provider.connector", "effect_class": string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		"attempt": 1, "revision_id": generation.RevisionID,
 	}
-	var failure any
-	var failureJSON any
+	var failure *runtimefailures.Envelope
 	if failureClass == "" {
 		resultPayload["result"] = map[string]any{"value": "recorded-result"}
 	} else {
@@ -553,26 +501,21 @@ func seedSelectedContractActivityAttempt(t *testing.T, db activityForkFixtureDB,
 		if !ok {
 			t.Fatalf("construct source activity failure %s/%s", failureClass, failureCode)
 		}
-		failure = typed
+		failure = &typed
 		resultPayload["failure"] = failure
-		failureJSON = selectedContractActivityJSON(t, failure)
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
 	resultEventID := activityidentity.ResultEventID(fact, resultEventType)
 	inputHash := sha256.Sum256([]byte(`{"value":"x"}`))
-	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO activity_attempts (
-			request_event_id, run_id, execution_mode, source_event_id, entity_id, flow_instance, node_id, handler_event_key,
-			activity_id, tool, effect_class, attempt, status, success_event, failure_event,
-			result_event_id, result_event_type, result_payload, failure, input_hash, loop_generation, loop_stage,
-			started_at, completed_at, updated_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow_a', $13, 'review.requested',
-			'connector', 'provider.connector', 'non_idempotent_write', 1, $5, 'flow_a/connector.succeeded', 'flow_a/connector.failed',
-			$6::uuid, $7, $8::jsonb, $9::jsonb, $10, $11::jsonb, 'review', $12, $12, $12
-		)
-	`, requestEventID, fact.RunID, fact.SourceEventID, fact.EntityID, status, resultEventID, resultEventType,
-		selectedContractActivityJSON(t, resultPayload), failureJSON, fmt.Sprintf("sha256:%x", inputHash[:]), selectedContractActivityJSON(t, generation), at, fact.Owner.Key()); err != nil {
+	if err := storetest.SeedHistoricalActivityForkAttempt(context.Background(), selected, pipeline.ActivityAttemptRecord{
+		RequestEventID: requestEventID, RunID: fact.RunID, ExecutionMode: executionmode.Live,
+		SourceEventID: fact.SourceEventID, EntityID: fact.EntityID, FlowInstance: "flow_a", NodeID: fact.Owner.Key(), HandlerEventKey: "review.requested",
+		ActivityID: "connector", Tool: "provider.connector", EffectClass: "non_idempotent_write", Attempt: 1, Status: status,
+		SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
+		ResultEventID: resultEventID, ResultEventType: resultEventType, ResultPayload: resultPayload, Failure: failure,
+		InputHash: fmt.Sprintf("sha256:%x", inputHash[:]), Generation: generation, LoopStage: "review",
+		StartedAt: at, CompletedAt: &at, UpdatedAt: at,
+	}); err != nil {
 		t.Fatalf("seed source activity attempt: %v", err)
 	}
 }
@@ -632,13 +575,4 @@ func loadSelectedContractActivityResult(t *testing.T, selected any, runID, event
 		t.Fatalf("decode fork activity result: %v", err)
 	}
 	return payload
-}
-
-func selectedContractActivityJSON(t *testing.T, value any) string {
-	t.Helper()
-	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("marshal activity proof value: %v", err)
-	}
-	return string(raw)
 }
