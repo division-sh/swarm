@@ -288,7 +288,7 @@ func constructEntityToolFixture(t *testing.T, ctx context.Context, selected any,
 	if _, found, err := pc.Load(ctx, parentOwner); err != nil {
 		t.Fatal(err)
 	} else if !found {
-		parentGraph, found := semanticview.WorkflowStageTopology(source, parent.FlowID)
+		parentGraph, found := semanticview.WorkflowStageTopology(source, parent.TemplateID)
 		if !found {
 			t.Fatal("entity fixture parent requires its declared stage catalog")
 		}
@@ -298,7 +298,7 @@ func constructEntityToolFixture(t *testing.T, ctx context.Context, selected any,
 		}
 		parentCtx := effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
 		initial, lifecycle, err := pc.PrepareInitialEntryLifecycle(parentCtx, parentOwner, pipeline.WorkflowInstance{
-			WorkflowName: parent.FlowID, WorkflowVersion: source.WorkflowVersion(), StorageRef: parent.InstancePath,
+			WorkflowName: parent.TemplateID, WorkflowVersion: source.WorkflowVersion(), StorageRef: parent.InstancePath,
 			InstanceID: parent.InstanceID, EntityID: parent.EntityID, CurrentState: parentStage.ID(),
 			StageDefined: !parentStage.IsStatelessPosture(), CreatedAt: at, EnteredStageAt: at,
 		}, at)
