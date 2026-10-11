@@ -139,7 +139,10 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			var beforeState string
 			var beforeFields []byte
 			var beforeRevision int64
-			if err := db.QueryRowContext(ctx, `SELECT current_state,fields,revision FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runID, path).Scan(&beforeState, &beforeFields, &beforeRevision); err != nil {
+			if err := db.QueryRowContext(ctx, `SELECT current_state,revision FROM flow_instances WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, runID, heldView.Deliveries[0].Target.EntityID, path).Scan(&beforeState, &beforeRevision); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.QueryRowContext(ctx, `SELECT fields FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3`, runID, heldView.Deliveries[0].Target.EntityID, path).Scan(&beforeFields); err != nil {
 				t.Fatal(err)
 			}
 			if beforeState != "pending" {
@@ -207,7 +210,10 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			var afterState string
 			var afterFields []byte
 			var afterRevision int64
-			if err := db.QueryRowContext(ctx, `SELECT current_state,fields,revision FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runID, path).Scan(&afterState, &afterFields, &afterRevision); err != nil {
+			if err := db.QueryRowContext(ctx, `SELECT current_state,revision FROM flow_instances WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, runID, heldView.Deliveries[0].Target.EntityID, path).Scan(&afterState, &afterRevision); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.QueryRowContext(ctx, `SELECT fields FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3`, runID, heldView.Deliveries[0].Target.EntityID, path).Scan(&afterFields); err != nil {
 				t.Fatal(err)
 			}
 			if afterState != beforeState || afterRevision != beforeRevision || string(afterFields) != string(beforeFields) || !reflect.DeepEqual(loadPrefix(), prefix) {

@@ -179,14 +179,17 @@ func assertNestedInterruptedFinalState(t *testing.T, ctx context.Context, db *sq
 			}
 		}
 	}
-	rows, err := db.QueryContext(ctx, `SELECT current_state,fields FROM entity_state WHERE run_id=$1`, runID)
+	rows, err := db.QueryContext(ctx, `SELECT fi.current_state,es.fields
+		FROM entity_state es LEFT JOIN flow_instances fi
+		ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
+		WHERE es.run_id=$1`, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
 	seen := make(map[string]bool)
 	for rows.Next() {
-		var state string
+		var state sql.NullString
 		var raw []byte
 		if err := rows.Scan(&state, &raw); err != nil {
 			t.Fatal(err)
@@ -198,8 +201,8 @@ func assertNestedInterruptedFinalState(t *testing.T, ctx context.Context, db *sq
 		if task, ok := fields["task"].(string); ok {
 			account, _ := fields["account_id"].(string)
 			key := account + ":" + task
-			if state != "completed" || seen[key] || fields["task_key"] != key {
-				t.Fatalf("recovered task state=%s fields=%v duplicate=%v", state, fields, seen[key])
+			if !state.Valid || state.String != "completed" || seen[key] || fields["task_key"] != key {
+				t.Fatalf("recovered task state=%+v fields=%v duplicate=%v", state, fields, seen[key])
 			}
 			seen[key] = true
 		}

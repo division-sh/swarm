@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -268,13 +269,17 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 		}
 		assertNestedExactBarrier(t, ctx, db, r.Key, "fired", fanoutbarrier.Summary{Total: 2, Succeeded: 2})
 	}
-	rows, err := db.QueryContext(ctx, `SELECT flow_instance,current_state,fields FROM entity_state WHERE run_id=$1`, runID)
+	rows, err := db.QueryContext(ctx, `SELECT es.flow_instance,fi.current_state,es.fields
+		FROM entity_state es LEFT JOIN flow_instances fi
+		ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
+		WHERE es.run_id=$1`, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	states := map[string]string{}
 	for rows.Next() {
-		var path, state string
+		var path string
+		var state sql.NullString
 		var raw []byte
 		if err := rows.Scan(&path, &state, &raw); err != nil {
 			t.Fatal(err)
@@ -286,8 +291,8 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 		if task, ok := fields["task"].(string); ok {
 			account, _ := fields["account_id"].(string)
 			key := account + "/" + task
-			if state != "completed" || states[key] != "" || path == "" || fields["task_key"] != account+":"+task {
-				t.Fatalf("nested task state identity=%s path=%s state=%s duplicate=%s", key, path, state, states[key])
+			if !state.Valid || state.String != "completed" || states[key] != "" || path == "" || fields["task_key"] != account+":"+task {
+				t.Fatalf("nested task state identity=%s path=%s state=%+v duplicate=%s", key, path, state, states[key])
 			}
 			states[key] = path
 		}
