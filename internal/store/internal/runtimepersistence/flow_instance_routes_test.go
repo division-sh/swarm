@@ -59,13 +59,13 @@ func seedFlowRouteTestEntities(t *testing.T, ctx context.Context, exec flowRoute
 	t.Helper()
 	for _, flowInstance := range flowInstances {
 		if postgres {
-			if _, err := exec.ExecContext(ctx, `INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'flow-route-test', 'active', '{}'::jsonb, now(), now())`, runtimeflowidentity.EntityID(flowInstance), flowRouteTestRunID, flowInstance); err != nil {
+			if _, err := exec.ExecContext(ctx, `INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'flow-route-test', '{}'::jsonb, now(), now())`, runtimeflowidentity.EntityID(flowInstance), flowRouteTestRunID, flowInstance); err != nil {
 				t.Fatalf("seed flow route entity %s: %v", flowInstance, err)
 			}
 			continue
 		}
 		now := time.Now().UTC()
-		if _, err := exec.ExecContext(ctx, `INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES (?, ?, ?, 'flow-route-test', 'active', '{}', ?, ?)`, runtimeflowidentity.EntityID(flowInstance), flowRouteTestRunID, flowInstance, now, now); err != nil {
+		if _, err := exec.ExecContext(ctx, `INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES (?, ?, ?, 'flow-route-test', '{}', ?, ?)`, runtimeflowidentity.EntityID(flowInstance), flowRouteTestRunID, flowInstance, now, now); err != nil {
 			t.Fatalf("seed sqlite flow route entity %s: %v", flowInstance, err)
 		}
 	}
@@ -115,7 +115,6 @@ func ensureFlowInstanceRouteTables(t *testing.T, ctx context.Context, db *sql.DB
 			run_id UUID NOT NULL,
 			flow_instance TEXT NOT NULL,
 			entity_type TEXT NOT NULL DEFAULT '',
-			current_state TEXT NOT NULL DEFAULT '',
 			fields JSONB NOT NULL DEFAULT '{}'::jsonb,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -435,7 +434,7 @@ func TestFlowInstanceRouteTopologyReplacementPreservesOlderObserverSources(t *te
 				} else if _, err := db.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, stage_defined, current_state, entered_state_at, created_at, updated_at, gates, bookkeeping, accumulator, revision) VALUES ($1, $2, $3, 'flow-route-test', 'review', 'template', '{}', 'active', TRUE, 'active', $4, $4, $4, '{}', '{}', '{}', 1)`, flowRouteTestRunID, observer.Route.InstancePath, entityID, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := db.ExecContext(ctx, `INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at) VALUES ($1, $2, $3, 'flow-route-test', 'active', '{}', $4, $4)`, entityID, flowRouteTestRunID, observer.Route.InstancePath, time.Now().UTC()); err != nil {
+				if _, err := db.ExecContext(ctx, `INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES ($1, $2, $3, 'flow-route-test', '{}', $4, $4)`, entityID, flowRouteTestRunID, observer.Route.InstancePath, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
 				patterns := []string{"producer/old-a/work.ready", "producer/old-b/work.ready", "other/old/other.ready"}
@@ -911,10 +910,10 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 		t.Fatalf("seed flow-instance readiness: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
+		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, fields, created_at, updated_at)
 		VALUES
-			($2::uuid, $1::uuid, 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"v-active","weight":1.1234567}'::jsonb, NOW(), NOW()),
-			('33333333-3333-4333-8333-333333333333', $3::uuid, 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"wrong-run"}'::jsonb, NOW() + INTERVAL '1 minute', NOW() + INTERVAL '1 minute')
+			($2::uuid, $1::uuid, 'component-scaffold/active', 'component', '{"vertical_id":"v-active","weight":1.1234567}'::jsonb, NOW(), NOW()),
+			('33333333-3333-4333-8333-333333333333', $3::uuid, 'component-scaffold/active', 'component', '{"vertical_id":"wrong-run"}'::jsonb, NOW() + INTERVAL '1 minute', NOW() + INTERVAL '1 minute')
 	`, runID, entityID, foreignRunID); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
@@ -984,8 +983,8 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsDoesNotReadAmbientTransac
 		t.Fatalf("seed readiness in tx: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
-		VALUES ('22222222-2222-4222-8222-222222222222'::uuid, $1::uuid, 'component-scaffold/uncommitted', 'component', 'ready', '{}'::jsonb, NOW(), NOW())
+		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, fields, created_at, updated_at)
+		VALUES ('22222222-2222-4222-8222-222222222222'::uuid, $1::uuid, 'component-scaffold/uncommitted', 'component', '{}'::jsonb, NOW(), NOW())
 	`, runID); err != nil {
 		t.Fatalf("seed entity state in tx: %v", err)
 	}
