@@ -28,7 +28,7 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 			owner := f.store.(pipeline.WorkflowEngineMutationOwner)
 			created := f.source.turn1At.Add(-90 * time.Second)
 			seedWorkflowHeaderProjectionFixture(t, ctx, f.db, runID, entityID, "flow/forkchat", "flow/forkchat", "review_item", "draft", "{}", created)
-			seedWorkflowTargetStateForTransition(t, backend, f.db, runID, entityID, "flow/forkchat", "draft", 1, created)
+			seedWorkflowTargetStateForTransition(t, backend, f.db, runID, entityID, "flow/forkchat", created)
 			record := stateOnlyWorkflowEngineMutationRecord(t, runID, "flow/forkchat", "flow/forkchat", entityID, "draft", 1, created)
 			record.Mode = "static"
 			record.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
@@ -86,7 +86,7 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 			foreign := record
 			foreign.Identity.RunID = foreignRun
 			seedWorkflowHeaderProjectionFixture(t, foreignCtx, f.db, foreignRun, entityID, "flow/forkchat", "flow/forkchat", "review_item", "draft", "{}", created)
-			seedWorkflowTargetStateForTransition(t, backend, f.db, foreignRun, entityID, "flow/forkchat", "draft", 1, created)
+			seedWorkflowTargetStateForTransition(t, backend, f.db, foreignRun, entityID, "flow/forkchat", created)
 			foreign.ExpectedState, foreign.ExpectedRevision, foreign.CurrentState = "draft", 1, "foreign"
 			if _, err := owner.CommitWorkflowEngineMutation(foreignCtx, pipeline.WorkflowEngineMutationCommand{State: foreign}); err != nil {
 				t.Fatal(err)
