@@ -309,6 +309,8 @@ type publicationCompletionAudit struct {
 	request     apiidempotency.Request
 	committed   runtimebus.CommittedAPIEventPublication
 	deployment  *runtimebus.CommittedDeploymentRunCreation
+	deployments int
+	heldRuns    map[string]pipeline.DynamicFlowRuntimeReadinessPlan
 	commits     int
 	run         string
 	hold        bool
@@ -398,9 +400,13 @@ func (p *publicationCompletionAudit) observeDeployment(ctx context.Context, comm
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.deployment = &result
+	p.deployments++
 	p.request = command.Idempotency
 	p.process, _ = worklifetime.ProcessFromContext(ctx)
 	p.run = command.RunCreation.RunID
+	if p.heldRuns != nil && result.Acknowledged && !result.Replay {
+		p.heldRuns[p.run] = pipeline.DynamicFlowRuntimeReadinessPlan{}
+	}
 }
 
 type publicationAuditReadiness struct {
@@ -412,6 +418,13 @@ func (s *publicationAuditReadiness) BeginDynamicFlowRuntimeActivation(ctx contex
 	s.probe.mu.Lock()
 	acknowledged := s.probe.committed.Acknowledged || s.probe.deployment != nil && s.probe.deployment.Acknowledged
 	hold := s.probe.hold && acknowledged && request.Plan().RunID == s.probe.run
+	if s.probe.heldRuns != nil {
+		_, admitted := s.probe.heldRuns[request.Plan().RunID]
+		hold = s.probe.hold && admitted
+		if admitted {
+			s.probe.heldRuns[request.Plan().RunID] = request.Plan()
+		}
+	}
 	if acknowledged && request.Plan().RunID == s.probe.run && s.probe.plan.RunID == "" {
 		s.probe.plan = request.Plan()
 	}
