@@ -3,6 +3,7 @@
 package serveapp
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -67,13 +68,55 @@ func TestServedWhatsAppIdentityRebindRejectsPendingInputBothStores(t *testing.T)
 			requireServedNativeInputCard(t, endpoint, cardID, false)
 			peer.reply("reject", "REBIND_OBSOLETE_CARD", card)
 			query.MessageReference = "REBIND_OBSOLETE_CARD"
-			waitTextReplyIntent(t, reader, query, "control")
-			waitTextReplyIntent(t, reader, servedNativeInputActionObservation(t, endpoint, rebound.Operation.Coordinate.BundleHash, query), "stale")
+			// Rebind changes the audience epoch. No current receipt can turn
+			// the predecessor's physical card into an action for the new claimant.
+			waitTextReplyIntent(t, reader, query, "teaching")
+			requireServedNativeInputNoAction(t, endpoint, reader, rebound.Operation.Coordinate.BundleHash, query)
 			requireServedNativeInputCard(t, endpoint, cardID, false)
+			oldClaimant := types.NewJID("15551234568", types.DefaultUserServer)
+			oldLID := types.NewJID("100000000002", types.HiddenUserServer)
+			peer.replyFrom("27", "REBIND_FORMER_CLAIMANT", oldPrompt, oldClaimant, oldLID)
+			formerQuery := query
+			formerQuery.MessageReference, formerQuery.ConversationReference = "REBIND_FORMER_CLAIMANT", oldClaimant.String()
+			waitTextReplyIntent(t, reader, formerQuery, "rejected")
+			requireServedNativeInputNoAction(t, endpoint, reader, rebound.Operation.Coordinate.BundleHash, formerQuery)
 			peer.text("/inbox", "REBIND_CURRENT_INBOX")
 			query.MessageReference = "REBIND_CURRENT_INBOX"
 			waitTextReplyIntent(t, reader, query, "entry")
-			awaitServedNativeProcessSend(t, peer, "Inbox\n")
+			// The real SDK sends to the new claimant's observed linked-device
+			// address; the selected operator binding still retains the exact PN.
+			if inbox := awaitServedNativeInputMessage(t, peer, "Inbox\n"); inbox.To.ToNonAD() != lid {
+				t.Fatal("rebound Inbox used a different linked-device destination", inbox.To, lid)
+			}
+			if err := process.stop(); err != nil {
+				t.Fatal("rebound pending input did not join before restart", err)
+			}
+			requireServedNativeDisconnect(t, peer)
+			process = startServedNativeSDKProcess(t, opts, peer)
+			endpoint = process.endpoint(t) + "/v1/rpc"
+			peer.awaitPostLogin()
+			var restored channelonboarding.Result
+			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": rebound.Operation.OperationID}, &restored)
+			if restored.Readiness == nil || !restored.Readiness.Ready || restored.Binding == nil ||
+				restored.Binding.ExternalAccountRef != from.String() || restored.Operation.BindingRevision != rebound.Operation.BindingRevision ||
+				restored.Operation.Coordinate.RuntimeInstanceID == rebound.Operation.Coordinate.RuntimeInstanceID {
+				t.Fatal("restart adopted the former claimant or lost rebound identity", restored)
+			}
+			peer.reply("27", "REBIND_RESTART_OLD_PROMPT", oldPrompt)
+			query.MessageReference = "REBIND_RESTART_OLD_PROMPT"
+			waitTextReplyIntent(t, reader, query, "teaching")
+			requireServedNativeInputNoAction(t, endpoint, reader, restored.Operation.Coordinate.BundleHash, query)
+			peer.reply("reject", "REBIND_RESTART_OLD_CARD", card)
+			query.MessageReference = "REBIND_RESTART_OLD_CARD"
+			waitTextReplyIntent(t, reader, query, "teaching")
+			requireServedNativeInputNoAction(t, endpoint, reader, restored.Operation.Coordinate.BundleHash, query)
+			requireServedNativeInputCard(t, endpoint, cardID, false)
+			peer.text("/inbox", "REBIND_RESTART_INBOX")
+			query.MessageReference = "REBIND_RESTART_INBOX"
+			waitTextReplyIntent(t, reader, query, "entry")
+			if inbox := awaitServedNativeInputMessage(t, peer, "Inbox\n"); inbox.To.ToNonAD() != lid {
+				t.Fatal("restart sent Inbox to a different linked-device destination", inbox.To, lid)
+			}
 			var decisions operatorread.OperatorEventListResult
 			requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
 				"filter": map[string]any{"run_id": seed.RunID, "event_name": "mailbox.card_decided"}, "limit": 10}, &decisions)
@@ -81,9 +124,17 @@ func TestServedWhatsAppIdentityRebindRejectsPendingInputBothStores(t *testing.T)
 				t.Fatal("stale native input or control completed the pending decision", decisions)
 			}
 			if err := process.stop(); err != nil {
-				t.Fatal("rebound pending input did not join before restart", err)
+				t.Fatal("rebound pending input restart did not join", err)
 			}
 			requireServedNativeDisconnect(t, peer)
 		})
+	}
+}
+
+func requireServedNativeInputNoAction(t *testing.T, endpoint string, reader render.Observer, bundleHash string, text render.IntentObservationQuery) {
+	t.Helper()
+	query := servedNativeInputActionObservation(t, endpoint, bundleHash, text)
+	if action, found, err := reader.ObserveChannelIntent(context.Background(), query); err != nil || found {
+		t.Fatal("refused predecessor input still derived an executable action", action, found, err)
 	}
 }
