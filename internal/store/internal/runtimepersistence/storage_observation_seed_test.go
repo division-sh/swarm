@@ -119,7 +119,7 @@ func seedWorkflowProjectionFaultCut(t *testing.T, fixture authorActivityReceiptF
 		if _, err := tx.ExecContext(ctx, `INSERT INTO flow_instances(run_id,entity_id,instance_path,current_state,flow_template,mode,status,config,stage_defined,gates,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at) VALUES($1,$2,'storage-ref','queued','projection-flow','static','active','{"config":{},"workflow_version":"1.0.0","instance_id":"storage-ref","flow_path":"storage-ref"}',TRUE,'{}','{}','{}',1,$3,$3,$3)`, run, entity, time.Now().UTC()); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO entity_state(run_id,entity_id,flow_instance,entity_type,current_state,revision,fields,gates,accumulator) VALUES($1,$2,'storage-ref','test_entity','queued',1,'{}','{}','{}')`, run, entity)
+		_, err := tx.ExecContext(ctx, `INSERT INTO entity_state(run_id,entity_id,flow_instance,entity_type,fields) VALUES($1,$2,'storage-ref','test_entity','{}')`, run, entity)
 		return err
 	}); err != nil {
 		t.Fatal(err)
