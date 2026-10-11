@@ -436,6 +436,7 @@ func TestCLIAPIConnectionFlagsSurfaceAndIsolation(t *testing.T) {
 		"conversation list", "conversation view", "conversation turn",
 		"entity list", "entity view", "entity aggregate",
 		"mailbox list", "mailbox view", "mailbox defer",
+		"channel connect", "channel reconnect", "channel rebind", "channel resume", "channel list", "channel status", "channel unbind", "channel revoke-proof", "channel logout",
 		"control pause", "control continue", "control stop", "control nuke",
 		"run fork", "forkchat new", "forkchat resume", "forkchat list", "forkchat view", "forkchat delete",
 		"version",
@@ -458,7 +459,7 @@ func TestCLIAPIConnectionFlagsSurfaceAndIsolation(t *testing.T) {
 
 	withoutFlags := []string{
 		"", "verify", "completion", "run",
-		"event", "agent", "conversation", "entity", "mailbox", "control", "forkchat",
+		"event", "agent", "conversation", "entity", "mailbox", "channel", "control", "forkchat",
 	}
 	for _, path := range withoutFlags {
 		cmd := mustFindCLICommand(t, root, path)
