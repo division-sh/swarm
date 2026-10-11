@@ -179,7 +179,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 func readRetainedRootJoins(t *testing.T, rt servedControlProofRuntime, runID string) (loopruntime.Activation, []joinruntime.Activation) {
 	t.Helper()
 	var raw []byte
-	if err := rt.DB.QueryRow(`SELECT accumulator FROM entity_state WHERE run_id=$1 AND entity_id=$1`, runID).Scan(&raw); err != nil {
+	if err := rt.DB.QueryRow(`SELECT accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$1`, runID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	var persisted map[string]any

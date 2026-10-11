@@ -91,7 +91,7 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 func readForkLoopActivation(t *testing.T, rt servedControlProofRuntime, runID string) loopruntime.Activation {
 	t.Helper()
 	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(accumulator AS TEXT) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, flowidentity.EntityID("review")).Scan(&raw); err != nil {
+	if err := rt.DB.QueryRow(`SELECT CAST(accumulator AS TEXT) FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, runID, flowidentity.EntityID("review")).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	var state map[string]any
