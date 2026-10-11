@@ -64,6 +64,7 @@ func TestFamily145SupplementalFixtureAndEveryCallerHaveNoPoolOrQuerySelector(t *
 		"fan_out_supplemental_helpers_test.go", "fan_out_two_ten_suffix_test.go",
 		"fan_out_twenty_intent_contention_test.go", "fan_out_pressure_reservation_test.go",
 		"fan_out_pressure_soak_test.go", "fan_out_serving_capacity_conformance_test.go",
+		"fan_out_staged_soak_test.go",
 	} {
 		data, err := os.ReadFile(filepath.Join(root, "internal/runtime/conformance", path))
 		if err != nil {

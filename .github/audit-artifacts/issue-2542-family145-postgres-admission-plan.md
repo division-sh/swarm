@@ -2509,7 +2509,7 @@ classified, not claimed closed or converted to an admission-wait substitute.
 
 | Canonical owner | Exhaustive affected consumption and surviving scope |
 | --- | --- |
-| native storetest construction/close ledger | All five newSupplementalServingFixture call occurrences (six references including its definition), including finite/full contention, suffix, reservation and optional soak, use original-location native construction. Source/catalog/topology/runtime wiring and releaseAll-before-joined-close cleanup are unchanged. No second lifetime owner. |
+| native storetest construction/close ledger | All six newSupplementalServingFixture call occurrences (seven references including its definition), including finite/full contention, suffix, reservation, pressure and staged/optional soak, use original-location native construction. Source/catalog/topology/runtime wiring and releaseAll-before-joined-close cleanup are unchanged. No second lifetime owner. |
 | pipelinepersistence physical observations | Ten fixed ports retain global outcome/intent/capacity/cardinality/claim/progress/pressure scopes, exact committed-run DISTINCT event counts and the five-coordinate expired-claim row/outcome join. Original strict SUM NULL error and explicit COALESCE zero cases stay distinct, with no eligibility/run filter added to global reads. |
 | original selected native read coordinator | Every detached observation has its own original read cut; raw/absent/typed-nil/cancelled/closed owners refuse without provisional data. Failed required rows retain absence failure. Real expired held claims preserve nullable ownership, lease/retry fields, generation and exact clocks. |
 | existing runforkrevision physical-history owner | Supplemental history retains fact_key,revision ordering and complete physical fact bytes. Reporter revision,fact_key remains a distinct named operation; both share the original detached-row/error handling, not an ordering selector exposed to callers. |
@@ -2520,7 +2520,7 @@ decoding, key-major grouping, exactly two versions per key, creation cursor0,
 one cardinality-sized successor cursor, exact cardinality and total intent count.
 History helper query/scan/iteration errors now come from the same native reader,
 not an ignored error path. A family-specific proof preserves these assertions
-and rejects lost owner/order/key/cardinality cuts. The complete six-file caller
+and rejects lost owner/order/key/cardinality cuts. The complete seven-file caller
 inventory rejects restored DB/query/admission/getter syntax with hostile controls.
 It parses AST instead of treating the innocent QueryRowCalls metric label as a
 SQL operation; no code exception or substring allowance is introduced.
@@ -2532,6 +2532,7 @@ SQL operation; no code exception or substring allowance is introduced.
 | Held production capacity and exact loaded overlap | execution-proven through the same corrected path: TestFanOutServingM04CrossRunHeldTurnCapacityOnBothBackends and all four sqlite/postgres one-run/cross-run finite contention cases under race |
 | Two ten-row lost-wake suffix | execution-proven through the same corrected path: unchanged TestIssue2394TwoTenLostWakeSuffixBothStores under race on both stores |
 | Durable three-second pressure population | execution-proven through the same corrected path: unchanged TestIssue2394SupplementalPressureFiniteProbeBothStores under race on both stores |
+| Staged sparse-arrival recovery | execution-proven through the same corrected path: unchanged TestIssue2394SupplementalSoakFiniteProbeBothStores under race on both stores, including exact due-time/arrival, lost-wake, cursor/history and bounded final accounting assertions |
 | Real expired held/released claim and FIFO reservation | execution-proven through the same corrected path: unchanged TestIssue2394PressureReservationFIFOControlPostgres under race; original nullable lease/generation/outcome assertions retained |
 | Key-major versus revision-major history interpretation | reproduced and fixed: actual SQL ORDER BY revision,fact_key mutant is RED at exact versions=1/want2 in the real PostgreSQL one-run finite workload; restore GREEN |
 | Full cardinality and continuous optional-soak workload | qualification-open, NOT a separate semantic class: workload/profile/temporal assertions and every observer source mapping are conserved, but no full or real-soak execution is claimed in this focused checkpoint; the existing landing qualification obligation remains |
@@ -2540,7 +2541,10 @@ Vemew: complete restored suffix/contention/M04 roots race PASS60.626s; real
 pressure/FIFO roots race PASS70.250s. First finite13.485s was RED at the hidden
 shared waiter, not a flake; that reader is repaired. Ten native missing/strict-NULL
 and raw/cancelled/closed controls plus event/delivery/revision owner guards race
-PASS39.535s (earlier eight-port receipt PASS32.261s). Real history-order mutant
+PASS39.535s (earlier eight-port receipt PASS32.261s). The untouched staged-soak
+source is the sixth constructor caller, not a seventh opening; its exact finite
+recovery root passes23.667s on both stores under race and joins the seven-file
+carrier guard (PASS0.024s). Real history-order mutant
 RED11.238s; restored one-run root PASS12.100s. Finite/caller/history/successor
 controls PASS6.250s. Complete candidate overlay once PASS210.703s. Native plan
 binding and S-Z/pipeline conservation PASS19.591s; exact two new both-store child
