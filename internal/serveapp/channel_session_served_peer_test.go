@@ -307,10 +307,7 @@ func (p *serveNativeProtocolPeer) awaitPostLogin() (int, int) {
 	p.t.Helper()
 	deadline := time.Now().Add(serveRuntimeReadyTimeout)
 	for time.Now().Before(deadline) {
-		p.mu.Lock()
-		uploads, completed := p.prekeyUploads, p.postLogins
-		currentCompleted := p.wire != nil && p.postLoginWire == p.wire
-		p.mu.Unlock()
+		completed, uploads, currentCompleted := p.postLoginObservation()
 		if currentCompleted && uploads > 0 {
 			return completed, uploads
 		}
@@ -318,6 +315,33 @@ func (p *serveNativeProtocolPeer) awaitPostLogin() (int, int) {
 	}
 	p.t.Fatal("SDK did not complete its genuine prekey upload/post-login before the planned restart")
 	return 0, 0
+}
+
+func (p *serveNativeProtocolPeer) postLoginObservation() (int, int, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.postLogins, p.prekeyUploads, p.wire != nil && p.postLoginWire == p.wire
+}
+
+func TestServedNativePeerPostLoginUsesCurrentOccurrence(t *testing.T) {
+	current, retired := &whatsappfixture.Transport{}, &whatsappfixture.Transport{}
+	for _, test := range []struct {
+		name     string
+		observed *whatsappfixture.Transport
+		ready    bool
+	}{
+		{"retired_unpaired_predecessor", current, true},
+		{"previous_login_is_not_current", retired, false},
+		{"disconnected_login_is_not_current", nil, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			peer := &serveNativeProtocolPeer{wire: current, postLoginWire: test.observed, connections: 2, postLogins: 1, prekeyUploads: 1}
+			completed, uploads, ready := peer.postLoginObservation()
+			if completed != 1 || uploads != 1 || ready != test.ready {
+				t.Fatal("post-login observation confused history with current occurrence", completed, uploads, ready)
+			}
+		})
+	}
 }
 
 func (p *serveNativeProtocolPeer) success(wire *whatsappfixture.Transport) error {
