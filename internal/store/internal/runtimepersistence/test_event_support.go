@@ -443,6 +443,36 @@ func ReadLastThreeFanOutRuntimeLogPayloadsForTest(ctx context.Context, selected 
 	})
 }
 
+func ReadNestedSourceEventIDsForTest(ctx context.Context, selected any, run, name, parent string) ([]string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run, parent}, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
+		return eventrecord.ReadNestedSourceEventIDsTx(ctx, tx, run, name, parent)
+	})
+}
+
+func ReadNestedRunNamedEventIDsForTest(ctx context.Context, selected any, run, name string) ([]string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
+		return eventrecord.ReadNestedRunNamedEventIDsTx(ctx, tx, run, name)
+	})
+}
+
+func ReadNestedSiblingSourceEventIDForTest(ctx context.Context, selected any, run, event string) (string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run, event}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return eventrecord.ReadNestedSiblingSourceEventIDTx(ctx, tx, run, event)
+	})
+}
+
+func CountNestedRunEventIdentityForTest(ctx context.Context, selected any, run, event string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run, event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountNestedRunEventIdentityTx(ctx, tx, run, event)
+	})
+}
+
+func ReadRepeatedFanOutCompletionEventIDsForTest(ctx context.Context, selected any, run string) ([]string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
+		return eventrecord.ReadRepeatedFanOutCompletionEventIDsTx(ctx, tx, run)
+	})
+}
+
 func ReadFanInPeriodReportedEventIDsForTest(ctx context.Context, selected any) ([]string, error) {
 	return readFanInReportedEventIDsForTest(ctx, selected, false)
 }

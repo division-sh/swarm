@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "b3a7982f273954af5b748d3beb4bd5fc7030f5c1bd9a22ecedbd68f9992fe2b5"
+const targetDigest = "8c0d8e736f3fd7125dc18871106eb676a91bac37f173df5fa57c7c410fcf51b5"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -46,6 +46,7 @@ var files = []string{
 	"internal/cliapp/data_show_selected_test.go",
 	"internal/cliapp/runtime_log_filter_supported_test.go",
 	"internal/runtime/conformance/reply_resolution_conformance_test.go",
+	"internal/runtime/conformance/a2_repeated_fan_out_conformance_test.go",
 	"internal/runtime/conformance/delivery_lifecycle_conformance_test.go",
 	"internal/runtime/conformance/empty_handler_construction_test.go",
 	"internal/runtime/conformance/fan_in_barrier_runtime_conformance_test.go",
@@ -57,7 +58,10 @@ var files = []string{
 	"internal/runtime/conformance/fan_out_drain_failure_diagnostic_test.go",
 	"internal/runtime/conformance/fan_out_expired_evaluation_conformance_test.go",
 	"internal/runtime/conformance/fan_out_nested_capacity_conformance_test.go",
+	"internal/runtime/conformance/fan_out_nested_cancellation_conformance_test.go",
 	"internal/runtime/conformance/fan_out_nested_interrupted_group_test.go",
+	"internal/runtime/conformance/fan_out_nested_prepared_release_test.go",
+	"internal/runtime/conformance/fan_out_nested_readback_helpers_test.go",
 	"internal/runtime/conformance/fan_out_nested_serving_helpers_test.go",
 	"internal/runtime/conformance/fan_out_resource_selected_fork_test.go",
 	"internal/runtime/conformance/fan_out_resource_source_proof_test.go",

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
@@ -21,6 +22,102 @@ type FanOutSemanticOutcomeStorage = delivery.FanOutSemanticOutcomeStorage
 type FanOutBlockedSourceStorage = delivery.FanOutBlockedSourceStorage
 type FanOutTriggerDeliveryStorage = delivery.FanOutTriggerDeliveryStorage
 type FanOutRunProgressStorage = pipelinepersistence.FanOutRunProgressStorage
+
+type NestedFanOutBarrierStorage = pipelinepersistence.NestedFanOutBarrierStorage
+type NestedFanOutCursorClaimStorage = pipelinepersistence.NestedFanOutCursorClaimStorage
+type NestedFanOutOwedStorage = pipelinepersistence.NestedFanOutOwedStorage
+
+type RepeatedFanOutIntentStorage = pipelinepersistence.RepeatedFanOutIntentStorage
+
+func ReadRepeatedFanOutIntentForTest(ctx context.Context, selected any, key fanoutobligation.IntentKey) (RepeatedFanOutIntentStorage, error) {
+	if err := key.Validate(); err != nil {
+		return RepeatedFanOutIntentStorage{}, err
+	}
+	return readFanOutSemanticStorage(ctx, selected, []string{key.RunID, key.TriggeringDeliveryID}, func(ctx context.Context, tx *sql.Tx) (RepeatedFanOutIntentStorage, error) {
+		return pipelinepersistence.ReadRepeatedFanOutIntentTx(ctx, tx, key)
+	})
+}
+
+func CountRepeatedFanOutTriggerOutcomesForTest(ctx context.Context, selected any, run, trigger string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run, trigger}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountRepeatedFanOutTriggerOutcomesTx(ctx, tx, run, trigger)
+	})
+}
+
+func ReadRepeatedFanOutSnapshotForTest(ctx context.Context, selected any, run string) ([8]int64, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) ([8]int64, error) {
+		return delivery.ReadRepeatedFanOutSnapshotTx(ctx, tx, run)
+	})
+}
+
+func ReadNestedFanOutBarrierStatusForTest(ctx context.Context, selected any, key fanoutobligation.IntentKey) (string, error) {
+	if err := key.Validate(); err != nil {
+		return "", err
+	}
+	return readFanOutSemanticStorage(ctx, selected, []string{key.RunID, key.TriggeringDeliveryID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return pipelinepersistence.ReadNestedFanOutBarrierStatusTx(ctx, tx, key)
+	})
+}
+
+func ReadNestedFanOutBarrierForTest(ctx context.Context, selected any, key fanoutobligation.IntentKey) (NestedFanOutBarrierStorage, error) {
+	if err := key.Validate(); err != nil {
+		return NestedFanOutBarrierStorage{}, err
+	}
+	return readFanOutSemanticStorage(ctx, selected, []string{key.RunID, key.TriggeringDeliveryID}, func(ctx context.Context, tx *sql.Tx) (NestedFanOutBarrierStorage, error) {
+		return pipelinepersistence.ReadNestedFanOutBarrierTx(ctx, tx, key)
+	})
+}
+
+func ReadNestedPipelineReceiptOutcomeForTest(ctx context.Context, selected any, event string) (string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return pipelinepersistence.ReadNestedPipelineReceiptOutcomeTx(ctx, tx, event)
+	})
+}
+
+func CountNestedSuccessfulPipelineReceiptForTest(ctx context.Context, selected any, event string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountNestedSuccessfulPipelineReceiptTx(ctx, tx, event)
+	})
+}
+
+func ReadNestedFanOutCursorClaimForTest(ctx context.Context, selected any, key fanoutobligation.IntentKey) (NestedFanOutCursorClaimStorage, error) {
+	if err := key.Validate(); err != nil {
+		return NestedFanOutCursorClaimStorage{}, err
+	}
+	return readFanOutSemanticStorage(ctx, selected, []string{key.RunID, key.TriggeringDeliveryID}, func(ctx context.Context, tx *sql.Tx) (NestedFanOutCursorClaimStorage, error) {
+		return pipelinepersistence.ReadNestedFanOutCursorClaimTx(ctx, tx, key)
+	})
+}
+
+func CountNestedRunFanOutOutcomesForTest(ctx context.Context, selected any, run string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountNestedRunFanOutOutcomesTx(ctx, tx, run)
+	})
+}
+
+func ReadNestedRunFanOutOwedForTest(ctx context.Context, selected any, run string) (NestedFanOutOwedStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) (NestedFanOutOwedStorage, error) {
+		return pipelinepersistence.ReadNestedRunFanOutOwedTx(ctx, tx, run)
+	})
+}
+
+func ReadNestedCommittedOutcomeEventIDsForTest(ctx context.Context, selected any, run string) ([]string, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
+		return pipelinepersistence.ReadNestedCommittedOutcomeEventIDsTx(ctx, tx, run)
+	})
+}
+
+func ReadNestedAccountIntentKeysForTest(ctx context.Context, selected any, run string) ([]fanoutobligation.IntentKey, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) ([]fanoutobligation.IntentKey, error) {
+		return pipelinepersistence.ReadNestedAccountIntentKeysTx(ctx, tx, run)
+	})
+}
+
+func CountNestedContinuationHandoffsForTest(ctx context.Context, selected any, event string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountNestedContinuationHandoffsTx(ctx, tx, event)
+	})
+}
 
 func readFanOutSemanticStorage[T any](ctx context.Context, selected any, ids []string, query func(context.Context, *sql.Tx) (T, error)) (T, error) {
 	var empty, out T

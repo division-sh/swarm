@@ -14,6 +14,26 @@ import (
 type ScenarioSetupRunStorage = runlifecycle.ScenarioSetupRunStorage
 type PostgresScenarioSetupEntityStorage = entitystore.PostgresScenarioSetupEntityStorage
 
+type NestedFanOutEntityStorage = entitystore.NestedFanOutEntityStorage
+
+func ReadNestedRunEntityStateFieldsForTest(ctx context.Context, selected any, run string) ([]NestedFanOutEntityStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) ([]NestedFanOutEntityStorage, error) {
+		return entitystore.ReadNestedRunEntityStateFieldsTx(ctx, tx, run)
+	})
+}
+
+func ReadNestedRunEntityStatesForTest(ctx context.Context, selected any, run string) ([]NestedFanOutEntityStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) ([]NestedFanOutEntityStorage, error) {
+		return entitystore.ReadNestedRunEntityStatesTx(ctx, tx, run)
+	})
+}
+
+func ReadNestedEntityFieldsRevisionForTest(ctx context.Context, selected any, run, path string) (NestedFanOutEntityStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) (NestedFanOutEntityStorage, error) {
+		return entitystore.ReadNestedEntityFieldsRevisionTx(ctx, tx, run, path)
+	})
+}
+
 func ReadPostgresScenarioSetupRunStorageForTest(ctx context.Context, selected any, runID string) (ScenarioSetupRunStorage, error) {
 	if err := validatePostgresPublicationIdentities(selected, runID); err != nil {
 		return ScenarioSetupRunStorage{}, err

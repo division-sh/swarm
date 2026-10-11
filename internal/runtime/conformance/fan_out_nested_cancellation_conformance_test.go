@@ -14,10 +14,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
-	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -68,7 +68,7 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			probe.pauseAccountTurn = 2
 			probe.accountTurnPaused = make(chan struct{}, 1)
 			gate := newNestedChildHandlerGateCount(t, "account.task.requested", 2)
-			rt, db := newNestedServingRuntime(t, backend, source, nil, probe, gate)
+			rt := newNestedServingRuntime(t, backend, source, nil, probe, gate)
 			handlers := &nestedCancellationHandlers{gate: gate}
 			rt.pipeline.SetTestLifecycleProbe(handlers)
 			selectedControl, ok := rt.selected.(runcontrol.Store)
@@ -114,7 +114,9 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			deadline := time.Now().Add(5 * time.Second)
 			var parentStatus string
 			for time.Now().Before(deadline) {
-				if err := db.QueryRowContext(ctx, `SELECT status FROM fan_out_obligation_barriers WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`, parent.Key.RunID, parent.Key.TriggeringDeliveryID, parent.Key.ElementRef.FlowPath, parent.Key.ElementRef.Family, parent.Key.ElementRef.SemanticPath).Scan(&parentStatus); err != nil {
+				var err error
+				parentStatus, err = storetest.ReadNestedFanOutBarrierStatus(ctx, rt.selected, parent.Key)
+				if err != nil {
 					t.Fatal(err)
 				}
 				if parentStatus == "fired" {
@@ -122,44 +124,31 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			assertNestedExactBarrier(t, ctx, db, parent.Key, "fired", fanoutbarrier.Summary{Total: 3, Succeeded: 3})
+			assertNestedExactBarrier(t, ctx, rt.selected, parent.Key, "fired", fanoutbarrier.Summary{Total: 3, Succeeded: 3})
 			reader := nestedPublicReader(t, rt.selected)
 			parents := loadNotifyAllChildrenItemEvents(t, ctx, rt.selected, runID, notifyID)
 			assertNotifyAllChildrenItemSequence(t, parents, accounts)
 			parentViews := make(map[string]operatorread.OperatorEventFull, len(parents))
 			for _, event := range parents {
 				parentViews[event.ID] = assertNestedDeliveredEvent(t, ctx, reader, event.ID, 1)
-				assertNestedPipelineReceipt(t, ctx, db, event.ID, true)
+				assertNestedPipelineReceipt(t, ctx, rt.selected, event.ID, true)
 			}
 			heldView, err := reader.LoadOperatorEvent(ctx, held.EventID)
 			if err != nil || len(heldView.Deliveries) != 1 || heldView.Deliveries[0].Terminal {
 				t.Fatalf("held child before stop=%+v err=%v", heldView, err)
 			}
 			path := heldView.Deliveries[0].Target.FlowInstance
-			var beforeState string
-			var beforeFields []byte
-			var beforeRevision int64
-			if err := db.QueryRowContext(ctx, `SELECT current_state,fields,revision FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runID, path).Scan(&beforeState, &beforeFields, &beforeRevision); err != nil {
+			beforeEntity, err := storetest.ReadNestedEntityFieldsRevision(ctx, rt.selected, runID, path)
+			if err != nil {
 				t.Fatal(err)
 			}
+			beforeState, beforeFields, beforeRevision := beforeEntity.State, beforeEntity.Fields, beforeEntity.Revision
 			if beforeState != "pending" {
 				t.Fatalf("child mutated before execution gate: %s", beforeState)
 			}
 			loadPrefix := func() []string {
-				rows, err := db.QueryContext(ctx, `SELECT event_id FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed' ORDER BY event_id`, runID)
+				ids, err := storetest.ReadNestedCommittedOutcomeEventIDs(ctx, rt.selected, runID)
 				if err != nil {
-					t.Fatal(err)
-				}
-				defer rows.Close()
-				var ids []string
-				for rows.Next() {
-					var id string
-					if err := rows.Scan(&id); err != nil {
-						t.Fatal(err)
-					}
-					ids = append(ids, id)
-				}
-				if err := rows.Err(); err != nil {
 					t.Fatal(err)
 				}
 				return ids
@@ -175,8 +164,7 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			handlers.assertOnlyHeld(t, held.EventID, secondHeld.EventID)
 			triggerDeadline := time.Now().Add(5 * time.Second)
 			for time.Now().Before(triggerDeadline) {
-				var outcome string
-				err := db.QueryRowContext(ctx, `SELECT outcome FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, notifyID).Scan(&outcome)
+				outcome, err := storetest.ReadNestedPipelineReceiptOutcome(ctx, rt.selected, notifyID)
 				if err == nil && outcome == "success" {
 					break
 				}
@@ -185,7 +173,7 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			assertNestedPipelineReceipt(t, ctx, db, notifyID, true)
+			assertNestedPipelineReceipt(t, ctx, rt.selected, notifyID, true)
 			// The second child has not claimed an ordinal. Fence the occurrence,
 			// join that paused turn, then stop without preempting the committed group.
 			rt.workOwner.Retire()
@@ -204,12 +192,11 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 				t.Fatalf("production run-control cancellation=%+v err=%v", result, err)
 			}
 			gate.open()
-			var afterState string
-			var afterFields []byte
-			var afterRevision int64
-			if err := db.QueryRowContext(ctx, `SELECT current_state,fields,revision FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runID, path).Scan(&afterState, &afterFields, &afterRevision); err != nil {
+			afterEntity, err := storetest.ReadNestedEntityFieldsRevision(ctx, rt.selected, runID, path)
+			if err != nil {
 				t.Fatal(err)
 			}
+			afterState, afterFields, afterRevision := afterEntity.State, afterEntity.Fields, afterEntity.Revision
 			if afterState != beforeState || afterRevision != beforeRevision || string(afterFields) != string(beforeFields) || !reflect.DeepEqual(loadPrefix(), prefix) {
 				t.Fatalf("canceled held child mutated entity/prefix: state=%s/%s revision=%d/%d fields=%s/%s", beforeState, afterState, beforeRevision, afterRevision, beforeFields, afterFields)
 			}
@@ -219,32 +206,22 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 					t.Fatalf("canceled child %s public terminal disposition=%+v err=%v", id, post, err)
 				}
 				effectName := eventidentity.ExternalizeForFlow(post.Deliveries[0].Target.FlowInstance, []string{"account.task.completed"}, "account.task.completed")
-				if ids := nestedEventIDs(t, ctx, db, runID, effectName, id); len(ids) != 0 {
+				if ids := nestedEventIDs(t, ctx, rt.selected, runID, effectName, id); len(ids) != 0 {
 					t.Fatalf("canceled held child %s emitted business effects: %v", id, ids)
 				}
 			}
-			assertNestedExactBarrier(t, ctx, db, parent.Key, "fired", fanoutbarrier.Summary{Total: 3, Succeeded: 3})
+			assertNestedExactBarrier(t, ctx, rt.selected, parent.Key, "fired", fanoutbarrier.Summary{Total: 3, Succeeded: 3})
 			for _, event := range parents {
 				view := assertNestedDeliveredEvent(t, ctx, reader, event.ID, 1)
 				if !reflect.DeepEqual(view, parentViews[event.ID]) {
 					t.Fatalf("cancellation rewrote acknowledged parent publication %s: before=%+v after=%+v", event.ID, parentViews[event.ID], view)
 				}
-				assertNestedPipelineReceipt(t, ctx, db, event.ID, true)
+				assertNestedPipelineReceipt(t, ctx, rt.selected, event.ID, true)
 			}
-			rows, err := db.QueryContext(ctx, `SELECT triggering_delivery_id,flow_path,declaration_family,semantic_path FROM fan_out_intents WHERE run_id=$1 AND flow_path='account'`, runID)
+			children, err := storetest.ReadNestedAccountIntentKeys(ctx, rt.selected, runID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			var children []fanoutobligation.IntentKey
-			for rows.Next() {
-				key := fanoutobligation.IntentKey{RunID: runID}
-				if err := rows.Scan(&key.TriggeringDeliveryID, &key.ElementRef.FlowPath, &key.ElementRef.Family, &key.ElementRef.SemanticPath); err != nil {
-					t.Fatal(err)
-				}
-				children = append(children, key)
-			}
-			err = rows.Err()
-			rows.Close()
 			if err != nil || len(children) != 3 {
 				t.Fatalf("nested cancellation exact keys=%+v err=%v", children, err)
 			}
@@ -255,7 +232,7 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 					// delivery terminalization; only unissued ordinals are canceled.
 					want = fanoutbarrier.Summary{Total: 2, DeadLettered: 2}
 				}
-				assertNestedExactBarrier(t, ctx, db, key, string(fanoutbarrier.StatusSuppressedRunTerminal), want)
+				assertNestedExactBarrier(t, ctx, rt.selected, key, string(fanoutbarrier.StatusSuppressedRunTerminal), want)
 			}
 			summary, err := rt.selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
 			if err != nil || summary.Committed != 8 || summary.Canceled != 4 || summary.SemanticRejected != 0 || summary.Owed != 0 || summary.BlocksCompletion() {

@@ -49,6 +49,32 @@ type FanOutTriggerDeliveryStorage struct {
 	Failure []byte
 }
 
+func CountNestedContinuationHandoffsTx(ctx context.Context, tx *sql.Tx, event string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND continuation_handoff_at IS NOT NULL`, event).Scan(&out)
+	if err != nil {
+		return 0, err
+	}
+	return out, nil
+}
+
+func ReadRepeatedFanOutSnapshotTx(ctx context.Context, tx *sql.Tx, run string) ([8]int64, error) {
+	var out [8]int64
+	err := tx.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM events WHERE run_id=$1),
+		(SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1),
+		(SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1),
+		(SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1),
+		(SELECT COALESCE(SUM(revision),0) FROM entity_state WHERE run_id=$1),
+		(SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1),
+		(SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1),
+		(SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id=$1))`, run).Scan(&out[0], &out[1], &out[2], &out[3], &out[4], &out[5], &out[6], &out[7])
+	if err != nil {
+		return [8]int64{}, err
+	}
+	return out, nil
+}
+
 func ReadFanOutSourceProgressStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (FanOutSourceProgressStorage, error) {
 	var out FanOutSourceProgressStorage
 	err := tx.QueryRowContext(ctx, `SELECT i.cursor,i.status FROM fan_out_intents i JOIN event_deliveries d ON d.delivery_id=i.triggering_delivery_id WHERE i.run_id=$1 AND d.event_id=$2`, runID, eventID).Scan(&out.Cursor, &out.Status)

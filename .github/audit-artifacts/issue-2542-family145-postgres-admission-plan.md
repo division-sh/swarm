@@ -2235,3 +2235,48 @@ are qualified (M2 plus fan-in4); the semantic constructor debit is provisional,
 as is the separately recorded Docker debit. This is not a fresh global census,
 downward ratchet, restart qualification or full-family closure claim. Remaining
 conformance nested/serving/supplemental carriers are the next authorized D groups.
+
+### Whole nested-serving and repeated-trigger carrier closure
+
+Both newNestedServingRuntime and b17MixedNestedRuntime now return only the real
+runtime, with native location construction and no pool. The complete consumer
+chain includes A2's repeated-trigger proof, all capacity/direct-membership/many-
+intent roots, prepared refusal, held-child cancellation, interrupted group replay
+and B17's mixed dependency observer. Nineteen source-pinned declarations across
+eight files lose every DB parameter, field, argument and direct SQL operation.
+The B17 observer retains its full original held-child boundary and four INDEPENDENT
+ordered reads; no post-hoc filtering, combined snapshot or changed disposal gate.
+
+Existing event-record, pipeline, entity and closed delivery owners retain the
+original physical predicates. Required rows still refuse with sql.ErrNoRows;
+owed/defaulted counts remain zero, while source-mutation NULL stays strict.
+Barrier reads preserve all five key columns. Event discovery retains immediate
+parent/run/name, duplicate siblings and exact ID order; unparented/run-name and
+fixed completion discovery do not gain a parent filter. Entity state/fields and
+path/state/fields use their distinct original projections. Repeated-trigger replay
+keeps the one-statement eight-field snapshot, including attempt membership through
+the exact run's deliveries. No raw handles, caller SQL/selectors or callbacks cross
+the public fixture boundary; native lifetime, gates and cleanup order are unchanged.
+
+| Complete consumer/proof group | Receipt |
+| --- | --- |
+| Eight original roots/sixteen backend cells | reset-nested-original-workloads-green.jsonl, race/count1/GOMAXPROCS2 GREEN233.804s; each original deadline and behavioral assertion retained |
+| Final exact state/fields projection in uncertain group replay | Affected original root rerun only, both-store race GREEN36.311s; other unchanged workload receipts carry |
+| All21 fixed operations: absence, NULL/default, cancellation/foreign/raw/closed | Native grouped controls GREEN18.545s, original independent-read counters and zero writes |
+| Immediate-parent sibling multiplicity/ID order, run-name non-narrowing | Native canonical root/child publications, two selected reads/no writes GREEN14.496s |
+| Actual source-predicate deletion and snapshot run widening | Each injected production-query mutant RED on BOTH stores at its intended assertion; restored scope control GREEN14.638s |
+| Every finite consumer, assertion and original cut | Finite19-declaration conservation/foreign-cut/duplicate/raw/weak-assertion controls; historical receipts and complete finite idempotence GREEN8.314s |
+| Candidate source/type and dependency controls | One complete overlay GREEN140.643s; exact persistence guards across seven owner packages GREEN; unchanged80-root sweep carries; source-golden/current-selector roots GREEN1.994s; U1000 clean; dry-run Changes:[] |
+
+Original workload SHA256
+76aeadefa0721e579d839a2d7fde31b4e494ede7db678f152dd829d4acf95d57;
+native controls5aa65dff6a2d86e6a526543c351c10c97f96bb1ee44cb4efce533a56961bbc9c;
+overlayc21209f33ceaeb622db84bde536370a90d67cea3ffaeb31da541571d8b74463a.
+Corpus1086/234 current transitions, digest
+8c0d8e736f3fd7125dc18871106eb676a91bac37f173df5fa57c7c410fcf51b5;
+all893 historical tuples/24 receipts retained. Two more ordinary openings are
+execution-qualified: source-spelling126 =111 outside plus15 private, provisional
+M0/D89/S37. No fresh global census, baseline/ratchet update or parent closure.
+The prior semantic/M01/Docker holds remain unchanged; no full cardinality rerun.
+Next: ready serving/supplemental dependencies, keeping their exact live-fault
+and possession-loss S cuts separate from mechanical propagation.

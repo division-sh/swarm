@@ -6914,6 +6914,20 @@ engine:
                 runtime-log payloads by descending insertion sequence. Real native insert faults, immutable captured
                 sources, partition equivalence, retry/blocked isolation, receiver drain and joined cleanup remain
                 mandatory execution proofs; source-spelling migration alone is not their qualification.
+              nested_fan_out_fixture_observation: >-
+                Nested serving and repeated-trigger fixtures retain the original selected owner, not a returned pool,
+                in every constructor, readback helper and execution-boundary observer. Event identity discovery
+                preserves exact run/name/source predicates, original ordering and SQL NULL behavior; physical
+                pipeline receipts retain their outcome-only projection and distinct success-only/count cuts.
+                Barrier status/summary and intent cursor/claim/source-mutation reads preserve every exact key
+                component. Run-wide outcomes, committed prefixes, account-path child keys and entity fields/revision
+                remain physical witnesses without eligibility, decoded-source or lifecycle narrowing. Independent
+                predecessor/current receipt and continuation-handoff reads stay independent in their original order.
+                The repeated-trigger no-mutation witness retains its one-statement eight-field count/revision/attempt
+                snapshot, not a reconstructed sequence of reads or summaries. Empty owed work retains COALESCE while
+                absent required rows and strict scalar NULL reads refuse without partial evidence. Real publication,
+                held-handler, precommit-refusal, cancellation, acknowledgment-loss, repeated-trigger and joined-cleanup
+                assertions are unchanged; native construction or read ownership alone does not qualify those workloads.
               fork_receiver_execution_faults: The active fork-receiver header fault changes only current_state from active to done for the exact run and entity, requiring exactly one row without adding a path filter or workflow transition. The exact delivery-claim age fault consumes the actual held opaque claim and changes only the original UTC now-minus-two-hours started/created and now-minus-one-hour updated/expiry cuts. Its obligation predicate retains delivery, run, version and in-progress status; its attempt predicate retains delivery, version, token and open-marker. Both statements require one row in a single original unrevisioned native write transaction, and any mismatch rolls back the complete fault. Neither operation changes business fields, revisions, companions, status, history or claim identity; real ClaimDelivery alone mints a successor. Public fixture bridges are SQL-free error-only operations, not selectors, raw getters, reconstructed coordinators or mutation-admission overrides.
               selected_fork_predecessor_setup: Selected-fork predecessor fixtures consume the original selected native coordinator for their exact source/run/event/entity and historical time. The fixed headerless entity setup preserves its pending lifecycle mutation, physical field defaults, revision and clocks without manufacturing a flow header or readiness; both rows commit together or neither survives a failed seed. Source availability consumes the existing run-source admission owner's presence check, not an earlier artifact decoder or a repair. Historical snapshot capture uses the existing revision fixture adapter within one selected mutation attempt and returns only its acknowledged exact revision receipt, including explicitly requested canonical fact families; failure yields no provisional receipt. No raw pool, transaction, callback, reconstructed coordinator or execution authority crosses these public fixture ports.
               selected_fork_component_runtime_authority: >-
