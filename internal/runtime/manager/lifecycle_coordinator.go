@@ -857,11 +857,7 @@ func lifecycleReintroductionOperationID(identity runtimeagentidentity.Identity, 
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join(parts, "\x00"))).String()
 }
 
-func lifecycleReintroductionAuthority(store AgentLifecyclePersistence, previous ProcessExecutionBinding) (string, ProcessExecutionBinding, error) {
-	return lifecycleMutationExecutionAuthority(store, previous, "restart", false)
-}
-
-func lifecycleMutationExecutionAuthority(store AgentLifecyclePersistence, previous ProcessExecutionBinding, nominalKind string, terminal bool) (string, ProcessExecutionBinding, error) {
+func lifecycleExecutionBinding(store AgentLifecyclePersistence, previous ProcessExecutionBinding, nominalKind string, terminal bool) (string, ProcessExecutionBinding, error) {
 	provider, ok := store.(processExecutionBindingProvider)
 	if !ok {
 		return "", ProcessExecutionBinding{}, errors.New("lifecycle mutation requires process execution binding")
@@ -870,22 +866,11 @@ func lifecycleMutationExecutionAuthority(store AgentLifecyclePersistence, previo
 	if err != nil {
 		return "", ProcessExecutionBinding{}, fmt.Errorf("load lifecycle reintroduction process binding: %w", err)
 	}
-	if err := previous.Validate(); err != nil {
-		return "", ProcessExecutionBinding{}, fmt.Errorf("previous lifecycle process binding: %w", err)
+	kind, err := previous.LifecycleMutationKind(target, nominalKind, terminal)
+	if err != nil {
+		return "", ProcessExecutionBinding{}, err
 	}
-	if err := target.Validate(); err != nil {
-		return "", ProcessExecutionBinding{}, fmt.Errorf("target lifecycle process binding: %w", err)
-	}
-	if previous.Equal(target) {
-		return strings.TrimSpace(nominalKind), target, nil
-	}
-	if sameProcessExecutionOwner(previous, target) {
-		if terminal {
-			return "source_set_retire", target, nil
-		}
-		return "source_set_rebind", target, nil
-	}
-	return "process_takeover", target, nil
+	return kind, target, nil
 }
 
 func (c *agentLifecycleCoordinator) registerExecution(ctx context.Context, rec PersistedAgent, persist bool, agent Agent, admission semanticview.FlowOwnedAgentSubscriptionAdmission) error {
@@ -982,7 +967,7 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 			Topology: topology, Now: now,
 		}
 		if terminated {
-			operationKind, targetBinding, authorityErr := lifecycleReintroductionAuthority(store, previous.ProcessBinding)
+			operationKind, targetBinding, authorityErr := lifecycleExecutionBinding(store, previous.ProcessBinding, "restart", false)
 			if authorityErr != nil {
 				return authorityErr
 			}
@@ -1790,7 +1775,7 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 	operationKind := trigger
 	targetBinding := cell.processBinding
 	if store != nil {
-		operationKind, targetBinding, err = lifecycleMutationExecutionAuthority(store, cell.processBinding, trigger, false)
+		operationKind, targetBinding, err = lifecycleExecutionBinding(store, cell.processBinding, trigger, false)
 		if err != nil {
 			c.mu.Unlock()
 			return nil, runtimeeffects.LifecycleToken{}, nil, err
@@ -2100,7 +2085,7 @@ func (c *agentLifecycleCoordinator) commitDeferredAgentTerminationLocked(
 	store := c.persistence()
 	if store != nil {
 		targetBinding := cell.processBinding
-		operationKind, targetBinding, err = lifecycleMutationExecutionAuthority(store, cell.processBinding, operationKind, true)
+		operationKind, targetBinding, err = lifecycleExecutionBinding(store, cell.processBinding, operationKind, true)
 		if err != nil {
 			return AgentLifecycleTransitionResult{}, err
 		}
@@ -2343,7 +2328,7 @@ func (c *agentLifecycleCoordinator) commitIdentityTerminationLocked(
 		processBinding := cell.processBinding
 		if store != nil {
 			targetBinding := cell.processBinding
-			operationKind, targetBinding, err = lifecycleMutationExecutionAuthority(store, cell.processBinding, operationKind, true)
+			operationKind, targetBinding, err = lifecycleExecutionBinding(store, cell.processBinding, operationKind, true)
 			if err != nil {
 				return agentTerminalCommit{}, err
 			}
