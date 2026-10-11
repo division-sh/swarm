@@ -176,7 +176,14 @@ func TestSchemaBootstrapRejectsLegacyPlatformShapesUnchanged(t *testing.T) {
 	}
 
 	for _, backend := range []SchemaDialect{SchemaDialectSQLite, SchemaDialectPostgres} {
-		for _, tc := range cases {
+		backendCases := cases
+		if backend == SchemaDialectPostgres {
+			backendCases = append(append([]legacyShape(nil), cases...), legacyShape{
+				name: "api_completion_jsonb", table: "api_idempotency",
+				postgres: []string{`ALTER TABLE api_idempotency ALTER COLUMN response TYPE JSONB USING response::jsonb`},
+			})
+		}
+		for _, tc := range backendCases {
 			t.Run(string(backend)+"/"+tc.name, func(t *testing.T) {
 				request := canonicalSchemaBootstrapTestRequest(t)
 				db, bootstrap := legacyShapeTestStore(t, backend, request)
