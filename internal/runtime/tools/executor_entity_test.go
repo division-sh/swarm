@@ -584,7 +584,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 	if errs := runtimetools.ValidateGeneratedToolSchemaClosureForSource(source); len(errs) > 0 {
 		t.Fatalf("ValidateGeneratedToolSchemaClosureForSource errors = %#v", errs)
 	}
-	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
 	saveSchema := names["save_validation_case_business_brief"].Schema.(map[string]any)
 	if err := runtimetools.ValidatePayloadAgainstSchema(saveSchema, map[string]any{
@@ -608,7 +608,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 	if err != nil || !found || before.EntityID != entityID || before.CurrentState != "queued" || before.Revision < 1 {
 		t.Fatalf("malformed-write control requires a live constructed target: found=%t instance=%+v err=%v", found, before, err)
 	}
-	beforeField := persistedEntityField(t, db, entityID, "business_brief")
+	beforeField := persistedEntityField(t, ctx, entityID, "business_brief")
 	currentCtx := runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		"evt-current",
 		events.EventType("validation.started"),
@@ -638,7 +638,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 		violation.Expected != "declared property" || violation.Actual != "undeclared property" {
 		t.Fatalf("malformed payload must reject exactly the undeclared notes property: %#v, %v", violation, err)
 	}
-	if got := persistedEntityField(t, db, entityID, "business_brief"); got != beforeField || strings.Contains(got, "after") || strings.Contains(got, "runtime bypass") {
+	if got := persistedEntityField(t, ctx, entityID, "business_brief"); got != beforeField || strings.Contains(got, "after") || strings.Contains(got, "runtime bypass") {
 		t.Fatalf("runtime validation failure still mutated entity: %s", got)
 	}
 	after, found, err := fixture.pipeline.Load(ctx, owner)
@@ -657,7 +657,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 		t.Fatalf("valid sibling payload has no exact write acknowledgement: %#v", output)
 	}
 	var saved map[string]any
-	if err := json.Unmarshal([]byte(persistedEntityField(t, db, entityID, "business_brief")), &saved); err != nil ||
+	if err := json.Unmarshal([]byte(persistedEntityField(t, ctx, entityID, "business_brief")), &saved); err != nil ||
 		!reflect.DeepEqual(saved, map[string]any{"summary": "after", "confidence": float64(9)}) {
 		t.Fatalf("valid sibling payload was not persisted exactly: %#v err=%v", saved, err)
 	}
@@ -745,7 +745,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 	if !ok || strings.TrimSpace(asString(brief["summary"])) != "after" {
 		t.Fatalf("read current business_brief = %#v, want updated current entity", got)
 	}
-	if got := persistedEntityField(t, db, siblingID, "business_brief"); strings.Contains(got, "after") {
+	if got := persistedEntityField(t, ctx, siblingID, "business_brief"); strings.Contains(got, "after") {
 		t.Fatalf("generated save touched sibling entity: %s", got)
 	}
 
@@ -3206,15 +3206,23 @@ func seedEntityStateRow(t *testing.T, db *sql.DB, entityID, flowInstance, entity
 	}
 }
 
-func persistedEntityField(t *testing.T, db *sql.DB, entityID, field string) string {
+func persistedEntityField(t *testing.T, ctx context.Context, entityID, field string) string {
 	t.Helper()
-	var raw []byte
-	if err := db.QueryRow(`
-		SELECT COALESCE(fields -> $2, 'null'::jsonb)
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $3::uuid
-	`, entityToolTestRunID, field, entityID).Scan(&raw); err != nil {
+	fixture, ok := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
+	if !ok {
+		t.Fatal("persisted field observation requires its original fixture owner")
+	}
+	projection, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, fixture.selected, entityToolTestRunID, entityID)
+	if err != nil {
 		t.Fatalf("read persisted entity field %s.%s: %v", entityID, field, err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(projection.Fields, &fields); err != nil {
+		t.Fatal(err)
+	}
+	raw, present := fields[field]
+	if !present {
+		return "null"
 	}
 	return strings.TrimSpace(string(raw))
 }
