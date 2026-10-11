@@ -1,7 +1,7 @@
 package cataloge2e
 
 import (
-	"strings"
+	"errors"
 	"testing"
 	"time"
 
@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
@@ -17,7 +18,8 @@ import (
 func TestReceiverMaterializationRootPreflightBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			h := newRuntimeHarnessForBackend(t, canonicalrouting.CopyReceiverMaterializationIntoRoot(t), backend, true)
+			foreignRunID := uuid.NewString()
+			h := newRuntimeHarnessForBackend(t, canonicalrouting.CopyReceiverMaterializationIntoRoot(t), backend, true, foreignRunID)
 			if err := h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "work.requested", Payload: map[string]any{"token": "constructed"}}, 20*time.Second, true); err != nil {
 				t.Fatal(err)
 			}
@@ -41,20 +43,26 @@ func TestReceiverMaterializationRootPreflightBothStores(t *testing.T) {
 				if delivery.Recipient.IsAgent() {
 					want = events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: ".", FlowInstance: catalogRuntimeRunID})
 				}
-				if !events.SameDeliveryTargetOwnership(delivery.Target, want) || !delivery.Initialization.Empty() {
+				if !events.SameDeliveryTargetOwnership(delivery.Target, want) {
 					t.Fatalf("root preflight inherited source or invented construction: %+v", delivery)
+				}
+				if delivery.Recipient.IsAgent() {
+					requireExistingRootConstructionDependency(t, h, event, delivery)
+				} else if !delivery.Initialization.Empty() {
+					t.Fatal("existing root node acquired new construction authority")
 				}
 			}
 			if err := events.ValidateReceiverMaterializations(event, plan.DeliveryRoutes); err != nil {
 				t.Fatal(err)
 			}
 			foreign := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), event.Type(), event.Producer(), "", event.Payload(), 0,
-				events.EventLineage{RunID: uuid.NewString(), ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live},
+				events.EventLineage{RunID: foreignRunID, ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live},
 				event.NormalizedEnvelope(), source, time.Now().UTC())
 			// An unrelated run cannot borrow this root or use a child output as
 			// construction authority for its missing header.
-			other, err := h.rt.Bus.CheckPublishRecipientPlan(catalogRunContext(h, catalogRuntimeRunID), foreign)
-			if err == nil || !strings.Contains(err.Error(), "construct it before handler delivery") {
+			other, err := h.rt.Bus.CheckPublishRecipientPlan(catalogRunContext(h, foreignRunID), foreign)
+			var absent *pipeline.WorkflowInstanceLookupMiss
+			if !errors.As(err, &absent) || absent.RequestedKey != foreignRunID || len(other.DeliveryRoutes) != 0 {
 				t.Fatalf("unconstructed second run preflight must refuse: %+v %v", other, err)
 			}
 			var count int
@@ -170,6 +178,7 @@ func TestReceiverMaterializationSourceLocalTargetlessAgentControlBothStores(t *t
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			h := newRuntimeHarnessForBackend(t, canonicalrouting.CopyReceiverMaterializationSourceLocalObserver(t), backend, true)
+			h.seedInitialState(catalogRuntimeRunID)
 			if err := h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "start.seeded", Payload: map[string]any{"token": "local"}}, 20*time.Second, true); err != nil {
 				t.Fatal(err)
 			}
@@ -195,9 +204,13 @@ func TestReceiverMaterializationSourceLocalTargetlessAgentControlBothStores(t *t
 					continue
 				}
 				observers++
-				if !route.Target.Empty() || !route.Initialization.Empty() || route.AgentIdentity.RunID != catalogRuntimeRunID {
-					t.Fatalf("source-local observer invented receiving state: %+v", route)
+				// This authored observer is entityless, not a runtime-created
+				// targetless actor: it retains its original root construction.
+				want := events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: ".", FlowInstance: catalogRuntimeRunID})
+				if !events.SameDeliveryTargetOwnership(route.Target, want) || route.AgentIdentity.RunID != catalogRuntimeRunID {
+					t.Fatalf("source-local observer acquired another actor owner: %+v", route)
 				}
+				requireExistingRootConstructionDependency(t, h, publication.Event.Event(), route)
 				deliveryID, err := deliverylifecycle.DeliveryID(id, route)
 				if err != nil {
 					t.Fatal(err)
@@ -219,6 +232,17 @@ func TestReceiverMaterializationSourceLocalTargetlessAgentControlBothStores(t *t
 			}
 			if observers != 1 {
 				t.Fatal("source-local declared observer omitted")
+			}
+			var providerCalls int
+			h.llm.mu.Lock()
+			for _, call := range h.llm.deliveryCalls {
+				if call.RunID == catalogRuntimeRunID && call.EventID == id && call.AgentID == "observer" && call.TargetEntityID == "" {
+					providerCalls++
+				}
+			}
+			h.llm.mu.Unlock()
+			if providerCalls != 1 {
+				t.Fatalf("source-local declared observer provider executions=%d, want1", providerCalls)
 			}
 		})
 	}

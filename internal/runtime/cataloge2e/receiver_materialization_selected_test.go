@@ -122,6 +122,17 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 				}
 			}
 			requireDeclaredAgentReceiverOwnership(t, child, node, agent)
+			historical, fixed := agent.Route.Initialization.HistoricalConstruction()
+			if !fixed || historical.SourceRunID != catalogRuntimeRunID || historical.SourceRevision != result.Materialization.ForkPoint.Revision ||
+				historical.SourceReceiver != agent.Route.AgentIdentity.Route || agent.Route.Initialization.ConstructionTarget().Route() != node.Route.Target.Route() {
+				t.Fatal("selected receiver lost its exact fixed-cut construction dependency")
+			}
+			if err := agent.Route.Initialization.ValidateEvent(publication.Event.Event()); err != nil {
+				t.Fatal(err)
+			}
+			if err := agent.Route.Initialization.ValidateRoute(agent.Route); err != nil {
+				t.Fatal(err)
+			}
 			if !agent.Authority.Equal(node.Authority) {
 				t.Fatalf("selected ownership relation changed: node=%+v agent=%+v", node, agent)
 			}

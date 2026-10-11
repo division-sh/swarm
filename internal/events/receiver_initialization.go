@@ -19,6 +19,13 @@ type ReceiverInitialization struct {
 	runID, eventID string
 	target         DeliveryTargetOwnership
 	receiver       agentidentity.Route
+	historical     HistoricalReceiverConstruction
+}
+
+type HistoricalReceiverConstruction struct {
+	SourceRunID    string              `json:"source_run_id"`
+	SourceRevision int64               `json:"source_revision"`
+	SourceReceiver agentidentity.Route `json:"source_receiver"`
 }
 
 func AdmitFlowReceiverInitialization(event Event, target DeliveryTargetOwnership, receiver agentidentity.Route) (ReceiverInitialization, error) {
@@ -37,12 +44,23 @@ func AdmitStoredFlowReceiverInitialization(runID, creatingEventID string, target
 	return s, s.validate()
 }
 
+func AdmitHistoricalFlowReceiverInitialization(runID string, target DeliveryTargetOwnership, receiver agentidentity.Route, historical HistoricalReceiverConstruction) (ReceiverInitialization, error) {
+	if !target.ExistingEntity() || historical == (HistoricalReceiverConstruction{}) {
+		return ReceiverInitialization{}, fmt.Errorf("historical receiver construction requires its exact fixed cut")
+	}
+	s := ReceiverInitialization{runID: runID, target: target, receiver: receiver, historical: historical}
+	return s, s.validate()
+}
+
 func (s ReceiverInitialization) Empty() bool                                 { return s.runID == "" }
 func (s ReceiverInitialization) CreatingEventID() string                     { return s.eventID }
 func (s ReceiverInitialization) ConstructionTarget() DeliveryTargetOwnership { return s.target }
 func (s ReceiverInitialization) ReceiverRoute() agentidentity.Route          { return s.receiver }
 func (s ReceiverInitialization) FlowLifecycle() bool                         { return !s.Empty() }
 func (s ReceiverInitialization) Equal(other ReceiverInitialization) bool     { return s == other }
+func (s ReceiverInitialization) HistoricalConstruction() (HistoricalReceiverConstruction, bool) {
+	return s.historical, s.historical != (HistoricalReceiverConstruction{})
+}
 
 func (s ReceiverInitialization) validate() error {
 	if canonicalMaterializationUUID(s.runID) != nil ||
@@ -60,6 +78,13 @@ func (s ReceiverInitialization) validate() error {
 	}
 	if path != s.target.Route().FlowInstance {
 		return fmt.Errorf("receiver initialization coordinates contradict construction target")
+	}
+	if historical, present := s.HistoricalConstruction(); present {
+		if s.eventID != "" || !s.target.ExistingEntity() ||
+			canonicalMaterializationUUID(historical.SourceRunID) != nil || historical.SourceRunID == s.runID || historical.SourceRevision <= 0 ||
+			historical.SourceReceiver != s.receiver || historical.SourceReceiver.Validate() != nil {
+			return fmt.Errorf("historical receiver initialization contradicts its captured source and fixed cut")
+		}
 	}
 	return nil
 }
@@ -104,16 +129,28 @@ func (s ReceiverInitialization) ValidateRoute(route DeliveryRoute) error {
 }
 
 type receiverInitializationWire struct {
-	Kind     string                  `json:"kind"`
-	RunID    string                  `json:"run_id"`
-	EventID  string                  `json:"event_id"`
-	Target   DeliveryTargetOwnership `json:"target"`
-	Receiver agentidentity.Route     `json:"receiver_route"`
+	Kind       string                          `json:"kind"`
+	RunID      string                          `json:"run_id"`
+	EventID    string                          `json:"event_id"`
+	Target     DeliveryTargetOwnership         `json:"target"`
+	Receiver   agentidentity.Route             `json:"receiver_route"`
+	Historical *HistoricalReceiverConstruction `json:"historical,omitempty"`
+}
+
+type historicalReceiverInitializationWire struct {
+	Kind       string                         `json:"kind"`
+	RunID      string                         `json:"run_id"`
+	Target     DeliveryTargetOwnership        `json:"target"`
+	Receiver   agentidentity.Route            `json:"receiver_route"`
+	Historical HistoricalReceiverConstruction `json:"historical"`
 }
 
 func (s ReceiverInitialization) MarshalJSON() ([]byte, error) {
 	if err := s.validate(); err != nil {
 		return nil, err
+	}
+	if historical, present := s.HistoricalConstruction(); present {
+		return json.Marshal(historicalReceiverInitializationWire{Kind: "flow_historical", RunID: s.runID, Target: s.target, Receiver: s.receiver, Historical: historical})
 	}
 	return json.Marshal(receiverInitializationWire{Kind: "flow_lifecycle", RunID: s.runID, EventID: s.eventID, Target: s.target, Receiver: s.receiver})
 }
@@ -135,19 +172,22 @@ func decodeReceiverInitialization(raw []byte, decoded semanticvalue.Value) (Rece
 	if decoded.Kind() != semanticvalue.KindObject || decoded.Len() != 5 {
 		return ReceiverInitialization{}, fmt.Errorf("receiver initialization requires every construction binding field")
 	}
-	for _, field := range []string{"kind", "run_id", "event_id", "target", "receiver_route"} {
+	kind, _ := decoded.Lookup("kind")
+	kindText, _ := kind.String()
+	fields := []string{"kind", "run_id", "event_id", "target", "receiver_route"}
+	if kindText == "flow_historical" {
+		fields[2] = "historical"
+		if err := validateHistoricalReceiverInitialization(decoded); err != nil {
+			return ReceiverInitialization{}, err
+		}
+	}
+	for _, field := range fields {
 		if value, present := decoded.Lookup(field); !present || value.Kind() == semanticvalue.KindNull {
 			return ReceiverInitialization{}, fmt.Errorf("receiver initialization missing %s", field)
 		}
 	}
-	receiver, _ := decoded.Lookup("receiver_route")
-	if receiver.Kind() != semanticvalue.KindObject || receiver.Len() != 4 {
-		return ReceiverInitialization{}, fmt.Errorf("receiver initialization requires complete captured coordinates")
-	}
-	for _, field := range []string{"presence", "scope_key", "instance_id", "instance_path"} {
-		if value, present := receiver.Lookup(field); !present || value.Kind() != semanticvalue.KindString {
-			return ReceiverInitialization{}, fmt.Errorf("receiver initialization has invalid %s", field)
-		}
+	if err := validateReceiverInitializationCoordinates(decoded, "receiver_route"); err != nil {
+		return ReceiverInitialization{}, err
 	}
 	var wire receiverInitializationWire
 	d := json.NewDecoder(bytes.NewReader(raw))
@@ -158,11 +198,43 @@ func decodeReceiverInitialization(raw []byte, decoded semanticvalue.Value) (Rece
 	if err := d.Decode(new(any)); err != io.EOF {
 		return ReceiverInitialization{}, fmt.Errorf("receiver initialization requires one object")
 	}
-	if wire.Kind != "flow_lifecycle" {
+	if wire.Kind != "flow_lifecycle" && wire.Kind != "flow_historical" {
 		return ReceiverInitialization{}, fmt.Errorf("unknown receiver initialization authority %q", wire.Kind)
 	}
 	value := ReceiverInitialization{runID: wire.RunID, eventID: wire.EventID, target: wire.Target, receiver: wire.Receiver}
+	if wire.Kind == "flow_historical" {
+		if wire.Historical == nil {
+			return ReceiverInitialization{}, fmt.Errorf("historical receiver initialization lacks fixed-cut evidence")
+		}
+		return AdmitHistoricalFlowReceiverInitialization(wire.RunID, wire.Target, wire.Receiver, *wire.Historical)
+	}
 	return value, value.validate()
+}
+
+func validateReceiverInitializationCoordinates(decoded semanticvalue.Value, field string) error {
+	receiver, _ := decoded.Lookup(field)
+	if receiver.Kind() != semanticvalue.KindObject || receiver.Len() != 4 {
+		return fmt.Errorf("receiver initialization requires complete captured coordinates")
+	}
+	for _, key := range []string{"presence", "scope_key", "instance_id", "instance_path"} {
+		if value, present := receiver.Lookup(key); !present || value.Kind() != semanticvalue.KindString {
+			return fmt.Errorf("receiver initialization has invalid %s", key)
+		}
+	}
+	return nil
+}
+
+func validateHistoricalReceiverInitialization(decoded semanticvalue.Value) error {
+	historical, _ := decoded.Lookup("historical")
+	if historical.Kind() != semanticvalue.KindObject || historical.Len() != 3 {
+		return fmt.Errorf("historical receiver initialization requires every fixed-cut coordinate")
+	}
+	for _, field := range []string{"source_run_id", "source_revision", "source_receiver"} {
+		if value, present := historical.Lookup(field); !present || value.Kind() == semanticvalue.KindNull {
+			return fmt.Errorf("historical receiver initialization missing %s", field)
+		}
+	}
+	return validateReceiverInitializationCoordinates(historical, "source_receiver")
 }
 
 type receiverInitializationRecord struct {

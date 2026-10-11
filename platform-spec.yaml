@@ -2113,8 +2113,12 @@ contract_formats:
             construction, including recursive static children, finishes in the canonical constructor commit before any
             ordinary node or agent handler executes. Handler flags, field references, effects, route ordering, future IDs
             and node completion cannot establish construction authority. Flow-owned agent execution carries closed
-            ReceiverInitialization dependency evidence independently of the actor target, with exactly
-            kind=flow_lifecycle, run_id, event_id, target and receiver_route. The target is the selected constructed
+            ReceiverInitialization dependency evidence independently of the actor target. Native evidence has exactly
+            kind=flow_lifecycle, run_id, event_id, target and receiver_route. Admitted fixed-cut evidence has exactly
+            kind=flow_historical, run_id, target, receiver_route and historical. The historical object requires exactly
+            source_run_id, positive integer source_revision and the complete source_receiver coordinate. Historical
+            evidence carries no native event_id and is never interpreted as startup creating-event absence.
+            The target is the selected constructed
             flow/header; receiver_route captures the constructor's complete canonical root-or-present agent coordinate,
             including declaration scope, logical instance and physical instance path, not a path-derived approximation.
             The receiver_route wire requires presence, scope_key, instance_id and instance_path exactly, including
@@ -2135,8 +2139,14 @@ contract_formats:
             compare the actor's exact stored entity value; empty is exactly empty, never a wildcard for a header entity.
             Ordinary agent-only fork replay validates the complete source publication at the selected revision, requires
             exact reconstructed receiver ownership, and rechecks the child row in the selected activation transaction.
-            Historical projection is not fresh construction: it admits existing_entity without copying source
-            initialization or granting unsupported historical execution. Existing root receivers use the same projection;
+            Historical projection is not fresh construction: the instance index admits the exact fixed-cut existing
+            flow/header, while each actor retains its independent entity ownership, including exactly empty. Pending
+            historical attachment retains its fixed-cut dependency through planning, durable delivery identity,
+            restoration and replay. Readiness and claim validate it in the original transaction through the existing
+            historical construction reader, against durable fork lineage and the captured immutable constructor.
+            Missing native evidence never falls back to history; conflicting present native and historical evidence
+            rejects the whole observation. No source initialization is copied and no
+            unsupported historical execution is granted. Existing root receivers use the same projection;
             staged non-agent and timer replay refusals remain unchanged. Untargeted agent receivers retain their explicit
             absence of entity ownership. Agent claims and continuation eligibility require the exact constructed target,
             the exact admitted agent lifecycle cell, and the matching live normal or selected generation grant. An agent

@@ -507,6 +507,7 @@ units:
       - github.com/division-sh/swarm/internal/runtime/bus
     required_children:
       TestOperatorEventPublishAgentHeaderSelectorsBothStores: [sqlite/review, sqlite/other, postgres/review, postgres/other]
+      TestHistoricalAgentAttachmentCannotBorrowNativeConstruction: [admitted_historical, native_receipt_omitted, historical_dependency_omitted, no_admitted_history, foreign_run, foreign_header, actor_entity_loan]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
@@ -627,6 +628,10 @@ units:
       - github.com/division-sh/swarm/internal/runtime/cataloge2e
     run: '^(Test($|[^CS].*|Stage.*|StaticDataInvocationGoldenConsumesAdmittedIdentity|ScatterGatherFrontierAggregatePreservesRefusalsBothStores|SelectedDownstreamPreparationFailsBeforeMaterializationBothStores|SelectedForkRecoveredReceiverReadinessBothStores|SelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic|SelectedForkPendingRootAgentInputBothStores)|Example.*|Fuzz.*)$'
     required_children:
+      TestReceiverMaterializationRootPreflightBothStores: [sqlite, postgres]
+      TestReceiverMaterializationSourceLocalTargetlessAgentControlBothStores: [sqlite, postgres]
+      TestReceiverMaterializationSelectedForkExecutionBothStores: [sqlite, postgres]
+      TestReceiverMaterializationSelectedForkPublicationFrontierBothStores: [sqlite, postgres]
       TestReceiverConstructionBeforeNodeAndAgentExecutionBothStores: [sqlite/collector, sqlite/renamed-observer, postgres/collector, postgres/renamed-observer]
       TestReceiverSuppliedStateMutationReuseRestartAndSelectedHistoryBothStores: [sqlite, postgres]
     count_mode: count-1

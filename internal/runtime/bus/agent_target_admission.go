@@ -248,8 +248,21 @@ func admitObservedAgentConstructionDependency(runID string, observation pipeline
 		return events.ReceiverInitialization{}, events.RouteIdentity{}, err
 	}
 	if !native {
-		// Fixed-cut historical admission is not a fresh native publication.
-		return events.ReceiverInitialization{}, target, nil
+		historical, admitted := observation.HistoricalConstruction()
+		if !admitted {
+			return events.ReceiverInitialization{}, events.RouteIdentity{}, fmt.Errorf("agent construction lacks native or admitted historical evidence")
+		}
+		receiver, err := identity.Route().AgentIdentityRoute()
+		if err != nil {
+			return events.ReceiverInitialization{}, events.RouteIdentity{}, err
+		}
+		sourceReceiver, err := historical.SourceOwner.Route.AgentIdentityRoute()
+		if err != nil {
+			return events.ReceiverInitialization{}, events.RouteIdentity{}, err
+		}
+		dependency, err := events.AdmitHistoricalFlowReceiverInitialization(runID, events.MustExistingEntityTarget(target), receiver,
+			events.HistoricalReceiverConstruction{SourceRunID: historical.SourceOwner.RunID, SourceRevision: historical.SourceRevision, SourceReceiver: sourceReceiver})
+		return dependency, target, err
 	}
 	receiver, err := identity.Route().AgentIdentityRoute()
 	if err != nil {

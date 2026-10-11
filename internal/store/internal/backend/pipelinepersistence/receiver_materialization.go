@@ -10,19 +10,34 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 func (s *PipelinePostgresOwner) ReceiverMaterializedTx(ctx context.Context, tx *sql.Tx, route events.DeliveryRoute) (bool, error) {
-	return receiverMaterializedTx(ctx, tx, route, false)
+	if tx == nil {
+		return false, fmt.Errorf("receiver construction requires its original transaction")
+	}
+	run, err := s.LoadSnapshotTx(ctx, tx, route.AgentIdentity.RunID, false)
+	if err != nil {
+		return false, err
+	}
+	return receiverMaterializedTx(ctx, tx, route, false, run, s.historicalInstances)
 }
 
 func (s *PipelineSQLiteOwner) ReceiverMaterializedTx(ctx context.Context, tx *sql.Tx, route events.DeliveryRoute) (bool, error) {
-	return receiverMaterializedTx(ctx, tx, route, true)
+	if tx == nil {
+		return false, fmt.Errorf("receiver construction requires its original transaction")
+	}
+	run, err := s.LoadSnapshotTx(ctx, tx, route.AgentIdentity.RunID)
+	if err != nil {
+		return false, err
+	}
+	return receiverMaterializedTx(ctx, tx, route, true, run, s.historicalInstances)
 }
 
 // Delivery settlement is not state ownership. The existing target persistence
 // owner admits the exact persisted halves before dependent execution is ready.
-func receiverMaterializedTx(ctx context.Context, tx *sql.Tx, route events.DeliveryRoute, sqlite bool) (bool, error) {
+func receiverMaterializedTx(ctx context.Context, tx *sql.Tx, route events.DeliveryRoute, sqlite bool, run runlifecycle.Snapshot, historical HistoricalFlowInstanceReader) (bool, error) {
 	if tx == nil || !route.Recipient.IsAgent() || route.Initialization.Empty() {
 		return false, fmt.Errorf("receiver materialization requires a transaction and exact construction dependency")
 	}
@@ -67,14 +82,38 @@ func receiverMaterializedTx(ctx context.Context, tx *sql.Tx, route events.Delive
 	if record.Lifecycle.Status == "terminated" {
 		return false, fmt.Errorf("materialized receiver lifecycle has terminated")
 	}
-	var receipt []byte
-	if err := tx.QueryRowContext(ctx, `SELECT projection FROM workflow_instance_initial_materializations
-			WHERE run_id=$1 AND instance_path=$2 AND entity_id=$3`, flow.RunID, flow.Route.InstancePath, entity.String()).Scan(&receipt); err != nil {
-		return false, fmt.Errorf("load exact receiver construction receipt: %w", err)
+	if historical == nil || run.RunID != flow.RunID {
+		return false, fmt.Errorf("receiver construction requires its exact native/historical owner")
 	}
-	original, err := pipeline.ProjectFlowConstructionPublication(receipt, flow, entity.String())
+	fixed, projected, err := historical.ReadHistoricalFlowInstanceConstructionEvidenceTx(ctx, tx, run, header)
 	if err != nil {
 		return false, err
+	}
+	original, recorded, err := ReadStoredFlowConstructionReceiptTx(ctx, tx, run.RunID, header)
+	if err != nil {
+		return false, err
+	}
+	if projected && recorded && (fixed.Identity != original.Identity || fixed.InstanceKey != original.InstanceKey) {
+		return false, fmt.Errorf("receiver native receipt contradicts fixed historical construction")
+	}
+	if recorded {
+		if err := original.ValidateStoredMode(header.Mode); err != nil {
+			return false, err
+		}
+	}
+	if dependency, isHistorical := route.Initialization.HistoricalConstruction(); isHistorical {
+		if !projected || fixed.Identity.TemplateID != target.FlowID || fixed.Identity.EntityID != target.EntityID ||
+			fixed.Identity.InstancePath != target.FlowInstance || fixed.SourceOwner.RunID != dependency.SourceRunID || fixed.SourceRevision != dependency.SourceRevision {
+			return false, fmt.Errorf("receiver dependency contradicts exact historical construction")
+		}
+		sourceReceiver, err := fixed.SourceOwner.Route.AgentIdentityRoute()
+		if err != nil || sourceReceiver != dependency.SourceReceiver {
+			return false, fmt.Errorf("receiver dependency contradicts captured historical coordinates")
+		}
+		return true, nil
+	}
+	if !recorded {
+		return false, fmt.Errorf("native receiver construction lacks its original receipt")
 	}
 	if original.Identity.TemplateID != target.FlowID {
 		return false, fmt.Errorf("receiver dependency contradicts original construction declaration")
