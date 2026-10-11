@@ -40,7 +40,7 @@ func validateSoakSelection(packages []string, run, skip, timeout, count, budget 
 		}
 		return nil
 	}
-	if timeout == ServedReporterGoTimeout && len(packages) == 1 && packages[0] == ServedReporterPackage && (run == ServedReporterRun || run == ServedReporterStressRun) && skip == "" && count == "count-1" && budget == "full" {
+	if isServedReporterSelection(packages, run, skip, timeout, count, budget) {
 		return nil
 	}
 	if timeout == PersistenceDebtGoTimeout && len(packages) == 1 && packages[0] == "github.com/division-sh/swarm/internal/store" && run == "^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtRatchet)$" && skip == "" && count == "count-1" && budget == "broad" {
@@ -56,6 +56,13 @@ func validateSoakSelection(packages []string, run, skip, timeout, count, budget 
 		return fmt.Errorf("only the exact separately executed soak or pipeline families may be excluded")
 	}
 	return nil
+}
+
+// The served progress and all-commit roots share one exact timeout envelope.
+func isServedReporterSelection(packages []string, run, skip, timeout, count, budget string) bool {
+	return timeout == ServedReporterGoTimeout && len(packages) == 1 && packages[0] == ServedReporterPackage &&
+		(run == ServedReporterRun || run == ServedReporterStressRun) && skip == "" &&
+		count == "count-1" && budget == "full"
 }
 
 // The complementary pipeline owner excludes only its two separately executed
