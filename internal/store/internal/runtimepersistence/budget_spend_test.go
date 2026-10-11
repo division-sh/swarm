@@ -135,13 +135,12 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 	for _, entity := range []struct {
 		id, flow, state string
 	}{{entityID, "flow/1", "active"}, {uuid.NewString(), "flow/done", "done"}} {
+		seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entity.id, entity.flow, "flow", "budget_entity", entity.state, "{}", recordedAt)
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO entity_state (
-				run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-				gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-			) VALUES ($1::uuid, $2::uuid, $3, 'budget_entity', $2, $2, $4,
-				'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $5, $5, $5)
-		`, runID, entity.id, entity.flow, entity.state, recordedAt); err != nil {
+				run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at
+			) VALUES ($1::uuid, $2::uuid, $3, 'budget_entity', $2, $2, '{}'::jsonb, $4, $4)
+		`, runID, entity.id, entity.flow, recordedAt); err != nil {
 			t.Fatalf("seed postgres budget entity %s: %v", entity.id, err)
 		}
 	}
@@ -219,7 +218,11 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 		t.Fatalf("budget projection targets = %#v, want both raw active-run targets", targets)
 	}
 	for _, target := range targets {
-		if target.RunID != runID || target.BundleHash == "" || target.FlowInstance == "" || target.Stage == "" {
+		wantStage, wantPath := "done", "flow/done"
+		if target.EntityID == entityID {
+			wantStage, wantPath = "active", "flow/1"
+		}
+		if target.RunID != runID || target.BundleHash == "" || target.FlowTemplate != "flow" || target.FlowInstance != wantPath || target.Stage != wantStage {
 			t.Fatalf("budget target lost source/flow/stage evidence: %#v", target)
 		}
 	}
@@ -236,12 +239,12 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 
 func seedSQLiteBudgetEntity(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, runID, entityID, flowInstance, state string, at time.Time) {
 	t.Helper()
+	seedWorkflowHeaderProjectionFixture(t, ctx, store.backend.ConstructionHandle(), runID, entityID, flowInstance, "flow", "budget_entity", state, "{}", at)
 	if _, err := store.backend.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES (?, ?, ?, 'budget_entity', ?, ?, ?, '{}', '{}', '{}', 1, ?, ?, ?)
-	`, runID, entityID, flowInstance, entityID, entityID, state, at, at, at); err != nil {
+			run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at
+		) VALUES (?, ?, ?, 'budget_entity', ?, ?, '{}', ?, ?)
+	`, runID, entityID, flowInstance, entityID, entityID, at, at); err != nil {
 		t.Fatalf("seed sqlite budget entity %s: %v", entityID, err)
 	}
 }
