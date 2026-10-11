@@ -933,6 +933,32 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(3, "runtime_composition", fmt.Errorf("command execution purpose is required"))
 		return 2
 	}
+	processWorkOwner := worklifetime.NewProcess()
+	apiProbe, err := startServeProcessProbe(ctx, processWorkOwner, opts.APIListenAddr, func(subject string, failure error) {
+		presenter.runtimeFailure(subject, failure)
+		cancelServe()
+	})
+	if err != nil {
+		presenter.fail(20, "http_listener_bind", err)
+		return 3
+	}
+	apiListener := apiProbe.listener
+	apiProbeOwnedByLifecycle := false
+	defer func() {
+		if !apiProbeOwnedByLifecycle {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), opts.ShutdownGrace)
+			defer cancel()
+			if err := apiProbe.Close(shutdownCtx); err != nil {
+				presenter.cleanupFailure("api probe shutdown", err)
+				if exitCode == 0 {
+					exitCode = 1
+				}
+			}
+		}
+	}()
+	if opts.TestAPIListenerBound != nil {
+		opts.TestAPIListenerBound(apiListener.Addr())
+	}
 	stores, err := buildStoresForServe(ctx, storeSelection, cfg)
 	if err != nil {
 		var acquisitionErr *runtimestartupownership.AcquisitionError
@@ -987,7 +1013,6 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		}
 		return cleanupErr
 	}
-	processWorkOwner := worklifetime.NewProcess()
 	selectedLifecycle, err := activateServeLifecycle(storeLifetime, processWorkOwner)
 	if err != nil {
 		presenter.fail(5, "runtime_context", err)
@@ -1002,8 +1027,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	var workspaces cliapp.ServeWorkspaceLifecycle
 	var processCapability runtimestartupownership.ProcessCapability
 	cancelOwnershipWatch := func() {}
-	var apiServer, mcpServer *http.Server
-	var apiListener, mcpListener net.Listener
+	var mcpServer *http.Server
+	var mcpListener net.Listener
 	httpServersStarted := false
 	var publicExposure *runtimepublicingress.Controller
 	var storyFollower *serveAuthorActivityFollower
@@ -1019,14 +1044,11 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		if publicExposure != nil {
 			shutdownErr = publicExposure.Stop(shutdownCtx)
 		}
-		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "api", apiServer))
+		shutdownErr = errors.Join(shutdownErr, apiProbe.Close(shutdownCtx))
 		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
 		if !httpServersStarted {
 			// Before Serve owns the listeners, startup failure still needs to
 			// release them. Active listeners belong exclusively to HTTP shutdown.
-			if apiListener != nil {
-				shutdownErr = errors.Join(shutdownErr, apiListener.Close())
-			}
 			if mcpListener != nil {
 				shutdownErr = errors.Join(shutdownErr, mcpListener.Close())
 			}
@@ -1056,6 +1078,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			exitCode = 1
 		}
 	}()
+	apiProbeOwnedByLifecycle = true
 	processCapability, err = stores.StartupOwnership().AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
 		OwnerID: "serve:" + runtimeInstanceID, BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
 	})
@@ -1205,14 +1228,6 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	pinnedBundleHashes := servePinnedBundleHashes(loadedBundles)
 	credentialStore := req.Credentials
-	apiListener, err = cliapp.ListenServeHTTPListener("api", opts.APIListenAddr)
-	if err != nil {
-		presenter.fail(20, "http_listener_bind", err)
-		return 3
-	}
-	if opts.TestAPIListenerBound != nil {
-		opts.TestAPIListenerBound(apiListener.Addr())
-	}
 	mcpListener, err = cliapp.ListenServeHTTPListener("mcp", opts.MCPListenAddr)
 	if err != nil {
 		presenter.fail(20, "http_listener_bind", err)
@@ -1553,9 +1568,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	if req.ProviderIngress && rt != nil && rt.InboundGateway != nil {
 		inboundHandler = runtimeProcessInboundHandler{contexts: runtimeContextManager}
 	}
-	apiServer = newAPIServer(serveSupervisorReadiness{serveReadiness: ready, supervisor: supervisor}, apiV1Handler, inboundHandler, ctx)
+	apiHandler := newAPIServer(serveSupervisorReadiness{serveReadiness: ready, supervisor: supervisor}, apiV1Handler, inboundHandler, ctx).Handler
 	mcpServer = &http.Server{Handler: http.HandlerFunc(supervisor.serveMCP), ReadHeaderTimeout: 5 * time.Second}
-	apiServer.Handler = processOwnedHTTPHandler(processWorkOwner, apiServer.Handler)
+	apiHandler = processOwnedHTTPHandler(processWorkOwner, apiHandler)
 	mcpServer.Handler = processOwnedHTTPHandler(processWorkOwner, mcpServer.Handler)
 	if err := projectContextRegistration.WriteFinal(runtimeInstanceID, apiListener.Addr(), apiAuth, resolvedPaths, storeSelection, mountSources); err != nil {
 		presenter.fail(20, "context_registry", err)
@@ -1656,20 +1671,14 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	var releaseRuntimeContexts func() error
 	if err := activateServeAfterConnectedChannelTeardownRecovery(ctx, channelDestructive, func() error {
-		apiServerLease, err := processWorkOwner.Begin(ctx)
-		if err != nil {
-			return fmt.Errorf("admit api server: %w", err)
-		}
 		mcpServerLease, err := processWorkOwner.Begin(ctx)
 		if err != nil {
-			_ = apiServerLease.Done()
 			return fmt.Errorf("admit mcp server: %w", err)
 		}
+		if err := apiProbe.Install(ctx, apiHandler); err != nil {
+			return errors.Join(err, mcpServerLease.Done())
+		}
 		httpServersStarted = true
-		go func() {
-			defer func() { _ = apiServerLease.Done() }()
-			serveHTTPServer("api", apiServer, apiListener, runtimeFailure)
-		}()
 		go func() {
 			defer func() { _ = mcpServerLease.Done() }()
 			serveHTTPServer("mcp", mcpServer, mcpListener, runtimeFailure)

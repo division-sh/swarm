@@ -44,6 +44,17 @@ func OpenPostgres(dsn string) (*private.PostgresStore, *sql.DB, error) {
 	return store, db, nil
 }
 
+func OpenPostgresRuntime(ctx context.Context, dsn string) (*private.PostgresStore, *sql.DB, error) {
+	selected, handle, err := OpenPostgres(dsn)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := selected.RetainConstructionPossession(ctx); err != nil {
+		return nil, nil, errors.Join(err, selected.Close())
+	}
+	return selected, handle, nil
+}
+
 func OpenSQLiteRuntime(path string) (*private.SQLiteRuntimeStore, *sql.DB, error) {
 	schema, backend, err := storeschema.OpenSQLiteForConstruction(path)
 	if err != nil {
@@ -65,11 +76,23 @@ func OpenSQLiteRuntimeWithOwnershipBinding(path string) (*private.SQLiteRuntimeS
 	if err != nil {
 		return nil, nil, err
 	}
+	return openSQLiteUnderPossession(context.Background(), path, constructionGuard)
+}
+
+func OpenSQLiteRuntimeForServing(ctx context.Context, path string) (*private.SQLiteRuntimeStore, *sql.DB, error) {
+	constructionGuard, err := storestartupownership.WaitSQLiteConstructionGuard(ctx, path)
+	if err != nil {
+		return nil, nil, err
+	}
+	return openSQLiteUnderPossession(ctx, path, constructionGuard)
+}
+
+func openSQLiteUnderPossession(ctx context.Context, path string, constructionGuard *storestartupownership.SQLiteConstructionGuard) (*private.SQLiteRuntimeStore, *sql.DB, error) {
 	schema, backend, err := storeschema.OpenSQLiteForConstruction(path)
 	if err != nil {
 		return nil, nil, errors.Join(err, constructionGuard.Release())
 	}
-	identity, err := constructionGuard.BackendIdentity(context.Background())
+	identity, err := constructionGuard.BackendIdentity(ctx)
 	if err != nil {
 		return nil, nil, errors.Join(err, schema.Close(), constructionGuard.Release())
 	}

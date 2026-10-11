@@ -33,6 +33,20 @@ type SQLiteBackendIdentity struct {
 }
 
 func AcquireSQLiteConstructionGuard(selectedPath string) (*SQLiteConstructionGuard, error) {
+	return sqliteConstructionGuard(context.Background(), selectedPath, false)
+}
+
+func WaitSQLiteConstructionGuard(ctx context.Context, selectedPath string) (*SQLiteConstructionGuard, error) {
+	return sqliteConstructionGuard(ctx, selectedPath, true)
+}
+
+func sqliteConstructionGuard(ctx context.Context, selectedPath string, wait bool) (*SQLiteConstructionGuard, error) {
+	if ctx == nil {
+		return nil, errors.New("SQLite construction requires a context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	selectedPath = strings.TrimSpace(selectedPath)
 	if selectedPath == "" {
 		return nil, errors.New("SQLite selected-store path is required")
@@ -44,7 +58,12 @@ func AcquireSQLiteConstructionGuard(selectedPath string) (*SQLiteConstructionGua
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return nil, fmt.Errorf("create SQLite selected-store parent: %w", err)
 	}
-	possession, err := acquireSQLiteConstructionPossession(abs)
+	var possession sqlitePossession
+	if wait {
+		possession, err = waitSQLiteConstructionPossession(ctx, abs)
+	} else {
+		possession, err = acquireSQLiteConstructionPossession(abs)
+	}
 	if err != nil {
 		return nil, err
 	}
