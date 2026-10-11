@@ -329,6 +329,16 @@ func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Ba
 	return h, db, hash
 }
 
+func startChannelAnchorJourneyRuntime(t *testing.T, backend servedparity.Backend, token string, withSummary bool) (*channelOnboardingE2EHarness, string) {
+	t.Helper()
+	return startChannelAnchorPublicJourney(t, backend, token, withSummary, 0, nil)
+}
+
+func startChannelAnchorJourneyRuntimeWithDraftTTL(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration) (*channelOnboardingE2EHarness, string) {
+	t.Helper()
+	return startChannelAnchorPublicJourney(t, backend, token, withSummary, draftTTL, nil)
+}
+
 func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration, configure func(*cliapp.ServeOptions)) (*channelOnboardingE2EHarness, string) {
 	t.Helper()
 	h := newChannelOnboardingE2EHarness(t, backend, true)
