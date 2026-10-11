@@ -333,7 +333,7 @@ func (p *logoutRecoveryProbe) DispatchSessionLogout(ctx context.Context, op doma
 		return err
 	}
 	p.dispatched = append(p.dispatched, op)
-	return nil
+	return errors.New("destructive recovery must not redispatch the original SDK")
 }
 
 func TestSessionLogoutRecoveryConsumesFrozenResponsibilityBothStores(t *testing.T) {
@@ -356,19 +356,15 @@ func TestSessionLogoutRecoveryConsumesFrozenResponsibilityBothStores(t *testing.
 					t.Fatal(err)
 				}
 			}
-			if probe.prepared != 0 || len(probe.dispatched) != 2 {
-				t.Fatal("recovery re-selected or lost its responsibility")
-			}
-			for _, resumed := range probe.dispatched {
-				if resumed.TeardownID != teardown.TeardownID || resumed.Logout == nil || *resumed.Logout != *request.Logout {
-					t.Fatal("recovery rewrote frozen session evidence")
-				}
+			if probe.prepared != 0 || len(probe.dispatched) != 0 {
+				t.Fatal("destructive recovery prepared or dispatched SDK logout")
 			}
 			// The adapter above is an observation probe, not a journal or SDK
 			// implementation. Recovery cannot fabricate a successful outcome.
 			current, err := f.selected.GetChannelTeardown(context.Background(), teardown.TeardownID)
-			if err != nil || current.Phase != domain.TeardownAuthorityRetired || current.Revision != teardown.Revision {
-				t.Fatal("recovery fabricated settlement", err)
+			if err != nil || current.Phase != domain.TeardownAuthorityRetired || current.Revision != teardown.Revision ||
+				current.Logout == nil || *current.Logout != *request.Logout {
+				t.Fatal("recovery fabricated settlement or rewrote frozen session evidence", err)
 			}
 			readback, err := domain.NewSessionLogoutReadback(current)
 			if err != nil || readback.OperationID != op.OperationID || readback.ExpectedRevision != op.Revision {
