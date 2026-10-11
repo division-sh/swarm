@@ -2335,6 +2335,14 @@ func (i *cancellationTestIdentities) CurrentBinding(ctx context.Context, _ opera
 	return operatorchannel.Binding{}, operatorchannel.ErrNotFound
 }
 
+func (i *cancellationTestIdentities) RetainedCurrentBinding(ctx context.Context, identity operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error) {
+	binding, err := i.CurrentBinding(ctx, identity)
+	if errors.Is(err, operatorchannel.ErrCredentialStale) {
+		return binding, nil
+	}
+	return binding, err
+}
+
 func (i *cancellationTestIdentities) CurrentBindingReadiness(ctx context.Context, identity operatorchannel.InterfaceIdentity) (operatorchannel.Binding, bool, error) {
 	binding, err := i.CurrentBinding(ctx, identity)
 	if err != nil {
