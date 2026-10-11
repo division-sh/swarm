@@ -150,6 +150,9 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 			if providerCalls != 1 || node.ClaimVersion != 1 || agent.ClaimVersion != 1 {
 				t.Fatalf("selected exact provider execution count=%d node=%+v agent=%+v calls=%+v", providerCalls, node, agent, calls)
 			}
+			if !publicationFrontier {
+				requireHistoricalPublicationFreshBusReplay(t, ctx, h, publication, node, agent, calls)
+			}
 			var sourceExecutions int
 			if err := h.db.QueryRowContext(ctx, `SELECT count(*) FROM event_deliveries WHERE run_id=$1 AND status='delivered'`, catalogRuntimeRunID).Scan(&sourceExecutions); err != nil || sourceExecutions != sourceExecutionsBefore {
 				t.Fatalf("fork executed source: before=%d after=%d err=%v", sourceExecutionsBefore, sourceExecutions, err)

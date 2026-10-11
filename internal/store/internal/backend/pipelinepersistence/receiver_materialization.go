@@ -82,6 +82,11 @@ func receiverMaterializedTx(ctx context.Context, tx *sql.Tx, route events.Delive
 	if record.Lifecycle.Status == "terminated" {
 		return false, fmt.Errorf("materialized receiver lifecycle has terminated")
 	}
+	return receiverConstructionEvidenceTx(ctx, tx, flow, route.Initialization, run, header, historical)
+}
+
+func receiverConstructionEvidenceTx(ctx context.Context, tx *sql.Tx, flow flowidentity.RunScopedFlowInstance, initialization events.ReceiverInitialization, run runlifecycle.Snapshot, header pipeline.WorkflowInstance, historical HistoricalFlowInstanceReader) (bool, error) {
+	target := initialization.ConstructionTarget().Route()
 	if historical == nil || run.RunID != flow.RunID {
 		return false, fmt.Errorf("receiver construction requires its exact native/historical owner")
 	}
@@ -101,7 +106,7 @@ func receiverMaterializedTx(ctx context.Context, tx *sql.Tx, route events.Delive
 			return false, err
 		}
 	}
-	if dependency, isHistorical := route.Initialization.HistoricalConstruction(); isHistorical {
+	if dependency, isHistorical := initialization.HistoricalConstruction(); isHistorical {
 		if !projected || fixed.Identity.TemplateID != target.FlowID || fixed.Identity.EntityID != target.EntityID ||
 			fixed.Identity.InstancePath != target.FlowInstance || fixed.SourceOwner.RunID != dependency.SourceRunID || fixed.SourceRevision != dependency.SourceRevision {
 			return false, fmt.Errorf("receiver dependency contradicts exact historical construction")
@@ -118,7 +123,7 @@ func receiverMaterializedTx(ctx context.Context, tx *sql.Tx, route events.Delive
 	if original.Identity.TemplateID != target.FlowID {
 		return false, fmt.Errorf("receiver dependency contradicts original construction declaration")
 	}
-	if original.CreatingInput.EventID != route.Initialization.CreatingEventID() {
+	if original.CreatingInput.EventID != initialization.CreatingEventID() {
 		return false, fmt.Errorf("receiver dependency contradicts original construction publication")
 	}
 	return true, nil

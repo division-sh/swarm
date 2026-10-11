@@ -75,6 +75,8 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 			"TestReceiverEntitylessPendingAttachmentExecutesBothStores",
 			"TestReceiverPublicationCommitUncertaintyBothStores",
 			"TestReceiverPublicationExplicitTargetsBothStores",
+			"TestReceiverHistoricalMaterializationRefusesCrossedEvidenceBothStores",
+			"TestReceiverHistoricalMaterializationRefusesLaterNativeConstructionBothStores",
 			"TestR7PreparedSelectionRechecksDurableAdmissionBothStores",
 			"TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores",
 		},
@@ -110,6 +112,15 @@ func TestFlowConstructorProofPartitionRequiresBothStores(t *testing.T) {
 			},
 		},
 		"store-runtime-full-05": {
+			"TestReceiverConstructionReceiptBindsCreatingPublicationBothStores": {
+				"sqlite/keyed/conflicting_historical", "postgres/keyed/conflicting_historical",
+				"sqlite/later_native_fork/exact", "sqlite/later_native_fork/stored_exact", "sqlite/later_native_fork/missing_receipt",
+				"postgres/later_native_fork/exact", "postgres/later_native_fork/stored_exact", "postgres/later_native_fork/missing_receipt",
+			},
+			"TestReceiverHistoricalMaterializationRefusesCrossedEvidenceBothStores": {
+				"sqlite/exact", "sqlite/source_run", "sqlite/revision", "sqlite/scope", "sqlite/logical_instance", "sqlite/native_missing_receipt",
+				"postgres/exact", "postgres/source_run", "postgres/revision", "postgres/scope", "postgres/logical_instance", "postgres/native_missing_receipt",
+			},
 			"TestReceiverPublicationExplicitTargetsBothStores": {
 				"sqlite/selected_review", "sqlite/selected_other", "sqlite/selected_root", "sqlite/selected_foreign_root_control", "sqlite/missing_header_entity", "sqlite/foreign_run", "sqlite/foreign_flow", "sqlite/foreign_instance", "sqlite/foreign_header_entity",
 				"postgres/selected_review", "postgres/selected_other", "postgres/selected_root", "postgres/selected_foreign_root_control", "postgres/missing_header_entity", "postgres/foreign_run", "postgres/foreign_flow", "postgres/foreign_instance", "postgres/foreign_header_entity",
