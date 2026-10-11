@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,6 +28,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/uuid"
@@ -152,7 +154,7 @@ func executeEventPublish(ctx context.Context, req Request, opts EventPublication
 	if err != nil {
 		return nil, runStartIdempotencyError(err)
 	}
-	stored, err := eventPublishStoredResult(completion)
+	stored, err := recordedPublicCompletionResult(completion)
 	if err != nil {
 		if replay {
 			return nil, fmt.Errorf("decode event.publish idempotency response: %w", err)
@@ -162,12 +164,40 @@ func executeEventPublish(ctx context.Context, req Request, opts EventPublication
 	return stored, nil
 }
 
-func eventPublishStoredResult(completion apiidempotency.Completion) (eventPublishResult, error) {
-	var stored eventPublishResult
-	if err := json.Unmarshal(completion.Response, &stored); err != nil {
-		return eventPublishResult{}, err
+func recordedPublicCompletionResult(completion apiidempotency.Completion) (semanticvalue.Value, error) {
+	value, err := canonicaljson.Decode(completion.Response)
+	if err != nil {
+		return semanticvalue.Value{}, err
 	}
-	return stored, nil
+	raw, err := canonicaljson.Encode(value)
+	if err != nil {
+		return semanticvalue.Value{}, err
+	}
+	if !bytes.Equal(raw, completion.Response) {
+		return semanticvalue.Value{}, errors.New("recorded public completion is not canonical")
+	}
+	return value, nil
+}
+
+func publicPublicationRequest(req Request, now time.Time) (apiidempotency.Request, error) {
+	key, _, err := optionalStringParam(req.Params, "idempotency_key")
+	return apiidempotency.Request{Method: req.Method, Actor: apiidempotency.BearerActor(req.ActorTokenID),
+		IdempotencyKey: key, RequestHash: req.RequestHash, TTL: runStartIDempotencyTTL, Now: now}, err
+}
+
+func lookupPublicPublication(ctx context.Context, req Request, opts EventPublicationOptions, now time.Time) (apiidempotency.Completion, bool, apiidempotency.Request, error) {
+	request, err := publicPublicationRequest(req, now)
+	if err != nil || request.IdempotencyKey == "" {
+		return apiidempotency.Completion{}, false, request, err
+	}
+	owner, ok := opts.Acknowledged.(interface {
+		LookupAPIEventPublication(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error)
+	})
+	if !ok || owner == nil {
+		return apiidempotency.Completion{}, false, request, errors.New("public publication requires selected-store completion lookup")
+	}
+	completion, replay, err := owner.LookupAPIEventPublication(ctx, request)
+	return completion, replay, request, err
 }
 
 func executeOperatorEventPublication(
@@ -177,24 +207,12 @@ func executeOperatorEventPublication(
 	now time.Time,
 	cfg eventPublicationConfig,
 ) (apiidempotency.Completion, bool, error) {
-	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
+	idempotency, err := publicPublicationRequest(req, now)
 	if err != nil {
 		return apiidempotency.Completion{}, false, err
 	}
-	idempotency := apiidempotency.Request{
-		Method:         req.Method,
-		Actor:          apiidempotency.BearerActor(req.ActorTokenID),
-		IdempotencyKey: idempotencyKey,
-		RequestHash:    req.RequestHash,
-		TTL:            runStartIDempotencyTTL,
-		Now:            now,
-	}
 	if cfg.atomicAPICompletion {
-		publisher, ok := opts.Acknowledged.(apiEventAcknowledgedPublisher)
-		if !ok || publisher == nil {
-			return apiidempotency.Completion{}, false, errors.New("event.publish requires atomic selected-store publication and API completion")
-		}
-		completion, replay, err := publisher.LookupAPIEventPublication(ctx, idempotency)
+		completion, replay, _, err := lookupPublicPublication(ctx, req, opts, now)
 		if err != nil || replay {
 			return completion, replay, err
 		}
@@ -309,7 +327,7 @@ func eventPublicationCompletion(ctx context.Context, opts EventPublicationOption
 	if err != nil {
 		return apiidempotency.Completion{}, err
 	}
-	response, err := json.Marshal(result)
+	response, err := canonicaljson.Bytes(result)
 	if err != nil {
 		return apiidempotency.Completion{}, err
 	}

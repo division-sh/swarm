@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
@@ -46,7 +47,7 @@ func withAPIEventPublicationDeliveryCompletion(completion apiidempotency.Complet
 		return apiidempotency.Completion{}, fmt.Errorf("encode API event publication deliveries: %w", err)
 	}
 	response["deliveries"] = encodedDeliveries
-	completion.Response, err = json.Marshal(response)
+	completion.Response, err = canonicaljson.Bytes(response)
 	if err != nil {
 		return apiidempotency.Completion{}, fmt.Errorf("encode API event publication completion: %w", err)
 	}

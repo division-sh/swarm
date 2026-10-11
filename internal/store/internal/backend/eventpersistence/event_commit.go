@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -554,7 +555,7 @@ func bindRunCreationCompletion(completion apiidempotency.Completion, record runt
 		return apiidempotency.Completion{}, fmt.Errorf("decode run creation API completion")
 	}
 	response["data_binding"] = record.Binding
-	raw, err := json.Marshal(response)
+	raw, err := canonicaljson.Bytes(response)
 	if err != nil {
 		return apiidempotency.Completion{}, err
 	}

@@ -15,14 +15,14 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/apiv1"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
-// Audit-only controls on current master, not runtime remediation or a retry of
-// the frozen three-anchor race batch.
-func TestAudit1930PublicationHeldOriginalDeadlineBothStores(t *testing.T) {
+func TestPublicPublicationCompletionBoundaryBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			probe := installPublicationCompletionAudit(t, true)
@@ -34,8 +34,6 @@ func TestAudit1930PublicationHeldOriginalDeadlineBothStores(t *testing.T) {
 			go func() { done <- publicationAuditHTTP(ctx, endpoint, publicationAuditParams(hash, "audit1930-held")) }()
 			select {
 			case <-probe.entered:
-			case result := <-done:
-				t.Fatalf("request returned before owned readiness cut: %+v", result)
 			case <-time.After(10 * time.Second):
 				t.Fatal("owned readiness cut not reached")
 			}
@@ -50,26 +48,27 @@ func TestAudit1930PublicationHeldOriginalDeadlineBothStores(t *testing.T) {
 				t.Fatalf("completion at post-ACK cut: found=%t err=%v", found, err)
 			}
 			result := <-done
-			probe.releaseOnce.Do(func() { close(probe.release) })
-			if result.err == nil || len(result.result) != 0 {
-				t.Fatalf("current source unexpectedly returned completion through canceled caller: %+v", result)
+			if result.err != nil || result.rpcError != nil || !bytes.Equal(result.result, stored.Response) {
+				t.Fatalf("recorded completion did not return while readiness was held: %+v stored=%s", result, stored.Response)
 			}
-			t.Logf("AUDIT1930 ack=true key=%s event=%s completion_bytes=%d completion_hash=%x caller_error=%T response=absent outer_finalizer=UNOBSERVED", request.IdempotencyKey, stored.ResourceID, len(stored.Response), sha256.Sum256(stored.Response), result.err)
+			cancel()
 			replay := publicationAuditHTTP(t.Context(), endpoint, publicationAuditParams(hash, "audit1930-held"))
 			if replay.err != nil || replay.rpcError != nil || len(replay.result) == 0 {
-				t.Fatalf("same-key replay after cancellation: %+v", replay)
+				t.Fatalf("same-key replay while readiness held: %+v", replay)
 			}
 			probe.mu.Lock()
 			calls := probe.commits
 			probe.mu.Unlock()
-			if calls != 1 {
-				t.Fatalf("same-key retry executed %d commits, want one", calls)
+			if calls != 1 || !bytes.Equal(replay.result, stored.Response) {
+				t.Fatalf("same-key replay changed completion or executed %d commits", calls)
 			}
+			probe.releaseOnce.Do(func() { close(probe.release) })
+			waitPublicationCompletionDisposition(t, probe)
 		})
 	}
 }
 
-func TestAudit1930PublicationNativeStoredWireBytesBothStores(t *testing.T) {
+func TestPublicPublicationCompletionExactBytesBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			probe := installPublicationCompletionAudit(t, false)
@@ -101,6 +100,10 @@ func TestAudit1930PublicationNativeStoredWireBytesBothStores(t *testing.T) {
 				t.Logf("AUDIT1930 %s bytes=%d sha256=%x", label, len(raw), sha256.Sum256(raw))
 			}
 			t.Logf("AUDIT1930 exact_native_stored=%t exact_stored_first_wire=%t exact_stored_replay_wire=%t commits=%d", bytes.Equal(committed.Completion.Response, stored.Response), bytes.Equal(stored.Response, first.result), bytes.Equal(stored.Response, replay.result), calls)
+			if !bytes.Equal(committed.Completion.Response, stored.Response) || !bytes.Equal(stored.Response, first.result) || !bytes.Equal(stored.Response, replay.result) {
+				t.Fatal("native/store/first/replay result bytes differ")
+			}
+			waitPublicationCompletionDisposition(t, probe)
 		})
 	}
 }
@@ -149,6 +152,9 @@ func publicationAuditParams(hash, key string) map[string]any {
 type publicationCompletionAudit struct {
 	mu          sync.Mutex
 	native      runtimebus.APIEventPublicationCommitOwner
+	workflow    pipeline.WorkflowPersistenceOwner
+	plan        pipeline.DynamicFlowRuntimeReadinessPlan
+	process     *worklifetime.Process
 	request     apiidempotency.Request
 	committed   runtimebus.CommittedAPIEventPublication
 	commits     int
@@ -177,6 +183,7 @@ func installPublicationCompletionAudit(t *testing.T, hold bool) *publicationComp
 			panic(fmt.Sprintf("audit requires native selected owner, got %T", native))
 		}
 		projected.deps.WorkflowPersistence = pipeline.NewWorkflowPersistence(&publicationAuditReadiness{WorkflowPersistenceOwner: workflows, probe: p})
+		p.workflow = workflows
 		return projected
 	}
 	t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
@@ -191,6 +198,7 @@ func (p *publicationCompletionAudit) commit(ctx context.Context, native runtimeb
 	p.mu.Lock()
 	p.commits++
 	p.request, p.committed = command.Idempotency, result
+	p.process, _ = worklifetime.ProcessFromContext(ctx)
 	p.run = command.Publication.Commit.Event.Event().RunID()
 	p.mu.Unlock()
 	return result, err
@@ -222,6 +230,9 @@ type publicationAuditReadiness struct {
 func (s *publicationAuditReadiness) BeginDynamicFlowRuntimeActivation(ctx context.Context, request pipeline.DynamicFlowRuntimeActivationRequest) (pipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
 	s.probe.mu.Lock()
 	hold := s.probe.hold && s.probe.committed.Acknowledged && request.Plan().RunID == s.probe.run
+	if s.probe.committed.Acknowledged && request.Plan().RunID == s.probe.run && s.probe.plan.RunID == "" {
+		s.probe.plan = request.Plan()
+	}
 	s.probe.mu.Unlock()
 	if hold {
 		s.probe.enterOnce.Do(func() { close(s.probe.entered) })
@@ -231,4 +242,34 @@ func (s *publicationAuditReadiness) BeginDynamicFlowRuntimeActivation(ctx contex
 		}
 	}
 	return s.WorkflowPersistenceOwner.BeginDynamicFlowRuntimeActivation(ctx, request)
+}
+
+func waitPublicationCompletionDisposition(t *testing.T, p *publicationCompletionAudit) {
+	t.Helper()
+	p.mu.Lock()
+	native, committed, workflow, plan, process := p.native, p.committed, p.workflow, p.plan, p.process
+	runID := p.run
+	p.mu.Unlock()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		evidence := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), native, runID, committed.Completion.ResourceID)
+		ready := false
+		if plan.RunID != "" {
+			readiness, found, err := workflow.LoadDynamicFlowRuntimeReadiness(t.Context(), runID, plan.Identity.Route())
+			if err != nil || !found {
+				t.Fatalf("exact readiness readback: found=%t err=%v", found, err)
+			}
+			ready = readiness.Phase == pipeline.FlowAttachmentReady
+		}
+		if evidence.PipelineReceiptCount == 1 && ready && process != nil && process.PublicCompletionCount() == 0 {
+			if !evidence.RecordFound || evidence.CommittedScope == "" {
+				t.Fatal("settlement lost the exact committed publication")
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("accepted publication did not settle after readiness release: %+v", evidence)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }

@@ -3,6 +3,10 @@
 The reviewer chooses independent `CI-Tier` and `Local-Tier` PR-body lines. Use
 `go run ./cmd/swarm-test --tier core`, `--tier lifecycle`, or `--full` for the
 explicit local tier. Plain invocation is unqualified core developer feedback.
+Under the user's focused-only local policy, a reviewer may instead declare
+`Local-Tier: focused` for named manual focused/race/both-store receipts. This is
+PR-body review metadata, not `--tier focused`, a duplicate local tier run, or a
+claim that core/lifecycle/full completed. Hosted CI selection remains independent.
 Explicit qualification requires clean tracked and non-ignored untracked source
 before planning, before/after each unit, and after the joined aggregate.
 

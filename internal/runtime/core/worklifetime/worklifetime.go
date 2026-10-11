@@ -28,14 +28,15 @@ const (
 // gate is the only process-local work counter. It is deliberately private:
 // callers operate through one of the fixed occurrence types below.
 type gate struct {
-	mu               sync.Mutex
-	state            gateState
-	active           uint64
-	activeTransient  uint64
-	drained          chan struct{}
-	transientDrained chan struct{}
-	ctx              context.Context
-	cancel           context.CancelCauseFunc
+	mu                sync.Mutex
+	state             gateState
+	active            uint64
+	activeTransient   uint64
+	publicCompletions uint64
+	drained           chan struct{}
+	transientDrained  chan struct{}
+	ctx               context.Context
+	cancel            context.CancelCauseFunc
 }
 
 func newGate(parent context.Context) *gate {
@@ -51,14 +52,15 @@ func newGate(parent context.Context) *gate {
 }
 
 type Lease struct {
-	mu        sync.Mutex
-	gate      *gate
-	ctx       context.Context
-	cancel    context.CancelCauseFunc
-	stop      func() bool
-	parent    *Lease
-	transient bool
-	settled   bool
+	mu               sync.Mutex
+	gate             *gate
+	ctx              context.Context
+	cancel           context.CancelCauseFunc
+	stop             func() bool
+	parent           *Lease
+	transient        bool
+	publicCompletion bool
+	settled          bool
 }
 
 type acceptedLeaseContextKey struct{}
@@ -108,6 +110,10 @@ func (g *gate) beginAcceptedDescendant(parent context.Context) (*Lease, error) {
 }
 
 func (g *gate) beginWithParent(parent context.Context, transient bool, ancestor *Lease) (*Lease, error) {
+	return g.beginOwned(parent, transient, ancestor, false)
+}
+
+func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Lease, publicCompletion bool) (*Lease, error) {
 	if g == nil {
 		return nil, errors.New("work occurrence is required")
 	}
@@ -129,6 +135,13 @@ func (g *gate) beginWithParent(parent context.Context, transient bool, ancestor 
 		g.mu.Unlock()
 		return nil, ErrRetired
 	}
+	if publicCompletion && g.publicCompletions >= PublicCompletionLimit {
+		g.mu.Unlock()
+		return nil, ErrPublicCompletionCapacity
+	}
+	if publicCompletion {
+		g.publicCompletions++
+	}
 	if g.active == 0 {
 		g.drained = make(chan struct{})
 	}
@@ -142,7 +155,7 @@ func (g *gate) beginWithParent(parent context.Context, transient bool, ancestor 
 	g.mu.Unlock()
 
 	ctx, cancel := context.WithCancelCause(parent)
-	lease := &Lease{gate: g, ctx: ctx, cancel: cancel, transient: transient}
+	lease := &Lease{gate: g, ctx: ctx, cancel: cancel, transient: transient, publicCompletion: publicCompletion}
 	lease.ctx = context.WithValue(ctx, acceptedLeaseContextKey{}, lease)
 	lease.stop = context.AfterFunc(g.ctx, func() {
 		cancel(ErrRetired)
@@ -186,6 +199,13 @@ func (l *Lease) Done() error {
 		if g.active == 0 {
 			settleErr = errors.New("work occurrence accounting underflow")
 		} else {
+			if l.publicCompletion {
+				if g.publicCompletions == 0 {
+					settleErr = errors.New("public completion accounting underflow")
+				} else {
+					g.publicCompletions--
+				}
+			}
 			g.active--
 			if g.active == 0 {
 				close(g.drained)
