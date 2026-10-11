@@ -579,6 +579,22 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 	if pendingCard {
 		pendingAt := at.Add(time.Minute)
 		pending, continuation := newDeclaredRootActivityCard(t, runID, pendingAt, declarations)
+		if carryReply {
+			continuation.ReplyContextID = replyID
+			value, err := continuation.EffectValue()
+			if err != nil {
+				t.Fatal(err)
+			}
+			continuation.EffectContentHash, err = canonicaljson.HashValue(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pending.EffectContentHash, pending.CardContentHash = continuation.EffectContentHash, ""
+			pending, err = decisioncard.New(pending)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 		parent := eventtest.ExistingRunRootIngress(continuation.SourceEventID, "activity.seeded", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, pendingAt)
 		if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, parent); err != nil {
 			t.Fatal(err)
