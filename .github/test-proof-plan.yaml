@@ -1271,7 +1271,7 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: ^TestSelected.*$
     required_children:
-      TestSelectedContinuationReadFenceBothStores: [sqlite/existing_busy, sqlite/existing_retry, sqlite/entityless_pending, postgres/existing_busy, postgres/existing_retry, postgres/entityless_pending]
+      TestSelectedContinuationReadFenceBothStores: [sqlite/existing_busy, sqlite/existing_retry, sqlite/entityless_pending, postgres/existing_busy, postgres/existing_retry, postgres/entityless_pending, sqlite/existing_delivered, sqlite/existing_dead_letter, sqlite/existing_terminalized, postgres/existing_delivered, postgres/existing_dead_letter, postgres/existing_terminalized]
       TestSelectedProviderTurnRetainsActualBusinessOriginBothStores: [sqlite, postgres]
       TestSelectedTurnTerminationPreservesExactOriginBothStores: [sqlite, postgres]
       TestSelectedRetriedTurnCancellationBothStores: [unstarted/sqlite, unstarted/postgres, authorized/sqlite, authorized/postgres, launched/sqlite, launched/postgres, timeout_recovery/sqlite, timeout_recovery/postgres]
