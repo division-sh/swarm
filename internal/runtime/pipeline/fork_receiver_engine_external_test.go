@@ -301,17 +301,21 @@ func forkEngineMarker(t *testing.T, raw string) any {
 func assertForkEngineRows(t *testing.T, db *sql.DB, sourceRun, childRun, receiver, sourceBefore string, wantRevision int64, missing bool) {
 	t.Helper()
 	var fields string
-	var revision int64
-	err := db.QueryRow(`SELECT CAST(es.fields AS TEXT), fi.revision
-FROM entity_state es JOIN flow_instances fi
-ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
-WHERE es.run_id=$1 AND es.entity_id=$2 AND es.flow_instance='consumer'`, childRun, receiver).Scan(&fields, &revision)
 	if missing {
+		// A missing header must not hide a recreated data row before cleanup.
+		err := db.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, childRun, receiver).Scan(&fields)
 		if err != sql.ErrNoRows {
 			t.Fatalf("required-state failure recreated the receiver: %s err=%v", fields, err)
 		}
-	} else if err != nil || forkEngineMarker(t, fields) != "consumer-engine" || revision != wantRevision {
-		t.Fatalf("engine did not write receiving entity exactly once: %s revision=%d want=%d err=%v", fields, revision, wantRevision, err)
+	} else {
+		var revision int64
+		err := db.QueryRow(`SELECT CAST(es.fields AS TEXT), fi.revision
+FROM entity_state es JOIN flow_instances fi
+ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+WHERE es.run_id=$1 AND es.entity_id=$2 AND es.flow_instance='consumer'`, childRun, receiver).Scan(&fields, &revision)
+		if err != nil || forkEngineMarker(t, fields) != "consumer-engine" || revision != wantRevision {
+			t.Fatalf("engine did not write receiving entity exactly once: %s revision=%d want=%d err=%v", fields, revision, wantRevision, err)
+		}
 	}
 	if err := db.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance='producer'`, childRun).Scan(&fields); err != nil || forkEngineMarker(t, fields) != "producer-owned" {
 		t.Fatalf("engine borrowed producer state: %s err=%v", fields, err)
