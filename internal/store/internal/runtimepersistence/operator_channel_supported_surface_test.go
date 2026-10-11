@@ -1359,6 +1359,11 @@ func (a operatorChannelSupportedSurfaceDestructive) RevokeProof(ctx context.Cont
 	return a.service.RevokeProof(ctx, selector, revision, time.Now().UTC())
 }
 
+func (a operatorChannelSupportedSurfaceDestructive) Logout(context.Context, string, int64, string, string) (channelonboarding.SessionLogoutReadback, error) {
+	// This identity-only surface has no native session or SDK owner.
+	return channelonboarding.SessionLogoutReadback{}, channelonboarding.ErrConflict
+}
+
 func operatorChannelSupportedSurfaceList(t *testing.T, endpoint, token string) struct {
 	PrincipalID string                                       `json:"principal_id"`
 	Channels    []channelonboarding.ConnectedChannelReadback `json:"channels"`

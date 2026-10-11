@@ -266,109 +266,109 @@
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.Recover",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
-    "body_sha256": "c34f15bb1d6a2997dffee1da21c279fbb4447a5d28f55156063a631abc8e4ea3"
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
+    "body_sha256": "4634e6eed9356de0ecc5bf286489b0ccf02d18e83d9ddca455d4dde79c489cc9"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.RetireContext",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "ecc2c236e6e3cafa78e932374c89455b43c951f22eb3be02507922aede1bd7ed"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.RetireInterface",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "24bf9d1b6e7b9b15a112bb8d2cb7559d301ecf8dc995442c8ef1a6540e789af5"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.RevokeProof",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "c084c71089ed03171da0d32fa30bf3976e20b5733a733160005681811f8b2b48"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.Unbind",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "035bf661ebc5fc9b87e2a90c43dd035ef7ebc6a44d59b0218f0f9e3aecbfe3df"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.complete",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "616282d0e2b5f38e69b8caec452bce02de13805197a8c6da593b85281fc0c08d"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.exactTeardownReplay",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "10839fee7202d465f2eb4c3e2467b671f3bf42ae2ca8bf475acc4e3c9d75e18a"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.releaseScopedCredentials",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "ec1e3baa74341497bd378a9afe333c9abb3d3349948da5cca048d44cb4136d6d"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.retainedCredentialEvidence",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "c2b04a454fbe712df25fc51b59e2230f3de27a1df0199e284c193305a7e7bc8a"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.retireAuthority",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "eccdfd36aca61d25a431311fe90dbeb67b77103e61020dd216eee8fd14e6f620"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::NewDestructiveService",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "76557eb41e8ea5d81907e4918db2350891efb5f36a7fa3b6fa529a084a8530d2"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::ReserveTeardownRequest.Validate",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "95c04a88e01541d584e33da28d30b02f8a6aedf42f5f87dd285384a25ad7f2e2"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::TeardownKind.Valid",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "dc0273cb71fc9a994809db51743fc2fe8121f8a383e4497974041b01c9b214fa"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::TeardownPhase.Terminal",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "c2a08450675ba535548a217aeedbcd80316b4e07cd59c2c0646c10ca2150df0e"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::TeardownPhase.Valid",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "381aac55aa97dfbf5422edfeb9b021ea3926c3f875ec63c56ed277fca045cc92"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::TeardownScope.Normalized",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "9e0279703052ca2ddfce27451e7c9762716bbe8729997d482989535351c1e5d8"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::TeardownScope.Validate",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "62123ec2f6a23a1ba5d0b9fc6d4eb76fb59efb46f3bf442492be0b78fa2fe2af"
   },
   {
     "owner": "internal/channelonboarding/teardown.go::teardownScopeMatchesOperation",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
     "body_sha256": "8b194ef6ed3b223944f0b292609df35e7cc1c99fa156a32d9f14c124f201cc8d"
   },
   {
@@ -4656,6 +4656,30 @@
     "body_sha256": "c89c933e881329091c0faf959e3bd6b9d834da22eebd75b8be0a5835817b7318"
   },
   {
+    "owner": "internal/store/internal/backend/channelonboarding/logout_recovery.go::*PostgresOwner.RecoverUnlaunchedChannelLogout",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-live-authorizer,2577-logout-authorization-race",
+    "body_sha256": "d04cb353c58b77780bff25eb7b8b84d59d2103a33d4b7b2f6c7c1346608c5da6"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout_recovery.go::*SQLiteOwner.RecoverUnlaunchedChannelLogout",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-live-authorizer,2577-logout-authorization-race",
+    "body_sha256": "a6e886bfada58ec40b682cb659cb82724fc5f58c9b25b9a1a81144d9dd2dbe7a"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout_recovery.go::logoutOriginalWithdrawnWithoutAuthorizationTx",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-live-authorizer,2577-logout-authorization-race",
+    "body_sha256": "d47cf03dd125e084730b0223638d9bf420a5eb6f437ad60f599ea4bb56d3a10c"
+  },
+  {
+    "owner": "internal/store/internal/backend/channelonboarding/logout_recovery.go::recoverUnlaunchedLogout",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-live-authorizer,2577-logout-authorization-race",
+    "body_sha256": "ca930542a69e571ac34741fbdab410d408d523dd7062b3f8dfac5d206a2276b6"
+  },
+  {
     "owner": "internal/store/internal/backend/channelonboarding/session_standing.go::*PostgresOwner.SessionStandingBindingCurrent",
     "audit_rows": "A10,A27",
     "proof_families": "2577-native-confirmed-retention,2577-native-withdrawal,P08,P10,P21",
@@ -5152,6 +5176,12 @@
     "audit_rows": "A19,A28",
     "proof_families": "2567-P07,P08",
     "body_sha256": "e1031c6e422808ee24d095f5b91aab937feb28e0f6baf0389e064e2992af8f87"
+  },
+  {
+    "owner": "internal/store/internal/startupownership/withdrawn_runtime.go::RuntimeAuthorityWithdrawnTx",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-original-withdrawal",
+    "body_sha256": "aba5be250c4e70b9a921fac1b0327d39f45b1ce5716f044ed50454bfee7bcfb7"
   },
   {
     "owner": "internal/store/selected/admission.go::*AbsentSQLiteStore.Error",

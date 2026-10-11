@@ -1060,6 +1060,10 @@ func (s *PostgresStore) RecoverSelectedFork(ctx context.Context, req runcontrol.
 	return s.runForkPostgresOwner.RecoverSelectedFork(ctx, req)
 }
 
+func (s *PostgresStore) RecoverUnlaunchedChannelLogout(ctx context.Context, id string, revision int64, now time.Time) (channelonboarding.TeardownOperation, error) {
+	return s.channelOnboardingPostgresOwner.RecoverUnlaunchedChannelLogout(ctx, id, revision, now)
+}
+
 func (s *PostgresStore) RegisterAuthorActivityEventCatalog(scope authoractivity.Scope, descriptors []authoractivity.EventDescriptor) (*authoractivity.EventCatalogLease, error) {
 	return s.activityPostgresOwner.RegisterAuthorActivityEventCatalog(scope, descriptors)
 }
@@ -2326,6 +2330,10 @@ func (s *SQLiteRuntimeStore) RecoverCompletionContinuation(ctx context.Context, 
 
 func (s *SQLiteRuntimeStore) RecoverSelectedFork(ctx context.Context, req runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error) {
 	return s.runForkSQLiteOwner.RecoverSelectedFork(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) RecoverUnlaunchedChannelLogout(ctx context.Context, id string, revision int64, now time.Time) (channelonboarding.TeardownOperation, error) {
+	return s.channelOnboardingSQLiteOwner.RecoverUnlaunchedChannelLogout(ctx, id, revision, now)
 }
 
 func (s *SQLiteRuntimeStore) RegisterAuthorActivityEventCatalog(scope authoractivity.Scope, descriptors []authoractivity.EventDescriptor) (*authoractivity.EventCatalogLease, error) {
