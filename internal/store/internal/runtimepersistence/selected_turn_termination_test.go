@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -57,6 +58,16 @@ func TestSelectedTurnTerminationPreservesExactOriginBothStores(t *testing.T) {
 			if err != nil || repeated.Validate() != nil || !repeated.Delivery.SettledAt.Equal(canceled.Delivery.SettledAt) {
 				t.Fatalf("repeat selected cancellation changed evidence: %+v %v", repeated, err)
 			}
+			assertTerminalSelectedContinuations(t, ctx, actual, canceled.Delivery, true)
+			if err := selected.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
+				t.Fatal(err)
+			}
+			event, ok := correlation.InboundEventFromContext(ctx)
+			if !ok || event.ID() != canceled.Delivery.EventID {
+				t.Fatal("canceled readback lost its actual provider-origin event")
+			}
+			assertFencedSelectedContinuations(t, ctx, actual, event, canceled.Delivery.Route, canceled.Delivery, deliverylifecycle.ClaimTerminal)
+			assertTerminalSelectedContinuations(t, ctx, actual, canceled.Delivery, false)
 		})
 	}
 }

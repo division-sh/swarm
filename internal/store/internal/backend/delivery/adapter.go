@@ -816,6 +816,10 @@ func (a *Adapter) ObserveContinuation(
 	if !record.Authority.Equal(authority) {
 		return ContinuationObservation{DeliveryID: deliveryID, Disposition: ClaimWrongAuthority}, nil
 	}
+	if record.Status.Terminal() {
+		// Settled evidence is not authorization to resume selected work.
+		return ContinuationObservation{DeliveryID: deliveryID, Disposition: ClaimTerminal}, nil
+	}
 	// Observation fences authority independently of first-claim ordering.
 	tx, _ := q.(*sql.Tx)
 	current, err := a.selectedExecutionCurrentRead(ctx, tx, authority)

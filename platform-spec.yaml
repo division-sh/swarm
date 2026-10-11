@@ -7367,6 +7367,7 @@ engine:
           Single and batch continuation observations independently validate the exact current selected
           execution read fence, including claimed/history and non-existing target kinds. Skipping creating-turn
           ordering never skips authority validation; a fenced execution cannot produce a live disposition or wake.
+          Exact-authority terminal historical observation returns terminal without a wake even after selected execution retirement; it is not live selected-work authorization.
           Pending, executing and retry-scheduled creating turns defer followers without minting their
           claims. A committed delivered, dead-letter or canceled outcome releases them; a follower's
           missing-field or handler failure is its own typed outcome, never inherited from the creator.

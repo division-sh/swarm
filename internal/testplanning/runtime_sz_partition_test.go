@@ -77,7 +77,7 @@ func validateRuntimeSZChildren(policy Policy) error {
 	}
 	// Reviewed addition: preserve the original partition inventory unchanged.
 	readFenceRoot := "TestSelectedContinuationReadFenceBothStores"
-	readFenceCells := []string{"sqlite/existing_busy", "sqlite/existing_retry", "sqlite/entityless_pending", "postgres/existing_busy", "postgres/existing_retry", "postgres/entityless_pending"}
+	readFenceCells := []string{"sqlite/existing_busy", "sqlite/existing_retry", "sqlite/entityless_pending", "postgres/existing_busy", "postgres/existing_retry", "postgres/entityless_pending", "sqlite/existing_delivered", "sqlite/existing_dead_letter", "sqlite/existing_terminalized", "postgres/existing_delivered", "postgres/existing_dead_letter", "postgres/existing_terminalized"}
 	if !reflect.DeepEqual(children[readFenceRoot], readFenceCells) {
 		return fmt.Errorf("selected continuation read-fence required children changed: %v", children[readFenceRoot])
 	}
