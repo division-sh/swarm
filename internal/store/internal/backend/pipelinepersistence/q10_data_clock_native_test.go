@@ -17,7 +17,6 @@ import (
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
@@ -31,15 +30,10 @@ func TestQ10DataClockWriteTriggersBothStores(t *testing.T) {
 			ctx := context.Background()
 			at := time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
 			runID, entityID, foreignRunID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-			seed := runlifecyclefixture.Fixture{RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), StartedAt: at}
 			if postgres {
-				runlifecyclefixture.RequirePostgres(t, ctx, db, seed)
-				seed.RunID = foreignRunID
-				runlifecyclefixture.RequirePostgres(t, ctx, db, seed)
+				requirePostgresStatementRuns(t, db, runID, foreignRunID)
 			} else {
-				runlifecyclefixture.RequireSQLite(t, ctx, db, seed)
-				seed.RunID = foreignRunID
-				runlifecyclefixture.RequireSQLite(t, ctx, db, seed)
+				requireSQLiteStatementRuns(t, db, runID, foreignRunID)
 			}
 			record := pipeline.WorkflowEngineStateRecord{
 				Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute("work", "work", "work")},
