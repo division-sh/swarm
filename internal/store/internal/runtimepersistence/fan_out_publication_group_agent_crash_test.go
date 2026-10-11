@@ -94,7 +94,7 @@ func TestIssue2394PublicationGroupDeferredAgentSIGKILLBothStores(t *testing.T) {
 				env = append(env, "SWARM_FAN_OUT_CRASH_PREDECESSOR="+string(oldJSON))
 				_, evidence, exited = startPublicationGroupCrashChild(t, "successor", env)
 				next := awaitFanOutCrashEvidence(t, evidence)
-				if !next.Recovered || next.Authority.PredecessorAuthorityID != old.Authority.AuthorityID {
+				if !next.Recovered || next.Authority.Validate() != nil || next.Authority.AuthorityID == old.Authority.AuthorityID || next.Authority.AuthorityGeneration != old.Authority.AuthorityGeneration+1 || next.Authority.Backend != old.Authority.Backend || next.Authority.OwnerID != "publication-group-agent-successor" {
 					t.Fatalf("agent recovery lacks exact process succession: %+v", next)
 				}
 				select {
@@ -153,7 +153,7 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 		if err := json.Unmarshal([]byte(os.Getenv("SWARM_FAN_OUT_CRASH_PREDECESSOR")), &old); err != nil {
 			t.Fatal(err)
 		}
-		if processEvidence.AuthorityID == old.AuthorityID || processEvidence.PredecessorAuthorityID != old.AuthorityID || processEvidence.AuthorityGeneration != old.AuthorityGeneration+1 || processEvidence.AcquisitionKind != startupownership.AcquisitionCrashTakeover {
+		if processEvidence.Validate() != nil || processEvidence.AuthorityID == old.AuthorityID || processEvidence.AuthorityGeneration != old.AuthorityGeneration+1 || processEvidence.Backend != old.Backend || processEvidence.OwnerID != request.OwnerID || processEvidence.BootID != request.BootID || processEvidence.RuntimeInstanceID != request.RuntimeInstanceID {
 			t.Fatalf("not exact agent crash takeover: old=%+v next=%+v", old, processEvidence)
 		}
 	}

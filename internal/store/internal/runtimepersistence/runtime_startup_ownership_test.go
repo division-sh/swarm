@@ -33,7 +33,7 @@ func testStartupAcquireRequest(ownerID string) runtimestartupownership.AcquireRe
 
 type startupAuthorityParityStore interface {
 	runtimestartupownership.Store
-	runtimestartupownership.AuthorityMaintenanceStore
+	InspectAuthority(context.Context) (runtimestartupownership.AuthorityInspection, error)
 	runtimeeffects.Store
 	runtimeeffects.RecoveryStore
 }
