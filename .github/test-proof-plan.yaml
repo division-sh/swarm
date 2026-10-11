@@ -1136,6 +1136,8 @@ units:
     # top-level tests accounted for 84.85s of the 198.41s package test time.
     run: ^TestR[^u].*$
     required_children:
+      TestR7PreparedSelectionRechecksDurableAdmissionBothStores: [sqlite/unchanged, sqlite/run_stopped, sqlite/source_replaced, sqlite/stored_winner, sqlite/terminal_winner, postgres/unchanged, postgres/run_stopped, postgres/source_replaced, postgres/stored_winner, postgres/terminal_winner]
+      TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores: [sqlite, postgres]
       TestRootTurnTerminationUsesConstructedRunOwnerBothStores: [prelaunch/sqlite, prelaunch/postgres, launched/sqlite, launched/postgres]
       TestRetriedBusinessTurnTerminationAndTimeoutRecoveryBothStores: [retry_queued/sqlite, retry_queued/postgres, unstarted/sqlite, unstarted/postgres, authorized/sqlite, authorized/postgres, launched/sqlite, launched/postgres, timeout-recovery/sqlite, timeout-recovery/postgres]
       TestRootTurnTimeoutRecoveryKeepsExactReactionBothStores: [sqlite, postgres]

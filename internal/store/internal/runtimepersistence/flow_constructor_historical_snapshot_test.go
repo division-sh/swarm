@@ -14,7 +14,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -55,6 +57,155 @@ func TestR7HistoricalImmutableKeyBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			proveFlowConstructorHistoricalSnapshot(t, backend, false, true, false, true)
+		})
+	}
+}
+
+func TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f, request := newR7SelectionProof(t, backend)
+			index := f.store.(pipeline.FlowInstanceIndexReader)
+			selected, err := pipeline.PrepareFlowInstanceSelection(f.ctx, index, f.manager, request)
+			if err != nil || selected.Activation == nil {
+				t.Fatalf("prepare original receiver: %+v err=%v", selected, err)
+			}
+			committer := agentFixtureFlowActivationCommitter{store: f.store}
+			if _, err := committer.CommitFlowInstanceActivation(f.ctx, *selected.Activation); err != nil {
+				t.Fatal(err)
+			}
+			runID, source, fact := request.Lookup.RunID(), request.Lookup.Source(), request.Lookup.SourceFact()
+			marker := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(source.ResolveFlowEventReference("worker", "item.finished")), "fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+			if err := commitSemanticPipelineProcessedEventFixture(f.ctx, f.store, marker); err != nil {
+				t.Fatal(err)
+			}
+			forks := f.store.(interface {
+				PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+				MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+			})
+			cutRequest := runfork.RunForkPlanRequest{SourceRunID: runID, At: marker.ID()}
+			cut, err := forks.PlanRunFork(f.ctx, cutRequest)
+			if err != nil || len(cut.Entities) != 2 {
+				t.Fatalf("capture root and original receiver: %+v err=%v", cut, err)
+			}
+			later := request.Constructor
+			later.Instance, err = flowidentity.KeyedChild(source, request.Lookup.ParentIdentity(), "worker", "after-cut")
+			if err != nil {
+				t.Fatal(err)
+			}
+			later.ResolvedKey, later.OccurredAt = "later-key", time.Now().UTC()
+			later.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), "item.created", "constructor-fixture", "", []byte(`{"item_id":"later-key"}`), 0, runID, events.EventEnvelope{}, later.OccurredAt)
+			laterPlan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, later)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := committer.CommitFlowInstanceActivation(f.ctx, laterPlan); err != nil {
+				t.Fatal(err)
+			}
+			originalOwner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: selected.Identity().Route()}
+			if err := f.workflows.MarkTerminated(f.ctx, originalOwner, identity.NormalizeEntityID(selected.Identity().EntityID), time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
+			if current, found, err := index.LookupFlowInstance(f.ctx, request.Lookup); err != nil || !found {
+				t.Fatalf("current terminal receiver disappeared: found=%t err=%v", found, err)
+			} else if header, err := current.WorkflowInstance(); err != nil || header.Status != "terminated" || header.TerminatedAt.IsZero() {
+				t.Fatalf("post-cut terminalization did not commit: %+v err=%v", header, err)
+			}
+			laterKeys, err := pipeline.AdmitFlowInstanceKeyMaterial(source, "worker", "later-key")
+			if err != nil {
+				t.Fatal(err)
+			}
+			laterLookup, err := pipeline.NewDeclaredFlowInstanceLookup(source, fact, runID, "worker", request.Lookup.ParentIdentity(), laterKeys)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if current, found, err := index.LookupFlowInstance(f.ctx, laterLookup); err != nil || !found || current.Identity() != laterPlan.Identity {
+				t.Fatalf("post-cut creation did not commit: %+v found=%t err=%v", current, found, err)
+			}
+			if again, err := forks.PlanRunFork(f.ctx, cutRequest); err != nil || again.ForkPoint != cut.ForkPoint || !reflect.DeepEqual(again.Entities, cut.Entities) {
+				t.Fatalf("live construction/lifecycle changed the fixed cut: %+v err=%v", again, err)
+			}
+			forkRequest := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID()}
+			fork, err := forks.MaterializeRunFork(f.ctx, forkRequest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rootLookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, flowidentity.RunScopedFlowInstance{
+				RunID: fork.ForkRunID, Route: flowidentity.StoredRoute(".", fork.ForkRunID, fork.ForkRunID),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			root, found, err := index.LookupFlowInstance(f.ctx, rootLookup)
+			if err != nil || !found {
+				t.Fatalf("historical root missing: found=%t err=%v", found, err)
+			}
+			originalKeys, err := pipeline.AdmitFlowInstanceKeyMaterial(source, "worker", request.Constructor.ResolvedKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalLookup, err := pipeline.NewDeclaredFlowInstanceLookup(source, fact, fork.ForkRunID, "worker", root.Identity(), originalKeys)
+			if err != nil {
+				t.Fatal(err)
+			}
+			laterLookup, err = pipeline.NewDeclaredFlowInstanceLookup(source, fact, fork.ForkRunID, "worker", root.Identity(), laterKeys)
+			if err != nil {
+				t.Fatal(err)
+			}
+			readFixed := func() pipeline.FlowInstanceObservation {
+				t.Helper()
+				observed, found, err := index.LookupFlowInstance(f.ctx, originalLookup)
+				if err != nil || !found || observed.Identity().EntityID != selected.Identity().EntityID || observed.InstanceKey() != "business-key" {
+					t.Fatalf("historical selector lost original identity: %+v found=%t err=%v", observed, found, err)
+				}
+				header, err := observed.WorkflowInstance()
+				if err != nil || header.Status != "active" || !header.TerminatedAt.IsZero() || header.CurrentState != "pending" || header.ParentFlowInstance != fork.ForkRunID {
+					t.Fatalf("historical selector borrowed current lifecycle/parent: %+v err=%v", header, err)
+				}
+				fixed, historical := observed.HistoricalConstruction()
+				if !historical || fixed.SourceOwner != originalOwner || fixed.SourceRevision != cut.ForkPoint.Revision {
+					t.Fatalf("historical selector lost captured construction: %+v", fixed)
+				}
+				if _, native, err := observed.NativeConstruction(); err != nil || native {
+					t.Fatalf("historical lookup fabricated original receipt: native=%t err=%v", native, err)
+				}
+				if _, ready := observed.Readiness(); ready {
+					t.Fatal("materialize-only lookup fabricated fresh readiness")
+				}
+				if later, found, err := index.LookupFlowInstance(f.ctx, laterLookup); err != nil || found || later.Valid() {
+					t.Fatalf("historical index borrowed a post-cut receiver: %+v found=%t err=%v", later, found, err)
+				}
+				return observed
+			}
+			original := readFixed()
+			before, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if replayed, err := forks.MaterializeRunFork(f.ctx, forkRequest); err != nil || replayed.ForkRunID != fork.ForkRunID {
+				t.Fatalf("exact fixed fork replay: %+v err=%v", replayed, err)
+			}
+			if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("exact fixed fork replay changed durable evidence: %v", err)
+			}
+			artifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  newer_source: {}\n"))
+			sourceartifactfixture.RequireArtifact(t, f.ctx, f.store.(sourceartifactfixture.Writer), artifact)
+			if _, err := f.store.(runlifecycle.OperationOwner).ReviseRunSource(f.ctx, runlifecycle.SourceRevisionRequest{RunID: runID, Source: sourceartifactfixture.FactFor(artifact)}); err != nil {
+				t.Fatal(err)
+			}
+			before, err = ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if current := readFixed(); !reflect.DeepEqual(current, original) {
+				t.Fatal("current source progress changed the captured observation")
+			}
+			if replayed, err := forks.MaterializeRunFork(f.ctx, forkRequest); err == nil || replayed.ForkRunID != "" || !strings.Contains(err.Error(), "conflicts with persisted lifecycle state") {
+				t.Fatalf("source progress rewrote frozen fork eligibility: %+v err=%v", replayed, err)
+			}
+			if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("historical lookup/replay changed durable evidence: %v", err)
+			}
 		})
 	}
 }
