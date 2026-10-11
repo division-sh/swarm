@@ -12115,7 +12115,15 @@ tool_model:
         store. Provider consumers receive no database, transaction, query, SQL-capable SDK container or general
         mutation callback. Shared capture evidence is data only; account, input and claim issuance remain inside
         the closed native session owner. Directory/file possession and SDK write fencing/join precede database
-        release. Capture quota, whole-row/digest validation, original staged request bytes and receipt-verified
+        release. The private SQLite owner retains one serialized SQL connection, WAL journaling,
+        synchronous FULL commits and foreign-key enforcement; unsupported modes refuse instead of falling back.
+        Existing account evidence is verified before journal configuration or SDK schema upgrade. SDK schema
+        initialization continues to consume the pinned SDK owner, while both capture/failure tables and their
+        required columns are admitted in one initialization transaction. No capture handle or SDK connection
+        is published before that durable preparation succeeds. Initialization failure rolls back partial capture
+        schema and grants no pairing, input or execution authority. Private WAL and shared-memory files retain
+        the same restrictive possession checks; complete SDK/private-store join precedes their owner release.
+        Capture quota, whole-row/digest validation, original staged request bytes and receipt-verified
         retirement retain one semantic owner. Private-state tests consume finite named corruption, quota, fault,
         close/reopen and observation fixtures. Selected-store tests consume exact-instance onboarding lock/waiter,
         publication failure and release operations, never a recovered pool or general transaction capability.
