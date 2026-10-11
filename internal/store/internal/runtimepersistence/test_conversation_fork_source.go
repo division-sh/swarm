@@ -3,12 +3,15 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
@@ -40,6 +43,15 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 	if !ok || source.BundleHash() == "" {
 		return result, fmt.Errorf("fork fixture requires exact source scope")
 	}
+	header, err := pipeline.WorkflowInstanceHeaderPayloadForRoute(flowidentity.RouteForInstancePath("flow/forkchat"), "")
+	if err != nil {
+		return result, err
+	}
+	headerJSON, err := json.Marshal(header)
+	if err != nil {
+		return result, err
+	}
+	bornAt, advancedAt := fixture.Turn1At.Add(-30*time.Second), fixture.Turn1At.Add(10*time.Second)
 	persist := func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, dialect authoractivityfixture.Dialect) error {
 		query := "SELECT bundle_hash FROM runs WHERE run_id=?"
 		if dialect == authoractivityfixture.DialectPostgres {
@@ -69,8 +81,9 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 				memory_enabled, status, created_at, updated_at
 			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'active',$10,$10)`,
 					[]any{fixture.SessionID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, now.Add(-3 * time.Minute)}},
-				{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid,$2::uuid,'flow/forkchat','default','after','{}'::jsonb,'{"name":"After"}'::jsonb,'{}'::jsonb,2,$3,$3,$3)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
-				{`INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at) VALUES ($1::uuid,$2::uuid,'lifecycle_state','',NULL,'"draft"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'authored_field','name',NULL,'"Before"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'lifecycle_state','','"draft"'::jsonb,'"after"'::jsonb,'platform','test',$4)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
+				{`INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, mode, config, status, stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid,'flow/forkchat','forkchat',$2::uuid,'default','static',$3::jsonb,'active',TRUE,'after','{}'::jsonb,'{}'::jsonb,'{}'::jsonb,2,$4,$5,$4)`, []any{fixture.RunID, fixture.EntityID, string(headerJSON), advancedAt, bornAt}},
+				{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES ($1::uuid,$2::uuid,'flow/forkchat','default','{"name":"After"}'::jsonb,$3,$3)`, []any{fixture.RunID, fixture.EntityID, advancedAt}},
+				{`INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at) VALUES ($1::uuid,$2::uuid,'lifecycle_state','',NULL,'"draft"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'authored_field','name',NULL,'"Before"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'lifecycle_state','','"draft"'::jsonb,'"after"'::jsonb,'platform','test',$4),($1::uuid,$2::uuid,'authored_field','name','"Before"'::jsonb,'"After"'::jsonb,'platform','test',$4)`, []any{fixture.RunID, fixture.EntityID, bornAt, advancedAt}},
 			}
 		case authoractivityfixture.DialectSQLite:
 			statements = []struct {
@@ -83,8 +96,9 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 				memory_enabled, status, created_at, updated_at
 			) VALUES (?,?,?,?,?,?,?,?,?,1,'active',?,?)`,
 					[]any{fixture.SessionID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, now.Add(-3 * time.Minute), now.Add(-3 * time.Minute)}},
-				{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?,?,'flow/forkchat','default','after','{}','{"name":"After"}','{}',2,?,?,?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
-				{`INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at) VALUES (?,?,'lifecycle_state','',NULL,'"draft"','platform','test',?),(?,?,'authored_field','name',NULL,'"Before"','platform','test',?),(?,?,'lifecycle_state','','"draft"','"after"','platform','test',?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
+				{`INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, mode, config, status, stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?,'flow/forkchat','forkchat',?,'default','static',?,'active',TRUE,'after','{}','{}','{}',2,?,?,?)`, []any{fixture.RunID, fixture.EntityID, string(headerJSON), advancedAt, bornAt, advancedAt}},
+				{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES (?,?,'flow/forkchat','default','{"name":"After"}',?,?)`, []any{fixture.RunID, fixture.EntityID, advancedAt, advancedAt}},
+				{`INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at) VALUES (?,?,'lifecycle_state','',NULL,'"draft"','platform','test',?),(?,?,'authored_field','name',NULL,'"Before"','platform','test',?),(?,?,'lifecycle_state','','"draft"','"after"','platform','test',?),(?,?,'authored_field','name','"Before"','"After"','platform','test',?)`, []any{fixture.RunID, fixture.EntityID, bornAt, fixture.RunID, fixture.EntityID, bornAt, fixture.RunID, fixture.EntityID, advancedAt, fixture.RunID, fixture.EntityID, advancedAt}},
 			}
 		}
 		for _, statement := range statements {
