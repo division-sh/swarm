@@ -33,6 +33,7 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 					"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "input-seed",
 				})
+				waitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, seed.EventID)
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "input-pause"})
@@ -69,6 +70,7 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 					return
 				}
 				point := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+				waitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, point.EventID)
 				if mode == "explicit_child" && len(point.Deliveries) != 1 {
 					t.Fatalf("explicit connected receiver restriction admitted %d deliveries, want one child", len(point.Deliveries))
 				}
