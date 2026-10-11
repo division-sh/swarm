@@ -8,7 +8,33 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
+
+// Private composition port: the fixed-snapshot owner supplies evidence only;
+// delivery admission remains the sole interpreter of predecessor outcomes.
+type ReceiverConstructionHistory interface {
+	ReadReceiverConstructionHistoryTx(context.Context, *sql.Tx, runlifecycle.Snapshot, pipeline.WorkflowInstance) (bool, error)
+}
+
+func (s *PipelinePostgresOwner) BindReceiverConstructionHistory(owner ReceiverConstructionHistory) error {
+	if owner == nil || s.receiverHistory != nil {
+		return fmt.Errorf("receiver construction history must be bound exactly once")
+	}
+	s.receiverHistory = owner
+	return nil
+}
+
+func (s *PipelineSQLiteOwner) BindReceiverConstructionHistory(owner ReceiverConstructionHistory) error {
+	if owner == nil || s.receiverHistory != nil {
+		return fmt.Errorf("receiver construction history must be bound exactly once")
+	}
+	s.receiverHistory = owner
+	return nil
+}
 
 func (s *PipelinePostgresOwner) ReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, runID string, route events.DeliveryRoute) (string, error) {
 	return receiverCreatingEventTx(ctx, tx, runID, route)
@@ -16,6 +42,75 @@ func (s *PipelinePostgresOwner) ReceiverCreatingEventTx(ctx context.Context, tx 
 
 func (s *PipelineSQLiteOwner) ReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, runID string, route events.DeliveryRoute) (string, error) {
 	return receiverCreatingEventTx(ctx, tx, runID, route)
+}
+
+func (s *PipelinePostgresOwner) SelectedReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, authority deliverylifecycle.ExecutionAuthority, route events.DeliveryRoute) (string, error) {
+	run, err := s.LoadSnapshotTx(ctx, tx, authority.ForkRunID(), false)
+	if err != nil {
+		return "", err
+	}
+	return selectedReceiverCreatingEventTx(ctx, tx, authority, route, run, s.receiverHistory, false)
+}
+
+func (s *PipelineSQLiteOwner) SelectedReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, authority deliverylifecycle.ExecutionAuthority, route events.DeliveryRoute) (string, error) {
+	run, err := s.LoadSnapshotTx(ctx, tx, authority.ForkRunID())
+	if err != nil {
+		return "", err
+	}
+	return selectedReceiverCreatingEventTx(ctx, tx, authority, route, run, s.receiverHistory, true)
+}
+
+// The delivery owner has checked the exact selected-execution fence. A missing
+// native receipt is never historical authority: the fixed cut must prove it.
+func selectedReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, authority deliverylifecycle.ExecutionAuthority, route events.DeliveryRoute, run runlifecycle.Snapshot, history ReceiverConstructionHistory, sqlite bool) (string, error) {
+	if tx == nil || authority.Kind() != deliverylifecycle.ExecutionAuthoritySelectedContractFork || authority.Validate() != nil || route.Target.Empty() {
+		return "", fmt.Errorf("selected creating-turn identity requires its admitted fork authority and transaction")
+	}
+	if err := events.ValidateDeliveryRoutes([]events.DeliveryRoute{route}); err != nil {
+		return "", err
+	}
+	if history == nil || run.RunID != authority.ForkRunID() || run.Validate() != nil {
+		return "", fmt.Errorf("selected creating-turn observation requires its bound run and fixed-snapshot owner")
+	}
+	header, err := selectedCreatingReceiverHeader(ctx, tx, run.RunID, route.Target.Route(), sqlite)
+	if err != nil {
+		return "", err
+	}
+	historical, err := history.ReadReceiverConstructionHistoryTx(ctx, tx, run, header)
+	if err != nil {
+		return "", err
+	}
+	var present bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workflow_instance_initial_materializations
+		WHERE run_id=$1 AND instance_path=$2)`, run.RunID, header.StorageRef).Scan(&present); err != nil {
+		return "", fmt.Errorf("inspect fork-local creating receipt: %w", err)
+	}
+	if historical && present {
+		return "", fmt.Errorf("receiver has contradictory historical and native construction evidence")
+	}
+	if historical {
+		return "", nil
+	}
+	return receiverCreatingEventTx(ctx, tx, authority.ForkRunID(), route)
+}
+
+func selectedCreatingReceiverHeader(ctx context.Context, tx *sql.Tx, runID string, target events.RouteIdentity, sqlite bool) (pipeline.WorkflowInstance, error) {
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(target.FlowID, flowidentity.LogicalInstanceID(target.FlowInstance), target.FlowInstance))
+	if err != nil {
+		return pipeline.WorkflowInstance{}, err
+	}
+	var entityID string
+	if err := tx.QueryRowContext(ctx, `SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND flow_template=$3`, runID, target.FlowInstance, target.FlowID).Scan(&entityID); err != nil {
+		return pipeline.WorkflowInstance{}, fmt.Errorf("read selected constructed receiver: %w", err)
+	}
+	if target.EntityID != "" && target.EntityID != entityID {
+		return pipeline.WorkflowInstance{}, fmt.Errorf("selected creating-turn target contradicts constructed receiver identity")
+	}
+	paired, err := loadWorkflowTargetPersistence(ctx, tx, owner, identity.NormalizeEntityID(entityID), sqlite)
+	if err != nil {
+		return pipeline.WorkflowInstance{}, err
+	}
+	return paired.DecodeComplete(owner.Route, identity.NormalizeEntityID(entityID))
 }
 
 // Construction supplies the immutable predecessor identity, never its outcome.

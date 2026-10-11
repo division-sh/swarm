@@ -1195,7 +1195,7 @@ units:
     # TestC moves here after full01 exceeded its unchanged command budget.
     run: '^Test(C.*|[G-H].*)$'
     required_children:
-      TestCreatingPredecessorAdmissionBothStores: [sqlite/pending, sqlite/claimed, sqlite/retry, sqlite/delivered, sqlite/dead_letter, sqlite/no_delivery, sqlite/different_sender, postgres/pending, postgres/claimed, postgres/retry, postgres/delivered, postgres/dead_letter, postgres/no_delivery, postgres/different_sender]
+      TestCreatingPredecessorAdmissionBothStores: [sqlite/pending, sqlite/claimed, sqlite/retry, sqlite/delivered, sqlite/dead_letter, sqlite/no_delivery, sqlite/different_sender, sqlite/missing_receipt, postgres/pending, postgres/claimed, postgres/retry, postgres/delivered, postgres/dead_letter, postgres/no_delivery, postgres/different_sender, postgres/missing_receipt]
       TestCreatingPredecessorNoInputBothStores: [sqlite/fieldless, sqlite/fielded, postgres/fieldless, postgres/fielded]
       TestCreatingPredecessorCanceledTurnBothStores: [sqlite, postgres]
       TestCanceledTurnPreservesCapturedProviderDrainBothStores: [delivery/sqlite, delivery/postgres, directive/sqlite, directive/postgres]

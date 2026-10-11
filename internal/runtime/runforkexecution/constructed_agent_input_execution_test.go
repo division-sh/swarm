@@ -3,6 +3,9 @@ package runforkexecution
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -18,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -35,9 +39,17 @@ import (
 	"github.com/google/uuid"
 )
 
-type constructedInputAgent struct{ selectedContractForkTestAgent }
+type constructedInputAgent struct {
+	selectedContractForkTestAgent
+	observe func(context.Context, events.Event) error
+}
 
-func (a *constructedInputAgent) OnEvent(_ context.Context, event events.Event) ([]events.Event, error) {
+func (a *constructedInputAgent) OnEvent(ctx context.Context, event events.Event) ([]events.Event, error) {
+	if a.observe != nil {
+		if err := a.observe(ctx, event); err != nil {
+			return nil, err
+		}
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.runIDs = append(a.runIDs, event.RunID())
@@ -65,7 +77,49 @@ func TestSelectedNestedConstructedAgentInputExecutesBothStores(t *testing.T) {
 	}
 }
 
-func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fields bool) {
+func TestSelectedHistoricalPredecessorScanBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) { proveSelectedConstructedAgentInput(t, backend, false, false, true) })
+	}
+}
+
+type selectedHistoricalScanProbe struct {
+	SelectedContractReplayPersistence
+	store deliverylifecycle.Store
+}
+
+var errSelectedHistoricalScanCut = errors.New("selected historical scan component cut")
+
+// Component proof: commit an acknowledged prepared-publication handoff through
+// its real owner, then inspect pending eligibility before execution consumes it.
+func (p selectedHistoricalScanProbe) CommitSelectedForkEvent(ctx context.Context, req bus.CommitSelectedForkEventRequest) (bus.CommittedSelectedForkEvent, error) {
+	disposition := pipelineobligation.Acknowledged("selected_predecessor_component")
+	req.Commit.Disposition = &disposition
+	result, err := p.SelectedContractReplayPersistence.CommitSelectedForkEvent(ctx, req)
+	if err != nil {
+		return result, err
+	}
+	page, err := p.store.ScanDeliveryContinuations(ctx, req.Commit.DeliveryAuthority, deliverylifecycle.ContinuationCursor{}, 64)
+	if err != nil {
+		return result, err
+	}
+	for _, proof := range result.DeliveryHandoffs {
+		found := slices.ContainsFunc(page.Items, func(item deliverylifecycle.ContinuationItem) bool {
+			return item.DeliveryID == proof.DeliveryID() && item.Disposition == deliverylifecycle.ClaimAcquired && item.Invariant == nil && item.Snapshot.ClaimVersion == 0
+		})
+		if !found {
+			return result, fmt.Errorf("historical pending continuation rejected: delivery=%s page=%+v", proof.DeliveryID(), page)
+		}
+	}
+	if len(result.DeliveryHandoffs) == 0 {
+		return result, fmt.Errorf("historical scan proof never reached a durable receiver")
+	}
+	// Stop this component before ordinary publication dispatch: its initial
+	// disposition was already committed, so it must not be settled a second time.
+	return result, errSelectedHistoricalScanCut
+}
+
+func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fields bool, scan ...bool) {
 	t.Helper()
 	var db *sql.DB
 	var selected startupownership.Store
@@ -215,6 +269,9 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		}
 	}
 	before := selectedPreparationDatabaseSnapshot(t, db, backend)
+	if len(scan) != 0 && scan[0] {
+		owner.ports.replay = selectedHistoricalScanProbe{SelectedContractReplayPersistence: owner.ports.replay, store: selected.(deliverylifecycle.Store)}
+	}
 	agents := map[agentidentity.Identity]*constructedInputAgent{}
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
@@ -227,13 +284,26 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 				if err != nil {
 					return nil, err
 				}
-				agent := &constructedInputAgent{}
+				agent := &constructedInputAgent{observe: func(ctx context.Context, event events.Event) error {
+					err := observeSelectedConstructedInput(ctx, selected, event)
+					if err != nil {
+						t.Logf("selected admission observation: %v", err)
+					}
+					return err
+				}}
 				agent.Configure(cfg)
 				agents[identity] = agent
 				return agent, nil
 			},
 		},
 	})
+	if len(scan) != 0 && scan[0] {
+		if !errors.Is(err, errSelectedHistoricalScanCut) {
+			t.Fatalf("historical scan did not reach its exact admitted component cut: %v", err)
+		}
+		requireSelectedConstructedSourceUnchanged(t, db, backend, runID, before)
+		return
+	}
 	if err != nil || !result.Activation.Activated || result.ExecutedEventCount != 1 {
 		t.Fatalf("actual selected constructed-input execution: result=%#v err=%v", result, err)
 	}
@@ -274,6 +344,11 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 			t.Fatalf("fork companion lost retained business field: %+v", header.Fields)
 		}
 	}
+	requireSelectedConstructedSourceUnchanged(t, db, backend, runID, before)
+}
+
+func requireSelectedConstructedSourceUnchanged(t *testing.T, db *sql.DB, backend, runID string, before map[string][]string) {
+	t.Helper()
 	after := selectedPreparationDatabaseSnapshot(t, db, backend)
 	for table, rows := range before {
 		if table == "runs" {
@@ -286,4 +361,37 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		}
 	}
 
+}
+
+func observeSelectedConstructedInput(ctx context.Context, selected startupownership.Store, event events.Event) error {
+	rows, err := storetest.ReadReceiverDeliveryStorage(ctx, selected, event.RunID())
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if row.EventID == event.ID() {
+			return observeHistoricalClaimEntrances(ctx, selected.(deliverylifecycle.Store), row.DeliveryID)
+		}
+	}
+	return fmt.Errorf("admitted selected receiver lacks its exact delivery")
+}
+
+func observeHistoricalClaimEntrances(ctx context.Context, store deliverylifecycle.Store, deliveryID string) error {
+	before, err := store.Snapshot(ctx, deliveryID)
+	if err != nil {
+		return err
+	}
+	batch, err := store.ObserveDeliveryContinuations(ctx, before.Authority, []string{deliveryID})
+	if err != nil || len(batch) != 1 || batch[0].Invariant != nil || batch[0].Disposition != deliverylifecycle.ClaimBusy {
+		return fmt.Errorf("historical batch rejected admitted receiver: %+v err=%v", batch, err)
+	}
+	single, err := store.ObserveDeliveryContinuation(ctx, before.Authority, deliveryID)
+	if err != nil || single.Invariant != nil || single.Disposition != deliverylifecycle.ClaimBusy {
+		return fmt.Errorf("historical continuation rejected admitted receiver: %+v err=%v", single, err)
+	}
+	after, err := store.Snapshot(ctx, deliveryID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		return fmt.Errorf("historical observation mutated exact claim: err=%v", err)
+	}
+	return nil
 }
