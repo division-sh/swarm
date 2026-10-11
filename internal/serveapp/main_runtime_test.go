@@ -38,6 +38,7 @@ import (
 	runtimeagentmemory "github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -792,6 +793,8 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 }
 
 func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t *testing.T) {
+	var deliveryReader servedRunDeliveryReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 	endpoint, db, bundleHash, _, pg := startServedJoinProofRuntime(t)
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name": "order.started", "bundle_hash": bundleHash,
@@ -814,7 +817,7 @@ func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t 
 	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, arrival.EventID, "node", identitytest.RootNode(t, "join-node").Key(), "delivered", 1)
 	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", arrival.EventID, "platform", "pipeline", "success", 1)
 	waitServedJoinSourceTimer(t, db, initial.RunID)
-	waitServedRunDeliveryQuiescence(t, db, "postgres", initial.RunID)
+	waitServedRunDeliveryQuiescence(t, deliveryReader, initial.RunID)
 	forkEventID := seedServedJoinForkFrontier(t, db, initial.RunID, entityID, arrival.EventID)
 	if _, err := pg.PlanRunFork(context.Background(), runfork.RunForkPlanRequest{
 		SourceRunID: initial.RunID,
@@ -915,29 +918,27 @@ func waitServedJoinSourceTimer(t *testing.T, db *sql.DB, runID string) {
 	t.Fatalf("served join source timers for run %s = %d, want 1\n%s", runID, count, servedEventPublishDebugSummary(t, db, "postgres", runID))
 }
 
-func waitServedRunDeliveryQuiescence(t *testing.T, db *sql.DB, backend, runID string) {
+func waitServedRunDeliveryQuiescence(t *testing.T, reader servedRunDeliveryReader, runID string) {
 	t.Helper()
+	if reader == nil {
+		t.Fatal("served delivery quiescence requires its native run summary reader")
+	}
 	deadline := time.Now().Add(servedProofPollDeadline)
 	stable := 0
+	var last runtimedelivery.RunSummary
 	for time.Now().Before(deadline) {
-		var active int
-		query := `
-			SELECT COUNT(*)
-			FROM event_deliveries
-			WHERE run_id = ?
-			  AND status IN ('pending', 'in_progress')
-		`
-		if backend == "postgres" {
-			query = `
-				SELECT COUNT(*)
-				FROM event_deliveries
-				WHERE run_id = $1::uuid
-				  AND status IN ('pending', 'in_progress')
-			`
-		}
-		if err := db.QueryRowContext(context.Background(), query, runID).Scan(&active); err != nil {
+		summary, err := reader(context.Background(), runID)
+		if err != nil {
 			t.Fatalf("count active served run deliveries: %v", err)
 		}
+		if summary.RunID != runID {
+			t.Fatalf("delivery summary run=%q,want exact %q", summary.RunID, runID)
+		}
+		if err := summary.Validate(); err != nil {
+			t.Fatalf("invalid served run delivery summary: %v", err)
+		}
+		last = summary
+		active := summary.Pending + summary.InProgress
 		if active == 0 {
 			stable++
 			if stable == 4 {
@@ -948,7 +949,7 @@ func waitServedRunDeliveryQuiescence(t *testing.T, db *sql.DB, backend, runID st
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("served run %s deliveries did not remain quiescent\n%s", runID, servedEventPublishDebugSummary(t, db, backend, runID))
+	t.Fatalf("served run %s deliveries did not remain quiescent: %+v", runID, last)
 }
 
 func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *testing.T) {
@@ -1493,6 +1494,7 @@ type servedControlProofRuntime struct {
 	SQLite              *store.SQLiteRuntimeStore
 	ForkRuntime         selectedForkRuntimeProofOptions
 	ReceiverStateReader receiverProofStateReader
+	ReadRunDeliveries   servedRunDeliveryReader
 }
 
 func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProofRuntime) context.Context {
@@ -1539,6 +1541,8 @@ func startServedLiveAgentProofRuntimeWithLLM(t *testing.T, backend servedparity.
 
 func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, backend servedparity.Backend, llm servedLiveAgentProofLLMRuntime, faults *servedDirectivePersistenceFaults) servedControlProofRuntime {
 	t.Helper()
+	var deliveryReader servedRunDeliveryReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
@@ -1574,7 +1578,7 @@ func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, bac
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for live-agent served parity proof")
 		}
-		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, SQLite: servedSQLite}
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, SQLite: servedSQLite}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -1603,7 +1607,7 @@ func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, bac
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 			TestLLMRuntime:          llm,
 		})
-		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Postgres: pg}
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Postgres: pg}
 	default:
 		t.Fatalf("unknown live-agent served parity backend %q", backend)
 		return servedControlProofRuntime{}
@@ -1636,6 +1640,8 @@ func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend) 
 
 func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparity.Backend, fixture func(*testing.T) string) servedControlProofRuntime {
 	t.Helper()
+	var deliveryReader servedRunDeliveryReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 	var contexts *runtimepkg.RuntimeContextManager
 	captureContexts := func(manager *runtimepkg.RuntimeContextManager) { contexts = manager }
 	switch backend {
@@ -1666,7 +1672,7 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for control served parity proof")
 		}
-		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, SQLite: servedSQLite}
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, SQLite: servedSQLite}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -1688,7 +1694,7 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 			TestLifecycleProbe:           probe,
 			TestOutboxSweeperConfig:      servedEventPublishProofOutboxSweeperConfig(),
 		})
-		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, Postgres: pg}
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, Postgres: pg}
 	default:
 		t.Fatalf("unknown served control backend %q", backend)
 		return servedControlProofRuntime{}
@@ -1771,7 +1777,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if err := rt.DB.QueryRowContext(context.Background(), forkCountQuery, started.RunID, published.EventID).Scan(&forkRows); err != nil || forkRows != 1 {
 		t.Fatalf("%s durable fork rows = %d, err=%v, want 1", rt.Backend, forkRows, err)
 	}
-	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for {
 		var candidateSettled bool
@@ -1886,6 +1892,8 @@ func runServedConversationForkBackendProof(t *testing.T, backend servedparity.Ba
 
 func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.Backend) servedConversationForkProofRuntime {
 	t.Helper()
+	var deliveryReader servedRunDeliveryReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 	requests := &atomic.Int32{}
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -1941,7 +1949,7 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 		if servedDB == nil {
 			t.Fatal("served conversation fork SQLDB is required")
 		}
-		return servedControlProofRuntime{
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader,
 			Endpoint: endpoint, DB: servedDB, BundleHash: servedEventPublishFixtureBundleHash(t, sourceRoot), Runtime: rt,
 			Postgres: servedPostgres, SQLite: servedSQLite,
 		}
@@ -2020,7 +2028,7 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	if !initial.NewRunCreated || initial.RunID == "" {
 		t.Fatalf("%s conversation fork source run = %#v", rt.Backend, initial)
 	}
-	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, initial.RunID)
+	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, initial.RunID)
 	ready := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name":      "fork.source_message",
 		"run_id":          initial.RunID,
@@ -2474,6 +2482,8 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 
 func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
+	var deliveryReader servedRunDeliveryReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 	forkOptions := captureServedForkRuntimeOptions(t)
 	configureWorkspace := func() {
 		if !realWorkspace {
@@ -2532,7 +2542,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for test.setup_entities served parity proof")
 		}
-		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, SQLite: servedSQLite, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, SQLite: servedSQLite, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -2556,7 +2566,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 			Verbose:                          true,
 			TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
 		})
-		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Postgres: pg, Backend: "postgres", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Postgres: pg, Backend: "postgres", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
 	default:
 		t.Fatalf("unknown served test.setup_entities backend %q", backend)
 		return servedControlProofRuntime{}
@@ -7567,7 +7577,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, bundle *
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	activeSessionID := uuid.NewString()
-	runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour), BundleHash: bundleHash})
+	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour), BundleHash: bundleHash})
 	identity := servedRuntimeFlowIdentityFieldsForRun(t, runID, "agent-a", "serve-abandon", "agent-a")
 	requireServeTestAgentFixtureForSource(t, sqliteStore, runtimeactors.AgentConfig{
 		ID: identity.AgentID, Identity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a"),
@@ -8708,7 +8718,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	if _, err := runtimePG.EnsureSourceArtifactWithData(ctx, bundle.SourceArtifact, catalog); err != nil {
 		t.Fatalf("persist postgres abandon source artifact: %v", err)
 	}
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash})
+	storetest.RequireRun(t, ctx, runtimePG, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash})
 	requireServeTestAgentFixtureForSource(t, runtimePG, runtimeactors.AgentConfig{
 		ID: identity.AgentID, Identity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a"),
 		Type: "default", Role: "operator", Model: "regular", LLMBackend: "anthropic",

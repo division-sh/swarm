@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -26,8 +25,8 @@ func selectedContractTestRuntimeAuthority(t testing.TB, ctx context.Context, db 
 	t.Helper()
 	source := loaded.SourceArtifactFact
 	sourceRun, eventID, bindingID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRun, Source: source, Artifact: artifact,
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRun, BundleHash: source.BundleHash(), Artifact: artifact,
 	})
 	now := time.Now().UTC()
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, sourceRun, "selected.proof",

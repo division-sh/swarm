@@ -27,7 +27,7 @@ func TestForkTerminalBarrierHistoryCorruptionBothStores(t *testing.T) {
 				t.Run(variant, func(t *testing.T) {
 					at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 					ctx, fixture, handle := seedDeclaredForkFanOutFixtureWithBarrier(t, backend, authorActivityReceiptFixture{db: db, store: owner.(authorActivityReceiptStore)}, 0, at, true)
-					advanceFanOutBarriersForTest(t, ctx, selected, db, fixture.runID, at.Add(time.Second))
+					advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, at.Add(time.Second))
 					activationID := mustFanOutBarrierScheduleActivationID(t, ctx, db, fixture)
 					activation, found, err := owner.(genericschedule.Store).LoadGenericScheduleActivation(ctx, activationID)
 					if err != nil || !found {
@@ -48,7 +48,7 @@ func TestForkTerminalBarrierHistoryCorruptionBothStores(t *testing.T) {
 					markFanOutBarrierScheduleFired(t, ctx, db, activationID, occurrenceID, activation.CurrentDueAt.Add(time.Second))
 					settleFanOutBarrierRouteDeadLetter(t, ctx, selected, occurrence, route)
 					// Use the real terminal owner, not a status-only fixture.
-					advanceFanOutBarriersForTest(t, ctx, selected, db, fixture.runID, time.Now().UTC())
+					advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, time.Now().UTC())
 					query := ""
 					switch variant {
 					case "claim":

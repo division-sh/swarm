@@ -402,7 +402,7 @@ func TestMockOnlyPostureRejectsLiveAgentRestartBeforeSuccessorFactory(t *testing
 
 type startupReplayTestStore struct {
 	recoveryTestStore
-	*managerDeliveryTestStore
+	*ManagerDeliveryNativeFixture
 }
 
 func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {

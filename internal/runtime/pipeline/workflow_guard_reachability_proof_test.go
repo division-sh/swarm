@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
-func TestGuardTerminationVerifiedExecutionAndRestartBothStores(t *testing.T) {
+func VerifyNativeGuardTerminationVerifiedExecutionAndRestartBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range []struct {
 		name, guard string
 		prefix      []string
@@ -105,7 +105,7 @@ func TestGuardTerminationVerifiedExecutionAndRestartBothStores(t *testing.T) {
 		}
 		for _, backend := range []string{"sqlite", "postgres"} {
 			t.Run(tc.name+"/"+backend, func(t *testing.T) {
-				f := newCompiledAdapterFixture(t, backend, rebuilt, ".", "ready", true)
+				f := newNativeCompiledAdapterFixture(t, backend, rebuilt, ".", "ready", true, open)
 				evt := f.event("kill")
 				result, err := f.execute("kill", evt)
 				status, marker := HandlerOutcomeKilled, "unchanged"
@@ -126,10 +126,8 @@ func TestGuardTerminationVerifiedExecutionAndRestartBothStores(t *testing.T) {
 				if _, ordinary := record.Evidence.Compiled(); ordinary != (tc.prefix == nil) {
 					t.Fatal("guard execution changed ordinary versus failed-check authority")
 				}
-				restarted := newPostgresWorkflowInstanceStoreForTest(f.db)
-				if backend == "sqlite" {
-					restarted = newSQLiteWorkflowInstanceStoreForTest(t, f.db)
-				}
+				restarted := f.native.ReopenProjection().store
+				f.store = restarted
 				route := testWorkflowInstanceRoute(f.path)
 				reloaded, found, err := restarted.Load(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, route.InstancePath))
 				if err != nil || !found || !reflect.DeepEqual(after, reloaded) {

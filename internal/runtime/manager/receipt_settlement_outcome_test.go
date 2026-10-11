@@ -89,12 +89,19 @@ func (b *receiptOutcomeBus) ReleaseDeliveryContinuation(deliveryID string) error
 
 // Real SQLite delivery-adapter COMMIT precedes the injected owner return error.
 // This tests the exact manager consumer, not driver cleanup or wire failure.
-func TestWriteReceiptPreservesCommittedSettlementAndContinuation(t *testing.T) {
-	for _, status := range []ReceiptStatus{ReceiptStatusProcessed, ReceiptStatusError, ReceiptStatusDeadLetter, ReceiptStatusTerminal} {
+// Real SQLite delivery-adapter COMMIT precedes the injected owner return error.
+// This tests the exact manager consumer, not driver cleanup or wire failure.
+func ProveNativeWriteReceiptPreservesCommittedSettlementAndContinuation(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+	for _, status := range // Real SQLite delivery-adapter COMMIT precedes the injected owner return error.
+	// This tests the exact manager consumer, not driver cleanup or wire failure.
+	// Real SQLite delivery-adapter COMMIT precedes the injected owner return error.
+	// This tests the exact manager consumer, not driver cleanup or wire failure.
+	[]ReceiptStatus{ReceiptStatusProcessed, ReceiptStatusError, ReceiptStatusDeadLetter, ReceiptStatusTerminal} {
 		for _, phase := range []string{"healthy", "commit_error", "continuation_error", "both_errors", "uncommitted", "foreign_snapshot"} {
 			t.Run(string(status)+"/"+phase, func(t *testing.T) {
 				failure, cleanup := errors.New("postcommit owner failure"), errors.New("continuation cleanup failure")
-				store := &receiptOutcomeStore{Store: newManagerDeliveryTestStore(t), uncommitted: phase == "uncommitted", foreign: phase == "foreign_snapshot"}
+				nativeDelivery := newNativeDelivery(t)
+				store := &receiptOutcomeStore{Store: nativeDelivery, uncommitted: phase == "uncommitted", foreign: phase == "foreign_snapshot"}
 				bus := &receiptOutcomeBus{}
 				if phase == "commit_error" || phase == "both_errors" || phase == "uncommitted" {
 					store.failure = failure
@@ -104,6 +111,7 @@ func TestWriteReceiptPreservesCommittedSettlementAndContinuation(t *testing.T) {
 				}
 				am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: store})
 				evt := eventtest.RunCreatingRootIngress(eventtest.UUID("receipt-outcome"), "work.requested", "", "", nil, 0, eventtest.UUID("receipt-outcome-run"), "", events.EventEnvelope{}, time.Time{})
+				nativeDelivery.seedAgentDeliveries(t, "agent-a", []events.Event{evt})
 				ctx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), evt, "agent-a")
 				claim, _ := runtimedelivery.ClaimFromContext(ctx)
 				snapshot, err := am.writeReceipt(ctx, evt, status, testFailure("receipt_failure"))
@@ -140,7 +148,6 @@ func TestWriteReceiptPreservesCommittedSettlementAndContinuation(t *testing.T) {
 				if err != nil || len(outcomes) != 1 {
 					t.Fatalf("durable outcomes=%+v err=%v", outcomes, err)
 				}
-				// Reusing the settled claim must fail before a second settlement.
 				_, err = am.writeReceipt(ctx, evt, status, testFailure("receipt_failure"))
 				if err == nil || store.settlements.Load() != 1 {
 					t.Fatalf("settled claim replayed: settlements=%d err=%v", store.settlements.Load(), err)
@@ -150,7 +157,7 @@ func TestWriteReceiptPreservesCommittedSettlementAndContinuation(t *testing.T) {
 	}
 }
 
-func TestProcessEventDoesNotResettleAcknowledgedReceiptError(t *testing.T) {
+func ProveNativeProcessEventDoesNotResettleAcknowledgedReceiptError(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
 	for _, failed := range []bool{false, true} {
 		name := "success"
 		if failed {
@@ -158,7 +165,8 @@ func TestProcessEventDoesNotResettleAcknowledgedReceiptError(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			failure, cleanup := errors.New("postcommit owner failure"), errors.New("continuation failure")
-			store := &receiptOutcomeStore{Store: newManagerDeliveryTestStore(t), failure: failure}
+			nativeDelivery := newNativeDelivery(t)
+			store := &receiptOutcomeStore{Store: nativeDelivery, failure: failure}
 			bus := &receiptOutcomeBus{failure: cleanup}
 			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: store})
 			agent := &countingFailureAgent{failureReturningAgent: failureReturningAgent{id: "agent-a"}}
@@ -166,6 +174,7 @@ func TestProcessEventDoesNotResettleAcknowledgedReceiptError(t *testing.T) {
 				agent.err = errors.New("handler failed")
 			}
 			evt := eventtest.RunCreatingRootIngress(eventtest.UUID("process-receipt"), "work.requested", "", "", nil, 0, eventtest.UUID("process-receipt-run"), "", events.EventEnvelope{}, time.Time{})
+			nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{evt})
 			ctx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), evt, agent.ID())
 			result := am.processEventDetailed(ctx, agent, evt)
 			if !errors.Is(result.err, failure) || !errors.Is(result.err, cleanup) || agent.calls != 1 || store.settlements.Load() != 1 {

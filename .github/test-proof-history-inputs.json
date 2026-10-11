@@ -1,0 +1,12 @@
+{
+  "github.com/division-sh/swarm/internal/store": [
+    "40c0b18bf315a949959417688adb32e358413b78",
+    "44c4047f0ac6866f6f4475c12d8a0f69e16b062c"
+  ],
+  "github.com/division-sh/swarm/scripts/rewrite-stages-2566": [
+    "055bbbaba13e8d604ed80b73af98ca97c3b7acfb",
+    "5ea6d33d6b1d2afe6f13ae14df07ddbbfc08576b",
+    "83482f4ad0df7536975f427a25d60f2a997e4e23",
+    "c0f7c2ac5be811b373061a8075d9d603b74e3431"
+  ]
+}

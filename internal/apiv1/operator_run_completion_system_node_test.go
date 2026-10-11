@@ -103,7 +103,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	if data := asMap(t, terminalPublish.Error.Data); data["code"] != RunAlreadyTerminalCode {
 		t.Fatalf("event.publish --run-id terminal data = %#v, want %s", data, RunAlreadyTerminalCode)
 	}
-	if count := countEventsByName(t, db, "flow.started"); count != 1 {
+	if count := countEventsByName(t, pg, "flow.started"); count != 1 {
 		t.Fatalf("flow.started event count after terminal publish = %d, want 1", count)
 	}
 }

@@ -33,7 +33,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -450,21 +449,10 @@ func selectedRuntimeOutcomeSQLiteOwner(t *testing.T, selected *store.SQLiteRunti
 
 func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected SelectedContractForkLifecycle, loaded LoadedSelectedContractSource, runID, eventID string, route events.DeliveryRoute, at time.Time) {
 	t.Helper()
-	fixture := runlifecyclefixture.Fixture{
-		RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Source: loaded.SourceArtifactFact,
+	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
+		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),
 		Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),
-	}
-	if backend == "sqlite" {
-		if _, err := selected.(*store.SQLiteRuntimeStore).EnsureSourceArtifact(ctx, fixture.Artifact); err != nil {
-			t.Fatal(err)
-		}
-		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
-	} else {
-		if _, err := selected.(*store.PostgresStore).EnsureSourceArtifact(ctx, fixture.Artifact); err != nil {
-			t.Fatal(err)
-		}
-		runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
-	}
+	})
 	payload, err := json.Marshal(map[string]any{"entity_id": runID})
 	if err != nil {
 		t.Fatal(err)

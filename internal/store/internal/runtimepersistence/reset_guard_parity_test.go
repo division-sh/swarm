@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -167,12 +166,7 @@ func TestResetRetainedCleanupScopeAndRollbackBothStores(t *testing.T) {
 				sourceartifactfixture.RequireArtifact(t, ctx, backend.store.(sourceartifactfixture.Writer), artifact)
 				seedRun := func(id string) {
 					t.Helper()
-					fixture := runlifecyclefixture.Fixture{RunID: id, BundleHash: artifact.BundleHash(), Origin: runlifecyclefixture.ScenarioSetupOrigin()}
-					if backend.name == "sqlite" {
-						runlifecyclefixture.RequireSQLite(t, ctx, backend.db, fixture)
-					} else {
-						runlifecyclefixture.RequirePostgres(t, ctx, backend.db, fixture)
-					}
+					requireRunFixtureForTest(t, ctx, backend.store, semanticRunFixture{RunID: id, BundleHash: artifact.BundleHash(), Origin: semanticScenarioSetupRunOriginForTest()})
 				}
 				runID := uuid.NewString()
 				seedRun(runID)

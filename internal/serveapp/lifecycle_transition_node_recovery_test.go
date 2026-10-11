@@ -136,9 +136,9 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 					}
 					requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.repeat", "ordinary-before-cap", map[string]any{"revision_id": loop.RevisionID}))
 					requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "drafting")
-					waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				before := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 				expected := lifecycleRecoveryCarrier(t, runtime, escape)
 				armed.Store(true)
@@ -179,7 +179,7 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 					target = "escaped"
 				}
 				requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, target)
-				waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				after := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 				if len(after) != 1 || len(before) != 1 || after[0].TriggerEventID == before[0].TriggerEventID {
 					t.Fatal("reexecuted node lost or duplicated prior history")
@@ -209,7 +209,7 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 					requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.close", "close", map[string]any{"revision_id": current.RevisionID}))
 					requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "done")
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				if closed := readLifecycleLoop(t, rt, seed.RunID, entityID); closed.Status != loopruntime.StatusClosed {
 					t.Fatal("loop not closed")
 				}

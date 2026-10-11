@@ -100,8 +100,7 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 	store := goldenSQLiteStore(root)
 	configPath := filepath.Join(root, "config", "swarm.yaml")
 	// Verification must use the same ephemeral listener policy as serve.
-	writeReleaseFile(t, configPath, goldenRuntimeConfig(store)+
-		"serve:\n  api_listen_addr: '127.0.0.1:0'\n  mcp_listen_addr: '127.0.0.1:0'\n")
+	writeReleaseFile(t, configPath, goldenRuntimeConfig(store))
 	devConfigPath := filepath.Join(root, ".swarm", "swarm.yaml")
 	writeReleaseFile(t, devConfigPath, goldenRuntimeConfig(goldenStoreSelection{
 		name: "sqlite", configYAML: "store:\n  backend: sqlite\n",
@@ -860,7 +859,7 @@ func goldenRuntimeConfig(store goldenStoreSelection) string {
 		"  backend: claude_cli\n" +
 		"workspace:\n" +
 		"  backend: host\n" +
-		store.configYAML
+		store.configYAML + testutil.EphemeralServeListenerConfig()
 }
 
 // Clock processes need only an isolated location, not a diagnostic pool or a

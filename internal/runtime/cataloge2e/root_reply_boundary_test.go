@@ -1,6 +1,7 @@
 package cataloge2e
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -38,23 +40,18 @@ func proveRootReplyBoundary(t *testing.T, rootRequester bool) {
 					if !t.Failed() {
 						return
 					}
-					rows, err := h.db.Query(`SELECT CAST(e.event_id AS TEXT),e.event_name,
-						COALESCE(r.outcome,''),COALESCE(r.reason_code,'')
-						FROM events e LEFT JOIN event_receipts r ON r.event_id=e.event_id
-						AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'
-						ORDER BY e.created_at,e.event_id LIMIT 100`)
+					reader, err := h.catalogOperatorEventLister()
 					if err != nil {
 						t.Logf("reply publication diagnostic: %v", err)
 						return
 					}
-					defer rows.Close()
-					for rows.Next() {
-						var id, name, outcome, reason string
-						if err := rows.Scan(&id, &name, &outcome, &reason); err != nil {
-							t.Logf("reply publication diagnostic: %v", err)
-							return
-						}
-						t.Logf("reply publication: event=%s name=%s outcome=%s reason=%s", id, name, outcome, reason)
+					rows, err := storetest.ReadEarliestEventPipelineReceiptRows(context.Background(), reader)
+					if err != nil {
+						t.Logf("reply publication diagnostic: %v", err)
+						return
+					}
+					for _, row := range rows {
+						t.Logf("reply publication: event=%s name=%s outcome=%s reason=%s", row.ID, row.Name, row.Outcome, row.Reason)
 					}
 				})
 				steps := []catalogTriggerStep{
@@ -116,25 +113,12 @@ func assertConstructedRootReplyOrigins(t *testing.T, h *runtimeHarness) {
 	if h.sqlite != nil {
 		reader = h.sqlite
 	}
-	rows, err := h.db.QueryContext(h.ctx, `SELECT CAST(request_event_id AS TEXT)
-		FROM reply_contexts WHERE run_id=$1 ORDER BY request_event_id`, catalogRuntimeRunID)
+	selected, err := h.catalogOperatorEventLister()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			t.Fatal(err)
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		t.Fatal(err)
-	}
-	if err := rows.Close(); err != nil {
+	ids, err := storetest.ReadReplyContextRequestIDs(h.ctx, selected, catalogRuntimeRunID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	want := events.RouteIdentity{FlowID: ".", FlowInstance: catalogRuntimeRunID, EntityID: catalogRuntimeRunID}
@@ -155,11 +139,15 @@ func assertRootReplyRefusals(t *testing.T, h *runtimeHarness, explicit bool) {
 	if h.sqlite != nil {
 		backend = h.sqlite
 	}
-	var contextID, requestID, acceptedID string
-	if err := h.db.QueryRowContext(h.ctx, `SELECT reply_context_id, request_event_id, accepted_reply_event_id
-		FROM reply_contexts WHERE run_id=$1 ORDER BY reply_context_id LIMIT 1`, catalogRuntimeRunID).Scan(&contextID, &requestID, &acceptedID); err != nil {
+	selected, err := h.catalogOperatorEventLister()
+	if err != nil {
 		t.Fatal(err)
 	}
+	stored, err := storetest.ReadFirstReplyContextStorage(h.ctx, selected, catalogRuntimeRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextID, requestID, acceptedID := stored.ContextID, stored.RequestEventID, stored.AcceptedReplyEventID
 	request, found, err := backend.LoadPreparedPublishEvent(h.ctx, requestID)
 	if err != nil || !found || len(request.DeliveryRoutes) != 1 {
 		t.Fatalf("request readback=%+v found=%v error=%v", request, found, err)
@@ -204,15 +192,16 @@ func assertRootReplyRefusals(t *testing.T, h *runtimeHarness, explicit bool) {
 				context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:missing"}}
 			}
 			ctx := events.WithDeliveryContext(h.ctx, context)
-			var before, after int
-			if err := h.db.QueryRowContext(h.ctx, `SELECT count(*) FROM events WHERE run_id=$1`, catalogRuntimeRunID).Scan(&before); err != nil {
+			before, err := storetest.CountPhysicalRunEvents(h.ctx, selected, catalogRuntimeRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			plan, err := h.rt.Bus.CheckPublishRecipientPlan(ctx, event)
 			if err != nil || len(plan.DeliveryRoutes) != 0 || plan.TargetFailure != tc.failure {
 				t.Fatalf("late reply preflight=%+v error=%v want=%s", plan, err, tc.failure)
 			}
-			if err := h.db.QueryRowContext(h.ctx, `SELECT count(*) FROM events WHERE run_id=$1`, catalogRuntimeRunID).Scan(&after); err != nil {
+			after, err := storetest.CountPhysicalRunEvents(h.ctx, selected, catalogRuntimeRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if before != after {
@@ -228,26 +217,25 @@ func assertRootReplyRefusals(t *testing.T, h *runtimeHarness, explicit bool) {
 
 func assertRootReplyEvidence(t *testing.T, h *runtimeHarness, expected catalogExpectedDocument, want int) {
 	t.Helper()
-	var total, accepted, distinctRequests, distinctReplies int
-	if err := h.db.QueryRowContext(h.ctx, `SELECT count(*), count(accepted_reply_event_id),
-		count(DISTINCT request_event_id), count(DISTINCT accepted_reply_event_id)
-		FROM reply_contexts WHERE run_id=$1`, catalogRuntimeRunID).Scan(&total, &accepted, &distinctRequests, &distinctReplies); err != nil {
-		t.Fatal(err)
-	}
-	if total != want || accepted != want || distinctRequests != want || distinctReplies != want {
-		t.Fatalf("reply contexts=%d accepted=%d requests=%d replies=%d want=%d", total, accepted, distinctRequests, distinctReplies, want)
-	}
 	lister, err := h.catalogOperatorEventLister()
 	if err != nil {
 		t.Fatal(err)
+	}
+	counts, err := storetest.ReadReplyContextStorageCounts(h.ctx, lister, catalogRuntimeRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	total, accepted, distinctRequests, distinctReplies := counts.Total, counts.Accepted, counts.DistinctRequests, counts.DistinctReplies
+	if total != want || accepted != want || distinctRequests != want || distinctReplies != want {
+		t.Fatalf("reply contexts=%d accepted=%d requests=%d replies=%d want=%d", total, accepted, distinctRequests, distinctReplies, want)
 	}
 	public, err := loadCatalogOperatorEvents(h.ctx, lister)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range append([]string{"request.started"}, expected.Expected.EmittedEvents...) {
-		var publications int
-		if err := h.db.QueryRowContext(h.ctx, `SELECT count(*) FROM events WHERE run_id=$1 AND event_name=$2`, catalogRuntimeRunID, name).Scan(&publications); err != nil {
+		publications, err := storetest.CountRunEventNameStorage(h.ctx, lister, catalogRuntimeRunID, name)
+		if err != nil {
 			t.Fatal(err)
 		}
 		visible := 0

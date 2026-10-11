@@ -113,7 +113,7 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 				t.Fatal("released verdict did not complete")
 			}
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			if code := first.stop(); code != 0 {
 				t.Fatalf("pre-consumer stop=%d", code)
 			}
@@ -122,7 +122,7 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 			second, rt := start()
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			after := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 			if len(after) != 1 || !reflect.DeepEqual(readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, outcomeID), before[0]) || after[0].TriggerEventID != outcomeID || after[0].From != "approved" || after[0].To != "done" {
 				t.Fatalf("restart changed gate cause or replayed route: before=%#v after=%#v", before, after)

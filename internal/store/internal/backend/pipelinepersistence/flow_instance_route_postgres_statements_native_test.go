@@ -12,7 +12,6 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/lib/pq"
 )
 
@@ -26,13 +25,8 @@ func populatePostgresRouteStatementFixture(t testing.TB, db *sql.DB, owners int,
 	t.Helper()
 	// Cancellation observes the server barrier through an independent session.
 	db.SetMaxOpenConns(2)
+	requirePostgresStatementRuns(t, db, postgresStatementRunID)
 	for _, query := range []string{
-		`CREATE TABLE runs (run_id UUID PRIMARY KEY, status TEXT, bundle_hash TEXT,
-		 origin_kind TEXT, trigger_event_id UUID, trigger_event_type TEXT,
-		 origin_service_id UUID, origin_generation BIGINT, forked_from_run_id UUID,
-		 forked_from_event_id UUID, started_at TIMESTAMPTZ)`,
-		`CREATE TABLE source_artifacts (bundle_hash TEXT PRIMARY KEY, source_blob BYTEA,
-		 member_count INTEGER, total_bytes BIGINT, created_at TIMESTAMPTZ)`,
 		`CREATE TABLE routing_rules (rule_id UUID PRIMARY KEY,
 		 event_pattern TEXT, subscriber_type TEXT, subscriber_id TEXT, run_id UUID,
 		 flow_instance TEXT, source_flow TEXT, is_wildcard BOOLEAN, is_materialized BOOLEAN,
@@ -55,9 +49,6 @@ func populatePostgresRouteStatementFixture(t testing.TB, db *sql.DB, owners int,
 			t.Fatal(err)
 		}
 	}
-	runlifecyclefixture.RequirePostgres(t, context.Background(), db, runlifecyclefixture.Fixture{
-		RunID: postgresStatementRunID, Origin: runlifecyclefixture.ScenarioSetupOrigin(),
-	})
 	sets := postgresStatementRouteSets(owners)
 	if existing {
 		tx, err := db.Begin()

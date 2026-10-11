@@ -22,7 +22,7 @@ func TestServedCompiledGateAdvanceOnlyOnBothStores(t *testing.T) {
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &result)
 			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "approved")
 			requireServedEntityReadback(t, rt.Endpoint, seed.RunID, entityID, "approved")
-			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 			if len(history) != 1 {
 				t.Fatalf("advance-only history=%#v", history)

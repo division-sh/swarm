@@ -44,7 +44,7 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 						}
 						payload["deadline_at"] = deadline.Format(time.RFC3339Nano)
 						requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": eventName, "run_id": f.base.RunID, "source_event_id": f.eventID, "payload": payload, "idempotency_key": "human-topology-" + f.base.RunID})
-						waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, f.base.RunID)
+						waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, f.base.RunID)
 						expectedEntity := ""
 						if mode == "template" {
 							var fields string
@@ -110,7 +110,7 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 							outcome = "human_task.expired"
 							for _, request := range completed {
 								var replay map[string]any
-								waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, request.runID)
+								waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, request.runID)
 								before := mailboxCompletionRunEffects(t, rt, request.runID)
 								requireServedJSONRPCResult(t, rt.Endpoint, request.method, request.params, &replay)
 								want := make(map[string]any, len(request.response))
@@ -130,7 +130,7 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 							requireServedJSONRPCResult(t, rt.Endpoint, method, params, &response)
 							completed = append(completed, completedRequest{method, f.base.RunID, params, response})
 						}
-						waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, f.base.RunID)
+						waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, f.base.RunID)
 						rows, err := rt.DB.Query(`SELECT d.subscriber_id,d.status,CAST(d.delivery_target_route AS TEXT),d.agent_flow_scope_key,d.agent_flow_instance_path,e.event_id,e.source_event_id FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 AND e.event_name=$2`, f.base.RunID, outcome)
 						if err != nil {
 							t.Fatal(err)

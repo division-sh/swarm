@@ -57,7 +57,7 @@ func TestPausedHandedAgentParksUntilContinueBothStores(t *testing.T) {
 							t.Fatal(err)
 						}
 					} else {
-						expirePausedDeliveryClaim(t, f, id)
+						expirePausedDeliveryClaim(t, f, claim.Claim)
 					}
 				}
 				controller := runtimeruncontrol.NewController(f.store.(runtimeruncontrol.Store), f.bus, runtimeruncontrol.Options{})
@@ -269,12 +269,14 @@ func TestPausedEligibilityRejectsBrokenControlBothStores(t *testing.T) {
 				if _, err := controller.Pause(f.ctx, runtimeruncontrol.TransitionRequest{RunID: f.event.RunID(), Reason: "control-corruption-proof"}); err != nil {
 					t.Fatal(err)
 				}
-				query := `DELETE FROM run_control_state WHERE run_id=$1`
+				var faultErr error
 				if posture == "contradictory_control" {
-					query = `UPDATE run_control_state SET control_status='running' WHERE run_id=$1`
+					faultErr = storetest.ContradictPausedRunControl(f.ctx, f.store, f.event.RunID())
+				} else {
+					faultErr = storetest.RemovePausedRunControl(f.ctx, f.store, f.event.RunID())
 				}
-				if _, err := f.db.ExecContext(f.ctx, query, f.event.RunID()); err != nil {
-					t.Fatal(err)
+				if faultErr != nil {
+					t.Fatal(faultErr)
 				}
 				route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(f.agentID), AgentIdentity: f.identity}
 				id, err := runtimedelivery.DeliveryID(f.event.ID(), route)
@@ -307,7 +309,7 @@ func TestMixedPausedRunningRecoveryBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			f := newCompleteEventDispatchFixture(t, backend, false)
 			runningID := uuid.NewString()
-			seedCompleteEventDispatchRun(t, f.ctx, f.db, backend, runningID, f.event.CreatedAt())
+			seedCompleteEventDispatchRun(t, f.ctx, f.store, runningID, f.event.CreatedAt())
 			running := newRetryReleaseRunRoot(runningID, f.event.CreatedAt().Add(time.Microsecond))
 			storetest.CommitSemanticEventWithRoutes(t, f.ctx, f.store, running, nil, runtimepipelineobligation.ScopeSubscribed)
 			controller := runtimeruncontrol.NewController(f.store.(runtimeruncontrol.Store), f.bus, runtimeruncontrol.Options{})
@@ -341,35 +343,9 @@ func TestMixedPausedRunningRecoveryBothStores(t *testing.T) {
 	}
 }
 
-func expirePausedDeliveryClaim(t *testing.T, f completeEventDispatchFixture, id string) {
+func expirePausedDeliveryClaim(t *testing.T, f completeEventDispatchFixture, claim runtimedelivery.Claim) {
 	t.Helper()
-	tx, err := f.db.BeginTx(f.ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-	start, end := time.Now().UTC().Add(-2*time.Hour), time.Now().UTC().Add(-time.Hour)
-	deliverySQL := "UPDATE event_deliveries SET created_at = ?, started_at = ?, updated_at = ? WHERE delivery_id = ? AND status = 'in_progress'"
-	attemptSQL := "UPDATE event_delivery_attempts SET started_at = ?, lease_expires_at = ? WHERE delivery_id = ? AND open_marker = TRUE"
-	deliveryArgs := []any{start, start, end, id}
-	if f.dialect == "postgres" {
-		deliverySQL = "UPDATE event_deliveries SET created_at = $1, started_at = $1, updated_at = $2 WHERE delivery_id = $3::uuid AND status = 'in_progress'"
-		attemptSQL = "UPDATE event_delivery_attempts SET started_at = $1, lease_expires_at = $2 WHERE delivery_id = $3::uuid AND open_marker = TRUE"
-		deliveryArgs = []any{start, end, id}
-	}
-	for _, query := range []struct {
-		sql  string
-		args []any
-	}{{deliverySQL, deliveryArgs}, {attemptSQL, []any{start, end, id}}} {
-		result, err := tx.ExecContext(f.ctx, query.sql, query.args...)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if count, err := result.RowsAffected(); err != nil || count != 1 {
-			t.Fatalf("expiry affected=%d error=%v", count, err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
+	if err := storetest.ExpireExactDeliveryClaimFault(f.ctx, f.store, claim); err != nil {
 		t.Fatal(err)
 	}
 }

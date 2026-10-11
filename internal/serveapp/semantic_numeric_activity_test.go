@@ -212,7 +212,7 @@ collector:
 
 func requireNumericMockForkOutput(t *testing.T, rt servedControlProofRuntime, run string) {
 	t.Helper()
-	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, run)
+	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, run)
 	var entityID string
 	if err := rt.DB.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1`, run).Scan(&entityID); err != nil {
 		t.Fatal(err)

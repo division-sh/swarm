@@ -84,7 +84,7 @@ func newStartupReadinessTestRuntime(t testing.TB, nodes ...runtimepipeline.Backg
 		SystemNodes:           nodes,
 		workOccurrence:        runtimeTestOccurrence(t, runtimeTestBundleHash),
 		startupGrant:          grant,
-		deliveryStore:         newRuntimeShutdownDeliveryStore(t),
+		deliveryStore:         &managedNativeRecoveryDeliveryStore{},
 		standingRestartReader: startupRecoveryWorkflowOwner{},
 		Options: RuntimeOptions{
 			DisablePersistentStartupRecovery: true,

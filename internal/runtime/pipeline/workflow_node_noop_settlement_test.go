@@ -73,7 +73,7 @@ func (s *observedNoopSettlementStore) SettleWorkflowNodeSuccess(ctx context.Cont
 	return s.Store.SettleWorkflowNodeSuccess(ctx, claim, effects, duration, selection)
 }
 
-func TestObsoleteJoinOccurrenceUsesAtomicNodeSettlementBothStores(t *testing.T) {
+func VerifyNativeObsoleteJoinOccurrenceUsesAtomicNodeSettlementBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, storeCase := range workflowJoinStoreCases() {
 		for _, flowID := range []string{"", "orders"} {
 			name := "root"
@@ -81,7 +81,7 @@ func TestObsoleteJoinOccurrenceUsesAtomicNodeSettlementBothStores(t *testing.T) 
 				name = "flow"
 			}
 			t.Run(storeCase.name+"/"+name, func(t *testing.T) {
-				h := newExactWorkflowJoinHarness(t, storeCase, flowID, "awaiting", []any{"a", "b"})
+				h := newNativeExactWorkflowJoinHarness(t, storeCase.name, flowID, "awaiting", []any{"a", "b"}, nil, open)
 				schedule := h.armInitial()
 				h.transition("dispatching", "manual.abort")
 				before := h.instance()
@@ -97,7 +97,7 @@ func TestObsoleteJoinOccurrenceUsesAtomicNodeSettlementBothStores(t *testing.T) 
 					t.Fatal(err)
 				}
 				route := events.DeliveryRoute{Recipient: recipient, Target: events.MustExistingEntityTarget(target)}
-				ctx, err := persistWorkflowJoinPublicationForTest(t, h.pc, h.ctx, late, route, false)
+				ctx, err := nativeWorkflowJoinPublicationContextForTest(t, h.fixture, h.pc, h.ctx, late, route, false)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -130,7 +130,7 @@ func TestObsoleteJoinOccurrenceUsesAtomicNodeSettlementBothStores(t *testing.T) 
 				if after := h.instance(); !reflect.DeepEqual(before, after) {
 					t.Fatalf("obsolete join changed workflow state or header\nbefore=%#v\nafter=%#v", before, after)
 				}
-				_, cancellations := committedWorkflowSchedulesForTest(t, h.store)
+				_, cancellations := h.mutations.schedules()
 				if len(cancellations) != 1 || cancellations[0].Command.ScheduleKey != schedule.Command.ScheduleKey {
 					t.Fatalf("obsolete join changed schedule retirement: %#v", cancellations)
 				}

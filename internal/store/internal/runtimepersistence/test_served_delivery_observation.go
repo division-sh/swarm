@@ -5,10 +5,382 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
+
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 )
+
+type LatestPipelineReceiptStorage = pipelinepersistence.LatestPipelineReceiptStorage
+
+type NodeDeliveryDiagnosticStorage struct {
+	Rows, DeadLetters, Receipts []string
+}
+
+func ReadServedRunDeliverySummaryForTest(ctx context.Context, selected any, runID string) (runtimedelivery.RunSummary, error) {
+	if err := validateSelectedForkStorageIdentity(runID); err != nil {
+		return runtimedelivery.RunSummary{}, err
+	}
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return runtimedelivery.RunSummary{}, err
+	}
+	var summary runtimedelivery.RunSummary
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		switch owner := selected.(type) {
+		case *PostgresStore:
+			summary, err = owner.deliveryPostgresOwner.SummarizeRunTx(ctx, tx, runID)
+		case *SQLiteRuntimeStore:
+			summary, err = owner.deliverySQLiteOwner.SummarizeRunTx(ctx, tx, runID)
+		}
+		return err
+	})
+	if err != nil {
+		return runtimedelivery.RunSummary{}, err
+	}
+	return summary, nil
+}
+
+func ReadNodeDeliveryTargetEncodingForTest(ctx context.Context, selected any, eventID, nodeID string) (string, error) {
+	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
+		return "", err
+	}
+	if nodeID == "" || strings.TrimSpace(nodeID) != nodeID {
+		return "", fmt.Errorf("node target observation requires its exact nonempty recipient")
+	}
+	_, postgres := selected.(*PostgresStore)
+	var raw string
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		raw, err = delivery.ReadNodeDeliveryTargetEncodingTx(ctx, tx, postgres, eventID, nodeID)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return raw, nil
+}
+
+func ReadNodeDeliveryDiagnosticStorageForTest(ctx context.Context, selected any, eventID string) (NodeDeliveryDiagnosticStorage, error) {
+	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
+		return NodeDeliveryDiagnosticStorage{}, err
+	}
+	_, postgres := selected.(*PostgresStore)
+	var out NodeDeliveryDiagnosticStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out.Rows, err = delivery.ReadNodeDeliveryDiagnosticLinesTx(ctx, tx, postgres, eventID)
+		if err != nil {
+			return fmt.Errorf("delivery dump: %w", err)
+		}
+		out.DeadLetters, err = delivery.ReadNodeDeadLetterDiagnosticLinesTx(ctx, tx, postgres, eventID)
+		if err != nil {
+			return fmt.Errorf("dead letter dump: %w", err)
+		}
+		out.Receipts, err = pipelinepersistence.ReadNodeReceiptDiagnosticLinesTx(ctx, tx, postgres, eventID)
+		if err != nil {
+			return fmt.Errorf("receipt dump: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return NodeDeliveryDiagnosticStorage{}, err
+	}
+	return out, nil
+}
+
+type CausalDeliveryStatusCount = delivery.CausalDeliveryStatusCount
+
+type CausalDeliveryFrontier = delivery.CausalDeliveryFrontier
+type CausalDeliveryFrontierProbe = delivery.CausalDeliveryFrontierProbe
+
+const (
+	FrontierComplete           = delivery.FrontierComplete
+	FrontierMissing            = delivery.FrontierMissing
+	FrontierPending            = delivery.FrontierPending
+	FrontierDuplicateDelivery  = delivery.FrontierDuplicateDelivery
+	FrontierDeadLetterDelivery = delivery.FrontierDeadLetterDelivery
+)
+
+func ReadCausalDeliveryFrontierForTest(ctx context.Context, selected any, runID, eventID string) (CausalDeliveryFrontier, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return CausalDeliveryFrontier{}, err
+	}
+	var out CausalDeliveryFrontier
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = delivery.ReadCausalDeliveryFrontier(ctx, tx, runID, eventID)
+		return err
+	})
+	if err != nil {
+		return CausalDeliveryFrontier{}, err
+	}
+	return out, nil
+}
+
+func ProbeCausalDeliveryFrontierForTest(ctx context.Context, selected any, probe CausalDeliveryFrontierProbe) (CausalDeliveryFrontier, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return CausalDeliveryFrontier{}, err
+	}
+	var out CausalDeliveryFrontier
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = delivery.ProbeCausalDeliveryFrontier(ctx, tx, probe)
+		return err
+	})
+	if err != nil {
+		return CausalDeliveryFrontier{}, err
+	}
+	return out, nil
+}
+
+func CountClosedSourceFanOutIssuanceForTest(ctx context.Context, selected any, runID, eventID string, cardinality int) (int, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return 0, err
+	}
+	var count int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		count, err = pipelinepersistence.CountClosedSourceFanOutIssuance(ctx, tx, runID, eventID, cardinality)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+type DeliveryAttemptDiagnosticRow = delivery.DeliveryAttemptDiagnosticRow
+
+type EventDeliveryDiagnosticRow = delivery.EventDeliveryDiagnosticRow
+
+func ReadEventDeliveryDiagnosticRowsForTest(ctx context.Context, selected any, eventID string) ([]EventDeliveryDiagnosticRow, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	_, postgres := selected.(*PostgresStore)
+	var out []EventDeliveryDiagnosticRow
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = delivery.ReadEventDeliveryDiagnosticRows(ctx, tx, eventID, postgres)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadSubscriberEventNamesCreatedSinceForTest(ctx context.Context, selected any, since time.Time, subscriberID string) ([]string, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out []string
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = delivery.ReadSubscriberEventNamesCreatedSince(ctx, tx, since, subscriberID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadCausalDeliveryStatusCountsForTest(ctx context.Context, selected any, runID, eventID string) ([]CausalDeliveryStatusCount, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out []CausalDeliveryStatusCount
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = delivery.ReadCausalDeliveryStatusCounts(ctx, tx, runID, eventID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadNonLogRunDeliveryClaimTotalsForTest(ctx context.Context, selected any, runID string) (deliveries, claims int64, err error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return 0, 0, err
+	}
+	err = readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		deliveries, claims, err = delivery.ReadNonLogRunDeliveryClaimTotals(ctx, tx, runID)
+		return err
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	return deliveries, claims, nil
+}
+
+func ReadDeliveryAttemptDiagnosticRowsForTest(ctx context.Context, selected any, deliveryID string) ([]DeliveryAttemptDiagnosticRow, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out []DeliveryAttemptDiagnosticRow
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = delivery.ReadDeliveryAttemptDiagnosticRows(ctx, tx, deliveryID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+type EventPipelineReceiptObservationRow = pipelinepersistence.EventPipelineReceiptObservationRow
+
+type SourceFanOutIntentDiagnosticRow = pipelinepersistence.SourceFanOutIntentDiagnosticRow
+
+func ReadSourceFanOutIntentDiagnosticRowsForTest(ctx context.Context, selected any, runID, eventID string) ([]SourceFanOutIntentDiagnosticRow, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out []SourceFanOutIntentDiagnosticRow
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = pipelinepersistence.ReadSourceFanOutIntentDiagnosticRows(ctx, tx, runID, eventID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadEarliestEventPipelineReceiptRowsForTest(ctx context.Context, selected any) ([]EventPipelineReceiptObservationRow, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out []EventPipelineReceiptObservationRow
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = pipelinepersistence.ReadEarliestEventPipelineReceiptRows(ctx, tx)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadLatestPlatformPipelineReceiptStorageForTest(ctx context.Context, selected any, eventID string) (LatestPipelineReceiptStorage, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return LatestPipelineReceiptStorage{}, err
+	}
+	var out LatestPipelineReceiptStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		_, postgres := selected.(*PostgresStore)
+		var err error
+		out, err = pipelinepersistence.ReadLatestPlatformPipelineReceiptStorage(ctx, tx, postgres, eventID)
+		return err
+	})
+	if err != nil {
+		return LatestPipelineReceiptStorage{}, err
+	}
+	return out, nil
+}
+
+func CountDeadLettersForOriginalEventForTest(ctx context.Context, selected any, originalEventID string) (int, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return 0, err
+	}
+	var count int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		count, err = delivery.CountDeadLettersForOriginalEvent(ctx, tx, originalEventID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+type DeadLetterObservationRow = delivery.DeadLetterObservationRow
+
+type TargetFailureDeadLetterStorage = delivery.TargetFailureDeadLetterStorage
+
+func ReadTargetFailureDeadLetterStorageForTest(ctx context.Context, selected any, eventID string) (TargetFailureDeadLetterStorage, error) {
+	if err := validateSelectedForkStorageIdentity(eventID); err != nil {
+		return TargetFailureDeadLetterStorage{}, err
+	}
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return TargetFailureDeadLetterStorage{}, err
+	}
+	var out TargetFailureDeadLetterStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		_, postgres := selected.(*PostgresStore)
+		var err error
+		out, err = delivery.ReadTargetFailureDeadLetterStorage(ctx, tx, postgres, eventID)
+		return err
+	})
+	if err != nil {
+		return TargetFailureDeadLetterStorage{}, err
+	}
+	return out, nil
+}
+
+type ChainDepthDeadLetterStorage = delivery.ChainDepthDeadLetterStorage
+
+func ReadChainDepthDeadLetterStorageForTest(ctx context.Context, selected any, runID, entityID string) (ChainDepthDeadLetterStorage, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return ChainDepthDeadLetterStorage{}, err
+	}
+	var out ChainDepthDeadLetterStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		_, postgres := selected.(*PostgresStore)
+		var err error
+		out, err = delivery.ReadChainDepthDeadLetterStorage(ctx, tx, postgres, runID, entityID)
+		return err
+	})
+	if err != nil {
+		return ChainDepthDeadLetterStorage{}, err
+	}
+	return out, nil
+}
+
+func CountDeadLetterEntityRelationsSinceForTest(ctx context.Context, selected any, since time.Time, entityID string) (int, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return 0, err
+	}
+	var count int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		_, postgres := selected.(*PostgresStore)
+		var err error
+		count, err = delivery.CountDeadLetterEntityRelationsSince(ctx, tx, postgres, since, entityID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func ReadDeadLetterObservationRowsForTest(ctx context.Context, selected any) ([]DeadLetterObservationRow, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out []DeadLetterObservationRow
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		_, postgres := selected.(*PostgresStore)
+		var err error
+		out, err = delivery.ReadDeadLetterObservationRows(ctx, tx, postgres)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
 
 // Transferred from B70ab4d333 /888cb4958 under6010346696. The three OR arms
 // are one exact handoff predicate, not a delivery-active substitute.

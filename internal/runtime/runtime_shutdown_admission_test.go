@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -20,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -28,13 +26,8 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
 )
 
 type runtimeShutdownTestAgent struct {
@@ -126,271 +119,47 @@ func (s *runtimeShutdownCompletionStore) ExecuteCompletionCandidate(
 	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeAwaitMutation}, nil
 }
 
+// This spy only records the native owner's acknowledged activation; all reads,
+// claims, settlements and transaction ownership stay with the original store.
 type runtimeShutdownDeliveryStore struct {
 	runtimedelivery.Store
-	db        *sql.DB
-	adapter   *deliveryfixture.Adapter
 	authority runtimedelivery.ExecutionAuthority
-	mu        sync.Mutex
-	events    map[string]events.Event
 }
 
-func newRuntimeShutdownDeliveryStore(t testing.TB) *runtimeShutdownDeliveryStore {
+func (s *runtimeShutdownDeliveryStore) ActivateDeliveryAuthority(ctx context.Context, authority runtimedelivery.ExecutionAuthority) error {
+	commit, err := s.ActivateDeliveryAuthorityOutcome(ctx, authority)
+	if !commit.Acknowledged && err == nil {
+		return errors.New("native shutdown authority activation was not acknowledged")
+	}
+	return err
+}
+
+func (s *runtimeShutdownDeliveryStore) ActivateDeliveryAuthorityOutcome(ctx context.Context, authority runtimedelivery.ExecutionAuthority) (runtimedelivery.ActivationCommit, error) {
+	commit, err := s.Store.ActivateDeliveryAuthorityOutcome(ctx, authority)
+	if commit.Acknowledged {
+		s.authority = authority
+	}
+	return commit, err
+}
+
+func newRuntimeShutdownDeliveryStore(t *testing.T, open RuntimeLogNativeOpenerForTest) (*runtimeShutdownDeliveryStore, RuntimeLogNativeFixtureForTest) {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+uuid.NewString()+"?mode=memory&cache=shared")
+	fixture := open(t, sourceartifactfixture.Artifact())
+	if err := fixture.RequireRun(fixture.Context, agentidentitytest.DefaultRunID); err != nil {
+		t.Fatal(err)
+	}
+	return &runtimeShutdownDeliveryStore{Store: fixture.Deliveries}, fixture
+}
+
+func activateRuntimeShutdownDelivery(t *testing.T, store *runtimeShutdownDeliveryStore, bus *runtimebus.EventBus, ctx context.Context) {
+	t.Helper()
+	authority, err := bus.DeliveryAuthority()
 	if err != nil {
-		t.Fatalf("open runtime shutdown delivery store: %v", err)
+		t.Fatal(err)
 	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	for _, ddl := range []string{
-		`CREATE TABLE events (
-			event_class TEXT NOT NULL, event_id TEXT PRIMARY KEY, run_id TEXT, event_name TEXT NOT NULL,
-			task_id TEXT, entity_id TEXT, flow_instance TEXT, scope TEXT NOT NULL, payload BLOB NOT NULL,
-			payload_bytes BLOB NOT NULL,
-			payload_schema_bundle_hash TEXT NOT NULL,
-			payload_schema_flow_id TEXT,
-			payload_schema_event_key TEXT NOT NULL,
-			payload_schema_digest TEXT NOT NULL,
-			payload_schema_class TEXT NOT NULL,
-			execution_mode TEXT NOT NULL, chain_depth INTEGER NOT NULL, produced_by TEXT NOT NULL,
-			produced_by_type TEXT NOT NULL, source_event_id TEXT, created_at TIMESTAMP NOT NULL,
-			handler_node TEXT, idempotency_key TEXT,
-			routing_source_kind TEXT NOT NULL, routing_source_authority TEXT, source_route BLOB NOT NULL,
-				target_route BLOB NOT NULL, target_set BLOB NOT NULL, operator_reference_event_id TEXT, inherited_fan_out_origin BLOB,
-				route_settlement BLOB NOT NULL
-		)`,
-		`CREATE TABLE event_deliveries (
-				delivery_id TEXT PRIMARY KEY, run_id TEXT, event_id TEXT NOT NULL, route_identity TEXT NOT NULL,
-				subscriber_type TEXT NOT NULL, subscriber_id TEXT NOT NULL, delivery_target_route BLOB NOT NULL,
-				agent_name_owner TEXT NOT NULL, agent_name_source TEXT NOT NULL,
-				agent_route_presence TEXT NOT NULL, agent_flow_scope_key TEXT NOT NULL,
-				agent_flow_instance_id TEXT NOT NULL, agent_flow_instance_path TEXT NOT NULL,
-				delivery_context BLOB NOT NULL, delivery_payload_projection BLOB NOT NULL,
-				connect_execution_claim BLOB NOT NULL,
-				receiver_materialization_plan BLOB NOT NULL DEFAULT 'null',
-				execution_authority_kind TEXT NOT NULL, authority_bundle_hash TEXT NOT NULL,
-				execution_authority_id TEXT NOT NULL,
-				execution_authority_generation INTEGER NOT NULL, selected_execution_id TEXT,
-				selected_fork_run_id TEXT, selected_execution_generation INTEGER, status TEXT NOT NULL,
-				continuation_handoff_at TIMESTAMP,
-			retry_count INTEGER NOT NULL, max_retries INTEGER NOT NULL, next_eligible_at TIMESTAMP,
-			claim_version INTEGER NOT NULL, current_attempt_version INTEGER, current_attempt_open BOOLEAN,
-			reason_code TEXT, failure BLOB, started_at TIMESTAMP,
-			settled_at TIMESTAMP, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
-			UNIQUE(event_id, route_identity)
-		)`,
-		`CREATE TABLE event_delivery_handler_rule_selections (
-			delivery_id TEXT PRIMARY KEY REFERENCES event_deliveries(delivery_id),
-			selection_context TEXT NOT NULL, disposition TEXT NOT NULL,
-			flow_path TEXT, declaration_family TEXT, semantic_path TEXT,
-			display_label TEXT NOT NULL DEFAULT ''
-		)`,
-		`CREATE TABLE event_delivery_attempts (
-			delivery_id TEXT NOT NULL, claim_version INTEGER NOT NULL, claim_token TEXT NOT NULL UNIQUE,
-			started_at TIMESTAMP NOT NULL, lease_expires_at TIMESTAMP NOT NULL,
-			current_delivery_id TEXT, active_session_id TEXT, session_delivery_id TEXT, session_run_id TEXT,
-			session_subscriber_type TEXT, session_agent_id TEXT, open_marker BOOLEAN NOT NULL,
-			closure_kind TEXT NOT NULL,
-			session_agent_name_owner TEXT, session_agent_name_source TEXT, session_agent_route_presence TEXT,
-			session_agent_flow_scope_key TEXT, session_agent_flow_instance_id TEXT, session_agent_flow_instance_path TEXT,
-			outcome TEXT,
-			reason_code TEXT, failure BLOB, side_effects BLOB NOT NULL DEFAULT '[]', duration_ms INTEGER,
-			completed_at TIMESTAMP, PRIMARY KEY(delivery_id, claim_version)
-		)`,
-		`CREATE TABLE author_activity_order (
-			singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
-			last_sequence BIGINT NOT NULL CHECK (last_sequence >= 0)
-		)`,
-		`CREATE TABLE author_activity_occurrences (
-			occurrence_id TEXT PRIMARY KEY, sequence BIGINT NOT NULL UNIQUE CHECK (sequence > 0),
-			kind TEXT NOT NULL, version INTEGER NOT NULL CHECK (version = 2), transition TEXT NOT NULL,
-			source_owner TEXT NOT NULL, source_identity TEXT NOT NULL, dedup_key TEXT NOT NULL UNIQUE,
-			run_id TEXT, entity_id TEXT, agent_id TEXT, flow_id TEXT, scope_kind TEXT NOT NULL,
-			runtime_instance_id TEXT, bundle_hash TEXT, author_safe_summary TEXT,
-			projection TEXT NOT NULL DEFAULT '{}', failure TEXT, occurred_at TIMESTAMP NOT NULL
-		)`,
-		`CREATE TABLE run_fork_revision_heads (run_id TEXT PRIMARY KEY, last_revision INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMP)`,
-		`CREATE TABLE run_fork_revisions (run_id TEXT, revision INTEGER, recorded_at TIMESTAMP)`,
-		`CREATE TABLE run_fork_fact_revisions (run_id TEXT, revision INTEGER, family TEXT, fact_key TEXT, fact TEXT, present BOOLEAN)`,
-	} {
-		if _, err := db.Exec(ddl); err != nil {
-			t.Fatalf("create runtime shutdown delivery schema: %v", err)
-		}
+	if err := store.ActivateDeliveryAuthority(ctx, authority); err != nil {
+		t.Fatal(err)
 	}
-	if err := runlifecyclefixture.CreateSQLiteScenarioSchema(context.Background(), db); err != nil {
-		t.Fatalf("create runtime shutdown lifecycle schema: %v", err)
-	}
-	if err := deliveryfixture.CreateSQLiteRunAdmissionSchema(context.Background(), db); err != nil {
-		t.Fatalf("create runtime shutdown dispatch schema: %v", err)
-	}
-	adapter, err := deliveryfixture.NewAdapter(deliveryfixture.DialectSQLite)
-	if err != nil {
-		t.Fatalf("create runtime shutdown delivery adapter: %v", err)
-	}
-	source := sourceartifactfixture.Fact()
-	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, "runtime-shutdown-test", 1)
-	if err != nil {
-		t.Fatalf("create runtime shutdown delivery authority: %v", err)
-	}
-	if err := runlifecyclefixture.Materialize(context.Background(), db, runlifecyclefixture.DialectSQLite, runlifecyclefixture.Fixture{
-		RunID: agentidentitytest.DefaultRunID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Artifact: sourceartifactfixture.Artifact(),
-	}); err != nil {
-		t.Fatalf("seed runtime shutdown delivery run: %v", err)
-	}
-	return &runtimeShutdownDeliveryStore{
-		db: db, adapter: adapter, authority: authority, events: make(map[string]events.Event),
-	}
-}
-
-func (s *runtimeShutdownDeliveryStore) InspectDeliveryRecovery(
-	ctx context.Context,
-	source runtimecorrelation.SourceArtifactFact,
-) (runtimedelivery.RecoveryInventory, error) {
-	return s.adapter.InspectRecovery(ctx, s.db, source)
-}
-
-func (s *runtimeShutdownDeliveryStore) ObserveDeliveryContinuation(
-	ctx context.Context,
-	authority runtimedelivery.ExecutionAuthority,
-	deliveryID string,
-) (runtimedelivery.ContinuationObservation, error) {
-	return s.adapter.ObserveContinuation(ctx, s.db, authority, deliveryID)
-}
-
-func (s *runtimeShutdownDeliveryStore) ObserveDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, deliveryIDs []string) ([]runtimedelivery.ContinuationObservation, error) {
-	observations := make([]runtimedelivery.ContinuationObservation, 0, len(deliveryIDs))
-	for _, deliveryID := range deliveryIDs {
-		observation, err := s.ObserveDeliveryContinuation(ctx, authority, deliveryID)
-		if err != nil {
-			return nil, err
-		}
-		observations = append(observations, observation)
-	}
-	return observations, nil
-}
-
-func (s *runtimeShutdownDeliveryStore) mutate(ctx context.Context, fn func(context.Context, *eventfixture.Attempt) error) error {
-	return eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, fn).Err()
-}
-
-func (s *runtimeShutdownDeliveryStore) ClaimDelivery(
-	ctx context.Context,
-	authority runtimedelivery.ExecutionAuthority,
-	evt events.Event,
-	route events.DeliveryRoute,
-) (result runtimedelivery.ClaimResult, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.events[evt.ID()] = evt
-	err = s.mutate(ctx, func(txctx context.Context, attempt *eventfixture.Attempt) error {
-		if err := eventfixture.Insert(txctx, attempt, authoractivityfixture.DialectSQLite, evt); err != nil {
-			return err
-		}
-		if _, err := s.adapter.CommitInitial(txctx, attempt, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, authority); err != nil {
-			return err
-		}
-		result, err = s.adapter.ClaimExactResult(txctx, attempt, authority, evt, route, runtimedelivery.DefaultLeaseTTL)
-		return err
-	})
-	return result, err
-}
-
-func (s *runtimeShutdownDeliveryStore) ActivateDeliveryAuthority(
-	ctx context.Context,
-	authority runtimedelivery.ExecutionAuthority,
-) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.authority = authority
-	return s.mutate(ctx, func(txctx context.Context, attempt *eventfixture.Attempt) error {
-		return s.adapter.ActivateNormalAuthority(txctx, attempt, authority)
-	})
-}
-
-func (s *runtimeShutdownDeliveryStore) ActivateDeliveryAuthorityOutcome(
-	ctx context.Context,
-	authority runtimedelivery.ExecutionAuthority,
-) (runtimedelivery.ActivationCommit, error) {
-	if err := s.ActivateDeliveryAuthority(ctx, authority); err != nil {
-		return runtimedelivery.ActivationCommit{}, err
-	}
-	return runtimedelivery.ActivationCommit{Acknowledged: true}, nil
-}
-
-func (s *runtimeShutdownDeliveryStore) ScanDeliveryContinuations(
-	ctx context.Context,
-	authority runtimedelivery.ExecutionAuthority,
-	cursor runtimedelivery.ContinuationCursor,
-	limit int,
-) (page runtimedelivery.ContinuationPage, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	err = s.mutate(ctx, func(txctx context.Context, attempt *eventfixture.Attempt) error {
-		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			page, err = s.adapter.ScanContinuations(txctx, tx, authority, cursor, limit)
-			return err
-		})
-	})
-	if err != nil {
-		return runtimedelivery.ContinuationPage{}, err
-	}
-	for index := range page.Items {
-		evt, ok := s.events[page.Items[index].Snapshot.EventID]
-		if !ok {
-			return runtimedelivery.ContinuationPage{}, runtimedelivery.ErrNotFound
-		}
-		page.Items[index].Event = evt
-	}
-	return page, nil
-}
-
-func (s *runtimeShutdownDeliveryStore) SettleWorkflowNodeSuccess(ctx context.Context, claim runtimedelivery.Claim, effects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.ClaimCommit, error) {
-	if claim.SubscriberClass() != runtimedelivery.SubscriberNode {
-		return runtimedelivery.ClaimCommit{}, errors.New("workflow node success requires a node claim")
-	}
-	var snapshot runtimedelivery.Snapshot
-	result := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(txctx context.Context, attempt *eventfixture.Attempt) error {
-		if _, err := s.adapter.RenewClaim(txctx, attempt, claim, runtimedelivery.DefaultLeaseTTL); err != nil {
-			return err
-		}
-		var err error
-		snapshot, err = s.adapter.SettleSuccess(txctx, attempt, claim, effects, duration, selection)
-		return err
-	})
-	if !result.Acknowledged() {
-		return runtimedelivery.ClaimCommit{}, result.Err()
-	}
-	return runtimedelivery.ClaimCommit{Snapshot: snapshot, Acknowledged: true}, result.Err()
-}
-
-func (s *runtimeShutdownDeliveryStore) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, effects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (snapshot runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(txctx context.Context, attempt *eventfixture.Attempt) error {
-		snapshot, err = s.adapter.SettleSuccess(txctx, attempt, claim, effects, duration, selection)
-		return err
-	})
-	return snapshot, err
-}
-
-func (s *runtimeShutdownDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
-	var snapshot runtimedelivery.Snapshot
-	result := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(txctx context.Context, attempt *eventfixture.Attempt) error {
-		var err error
-		snapshot, err = s.adapter.RenewClaim(txctx, attempt, claim, runtimedelivery.DefaultLeaseTTL)
-		return err
-	})
-	if !result.Acknowledged() {
-		return runtimedelivery.ClaimCommit{}, result.Err()
-	}
-	return runtimedelivery.ClaimCommit{Snapshot: snapshot, Acknowledged: true}, result.Err()
-}
-
-func (s *runtimeShutdownDeliveryStore) SettleFailure(ctx context.Context, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (snapshot runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(txctx context.Context, attempt *eventfixture.Attempt) error {
-		snapshot, err = s.adapter.SettleFailure(txctx, attempt, claim, settlement)
-		return err
-	})
-	return snapshot, err
 }
 
 func (*runtimeShutdownManagerStore) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {
@@ -457,12 +226,28 @@ func (*runtimeShutdownInboundStore) ValidateInboundPublicationIntegrity(context.
 	return nil
 }
 
-func TestRuntimeShutdownDeliveryFixtureClaimsThroughCanonicalAdapter(t *testing.T) {
-	store := newRuntimeShutdownDeliveryStore(t)
+func VerifyRuntimeShutdownDeliveryFixtureClaimsThroughCanonicalAdapterForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
+	store, fixture := newRuntimeShutdownDeliveryStore(t, open)
 	identity := agentidentitytest.RootRuntime(t, "agent-1", "runtime-test/shutdown-admission")
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("shutdown-fixture-claim"),
 		"test.in", "tester", "", nil, 0, identity.RunID, events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
+	authority, err := runtimedelivery.NewNormalExecutionAuthority(sourceartifactfixture.Fact(), "runtime-shutdown-test", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ActivateDeliveryAuthorityOutcome(fixture.Context, authority); err != nil {
+		t.Fatal(err)
+	}
+	missing, err := store.ClaimDelivery(fixture.Context, authority, event, route)
+	if err != nil || missing.Disposition != runtimedelivery.ClaimAbsent {
+		t.Fatalf("shutdown fixture claimed an unpublished obligation: %+v/%v", missing, err)
+	}
+	before := fixture.Physical(fixture.Context)
+	if before.Events != 0 || before.Deliveries != 0 {
+		t.Fatalf("claim seeded unpublished durable work: %+v", before)
+	}
+	event = fixture.PublishDelivery(fixture.Context, event, []events.DeliveryRoute{route}, store.authority)
 	result, err := store.ClaimDelivery(testAuthorActivityContext(context.Background()), store.authority, event, route)
 	if err != nil {
 		t.Fatalf("shutdown fixture must admit its real delivery claim: %v", err)
@@ -472,15 +257,18 @@ func TestRuntimeShutdownDeliveryFixtureClaimsThroughCanonicalAdapter(t *testing.
 	}
 }
 
-func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *testing.T) {
-	deliveryStore := newRuntimeShutdownDeliveryStore(t)
+func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
+	deliveryStore, fixture := newRuntimeShutdownDeliveryStore(t, open)
 	bus, err := newRuntimeTestEventBus(t, nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	activateRuntimeShutdownDelivery(t, deliveryStore, bus, fixture.Context)
 	started := make(chan struct{}, 1)
 	canceled := make(chan struct{}, 1)
 	release := make(chan struct{})
+	var finish sync.Once
+	releaseWork := func() { finish.Do(func() { close(release) }) }
 
 	agent := runtimeShutdownTestAgent{
 		id:            "agent-1",
@@ -499,6 +287,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 
 	workOwner := runtimeTestEventBusRuntimeOccurrence(t, bus)
 	rt := &Runtime{Bus: bus, workOccurrence: workOwner}
+	t.Cleanup(func() { releaseWork(); _ = rt.Shutdown() })
 	managerStore := &runtimeShutdownManagerStore{}
 	am := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		if cfg.ID != agent.id {
@@ -531,9 +320,13 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.ExistingRunRootIngress(eventtest.UUID("runtime-shutdown-inbound-1"),
+	event := eventtest.ExistingRunRootIngress(eventtest.UUID("runtime-shutdown-inbound-1"),
 		events.EventType("test.in"),
-		"tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())); err != nil {
+		"tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())
+	event = fixture.PublishDelivery(fixture.Context, event, []events.DeliveryRoute{{
+		Recipient: events.MustAgentDeliveryRecipient(agent.id), AgentIdentity: agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission"),
+	}}, deliveryStore.authority)
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), event); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -629,7 +422,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 		t.Fatal("inbound store was touched after runtime shutdown admission closed")
 	}
 
-	close(release)
+	releaseWork()
 
 	select {
 	case err := <-shutdownErrCh:
@@ -641,15 +434,18 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	}
 }
 
-func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *testing.T) {
-	deliveryStore := newRuntimeShutdownDeliveryStore(t)
+func VerifyRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrainForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
+	deliveryStore, fixture := newRuntimeShutdownDeliveryStore(t, open)
 	bus, err := newRuntimeTestEventBus(t, nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
+	activateRuntimeShutdownDelivery(t, deliveryStore, bus, fixture.Context)
 	started := make(chan struct{}, 1)
 	canceled := make(chan struct{}, 1)
 	release := make(chan struct{})
+	var finish sync.Once
+	releaseWork := func() { finish.Do(func() { close(release) }) }
 
 	agent := runtimeShutdownTestAgent{
 		id:            "agent-1",
@@ -668,6 +464,7 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 
 	workOwner := runtimeTestEventBusRuntimeOccurrence(t, bus)
 	rt := &Runtime{Bus: bus, workOccurrence: workOwner}
+	t.Cleanup(func() { releaseWork(); _ = rt.Shutdown() })
 	am := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
@@ -692,9 +489,13 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), eventtest.ExistingRunRootIngress(eventtest.UUID("runtime-shutdown-grace-inbound-1"),
+	event := eventtest.ExistingRunRootIngress(eventtest.UUID("runtime-shutdown-grace-inbound-1"),
 		events.EventType("test.in"),
-		"tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())); err != nil {
+		"tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())
+	event = fixture.PublishDelivery(fixture.Context, event, []events.DeliveryRoute{{
+		Recipient: events.MustAgentDeliveryRecipient(agent.id), AgentIdentity: agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission"),
+	}}, deliveryStore.authority)
+	if err := bus.Publish(testAuthorActivityContext(context.Background()), event); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -720,7 +521,7 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 		t.Fatalf("ShutdownWithOptions abandoned canceled work: %v", err)
 	default:
 	}
-	close(release)
+	releaseWork()
 	err = <-shutdownErrCh
 	if err == nil || !strings.Contains(err.Error(), "agent manager shutdown:") {
 		t.Fatalf("ShutdownWithOptions err = %v, want configured grace manager timeout", err)

@@ -72,7 +72,7 @@ func TestA2JoinCancellationSettlesAlreadyBoundWorkOnBothStores(t *testing.T) {
 				t.Run(backend.name+"/"+mode+"/"+phase, func(t *testing.T) {
 					selected := backend.open(t)
 					runID, lastID, untilID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-					insertGateRecoveryRun(t, selected, runID)
+					insertGateRecoveryRun(t, selected.events, runID)
 					ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 					files := a2CountJoinFiles(2)
 					files["schema.yaml"] = strings.Replace(files["schema.yaml"], "  ready: {final: true}", "  ready: {final: true}\n  dispatching: {}\n  cancelled: {final: true}", 1)

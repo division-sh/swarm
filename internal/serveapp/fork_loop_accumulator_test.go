@@ -34,7 +34,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 					"event_name": "work.requested", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"token": "loop-notice-proof"}, "idempotency_key": "accumulator-start",
 				})
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 				waitForkReceiverSourceCompletion(t, rt, started.RunID)
 				first := readForkLoopActivation(t, rt, started.RunID)
 				initial := readForkHandlerAccumulators(t, rt, started.RunID)
@@ -49,7 +49,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 					"event_name": "review.retry", "run_id": started.RunID, "source_event_id": started.EventID,
 					"payload": map[string]any{"revision_id": first.RevisionID, "token": "loop-notice-proof"}, "idempotency_key": "accumulator-repeat",
 				})
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 				waitForkReceiverSourceCompletion(t, rt, started.RunID)
 				current := readForkLoopActivation(t, rt, started.RunID)
 				if current.Attempt != 2 || current.ActivationID != first.ActivationID || current.RevisionID == first.RevisionID {
@@ -93,7 +93,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 				params := map[string]any{"source_run_id": started.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "accumulator-fork"}
 				var fork apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 				child := readForkHandlerAccumulators(t, rt, fork.ForkRunID)
 				if len(child) != len(source) {
 					t.Fatalf("child bucket count=%d source=%d; source=%#v child=%#v", len(child), len(source), source, child)

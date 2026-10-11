@@ -13,6 +13,26 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
+func ReadCommittedPipelineScopeForTest(ctx context.Context, selected any, eventID string) (runtimepipelineobligation.CommittedScope, error) {
+	if err := validateSelectedForkStorageIdentity(eventID); err != nil {
+		return "", err
+	}
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return "", err
+	}
+	_, postgres := selected.(*PostgresStore)
+	var scope runtimepipelineobligation.CommittedScope
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		scope, err = pipelinepersistence.LoadCommittedScope(ctx, tx, eventID, postgres)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return scope, nil
+}
+
 // ReadSemanticEventFixtureEvidenceForTest keeps record, revision and delivery
 // observations in one read snapshot owned by the original selected coordinator.
 

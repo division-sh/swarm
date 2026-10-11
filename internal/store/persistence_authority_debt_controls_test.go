@@ -29,6 +29,44 @@ func debtControlSet(sites ...authorityDebtSite) map[string]authorityDebtSite {
 	return out
 }
 
+func TestPersistenceAuthorityDebtFixtureRoleDoesNotAuthorizeProductionConsumption(t *testing.T) {
+	const fixture = "github.com/division-sh/swarm/internal/store/selected/selectedtest"
+	const source = `package probe;import selectedtest "github.com/division-sh/swarm/internal/store/selected/selectedtest";func use(){selectedtest.ManagerDeliveryExecution()}`
+	file, err := parser.ParseFile(token.NewFileSet(), "probe.go", source, parser.AllErrors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	object := types.NewFunc(token.NoPos, types.NewPackage(fixture, "selectedtest"), "ManagerDeliveryExecution", types.NewSignatureType(nil, nil, nil, nil, nil, false))
+	info := &types.Info{Uses: map[*ast.Ident]types.Object{}}
+	ast.Inspect(file, func(node ast.Node) bool {
+		if selector, ok := node.(*ast.SelectorExpr); ok {
+			info.Uses[selector.Sel] = object
+		}
+		return true
+	})
+	for _, test := range []struct {
+		path string
+		want int
+	}{
+		{"internal/runtime/ordinary.go", 2},
+		{"internal/store/selected/ordinary.go", 2},
+		{"internal/store/internal/ordinary.go", 2},
+		{"internal/store/selected/selectedtesting/ordinary.go", 2},
+		{"internal/runtime/ordinary_test.go", 0},
+		{"internal/store/selected/selectedtest/manager_delivery.go", 0},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			findings := debtCollectTestAuthorityConsumptionFindings(test.path, file, info)
+			if len(findings) != test.want {
+				t.Fatalf("production import and typed reference findings=%+v want=%d", findings, test.want)
+			}
+			if test.want != 0 && (findings[0].Member != "import:"+fixture || !strings.HasPrefix(findings[1].Member, "reference:"+fixture+".ManagerDeliveryExecution#")) {
+				t.Fatalf("production consumption lost exact authority identities: %+v", findings)
+			}
+		})
+	}
+}
+
 func TestPersistenceAuthorityDebtRatchetRejectsPaymentDuplicationReseedAndResurrection(t *testing.T) {
 	one, two := debtControlSite("call:QueryRow", 1), debtControlSite("call:Exec", 1)
 	base := debtControlSet(one, two)
@@ -767,6 +805,15 @@ func TestPersistenceAuthorityDebtRatchetIsSelectedInEveryTier(t *testing.T) {
 				"TestNativeLoopClaimFixturesDoNotReceiveRawAuthority",
 				"TestNativeMockFixturesDoNotReceiveRawAuthority",
 				"TestNativeAPIReadSetupDoesNotReceiveRawAuthority",
+				"TestNativeProjectionRoundTripFixturesDoNotReceiveRawAuthority",
+				"TestNativeStorageIdentityFixturesDoNotReceiveRawAuthority",
+				"TestNativeProjectionStorageFixturesDoNotReceiveRawAuthority",
+				"TestNativeProjectionShapeFixturesDoNotReceiveRawAuthority",
+				"TestNativeProjectionHeaderFixturesDoNotReceiveRawAuthority",
+				"TestNativeMutationSeedFixturesDoNotReceiveRawAuthority",
+				"TestNativeLookupMissFixturesDoNotReceiveRawAuthority",
+				"TestNativeBookkeepingFixturesDoNotReceiveRawAuthority",
+				"TestNativeHandlerFixturesDoNotReceiveRawAuthority",
 			}
 			if family.Name != "TestNativeFixtureFamiliesDoNotReceiveRawAuthority" || family.Package != root.Package || !slices.Equal(unit.RequiredChildren[family.Name], children) {
 				t.Fatalf("census lost a required native family: %+v, %v", family, unit.RequiredChildren)

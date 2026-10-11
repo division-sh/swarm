@@ -29,6 +29,58 @@ type ReplySQLiteOwner struct {
 	backend *sqlitebackend.Backend
 }
 
+type ReplyContextStorageCounts struct {
+	Total, Accepted, DistinctRequests, DistinctReplies int
+}
+
+type FirstReplyContextStorage struct {
+	ContextID, RequestEventID, AcceptedReplyEventID string
+}
+
+func ReadReplyContextRequestIDs(ctx context.Context, tx *sql.Tx, run string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(request_event_id AS TEXT) FROM reply_contexts WHERE run_id=$1 ORDER BY request_event_id`, run)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func ReadFirstReplyContextStorage(ctx context.Context, tx *sql.Tx, run string) (FirstReplyContextStorage, error) {
+	var row FirstReplyContextStorage
+	err := tx.QueryRowContext(ctx, `SELECT reply_context_id,request_event_id,accepted_reply_event_id
+FROM reply_contexts WHERE run_id=$1 ORDER BY reply_context_id LIMIT 1`, run).
+		Scan(&row.ContextID, &row.RequestEventID, &row.AcceptedReplyEventID)
+	if err != nil {
+		return FirstReplyContextStorage{}, err
+	}
+	return row, nil
+}
+
+func ReadReplyContextStorageCounts(ctx context.Context, tx *sql.Tx, run string) (ReplyContextStorageCounts, error) {
+	var row ReplyContextStorageCounts
+	err := tx.QueryRowContext(ctx, `SELECT count(*),count(accepted_reply_event_id),count(DISTINCT request_event_id),count(DISTINCT accepted_reply_event_id)
+FROM reply_contexts WHERE run_id=$1`, run).Scan(&row.Total, &row.Accepted, &row.DistinctRequests, &row.DistinctReplies)
+	if err != nil {
+		return ReplyContextStorageCounts{}, err
+	}
+	return row, nil
+}
+
 func NewPostgres(backend *postgresbackend.Backend) (*ReplyPostgresOwner, error) {
 	if backend == nil || !backend.Valid() {
 		return nil, fmt.Errorf("postgres reply-context backend is required")

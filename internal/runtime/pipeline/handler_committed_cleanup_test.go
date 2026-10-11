@@ -8,16 +8,16 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
-func TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores(t *testing.T) {
-	for _, backend := range workflowJoinStoreCases() {
-		t.Run(backend.name, func(t *testing.T) {
-			store, ctx := backend.open(t)
+func VerifyNativeHandlerCommittedCleanupErrorRetainsExactOutcomeBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
 			bundle := loadWorkflowTempBundle(t, map[string]string{
 				"schema.yaml":   "name: committed-cleanup\nstages:\n  queued: {}\n  done: {final: true}\n",
 				"entities.yaml": "test_entity: {}\n",
@@ -28,29 +28,25 @@ func TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores(t *testing.T)
 			module.workflowNodes = []WorkflowNode{{
 				Node: pipelineNode(t, ".", "node-a"), Subscriptions: []events.EventType{"source.evt"},
 			}}
-			bus := &recordingPipelineBus{}
-			pc := newPostgresPipelineCoordinatorForTest(bus, store.testDB(), PipelineCoordinatorOptions{
-				Module: module, DeliveryStore: newPipelineTestDeliveryOwnerForDB(t, store.testDB()),
-			})
-			pc.workflowStore = store
-			owner := configurePipelineTestDeliveryOwner(t, pc)
-			runID := correlation.RunIDFromContext(ctx)
-			entityID := runID
-			evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
-			dialect := authoractivityfixture.DialectPostgres
-			if store.isSQLite() {
-				dialect = authoractivityfixture.DialectSQLite
+			fixture := open(t, backend, semanticview.Wrap(bundle))
+			pc, ctx := nativePipelineDeliveryCoordinatorForTest(t, fixture, module)
+			bus := observeNativePipelineDeliveryBusForTest(t, pc)
+			runID := uuid.NewString()
+			ctx = correlation.WithRunID(ctx, runID)
+			if err := fixture.RequireRun(ctx, runID); err != nil {
+				t.Fatal(err)
 			}
-			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
-			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "v-test",
+			entityID := runID
+			evt := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, events.EnvelopeForTargetRoute(handlerTestWorkflowEnvelope(".", runID, entityID), events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
+			if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
 				CurrentState: "queued", EntityType: "test_entity", Fields: map[string]any{},
 			})); err != nil {
 				t.Fatal(err)
 			}
 			node := pipelineNode(t, ".", "node-a")
 			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID})}
-			if err := owner.commitInitial(ctx, evt, route); err != nil {
+			if err := fixture.PublishNode(ctx, evt, route); err != nil {
 				t.Fatal(err)
 			}
 			deliveryID, err := deliverylifecycle.DeliveryID(evt.ID(), route)
@@ -58,18 +54,18 @@ func TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores(t *testing.T)
 				t.Fatal(err)
 			}
 			injected := errors.New("injected postcommit publication cleanup")
-			bus.finalizeErr = injected
+			bus.finalizeFailure = injected
 			attemptCtx := withWorkflowNodeDeliveryRoute(ctx, route)
 			handled, err := pc.dispatchWorkflowNodeEventResult(attemptCtx, evt)
 			if !handled || !errors.Is(err, injected) {
 				t.Fatalf("handled=%t error=%v, want committed cleanup diagnostic", handled, err)
 			}
-			assertCommittedHandlerCleanupRows(t, ctx, store, owner, bus, runID, entityID, deliveryID)
-			bus.finalizeErr = nil
+			assertNativeCommittedHandlerCleanupRows(t, ctx, fixture, bus, runID, entityID, deliveryID)
+			bus.finalizeFailure = nil
 			if _, err := pc.dispatchWorkflowNodeEventResult(attemptCtx, evt); err != nil {
 				t.Fatalf("duplicate delivery after acknowledged cleanup failure: %v", err)
 			}
-			assertCommittedHandlerCleanupRows(t, ctx, store, owner, bus, runID, entityID, deliveryID)
+			assertNativeCommittedHandlerCleanupRows(t, ctx, fixture, bus, runID, entityID, deliveryID)
 		})
 	}
 }
@@ -83,10 +79,9 @@ func (r releaseFailureWorkflowRuntime) ReleaseDeliveryContinuation(deliveryID st
 	return errors.Join(r.WorkflowDeliveryRuntime.ReleaseDeliveryContinuation(deliveryID), r.failure)
 }
 
-func TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores(t *testing.T) {
-	for _, backend := range workflowJoinStoreCases() {
-		t.Run(backend.name, func(t *testing.T) {
-			store, ctx := backend.open(t)
+func VerifyNativeGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
 			bundle := loadWorkflowTempBundle(t, map[string]string{
 				"schema.yaml":   "name: terminal-no-engine\nstages:\n  queued: {}\n  done: {final: true}\n",
 				"entities.yaml": "test_entity: {}\n",
@@ -96,28 +91,25 @@ func TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores(t *
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 			node := pipelineNode(t, ".", "node-a")
 			module.workflowNodes = []WorkflowNode{{Node: node, Subscriptions: []events.EventType{"source.evt"}}}
-			bus := &recordingPipelineBus{}
-			pc := newPostgresPipelineCoordinatorForTest(bus, store.testDB(), PipelineCoordinatorOptions{
-				Module: module, DeliveryStore: newPipelineTestDeliveryOwnerForDB(t, store.testDB()),
-			})
-			pc.workflowStore = store
-			owner := configurePipelineTestDeliveryOwner(t, pc)
-			runID := correlation.RunIDFromContext(ctx)
-			entityID := runID
-			evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
-			dialect := authoractivityfixture.DialectPostgres
-			if store.isSQLite() {
-				dialect = authoractivityfixture.DialectSQLite
+			fixture := open(t, backend, semanticview.Wrap(bundle))
+			pc, ctx := nativePipelineDeliveryCoordinatorForTest(t, fixture, module)
+			bus := observeNativePipelineDeliveryBusForTest(t, pc)
+			owner := fixture.Store
+			runID := uuid.NewString()
+			ctx = correlation.WithRunID(ctx, runID)
+			if err := fixture.RequireRun(ctx, runID); err != nil {
+				t.Fatal(err)
 			}
-			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
-			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "v-test",
+			entityID := runID
+			evt := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, events.EnvelopeForTargetRoute(handlerTestWorkflowEnvelope(".", runID, entityID), events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
+			if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
 				CurrentState: "queued", EntityType: "test_entity", Fields: map[string]any{},
 			})); err != nil {
 				t.Fatal(err)
 			}
 			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID})}
-			if err := owner.commitInitial(ctx, evt, route); err != nil {
+			if err := fixture.PublishNode(ctx, evt, route); err != nil {
 				t.Fatal(err)
 			}
 			deliveryID, err := deliverylifecycle.DeliveryID(evt.ID(), route)
@@ -134,40 +126,33 @@ func TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores(t *
 			if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != "delivered" {
 				t.Fatalf("settled outcomes=%+v error=%v, want one delivered", outcomes, err)
 			}
-			if got := bus.outboxCount(); got != 0 {
+			if got := bus.committedCount(); got != 0 {
 				t.Fatalf("guard rejection published %d events", got)
 			}
 		})
 	}
 }
 
-func assertCommittedHandlerCleanupRows(t *testing.T, ctx context.Context, store *workflowInstanceStore, owner *pipelineTestDeliveryOwner, bus *recordingPipelineBus, runID, entityID, deliveryID string) {
+func assertNativeCommittedHandlerCleanupRows(t *testing.T, ctx context.Context, fixture *PipelineDeliveryNativeFixtureForTest, bus *nativePipelineDeliveryBusObservationForTest, runID, entityID, deliveryID string) {
 	t.Helper()
-	snapshot, err := owner.Snapshot(ctx, deliveryID)
+	snapshot, err := fixture.Store.Snapshot(ctx, deliveryID)
 	if err != nil || snapshot.Status != deliverylifecycle.StatusDelivered {
 		t.Fatalf("delivery snapshot=%+v error=%v", snapshot, err)
 	}
-	outcomes, err := owner.Outcomes(ctx, deliveryID)
+	outcomes, err := fixture.Store.Outcomes(ctx, deliveryID)
 	if err != nil || len(outcomes) != 1 {
 		t.Fatalf("delivery outcomes=%+v error=%v, want one", outcomes, err)
 	}
-	stateQuery, eventQuery := "SELECT current_state FROM entity_state WHERE run_id=? AND entity_id=?", "SELECT COUNT(*) FROM events WHERE run_id=? AND event_name='source.done'"
-	if !store.isSQLite() {
-		stateQuery = "SELECT current_state FROM entity_state WHERE run_id=$1::uuid AND entity_id=$2::uuid"
-		eventQuery = "SELECT COUNT(*) FROM events WHERE run_id=$1::uuid AND event_name='source.done'"
+	instance, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceForRun(runID, runID))
+	if err != nil || !found || instance.EntityID != entityID || instance.CurrentState != "done" {
+		t.Fatalf("state=%+v found=%t error=%v, want exact done", instance, found, err)
 	}
-	var state string
-	if err := store.testDB().QueryRowContext(ctx, stateQuery, runID, entityID).Scan(&state); err != nil || state != "done" {
-		t.Fatalf("state=%q error=%v, want done", state, err)
-	}
-	var eventsCount int
-	if err := store.testDB().QueryRowContext(ctx, eventQuery, runID).Scan(&eventsCount); err != nil || eventsCount != 1 {
+	eventsCount, err := fixture.EventCount(ctx, runID, "source.done")
+	if err != nil || eventsCount != 1 {
 		t.Fatalf("emitted events=%d error=%v, want one", eventsCount, err)
 	}
-	bus.deliveryContinuations.mu.Lock()
-	retained, exists := bus.deliveryContinuations.held[deliveryID]
-	bus.deliveryContinuations.mu.Unlock()
-	if exists || bus.outboxCount() != 1 {
-		t.Fatalf("committed delivery retained continuation=%t/%t outbox=%d", retained, exists, bus.outboxCount())
+	acquisition, err := fixture.Continuations.Acquire(deliveryID)
+	if err != nil || acquisition.Validate(deliveryID) != nil || acquisition.Disposition() != worklifetime.DeliveryTerminallyFenced || bus.committedCount() != 1 {
+		t.Fatalf("committed delivery has executable continuation=%v/%v committed=%d", acquisition.Disposition(), err, bus.committedCount())
 	}
 }

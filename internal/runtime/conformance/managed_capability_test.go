@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -43,7 +41,6 @@ func managedConformanceExecutionContextForBundle(t testing.TB, ctx context.Conte
 func persistConformanceAgentTurnReadbackFixture(
 	t testing.TB,
 	ctx context.Context,
-	db *sql.DB,
 	selected *store.PostgresStore,
 	rec runtimellm.AgentTurnRecord,
 ) error {
@@ -54,10 +51,15 @@ func persistConformanceAgentTurnReadbackFixture(
 	}
 	eventID := uuid.NewString()
 	eventType := events.EventType("conformance.turn.requested")
-	event := storetest.InsertExistingRunRootEventRecord(
-		t, ctx, db, authoractivityfixture.DialectPostgres, eventID, rec.RunID, eventType,
-		eventtest.Producer(events.EventProducerExternal, "conformance"), []byte(`{}`), events.EventEnvelope{}, time.Now().UTC(),
+	event := eventtest.ExistingRunRootIngressWithRoutingSource(
+		eventID, eventType, "conformance", "", []byte(`{}`), 0, rec.RunID,
+		events.EventEnvelope{}, events.NoRoutingSource(), time.Now().UTC(),
 	)
+	probe := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
+	storetest.CommitSemanticEvent(t, ctx, selected, event)
+	if counts := probe.Snapshot(); counts.Total.WriteCommits == 0 || counts.Active != 0 {
+		t.Fatalf("conversation trigger publication escaped original selected coordinator: %+v", counts)
+	}
 	storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
 		Store: selected, Selected: selected, Identity: rec.Identity,
 		RunID: rec.RunID, SessionID: rec.SessionID, TurnID: uuid.NewString(), Memory: rec.Memory,

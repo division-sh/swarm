@@ -26,10 +26,10 @@ func TestFanOutExactEffectsOptionalBarrierBothStores(t *testing.T) {
 				}
 				requireExactFanOutHistory(t, ctx, db, fixture, 1, 0, barriers)
 				if withBarrier {
-					advanceFanOutBarriersForTest(t, ctx, raw.(storeTestDurableEventBusStore), db, fixture.runID, time.Now().UTC())
+					advanceFanOutBarriersForTest(t, ctx, raw.(storeTestDurableEventBusStore), fixture.runID, time.Now().UTC())
 					requireExactFanOutHistory(t, ctx, db, fixture, 1, 0, 2)
 					before := countP16RunRevisions(t, db, fixture.runID)
-					advanceFanOutBarriersForTest(t, ctx, raw.(storeTestDurableEventBusStore), db, fixture.runID, time.Now().UTC())
+					advanceFanOutBarriersForTest(t, ctx, raw.(storeTestDurableEventBusStore), fixture.runID, time.Now().UTC())
 					if got := countP16RunRevisions(t, db, fixture.runID); got != before {
 						t.Fatalf("unchanged barrier added a revision: before=%d after=%d", before, got)
 					}

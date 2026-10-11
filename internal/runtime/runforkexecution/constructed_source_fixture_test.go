@@ -26,7 +26,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 )
 
 // Real constructor preparation and tree commit establish the source history.
@@ -38,9 +37,9 @@ func seedSelectedConstructedRootHistory(t *testing.T, ctx context.Context, db *s
 		t.Fatal("source constructor requires its admitted artifact")
 	}
 	ctx = effects.WithExecutionMode(correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, runID), loaded.SourceArtifactFact), mode)
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
-		Source: loaded.SourceArtifactFact, Artifact: bundle.SourceArtifact,
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
+		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact,
 	})
 	payload, err := json.Marshal(map[string]any{"entity_id": runID})
 	if err != nil {

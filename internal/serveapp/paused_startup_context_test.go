@@ -25,7 +25,6 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -127,12 +126,7 @@ func TestPausedMixedRunsStartupBothStores(t *testing.T) {
 					runID := uuid.NewString()
 					ctx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), runID)
 					ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, fact.BundleHash()))
-					fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Artifact: artifacts[index]}
-					if backend == "sqlite" {
-						runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
-					} else {
-						runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
-					}
+					storetest.RequireRun(t, ctx, deps.EventBusDurable.RunLifecycle.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: artifacts[index]})
 					event := eventtest.ExistingRunRootIngress(uuid.NewString(), "widget.scored", "test", "", []byte(`{"delta":1}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 					var routes []events.DeliveryRoute
 					if paused {

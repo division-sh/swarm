@@ -19,7 +19,7 @@ func TestServedSelectionProcessCutsBothStores(t *testing.T) {
 				start, ready, _ := mailboxCompletionProcessHarnessWithSelectionCut(t, backend, canonicalrouting.CopySelectionRetry(t), cut)
 				first, rt := start(true)
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "seed", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "seed"})
-				waitServedRunDeliveryQuiescence(t, rt.DB, backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				params := map[string]any{"event_name": "select", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{}, "idempotency_key": "selection-crash"}
 				raw, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "selection", "method": "event.publish", "params": params})
 				if err != nil {
@@ -78,7 +78,7 @@ func TestServedSelectionProcessCutsBothStores(t *testing.T) {
 				second, recovered := start(false)
 				assertServedSelectionTrace(t, recovered, eventID, seed.RunID, true)
 				requireServedEventPublishEntityState(t, recovered.DB, backend, seed.RunID, "", "done")
-				waitServedRunDeliveryQuiescence(t, recovered.DB, backend, seed.RunID)
+				waitServedRunDeliveryQuiescence(t, recovered.ReadRunDeliveries, seed.RunID)
 				duplicate := requireServedEventPublishRPCResult(t, recovered.Endpoint, params)
 				if duplicate.EventID != eventID || duplicate.RunID != seed.RunID {
 					t.Fatal("process recovery replaced the admitted publication")

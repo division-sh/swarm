@@ -20,6 +20,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testcatalog"
 	"github.com/division-sh/swarm/internal/testutil/replayconformance"
 	"github.com/google/uuid"
@@ -471,7 +472,7 @@ func assertCatalogReplayFixtureOutcome(t testing.TB, fixture testcatalog.Fixture
 		required = map[string]int{"monitor.started": 1, "monitor.stopped": 1, "timer.tick": 2}
 	}
 	if childPath != "" {
-		child, found, err := catalogFlowInstanceForCausalFlow(h.db, h.workflow, nil, nil, childPath, false)
+		child, found, err := catalogFlowInstanceForCausalFlow(h.workflow, nil, nil, childPath, false)
 		if err != nil || !found {
 			t.Fatalf("load %s worker outcome: found=%t err=%v", fixture.Name, found, err)
 		}
@@ -547,27 +548,20 @@ func (h *runtimeHarness) captureCatalogStepOutcome(step catalogTriggerStep, publ
 }
 
 func (h *runtimeHarness) loadCatalogReceipt(eventID string) (*catalogReceiptOutcome, error) {
-	var subscriberID, outcome string
-	var sideEffects, rawFailure []byte
-	query := `
-		SELECT subscriber_id, outcome, COALESCE(side_effects::text, ''), COALESCE(failure, 'null'::jsonb)
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'platform'
-		  AND (subscriber_id = 'pipeline' OR subscriber_id LIKE 'pipeline:%')
-		ORDER BY processed_at DESC
-		LIMIT 1`
-	if h.backend == catalogBackendSQLite {
-		query = `
-			SELECT subscriber_id, outcome, COALESCE(side_effects, ''), COALESCE(failure, 'null')
-			FROM event_receipts
-			WHERE event_id = ?
-			  AND subscriber_type = 'platform'
-			  AND (subscriber_id = 'pipeline' OR subscriber_id LIKE 'pipeline:%')
-			ORDER BY processed_at DESC
-			LIMIT 1`
+	reader, err := h.catalogOperatorEventLister()
+	if err != nil {
+		return nil, err
 	}
-	err := h.db.QueryRowContext(h.ctx, query, strings.TrimSpace(eventID)).Scan(&subscriberID, &outcome, &sideEffects, &rawFailure)
+	receipt, err := storetest.ReadLatestPlatformPipelineReceiptStorage(h.ctx, reader, strings.TrimSpace(eventID))
+	if err == nil && !receipt.Found {
+		err = sql.ErrNoRows
+	}
+	subscriberID, outcome := receipt.SubscriberID, receipt.Outcome
+	sideEffects := []byte(receipt.SideEffects)
+	rawFailure := []byte(receipt.Failure)
+	if rawFailure == nil {
+		rawFailure = []byte("null")
+	}
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

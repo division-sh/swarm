@@ -57,7 +57,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 					if !opened.NewRunCreated || opened.RunID == "" || opened.EventID == "" {
 						t.Fatalf("root map ingress did not create a real run: %+v", opened)
 					}
-					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, opened.RunID)
+					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, opened.RunID)
 					waitA2PortfolioComplete(t, rt, opened.RunID, opened.RunID)
 					entity, arm := requireA2MapRecipeResult(t, rt, opened, tc.items, tc.members, tc.results)
 					var payload map[string]any
@@ -149,7 +149,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 				if replay.EventID != batch.opened.EventID || replay.RunID != batch.opened.RunID {
 					t.Fatalf("same-idempotency root replay changed identity: first=%+v replay=%+v", batch.opened, replay)
 				}
-				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, batch.opened.RunID)
+				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, batch.opened.RunID)
 				entity, arm = requireA2MapRecipeResult(t, rt, batch.opened, batch.items, batch.members, batch.results)
 				if !reflect.DeepEqual(batch.root, entity) || !reflect.DeepEqual(batch.arm, arm) || !reflect.DeepEqual(batch.events, requireA2MapRecipeHealthyEvents(t, rt, batch.opened.RunID)) {
 					t.Fatal("same-idempotency replay changed map state, arm or event/settlement evidence")

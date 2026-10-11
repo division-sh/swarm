@@ -10,6 +10,7 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestTier11FlowCompositionCanonicalRoutingOwnership(t *testing.T) {
@@ -162,43 +163,17 @@ func assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t testing.TB, h *runt
 
 func dumpEventDeliveries(t testing.TB, h *runtimeHarness, eventID string) string {
 	t.Helper()
-	query := `
-		SELECT COALESCE(subscriber_type, ''),
-		       COALESCE(subscriber_id, ''),
-		       COALESCE(status, ''),
-		       COALESCE(reason_code, ''),
-		       COALESCE(delivery_target_route->'route'->>'flow_instance', ''),
-		       COALESCE(delivery_target_route->'route'->>'entity_id', '')
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		ORDER BY created_at ASC, delivery_id ASC`
-	if h.backend == catalogBackendSQLite {
-		query = `
-			SELECT COALESCE(subscriber_type, ''),
-			       COALESCE(subscriber_id, ''),
-			       COALESCE(status, ''),
-			       COALESCE(reason_code, ''),
-			       COALESCE(json_extract(delivery_target_route, '$.route.flow_instance'), ''),
-			       COALESCE(json_extract(delivery_target_route, '$.route.entity_id'), '')
-			FROM event_deliveries
-			WHERE event_id = ?
-			ORDER BY created_at ASC, delivery_id ASC`
-	}
-	rows, err := h.db.QueryContext(testAuthorActivityContext(context.Background()), query, eventID)
+	reader, err := h.catalogOperatorEventLister()
 	if err != nil {
-		return "query_error:" + err.Error()
+		return "observation_error:" + err.Error()
 	}
-	defer rows.Close()
+	rows, err := storetest.ReadEventDeliveryDiagnosticRows(testAuthorActivityContext(context.Background()), reader, eventID)
+	if err != nil {
+		return "observation_error:" + err.Error()
+	}
 	var out []string
-	for rows.Next() {
-		var subscriberType, subscriberID, status, reason, flowInstance, entityID string
-		if err := rows.Scan(&subscriberType, &subscriberID, &status, &reason, &flowInstance, &entityID); err != nil {
-			return "scan_error:" + err.Error()
-		}
-		out = append(out, subscriberType+"/"+subscriberID+" status="+status+" reason="+reason+" route="+flowInstance+"/"+entityID)
-	}
-	if err := rows.Err(); err != nil {
-		return "rows_error:" + err.Error()
+	for _, row := range rows {
+		out = append(out, row.SubscriberType+"/"+row.SubscriberID+" status="+row.Status+" reason="+row.Reason+" route="+row.FlowInstance+"/"+row.EntityID)
 	}
 	if len(out) == 0 {
 		return "<none>"

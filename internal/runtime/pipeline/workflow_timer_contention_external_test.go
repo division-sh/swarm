@@ -389,7 +389,7 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 					owner.holdActivationRead, owner.holdTargetRead = false, false
 					before, beforeFound, beforeErr := pc.Load(ctx, identity)
 					timer, timerFound, timerErr := activations.LoadWorkflowTimerActivation(ctx, rows[0].Ref.ActivationID)
-					t.Logf("M09 failed-cut evidence parent=%v publication=%s dispatch=%v entry=%v exit=%v intercept=%v outcome=%+v calls=%d acknowledged=%d mutation=%v authorization_reads=%d authorization_error=%v event=%s stage=%s history=%d state_found=%t state_error=%v timer_found=%t timer_status=%s fired_at=%s timer_error=%v receipts=%d", fireCtx.Err(), outcome, err, capture.entryErr, capture.exitErr, capture.interceptErr, capture.outcome, owner.calls, owner.acknowledged, owner.lastErr, owner.interruptedActivationReads, owner.activationReadErr, capture.eventID, before.CurrentState, len(before.TransitionHistory), beforeFound, beforeErr, timerFound, timer.Status, timer.FiredAt.Format(time.RFC3339Nano), timerErr, gateRecoveryPipelineReceiptCount(t, selected, capture.eventID))
+					t.Logf("M09 failed-cut evidence parent=%v publication=%s dispatch=%v entry=%v exit=%v intercept=%v outcome=%+v calls=%d acknowledged=%d mutation=%v authorization_reads=%d authorization_error=%v event=%s stage=%s history=%d state_found=%t state_error=%v timer_found=%t timer_status=%s fired_at=%s timer_error=%v receipts=%d", fireCtx.Err(), outcome, err, capture.entryErr, capture.exitErr, capture.interceptErr, capture.outcome, owner.calls, owner.acknowledged, owner.lastErr, owner.interruptedActivationReads, owner.activationReadErr, capture.eventID, before.CurrentState, len(before.TransitionHistory), beforeFound, beforeErr, timerFound, timer.Status, timer.FiredAt.Format(time.RFC3339Nano), timerErr, gateRecoveryPipelineReceiptCount(t, selected.events, capture.eventID))
 				}()
 				if entryCut {
 					if scenario == "deadline_entry_live_outer" && fireCtx.Err() != nil {
@@ -471,7 +471,7 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 					if err != nil || !found || before.CurrentState != "waiting" || len(before.TransitionHistory) != 0 || owner.acknowledged != 0 {
 						t.Fatalf("rejected transition leaked: %+v found=%t error=%v", before, found, err)
 					}
-					if got := gateRecoveryPipelineReceiptCount(t, selected, eventID); got != 0 {
+					if got := gateRecoveryPipelineReceiptCount(t, selected.events, eventID); got != 0 {
 						t.Fatalf("rejected transition has %d terminal receipts", got)
 					}
 					if receiverProbe != nil {
@@ -555,7 +555,7 @@ func verifyWorkflowTimerPublishedOccurrenceRecovery(t *testing.T, scenarios []st
 					t.Fatalf("settled occurrence replayed: %+v error=%v", result, err)
 				}
 				persisted, found, err := activations.LoadWorkflowTimerActivation(ctx, fired.Ref.ActivationID)
-				if err != nil || !found || !reflect.DeepEqual(persisted, fired) || workflowTimerEventCount(t, selected, runID, runtimecontracts.WorkflowStageTimerInternalEvent) != 1 || gateRecoveryPipelineReceiptCount(t, selected, eventID) != 1 {
+				if err != nil || !found || !reflect.DeepEqual(persisted, fired) || workflowTimerEventCount(t, selected, runID, runtimecontracts.WorkflowStageTimerInternalEvent) != 1 || gateRecoveryPipelineReceiptCount(t, selected.events, eventID) != 1 {
 					t.Fatalf("recovery changed exact occurrence/history: before=%+v after=%+v error=%v", fired, persisted, err)
 				}
 				if receiverProbe != nil {

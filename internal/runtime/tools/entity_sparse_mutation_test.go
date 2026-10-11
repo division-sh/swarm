@@ -2,7 +2,6 @@ package tools_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -35,10 +34,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -208,14 +205,12 @@ func seedEntityToolSourceRun(t *testing.T, selected any, bundle *contracts.Workf
 	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 	ctx = effects.WithDifferentOwner(ctx, effects.OwnerBuildTestInfrastructure)
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, entityToolTestRunID), fact)
-	fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: entityToolTestRunID, Artifact: bundle.SourceArtifact}
-	switch selected.(type) {
-	case *store.PostgresStore:
-		runlifecyclefixture.RequirePostgres(t, ctx, storetest.DatabaseForTest(selected), fixture)
-	case *store.SQLiteRuntimeStore:
-		runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(selected), fixture)
-	default:
-		t.Fatalf("unsupported entity test backend %T", selected)
+	runner, ok := selected.(storetest.RunFixtureStore)
+	if !ok {
+		t.Fatalf("entity test store %T has no selected run lifecycle owner", selected)
+	}
+	if err := storetest.MaterializeRun(ctx, runner, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: entityToolTestRunID, Artifact: bundle.SourceArtifact}); err != nil {
+		t.Fatalf("materialize entity source run: %v", err)
 	}
 	owner, ok := selected.(entityToolImportOwner)
 	if !ok {
@@ -259,13 +254,12 @@ writer:
 				},
 			})
 			var persistence sparseEntityToolStore
-			var db *sql.DB
 			if backend == "sqlite" {
 				s := newSQLiteRuntimeToolStoreForTest(t)
-				persistence, db = s, storetest.DatabaseForTest(s)
+				persistence = s
 			} else {
 				s := newPostgresHumanTaskToolStoreForTest(t)
-				persistence, db = s, storetest.DatabaseForTest(s)
+				persistence = s
 			}
 			runID, entityID := uuid.NewString(), uuid.NewString()
 			fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
@@ -278,11 +272,12 @@ writer:
 			if _, err := persistence.EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
 				t.Fatal(err)
 			}
-			fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: fact.BundleHash()}
-			if backend == "sqlite" {
-				runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
-			} else {
-				runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
+			runner, ok := persistence.(storetest.RunFixtureStore)
+			if !ok {
+				t.Fatal("sparse entity fixture requires selected run lifecycle owner")
+			}
+			if err := storetest.MaterializeRun(ctx, runner, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: fact.BundleHash()}); err != nil {
+				t.Fatal(err)
 			}
 			source := semanticview.Wrap(bundle)
 			if problems := tools.ValidateGeneratedToolSchemaClosureForSource(source); len(problems) != 0 {

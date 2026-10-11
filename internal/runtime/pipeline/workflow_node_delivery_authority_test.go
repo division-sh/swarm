@@ -2,8 +2,9 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,20 +13,18 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
 type failOnceRetryPipelineBus struct {
-	*recordingPipelineBus
+	*nativePipelineDeliveryBusObservationForTest
 	calls atomic.Int32
 }
 
@@ -44,7 +43,7 @@ func (s *failingPreclaimDeliveryStore) ClaimDelivery(context.Context, runtimedel
 	return runtimedelivery.ClaimResult{}, s.failure
 }
 
-func TestPipelinePreclaimFailurePreservesErrorAndReturnsExactCarrier(t *testing.T) {
+func VerifyPipelinePreclaimFailurePreservesErrorAndReturnsExactCarrierForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	independent := errors.New("independent claim-store failure")
 	for _, tc := range []struct {
 		name         string
@@ -58,12 +57,29 @@ func TestPipelinePreclaimFailurePreservesErrorAndReturnsExactCarrier(t *testing.
 		{name: "joined_failure", failure: errors.Join(context.Canceled, independent), cancel: true, wantCanceled: true, wantStore: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
-			pc, _ := newDeliveryAuthorityCoordinator(t, db)
-			runCtx := testPipelineCoordinatorRunContext(t, pc)
-			evt := seedDeliveryAuthorityEvent(t, db, runCtx)
-			seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
-			route := seedDeliveryAuthorityNodeDelivery(t, db, evt.ID(), pipelineNode(t, ".", "node-a"))
+			source := semanticview.Wrap(deliveryAuthoritySourceForTest(t))
+			fixture := open(t, source)
+			bundle, _ := semanticview.Bundle(source)
+			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
+			node := pipelineNode(t, ".", "node-a")
+			module.workflowNodes = []WorkflowNode{{Node: node, Subscriptions: []events.EventType{"source.evt"}}}
+			pc := fixture.NewCoordinator(PipelineCoordinatorOptions{Module: module})
+			runCtx := runtimecorrelation.WithRunID(fixture.Context, testPipelineRunID)
+			if err := fixture.RequireRun(runCtx, testPipelineRunID); err != nil {
+				t.Fatal(err)
+			}
+			entityID := testPipelineRunID
+			if err := fixture.Construct(runCtx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
+				WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "queued", Fields: map[string]any{}, EntityType: "test_entity",
+			})); err != nil {
+				t.Fatal(err)
+			}
+			target := events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: entityID}
+			evt := eventtest.ExistingRunRootIngress(uuid.NewString(), "source.evt", "src", "", []byte(`{"entity_id":"`+entityID+`"}`), 0,
+				testPipelineRunID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(target)}
+			fixture.Publish(runCtx, evt, route)
 			delivery, err := events.NewDeliveryEvent(evt, route)
 			if err != nil {
 				t.Fatal(err)
@@ -71,6 +87,28 @@ func TestPipelinePreclaimFailurePreservesErrorAndReturnsExactCarrier(t *testing.
 			deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), route)
 			if err != nil {
 				t.Fatal(err)
+			}
+			pending, err := pc.deliveryStore.Snapshot(runCtx, deliveryID)
+			if err != nil || pending.EventID != evt.ID() || pending.Route.Target != route.Target || pending.Route.Recipient != route.Recipient || pending.Status != runtimedelivery.StatusPending {
+				t.Fatalf("preclaim fixture differs from exact pending delivery: %+v err=%v", pending, err)
+			}
+			readAttempts := func() []string {
+				raw, err := fixture.ApplicationStorage(runCtx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var snapshot map[string]struct{ Rows []string }
+				if err := json.Unmarshal(raw, &snapshot); err != nil {
+					t.Fatal(err)
+				}
+				value, found := snapshot["event_delivery_attempts"]
+				if !found {
+					t.Fatal("preclaim snapshot omitted physical delivery attempts")
+				}
+				return value.Rows
+			}
+			if attempts := readAttempts(); len(attempts) != 0 {
+				t.Fatalf("preclaim fixture already has attempts: %q", attempts)
 			}
 			continuation := &scriptedWorkflowNodeContinuation{deliveryID: deliveryID}
 			ctx, cancel := context.WithCancel(runCtx)
@@ -98,10 +136,16 @@ func TestPipelinePreclaimFailurePreservesErrorAndReturnsExactCarrier(t *testing.
 			if resolution, ok := guard.Resolution(); !ok || resolution != worklifetime.DeliveryContinuationReturned || continuation.returns.Load() != 1 || continuation.consumes.Load() != 0 {
 				t.Fatalf("carrier resolution=%v present=%t returns=%d consumes=%d; want exact return", resolution, ok, continuation.returns.Load(), continuation.consumes.Load())
 			}
-			assertDeliveryAuthorityOutcomeCount(t, db, evt.ID(), route.Recipient.ID(), 0)
-			var status string
-			if err := db.QueryRowContext(context.Background(), `SELECT status FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_type='node' AND subscriber_id=$2`, evt.ID(), route.Recipient.ID()).Scan(&status); err != nil || status != "pending" {
+			if attempts := readAttempts(); len(attempts) != 0 {
+				t.Fatalf("delivery authority node outcomes = %d, want 0", len(attempts))
+			}
+			after, err := pc.deliveryStore.Snapshot(runCtx, deliveryID)
+			status := string(after.Status)
+			if err != nil || status != "pending" {
 				t.Fatalf("preclaim delivery status=%q error=%v, want pending", status, err)
+			}
+			if !reflect.DeepEqual(pending, after) {
+				t.Fatalf("preclaim changed exact delivery snapshot: before=%+v after=%+v", pending, after)
 			}
 		})
 	}
@@ -118,25 +162,67 @@ func (b *failOnceRetryPipelineBus) PrepareEnginePublications(ctx context.Context
 			errors.New("transient publication preparation failure"),
 		)
 	}
-	return b.recordingPipelineBus.PrepareEnginePublications(ctx, intents)
+	return b.EngineMutationPublicationPlanner.PrepareEnginePublications(ctx, intents)
 }
 
 func (b *failOnceRetryPipelineBus) PrepareEngineMutationPublications(ctx context.Context, intents []runtimeengine.EmitIntent, prospective PreparedWorkflowPublicationState) ([]runtimeengine.DurablePublicationPlan, error) {
 	if prospective.Empty() {
 		return nil, errors.New("test mutation publication requires prepared state")
 	}
-	return b.PrepareEnginePublications(ctx, intents)
+	if b.calls.Add(1) == 1 {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "prepare_failed", "workflow-node-retry-test", "prepare_engine_publications", nil, errors.New("transient publication preparation failure"))
+	}
+	return b.EngineMutationPublicationPlanner.PrepareEngineMutationPublications(ctx, intents, prospective)
 }
 
-func TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pc, bus := newDeliveryAuthorityCoordinator(t, db)
-	runCtx := testPipelineCoordinatorRunContext(t, pc)
-	evt := seedDeliveryAuthorityEvent(t, db, runCtx)
-	seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
+func VerifyPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthorityForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
+	source := semanticview.Wrap(deliveryAuthoritySourceForTest(t))
+	fixture := open(t, source)
+	bundle, _ := semanticview.Bundle(source)
+	module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
+	node := pipelineNode(t, ".", "node-a")
+	module.workflowNodes = []WorkflowNode{{Node: node, Subscriptions: []events.EventType{"source.evt"}}}
+	pc := fixture.NewCoordinator(PipelineCoordinatorOptions{Module: module})
+	runCtx := runtimecorrelation.WithRunID(fixture.Context, testPipelineRunID)
+	if err := fixture.RequireRun(runCtx, testPipelineRunID); err != nil {
+		t.Fatal(err)
+	}
+	entityID := testPipelineRunID
+	if err := fixture.Construct(runCtx, materializedWorkflowInstanceForTest(WorkflowInstance{
+		InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
+		WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(), CurrentState: "queued", Fields: map[string]any{}, EntityType: "test_entity",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	target := events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: entityID}
+	evt := eventtest.ExistingRunRootIngress(uuid.NewString(), "source.evt", "src", "", []byte(`{"entity_id":"`+entityID+`"}`), 0,
+		testPipelineRunID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
+	fixture.PublishDirect(runCtx, evt)
+	readCounts := func() map[string]int {
+		raw, err := fixture.ApplicationStorage(runCtx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var snapshot map[string]struct{ Rows []string }
+		if err := json.Unmarshal(raw, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		counts := map[string]int{}
+		for _, table := range []string{"events", "event_deliveries", "event_delivery_attempts"} {
+			value, found := snapshot[table]
+			if !found {
+				t.Fatalf("unstamped fixture omitted %s", table)
+			}
+			counts[table] = len(value.Rows)
+		}
+		return counts
+	}
+	before := readCounts()
+	if before["events"] != 1 || before["event_deliveries"] != 0 || before["event_delivery_attempts"] != 0 {
+		t.Fatalf("unstamped precondition = %+v, want one event without delivery or attempt", before)
+	}
 
-	postCommit := make([]OwnerAction, 0, 1)
-	ictx := WithPipelinePostCommitActions(runCtx, &postCommit)
+	ictx := runCtx
 	passthrough, _, _, err := pc.Intercept(ictx, evt)
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)
@@ -144,232 +230,212 @@ func TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority(
 	if !passthrough {
 		t.Fatal("Intercept passthrough = false, want event-wide interception to leave unstamped node delivery untouched")
 	}
-	if got := bus.publishedCount(); got != 0 {
+	after := readCounts()
+	if got := after["events"] - before["events"]; got != 0 {
 		t.Fatalf("published events = %d, want 0 without node delivery authority", got)
 	}
-	node := pipelineNode(t, ".", "node-a")
-	assertDeliveryAuthorityOutcomeCount(t, db, evt.ID(), node.Key(), 0)
-	assertDeliveryAuthorityDeliveryCount(t, db, evt.ID(), node.Key(), 0)
-}
-
-func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAuthorityLog(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pc, bus := newDeliveryAuthorityCoordinator(t, db)
-	runCtx := testPipelineCoordinatorRunContext(t, pc)
-	evt := seedDeliveryAuthorityEvent(t, db, runCtx)
-	seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
-
-	target := events.RouteIdentity{
-		FlowID: ".", FlowInstance: testPipelineRunID, EntityID: evt.EntityID(),
-	}
-	node := pipelineNode(t, ".", "node-a")
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(target)}
-	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, evt.ID(), node, target)
-	targetEvt := eventtest.TargetRouted(evt, target)
-	delivery, err := events.NewDeliveryEvent(targetEvt, route)
-	if err != nil {
-		t.Fatalf("NewDeliveryEvent: %v", err)
-	}
-	targetPostCommit := make([]OwnerAction, 0, 1)
-	targetCtx := WithPipelinePostCommitActions(runCtx, &targetPostCommit)
-	passthrough, _, _, err := pc.InterceptDeliveryRoute(targetCtx, delivery, route)
-	if err != nil {
-		t.Fatalf("target InterceptDeliveryRoute: %v", err)
-	}
-	if passthrough {
-		t.Fatal("target InterceptDeliveryRoute passthrough = true, want false for consumed target-routed node event")
-	}
-	if deliveryAuthorityLogCount(bus.runtimeLogEntries()) != 0 {
-		t.Fatalf("target runtime logs = %#v, want no false delivery_authority_missing log", bus.runtimeLogEntries())
-	}
-	assertDeliveryAuthorityOutcomeCount(t, db, evt.ID(), route.Recipient.ID(), 1)
-}
-
-func TestPipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWithoutStampedClaim(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	source := testWorkflowNodeConnectedInputCollisionSource()
-	bundle, ok := semanticview.Bundle(source)
-	if !ok {
-		t.Fatal("connected-input collision source has no contract bundle")
-	}
-	bus := &recordingPipelineBus{}
-	pc := newPostgresPipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		DeliveryStore: newPipelineTestDeliveryOwnerForDB(t, db),
-		Module: &previewWorkflowModule{
-			bundle: bundle,
-			workflowNodes: []WorkflowNode{{
-				Node:          pipelineNode(t, "receiver", "receiver-node"),
-				Subscriptions: []events.EventType{"deploy.accepted", "deploy.audited"},
-			}},
-		},
-	})
-	runCtx := testPipelineCoordinatorRunContext(t, pc)
-
-	entityID := uuid.NewString()
-	eventID := uuid.NewString()
-	target := events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: entityID}
-	producerEntityID := uuid.NewString()
-	evt := eventtest.RunCreatingRootIngressWithRoutingSource(eventID, "producer/deploy.done", "producer", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{
-		EntityID:     target.EntityID,
-		FlowInstance: target.FlowInstance,
-		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerEntityID},
-		Target:       target,
-	}, eventtest.StaticFlowRoutingSource("producer", "producer", producerEntityID), time.Now().UTC())
-	ctx := testAuthorActivityContext(t, runCtx)
-	seedPipelineEventRecord(t, ctx, db, evt)
-	receiverNode := pipelineNode(t, "receiver", "receiver-node")
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(receiverNode), Target: events.MustExistingEntityTarget(target)}
-	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, eventID, receiverNode, target)
-	delivery, err := events.NewDeliveryEvent(evt, route)
-	if err != nil {
-		t.Fatalf("NewDeliveryEvent: %v", err)
-	}
-
-	for attempt := 1; attempt <= 2; attempt++ {
-		passthrough, deferred, _, err := pc.InterceptDeliveryRoute(ctx, delivery, route)
-		if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
-			t.Fatalf("attempt %d InterceptDeliveryRoute error = %v, want missing stamped-claim failure", attempt, err)
-		}
-		if passthrough {
-			t.Fatalf("attempt %d passthrough = true, want fail-closed interception", attempt)
-		}
-		if len(deferred) != 0 {
-			t.Fatalf("attempt %d deferred events = %#v, want none", attempt, deferred)
-		}
-	}
-	assertDeliveryAuthorityOutcomeCount(t, db, eventID, route.Recipient.ID(), 0)
-	var status string
-	if err := db.QueryRowContext(ctx, `
-		SELECT status
-		FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, eventID, route.Recipient.ID()).Scan(&status); err != nil {
-		t.Fatalf("load ambiguous connected-input delivery: %v", err)
-	}
-	if status != "pending" {
-		t.Fatalf("delivery status = %q, want pending after rejected replay", status)
-	}
-	if got := bus.publishedCount(); got != 0 {
-		t.Fatalf("published handler events = %d, want zero", got)
+	if after["event_delivery_attempts"] != 0 || after["event_deliveries"] != 0 {
+		t.Fatalf("delivery authority node outcomes/deliveries = %+v, want zero", after)
 	}
 }
 
-func TestPipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecution(t *testing.T) {
-	for _, name := range []string{"dead_letter"} {
-		t.Run(name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
-			pc, bus := newDeliveryAuthorityCoordinator(t, db)
-			runCtx := testPipelineCoordinatorRunContext(t, pc)
-			evt := seedDeliveryAuthorityEvent(t, db, runCtx)
-			seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
-			node := pipelineNode(t, ".", "node-a")
-			seedDeliveryAuthorityTerminalNodeDelivery(t, db, evt.ID(), node)
-
-			postCommit := make([]OwnerAction, 0, 1)
-			ictx := WithPipelinePostCommitActions(runCtx, &postCommit)
-			passthrough, _, _, err := pc.Intercept(ictx, evt)
+func VerifyNativePipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAuthorityLogForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture, pc, ctx, evt, route := nativeReceiverPreparationFixtureForTest(t, backend, open)
+			bus := observeNativePipelineDeliveryBusForTest(t, pc)
+			delivery, err := events.NewDeliveryEvent(evt, route)
 			if err != nil {
-				t.Fatalf("Intercept: %v", err)
+				t.Fatal(err)
 			}
-			if !passthrough {
-				t.Fatal("Intercept passthrough = false, want event-wide interception to leave terminal node delivery untouched")
+			passthrough, _, _, err := pc.InterceptDeliveryRoute(ctx, delivery, route)
+			if err != nil {
+				t.Fatalf("target InterceptDeliveryRoute: %v", err)
 			}
-			if got := bus.publishedCount(); got != 0 {
-				t.Fatalf("published events = %d, want 0 for terminal node delivery", got)
+			if passthrough {
+				t.Fatal("target InterceptDeliveryRoute passthrough = true, want consumed target-routed event")
 			}
-			assertDeliveryAuthorityOutcomeCount(t, db, evt.ID(), node.Key(), 1)
-			assertDeliveryAuthorityDeliveryCount(t, db, evt.ID(), node.Key(), 1)
+			if deliveryAuthorityLogCount(bus.runtimeLogEntries()) != 0 {
+				t.Fatalf("target runtime logs = %#v, want no false delivery_authority_missing log", bus.runtimeLogEntries())
+			}
+			id, err := runtimedelivery.DeliveryID(evt.ID(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			outcomes, err := fixture.Store.Outcomes(ctx, id)
+			if err != nil || len(outcomes) != 1 {
+				t.Fatalf("exact target outcomes = %#v/%v, want one", outcomes, err)
+			}
 		})
 	}
 }
 
-func TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext(t, context.Background())
-	pc, _ := newDeliveryAuthorityCoordinator(t, db)
-	runCtx := testPipelineCoordinatorRunContext(t, pc)
-	evt := seedDeliveryAuthorityEvent(t, db, runCtx)
-	seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
-	node := pipelineNode(t, ".", "node-a")
-	route := seedDeliveryAuthorityNodeDelivery(t, db, evt.ID(), node)
-
-	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(runCtx, route), evt)
-	if err != nil {
-		t.Fatalf("dispatchWorkflowNodeEventResult: %v", err)
-	}
-	if !handled {
-		t.Fatal("dispatchWorkflowNodeEventResult handled = false, want true for authorized node delivery")
-	}
-	assertDeliveryAuthorityOutcomeCount(t, db, evt.ID(), node.Key(), 1)
-	var status string
-	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, '')
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = $2
-	`, evt.ID(), node.Key()).Scan(&status); err != nil {
-		t.Fatalf("load authorized node delivery: %v", err)
-	}
-	if status != "delivered" {
-		t.Fatalf("authorized node delivery status = %q, want delivered", status)
+func VerifyNativePipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWithoutStampedClaimForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	source := loadNamesOnlyPipelineSource(t, canonicalrouting.CopyPipelineConnectedDeliveryCollision(t))
+	bundle, _ := semanticview.Bundle(source)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := open(t, backend, semanticview.Wrap(bundle))
+			node := pipelineNode(t, "receiver", "receiver-node")
+			module := &previewWorkflowModule{bundle: bundle, workflowNodes: []WorkflowNode{{Node: node, Subscriptions: []events.EventType{"deploy.accepted", "deploy.audited"}}}}
+			pc, ctx := nativePipelineDeliveryCoordinatorForTest(t, fixture, module)
+			bus := observeNativePipelineDeliveryBusForTest(t, pc)
+			run := uuid.NewString()
+			ctx = runtimecorrelation.WithRunID(ctx, run)
+			if err := fixture.RequireRun(ctx, run); err != nil {
+				t.Fatal(err)
+			}
+			target := events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: uuid.NewString()}
+			producerEntity := uuid.NewString()
+			evt := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "producer/deploy.done", "producer", "", []byte("{}"), 0, run,
+				events.EventEnvelope{EntityID: target.EntityID, FlowInstance: target.FlowInstance,
+					Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerEntity}, Target: target},
+				eventtest.StaticFlowRoutingSource("producer", "producer", producerEntity), time.Now().UTC())
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(target)}
+			if err := fixture.PublishNode(ctx, evt, route); err != nil {
+				t.Fatal(err)
+			}
+			delivery, err := events.NewDeliveryEvent(evt, route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for attempt := 1; attempt <= 2; attempt++ {
+				passthrough, deferred, _, err := pc.InterceptDeliveryRoute(ctx, delivery, route)
+				if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
+					t.Fatalf("attempt %d InterceptDeliveryRoute error = %v, want missing stamped-claim failure", attempt, err)
+				}
+				if passthrough {
+					t.Fatalf("attempt %d passthrough = true, want fail-closed interception", attempt)
+				}
+				if len(deferred) != 0 {
+					t.Fatalf("attempt %d deferred events = %#v, want none", attempt, deferred)
+				}
+			}
+			id, err := runtimedelivery.DeliveryID(evt.ID(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			outcomes, err := fixture.Store.Outcomes(ctx, id)
+			if err != nil || len(outcomes) != 0 {
+				t.Fatalf("unstamped replay outcomes = %#v/%v, want none", outcomes, err)
+			}
+			snapshot, err := fixture.Store.Snapshot(ctx, id)
+			if err != nil || snapshot.Status != runtimedelivery.StatusPending {
+				t.Fatalf("unstamped replay changed exact pending obligation: %+v/%v", snapshot, err)
+			}
+			if got := bus.publishedCount(); got != 0 {
+				t.Fatalf("published handler events = %d, want zero", got)
+			}
+		})
 	}
 }
 
-func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
+func VerifyNativePipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecutionForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend+"/dead_letter", func(t *testing.T) {
+			fixture, pc, ctx, evt, route := nativeReceiverPreparationFixtureForTest(t, backend, open)
+			bus := observeNativePipelineDeliveryBusForTest(t, pc)
+			id, err := runtimedelivery.DeliveryID(evt.ID(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			consumeNativePipelineDeliveryCarrierForTest(t, fixture, ctx, id)
+			result, err := fixture.Store.ClaimDelivery(ctx, fixture.Authority, evt, route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			acquired, ok := result.Acquired()
+			if !ok {
+				t.Fatalf("terminal fixture claim = %s, want acquired", result.Disposition)
+			}
+			failure := runtimefailures.FromError(errors.New("terminal delivery fixture"), "pipeline-test", "settle").Failure
+			if _, err := fixture.Store.SettleFailure(ctx, acquired.Claim, runtimedelivery.Settlement{
+				Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "terminal_delivery_fixture",
+				Failure: &failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			passthrough, _, _, err := pc.Intercept(ctx, evt)
+			if err != nil {
+				t.Fatalf("Intercept: %v", err)
+			}
+			if !passthrough {
+				t.Fatal("event-wide interception must leave terminal node delivery untouched")
+			}
+			if got := bus.publishedCount(); got != 0 {
+				t.Fatalf("terminal delivery emitted %d events", got)
+			}
+			outcomes, err := fixture.Store.Outcomes(ctx, id)
+			if err != nil || len(outcomes) != 1 {
+				t.Fatalf("terminal outcomes = %#v/%v, want one", outcomes, err)
+			}
+			if count, err := fixture.DeliveryCount(ctx, evt.ID(), route.Recipient.ID()); err != nil || count != 1 {
+				t.Fatalf("terminal exact physical obligations = %d/%v, want one", count, err)
+			}
+		})
+	}
+}
+
+func VerifyNativePipelineCoordinatorInterceptSettlesAuthorizedNodeDeliveryForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture, pc, ctx, evt, route := nativeReceiverPreparationFixtureForTest(t, backend, open)
+			handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
+			if err != nil || !handled {
+				t.Fatalf("authorized node execution handled=%t error=%v", handled, err)
+			}
+			id, err := runtimedelivery.DeliveryID(evt.ID(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			outcomes, err := fixture.Store.Outcomes(ctx, id)
+			if err != nil || len(outcomes) != 1 {
+				t.Fatalf("authorized outcomes = %#v/%v, want one", outcomes, err)
+			}
+			snapshot, err := fixture.Store.Snapshot(ctx, id)
+			if err != nil || snapshot.Status != runtimedelivery.StatusDelivered {
+				t.Fatalf("authorized exact snapshot = %+v/%v, want delivered", snapshot, err)
+			}
+		})
+	}
+}
+
+func VerifyNativeWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParityForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	const retryBase = 30 * time.Second
-	for _, tc := range workflowJoinStoreCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			workflowStore, ctx := tc.open(t)
-			owner := newPipelineTestDeliveryOwnerForDB(t, workflowStore.testDB())
-			baseBus := &recordingPipelineBus{}
-			bus := &failOnceRetryPipelineBus{recordingPipelineBus: baseBus}
-			bundle := loadWorkflowTempBundle(t, map[string]string{
-				"schema.yaml":   "name: delivery-retry\nstages:\n  queued: {}\n  done: {final: true}\n",
-				"entities.yaml": "test_entity: {}\n",
-				"events.yaml":   "source.evt:\nnode.completed:\n",
-				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      emit: node.completed\n",
-			})
-			bundle.Policy = runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
-				"handler_retry_base_seconds": {Value: int(retryBase / time.Second)},
-			}}
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			source := loadNamesOnlyPipelineSource(t, canonicalrouting.CopyPipelineDeliveryRetry(t))
+			bundle, _ := semanticview.Bundle(source)
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 			module.workflowNodes = []WorkflowNode{{
 				Node: pipelineNode(t, ".", "node-a"), Subscriptions: []events.EventType{"source.evt"},
 			}}
-			pc := newPostgresPipelineCoordinatorForTest(bus, workflowStore.testDB(), PipelineCoordinatorOptions{
-				Module:        module,
-				Persistence:   workflowPersistenceForTest(workflowStore),
-				DeliveryStore: owner,
-				WorkOwner:     pipelineTestWorkOwner(t),
-			})
-			configurePipelineTestDeliveryOwner(t, pc)
-
-			runID := runtimecorrelation.RunIDFromContext(ctx)
+			fixture := open(t, backend, semanticview.Wrap(bundle))
+			pc, ctx := nativePipelineDeliveryCoordinatorForTest(t, fixture, module)
+			owner := fixture.Store
+			bus := &failOnceRetryPipelineBus{nativePipelineDeliveryBusObservationForTest: observeNativePipelineDeliveryBusForTest(t, pc)}
+			pc.bus = bus
+			runID := uuid.NewString()
+			ctx = runtimecorrelation.WithRunID(ctx, runID)
+			if err := fixture.RequireRun(ctx, runID); err != nil {
+				t.Fatal(err)
+			}
 			entityID := runID
-			evt := eventtest.RunCreatingRootIngress(
-				uuid.NewString(), events.EventType("source.evt"), "src", "", []byte(`{}`), 0,
-				runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), time.Now().UTC(),
-			)
-			dialect := authoractivityfixture.DialectPostgres
-			if workflowStore.isSQLite() {
-				dialect = authoractivityfixture.DialectSQLite
-			}
-			seedPipelineEventRecordForDialect(t, ctx, workflowStore.testDB(), dialect, evt)
-			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			evt := eventtest.ExistingRunRootIngress(uuid.NewString(), "source.evt", "src", "", []byte("{}"), 0, runID,
+				events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), time.Now().UTC())
+			if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(), CurrentState: "queued",
-				EntityID:       entityID,
-				EnteredStageAt: evt.CreatedAt(), CreatedAt: evt.CreatedAt(),
-				EntityType: "test_entity",
+				EntityID: entityID, EnteredStageAt: evt.CreatedAt(), CreatedAt: evt.CreatedAt(), EntityType: "test_entity", Fields: map[string]any{},
 			})); err != nil {
-				t.Fatalf("seed workflow instance: %v", err)
+				t.Fatal(err)
 			}
+
 			route := events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(pipelineNode(t, ".", "node-a")), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 					FlowID: ".", FlowInstance: runID, EntityID: entityID,
 				}),
 			}
-			if err := owner.commitInitial(ctx, evt, route); err != nil {
+			if err := fixture.PublishNode(ctx, evt, route); err != nil {
 				t.Fatalf("commit node delivery: %v", err)
 			}
 
@@ -427,9 +493,10 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 				t.Fatalf("early-wake delivery snapshot = status:%s retries:%d, want unchanged failed/1", snapshot.Status, snapshot.RetryCount)
 			}
 
-			if err := owner.makeRetryEligible(ctx, proof.DeliveryID()); err != nil {
+			if err := fixture.RetryEligible(ctx, evt, route); err != nil {
 				t.Fatalf("make retry selected-store eligible: %v", err)
 			}
+			recoverNativePipelineRetryForTest(t, fixture, ctx)
 			handled, err = pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), evt)
 			if err != nil {
 				t.Fatalf("dispatch selected-store-eligible retry: %v", err)
@@ -455,163 +522,11 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 	}
 }
 
-func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordinator, *recordingPipelineBus) {
+func deliveryAuthoritySourceForTest(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	bus := &recordingPipelineBus{}
-	// Delivery authority exercises unconditional advancement, not rule selection.
-	// The old raw rule was non-authored and produced a NotApplicable selection fact.
-	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: delivery-authority\nstages:\n  queued: {}\n  done: {final: true}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "source.evt:\n",
-		"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      advances_to: done\n",
-	})
-	module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
-	module.workflowNodes = []WorkflowNode{{
-		Node:          pipelineNode(t, ".", "node-a"),
-		Subscriptions: []events.EventType{"source.evt"},
-	}}
-	pc := newPostgresPipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
-		DeliveryStore: newPipelineTestDeliveryOwnerForDB(t, db),
-		Module:        module,
-	})
-	return pc, bus
-}
-
-func seedDeliveryAuthorityEvent(t *testing.T, db *sql.DB, ctx context.Context) events.Event {
-	t.Helper()
-	entityID := testPipelineRunID
-	evt := eventtest.RunCreatingRootIngress(
-		uuid.NewString(),
-		events.EventType("source.evt"),
-		"src",
-		"",
-		[]byte(`{"entity_id":"`+entityID+`"}`),
-		0,
-		testPipelineRunID,
-		"",
-		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: entityID}),
-		time.Now().UTC(),
-	)
-
-	seedPipelineEventRecord(t, ctx, db, evt)
-	return evt
-}
-
-func seedDeliveryAuthorityWorkflowInstance(t *testing.T, pc *PipelineCoordinator, ctx context.Context, entityID string) {
-	t.Helper()
-	if err := pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      testPipelineRunID,
-		StorageRef:      testPipelineRunID,
-		EntityID:        entityID,
-		WorkflowName:    ".",
-		WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
-		CurrentState:    "queued",
-		Fields:          map[string]any{},
-		EntityType:      "test_entity",
-	})); err != nil {
-		t.Fatalf("seed delivery authority workflow instance: %v", err)
-	}
-}
-
-func seedDeliveryAuthorityNodeDelivery(t *testing.T, db *sql.DB, eventID string, node runtimeidentity.ExecutableNode) events.DeliveryRoute {
-	t.Helper()
-	evt, err := newPipelineTestDeliveryOwnerForDB(t, db).loadEvent(testAuthorActivityContext(t, context.Background()), eventID)
-	if err != nil {
-		t.Fatalf("load delivery authority event: %v", err)
-	}
-	return seedDeliveryAuthorityNodeDeliveryForTarget(t, db, eventID, node, events.RouteIdentity{
-		FlowID: ".", FlowInstance: testPipelineRunID, EntityID: evt.EntityID(),
-	})
-}
-
-func seedDeliveryAuthorityNodeDeliveryForTarget(t *testing.T, db *sql.DB, eventID string, node runtimeidentity.ExecutableNode, target events.RouteIdentity) events.DeliveryRoute {
-	t.Helper()
-	owner := newPipelineTestDeliveryOwnerForDB(t, db)
-	evt, err := owner.loadEvent(testAuthorActivityContext(t, context.Background()), eventID)
-	if err != nil {
-		t.Fatalf("load delivery authority event: %v", err)
-	}
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(target)}
-	if err := owner.commitInitial(testAuthorActivityContext(t, context.Background()), evt, route); err != nil {
-		t.Fatalf("seed target delivery authority node delivery: %v", err)
-	}
-	return route
-}
-
-func seedDeliveryAuthorityTerminalNodeDelivery(t *testing.T, db *sql.DB, eventID string, node runtimeidentity.ExecutableNode) {
-	t.Helper()
-	ctx := testAuthorActivityContext(t, context.Background())
-	owner := newPipelineTestDeliveryOwnerForDB(t, db)
-	evt, err := owner.loadEvent(ctx, eventID)
-	if err != nil {
-		t.Fatalf("load terminal delivery authority event: %v", err)
-	}
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{
-		FlowID: ".", FlowInstance: testPipelineRunID, EntityID: evt.EntityID(),
-	})}
-	if err := owner.commitInitial(ctx, evt, route); err != nil {
-		t.Fatalf("commit terminal delivery authority: %v", err)
-	}
-	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), route)
-	if err != nil {
-		t.Fatalf("derive terminal delivery authority id: %v", err)
-	}
-	snapshot, err := owner.Snapshot(ctx, deliveryID)
-	if err != nil {
-		t.Fatalf("read terminal delivery authority: %v", err)
-	}
-	result, err := owner.ClaimDelivery(ctx, snapshot.Authority, evt, route)
-	if err != nil {
-		t.Fatalf("claim terminal delivery authority: %v", err)
-	}
-	claimed, ok := result.Acquired()
-	if !ok {
-		t.Fatalf("claim terminal delivery authority disposition = %s", result.Disposition)
-	}
-	failure := runtimefailures.FromError(errors.New("terminal delivery fixture"), "pipeline-test", "settle").Failure
-	if _, err := owner.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
-		Disposition: runtimedelivery.FailureDeadLetter,
-		ReasonCode:  "terminal_delivery_fixture",
-		Failure:     &failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
-	}); err != nil {
-		t.Fatalf("settle terminal delivery authority: %v", err)
-	}
-}
-
-func assertDeliveryAuthorityOutcomeCount(t *testing.T, db *sql.DB, eventID, nodeID string, want int) {
-	t.Helper()
-	var got int
-	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
-		SELECT COUNT(*)
-		FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
-		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
-		WHERE d.event_id = $1::uuid
-		  AND d.subscriber_type = 'node'
-		  AND d.subscriber_id = $2
-	`, eventID, nodeID).Scan(&got); err != nil {
-		t.Fatalf("count delivery authority node outcomes: %v", err)
-	}
-	if got != want {
-		t.Fatalf("delivery authority node outcomes = %d, want %d", got, want)
-	}
-}
-
-func assertDeliveryAuthorityDeliveryCount(t *testing.T, db *sql.DB, eventID, nodeID string, want int) {
-	t.Helper()
-	var got int
-	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = $2
-	`, eventID, nodeID).Scan(&got); err != nil {
-		t.Fatalf("count delivery authority node deliveries: %v", err)
-	}
-	if got != want {
-		t.Fatalf("delivery authority node deliveries = %d, want %d", got, want)
-	}
+	source := loadNamesOnlyPipelineSource(t, canonicalrouting.CopyPipelineDeliveryAuthority(t))
+	bundle, _ := semanticview.Bundle(source)
+	return bundle
 }
 
 func deliveryAuthorityLogCount(logs []RuntimeLogEntry) int {

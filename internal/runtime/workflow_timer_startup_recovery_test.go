@@ -33,11 +33,11 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
 type workflowTimerStartupStore interface {
+	storetest.RunFixtureStore
 	externalRuntimeTestDurableEventStore
 	runtimepipeline.WorkflowPersistenceOwner
 	swarmruntime.EventPayloadAdmissionBinder
@@ -130,11 +130,7 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 			entityID := uuid.NewString()
 			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "25ms")
 			ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)
-			if postgres {
-				runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
-			} else {
-				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
-			}
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 
 			process := worklifetime.NewProcess()
 			source := semanticview.Wrap(bundle)
@@ -328,12 +324,7 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 				ctx   context.Context
 				runID string
 			}{{workflowCtx, workflowRunID}, {genericCtx, genericRunID}} {
-				fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: run.runID, Artifact: bundle.SourceArtifact}
-				if postgres {
-					runlifecyclefixture.RequirePostgres(t, run.ctx, db, fixture)
-				} else {
-					runlifecyclefixture.RequireSQLite(t, run.ctx, db, fixture)
-				}
+				storetest.RequireRun(t, run.ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: run.runID, Artifact: bundle.SourceArtifact})
 			}
 
 			source := semanticview.Wrap(bundle)
@@ -578,7 +569,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			db, selected, postgres := backend.open(t)
+			_, selected, postgres := backend.open(t)
 			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 			if !postgres {
 				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
@@ -586,11 +577,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			runID := uuid.NewString()
 			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "25ms")
 			ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)
-			if postgres {
-				runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
-			} else {
-				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
-			}
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 
 			source := semanticview.Wrap(bundle)
 			module := newRuntimeTestWorkflowModule(t, source)
@@ -726,7 +713,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			db, selected, postgres := backend.open(t)
+			_, selected, postgres := backend.open(t)
 			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 			if !postgres {
 				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
@@ -734,11 +721,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			runID := uuid.NewString()
 			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "3s")
 			ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)
-			if postgres {
-				runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
-			} else {
-				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
-			}
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 
 			// This proof owns restoration through Runtime.Start, not the separate
 			// overdue-timer versus pipeline-recovery ordering tracked by #2234.

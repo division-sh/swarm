@@ -70,7 +70,12 @@ func TestManagerQueuedCancellationReleasesOnlyCommittedOrigin(t *testing.T) {
 			if mode == "cleanup_error" {
 				bus.failure = fault
 			}
-			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{})
+			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
+				PersistenceRoles: PersistenceRoles{DeliveryRuntime: managerTestDeliveryRuntime{sink: bus}},
+			})
+			if _, err := am.roles.DeliveryRuntime.DeliveryAuthority(); err == nil {
+				t.Fatal("continuation-only unit control invented live delivery authority")
+			}
 			snapshot := deliverylifecycle.Snapshot{DeliveryID: uuid.NewString(), RunID: uuid.NewString(), SubscriberID: "queued-agent", SubscriberClass: deliverylifecycle.SubscriberAgent, Status: deliverylifecycle.StatusCanceled, ReasonCode: "terminate", SettledAt: time.Now().UTC()}
 			if mode == "wrong_reason" {
 				snapshot.ReasonCode = "shutdown"

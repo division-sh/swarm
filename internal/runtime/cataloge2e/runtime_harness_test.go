@@ -42,7 +42,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -295,20 +294,20 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), catalogRuntimeRunID))
 	processOwner := worklifetime.NewProcess()
 	ctx = worklifetime.WithProcess(ctx, processOwner)
-	fixture := runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID,
-		Source: sourceArtifactFact, Artifact: bundle.SourceArtifact,
+	var runSetup storetest.RunFixtureStore = pg
+	if pg == nil {
+		runSetup = sqlite
+	}
+	fixture := storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID,
+		BundleHash: sourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact,
 	}
 	// Scenario fixtures are setup, not live runtime mutations. Admit every
 	// requested run before constructing a runtime that can start store writers.
 	for _, runID := range append([]string{catalogRuntimeRunID}, additionalRunIDs...) {
 		fixture.RunID = runID
 		fixtureCtx := runtimecorrelation.WithRunID(ctx, runID)
-		if pg != nil {
-			runlifecyclefixture.RequirePostgres(t, fixtureCtx, db, fixture)
-		} else {
-			runlifecyclefixture.RequireSQLite(t, fixtureCtx, db, fixture)
-		}
+		storetest.RequireRun(t, fixtureCtx, runSetup, fixture)
 	}
 	var workflowPersistence runtimepipeline.WorkflowPersistence
 	var deps runtime.RuntimeDeps
@@ -346,7 +345,7 @@ func newRuntimeHarnessWithTerminalProvider(t *testing.T, fixtureRoot string, bac
 			t.Fatalf("runtime.Start: %v", err)
 		}
 	}
-	startedAt := catalogHarnessStartBoundary(t, db, backend)
+	startedAt := catalogHarnessStartBoundary(t, pg, backend)
 	if transcript != nil {
 		startedAt = transcript.observationBoundary()
 	}
@@ -757,14 +756,14 @@ func cloneCatalogPreviews(in map[string]runtimepipeline.HandlerPreview) map[stri
 	return out
 }
 
-func catalogHarnessStartBoundary(t testing.TB, db *sql.DB, backend catalogRuntimeBackend) time.Time {
+func catalogHarnessStartBoundary(t testing.TB, pg *store.PostgresStore, backend catalogRuntimeBackend) time.Time {
 	t.Helper()
 	appTime := time.Now().UTC()
 	if backend == catalogBackendSQLite {
 		return appTime.Add(-1 * time.Second)
 	}
-	var out time.Time
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `SELECT NOW()`).Scan(&out); err != nil {
+	out, err := storetest.ReadPostgresObservationTime(testAuthorActivityContext(context.Background()), pg)
+	if err != nil {
 		t.Fatalf("query catalog harness db time: %v", err)
 	}
 	dbTime := out.UTC()
@@ -1048,26 +1047,21 @@ func (h *runtimeHarness) publishRuntimeEventResultWithIdentity(eventType, source
 func (h *runtimeHarness) refreshPublishedEventEntityID(eventID string) {
 	h.t.Helper()
 	eventID = strings.TrimSpace(eventID)
-	if h == nil || h.db == nil || eventID == "" {
+	if h == nil || (h.pg == nil && h.sqlite == nil) || eventID == "" {
 		return
 	}
-	var entityID string
-	query := `
-		SELECT COALESCE(entity_id::text, '')
-		FROM events
-		WHERE event_id = $1::uuid
-	`
-	if h.backend == catalogBackendSQLite {
-		query = `SELECT COALESCE(entity_id, '') FROM events WHERE event_id = ?`
+	var selected any = h.pg
+	if h.pg == nil {
+		selected = h.sqlite
 	}
-	err := h.db.QueryRowContext(h.ctx, query, eventID).Scan(&entityID)
-	if err == sql.ErrNoRows {
-		return
-	}
+	event, found, err := storetest.ReadCanonicalEventRecord(h.ctx, selected, eventID)
 	if err != nil {
 		h.t.Fatalf("query published event entity_id for %s: %v", eventID, err)
 	}
-	entityID = strings.TrimSpace(entityID)
+	if !found {
+		return
+	}
+	entityID := strings.TrimSpace(event.EntityID())
 	if entityID == "" {
 		return
 	}
@@ -1219,26 +1213,19 @@ func (h *runtimeHarness) firstPublishedEntityID() string {
 
 func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID string, want []string, flowPrefix string, source semanticview.Source) bool {
 	h.t.Helper()
-	relevantEventIDs := catalogCausalEventIDs(h.t, h.db, h.startedAt, h.publishedIDs)
-	relevantEntityIDs := catalogCausalEntityIDs(h.t, h.db, h.startedAt, h.publishedIDs, entityID)
-	rows, err := h.db.QueryContext(ctx, catalogDialectQuery(h.db, `
-		SELECT event_id::text, event_name, COALESCE(NULLIF(payload->>'entity_id', ''), COALESCE(entity_id::text, ''))
-		FROM events
-		WHERE created_at >= $1
-		ORDER BY created_at ASC, event_id ASC
-	`, `
-		SELECT event_id, event_name, COALESCE(NULLIF(json_extract(payload, '$.entity_id'), ''), COALESCE(entity_id, ''))
-		FROM events
-		WHERE created_at >= ?
-		ORDER BY created_at ASC, event_id ASC
-	`), h.startedAt)
+	reader, err := h.catalogOperatorEventLister()
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	relevantEventIDs := catalogCausalEventIDs(h.t, reader, h.startedAt, h.publishedIDs)
+	relevantEntityIDs := catalogCausalEntityIDs(h.t, reader, h.startedAt, h.publishedIDs, entityID)
+	rows, err := storetest.ReadCausalEventStorageSince(ctx, reader, h.startedAt)
 	if err != nil {
 		if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			return false
 		}
 		h.t.Fatalf("query emitted events for wait: %v", err)
 	}
-	defer rows.Close()
 
 	counts := make(map[string]int, len(want))
 	wantNames := make(map[string]struct{}, len(want))
@@ -1249,11 +1236,8 @@ func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID 
 			wantNames[name] = struct{}{}
 		}
 	}
-	for rows.Next() {
-		var eventID, eventName, payloadEntityID string
-		if err := rows.Scan(&eventID, &eventName, &payloadEntityID); err != nil {
-			h.t.Fatalf("scan emitted events for wait: %v", err)
-		}
+	for _, row := range rows {
+		eventID, eventName, payloadEntityID := row.ID, row.Name, row.PayloadEntityID
 		if _, skip := h.publishedIDs[strings.TrimSpace(eventID)]; skip {
 			continue
 		}
@@ -1278,12 +1262,6 @@ func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID 
 			continue
 		}
 		counts[eventName]--
-	}
-	if err := rows.Err(); err != nil {
-		if ctx.Err() != nil {
-			return false
-		}
-		h.t.Fatalf("iterate emitted events for wait: %v", err)
 	}
 	for name, remaining := range counts {
 		if remaining > 0 {

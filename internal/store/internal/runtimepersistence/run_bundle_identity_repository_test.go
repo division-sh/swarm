@@ -25,7 +25,6 @@ func TestRepositoryRunCreationHasCanonicalOwnersOnly(t *testing.T) {
 	wantOwners := map[string]bool{
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_mutation.go": false,
 		"internal/store/internal/backend/runlifecycle/test_snapshot_fault.go":    false,
-		"internal/testutil/runlifecyclefixture/fixture.go":                       false,
 	}
 	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {

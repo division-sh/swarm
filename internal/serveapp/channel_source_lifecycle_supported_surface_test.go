@@ -23,6 +23,8 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, operation := range []string{"disk", "new_process", "retained_reset", "source_reset", "fork"} {
 			t.Run(string(backend)+"/"+operation, func(t *testing.T) {
+				var deliveryReader servedRunDeliveryReader
+				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 				h, db, hash := startChannelAnchorJourney(t, backend, "source-lifecycle-token", false)
 				var standingRun string
 				if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&standingRun); err != nil {
@@ -266,7 +268,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					if backend == servedparity.BackendExplicitPostgres {
 						storeBackend = "postgres"
 					}
-					waitServedRunDeliveryQuiescence(t, db, storeBackend, seed.RunID)
+					waitServedRunDeliveryQuiescence(t, deliveryReader, seed.RunID)
 					requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": uuid.NewString()})
 					frontier := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
 						"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
