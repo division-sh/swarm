@@ -1389,3 +1389,51 @@ claimed retired. No fresh global raw-site census/debt-baseline result, whole
 family or parent closure, restart, flake or measured throughput claim. Existing
 #2542/#2151/watchlist mapping and M01/Docker qualification obligations remain.
 Local signed checkpoint only; no push, PR, tier or server2 use.
+
+## Entire Shared Activity Snapshot Transaction Protocol
+
+activityForkFixture.capture no longer selects an independent SQLite BeginTx /
+CaptureSQLite / Commit / Rollback path. Both backends delegate to the same
+existing captureSelectedExecutionSourceRevision and selected native revision
+fixture owner, using f.owner.ports.fork and the original predecessor run. Its
+default family set is the existing AllFamilies, preserving the previous
+explicit SQLite family inventory. The original case-loop call stays after
+source loop/request setup and before optional recorded attempt setup. The
+unused separate SQLite selector field/import is removed; no compatibility
+branch, callback, extra capture or detached head query replaces the protocol.
+
+All five cases on both backends pass under race/count1 in
+activity-snapshot-native-consumers (26.917s): manual confirmation refusal,
+exactly-once read-only execution, recorded success, recorded typed failure and
+uncertain outcome. The real runtime container, original HTTP connector call
+counts, complete generation/identity lineage, result payload/failure and mode,
+no redispatch on repeat, attempt counts and exact source-before/after equality
+are unchanged. Existing original-coordinator snapshot/cancellation controls
+carry because that native owner was not modified.
+
+The exact helper is pinned by
+TestFamily145ActivitySnapshotRetiresIndependentProtocolAndRejectsBorrowedOwner:
+one owner/one loop callsite, complete family set and original run/selected
+identity, hostile raw owner/foreign run/reduced family/extra BeginTx cases.
+Changing the real helper to f.db.DB fails the read-only execution cell on both
+stores before fork admission: event fixture selected store *sql.DB is not
+initialized. activity-snapshot-raw-owner-counterexample expected RED13.793s;
+held until command completion, then exactly restored. The restored two-cell
+receipt is separate from the unchanged full ten-cell receipt.
+
+Complete cheap TestFamily145 prefix and historical/finite/successor controls
+are GREEN in activity-snapshot-family-controls. Corpus1028/169 transitions;
+digest eb8ad3ae9f1a552154373a8822d1a336a28740aea27ad0e5a0f3cb4513793bbb.
+The existing capture row receives only its exact Successor; one constructor
+record accounts for removal of the dead SQLite selector. Original893 tuples
+and24 historical receipts remain unchanged. Codemod dry run Changes=[],
+three-package U1000 and diff clean; committed-head complexity qualifies the
+checkpoint. The authoritative spec records this exact historical cut.
+
+Named supplied-pool admissions remain131 (132 excluding unqualified Docker).
+This retires the complete shared snapshot transaction capability, not the
+activityForkFixtureDB schema/dialect shim or historical loop/request/attempt
+writers and storage readers, which remain explicit upcoming migration tail.
+No fresh global census, restart/parent closure or measured flake/performance
+claim. M01/Docker remain qualification-open under #2353. Local signed checkpoint
+only, no push/PR/tier/server2 use; unaffected owner/guard receipts carry.

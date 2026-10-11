@@ -35,9 +35,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -256,9 +254,8 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 // The source state and activity journal are explicit fixtures. Fork admission,
 // materialization, runtime execution, connector calls and final publication are real.
 type activityForkFixture struct {
-	db     activityForkFixtureDB
-	owner  SelectedContractExecutionOwner
-	sqlite *store.SQLiteRuntimeStore
+	db    activityForkFixtureDB
+	owner SelectedContractExecutionOwner
 }
 
 type activityForkFixtureDB struct {
@@ -312,7 +309,7 @@ func newActivityForkFixture(t *testing.T, backend string) activityForkFixture {
 		selected := storetest.StartSQLiteRuntimeStore(t)
 		return activityForkFixture{
 			db:    activityForkFixtureDB{DB: storetest.Database(selected), sqlite: true},
-			owner: selectedContractSQLiteExecutionOwnerForTest(t, selected), sqlite: selected,
+			owner: selectedContractSQLiteExecutionOwnerForTest(t, selected),
 		}
 	case "postgres":
 		_, db, _ := testutil.StartPostgres(t)
@@ -358,22 +355,7 @@ func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContr
 
 func (f activityForkFixture) capture(t *testing.T, runID string) {
 	t.Helper()
-	if f.sqlite == nil {
-		captureSelectedExecutionSourceRevision(t, f.owner.ports.fork, runID)
-		return
-	}
-	ctx := context.Background()
-	tx, err := f.db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-	if _, err := runforkrevision.CaptureSQLite(ctx, tx, runID, runforkrevision.AllFamilies()...); err != nil {
-		t.Fatalf("capture SQLite activity source revision: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
+	captureSelectedExecutionSourceRevision(t, f.owner.ports.fork, runID)
 }
 
 func selectedContractActivityDescriptorExists(descriptors []runtimeauthoractivity.EventDescriptor, eventType string) bool {

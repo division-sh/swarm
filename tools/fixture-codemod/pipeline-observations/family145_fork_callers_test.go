@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 168 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "d6169404cf392db6bf037e75de4dddc6b452cf4e5e377888740e5667f2593236" {
+	if err != nil || len(rows) != 169 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "eb8ad3ae9f1a552154373a8822d1a336a28740aea27ad0e5a0f3cb4513793bbb" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -67,6 +67,15 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 
 func assertFamily145SemanticProofs(t testing.TB, function, beforeSource, afterSource string) {
 	t.Helper()
+	if function == "capture" {
+		if !strings.Contains(beforeSource, "runforkrevision.CaptureSQLite(ctx, tx, runID, runforkrevision.AllFamilies()...)") {
+			t.Fatal("activity capture lost its original complete historical family set")
+		}
+		if err := family145ActivitySnapshotError(afterSource); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
 	if function == "seedSelectedExecutionSourceReplayScopeMarker" || function == "seedSelectedExecutionPostForkSourceEvent" {
 		assertFamily145ReplayScopeHistoryProofs(t, function, beforeSource, afterSource)
 		return
@@ -171,6 +180,8 @@ func family145SemanticOwner(function string) bool {
 	case "seedSelectedExecutionDiagnosticPlatformDeadLetter", "seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter":
 		return true
 	case "seedSelectedExecutionSourceReplayScopeMarker", "seedSelectedExecutionPostForkSourceEvent":
+		return true
+	case "capture":
 		return true
 	}
 	return false
