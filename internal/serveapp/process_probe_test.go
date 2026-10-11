@@ -92,12 +92,8 @@ func TestServingStandbyPrecedesStoreProjectionBothStores(t *testing.T) {
 			if backend == backendselection.BackendSQLite {
 				request.Selection.SQLitePath = filepath.Join(t.TempDir(), "runtime.db")
 			} else {
-				request.PostgresDSN, _, _ = testutil.StartEmptyPostgres(t)
-				connection, err := testpostgres.ParseConnection(request.PostgresDSN)
-				if err != nil {
-					t.Fatal(err)
-				}
-				p := connection.Parameters()
+				var p testpostgres.Parameters
+				request.PostgresDSN, p, _ = testutil.StartEmptyPostgresProcessLeaseProof(t)
 				t.Setenv("SWARM_PROCESS_WAIT_PASSWORD", p.Password)
 				cfg.Database = config.DatabaseConfig{Host: p.Host, Port: int(p.Port), Name: p.Database, User: p.User, PasswordEnv: "SWARM_PROCESS_WAIT_PASSWORD", SSLMode: p.SSLMode}
 			}

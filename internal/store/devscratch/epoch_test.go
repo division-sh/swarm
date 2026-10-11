@@ -14,9 +14,9 @@ import (
 
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/store/devscratch"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
+	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 )
 
 const (
@@ -41,7 +41,7 @@ func TestDevScratchEpochHelperProcess(t *testing.T) {
 		if err := authority.PrepareFreshStore(); err != nil {
 			t.Fatal(err)
 		}
-		selected, _, err := storeconstruction.OpenSQLiteRuntimeForServing(context.Background(), coordinate.DatabasePath)
+		selected, err := selectedtest.OpenProcessLeaseFixture(context.Background(), storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: coordinate.DatabasePath}, "")
 		if err != nil {
 			t.Fatal(err)
 		}

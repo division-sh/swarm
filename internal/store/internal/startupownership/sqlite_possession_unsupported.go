@@ -33,12 +33,14 @@ func acquireSQLiteConstructionPossession(path string) (sqlitePossession, error) 
 	return acquireSQLiteFilePossession(path)
 }
 
-func waitSQLiteFilePossession(_ context.Context, path string) (sqlitePossession, error) {
-	return acquireSQLiteFilePossession(path)
+func waitSQLiteFilePossession(context.Context, string) (sqlitePossession, error) {
+	_, err := acquireSQLiteFilePossession("")
+	return nil, err
 }
 
-func waitSQLiteConstructionPossession(_ context.Context, path string) (sqlitePossession, error) {
-	return acquireSQLiteFilePossession(path)
+func waitSQLiteConstructionPossession(context.Context, string) (sqlitePossession, error) {
+	_, err := acquireSQLiteFilePossession("")
+	return nil, err
 }
 
 func sameSQLitePossessionResource(sqlitePossession, sqlitePossession) bool { return false }

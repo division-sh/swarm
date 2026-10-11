@@ -49,6 +49,25 @@ func StartEmptyPostgresDSN(t *testing.T) string {
 	return dsn
 }
 
+// StartEmptyPostgresProcessLeaseProof retains the observer inside the native
+// harness and exposes only connection data and the exact process-wait witness.
+func StartEmptyPostgresProcessLeaseProof(t *testing.T) (string, testpostgres.Parameters, func(context.Context) (bool, error)) {
+	t.Helper()
+	dsn, observer, _ := StartEmptyPostgres(t)
+	connection, err := testpostgres.ParseConnection(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dsn, connection.Parameters(), func(ctx context.Context) (bool, error) {
+		var waiting bool
+		err := observer.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted
+			AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+			AND classid::bigint=CASE WHEN hashtext('swarm:runtime:shared-store-owner')<0 THEN 4294967295::bigint ELSE 0::bigint END
+			AND objid::bigint=(hashtext('swarm:runtime:shared-store-owner')::bigint & 4294967295::bigint) AND objsubid=1)`).Scan(&waiting)
+		return waiting, err
+	}
+}
+
 func startPostgresDatabase(t *testing.T, useTemplate bool) (string, *sql.DB, func()) {
 	t.Helper()
 	connection, err := testpostgres.ConnectionFromEnvironment()
