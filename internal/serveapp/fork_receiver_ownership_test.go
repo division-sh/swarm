@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type forkReceiverRow struct {
@@ -876,13 +877,22 @@ func TestSelectedForkReceiverConstructorCompilationIsNotHandlerCreation(t *testi
 func TestServedForkSourceCompletionWithoutForkBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
+			publication := newExactOriginPublicationProbe(t)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"work_id": "no-fork-completion"}, "idempotency_key": "no-fork-seed"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
+			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID); err != nil {
+				t.Fatal(err)
+			}
+			earlyRoot := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), rt.ReceiverStateReader, seed.RunID, seed.EventID)
 			early := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
 			settled := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
+			settledRoot := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), rt.ReceiverStateReader, seed.RunID, seed.EventID)
+			if earlyRoot.PipelineReceiptCount != 1 || settledRoot.PipelineReceiptCount != 1 {
+				t.Fatalf("joined root publication lost its settled receipt: %d->%d", earlyRoot.PipelineReceiptCount, settledRoot.PipelineReceiptCount)
+			}
 			columnsRows, err := rt.DB.Query(`SELECT * FROM event_deliveries WHERE 1=0`)
 			if err != nil {
 				t.Fatal(err)
@@ -948,6 +958,9 @@ func TestServedForkSourceCompletionWithoutForkBothStores(t *testing.T) {
 				}
 			}
 			sort.Strings(changed)
+			// Root handoff 0->1 is witnessed by the separate held-publication proof.
+			// Child handoffs may still settle between these original snapshots.
+			t.Logf("JOINED ROOT: receipts=%d->%d; root delta is zero, not positive handoff proof", earlyRoot.PipelineReceiptCount, settledRoot.PipelineReceiptCount)
 			t.Logf("NO FORK INVOKED: delivery-only quiescence -> pipeline completion changed=%v receipts=%d->%d", changed, len(early["event_receipts"]), len(settled["event_receipts"]))
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			if after := readServedForkRecipientSourceDomain(t, rt, seed.RunID); !reflect.DeepEqual(settled, after) {
