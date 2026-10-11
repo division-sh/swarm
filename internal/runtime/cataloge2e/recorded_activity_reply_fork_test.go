@@ -206,4 +206,10 @@ func logCopiedActivityReturnPhase(t *testing.T, ctx context.Context, selected an
 	storage, storageErr := storetest.ReadSelectedExecutionStorage(read, selected, runID)
 	attempts, attemptsErr := storetest.ReadActivityAttemptStorage(read, selected, runID)
 	t.Logf("child return phase: storage=%+v attempts=%+v read_errors=%v/%v", storage, attempts, storageErr, attemptsErr)
+	run, runErr := storetest.ReadRuntimeLogRunSnapshot(read, selected, runID)
+	if runErr == nil {
+		t.Logf("child terminal phase: state=%s failure=%+v", run.State, run.Failure)
+	} else {
+		t.Logf("child terminal phase read failed: %v", runErr)
+	}
 }
