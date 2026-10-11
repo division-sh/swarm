@@ -67,7 +67,7 @@ func observeServeChannelSession(ctx context.Context, sessions serveSessionBootst
 var newServeSessionBootstrap = unavailableServeSessionBootstrap
 
 func unavailableServeSessionBootstrap(serveSessionBootstrapRuntime, channelonboarding.Store,
-	operatorchannel.CredentialCurrentness, string,
+	operatorchannel.CredentialCurrentness, string, *sessionprovider.InvocationState,
 ) (serveSessionBootstrapOwner, error) {
 	return nil, &operatorchannel.SessionProviderUnavailableError{Provider: "whatsapp"}
 }

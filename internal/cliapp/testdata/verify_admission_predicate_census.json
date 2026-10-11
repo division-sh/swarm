@@ -3687,7 +3687,7 @@
     "owner": "internal/serveapp/channel_session_bootstrap.go::unavailableServeSessionBootstrap",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement",
-    "body_sha256": "79c42f64d96dca6d59a4d4ca1b1a2b56eb3330d3cc85356204693051cf090e1f"
+    "body_sha256": "4d6a1f975f6edfd33fc0c73392169ac7f2f3c5f444723e16d3b05ef345382d10"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap.go::validateServeSessionCandidate",
@@ -3735,7 +3735,7 @@
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.QualifySessionPlan",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
-    "body_sha256": "9b06101dc5334ac1fd61389dd00fb7373c4c4d75ebda6899a793547824fd242b"
+    "body_sha256": "fad43ada3d8f69cc2c311c12b0e214ac10969cf1b22d38afc6baf943013b40f5"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ReadSessionPairing",
@@ -3759,7 +3759,7 @@
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.completeSessionAttempt",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
-    "body_sha256": "5a23731cf719ea620c6af673982c5778a3dc8661770184716bff79ae70163b64"
+    "body_sha256": "a4dc8fa7dc4603d316a24ae5bf1ac745c32b2cb110d4de73c7d441fa9d76ce16"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.connection",
@@ -3813,7 +3813,7 @@
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::newNativeServeSessionBootstrap",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
-    "body_sha256": "ecbebc0210b1d43bbd41e0d6233b1dbeb6c6bd0658ff65d1906701ea40ba95b7"
+    "body_sha256": "975afdb597f160ed4862b396adfc3814bb8bc7d1cfffceeaa872133b39bfd90a"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::serveSessionRetirementRequired",
@@ -3825,7 +3825,7 @@
     "owner": "internal/serveapp/channel_session_startup.go::newServeChannelProviderOwners",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-startup",
-    "body_sha256": "af0767b14ccbdc669e6c94c42c8bc2334c7dddde01081af8ecaa50b44d62a111"
+    "body_sha256": "23f957b8679f0ade16fef73279f5194b4c69c44248f97fdffeeb47ac930c57b1"
   },
   {
     "owner": "internal/serveapp/channel_session_startup.go::restoreServeChannelStartup",
