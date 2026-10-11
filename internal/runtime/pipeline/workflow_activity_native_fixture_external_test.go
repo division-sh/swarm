@@ -105,11 +105,11 @@ func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerRepla
 		Construct: func(ctx context.Context, instance pipeline.WorkflowInstance) error {
 			command, err := flowactivationfixture.Command(ctx, instance, pipeline.WorkflowLifecycleMutationPlan{}, instance.CreatedAt)
 			if err != nil {
-				return err
+				return fmt.Errorf("prepare native component construction: %w", err)
 			}
 			committed, err := selected.(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
 			if err != nil {
-				return err
+				return fmt.Errorf("commit native component construction: %w", err)
 			}
 			if !committed.Acknowledged || !committed.Created {
 				return fmt.Errorf("loop component construction did not acknowledge exact native creation")
