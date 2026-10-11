@@ -2,7 +2,6 @@ package runtime_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"sync"
@@ -31,7 +30,6 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
@@ -49,6 +47,19 @@ type workflowTimerStartupStore interface {
 	runtimemanager.AgentLifecycleCellCensus
 	runtimetimerobligation.Reader
 	PipelineObligations() runtimepipelineobligation.Store
+}
+
+func workflowTimerStartupBackends() []struct {
+	name string
+	open func(*testing.T) workflowTimerStartupStore
+} {
+	return []struct {
+		name string
+		open func(*testing.T) workflowTimerStartupStore
+	}{
+		{name: "sqlite", open: func(t *testing.T) workflowTimerStartupStore { return storetest.StartSQLiteRuntimeStore(t) }},
+		{name: "postgres", open: func(t *testing.T) workflowTimerStartupStore { return storetest.StartPostgresRuntimeStore(t) }},
+	}
 }
 
 type workflowTimerStartupFlakyManagerStore struct {
@@ -99,33 +110,10 @@ func (s *workflowTimerStartupFlakyManagerStore) LoadAgents(ctx context.Context) 
 }
 
 func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRuntimeOnBothStores(t *testing.T) {
-	for _, backend := range []struct {
-		name string
-		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, bool)
-	}{
-		{
-			name: "sqlite",
-			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
-				selected := storetest.StartSQLiteRuntimeStore(t)
-				return storetest.Database(selected), selected, false
-			},
-		},
-		{
-			name: "postgres",
-			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected := storetest.AdmitPostgresRuntimeStore(t, db)
-				return db, selected, true
-			},
-		},
-	} {
+	for _, backend := range workflowTimerStartupBackends() {
 		t.Run(backend.name, func(t *testing.T) {
-			db, selected, postgres := backend.open(t)
+			selected := backend.open(t)
 			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
-			if !postgres {
-				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
-			}
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "25ms")
@@ -203,16 +191,11 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 
 				deadline := time.Now().Add(5 * time.Second)
 				for {
-					var eventCount int
-					var minMode, maxMode string
-					query := `SELECT COUNT(*), COALESCE(MIN(execution_mode), ''), COALESCE(MAX(execution_mode), '') FROM events WHERE task_id = ? AND produced_by = ? AND produced_by_type = 'platform'`
-					args := []any{command.TaskID, runtimegenericschedule.OccurrenceProducerID()}
-					if postgres {
-						query = `SELECT COUNT(*), COALESCE(MIN(execution_mode), ''), COALESCE(MAX(execution_mode), '') FROM events WHERE task_id = $1 AND produced_by = $2 AND produced_by_type = 'platform'`
-					}
-					if err := db.QueryRowContext(ctx, query, args...).Scan(&eventCount, &minMode, &maxMode); err != nil {
+					published, err := storetest.ReadGenericSchedulePublicationModes(ctx, selected, command.TaskID)
+					if err != nil {
 						t.Fatalf("read %s generic scheduled event: %v", mode, err)
 					}
+					eventCount, minMode, maxMode := published.Count, published.MinMode, published.MaxMode
 					activation, found, err := selected.LoadGenericScheduleActivation(ctx, admitted.Activation.ID)
 					if err != nil {
 						t.Fatalf("load %s generic schedule activation: %v", mode, err)
@@ -242,17 +225,11 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 
 			countEvents := func() (int, string, string) {
 				t.Helper()
-				query := `SELECT COUNT(DISTINCT event_id), COALESCE(MIN(execution_mode), ''), COALESCE(MAX(execution_mode), '') FROM events WHERE task_id = ? AND produced_by = ? AND produced_by_type = 'platform'`
-				args := []any{recurringCommand.TaskID, runtimegenericschedule.OccurrenceProducerID()}
-				if postgres {
-					query = `SELECT COUNT(DISTINCT event_id), COALESCE(MIN(execution_mode), ''), COALESCE(MAX(execution_mode), '') FROM events WHERE task_id = $1 AND produced_by = $2 AND produced_by_type = 'platform'`
-				}
-				var count int
-				var minMode, maxMode string
-				if err := db.QueryRowContext(ctx, query, args...).Scan(&count, &minMode, &maxMode); err != nil {
+				published, err := storetest.ReadGenericScheduleDistinctPublicationModes(ctx, selected, recurringCommand.TaskID)
+				if err != nil {
 					t.Fatalf("read recurring generic schedule events: %v", err)
 				}
-				return count, minMode, maxMode
+				return published.Count, published.MinMode, published.MaxMode
 			}
 
 			deadline := time.Now().Add(5 * time.Second)
@@ -291,28 +268,9 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 }
 
 func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletesOnBothStores(t *testing.T) {
-	for _, backend := range []struct {
-		name string
-		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, bool)
-	}{
-		{
-			name: "sqlite",
-			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
-				selected := storetest.StartSQLiteRuntimeStore(t)
-				return storetest.Database(selected), selected, false
-			},
-		},
-		{
-			name: "postgres",
-			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return db, storetest.AdmitPostgresRuntimeStore(t, db), true
-			},
-		},
-	} {
+	for _, backend := range workflowTimerStartupBackends() {
 		t.Run(backend.name, func(t *testing.T) {
-			db, selected, postgres := backend.open(t)
+			selected := backend.open(t)
 			workflowRunID := uuid.NewString()
 			genericRunID := uuid.NewString()
 			genericEntityID := uuid.NewString()
@@ -422,12 +380,8 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			time.Sleep(time.Until(dueAt) + 50*time.Millisecond)
 			countGenericEvents := func() int {
 				t.Helper()
-				query := `SELECT COUNT(*) FROM events WHERE task_id = ? AND produced_by = ? AND produced_by_type = 'platform'`
-				if postgres {
-					query = `SELECT COUNT(*) FROM events WHERE task_id = $1 AND produced_by = $2 AND produced_by_type = 'platform'`
-				}
-				var count int
-				if err := db.QueryRowContext(genericCtx, query, genericCommand.TaskID, runtimegenericschedule.OccurrenceProducerID()).Scan(&count); err != nil {
+				count, err := storetest.CountGenericSchedulePublications(genericCtx, selected, genericCommand.TaskID)
+				if err != nil {
 					t.Fatalf("count generic schedule events: %v", err)
 				}
 				return count
@@ -547,33 +501,10 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 }
 
 func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersOnBothStores(t *testing.T) {
-	for _, backend := range []struct {
-		name string
-		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, bool)
-	}{
-		{
-			name: "sqlite",
-			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
-				selected := storetest.StartSQLiteRuntimeStore(t)
-				return storetest.Database(selected), selected, false
-			},
-		},
-		{
-			name: "postgres",
-			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected := storetest.AdmitPostgresRuntimeStore(t, db)
-				return db, selected, true
-			},
-		},
-	} {
+	for _, backend := range workflowTimerStartupBackends() {
 		t.Run(backend.name, func(t *testing.T) {
-			_, selected, postgres := backend.open(t)
+			selected := backend.open(t)
 			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
-			if !postgres {
-				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
-			}
 			runID := uuid.NewString()
 			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "25ms")
 			ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)
@@ -691,33 +622,10 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 }
 
 func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStores(t *testing.T) {
-	for _, backend := range []struct {
-		name string
-		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, bool)
-	}{
-		{
-			name: "sqlite",
-			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
-				selected := storetest.StartSQLiteRuntimeStore(t)
-				return storetest.Database(selected), selected, false
-			},
-		},
-		{
-			name: "postgres",
-			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected := storetest.AdmitPostgresRuntimeStore(t, db)
-				return db, selected, true
-			},
-		},
-	} {
+	for _, backend := range workflowTimerStartupBackends() {
 		t.Run(backend.name, func(t *testing.T) {
-			_, selected, postgres := backend.open(t)
+			selected := backend.open(t)
 			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
-			if !postgres {
-				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
-			}
 			runID := uuid.NewString()
 			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "3s")
 			ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)

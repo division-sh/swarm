@@ -942,3 +942,115 @@ original893 immutable records and approved24-receipt pin are unchanged. Named
 admissions remaining139, or140 excluding Docker's unqualified removal. M01 and
 Docker remain qualification-open under #2353. No fresh global census/baseline,
 new architecture/framework, restart or family/parent closure, push or PR claim.
+
+## Timer Startup And Generic Schedule Construction Cohort
+
+All four repeated backend factories in workflow_timer_startup_recovery_test.go
+now consume one existing-native-constructor opening helper. It returns only the
+selected store, not a pool, borrowed transaction or dialect flag. All four
+PostgreSQL supplied-pool admissions and four SQLite Database getter calls are
+gone; the complete fixture file has no SQL, pool, raw getter or reconstructed
+coordinator. Opening location and early close registration are preserved. The
+three redundant identical SQLite workflow-persistence branches are removed.
+
+The eventrecord owner retains three independent fixed physical cuts: exact
+task_id, generic schedule occurrence producer ID and platform producer type.
+One-shot modes use COUNT(*), recurring modes use COUNT(DISTINCT event_id), and
+the topology latch uses its original count-only statement. No run/name/status
+filter, ordering, deduplication, mode normalization or callback is introduced.
+The mode strings retain original COALESCE(MIN/MAX, '') behavior. All public
+ports use the original selected coordinator and discard evidence on query,
+scan, cancellation or invalid/raw/closed-owner failure. They grant no schedule,
+timer, replay or execution authority. No writer or production contract changed.
+
+Original live/mock one-shot admission, recurring advancement/cancellation,
+overdue workflow/generic schedules, dynamic-topology refusal, publication abort,
+standing-finalization failure, preparation latch, manager hydration failure,
+no-generic-store restoration, source/mode/identity and joined predecessor cleanup
+assertions are preserved. Same-store reconstruction remains same-store proof,
+not independent-peer or process-restart qualification.
+
+| Manifestation | Disposition | Exact execution proof |
+| --- | --- | --- |
+| One-shot/recurring runtime publications and persisted mode | execution-proven through the same corrected path | TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRuntimeOnBothStores, both stores under race/count1 |
+| Topology/preparation/publication gates with overdue work | execution-proven through the same corrected path | TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletesOnBothStores, both stores under race/count1 |
+| Hydration refusal before workflow timer restoration | execution-proven through the same corrected path | TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersOnBothStores, both stores under race/count1 |
+| Workflow timer restoration without generic schedule store | execution-proven through the same corrected path | TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStores, both stores under race/count1 |
+| Exact producer/type refusal and original selected read cuts | execution-proven through the same corrected path | TestGenericSchedulePublicationObservationsKeepExactProducerAndOriginalCoordinatorBothStores; native wrong-producer platform log and wrong-type external ingress, three exact original-coordinator reads |
+| Typed-nil/raw/invalid/cancelled/closed observation refusal | reproduced and fixed | TestGenericSchedulePublicationObservationsRefuseRawInvalidAndClosedOwnersBothStores; initial typed-nil panic, existing native-owner validation, both-store GREEN |
+
+Measured receipts on vemew: timer-startup-native-consumers.jsonl PASS31.911s
+under race/count1, all four roots/eight backend cells. After repairing the new
+typed-nil refusal, timer-startup-final-publication-consumers.jsonl PASS62.213s
+for the two roots that actually consume the new reads; unchanged hydration and
+restoration receipts carry. timer-startup-native-owners-repaired.jsonl
+PASS13.768s, two roots/four backend cells. The original new-control receipt
+timer-startup-native-owners.jsonl remains disclosed RED (typed-nil panic).
+
+Deliberately inverting the producer-ID predicate in all three reads gives
+timer-startup-producer-counterexample.jsonl expected RED14.530s on both stores:
+the unrelated platform diagnostic produces nonzero evidence. Exact predicates
+restored; timer-startup-producer-restored.jsonl PASS52.584s, all owner controls.
+This is real native persisted evidence, not a textual mutation-only proof.
+timer-startup-finite-controls.jsonl PASS1.168s preserves exact source functions
+and every behavioral assertion; hostile construction controls reject returning
+a pool, reconstructed owner or raw SQL. Five-package U1000 is green and the
+complete codemod dry run is Changes=[]. No aggregate codemod package, local tier,
+full matrix, timeout inflation or retry loop. These race receipts are not a
+normal-workload timing-ceiling claim.
+
+The finite corpus remains1018 rows, now158 exact transitions; inspected digest
+2ab80a41c3b56e720878522cfe42cb3ceca0b6af76d2dc1753ae731773881a2a.
+Original893 immutable row hash0064a225... and approved24 historical receipt pin
+are unchanged. New shared-owner construction is handwritten once; the existing
+committed finite codemod supplies its four complete exact caller successors.
+No inferred rewrite, forced receipt expansion or general compatibility path.
+
+Named admissions remaining135, or136 excluding Docker's unqualified removal.
+This is the finite original named-call survey, not a fresh global raw-site census
+or a downward-baseline closure claim. Parent #2542/#2151 and their existing
+watchlist nodes stay open; no new architecture/framework or tracker required.
+M01 and Docker remain qualification-open under #2353. No push or PR.
+
+### Closed Event Fixture Owner Integration Repair
+
+The affected event-boundary guard found a real integration gap: importing the
+private eventrecord package from the new timer bridge, and seven earlier native
+bridge files, was outside its existing closed owner set. The earlier cohort
+guard receipts did not execute this particular root. This is not waived or
+hidden behind an added fixture exemption.
+
+The finite consolidate-family145-event-owner codemod repairs all eight sources
+together. It pins their complete input files and the existing test_event_support
+owner, preflights every named declaration and duplicate/missing-source refusal
+before writing, then moves23 declarations into that already classified owner.
+The committed relocation TSV and its executable correspondence control preserve
+each exact declaration hash, including all16 function bodies, seven types,
+arguments, validations, query cuts, coordinator entry and error paths. No new
+forwarding layer, SQL allowance, classifier relaxation or production-consumer
+permission is introduced. Two obsolete committed bridge files are deleted;
+the new timer bridge is absorbed without creating another file owner.
+
+This includes the publication, run/name identities, numeric registrations,
+source/global diagnostic logs, run/name count and exact replay-route fault
+ports. Their public callers, backend-domain operations and genuine selected
+transactions are unchanged. Unchanged source-pinned execution receipts carry;
+this mechanical relocation is not labeled new restart or M01/Docker proof.
+
+timer-startup-closed-owner-correspondence.jsonl PASS0.030s proves all23 exact
+current declarations plus missing/ambiguous declarations, edited inputs and
+side-effect-import refusal. All five affected event/delivery/revision/routing
+guards pass: runtimepersistence2.180s, events0.759s, canonicalrouting21.792s.
+timer-startup-adjacent-guards.jsonl remains disclosed RED at the event-import
+boundary; timer-startup-closed-owner-guards.jsonl is its complete GREEN receipt.
+Post-relocation timer-startup-closed-owner-native-controls.jsonl PASS13.546s
+under race/count1, both stores and all three actual selected-coordinator reads.
+U1000 is rerun for the changed native owner and the finite relocation tool;
+the unaffected consumer receipts are not replayed as a full tier or matrix.
+
+The exact source-role/owner model is unchanged. This repair closes the bounded
+bridge-placement defect, not the parent raw-authority class, and grants no new
+admission credit beyond the four factory removals above. The remaining named
+count stays135/136; global census/downward-baseline qualification stays reserved
+for whole-family closure. Existing #2151/#2542 tracking and watchlist mapping
+remain sufficient; no new issue or deeper architecture decision required.

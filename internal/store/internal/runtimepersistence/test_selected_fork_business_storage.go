@@ -5,7 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
-	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 )
 
@@ -21,22 +21,6 @@ func ReadRunStatusStorageForTest(ctx context.Context, selected any, runID string
 	})
 	if err != nil {
 		return "", err
-	}
-	return out, nil
-}
-
-func CountRunNamedEventStorageForTest(ctx context.Context, selected any, runID, eventName string) (int, error) {
-	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
-		return 0, err
-	}
-	var out int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		out, err = eventrecord.CountRunNamedEventStorageTx(ctx, tx, runID, eventName)
-		return err
-	})
-	if err != nil {
-		return 0, err
 	}
 	return out, nil
 }

@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 154 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "f635db7fde61d1d7b0d8c4495d560ca8ebc7cbefe176e7b9c92b4458806ab3f1" {
+	if err != nil || len(rows) != 158 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "2ab80a41c3b56e720878522cfe42cb3ceca0b6af76d2dc1753ae731773881a2a" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {

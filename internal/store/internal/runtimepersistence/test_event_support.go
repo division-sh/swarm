@@ -5,7 +5,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
+	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -652,4 +655,303 @@ func commitUnrevisionedEventFixtureFactsForTest(ctx context.Context, selected an
 	default:
 		return fmt.Errorf("event fixture store %T is unsupported", selected)
 	}
+}
+
+type GenericSchedulePublicationModes = eventrecord.GenericSchedulePublicationModes
+
+func ReadGenericSchedulePublicationModesForTest(ctx context.Context, selected any, taskID string) (GenericSchedulePublicationModes, error) {
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return GenericSchedulePublicationModes{}, err
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return GenericSchedulePublicationModes{}, errors.New("generic schedule publication observation requires a task ID")
+	}
+	var out GenericSchedulePublicationModes
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadGenericSchedulePublicationModesTx(ctx, tx, taskID)
+		return err
+	})
+	if err != nil {
+		return GenericSchedulePublicationModes{}, err
+	}
+	return out, nil
+}
+
+func ReadGenericScheduleDistinctPublicationModesForTest(ctx context.Context, selected any, taskID string) (GenericSchedulePublicationModes, error) {
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return GenericSchedulePublicationModes{}, err
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return GenericSchedulePublicationModes{}, errors.New("generic schedule publication observation requires a task ID")
+	}
+	var out GenericSchedulePublicationModes
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadGenericScheduleDistinctPublicationModesTx(ctx, tx, taskID)
+		return err
+	})
+	if err != nil {
+		return GenericSchedulePublicationModes{}, err
+	}
+	return out, nil
+}
+
+func CountGenericSchedulePublicationsForTest(ctx context.Context, selected any, taskID string) (int, error) {
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return 0, err
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return 0, errors.New("generic schedule publication observation requires a task ID")
+	}
+	var out int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.CountGenericSchedulePublicationsTx(ctx, tx, taskID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return out, nil
+}
+
+type NumericRegistrationStorage = eventrecord.NumericRegistrationStorage
+
+func ReadNumericRegistrationStorageForTest(ctx context.Context, selected any, runID string) ([]NumericRegistrationStorage, error) {
+	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
+		return nil, err
+	}
+	var out []NumericRegistrationStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadNumericRegistrationStorageTx(ctx, tx, runID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Read the physical identity at the caller's existing run/name cut. An
+// ambiguous fixture is a refusal, never permission to choose an arbitrary row.
+func ReadRunNamedEventIdentityStorageForTest(ctx context.Context, selected any, runID, eventName string) (string, error) {
+	if err := validateRunNamedEventObservation(selected, runID, eventName); err != nil {
+		return "", err
+	}
+	var eventID string
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		ids, err := eventrecord.ReadRunNamedEventIdentityCandidatesTx(ctx, tx, runID, eventName)
+		if err != nil {
+			return err
+		}
+		switch len(ids) {
+		case 0:
+			return sql.ErrNoRows
+		case 1:
+			eventID = ids[0]
+			return nil
+		default:
+			return fmt.Errorf("ambiguous physical event identity for run %s and event %s", runID, eventName)
+		}
+	})
+	if err != nil {
+		return "", err
+	}
+	return eventID, nil
+}
+
+func ReadRunNamedEventIdentitiesStorageForTest(ctx context.Context, selected any, runID, eventName string) ([]string, error) {
+	if err := validateRunNamedEventObservation(selected, runID, eventName); err != nil {
+		return nil, err
+	}
+	var ids []string
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		ids, err = eventrecord.ReadRunNamedEventIdentityHistoryTx(ctx, tx, runID, eventName)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func ReadRunLifecycleProjectionLogPayloadsForTest(ctx context.Context, selected any, runID string) ([][]byte, error) {
+	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
+		return nil, err
+	}
+	var out [][]byte
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadRunLifecycleProjectionLogPayloadsTx(ctx, tx, runID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadLifecycleProjectionLogPayloadsForTest(ctx context.Context, selected any) ([][]byte, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out [][]byte
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadLifecycleProjectionLogPayloadsTx(ctx, tx)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func CountRunNamedEventStorageForTest(ctx context.Context, selected any, runID, eventName string) (int, error) {
+	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
+		return 0, err
+	}
+	var out int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.CountRunNamedEventStorageTx(ctx, tx, runID, eventName)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return out, nil
+}
+
+type PublicationEventProjection = eventrecord.PublicationEventProjection
+
+type PublicationEventIdentityStorage = eventrecord.PublicationEventIdentityStorage
+
+type OperatorReferenceStorage = eventrecord.OperatorReferenceStorage
+
+type RootTemplatePublicationStorage = eventrecord.RootTemplatePublicationStorage
+
+type RunStartStorage struct {
+	Header  runlifecycle.RunStartHeaderStorage
+	Event   eventrecord.PublicationEventProjection
+	EventID string
+}
+
+func ReadPostgresRootTemplatePublicationForTest(ctx context.Context, selected any, eventID string) (RootTemplatePublicationStorage, error) {
+	if err := validatePostgresPublicationIdentities(selected, eventID); err != nil {
+		return RootTemplatePublicationStorage{}, err
+	}
+	var out RootTemplatePublicationStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadPostgresRootTemplatePublicationTx(ctx, tx, eventID)
+		return err
+	})
+	if err != nil {
+		return RootTemplatePublicationStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadPostgresRunStartStorageForTest(ctx context.Context, selected any, runID, eventName string) (RunStartStorage, error) {
+	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
+		return RunStartStorage{}, err
+	}
+	if _, ok := selected.(*PostgresStore); !ok {
+		return RunStartStorage{}, fmt.Errorf("run.start physical projection requires selected PostgreSQL storage")
+	}
+	var out RunStartStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out.Header, err = runlifecycle.ReadRunStartHeaderStorageTx(ctx, tx, runID)
+		if err != nil {
+			return err
+		}
+		out.Event, err = eventrecord.ReadRunStartEventProjectionTx(ctx, tx, runID, eventName)
+		if err != nil {
+			return err
+		}
+		out.EventID, err = eventrecord.ReadRunStartEventIdentityTx(ctx, tx, runID, eventName)
+		return err
+	})
+	if err != nil {
+		return RunStartStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadPublicationEventProjectionForTest(ctx context.Context, selected any, eventID string) (PublicationEventProjection, error) {
+	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
+		return PublicationEventProjection{}, err
+	}
+	_, postgres := selected.(*PostgresStore)
+	var out PublicationEventProjection
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadPublicationEventProjectionTx(ctx, tx, postgres, eventID)
+		return err
+	})
+	if err != nil {
+		return PublicationEventProjection{}, err
+	}
+	return out, nil
+}
+
+func ReadPublicationEventIdentityStorageForTest(ctx context.Context, selected any, eventID string) (PublicationEventIdentityStorage, error) {
+	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
+		return PublicationEventIdentityStorage{}, err
+	}
+	var out PublicationEventIdentityStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadPublicationEventIdentityStorageTx(ctx, tx, eventID)
+		return err
+	})
+	if err != nil {
+		return PublicationEventIdentityStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadOperatorReferenceStorageForTest(ctx context.Context, selected any, eventID string) (OperatorReferenceStorage, error) {
+	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
+		return OperatorReferenceStorage{}, err
+	}
+	var out OperatorReferenceStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadOperatorReferenceStorageTx(ctx, tx, eventID)
+		return err
+	})
+	if err != nil {
+		return OperatorReferenceStorage{}, err
+	}
+	return out, nil
+}
+
+func CorruptReplayEventTargetRouteForTest(ctx context.Context, selected any, eventID string) error {
+	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
+		return err
+	}
+	_, postgres := selected.(*PostgresStore)
+	return runEventFixtureMutationForTest(ctx, selected, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			return eventrecord.CorruptReplayEventTargetRouteTx(ctx, tx, postgres, eventID)
+		})
+	})
+}
+
+func RestoreReplayEventTargetRouteForTest(ctx context.Context, selected any, original events.Event) error {
+	if err := validateStandaloneStorageEvent(selected, original.ID()); err != nil {
+		return err
+	}
+	_, postgres := selected.(*PostgresStore)
+	return runEventFixtureMutationForTest(ctx, selected, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			return eventrecord.RestoreReplayEventTargetRouteTx(ctx, tx, postgres, original)
+		})
+	})
 }
