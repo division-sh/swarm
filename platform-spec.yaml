@@ -24026,14 +24026,28 @@ test_specification:
         preflight controls, finite source/provenance/retirement oracles and the conversation reconstruction canary.
         Lifecycle and full additionally retain codemod-pipeline-mutation (successor duplicate/stale-generation and
         premature handler dispatch), codemod-bus-mutation (independent lost claim/settlement source facts and
-        PostgreSQL blocked-SQL assertion-failure joining), and codemod-candidate-overlay (the complete actual
-        candidate with all affected package/test variants and its explicit issue2413 build profile).
-        All roots have exactly one owner in lifecycle and full; core defers exactly those five integration roots,
-        never other or newly added ordinary roots. Original fault cuts, separate mutation executions, backend cases,
+        PostgreSQL blocked-SQL assertion-failure joining). Full alone retains codemod-candidate-overlay (the complete
+        actual candidate with all affected package/test variants and its explicit issue2413 build profile).
+        A single-package or synthetic overlay is not an equivalent lifecycle substitute for that candidate;
+        future codemod/migration qualification must select full or explicitly include this named full-only unit.
+        All roots have exactly one full owner; lifecycle defers only the complete candidate-overlay root to full,
+        and core defers exactly those five integration roots, never other or newly added ordinary roots.
+        Original fault cuts, separate mutation executions, backend cases,
         injection/refusal/cleanup evidence, count-1, environments and deadlines remain unchanged. No combined faults,
         shared stores/lifetimes, persistent proof cache, narrowed type preflight or source-only execution substitute
-        supplies this qualification. This placement does not waive the independent Test-Time new-work or placement
-        limits; any over-threshold disposition still requires an explicitly approved versioned policy adjustment.
+        supplies this qualification. The user ratified this five-root placement at 2026-10-11 01:15 UTC;
+        reviewer-g's final ruling is #2604 comment 6104099093, based on run 38097201316 attempt 1 at source
+        bd2d853e3417db3981fca9ca60f6cad5980773e6. This is the finite versioned individual-over-30-second
+        disposition for TestNativeTimerSuccessorObserverRejectsRepublicationBothStores (77.44s),
+        TestNativeHandlerExecutionWindowRejectsEarlyProductionDispatchBothStores (35.58s),
+        TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts (36.91s),
+        TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners (34.06s), and
+        TestReviewedSnapshotCandidateOverlayTypeChecks (115.96s) in this exact package only.
+        The first four are approved only in lifecycle/full and the candidate only in full, under the original
+        ci-postgres-gateway-empty-v1/count-1 root cells. Core promotion, aliases, foreign package/environment/count
+        and backend relabeling do not inherit approval. The evaluator records the approval/source/run in its
+        warning evidence and charges all observed seconds under unchanged aggregate and command budgets.
+        Every other new/promoted over-30-second root still fails without its own reviewed versioned disposition.
       execution: >-
         Proof policy resolves each profile shard and named unit's environment from its explicit ci/local recipe
         declaration before plan hashing, weighting, batching or receipt production. Hosted selection of a local-named

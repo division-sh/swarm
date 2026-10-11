@@ -24,6 +24,11 @@ const (
 	// Changing the anchor requires a reviewed versioned policy adjustment, not
 	// a Test-Time body line, automatic publisher, or each new merge base.
 	TestTimeReferenceDigest = "f195969f9056e3c1e26605d114b50e61c8c2efddec55bdee0745f3de516a9db4"
+	// User-ratified finite placement, independently reviewed against this full
+	// execution. This does not grant an aggregate allowance or approve core.
+	testTimeCodemodPlacementApproval = "https://github.com/division-sh/swarm/pull/2604#issuecomment-6104099093"
+	testTimeCodemodPlacementSource   = "bd2d853e3417db3981fca9ca60f6cad5980773e6"
+	testTimeCodemodPlacementRun      = int64(38097201316)
 )
 
 type TimingCell struct {
@@ -322,7 +327,11 @@ func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, poli
 			row.Added = append(row.Added, root)
 			row.AddedSeconds += root.Seconds
 			if root.Seconds > 30 {
-				problems = append(problems, fmt.Sprintf("%s: new or promoted root %s.%s/%s is %.3fs (>30s): Test-Time rationale AND independent placement approval require a reviewed versioned policy adjustment", tier, root.Package, root.Root, root.Backend, root.Seconds))
+				if hasReviewedCodemodPlacement(root.TimingCell, tier) {
+					row.Warnings = append(row.Warnings, fmt.Sprintf("%s: %.3fs added root %s.%s has reviewed placement %s (run %d, source %s); its entire cost remains charged", tier, root.Seconds, root.Package, root.Root, testTimeCodemodPlacementApproval, testTimeCodemodPlacementRun, testTimeCodemodPlacementSource))
+				} else {
+					problems = append(problems, fmt.Sprintf("%s: new or promoted root %s.%s/%s is %.3fs (>30s): Test-Time rationale AND independent placement approval require a reviewed versioned policy adjustment", tier, root.Package, root.Root, root.Backend, root.Seconds))
+				}
 			}
 		}
 	}
@@ -347,6 +356,23 @@ func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, poli
 	}
 	problems = append(problems, row.costProblems(mode)...)
 	return row, problems
+}
+
+func hasReviewedCodemodPlacement(cell TimingCell, tier string) bool {
+	if cell.Package != "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations" || cell.Backend != "" || cell.Count != "count-1" || cell.Environment != "ci-postgres-gateway-empty-v1" {
+		return false
+	}
+	switch cell.Root {
+	case "TestReviewedSnapshotCandidateOverlayTypeChecks":
+		return tier == testplanning.ProfileFull
+	case "TestNativeTimerSuccessorObserverRejectsRepublicationBothStores",
+		"TestNativeHandlerExecutionWindowRejectsEarlyProductionDispatchBothStores",
+		"TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts",
+		"TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners":
+		return tier == testplanning.ProfileLifecycle || tier == testplanning.ProfileFull
+	default:
+		return false
+	}
 }
 
 func (row *TestTimeTier) costProblems(mode TestTimeMode) []string {

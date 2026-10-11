@@ -577,7 +577,7 @@ github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations	TestPip
 github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations	TestPipelineDeliveryCompiledCallerRecipesPreserveAssertions		ci-postgres-gateway-empty-v1	count-1	added		absent	0.06	added	added
 github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations	TestPipelineDeliveryCompiledCallerRewriteRejectsUnreviewedShape		ci-postgres-gateway-empty-v1	count-1	added		absent	0	added	added
 github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations	TestPipelineDeliveryFixtureCapabilityIsRetired		ci-postgres-gateway-empty-v1	count-1	added		absent	0.09	added	added
-github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations	TestReviewedSnapshotCandidateOverlayTypeChecks		ci-postgres-gateway-empty-v1	count-1	added		absent	115.96	added	deferred_lifecycle_full
+github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations	TestReviewedSnapshotCandidateOverlayTypeChecks		ci-postgres-gateway-empty-v1	count-1	added		absent	115.96	added	deferred_full_only
 github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations	TestRuntimeLogCaptureOracleRejectsLostPayloadAndFailureEvidence		ci-postgres-gateway-empty-v1	count-1	added		absent	0.03	added	added
 github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations	TestRuntimeLogCaptureRecipesPreserveMeaningfulUnitAssertions		ci-postgres-gateway-empty-v1	count-1	added		absent	0.05	added	added
 github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations	TestServedDeliveryQuiescenceCallerInventoryConsumesOnlyDomainReadPorts		ci-postgres-gateway-empty-v1	count-1	added		absent	0.15	added	added
