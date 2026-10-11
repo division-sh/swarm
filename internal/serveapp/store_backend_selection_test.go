@@ -22,6 +22,7 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -293,8 +294,8 @@ func TestBuildStoresSQLiteBindsOwnershipToConstructedBackendIdentity(t *testing.
 	}
 	requireSQLiteBackendIdentityRefusal(t, err)
 
-	var authorityRows, generation int
-	if err := selectedStoreDatabaseForTest(t, stores).QueryRowContext(ctx, `SELECT COUNT(*), generation FROM runtime_process_generation`).Scan(&authorityRows, &generation); err != nil {
+	authorityRows, generation, err := storetest.ReadProcessGenerationCardinality(ctx, stores.StartupOwnership())
+	if err != nil {
 		t.Fatalf("read constructed SQLite authority rows: %v", err)
 	}
 	if authorityRows != 1 || generation != 0 {
