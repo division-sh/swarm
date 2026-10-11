@@ -25,10 +25,11 @@ import (
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
+	artifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/platformschema"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -51,6 +52,9 @@ type timerHistoryNativeFixture struct {
 	sqlite   *sqlitebackend.Backend
 	pipeline timerHistoryNativeOwner
 	generic  timerHistoryNativeScheduleOwner
+	runs     interface {
+		CreateRun(context.Context, runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error)
+	}
 }
 
 // Native persistence/readback of an admitted typed-plan fixture, not historical
@@ -185,6 +189,7 @@ func openTimerHistoryNativeFixture(t *testing.T, dialect string) *timerHistoryNa
 		t.Fatal(err)
 	}
 	bootstrap := schemastore.SchemaBootstrapRequest{PlatformPlans: plans, Origin: schemastore.RuntimeStoreOrigin{SwarmVersion: "timer-history-native-test", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC()}}
+	setup := authoractivity.WithScope(t.Context(), authoractivity.BundleScope("00000000-0000-4000-8000-000000000001", sourceartifactfixture.BundleHash))
 	f := &timerHistoryNativeFixture{}
 	if dialect == "postgres" {
 		_, f.db, _ = testutil.StartPostgres(t)
@@ -199,8 +204,23 @@ func openTimerHistoryNativeFixture(t *testing.T, dialect string) *timerHistoryNa
 		if err := schema.BootstrapSchema(t.Context(), bootstrap); err != nil {
 			t.Fatal(err)
 		}
-		f.pipeline = &pipelinepersistence.PipelinePostgresOwner{RunLifecyclePostgresOwner: &storerunlifecycle.RunLifecyclePostgresOwner{}}
-		f.generic, err = storegenericschedule.NewPostgres(f.postgres, schema.RequireCurrent, &storerunlifecycle.RunLifecyclePostgresOwner{})
+		artifacts, err := artifactstore.NewPostgres(f.postgres, schema.RequireCurrent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := artifacts.EnsureSourceArtifact(setup, sourceartifactfixture.Artifact()); err != nil {
+			t.Fatal(err)
+		}
+		runs, err := storerunlifecycle.NewPostgres(f.postgres, schema.RequireCurrent, runhandoff.NewCandidateCoordinator())
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.runs = runs
+		f.pipeline = &pipelinepersistence.PipelinePostgresOwner{RunLifecyclePostgresOwner: runs}
+		f.generic, err = storegenericschedule.NewPostgres(f.postgres, schema.RequireCurrent, runs)
+		if err != nil {
+			t.Fatal(err)
+		}
 	} else {
 		dbPath := filepath.Join(t.TempDir(), "timer-history.db")
 		dsn := url.URL{Scheme: "file", Opaque: dbPath}
@@ -223,8 +243,23 @@ func openTimerHistoryNativeFixture(t *testing.T, dialect string) *timerHistoryNa
 		if err := schema.BootstrapSchema(t.Context(), bootstrap); err != nil {
 			t.Fatal(err)
 		}
-		f.pipeline = &pipelinepersistence.PipelineSQLiteOwner{RunLifecycleSQLiteOwner: &storerunlifecycle.RunLifecycleSQLiteOwner{}}
-		f.generic, err = storegenericschedule.NewSQLite(f.sqlite, schema.RequireCurrent, &storerunlifecycle.RunLifecycleSQLiteOwner{})
+		artifacts, err := artifactstore.NewSQLite(f.sqlite, schema.RequireCurrent, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := artifacts.EnsureSourceArtifact(setup, sourceartifactfixture.Artifact()); err != nil {
+			t.Fatal(err)
+		}
+		runs, err := storerunlifecycle.NewSQLite(f.sqlite, schema.RequireCurrent, runhandoff.NewCandidateCoordinator(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.runs = runs
+		f.pipeline = &pipelinepersistence.PipelineSQLiteOwner{RunLifecycleSQLiteOwner: runs}
+		f.generic, err = storegenericschedule.NewSQLite(f.sqlite, schema.RequireCurrent, runs)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -236,11 +271,9 @@ func (f *timerHistoryNativeFixture) runContext(t *testing.T, runID string, at ti
 	t.Helper()
 	fact := sourceartifactfixture.Fact()
 	ctx := authoractivity.WithScope(correlation.WithRunID(correlation.WithSourceArtifactFact(t.Context(), fact), runID), authoractivity.BundleScope("00000000-0000-4000-8000-000000000001", fact.BundleHash()))
-	fixture := runlifecyclefixture.Fixture{RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Source: fact, Artifact: sourceartifactfixture.Artifact(), BundleHash: fact.BundleHash(), StartedAt: runtimerunlifecycle.CanonicalTimestamp(at)}
-	if f.postgres != nil {
-		runlifecyclefixture.RequirePostgres(t, ctx, f.db, fixture)
-	} else {
-		runlifecyclefixture.RequireSQLite(t, ctx, f.db, fixture)
+	disposition, err := f.runs.CreateRun(ctx, runtimerunlifecycle.CreateRequest{RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(), Source: fact, StartedAt: runtimerunlifecycle.CanonicalTimestamp(at)})
+	if err != nil || disposition != runtimerunlifecycle.MutationApplied {
+		t.Fatalf("canonical native run creation: disposition=%s err=%v", disposition, err)
 	}
 	return ctx
 }
