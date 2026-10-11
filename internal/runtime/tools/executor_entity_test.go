@@ -655,7 +655,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 	siblingID := uuid.NewString()
 	foreignID := uuid.NewString()
 	fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
-	constructEntityToolFixture(t, ctx, fixture.selected, fixture.pipeline, fixture.source, "validation", "validation/inst-1", currentID, "queued", map[string]any{
+	owner := constructEntityToolFixture(t, ctx, fixture.selected, fixture.pipeline, fixture.source, "validation", "validation/inst-1", currentID, "queued", map[string]any{
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "before", "confidence": 1},
 	}, time.Now().UTC())
@@ -666,8 +666,14 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 	seedEntityStateRow(t, db, foreignID, "", "other/inst-1", "other_case", "queued", map[string]any{
 		"status": "foreign",
 	}, time.Now().UTC())
-	if _, err := db.Exec(`UPDATE entity_state SET bookkeeping = '{"private_fact":"must-not-leak"}'::jsonb WHERE entity_id = $1::uuid`, currentID); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE flow_instances
+		SET bookkeeping = jsonb_set(bookkeeping, '{private_fact}', '"must-not-leak"'::jsonb, true)
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid AND instance_path = $3`, owner.RunID, currentID, owner.Route.InstancePath); err != nil {
 		t.Fatalf("inject role-scoped hostile bookkeeping: %v", err)
+	}
+	stored, found, err := fixture.pipeline.Load(ctx, owner)
+	if err != nil || !found || stored.CurrentState != "queued" || stored.Bookkeeping["private_fact"] != "must-not-leak" {
+		t.Fatalf("private bookkeeping witness must exist in the admitted header: found=%t instance=%+v err=%v", found, stored, err)
 	}
 	currentCtx := runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
 		"evt-current",
@@ -1079,8 +1085,7 @@ func TestEntityTools_ReadsRejectUndeclaredStoredFields(t *testing.T) {
 	})
 	if _, err := db.Exec(`
 		UPDATE entity_state
-		SET fields = jsonb_set(COALESCE(fields, '{}'::jsonb), '{legacy_flag}', 'true'::jsonb, true),
-		    bookkeeping = '{"private_fact":"must-not-leak"}'::jsonb
+		SET fields = jsonb_set(COALESCE(fields, '{}'::jsonb), '{legacy_flag}', 'true'::jsonb, true)
 		WHERE entity_id = $1::uuid
 	`, entityID); err != nil {
 		t.Fatalf("inject legacy field: %v", err)
