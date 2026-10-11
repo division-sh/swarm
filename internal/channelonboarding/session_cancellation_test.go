@@ -36,17 +36,37 @@ func (s *canceledSessionReadback) CheckpointSessionPairing(ctx context.Context, 
 }
 
 func (s *canceledSessionReadback) ReadSessionPairing(ctx context.Context, _ Operation, _ operatorchannel.Principal) (PairingReadback, error) {
+	if s.phase == "readback" {
+		s.cancel()
+	}
 	s.readbackCanceled = ctx.Err() != nil
 	return PairingReadback{Code: "must-not-disclose"}, context.Cause(ctx)
 }
 
 type canceledNativeReadiness struct {
 	canceled bool
+	cancel   context.CancelFunc
 }
 
 func (r *canceledNativeReadiness) ProjectConnectedChannelReadiness(ctx context.Context, _ Operation, _ Candidate) (ConnectedChannelReadiness, bool, error) {
+	if r.cancel != nil {
+		r.cancel()
+	}
 	r.canceled = ctx.Err() != nil
 	return ConnectedChannelReadiness{Ready: true}, true, context.Cause(ctx)
+}
+
+type cancellationObservedHistoryRead struct {
+	Store
+	canceled bool
+}
+
+func (s *cancellationObservedHistoryRead) ListChannelTeardowns(ctx context.Context) ([]TeardownOperation, error) {
+	s.canceled = ctx.Err() != nil
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.Store.ListChannelTeardowns(ctx)
 }
 
 type cancelBeforeNativeReadbackStore struct {
@@ -71,11 +91,12 @@ func TestPairedNativeResultReadinessPreservesCallerCancellation(t *testing.T) {
 	caller, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	readiness := &canceledNativeReadiness{}
-	service := &Service{store: &cancelBeforeNativeReadbackStore{Store: selected, cancel: cancel},
+	history := &cancellationObservedHistoryRead{Store: &cancelBeforeNativeReadbackStore{Store: selected, cancel: cancel}}
+	service := &Service{store: history,
 		sessions: &canceledSessionReadback{}, identities: &cancellationTestIdentities{}, readiness: readiness}
 	result, err := service.driveLocked(caller, op, candidate, "")
-	if !errors.Is(err, context.Canceled) || !readiness.canceled {
-		t.Fatalf("paired native readiness lost caller cancellation: err=%v canceled=%v", err, readiness.canceled)
+	if !errors.Is(err, context.Canceled) || !history.canceled || readiness.canceled {
+		t.Fatalf("paired native history did not fence disclosure at its first canceled reader: err=%v canceled=%v", err, history.canceled)
 	}
 	if result.Readiness != nil && result.Readiness.Ready {
 		t.Fatal("canceled paired observation disclosed READY authority")
@@ -98,18 +119,51 @@ func TestNativeSessionResultReadbackPreservesCallerCancellation(t *testing.T) {
 			caller, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			sessions := &canceledSessionReadback{phase: phase, cancel: cancel}
-			service := &Service{store: store, sessions: sessions,
+			history := &cancellationObservedHistoryRead{Store: store}
+			service := &Service{store: history, sessions: sessions,
 				identities: &cancellationTestIdentities{}, readiness: cancellationTestReadiness{},
 				now: func() time.Time { return now }}
 			result, err := service.driveLocked(caller, op, candidate, "")
-			if !errors.Is(err, context.Canceled) || !sessions.readbackCanceled {
-				t.Fatalf("native readback lost caller cancellation: err=%v canceled=%v", err, sessions.readbackCanceled)
+			if !errors.Is(err, context.Canceled) || !history.canceled || sessions.readbackCanceled {
+				t.Fatalf("native history did not fence disclosure at its first canceled reader: err=%v canceled=%v", err, history.canceled)
 			}
 			if result.Pairing != nil && result.Pairing.Code != "" {
 				t.Fatal("canceled native readback disclosed QR material")
 			}
 			if store.op.Revision != op.Revision || store.sawCanceledContext {
 				t.Fatal("individual cancellation changed durable settlement ownership")
+			}
+		})
+	}
+}
+
+func TestNativeResultLateReadbackCancellationDoesNotDisclose(t *testing.T) {
+	for _, phase := range []string{"readiness", "pairing"} {
+		t.Run(phase, func(t *testing.T) {
+			now := time.Now().UTC()
+			candidate := testCandidate(strings.Repeat("a", 64), "support")
+			candidate.Posture = ActivationSessionConnection
+			op := testSucceededOperation(candidate, now)
+			caller, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			selected := &cancellationTestStore{op: op}
+			readiness := &canceledNativeReadiness{cancel: cancel}
+			sessions := &canceledSessionReadback{phase: "readback", cancel: cancel}
+			if phase == "pairing" {
+				op.Phase = PhaseActivatingProvider
+			}
+			service := &Service{store: selected, sessions: sessions, identities: &cancellationTestIdentities{}, readiness: readiness}
+			result, err := service.result(caller, op, &candidate)
+			observed := readiness.canceled
+			if phase == "pairing" {
+				observed = sessions.readbackCanceled
+			}
+			if !errors.Is(err, context.Canceled) || !observed ||
+				result.Pairing != nil && result.Pairing.Code != "" || result.Readiness != nil && result.Readiness.Ready {
+				t.Fatal("late readback cancellation was detached or disclosed QR/READY", result, err, observed)
+			}
+			if selected.op.Revision != op.Revision || selected.sawCanceledContext {
+				t.Fatal("read-only cancellation changed durable settlement ownership")
 			}
 		})
 	}
