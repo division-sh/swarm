@@ -1004,6 +1004,11 @@ contract_formats:
         routing step grants neither readiness nor reply authority: exact child/cut readback
         must discharge every pending blocker before publication or execution. Unrelated,
         duplicate or contradictory blockers still refuse before activation.
+        A captured platform.activity_requested publication without its terminal pipeline
+        receipt remains exact owed work even before any node delivery exists. The fixed-cut
+        event and receipt projections identify it for the existing platform activity owner;
+        no synthetic delivery, source approval grant or general absent-receipt replay is
+        created. A terminal receipt retains its outcome and prevents rearming.
         Matching request/result IDs alone do not establish agreement. Conflicting
         evidence fails without overwriting the row or appending a lifecycle story;
         an unchanged repeat is a no-op. JSON evidence uses the canonical semantic

@@ -121,18 +121,21 @@ func TestIssue642CopiedActivityPublishesAndReturnsToOwnRequesterBothStores(t *te
 			owner := selectedContractExecutionOwnerForCatalogHarness(t, h)
 			options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
 			staged := stageCatalogSelectedContractFork(t, h.ctx, selected, owner, loader, selection, options, catalogRuntimeRunID, cut)
+			t.Logf("fixed activity cut: point=%+v blockers=%+v", staged.ForkPoint, staged.ReplayResumeAdmission.UnsupportedBlockers)
 			childRows, err := storetest.ReadReplyContextRecords(h.ctx, reader, staged.ForkRunID)
 			if err != nil || len(childRows) != 1 || childRows[0].State != replycontext.StateOpen || childRows[0].ID == sourceRows[0].ID || childRows[0].SourceRequestEventID != sourceRows[0].SourceRequestEventID {
 				t.Fatalf("cut did not retain one open, independently owned child return: %+v error=%v", childRows, err)
 			}
-			activated, err := runforkexecution.ActivateSelectedContractRunFork(correlation.WithRunID(h.ctx, staged.ForkRunID), runforkexecution.SelectedContractActivationGateRequest{
-				ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, Store: runScopedCatalogStore(t, h), ExecutionOwner: owner, SourceLoader: loader, AgentRuntime: options,
+			executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
+				SourceRunID: catalogRuntimeRunID, At: cut, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 			})
-			if err != nil || !activated.Activated {
-				t.Fatalf("activate real recorded-result child: %+v error=%v", activated, err)
+			if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
+				t.Fatalf("activate real recorded-result child: %+v error=%v", executed, err)
 			}
+			t.Logf("acknowledged child: run=%s activated=%t", executed.Materialization.ForkRunID, executed.Activation.Activated)
 			ctx, cancel := context.WithTimeout(context.WithoutCancel(h.ctx), 20*time.Second)
 			defer cancel()
+			waitCopiedActivityRequesterReturn(t, ctx, selected, staged.ForkRunID)
 			attempts, err := storetest.ReadActivityAttemptStorage(ctx, selected, staged.ForkRunID)
 			if err != nil || len(attempts) != 1 {
 				t.Fatalf("child copied-journal inventory: %+v error=%v", attempts, err)
@@ -169,4 +172,38 @@ func TestIssue642CopiedActivityPublishesAndReturnsToOwnRequesterBothStores(t *te
 			}
 		})
 	}
+}
+
+func waitCopiedActivityRequesterReturn(t *testing.T, ctx context.Context, selected any, runID string) {
+	t.Helper()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		count, err := storetest.ReadLifecycleEventCardinality(ctx, selected, runID, "request.finished")
+		if err != nil {
+			logCopiedActivityReturnPhase(t, ctx, selected, runID)
+			t.Fatalf("read actual child requester completion: %v", err)
+		}
+		if count == 1 {
+			return
+		}
+		if count > 1 {
+			t.Fatalf("child produced %d requester completions", count)
+		}
+		select {
+		case <-ctx.Done():
+			logCopiedActivityReturnPhase(t, ctx, selected, runID)
+			t.Fatalf("child did not publish its own requester return within the original bound: %v", context.Cause(ctx))
+		case <-tick.C:
+		}
+	}
+}
+
+func logCopiedActivityReturnPhase(t *testing.T, ctx context.Context, selected any, runID string) {
+	t.Helper()
+	read, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	defer cancel()
+	storage, storageErr := storetest.ReadSelectedExecutionStorage(read, selected, runID)
+	attempts, attemptsErr := storetest.ReadActivityAttemptStorage(read, selected, runID)
+	t.Logf("child return phase: storage=%+v attempts=%+v read_errors=%v/%v", storage, attempts, storageErr, attemptsErr)
 }

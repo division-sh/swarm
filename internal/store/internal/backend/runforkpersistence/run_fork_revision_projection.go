@@ -27,6 +27,7 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]ru
 		}
 	}
 	deliveryKeys := make(map[string]struct{}, len(snapshot.Deliveries))
+	pipelineReceipts := make(map[string]struct{}, len(snapshot.Receipts))
 	out := make([]runfork.RunForkPendingWork, 0, len(snapshot.Deliveries)+len(snapshot.Receipts))
 	for _, delivery := range snapshot.Deliveries {
 		durable := delivery.Snapshot
@@ -60,6 +61,9 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]ru
 		out = append(out, item)
 	}
 	for _, receipt := range snapshot.Receipts {
+		if receipt.SubscriberType == "platform" && receipt.SubscriberID == "pipeline" {
+			pipelineReceipts[receipt.EventID] = struct{}{}
+		}
 		key := runForkRevisionSubscriberKey(receipt.EventID, receipt.SubscriberType, receipt.SubscriberID)
 		if _, ok := deliveryKeys[key]; ok {
 			continue
@@ -91,6 +95,24 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]ru
 			item.Classification = runfork.RunForkPendingClassificationDeliveredCompleted
 		}
 		out = append(out, item)
+	}
+	// Platform activity publication is itself owed pipeline work. At its
+	// publication cut there is no terminal receipt and no node delivery yet.
+	for _, event := range snapshot.Events {
+		if _, owned := runfork.RunForkSelectedContractPlatformRuntimeOwner(event.EventName); !owned {
+			continue
+		}
+		if _, settled := pipelineReceipts[event.EventID]; settled {
+			continue
+		}
+		if _, delivered := deliveryKeys[runForkRevisionSubscriberKey(event.EventID, "platform", "pipeline")]; delivered {
+			continue
+		}
+		out = append(out, runfork.RunForkPendingWork{
+			EventID: event.EventID, EventName: event.EventName, FlowInstance: event.FlowInstance, RoutingSource: event.RoutingSource,
+			SubscriberType: "platform", SubscriberID: "pipeline", Status: "pending",
+			Classification: runfork.RunForkPendingClassificationPending, CreatedAt: event.CreatedAt,
+		})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		left := runForkRevisionSubscriberKey(out[i].EventID, out[i].SubscriberType, out[i].SubscriberID) + "/" + out[i].DeliveryID
