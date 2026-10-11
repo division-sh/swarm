@@ -9,6 +9,9 @@ import (
 )
 
 func TestPublicCompletionAdmissionSharedProcessBound(t *testing.T) {
+	if PublicCompletionLimit != 128 {
+		t.Fatalf("ratified public completion bound = %d, want 128", PublicCompletionLimit)
+	}
 	process := NewProcess()
 	var owners []*RuntimeOccurrence
 	for index := range 2 {

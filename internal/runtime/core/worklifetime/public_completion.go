@@ -5,7 +5,7 @@ import (
 	"errors"
 )
 
-const PublicCompletionLimit = 32
+const PublicCompletionLimit = 128
 
 var ErrPublicCompletionCapacity = errors.New("public_completion_capacity_busy")
 
