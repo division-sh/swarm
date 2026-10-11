@@ -6,13 +6,14 @@ import (
 	"fmt"
 
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 )
 
 // RetainConstructionPossession precedes schema bootstrap. The capability adopts
 // this exact session rather than releasing and reacquiring the process lease.
-func (s *StartupPostgresOwner) RetainConstructionPossession(ctx context.Context) error {
-	if s == nil || ctx == nil {
-		return errors.New("PostgreSQL process construction requires an owner and context")
+func (s *StartupPostgresOwner) RetainConstructionPossession(ctx context.Context, schema *schemastore.Postgres) error {
+	if s == nil || ctx == nil || schema == nil {
+		return errors.New("PostgreSQL process construction requires an owner, schema and context")
 	}
 	s.constructionMu.Lock()
 	defer s.constructionMu.Unlock()
@@ -22,6 +23,11 @@ func (s *StartupPostgresOwner) RetainConstructionPossession(ctx context.Context)
 	lease, capacity, err := s.acquireConstructionPossession(ctx)
 	if err != nil {
 		return err
+	}
+	if err := schema.BindProcessLease(lease); err != nil {
+		releaseErr := lease.Release(ctx)
+		capacity()
+		return errors.Join(err, releaseErr)
 	}
 	s.constructionLease, s.constructionCapacity = lease, capacity
 	return nil

@@ -30,7 +30,7 @@ func (s *Postgres) BootstrapSchema(ctx context.Context, request SchemaBootstrapR
 	if err != nil {
 		return err
 	}
-	committed, err := s.backend.RunTransactionWithOptionsOutcome(ctx, &sql.TxOptions{}, func(sqlCtx context.Context, tx *sql.Tx) error {
+	bootstrap := func(sqlCtx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(sqlCtx, `SELECT pg_advisory_xact_lock($1)`, postgresSchemaBootstrapLock); err != nil {
 			return fmt.Errorf("serialize postgres schema bootstrap: %w", err)
 		}
@@ -55,7 +55,13 @@ func (s *Postgres) BootstrapSchema(ctx context.Context, request SchemaBootstrapR
 			return err
 		}
 		return nil
-	})
+	}
+	var committed bool
+	if s.processLease != nil {
+		committed, err = s.processLease.RunTransactionOutcome(ctx, bootstrap)
+	} else {
+		committed, err = s.backend.RunTransactionWithOptionsOutcome(ctx, &sql.TxOptions{}, bootstrap)
+	}
 	if committed {
 		s.schemaAdmission.markCurrent()
 	}

@@ -1,6 +1,7 @@
 package cliapp
 
 import (
+	"context"
 	"io"
 	"net"
 	"time"
@@ -39,6 +40,7 @@ type ServeOptions struct {
 	PublicWebhookListen              string
 	PublicWebhookListener            *net.TCPListener // Run owns this handle; CLI invocations bind normally.
 	ShutdownGrace                    time.Duration
+	ProcessStop                      func() // Actual serving stop notification to the outer process owner.
 	Dev                              bool
 	SelfCheck                        bool
 	AbandonActiveRuns                bool
@@ -54,6 +56,7 @@ type ServeOptions struct {
 	TestLLMRuntime                   runtimellm.Runtime
 	TestOutboxSweeperConfig          runtimebus.OutboxSweeperConfig
 	TestRuntimeReadyHook             func(*runtime.Runtime)
+	TestServingStop                  func(context.CancelFunc)
 	TestRuntimeContextsReadyHook     func(*runtime.RuntimeContextManager)
 	TestBeforeReadinessCommit        func() error
 	TestAPIListenerBound             func(net.Addr)

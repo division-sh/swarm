@@ -66,6 +66,9 @@ func (s *SQLite) BootstrapSchema(ctx context.Context, request SchemaBootstrapReq
 		if _, err := conn.ExecContext(ctx, `INSERT INTO runtime_store_metadata (id, swarm_version, platform_version, created_at, entity_presence_model) VALUES (1, ?, ?, ?, ?)`, request.Origin.SwarmVersion, request.Origin.PlatformVersion, request.Origin.CreatedAt.UTC().Format(time.RFC3339Nano), platformschema.EntityPresenceModel); err != nil {
 			return fmt.Errorf("stamp fresh sqlite store origin: %w", err)
 		}
+		if err := platformschema.SeedFreshProcessGeneration(ctx, conn, request.PlatformPlans); err != nil {
+			return err
+		}
 	case schemaStateCompatible:
 	case schemaStateIncompatible:
 		return diagnostic.failure(report.Drift)
