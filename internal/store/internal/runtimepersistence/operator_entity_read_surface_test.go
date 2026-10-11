@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -25,26 +27,24 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	base := time.Unix(1700000000, 0).UTC()
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runA, StartedAt: base})
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runB, StartedAt: base})
-	seedEntity := func(runID, entityID, flow, entityType, state, fields, gates, accumulated string, createdAt time.Time) {
+	seedEntity := func(runID, entityID, flow, entityType, fields string, createdAt time.Time) {
 		t.Helper()
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO entity_state (
 				run_id, entity_id, flow_instance, entity_type, slug, name,
-				current_state, gates, fields, accumulator, revision,
-				entered_state_at, created_at, updated_at
+				fields, created_at, updated_at
 			) VALUES (
 				$1::uuid, $2::uuid, $3, $4, NULL, NULL,
-				$5, $6::jsonb, $7::jsonb, $8::jsonb, 1,
-				$9, $9, $9
+				$5::jsonb, $6, $6
 			)
-		`, runID, entityID, flow, entityType, state, gates, fields, accumulated, createdAt); err != nil {
+		`, runID, entityID, flow, entityType, fields, createdAt); err != nil {
 			t.Fatalf("seed entity %s/%s: %v", runID, entityID, err)
 		}
 	}
-	seedEntity(runA, entityA, "review/primary", "mvp_spec", "collecting", `{"priority":"high","score":3}`, `{"approved":true}`, operatorLoopAccumulatedJSON(t, runA, entityA, base), base.Add(time.Minute))
-	seedEntity(runA, entityB, "review/secondary", "mvp_spec", "done", `{"priority":"low"}`, `{}`, `{}`, base)
-	seedEntity(runA, sharedEntity, "triage", "ticket", "collecting", `{"priority":"high"}`, `{}`, `{}`, base.Add(-time.Minute))
-	seedEntity(runB, sharedEntity, "triage", "ticket", "done", `{"priority":"low"}`, `{}`, `{}`, base.Add(-2*time.Minute))
+	seedEntity(runA, entityA, "review/primary", "mvp_spec", `{"priority":"high","score":3}`, base.Add(time.Minute))
+	seedEntity(runA, entityB, "review/secondary", "mvp_spec", `{"priority":"low"}`, base)
+	seedEntity(runA, sharedEntity, "triage", "ticket", `{"priority":"high"}`, base.Add(-time.Minute))
+	seedEntity(runB, sharedEntity, "triage", "ticket", `{"priority":"low"}`, base.Add(-2*time.Minute))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (
 			run_id, instance_path, entity_id, entity_type, flow_template, mode, config,
@@ -52,15 +52,17 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 			entered_state_at, created_at, updated_at
 		)
 		VALUES
-			($1::uuid, 'review/primary', $4::uuid, 'mvp_spec', 'review', 'template', '{"workflow_version":"v1"}'::jsonb,
-			 TRUE, 'collecting', '{"approved":true}', '{}', '{}', 1, $3, $3, $3),
-			($1::uuid, 'review/secondary', $5::uuid, 'mvp_spec', 'review', 'template', '{"workflow_version":"v2"}'::jsonb,
+			($1::uuid, 'review/primary', $4::uuid, 'mvp_spec', 'review', 'template', $7::jsonb,
+			 TRUE, 'collecting', '{"approved":true}', '{}', $10::jsonb, 1, $3, $3, $3),
+			($1::uuid, 'review/secondary', $5::uuid, 'mvp_spec', 'review', 'template', $8::jsonb,
 			 TRUE, 'done', '{}', '{}', '{}', 1, $3, $3, $3),
-			($1::uuid, 'triage', $6::uuid, 'ticket', 'triage', 'static', '{"workflow_version":"v1"}'::jsonb,
+			($1::uuid, 'triage', $6::uuid, 'ticket', 'triage', 'static', $9::jsonb,
 			 TRUE, 'collecting', '{}', '{}', '{}', 1, $3, $3, $3),
-			($2::uuid, 'triage', $6::uuid, 'ticket', 'triage', 'static', '{"workflow_version":"v1"}'::jsonb,
+			($2::uuid, 'triage', $6::uuid, 'ticket', 'triage', 'static', $9::jsonb,
 			 TRUE, 'done', '{}', '{}', '{}', 1, $3, $3, $3)
-	`, runA, runB, base, entityA, entityB, sharedEntity); err != nil {
+	`, runA, runB, base, entityA, entityB, sharedEntity,
+		operatorEntityHeaderConfig(t, "review/primary", "v1"), operatorEntityHeaderConfig(t, "review/secondary", "v2"),
+		operatorEntityHeaderConfig(t, "triage", "v1"), operatorLoopAccumulatedJSON(t, runA, entityA, base)); err != nil {
 		t.Fatalf("seed flow instances: %v", err)
 	}
 
@@ -103,10 +105,11 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if full.Entity.EntityType != "mvp_spec" {
 		t.Fatalf("full entity_type = %q, want mvp_spec", full.Entity.EntityType)
 	}
-	if full.Accumulated["score"] != float64(3) {
+	assertOperatorEntityOwnerClocks(t, full.Entity, base)
+	if full.Accumulated["score"] != int64(3) {
 		t.Fatalf("full accumulated = %#v, want score", full.Accumulated)
 	}
-	if bucket, ok := full.Accumulated["accumulator"].(map[string]any); !ok || bucket["count"] != float64(2) {
+	if bucket, ok := full.Accumulated["accumulator"].(map[string]any); !ok || bucket["count"] != int64(2) {
 		t.Fatalf("full accumulated bucket = %#v, want count", full.Accumulated["accumulator"])
 	}
 	if notes, ok := full.Accumulated["notes"].([]any); !ok || len(notes) != 2 {
@@ -124,7 +127,7 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities current_state: %v", err)
 	}
-	if stateAgg.Counts["collecting"] != 2 || stateAgg.Counts["done"] != 1 {
+	if stateAgg.Counts["collecting"] != 2 || stateAgg.Counts["done"] != 1 || stateAgg.AbsentCount != 0 {
 		t.Fatalf("state aggregate = %#v", stateAgg.Counts)
 	}
 	typedStateAgg, err := pg.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "current_state", Type: "mvp_spec"})
@@ -180,26 +183,24 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	base := time.Unix(1700000000, 0).UTC()
 	requireRunFixtureForTest(t, ctx, sqliteStore, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runA, StartedAt: base})
 	requireRunFixtureForTest(t, ctx, sqliteStore, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runB, StartedAt: base})
-	seedEntity := func(runID, entityID, flow, entityType, state, fields, gates, accumulated string, createdAt time.Time) {
+	seedEntity := func(runID, entityID, flow, entityType, fields string, createdAt time.Time) {
 		t.Helper()
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO entity_state (
 				run_id, entity_id, flow_instance, entity_type, slug, name,
-				current_state, gates, fields, accumulator, revision,
-				entered_state_at, created_at, updated_at
+				fields, created_at, updated_at
 			) VALUES (
 				?, ?, ?, ?, NULL, NULL,
-				?, ?, ?, ?, 1,
 				?, ?, ?
 			)
-		`, runID, entityID, flow, entityType, state, gates, fields, accumulated, createdAt, createdAt, createdAt); err != nil {
+		`, runID, entityID, flow, entityType, fields, createdAt, createdAt); err != nil {
 			t.Fatalf("seed sqlite entity %s/%s: %v", runID, entityID, err)
 		}
 	}
-	seedEntity(runA, entityA, "review/primary", "mvp_spec", "collecting", `{"priority":"high","score":3}`, `{"approved":true}`, operatorLoopAccumulatedJSON(t, runA, entityA, base), base.Add(time.Minute))
-	seedEntity(runA, entityB, "review/secondary", "mvp_spec", "done", `{"priority":"low"}`, `{}`, `{}`, base)
-	seedEntity(runA, sharedEntity, "triage", "ticket", "collecting", `{"priority":"high"}`, `{}`, `{}`, base.Add(-time.Minute))
-	seedEntity(runB, sharedEntity, "triage", "ticket", "done", `{"priority":"low"}`, `{}`, `{}`, base.Add(-2*time.Minute))
+	seedEntity(runA, entityA, "review/primary", "mvp_spec", `{"priority":"high","score":3}`, base.Add(time.Minute))
+	seedEntity(runA, entityB, "review/secondary", "mvp_spec", `{"priority":"low"}`, base)
+	seedEntity(runA, sharedEntity, "triage", "ticket", `{"priority":"high"}`, base.Add(-time.Minute))
+	seedEntity(runB, sharedEntity, "triage", "ticket", `{"priority":"low"}`, base.Add(-2*time.Minute))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (
 			run_id, instance_path, entity_id, entity_type, flow_template, mode, config,
@@ -207,15 +208,17 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 			entered_state_at, created_at, updated_at
 		)
 		VALUES
-			(?1, 'review/primary', ?4, 'mvp_spec', 'review', 'template', '{"workflow_version":"v1"}',
-			 TRUE, 'collecting', '{"approved":true}', '{}', '{}', 1, ?3, ?3, ?3),
-			(?1, 'review/secondary', ?5, 'mvp_spec', 'review', 'template', '{"workflow_version":"v2"}',
+			(?1, 'review/primary', ?4, 'mvp_spec', 'review', 'template', ?7,
+			 TRUE, 'collecting', '{"approved":true}', '{}', ?10, 1, ?3, ?3, ?3),
+			(?1, 'review/secondary', ?5, 'mvp_spec', 'review', 'template', ?8,
 			 TRUE, 'done', '{}', '{}', '{}', 1, ?3, ?3, ?3),
-			(?1, 'triage', ?6, 'ticket', 'triage', 'static', '{"workflow_version":"v1"}',
+			(?1, 'triage', ?6, 'ticket', 'triage', 'static', ?9,
 			 TRUE, 'collecting', '{}', '{}', '{}', 1, ?3, ?3, ?3),
-			(?2, 'triage', ?6, 'ticket', 'triage', 'static', '{"workflow_version":"v1"}',
+			(?2, 'triage', ?6, 'ticket', 'triage', 'static', ?9,
 			 TRUE, 'done', '{}', '{}', '{}', 1, ?3, ?3, ?3)
-	`, runA, runB, base, entityA, entityB, sharedEntity); err != nil {
+	`, runA, runB, base, entityA, entityB, sharedEntity,
+		operatorEntityHeaderConfig(t, "review/primary", "v1"), operatorEntityHeaderConfig(t, "review/secondary", "v2"),
+		operatorEntityHeaderConfig(t, "triage", "v1"), operatorLoopAccumulatedJSON(t, runA, entityA, base)); err != nil {
 		t.Fatalf("seed sqlite flow instances: %v", err)
 	}
 
@@ -265,10 +268,11 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if full.Entity.EntityType != "mvp_spec" {
 		t.Fatalf("full entity_type = %q, want mvp_spec", full.Entity.EntityType)
 	}
-	if full.Accumulated["score"] != float64(3) {
+	assertOperatorEntityOwnerClocks(t, full.Entity, base)
+	if full.Accumulated["score"] != int64(3) {
 		t.Fatalf("full accumulated = %#v, want score", full.Accumulated)
 	}
-	if bucket, ok := full.Accumulated["accumulator"].(map[string]any); !ok || bucket["count"] != float64(2) {
+	if bucket, ok := full.Accumulated["accumulator"].(map[string]any); !ok || bucket["count"] != int64(2) {
 		t.Fatalf("full accumulated bucket = %#v, want count", full.Accumulated["accumulator"])
 	}
 	assertOperatorLoopProjection(t, full)
@@ -298,7 +302,7 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities current_state: %v", err)
 	}
-	if stateAgg.Counts["collecting"] != 2 || stateAgg.Counts["done"] != 1 {
+	if stateAgg.Counts["collecting"] != 2 || stateAgg.Counts["done"] != 1 || stateAgg.AbsentCount != 0 {
 		t.Fatalf("state aggregate = %#v", stateAgg.Counts)
 	}
 	typedStateAgg, err := sqliteStore.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "current_state", Type: "mvp_spec"})
@@ -342,6 +346,34 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if _, err := sqliteStore.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: "not-a-uuid"}); !errors.Is(err, operatorread.ErrInvalidEntityReadParam) {
 		t.Fatalf("AggregateOperatorEntities invalid run id = %v, want operatorread.ErrInvalidEntityReadParam", err)
 	}
+}
+
+func assertOperatorEntityOwnerClocks(t *testing.T, entity operatorread.OperatorEntitySummary, headerAt time.Time) {
+	t.Helper()
+	if entity.StageDefined == nil || !*entity.StageDefined || entity.CurrentState == nil || *entity.CurrentState != "collecting" || entity.Revision == nil || *entity.Revision != 1 {
+		t.Fatalf("operator lifecycle did not consume the seeded header: %+v", entity)
+	}
+	if !entity.CreatedAt.Equal(headerAt.Add(time.Minute)) || !entity.UpdatedAt.Equal(headerAt.Add(time.Minute)) {
+		t.Fatalf("operator data clocks borrowed header timestamps: %+v", entity)
+	}
+	for _, clock := range []*time.Time{entity.EnteredStateAt, entity.LifecycleCreatedAt, entity.LifecycleUpdatedAt} {
+		if clock == nil || !clock.Equal(headerAt) {
+			t.Fatalf("operator lifecycle clock borrowed the data timestamp: %+v", entity)
+		}
+	}
+}
+
+func operatorEntityHeaderConfig(t *testing.T, path, version string) string {
+	t.Helper()
+	payload, err := pipeline.WorkflowInstanceHeaderPayloadForRoute(flowidentity.RouteForInstancePath(path), version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
 }
 
 func operatorLoopAccumulatedJSON(t *testing.T, runID, entityID string, now time.Time) string {
