@@ -64,3 +64,45 @@ func TestChannelSessionInstallationKeepsOneOriginalIssuer(t *testing.T) {
 		t.Fatal("foreign issuer became a visible executable context", err)
 	}
 }
+
+func TestChannelSessionResetInstallationKeepsOriginalIssuer(t *testing.T) {
+	for _, recovered := range []bool{false, true} {
+		t.Run(map[bool]string{false: "same_process", true: "startup_recovery"}[recovered], func(t *testing.T) {
+			var original []BundleContext
+			if !recovered {
+				original = []BundleContext{testBundleContext(t, runtimeContextTestHashA, "alpha.requested")}
+			}
+			manager, err := newTestRuntimeContextManager(t, nil, original...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := manager.BindChannelSessionAdmissionOwner(unissuedChannelSessionOwner{}); err != nil {
+				t.Fatal(err)
+			}
+			issuer := manager.channelSessions
+			for _, result := range manager.DeactivateAll(RuntimeContextCauseUnloaded) {
+				if result.ShutdownErr != nil {
+					t.Fatal(result.ShutdownErr)
+				}
+			}
+			next := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+			if recovered {
+				err = manager.StageRecoveredRuntimeContexts(next)
+			} else {
+				err = manager.StageResetRuntimeContexts(next)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if next.Runtime.channelSessions.Load() != issuer {
+				t.Fatal("staged reset runtime lost its original session admission owner")
+			}
+			if err := manager.PublishResetRuntimeContexts(next); err != nil || next.Runtime.channelSessions.Load() != issuer {
+				t.Fatal("published reset runtime replaced its original session admission owner", err)
+			}
+			if err := next.Runtime.bindChannelSessionAdmission(&channelSessionAdmission{owner: unissuedChannelSessionOwner{}}); err == nil {
+				t.Fatal("reset allowed a different session issuer")
+			}
+		})
+	}
+}

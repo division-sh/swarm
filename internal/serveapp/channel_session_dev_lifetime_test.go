@@ -87,6 +87,15 @@ func TestRunServeWhatsAppDevDoesNotRetainPrivateState(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(base, connectionID, "provider.db")); err != nil {
 		t.Fatal("same-process reset discarded original native state", err)
 	}
+	fresh := requireServedNativeProcessPairingRequest(t, endpoint, peer, channelonboarding.VerbConnect,
+		"native-dev-post-reset-connect", "DEV_FRESH_CLAIM", false)
+	if fresh.Operation.BindingRevision != rebound.Operation.BindingRevision+2 || servedNativeInvocationBase(t, nativeTemp) != base {
+		t.Fatal("fresh same-process connect erased its fence or replaced invocation ownership", fresh)
+	}
+	retainedHeader, err = os.ReadFile(filepath.Join(base, connectionID, "session.json"))
+	if err != nil || !bytes.Equal(header, retainedHeader) {
+		t.Fatal("fresh explicit connect adopted or rewrote the historical pairing", err)
+	}
 	if code := process.stop(); code != 0 {
 		t.Fatal("dev serve did not completely join native work", code, process.outputString())
 	}

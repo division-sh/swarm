@@ -1996,6 +1996,7 @@ func (s *cancellationTestStore) ReserveChannelOnboarding(ctx context.Context, re
 		Interface: req.Interface, Coordinate: req.Coordinate, TargetSelector: req.TargetSelector,
 		Posture: req.Posture, Ceremony: req.Ceremony, Phase: PhasePreparing, Revision: 1,
 		SaveProof: req.SaveProof, ClientLanguage: req.ClientLanguage, ClientLocaleRevision: 1,
+		ConnectFenceRevision:   req.ConnectFenceRevision,
 		CredentialReservations: append([]CredentialReservation(nil), req.CredentialReservations...),
 		RequestedAt:            req.RequestedAt, UpdatedAt: req.RequestedAt,
 	}
@@ -2341,6 +2342,18 @@ func (i *cancellationTestIdentities) RetainedCurrentBinding(ctx context.Context,
 		return binding, nil
 	}
 	return binding, err
+}
+
+func (i *cancellationTestIdentities) RetainedBindingFence(ctx context.Context, identity operatorchannel.InterfaceIdentity) (operatorchannel.BindingFence, error) {
+	if i.binding.Status == operatorchannel.BindingUnbound {
+		i.observe(ctx)
+		return operatorchannel.BindingFence{Revision: i.binding.Revision}, i.bindingErr
+	}
+	binding, err := i.RetainedCurrentBinding(ctx, identity)
+	if errors.Is(err, operatorchannel.ErrNotFound) {
+		return operatorchannel.BindingFence{}, nil
+	}
+	return operatorchannel.BindingFence{Revision: binding.Revision, CurrentIdentity: binding}, err
 }
 
 func (i *cancellationTestIdentities) CurrentBindingReadiness(ctx context.Context, identity operatorchannel.InterfaceIdentity) (operatorchannel.Binding, bool, error) {

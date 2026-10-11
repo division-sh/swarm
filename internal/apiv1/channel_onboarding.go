@@ -182,6 +182,11 @@ func channelOnboardingError(err error) error {
 	case errors.Is(err, channelonboarding.ErrInvalidRequest):
 		return NewInvalidParamsError(details)
 	default:
+		if runtimefailures.OnlyBranches(err, func(branch error) bool {
+			return branch == operatorchannel.ErrRevisionConflict || branch == operatorchannel.ErrConflict
+		}) {
+			return operatorChannelError(err)
+		}
 		return err
 	}
 }
