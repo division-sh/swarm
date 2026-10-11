@@ -646,14 +646,13 @@ func seedSpecEntityState(t *testing.T, ctx context.Context, db *sql.DB, entityID
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+			run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, $3, 'default', NULLIF($4,''), NULLIF($5,''), $6,
-			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
+			$1::uuid, $2::uuid, $3, 'default', NULLIF($4,''), NULLIF($5,''),
+			'{}'::jsonb, now(), now()
 		)
 		ON CONFLICT (run_id, entity_id) DO NOTHING
-	`, specEntityStateRunID, entityID, flowInstance, slug, name, state); err != nil {
+	`, specEntityStateRunID, entityID, flowInstance, slug, name); err != nil {
 		t.Fatalf("seed entity state: %v", err)
 	}
 }
@@ -1310,9 +1309,9 @@ func TestManagerStore_LoadRoutingRules_DoesNotJoinRunScopedEntityState(t *testin
 	for _, runID := range []string{runA, runB} {
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO entity_state (
-				run_id, entity_id, flow_instance, entity_type, slug, name, current_state
+				run_id, entity_id, flow_instance, entity_type, slug, name
 			)
-			VALUES ($1::uuid, $2::uuid, 'shared-flow', 'default', 'shared', 'Shared', 'active')
+			VALUES ($1::uuid, $2::uuid, 'shared-flow', 'default', 'shared', 'Shared')
 		`, runID, entityID); err != nil {
 			t.Fatalf("insert entity_state for run %s: %v", runID, err)
 		}

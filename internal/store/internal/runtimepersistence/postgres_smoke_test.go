@@ -29,11 +29,10 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, "testco", "test", "default", "operating", "{}", time.Now().UTC())
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+			run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'testco', 'default', 'testco', 'TestCo', 'operating',
-			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
+			$1::uuid, $2::uuid, 'testco', 'default', 'testco', 'TestCo',
+			'{}'::jsonb, now(), now()
 		)
 	`, runID, entityID); err != nil {
 		t.Fatalf("seed entity state: %v", err)
