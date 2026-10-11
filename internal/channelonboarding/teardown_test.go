@@ -591,7 +591,7 @@ func (i *recordingDestructiveIdentities) ResolveRetainedInterface(ctx context.Co
 	i.record("resolve")
 	return i.identity, nil
 }
-func (i *recordingDestructiveIdentities) CurrentBinding(ctx context.Context, _ operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error) {
+func (i *recordingDestructiveIdentities) RetainedCurrentBinding(ctx context.Context, _ operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error) {
 	i.observe(ctx)
 	i.record("current_binding")
 	return i.binding, nil
