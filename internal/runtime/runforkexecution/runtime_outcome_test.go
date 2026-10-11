@@ -464,7 +464,7 @@ func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend
 	commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
 	if backend == "postgres" {
 		seedSourceOutcomeThatMustNotSuppressFork(t, db, eventID, runID, at)
-		captureSelectedExecutionSourceRevision(t, db, runID)
+		captureSelectedExecutionSourceRevision(t, selected, runID)
 		return
 	}
 	tx, err := db.BeginTx(ctx, nil)

@@ -130,6 +130,77 @@ admission presence owner, deliberately not GetSourceArtifact's stronger decode.
 The existing snapshot owner now returns the acknowledged canonical revision
 adapter result when needed, without a second read of a possibly advanced head
 or another effects allocator. Public bridges carry detached data/receipts only.
-No constructor/caller codemod or complete-family retirement is claimed yet.
 The first cluster's native opening/readback propagation and the remaining
 ordinary constructor chains still need implementation and final census proof.
+
+### Local Propagation On Landed Master
+
+The local stack rebased cleanly onto #2604's actual landing c96e20aa7. Its tree
+matches the formerly approved 8c4914171 exactly; unchanged source-bound receipts
+carry. No push, PR, local tier, server2 run or parent-closure claim is made.
+
+The finite source-pinned family145-fork-callers codemod propagated 30 exact
+revision-capture calls and 21 constructed-history calls across five files.
+Revision capture now consumes the caller's existing native owner and returns
+the acknowledged adapter receipt, including the three explicit subset-family
+cuts. The constructed-history helpers no longer accept an unused raw pool.
+The script pins complete source/bindings, checks all five inputs and the full
+typed candidate before any write, and refuses altered/foreign/expression input.
+The activity fixture's SQLite raw capture is a named parent tail, not silently
+claimed migrated by its PostgreSQL argument handoff.
+
+Seventeen ordinary location openings now use StartPostgresRuntimeStore at the
+original resource-opening point: API directive/data, CLI data/log, three reply
+conformance roots, claim heartbeat, six provider ingress roots, provider raw
+settlement, pipeline committed-handoff cleanup, and pinned-source admission.
+Later consumer cleanup remains later than the native close ledger. Existing
+Database getters in the data/receipt families remain explicit parent debt; no
+new getter was introduced to replace a supplied pool. The terminal-panic fault,
+manager receipt carrier, parameter helpers, actual peers/reopen and Telegram's
+coupled raw readback were not treated as constructor-only because of lexical
+counts. They still require their exact original-owner migration.
+
+The two specified served NewPostgresStoreForTest reconstructions now consume
+the already installed original selected owner: historical-source startup
+integrity and persisted-missing readback. The shared served installation helper
+and its separate raw observation/fault seams are not claimed closed. Startup
+artifact corruption remains after canonical admission at the same test cut;
+schema/boot repair, the absence of readiness and retained history assertions
+have not been weakened or pre-empted by eager bootstrap.
+
+The existing recipe owner has 54 exact current transitions, 44 new rows and ten
+extensions of historical rows. The 893 original Before/After/Mechanical records
+remain unchanged. Reconciliation is pinned to c96e20aa7 and a fixed source list;
+its current transition digest is
+0683560527c0dc54545cee2e42dc48c29273bae1f5e356cac86cbc844a641a11.
+This is a local intermediate record; the whole-family record will include the
+remaining callers, classifications and retirement controls before publication.
+
+Focused Go1.25.0 / race / count1 / GOMAXPROCS=2 on vemew:
+- fork-caller-propagation.jsonl: six roots, 84 passing root/child records,
+  no failures/skips, 276.707s. Both-store activity replay and outcome settlement,
+  PostgreSQL lineage, active-delivery emission and three post-T family cuts pass.
+- native-openings.jsonl: 16 roots, 154 passing root/child records, no failures or
+  skips across five packages. Package times 12.607/23.035/24.979/10.631/78.288s;
+  no local tier or unaffected package matrix was run.
+- codemod-current-hostility.jsonl and admission-snapshots-hostility.jsonl:
+  exact finite rewrites, inert replay, unchanged caller assertions, hostile
+  bindings/source and preflight failures passed. propagation-controls-final.jsonl
+  subsequently passed all seven roots after the served transitions. The final
+  current-recipes dry run reported zero changes.
+- served-original-admission.jsonl: three roots, nine passing root/child records,
+  no failures/skips, 32.973s; all six both-store historical integrity fault cells
+  and the unchanged persisted-missing exit/readiness/history checks pass.
+- native-only targeted U1000 passed for the seven affected package families
+  before the served additions. It is not Linux/Darwin union qualification.
+
+Receipts are under ~/.cache/swarm-2542-family145 on vemew. The latest named-call
+shape survey was 182 remaining supplied-pool PostgreSQL calls before the
+pinned-source opening (181 now by exact source delta), down from 202. The two
+other constructor-spelling removals are additional, not counted in that 202.
+No fresh global census, zero additions, lowered baseline or final systematic
+consumption closure is asserted; those belong to the single whole-family
+checkpoint. The committed 10698/7754/67 census remains the last qualified global
+measurement. The remaining ordinary API observability constructor/session chain,
+fork/served seeds and counts, original live faults/capacity, private constructor
+roles, peers/reopen and final generic-capability retirement remain open here.

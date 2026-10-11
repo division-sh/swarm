@@ -245,9 +245,7 @@ func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
 }
 
 func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, authorActivityTestSourceArtifactFact.BundleHash())
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{WorkOwner: workOwner})
 	if err != nil {

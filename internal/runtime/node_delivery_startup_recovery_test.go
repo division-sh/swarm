@@ -568,9 +568,7 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 		t.Run(backend, func(t *testing.T) {
 			var selected startupRecoveryOrderStore
 			if backend == "postgres" {
-				_, postgresDB, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected = storetest.AdmitPostgresRuntimeStore(t, postgresDB)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			} else {
 				sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 				selected = sqliteStore

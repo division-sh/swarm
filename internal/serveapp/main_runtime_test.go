@@ -667,8 +667,7 @@ func TestCLI_ServeLifecycleRoutesDiagnosticsToStderr(t *testing.T) {
 }
 
 func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismatch(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := context.Background()
 	pinnedArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# pinned-source\n"))
 	otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# other-source\n"))
@@ -7495,7 +7494,7 @@ func TestRunServeRuntimeRejectsPresentZeroBeforeContextPublication(t *testing.T)
 }
 
 func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBeforeCleanup(t *testing.T) {
-	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+	_, _, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
 	ctx := context.Background()
@@ -7522,7 +7521,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 	if code != serveExitDataIntegrity {
 		t.Fatalf("Run code = %d, want %d\noutput:\n%s", code, serveExitDataIntegrity, out.String())
 	}
-	assertServeRuntimeRunStillActive(t, ctx, storetest.NewPostgresStoreForTest(db), persistedMissingRunID)
+	assertServeRuntimeRunStillActive(t, ctx, pg, persistedMissingRunID)
 	if strings.Contains(out.String(), "ready") {
 		t.Fatalf("serve reached readiness despite persisted-missing startup recovery failure:\n%s", out.String())
 	}

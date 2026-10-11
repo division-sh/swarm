@@ -359,7 +359,7 @@ func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContr
 func (f activityForkFixture) capture(t *testing.T, runID string) {
 	t.Helper()
 	if f.sqlite == nil {
-		captureSelectedExecutionSourceRevision(t, f.db.DB, runID)
+		captureSelectedExecutionSourceRevision(t, f.owner.ports.fork, runID)
 		return
 	}
 	ctx := context.Background()

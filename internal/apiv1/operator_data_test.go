@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -822,8 +821,7 @@ func TestDurableDataHTTPPublicSurfaceAcrossSelectedStores(t *testing.T) {
 	}{
 		{name: "sqlite", open: func(t *testing.T) dataHTTPSelectedStore { return storetest.StartSQLiteRuntimeStore(t) }},
 		{name: "postgres", open: func(t *testing.T) dataHTTPSelectedStore {
-			_, db, _ := testutil.StartPostgres(t)
-			return storetest.AdmitPostgresRuntimeStore(t, db)
+			return storetest.StartPostgresRuntimeStore(t)
 		}},
 	} {
 		t.Run(backend.name, func(t *testing.T) {

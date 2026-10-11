@@ -46,10 +46,18 @@ type pendingFile struct {
 
 func main() {
 	write := flag.Bool("write", false, "apply the finite reviewed rewrites after complete preflight")
+	forkCallers := flag.Bool("family145-fork-callers", false, "propagate the source-pinned original selected fork owners")
 	flag.Parse()
 	if flag.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: go run ./tools/fixture-codemod/pipeline-observations [-write]")
+		fmt.Fprintln(os.Stderr, "usage: go run ./tools/fixture-codemod/pipeline-observations [-family145-fork-callers] [-write]")
 		os.Exit(1)
+	}
+	if *forkCallers {
+		if err := migrateFamily145ForkCallers(*write); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
 	}
 	if err := migrate(*write); err != nil {
 		fmt.Fprintln(os.Stderr, err)
