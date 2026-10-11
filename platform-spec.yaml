@@ -11330,8 +11330,11 @@ tool_model:
         without a live business activation. The original RuntimeConnection separately admits its exact paired SDK
         occurrence. Production unlink has no unjournaled convenience path: callback, send and SDK-store drains
         precede the durable launch marker, which precedes unlink. Caller cancellation releases the bounded wait;
-        counted work retains settlement and cleanup. Complete success requires SDK unlink, original device deletion
-        and the original callback/socket/private-store join. Failure after launch is uncertain, even if remote unlink
+        counted process-owned work retains journal/history settlement and cleanup. That tail is reserved before
+        authorization and does not reacquire execution or completion admission from a retired runtime; SDK dispatch
+        remains separately fenced by its original runtime, source and private occurrence. Complete success requires
+        SDK unlink, original device deletion and the original callback/socket/private-store join. Failure after launch
+        is uncertain, even if remote unlink
         may have succeeded. Journal settlement and teardown result commit atomically. Startup recovery consumes the
         same frozen evidence and projection, abandoning authorized work or marking launched work uncertain without
         reconnect, deletion, success fabrication or redispatch. Terminal exact replay cannot create another attempt.
