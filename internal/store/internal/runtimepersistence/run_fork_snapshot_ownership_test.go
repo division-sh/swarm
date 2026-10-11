@@ -142,6 +142,7 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 						FlowInstance: "owner/one", EntityType: "review_item", Slug: "snapshot-slug", Name: "Snapshot Name",
 						StageDefined: true, FlowTemplate: "owner", Mode: "template", Status: "active",
 						CreatedAt: f.state.CreatedAt, UpdatedAt: f.state.UpdatedAt, EnteredStateAt: f.state.EnteredStageAt,
+						DataCreatedAt: &f.state.CreatedAt, DataUpdatedAt: &f.state.UpdatedAt,
 					}
 					if entity.MaterializationMetadata != nil {
 						var gotConfig, wantConfig any
