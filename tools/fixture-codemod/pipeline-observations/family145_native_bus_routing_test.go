@@ -13,7 +13,8 @@ import (
 )
 
 var family145NativeBusRoutingCalls = map[string][]string{
-	"TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode": {"storetest.StartPostgresRuntimeStore(t)", "eventBusTestRunContextForSource(t, pg, semanticview.Wrap(bundle))", "seedComponentFlowConstruction(t, ctx, pg, source,", "pg.CommitFlowInstanceActivation(constructionCtx, command)", "pc.FinalizeInitialEntryLifecycle(constructionCtx, committed.Lifecycle)", "runtimebustest.SubscribeIdentity(t, eb, agentIdentity, admission.CarrierOnly())", "defer runtimebustest.Unsubscribe(eb, agentID)", "delivered.Complete()", "storetest.CountTemplateNodeDelivery(ctx, pg, evt.ID(), \"account-setup-node-one\")"},
+	"TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnects": {"storetest.StartPostgresRuntimeStore(t)", "exactEventBusWorkflowFixtures(t, semanticview.Wrap(bundle),", "eventBusTestRunContextForSource(t, pg, semanticview.Wrap(bundle))", "workflowStore.PrepareInitialEntryLifecycle(", "CommitFlowInstanceActivation(", "workflowStore.FinalizeInitialEntryLifecycle(", "eb.WaitForQuiescence(ctx)", "storetest.ReadBusRoutingEventNames(context.Background(), pg)", "storetest.ReadBusAncestorDeliveryDiagnostics(context.Background(), pg)"},
+	"TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode":             {"storetest.StartPostgresRuntimeStore(t)", "eventBusTestRunContextForSource(t, pg, semanticview.Wrap(bundle))", "seedComponentFlowConstruction(t, ctx, pg, source,", "pg.CommitFlowInstanceActivation(constructionCtx, command)", "pc.FinalizeInitialEntryLifecycle(constructionCtx, committed.Lifecycle)", "runtimebustest.SubscribeIdentity(t, eb, agentIdentity, admission.CarrierOnly())", "defer runtimebustest.Unsubscribe(eb, agentID)", "delivered.Complete()", "storetest.CountTemplateNodeDelivery(ctx, pg, evt.ID(), \"account-setup-node-one\")"},
 }
 
 func family145NativeBusRoutingProofError(function, before, after string) error {
@@ -54,14 +55,79 @@ func TestFamily145NativeBusRoutingRetainsConstructionPublicationAndNodeExclusion
 		}
 		for _, assertion := range assertions {
 			condition := strings.SplitN(assertion, " => ", 2)[0]
-			if family145NativeBusRoutingProofError(row.Function, row.Before, strings.ReplaceAll(row.After, condition, "false")) == nil {
+			hostile, err := family145BusAssertionCounterexample(row.After, condition)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if family145NativeBusRoutingProofError(row.Function, row.Before, hostile) == nil {
 				t.Fatalf("lost original bus assertion accepted: %s", condition)
 			}
 		}
-		assertFamily145NativeBusNodeQuery(t, row.Before)
+		if row.Function == "TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode" {
+			assertFamily145NativeBusNodeQuery(t, row.Before)
+		} else {
+			assertFamily145BusAncestorQueries(t, row.Before)
+		}
 	}
 	if seen != len(family145NativeBusRoutingCalls) {
 		t.Fatalf("finite bus routing inventory incomplete: %d", seen)
+	}
+}
+
+func family145BusAssertionCounterexample(source, condition string) (string, error) {
+	file, err := parser.ParseFile(token.NewFileSet(), "proof.go", "package proof\n"+source, parser.AllErrors)
+	if err != nil {
+		return "", err
+	}
+	changed := false
+	ast.Inspect(file, func(node ast.Node) bool {
+		conditional, ok := node.(*ast.IfStmt)
+		if ok && family145NodeString(conditional.Cond) == condition {
+			conditional.Cond = ast.NewIdent("false")
+			changed = true
+		}
+		return true
+	})
+	if !changed {
+		return "", fmt.Errorf("original assertion condition not found in candidate: %s", condition)
+	}
+	return family145NodeString(file.Decls[0]), nil
+}
+
+func assertFamily145BusAncestorQueries(t *testing.T, before string) {
+	t.Helper()
+	original := family145ConnectorSQL(t, "package proof\n"+before)
+	for _, owner := range []struct {
+		file, function string
+		index, variant int
+	}{
+		{"eventrecord/bus_routing_observation.go", "ReadBusRoutingEventNamesTx", 0, 0},
+		{"delivery/read_projections.go", "ReadBusAncestorDeliveryDiagnosticsTx", 1, 1},
+	} {
+		path := filepath.Join("..", "..", "..", "internal", "store", "internal", "backend", owner.file)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, data, parser.AllErrors)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name.Name != owner.function {
+				continue
+			}
+			found = true
+			queries := family145ConnectorSQL(t, "package proof\n"+family145NodeString(fn))
+			if len(original) != 2 || len(queries) <= owner.variant || queries[owner.variant] != original[owner.index] {
+				t.Fatalf("ancestor observation changed exact global columns/NULL/order/join scope: %s", owner.function)
+			}
+		}
+		if !found {
+			t.Fatalf("ancestor original owner is missing: %s", owner.function)
+		}
 	}
 }
 

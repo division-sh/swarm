@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "edd095d75b02251edaa97c43239419315140e39e0af46d1f087e4488d851dbf4"
+const targetDigest = "04420f8556e38bd7172cd8b6e0e64bcc7be556acfe756b363e39ce6b91f6f9e2"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -144,7 +144,7 @@ func main() {
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
-			if path == "internal/runtime/bus/eventbus_publish_test.go" && key != "TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode" {
+			if path == "internal/runtime/bus/eventbus_publish_test.go" && key != "TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode" && key != "TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnects" {
 				continue
 			}
 			original := before[key]

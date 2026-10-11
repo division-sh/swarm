@@ -3419,10 +3419,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	if !slices.ContainsFunc(module.WorkflowNodes(), func(node runtimepipeline.WorkflowNode) bool { return node.Node.Equal(rootCollector) }) {
 		t.Fatalf("runtime workflow nodes = %#v, want exact root collector %s", module.WorkflowNodes(), rootCollector.Key())
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	var pc *runtimepipeline.PipelineCoordinator
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
@@ -3560,20 +3557,12 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	}
 
 	var emitted []string
-	rows, err := db.QueryContext(context.Background(), `SELECT event_name FROM events ORDER BY created_at ASC, event_id ASC`)
+	names, err := storetest.ReadBusRoutingEventNames(context.Background(), pg)
 	if err != nil {
 		t.Fatalf("query events: %v", err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			t.Fatalf("scan event: %v", err)
-		}
+	for _, name := range names {
 		emitted = append(emitted, strings.TrimSpace(name))
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate events: %v", err)
 	}
 
 	root, found, err := workflowStore.Load(ctx, testRunScopedFlowRoute(runtimeflowidentity.RouteForInstancePath(eventBusTestRunID)))
@@ -3584,21 +3573,13 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		t.Fatal("expected root instance")
 	}
 	if got := strings.TrimSpace(root.CurrentState); got != "done" {
-		rows, _ := db.QueryContext(context.Background(), `
-			SELECT e.event_name, d.subscriber_id, COALESCE(d.status, ''), COALESCE(d.delivery_target_route::text, '')
-			FROM event_deliveries d
-			JOIN events e ON e.event_id = d.event_id
-			ORDER BY e.created_at, d.subscriber_id, d.delivery_target_route::text
-		`)
+		rows, readErr := storetest.ReadBusAncestorDeliveryDiagnostics(context.Background(), pg)
 		deliveries := make([]string, 0)
-		if rows != nil {
-			defer rows.Close()
-			for rows.Next() {
-				var eventName, subscriberID, status, target string
-				if scanErr := rows.Scan(&eventName, &subscriberID, &status, &target); scanErr == nil {
-					deliveries = append(deliveries, eventName+"/"+subscriberID+"="+status+" "+target)
-				}
-			}
+		if readErr != nil {
+			t.Logf("read ancestor delivery diagnostics: %v", readErr)
+		}
+		for _, row := range rows {
+			deliveries = append(deliveries, row.Name+"/"+row.SubscriberID+"="+row.Status+" "+row.Target)
 		}
 		t.Fatalf("root current_state = %q, want done through declared ancestor connects; events=%v deliveries=%v", got, emitted, deliveries)
 	}

@@ -2873,3 +2873,42 @@ bus supplied-pool openings and their global/descendant diagnostic read chains
 remain explicitly pending, not claimed migrated or qualified. Parent and all
 M01/Docker/drain/D3/M07/rollback holds remain open; no process-restart claim,
 new framework, architecture issue, watchlist node, PR, push, tier or server2.
+
+## Native descendant-to-ancestor construction and chronology chain
+
+The whole declared descendant-completion fixture now opens natively and owns
+no supplied pool or query/row/transaction carrier. Its compiled structural-parent
+recipe, actual initial-entry preparation/activation/finalization, declared connect
+claim and preview, real publication and quiescence remain unchanged. Consumer
+trim/format, exact child/root states and forbidden-emission assertions remain.
+
+| Canonical owner | Exhaustive changed consumption / exact original contract |
+| --- | --- |
+| Native construction and existing bus/pipeline source owners | The complete nested-descendant witness uses one original-location selected owner and its existing native source/run/activation chain; factory close remains behind existing consumer cleanup. |
+| eventrecord | One fixed global event-name read, created_at ASC/event_id ASC; no extra column, run, state, eligibility or canonical decoder. The event bridge remains in test_event_support.go, not an event-boundary exemption. |
+| Closed delivery projection | The separate ancestor failure diagnostic retains the original inner event join, four native columns, status/target defaults and created_at/subscriber/target order. Consumer string formatting remains unchanged. Storage/query/scan/iteration/close failure returns no partial rows and never suppresses the original failed-state assertion. |
+| Finite source and assertion controls | Exact second bus-root transition, original predicates compared against the owner SQL and original assertions/calls/lifetimes hostile-controlled. Function-literal assertions are mutated by AST rather than a formatting-sensitive substring, with refusal if the original condition cannot be found. No assertion is skipped. |
+
+| Manifestation | Disposition / exact proof |
+| --- | --- |
+| Actual nested completion follows the declared ancestor connect without retired/undeclared output | reproduced and fixed: TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnects, original PostgreSQL surface under race PASS6.580s |
+| Both physical observation ports reject invalid/raw/cancelled/closed ownership and return an empty complete result on empty storage | execution-proven through the same corrected path: TestBusRoutingStorageObservationsRefuseForeignCancelledAndClosedOwnersBothStores, both stores under race PASS13.330s |
+| Complete construction, connect/preview/publication/quiescence/state/emission assertions and exact global SQL scope | execution-proven through the same corrected path: expanded native bus routing hostile/predicate controls and all family145/finite/historical/idempotency controls PASS10.070s |
+
+Receipts /home/youmew/.cache/swarm-2542-family145/native-bus-descendant-*.
+Boundary/revision/writer guards PASS6.550s, retirement guards PASS9.388s,
+dry-run Changes=[], affected U1000 clean. Unchanged wider receipts carry.
+Corpus329 / recipes1153; existing historical Before/After/source commitments
+remain intact, with only the exact current successor extended. The initial
+hostile assertion mutation exposed a formatting mismatch; AST counterfactual
+construction fixes that control without weakening the comparison.
+
+Final ratchet PASS187.080s:9015 ->9000,15 removals,0 additions; confirmed raw
+operation debt6505 ->6494, excluded uncertainty67 unchanged. Broader collector
+54736/39035 includes legitimate owners, not debt. Supplied pools94 ->93
+=91 external +2 private, M0/D56/S37; qualified openings41. Collector, policy
+and one-way debt transitions unchanged; signed-head complexity is recorded
+with the receipts. One bus supplied-pool opening plus its undeclared-child
+diagnostic/read chain remains pending. This closes the whole ancestor witness,
+not the bus/parent class. Existing semantic holds and architecture/watchlist
+tracking remain unwaived; no new framework, issue, push, PR, tier or server2.

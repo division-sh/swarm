@@ -24,6 +24,39 @@ type PreparedTargetConflictStorage struct {
 
 type TemplateDeliveryDiagnosticStorage struct{ SubscriberType, SubscriberID, Status, Reason, Failure, Target string }
 
+type BusAncestorDeliveryDiagnostic struct{ Name, SubscriberID, Status, Target string }
+
+func ReadBusAncestorDeliveryDiagnosticsTx(ctx context.Context, tx *sql.Tx, postgres bool) ([]BusAncestorDeliveryDiagnostic, error) {
+	query := `SELECT e.event_name, d.subscriber_id, COALESCE(d.status, ''), COALESCE(CAST(d.delivery_target_route AS TEXT), '')
+	FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
+	ORDER BY e.created_at, d.subscriber_id, CAST(d.delivery_target_route AS TEXT)`
+	if postgres {
+		query = `SELECT e.event_name, d.subscriber_id, COALESCE(d.status, ''), COALESCE(d.delivery_target_route::text, '')
+		FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
+		ORDER BY e.created_at, d.subscriber_id, d.delivery_target_route::text`
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BusAncestorDeliveryDiagnostic
+	for rows.Next() {
+		var row BusAncestorDeliveryDiagnostic
+		if err := rows.Scan(&row.Name, &row.SubscriberID, &row.Status, &row.Target); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func CountConnectorRunNodeDeliveriesTx(ctx context.Context, tx *sql.Tx, run, node string) (int, error) {
 	var count int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND subscriber_type='node' AND subscriber_id=$2`, run, node).Scan(&count); err != nil {

@@ -115,6 +115,22 @@ func ReadConnectorEventChronologyForTest(ctx context.Context, selected any, runI
 	return out, nil
 }
 
+func ReadBusRoutingEventNamesForTest(ctx context.Context, selected any) ([]string, error) {
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return nil, err
+	}
+	var out []string
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadBusRoutingEventNamesTx(ctx, tx)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func ReadChannelFirstActivitySourceRouteForTest(ctx context.Context, selected any, runID string) ([]byte, error) {
 	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
 		return nil, err
