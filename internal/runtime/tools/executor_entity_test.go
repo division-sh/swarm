@@ -1273,9 +1273,9 @@ func TestEntityTools_ImportedFixtureLogsInitialMutationRows(t *testing.T) {
 
 func TestEntityTools_GetEntityReturnsStoredCurrentState(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "tester", Type: "internal", Role: "operator", Tools: []string{"get_entity"}}
-	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "review", "accounts", "", "accounts:\n  status: text\n  score: numeric\n  active: boolean\n", "marginal_review")
+	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "review", "accounts", "", "accounts:\n  status: text\n  score: numeric\n  active: boolean\n", "queued", true)
 	ctx, exec := newEntityToolTestExecutorWithBundle(t, actor, bundle)
-	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
+	entityID := seedReviewedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"status": "open",
@@ -1583,9 +1583,9 @@ func captureEntityToolRunForkRevision(t *testing.T, db *sql.DB, runID string) {
 
 func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "tester", Type: "internal", Role: "operator", Tools: []string{"search_entities", "query_entities"}}
-	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "review", "accounts", "", "accounts:\n  status: text\n  score: numeric\n  active: boolean\n", "marginal_review")
+	bundle := loadWave1EntityToolBundleWithInitialStage(t, actor, "review", "accounts", "", "accounts:\n  status: text\n  score: numeric\n  active: boolean\n", "queued", true)
 	ctx, exec := newEntityToolTestExecutorWithBundle(t, actor, bundle)
-	seedImportedEntityForToolTest(t, ctx, map[string]any{
+	seedReviewedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"status": "open",
@@ -1628,6 +1628,9 @@ func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
 	queryResults, ok := queryResult["results"].([]map[string]any)
 	if !ok || len(queryResults) != 1 {
 		t.Fatalf("unexpected query results: %#v", queryResult["results"])
+	}
+	if got := strings.TrimSpace(asString(queryResults[0]["current_state"])); got != "marginal_review" {
+		t.Fatalf("query result current_state = %q, want marginal_review", got)
 	}
 }
 
@@ -2810,6 +2813,12 @@ func seedImportedEntityForToolTest(t *testing.T, ctx context.Context, input map[
 	return seedEntityToolFixtureForTest(t, ctx, input, true)
 }
 
+func seedReviewedEntityForToolTest(t *testing.T, ctx context.Context, input map[string]any) string {
+	entityID := seedImportedEntityForToolTest(t, ctx, input)
+	advanceReviewedEntityToolFixture(t, ctx, asString(input["flow_instance"]), entityID)
+	return entityID
+}
+
 func seedReadOnlyImportedEntityForToolTest(t *testing.T, ctx context.Context, input map[string]any) string {
 	return seedEntityToolFixtureForTest(t, ctx, input, false)
 }
@@ -2862,7 +2871,7 @@ func loadWave1EntityToolBundle(t *testing.T, actor models.AgentConfig, flowID, e
 	return loadWave1EntityToolBundleWithInitialStage(t, actor, flowID, entityType, typesYAML, entitiesYAML, "queued")
 }
 
-func loadWave1EntityToolBundleWithInitialStage(t *testing.T, actor models.AgentConfig, flowID, entityType, typesYAML, entitiesYAML, initial string) *runtimecontracts.WorkflowContractBundle {
+func loadWave1EntityToolBundleWithInitialStage(t *testing.T, actor models.AgentConfig, flowID, entityType, typesYAML, entitiesYAML, initial string, reviewedTransition ...bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
@@ -2889,6 +2898,10 @@ stages:
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), schemaYAML)
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), entityToolKeyedFixtureYAML(entitiesYAML))
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), entityToolAgentYAML(actor)+"  entity_writes:\n    "+entityType+": {save: all}\n")
+	if len(reviewedTransition) > 0 && reviewedTransition[0] {
+		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "events.yaml"), "advance:\n")
+		writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "nodes.yaml"), "reviewer:\n  execution_type: system_node\n  event_handlers:\n    advance: {advances_to: marginal_review}\n")
+	}
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
 	if err != nil {
