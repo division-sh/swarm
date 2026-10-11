@@ -179,19 +179,12 @@ func TestTemplateSelectExistingConformance_CoversResolutionSelectOwner(t *testin
 		t.Fatalf("route plan source = %#v, want payload.%s", key, templateselectexisting.TemplateInstanceBy)
 	}
 
-	materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
-		MatchValues: runtimepinrouting.AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}),
-		Descriptors: []runtimepinrouting.Descriptor{{
-			EntityID:      "ent-1",
-			FlowInstance:  "account/one",
-			AddressFields: map[string]string{"entity.account_id": "acct-1"},
-		}},
-	})
-	if !materialized.Failure.Empty() {
-		t.Fatalf("MaterializeConnectRoutePlan failure = %q, want none", materialized.Failure.Code())
+	material, failure := runtimepinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, runtimepinrouting.AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}))
+	if !failure.Empty() || len(material.Keys) != 1 || material.Keys[0].Field.Path() != "account_id" || material.Keys[0].Value != "acct-1" {
+		t.Fatalf("compiled material=%#v failure=%s, want account_id acct-1", material, failure.Code())
 	}
-	if materialized.Target.FlowInstance != "account/one" || materialized.Target.EntityID != "ent-1" {
-		t.Fatalf("materialized target = %#v, want account/one ent-1", materialized.Target)
+	if projected := runtimepinrouting.MaterializeConnectRoutePlan(plan); projected.Failure != runtimepinrouting.ConnectFailureReceiverResolutionMissing || !projected.Target.Empty() || len(projected.TargetSet) != 0 {
+		t.Fatalf("static projection elected a runtime receiver: %#v", projected)
 	}
 }
 
@@ -229,19 +222,12 @@ func TestTemplateSelectOrCreateConformance_CoversResolutionSelectOrCreateOwner(t
 		t.Fatalf("route plan source = %#v, want payload.%s", key, templateselectorcreate.TemplateInstanceBy)
 	}
 
-	materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
-		MatchValues: runtimepinrouting.AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}),
-		Descriptors: []runtimepinrouting.Descriptor{{
-			EntityID:      "ent-1",
-			FlowInstance:  "account/one",
-			AddressFields: map[string]string{"entity.account_id": "acct-1"},
-		}},
-	})
-	if !materialized.Failure.Empty() {
-		t.Fatalf("MaterializeConnectRoutePlan failure = %q, want none", materialized.Failure.Code())
+	material, failure := runtimepinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, runtimepinrouting.AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}))
+	if !failure.Empty() || len(material.Keys) != 1 || material.Keys[0].Field.Path() != "account_id" || material.Keys[0].Value != "acct-1" {
+		t.Fatalf("compiled material=%#v failure=%s, want account_id acct-1", material, failure.Code())
 	}
-	if materialized.Target.FlowInstance != "account/one" || materialized.Target.EntityID != "ent-1" {
-		t.Fatalf("materialized target = %#v, want account/one ent-1", materialized.Target)
+	if projected := runtimepinrouting.MaterializeConnectRoutePlan(plan); projected.Failure != runtimepinrouting.ConnectFailureReceiverResolutionMissing || !projected.Target.Empty() || len(projected.TargetSet) != 0 {
+		t.Fatalf("static projection elected a runtime receiver: %#v", projected)
 	}
 }
 
