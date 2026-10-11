@@ -1,6 +1,10 @@
 package main
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -12,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testtiming"
 	"gopkg.in/yaml.v3"
 )
@@ -86,6 +91,25 @@ func currentAttemptEvidenceFixture(t *testing.T) (config, testtiming.CommandEvid
 	path := filepath.Join(cfg.evidenceRoot, "command-primary-evidence.json")
 	evidence, err := readEvidence(path)
 	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := readPlan(cfg.planPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.BuildContext, err = testplanning.EffectiveBuildContext(context.Background(), ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Digest = ""
+	encoded, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(encoded)
+	plan.Digest = hex.EncodeToString(digest[:])
+	evidence.PlanDigest, evidence.BuildContext = plan.Digest, plan.BuildContext
+	if err := writeJSON(cfg.planPath, plan); err != nil {
 		t.Fatal(err)
 	}
 	evidence.WorkflowAttempt, evidence.ElapsedSeconds = 2, 106
@@ -268,8 +292,12 @@ func runRejectedPublisherScript(t *testing.T, cfg config, refusal string) {
 	if err := os.Mkdir(bin, 0700); err != nil {
 		t.Fatal(err)
 	}
+	realGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for name, script := range map[string]string{
-		"go":  "#!/bin/sh\nexec \"$PUBLISHER_NATIVE_BINARY\" -test.run='^TestPublisherNativeAttemptProcess$' -- \"$@\"\n",
+		"go":  "#!/bin/sh\nif [ \"$1\" = env ]; then exec \"$PUBLISHER_REAL_GO\" \"$@\"; fi\nexec \"$PUBLISHER_NATIVE_BINARY\" -test.run='^TestPublisherNativeAttemptProcess$' -- \"$@\"\n",
 		"git": "#!/bin/sh\ntest \"$*\" = 'rev-parse HEAD' || exit 1\nprintf '%s\\n' execution-head\n",
 		"gh":  "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$PUBLISHER_CALLS\"\nexit 1\n",
 	} {
@@ -298,7 +326,7 @@ func runRejectedPublisherScript(t *testing.T, cfg config, refusal string) {
 	calls := filepath.Join(dir, "calls")
 	cmd := exec.Command("bash", "-c", script)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "PUBLISHER_NATIVE_PROCESS=1", "PUBLISHER_NATIVE_BINARY="+executable, "PUBLISHER_CALLS="+calls, "GITHUB_RUN_ID=42", "GITHUB_RUN_ATTEMPT=2", "SOURCE_RUN_ID=github-actions-42-2")
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "PUBLISHER_NATIVE_PROCESS=1", "PUBLISHER_NATIVE_BINARY="+executable, "PUBLISHER_REAL_GO="+realGo, "PUBLISHER_CALLS="+calls, "GITHUB_RUN_ID=42", "GITHUB_RUN_ATTEMPT=2", "SOURCE_RUN_ID=github-actions-42-2")
 	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), refusal) {
 		t.Fatalf("A15 refusal did not reach the real native writer: %v %s", err, out)
 	}
