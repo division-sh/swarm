@@ -968,17 +968,18 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 		t.Fatalf("materialized fork run_id is empty: %#v", materialized)
 	}
 	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-	postForkRouteNode := mustPersistenceNode("flow-a", "post-t-source-route-node").Key()
-
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO routing_rules (
-			event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow,
-			is_materialized, status, created_at
-		)
-		VALUES ('item.received', 'node', $1, 'flow-a/1', 'flow-a', false, 'active', $2)
-	`, postForkRouteNode, at.Add(time.Minute)); err != nil {
-		t.Fatalf("seed post-T route: %v", err)
-	}
+	unrelatedRunID := uuid.NewString()
+	bundle := loadCanonicalSelectedContractStoreSource(t)
+	unrelatedCtx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
+	requireRunFixtureForTest(t, unrelatedCtx, pg, semanticRunFixture{
+		Origin: semanticScenarioSetupRunOriginForTest(), RunID: unrelatedRunID,
+		Artifact: bundle.SourceArtifact, StartedAt: at.Add(time.Minute),
+	})
+	commitPreparedWorkflowAggregateFixture(t, unrelatedCtx, pg, unrelatedRunID, runtimepipeline.WorkflowInstance{
+		InstanceID: unrelatedRunID, StorageRef: unrelatedRunID, EntityID: unrelatedRunID,
+		WorkflowName: ".", WorkflowVersion: semanticview.Wrap(bundle).WorkflowVersion(), Mode: "static", CurrentState: "pending",
+		CreatedAt: at.Add(time.Minute), EnteredStageAt: at.Add(time.Minute),
+	}, at.Add(time.Minute))
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,
@@ -1009,7 +1010,7 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 		t.Fatalf("run statuses source=%q fork=%q, want source forked and fork running after activation", sourceStatus, forkStatus)
 	}
 
-	var branchRows, forkDeliveryRows, sourceRouteRows, routeRecoveryRows int
+	var branchRows, forkDeliveryRows, unrelatedInstances, routeRecoveryRows int
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM run_fork_selected_contract_branch_divergences
@@ -1026,10 +1027,10 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	}
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
-		FROM routing_rules
-		WHERE subscriber_id = $1
-	`, postForkRouteNode).Scan(&sourceRouteRows); err != nil {
-		t.Fatalf("count source route rows: %v", err)
+		FROM flow_instances
+		WHERE run_id = $1::uuid AND instance_path = $1::text
+	`, unrelatedRunID).Scan(&unrelatedInstances); err != nil {
+		t.Fatalf("count unrelated native instance: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -1038,8 +1039,8 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	`, materialized.ForkRunID).Scan(&routeRecoveryRows); err != nil {
 		t.Fatalf("count route recovery rows: %v", err)
 	}
-	if branchRows != 0 || sourceRouteRows != 1 || routeRecoveryRows != 0 {
-		t.Fatalf("branch rows=%d fork delivery rows=%d source route rows=%d route recovery rows=%d, want no divergence, one untouched global route, and no invented recovery", branchRows, forkDeliveryRows, sourceRouteRows, routeRecoveryRows)
+	if branchRows != 0 || unrelatedInstances != 1 || routeRecoveryRows != 0 {
+		t.Fatalf("branch rows=%d fork delivery rows=%d unrelated instances=%d route recovery rows=%d, want no divergence, one untouched unrelated owner, and no invented recovery", branchRows, forkDeliveryRows, unrelatedInstances, routeRecoveryRows)
 	}
 	validationTx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {

@@ -616,7 +616,6 @@ func selectedForkExecutableMutationSnapshotForTest(t testing.TB, ctx context.Con
 		{name: "timers", query: `SELECT COUNT(*)::text FROM timers WHERE run_id = $1::uuid`},
 		{name: "readiness", query: `SELECT COUNT(*)::text FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid`},
 		{name: "agents", query: `SELECT COUNT(*)::text FROM agents WHERE $1::uuid IS NOT NULL`},
-		{name: "routes", query: `SELECT COUNT(*)::text FROM routing_rules WHERE $1::uuid IS NOT NULL`},
 		{name: "flow_instances", query: `SELECT COUNT(*)::text FROM flow_instances WHERE $1::uuid IS NOT NULL`},
 		{name: "execution_lineage", query: `SELECT COUNT(*)::text FROM run_fork_selected_contract_executions WHERE fork_run_id = $1::uuid`},
 		{name: "runtime_executions", query: `SELECT COUNT(*)::text FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id = $1::uuid`},
@@ -635,7 +634,6 @@ func selectedContractDynamicRuntimeGlobalSnapshot(t testing.TB, ctx context.Cont
 	out := map[string]int{}
 	for _, table := range []string{
 		"agents",
-		"routing_rules",
 		"flow_instances",
 		"flow_instance_runtime_readiness",
 		"timers",
@@ -881,19 +879,6 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	}
 	if len(recoveredRoutes) != 1 || recoveredRoutes[0].ForkRunID != result.Materialization.ForkRunID {
 		t.Fatalf("recovered route truth = %#v", recoveredRoutes)
-	}
-
-	var copiedCurrentRoutes int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM routing_rules
-		WHERE flow_instance = 'flow-a/1'
-		  AND is_materialized = true
-	`).Scan(&copiedCurrentRoutes); err != nil {
-		t.Fatalf("count current route rows: %v", err)
-	}
-	if copiedCurrentRoutes != 0 {
-		t.Fatalf("selected route recovery copied current routing_rules rows = %d, want 0", copiedCurrentRoutes)
 	}
 
 	var sourceCopiedEvents int

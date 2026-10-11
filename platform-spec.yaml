@@ -319,7 +319,7 @@ vocabulary:
     flow_instance_path:
       description: 'Concrete running instance identity. Includes the instance ID for template flows.
         Identifies a specific execution. Example: operating/vert-001. Used for: entity_state.flow_instance,
-        routing_rules.flow_instance, instance lifecycle management.'
+        flow_instances.instance_path, immutable instance lookup and lifecycle management.'
       examples:
       - scoring (static flow — scope key and instance path are the same)
       - operating/vert-001 (template instance — scope key is "operating", instance path includes the ID)
@@ -15349,6 +15349,59 @@ platform_tables:
   description: Platform-owned infrastructure tables. These exist regardless of which product contracts are loaded. They are
     the normal runtime boot schema, including canonical entity_state. They do not include product-specific typed entity
     tables derived from entities.yaml. The platform generates DDL for these at boot via GeneratePlatformTableDDLs.
+  retired_instance_routing:
+    status: unsupported
+    selected_store_policy: Reject the retired routing_rules table before preparation or runtime admission; select a fresh store. No migration, purge, export or compatibility reader is supported.
+    retired_api: 'Standalone UpsertFlowInstanceRoute, DeleteFlowInstanceRoute and ListFlowInstanceRoutes are unsupported.
+      ReplaceFlowInstanceRouteTopology, its transaction variant and the materialized topology replacement role are
+      unsupported. No independent selected-store operation writes, diffs, replaces or acknowledges an instance-route
+      mirror. Native construction/publication commits persist the exact construction and admitted delivery facts;
+      operation-local recipient binding consumes those facts without a compensating topology transaction.
+      EventBus.StageFlowInstanceRouteContext and the injected FlowRouteTopology persistence role are unsupported;
+      EventBus neither stages nor acknowledges a persisted instance-membership mirror. Construction and attachment
+      acknowledgment belong to their native commit owners, independently of any process route table.
+      The compiled source table does not export MaterializedRoutes or stage/rebuild concrete-instance topology;
+      recipient definitions bind to exact admitted instance observations without publishing membership.
+      Derivation admits the complete source declaration and subscriber definitions in one operation;
+      a graph-only partial table is not a production source-table constructor.
+      Publication preflight consumes the explicitly injected RunLifecycle.RequireActiveRun and PreparedEvents owners;
+      discovering run authority from EventStore or the redundant RequirePublicationRunActive alias is unsupported.
+      Constructed existence, immutable parent/key selection and terminal occupancy are observed through the native
+      FlowInstanceIndexReader, never through persisted route membership. Fixed-revision observations consume admitted
+      historical construction evidence; missing native receipt or readiness evidence is corruption, not an absent route.
+      ListSelectedRunTargetOwners and ListSelectedRunTargetOwnersForScope are unsupported orphan inventories.
+      ListActiveFlowInstanceDescriptorsForScope and ListActiveFlowInstanceDescriptorsForKey are unsupported;
+      normalized entity-field descriptor matching cannot elect an instance. Bounded compiled declaration or exact
+      coordinate lookup consumes immutable construction keys and stored identities, including terminal occupancy.
+      Recipient materialization reloads target evidence only through exact candidate coordinates admitted by that
+      same instance index; it does not regain an unbounded descriptor inventory after returning from planning.
+      Node lookup candidates carry the admitted handler declaration, not a declaration inferred from a stored path.
+      Root path-only and empty targets bind to the canonical selected run coordinate; contradictory explicit flow
+      or run coordinates are rejected. Non-root lookup still requires its exact concrete instance path.
+      ListFlowInstanceRouteRecords is unsupported; persisted per-instance route membership cannot elect or validate
+      an executable receiver. Instance observation and delivery planning consume their separate canonical owners.
+      A selected receiver with proven terminal stage or terminated construction produces the existing target-unreachable
+      publication outcome without creating a replacement. Unknown lifecycle, corruption, foreign-owner and independent
+      joined failures remain errors; they cannot be converted to absence or a benign target refusal.
+      A termination timestamp does not legitimize an unknown or missing lifecycle status.
+      Receiver observations consume exact admitted coordinates or compiled declaration scopes, including actual
+      structural parents and typed keys; source-entity scans cannot substitute for that selection.
+      A non-executable receiver remains occupied and historically readable; availability is not instance absence.
+      Exact direct delivery consumes its already admitted route/target without electing or reinterpreting a receiver
+      through current instance inventories. Its current exact agent availability check remains mandatory and preserves
+      independent lookup failures; receiver selection and exact committed-route consumption are distinct operations.'
+    reply_origin_availability: 'Reply recipient binding consumes the admitted native origin header or the exact
+      operation-private constructor proposal, not process route membership. A terminated or final-state origin remains
+      occupied but has no fresh reply carrier; classify the existing stale-arrival outcome without claiming its reply
+      context. Independent lookup, source, identity and corruption failures remain errors, never stale-arrival evidence.'
+    retired_observer_registry: 'A mutable template-source observer registry and its per-source-instance materialized
+      patterns are unsupported. Authored subscriptions consume their compiled admission and exact native receiver;
+      cross-flow delivery consumes the explicit compiled connection and actual stored parent/key identity. A new source
+      instance does not replace another producer family or establish a new subscription. Handler and concrete agent
+      roles remain distinct in operation-local recipient projection. The orphan SelectRouteDependencies and
+      RouteDependencySelection materialized-route replacement API is retired, not a spare graph consumer.
+      Ordinary subscriptions and connections consume the
+      same operation-private construction proposal before a new run commits; no boot-time resolver may discard it.'
   destructive_reset_cleanup_policy:
     status: internal_only
     owner: internal/runtime/destructivereset cleanup catalog and PostgresStore.ApplyDestructiveResetCleanup
@@ -15367,7 +15420,7 @@ platform_tables:
       - Fork-lineage cleanup must delete fork replay and selected-contract rows by fork/source run_id and by linked cleanup-owned event/delivery references before deleting event_deliveries or events; preserved fork/source run IDs are not sufficient proof that the row is out of scope.
       - Runtime-owned persisted facts that describe running or historical execution must carry an exact run_id, event lineage, or fork/source run lineage before destructive reset may delete them.
       - agent_directive_operations is retained replay/outcome authority rather than ordinary run history. Cleanup must fail closed while prepared, executing, executed, indeterminate, or unexpired succeeded/failed rows exist for a planned run; it may remove succeeded/failed rows only after expires_at.
-      - Concrete agents and flow instances are run-owned live execution state and are deleted before their planned runs. Authored routing law remains runless and survives; materialized routing rows are deleted by exact run_id before their flow owner.
+      - Concrete agents and flow instances are run-owned live execution state and are deleted before their planned runs. Compiled routing law derives from the admitted source artifact, not a persisted instance-route mirror. Retained source artifacts remain governed by the request-scoped retention policy.
       - Agent lifecycle operations, transition facts, diagnostic outbox rows, external-effect operation/attempt evidence, provider-attempt drain evidence, and spend/cost rows are replay, reconciliation, no-redispatch, or audit authority. Their complete run-scoped agent coordinates are immutable snapshots rather than live foreign-key selectors, so they survive deletion of the concrete agent and run. Cleanup rejects nonterminal attempts or pending drains before deleting mutable origin history.
       - Generated node-state tables remain split-preserved under their contract-owned identity. Runtime boot may create a
         missing generated node-state table only after platform-schema acceptance.
@@ -15437,7 +15490,6 @@ platform_tables:
         - conversation_fork_turns
         - conversation_forks
         - timers
-        - routing_rules
       delete_all:
         - channel_onboarding_operations
         - connected_channel_activations
@@ -18057,7 +18109,7 @@ platform_tables:
         identity and key through the same strict receipt decoder; current source/path cannot reconstruct absent facts.
         Readiness diagnostics enumerate in-scope native headers without routing-rule membership and consume native
         or positively admitted fixed-cut evidence in one repeatable-read snapshot. Native receipt/readiness absence is
-        typed corruption even when no route exists or an old route is inactive. A valid projected fixed-cut header may
+        typed corruption without any route-membership predicate. Old instance-route tables are unsupported. A valid projected fixed-cut header may
         lack fresh native rows but never receives a synthetic readiness phase. Older valid plans remain source-transition
         diagnostics without acquiring current-source execution or attachment authority. Present crossed evidence fails.
       ddl: |
@@ -18398,102 +18450,6 @@ platform_tables:
         invocation. agent_turns holds the per-turn structured execution log. Both are audit surfaces.
         agent_turns is more granular (one row per turn). agent_conversation_audits captures the complete
         conversation context (all messages, all tool results) in one row.'
-    routing_rules:
-      retired_api: 'Standalone UpsertFlowInstanceRoute, DeleteFlowInstanceRoute and ListFlowInstanceRoutes are unsupported.
-        ReplaceFlowInstanceRouteTopology, its transaction variant and the materialized topology replacement role are
-        unsupported. No independent selected-store operation writes, diffs, replaces or acknowledges an instance-route
-        mirror. Native construction/publication commits persist the exact construction and admitted delivery facts;
-        operation-local recipient binding consumes those facts without a compensating topology transaction.
-        EventBus.StageFlowInstanceRouteContext and the injected FlowRouteTopology persistence role are unsupported;
-        EventBus neither stages nor acknowledges a persisted instance-membership mirror. Construction and attachment
-        acknowledgment belong to their native commit owners, independently of any process route table.
-        The compiled source table does not export MaterializedRoutes or stage/rebuild concrete-instance topology;
-        recipient definitions bind to exact admitted instance observations without publishing membership.
-        Derivation admits the complete source declaration and subscriber definitions in one operation;
-        a graph-only partial table is not a production source-table constructor.
-        Publication preflight consumes the explicitly injected RunLifecycle.RequireActiveRun and PreparedEvents owners;
-        discovering run authority from EventStore or the redundant RequirePublicationRunActive alias is unsupported.
-        Constructed existence, immutable parent/key selection and terminal occupancy are observed through the native
-        FlowInstanceIndexReader, never through persisted route membership. Fixed-revision observations consume admitted
-        historical construction evidence; missing native receipt or readiness evidence is corruption, not an absent route.
-        ListSelectedRunTargetOwners and ListSelectedRunTargetOwnersForScope are unsupported orphan inventories.
-        ListActiveFlowInstanceDescriptorsForScope and ListActiveFlowInstanceDescriptorsForKey are unsupported;
-        normalized entity-field descriptor matching cannot elect an instance. Bounded compiled declaration or exact
-        coordinate lookup consumes immutable construction keys and stored identities, including terminal occupancy.
-        Recipient materialization reloads target evidence only through exact candidate coordinates admitted by that
-        same instance index; it does not regain an unbounded descriptor inventory after returning from planning.
-        Node lookup candidates carry the admitted handler declaration, not a declaration inferred from a stored path.
-        Root path-only and empty targets bind to the canonical selected run coordinate; contradictory explicit flow
-        or run coordinates are rejected. Non-root lookup still requires its exact concrete instance path.
-        ListFlowInstanceRouteRecords is unsupported; persisted per-instance route membership cannot elect or validate
-        an executable receiver. Instance observation and delivery planning consume their separate canonical owners.
-        A selected receiver with proven terminal stage or terminated construction produces the existing target-unreachable
-        publication outcome without creating a replacement. Unknown lifecycle, corruption, foreign-owner and independent
-        joined failures remain errors; they cannot be converted to absence or a benign target refusal.
-        A termination timestamp does not legitimize an unknown or missing lifecycle status.
-        Receiver observations consume exact admitted coordinates or compiled declaration scopes, including actual
-        structural parents and typed keys; source-entity scans cannot substitute for that selection.
-        A non-executable receiver remains occupied and historically readable; availability is not instance absence.
-        Exact direct delivery consumes its already admitted route/target without electing or reinterpreting a receiver
-        through current instance inventories. Its current exact agent availability check remains mandatory and preserves
-        independent lookup failures; receiver selection and exact committed-route consumption are distinct operations.'
-      reply_origin_availability: 'Reply recipient binding consumes the admitted native origin header or the exact
-        operation-private constructor proposal, not process route membership. A terminated or final-state origin remains
-        occupied but has no fresh reply carrier; classify the existing stale-arrival outcome without claiming its reply
-        context. Independent lookup, source, identity and corruption failures remain errors, never stale-arrival evidence.'
-      retired_observer_registry: 'A mutable template-source observer registry and its per-source-instance materialized
-        patterns are unsupported. Authored subscriptions consume their compiled admission and exact native receiver;
-        cross-flow delivery consumes the explicit compiled connection and actual stored parent/key identity. A new source
-        instance does not replace another producer family or establish a new subscription. Handler and concrete agent
-        roles remain distinct in operation-local recipient projection. The orphan SelectRouteDependencies and
-        RouteDependencySelection materialized-route replacement API is retired, not a spare graph consumer.
-        Ordinary subscriptions and connections consume the
-        same operation-private construction proposal before a new run commits; no boot-time resolver may discard it.'
-      description: 'Unified routing table for both contract-defined patterns and materialized instance routes. Replaces the
-        need for a separate flow_instance_routes table. At boot: contract subscriptions inserted as pattern rows (is_wildcard
-        may be true). On receiver creation: wildcard patterns expanded into concrete rows (is_materialized = true, materialized_from
-        = parent rule_id). On flow instance termination: materialized rows set to inactive. Event dispatch: match concrete
-        routes first (is_materialized = true, exact match), fall back to wildcard patterns.'
-      ddl: |
-        CREATE TABLE routing_rules (
-            rule_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            run_id            UUID REFERENCES runs(run_id),
-            event_pattern     TEXT NOT NULL,
-            subscriber_type   TEXT NOT NULL CHECK (subscriber_type IN ('node', 'agent')),
-            subscriber_id     TEXT NOT NULL,
-            flow_instance     TEXT,
-            source_flow       TEXT,
-            is_wildcard       BOOLEAN NOT NULL DEFAULT FALSE,
-            is_materialized   BOOLEAN NOT NULL DEFAULT FALSE,
-            materialized_from UUID,
-            status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
-            created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            CHECK ((is_materialized AND run_id IS NOT NULL AND flow_instance IS NOT NULL) OR (NOT is_materialized AND run_id IS NULL)),
-            FOREIGN KEY (run_id, flow_instance) REFERENCES flow_instances (run_id, instance_path),
-            INDEX idx_routing_event (run_id, event_pattern, status),
-            INDEX idx_routing_subscriber (run_id, subscriber_id),
-            INDEX idx_routing_flow (run_id, flow_instance) WHERE flow_instance IS NOT NULL,
-            INDEX idx_routing_materialized (materialized_from) WHERE materialized_from IS NOT NULL
-        );
-      lifecycle:
-        boot: Load contract subscriptions → INSERT pattern rows. Clear stale materialized rows from previous boot.
-        receiver_creation: In one selected mutation, project active dynamic-instance descriptors from the exact matching
-          `{bundle_hash, workflow_version}`, derive the complete topology including cross-instance observers,
-          and replace each affected flow_instance owner's active materialized set. Replacement inactivates rows absent from
-          the derived set and upserts expected rows with concrete flow_instance and rendered subscriber_id.
-          The same transaction may reuse its held active-run admission across that run's route owners, never across
-          runs or transactions. PostgreSQL resolves each materialized source reference and upserts the route in one
-          SQL statement, preserving source-match and absent-source semantics; this does not batch business mutations
-          or remove exact-owner replacement and rollback checks.
-          Exact instance updates on both stores consume the admitted nonempty instance path directly,
-          allowing the existing run/instance index to serve the lookup without NULL-path normalization.
-        terminate_flow_instance: In the same selected mutation as terminal lifecycle truth, derive topology without the
-          terminal owner and exact-set replace every affected source/consumer owner plus the terminal owner's empty set.
-          Every direct or composed caller must enter that selected mutation before terminal state changes; no two-transaction
-          fallback exists. Replacement failure rolls terminal lifecycle and every route owner back together. Process route
-          retirement and agent teardown are post-commit only.
-        event_dispatch: SELECT WHERE event_pattern matches AND status = active. Concrete rows (is_materialized) take priority
-          over wildcards.
     mailbox:
       description: 'Notice-only human mailbox queue. Generic mailbox rows cannot own typed decisions and cannot be decided
         or deferred. from_agent identifies the producer, summary provides human-readable notice content, and source_event_id
