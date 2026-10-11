@@ -1264,7 +1264,7 @@ func TestEntityTools_SaveEntityField_LogsNestedMutationRow(t *testing.T) {
 }
 
 func TestEntityTools_ImportedFixtureLogsInitialMutationRows(t *testing.T) {
-	ctx, _, db := newEntityToolTestHarness(t)
+	ctx, _, _ := newEntityToolTestHarness(t)
 	entityID := seedReadOnlyImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -1273,42 +1273,38 @@ func TestEntityTools_ImportedFixtureLogsInitialMutationRows(t *testing.T) {
 		},
 	})
 
-	rows, err := db.QueryContext(ctx, `
-		SELECT domain, path, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
-		FROM entity_mutations
-		WHERE entity_id = $1::uuid
-		ORDER BY created_at ASC, mutation_id ASC
-	`, entityID)
-	if err != nil {
-		t.Fatalf("query entity mutations: %v", err)
+	fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
+	owner := flowidentity.RunScopedFlowInstance{RunID: entityToolTestRunID,
+		Route: flowidentity.StoredRoute("review", "inst-1", "review/inst-1")}
+	if header, found, err := fixture.pipeline.Load(ctx, owner); err != nil || found {
+		t.Fatalf("read-only import acquired a constructed header: found=%t instance=%+v err=%v", found, header, err)
 	}
-	defer rows.Close()
-
-	fields := map[string][3]string{}
-	for rows.Next() {
-		var (
-			domain      string
-			path        string
-			writerType  string
-			writerID    string
-			handlerStep string
-		)
-		if err := rows.Scan(&domain, &path, &writerType, &writerID, &handlerStep); err != nil {
-			t.Fatalf("scan entity mutation: %v", err)
+	report, err := fixture.selected.(operatorread.RunReader).LoadRunDebugReport(ctx, entityToolTestRunID, operatorread.RunDebugQueryOptions{MutationLimit: 100})
+	if err != nil || len(report.Mutations) >= 100 {
+		t.Fatalf("load complete imported entity mutation history: count=%d err=%v", len(report.Mutations), err)
+	}
+	wantFields := map[string]any{"status": "open", "score": float64(10), "priority": float64(0)}
+	seen := map[string]bool{}
+	for _, row := range report.Mutations {
+		if row.EntityID != entityID {
+			continue
 		}
-		fields[strings.TrimSpace(domain)+":"+strings.TrimSpace(path)] = [3]string{writerType, writerID, handlerStep}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read entity mutations: %v", err)
-	}
-
-	for _, want := range []string{"lifecycle_state:", "authored_field:score", "authored_field:status"} {
-		meta, ok := fields[want]
-		if !ok {
-			t.Fatalf("missing mutation field %q in %#v", want, fields)
+		want, declared := wantFields[row.Path]
+		if row.Domain != "authored_field" || !declared || seen[row.Path] {
+			t.Fatalf("import acquired lifecycle, unexpected or duplicate field history: %+v", row)
 		}
-		if meta[0] != "platform" || meta[1] != "test.setup_entities" || meta[2] != "" {
-			t.Fatalf("import mutation metadata for %q = %#v, want platform/test.setup_entities/empty", want, meta)
+		seen[row.Path] = true
+		if row.WriterType != "platform" || row.WriterID != "test.setup_entities" || row.HandlerStep != "" {
+			t.Fatalf("import mutation metadata for %q = %#v, want platform/test.setup_entities/empty", row.Path, row)
+		}
+		var value any
+		if err := json.Unmarshal(row.NewValue, &value); err != nil || !reflect.DeepEqual(value, want) {
+			t.Fatalf("imported %s value = %s, want %#v: %v", row.Path, row.NewValue, want, err)
+		}
+	}
+	for field := range wantFields {
+		if !seen[field] {
+			t.Fatalf("missing imported authored_field:%s in %#v", field, report.Mutations)
 		}
 	}
 }

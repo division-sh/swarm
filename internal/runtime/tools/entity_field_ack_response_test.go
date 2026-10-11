@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -45,7 +46,6 @@ func TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStore
 				bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", "", "accounts:\n  status: text\n  items: list<text>\n")
 				var base runtimetools.EntityPersistence
 				var sourceCtx context.Context
-				query := `SELECT revision FROM entity_state WHERE run_id = ? AND entity_id = ?`
 				mutationQuery := `SELECT COUNT(*) FROM entity_mutations WHERE run_id = ? AND entity_id = ?`
 				if backend == "sqlite" {
 					selected := newSQLiteRuntimeToolStoreForTest(t)
@@ -55,7 +55,6 @@ func TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStore
 					selected := newPostgresHumanTaskToolStoreForTest(t)
 					sourceCtx = seedEntityToolSourceRun(t, selected, bundle)
 					base = selected
-					query = `SELECT revision FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 					mutationQuery = `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 				}
 				fault := errors.Join(errors.New("independent post-commit cleanup failed"), errors.New("SQL connection password=private-token"))
@@ -71,12 +70,16 @@ func TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStore
 					"flow_instance": "review/inst-1", "fields": map[string]any{"status": "open", "items": []any{"equal"}},
 				})
 				db := storetest.DatabaseForTest(base)
-				var before, baselineRevision int
+				var before int
 				if err := db.QueryRowContext(ctx, mutationQuery, entityToolTestRunID, entityID).Scan(&before); err != nil {
 					t.Fatal(err)
 				}
-				if err := db.QueryRowContext(ctx, query, entityToolTestRunID, entityID).Scan(&baselineRevision); err != nil {
-					t.Fatal(err)
+				owner := flowidentity.RunScopedFlowInstance{RunID: entityToolTestRunID,
+					Route: flowidentity.StoredRoute("review", "inst-1", "review/inst-1")}
+				baseline, found, err := fixture.pipeline.Load(ctx, owner)
+				if err != nil || !found || baseline.EntityID != entityID || baseline.StorageRef != owner.Route.InstancePath ||
+					!baseline.StageDefined || baseline.CurrentState != "queued" || baseline.Revision < 1 {
+					t.Fatalf("constructed acknowledgement target: found=%t instance=%+v err=%v", found, baseline, err)
 				}
 				input := map[string]any{
 					"entity_id": entityID, "field": "status", "value": "closed",
@@ -120,15 +123,18 @@ func TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStore
 				if !diagnosticFound {
 					t.Fatal("acknowledged post-commit failure was not logged internally")
 				}
-				var revision, count int
-				if err := db.QueryRowContext(ctx, query, entityToolTestRunID, entityID).Scan(&revision); err != nil {
-					t.Fatal(err)
+				committed, found, err := fixture.pipeline.Load(ctx, owner)
+				if err != nil || !found || committed.EntityID != entityID || committed.StorageRef != owner.Route.InstancePath ||
+					committed.StageDefined != baseline.StageDefined || committed.CurrentState != baseline.CurrentState {
+					t.Fatalf("committed header readback: found=%t instance=%+v err=%v", found, committed, err)
 				}
+				var count int
 				if err := db.QueryRowContext(ctx, mutationQuery, entityToolTestRunID, entityID).Scan(&count); err != nil {
 					t.Fatal(err)
 				}
-				if response["revision"] != revision || revision != baselineRevision+1 || count != before+1 || writer.writes != 1 {
-					t.Fatalf("committed revision = %#v, persisted revision = %d, mutations = %d, writes = %d", response["revision"], revision, count, writer.writes)
+				revision, validRevision := response["revision"].(int)
+				if !validRevision || int64(revision) != committed.Revision || committed.Revision != baseline.Revision+1 || count != before+1 || writer.writes != 1 {
+					t.Fatalf("committed revision = %#v, persisted revision = %d, mutations = %d, writes = %d", response["revision"], committed.Revision, count, writer.writes)
 				}
 				row, found, err := base.LoadEntityState(ctx, runtimetools.EntityIdentity{RunID: entityToolTestRunID, EntityID: entityID})
 				if err != nil || !found {
@@ -136,6 +142,9 @@ func TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStore
 				}
 				if operation == "append" && !reflect.DeepEqual(row["fields"].(map[string]any)["items"], []any{"equal", "equal"}) {
 					t.Fatalf("acknowledged append was repeated or lost multiplicity: %#v", row["fields"])
+				}
+				if operation == "set" && row["fields"].(map[string]any)["status"] != "closed" {
+					t.Fatalf("acknowledged set was not persisted: %#v", row["fields"])
 				}
 				writer.reject = true
 				input["value"] = "other"
@@ -149,6 +158,10 @@ func TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStore
 				after, found, err := base.LoadEntityState(ctx, runtimetools.EntityIdentity{RunID: entityToolTestRunID, EntityID: entityID})
 				if err != nil || !found || !reflect.DeepEqual(row, after) {
 					t.Fatalf("unacknowledged write changed state: %#v, %v", after, err)
+				}
+				afterHeader, found, err := fixture.pipeline.Load(ctx, owner)
+				if err != nil || !found || !reflect.DeepEqual(committed, afterHeader) {
+					t.Fatalf("unacknowledged write changed header: found=%t instance=%+v err=%v", found, afterHeader, err)
 				}
 			})
 		}
