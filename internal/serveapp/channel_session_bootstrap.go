@@ -20,6 +20,7 @@ type serveSessionBootstrapRuntime func(context.Context, channelonboarding.Candid
 
 type serveSessionBootstrapOwner interface {
 	channelonboarding.SessionBootstrapOwner
+	channelonboarding.SessionLogoutLifecycle
 	operatorchannel.CredentialCurrentness
 	operatorchannel.SessionAdmissionOwner
 	ObserveSession(context.Context, channelonboarding.Operation) (operatorchannel.ProviderAuthority, operatorchannel.SessionConnectionObservation, bool, error)
