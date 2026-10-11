@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	"github.com/google/uuid"
@@ -118,6 +119,45 @@ func TestRunForkFanOutBarrierTerminalHistoryDoesNotRearm(t *testing.T) {
 			runForkBarrierDueMutation(t, true, source, nil, owner.birth, owner)
 			if len(owner.commands) != 0 {
 				t.Fatal("terminal barrier history admitted a new schedule")
+			}
+		})
+	}
+}
+
+func TestRunForkFanOutBarrierProjectionSharesExactOwnership(t *testing.T) {
+	source, _ := runForkBarrierDueFixture(t)
+	childRun := uuid.NewString()
+	at := source.UpdatedAt.Add(time.Hour)
+	selected := source.Registration.PlanRef
+	selected.BundleHash = "bundle-v2:sha256:" + strings.Repeat("c", 64)
+	selected.SemanticDigest = "sha256:" + strings.Repeat("d", 64)
+	projected, err := runfork.ProjectFanOutBarrierRegistration(source.Registration, childRun, selected, nil, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, _ := projected.Handle.JoinRef()
+	intent, _ := ref.FanOutDelivery()
+	if projected.IntentKey.RunID != childRun || projected.EntityID != childRun || projected.Route.InstancePath != childRun ||
+		projected.RoutingSource.Route().EntityID != childRun || projected.PlanRef != selected ||
+		intent.TriggeringDeliveryID() != source.Registration.IntentKey.TriggeringDeliveryID || intent.BundleHash() != selected.BundleHash ||
+		intent.SemanticDigest() != selected.SemanticDigest || projected.ExecutionMode != source.Registration.ExecutionMode || !projected.CreatedAt.Equal(at) {
+		t.Fatalf("barrier projection replaced lineage or failed exact child ownership: %+v", projected)
+	}
+	for _, fault := range []string{"same_run", "declaration", "birth", "digest"} {
+		t.Run(fault, func(t *testing.T) {
+			run, plan, born := childRun, selected, at
+			switch fault {
+			case "same_run":
+				run = source.Registration.IntentKey.RunID
+			case "declaration":
+				plan.ElementRef.SemanticPath += ".foreign"
+			case "birth":
+				born = time.Time{}
+			case "digest":
+				plan.SemanticDigest = ""
+			}
+			if _, err := runfork.ProjectFanOutBarrierRegistration(source.Registration, run, plan, nil, born); err == nil {
+				t.Fatal("invalid selected barrier projection accepted")
 			}
 		})
 	}

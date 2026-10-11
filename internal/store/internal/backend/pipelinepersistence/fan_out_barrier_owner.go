@@ -11,8 +11,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
@@ -1020,62 +1018,10 @@ func materializeRunForkFanOutBarrierTx(
 	if err != nil {
 		return err
 	}
-	sourceJoin, _ := source.Registration.Handle.JoinRef()
-	var childGeneration attemptgeneration.Generation
-	if generation != nil {
-		if generation.Source().Generation() != sourceJoin.Generation() {
-			return fmt.Errorf("fork barrier source generation contradicts admitted correspondence")
-		}
-		projection, err := runfork.ProjectEntityOwnership(source.Registration.IntentKey.RunID, forkRunID, source.Registration.EntityID, source.Registration.Route.InstancePath)
-		if err != nil {
-			return err
-		}
-		if err := generation.RequireDestination(forkRunID, projection.Fork.EntityID); err != nil {
-			return err
-		}
-		childGeneration = generation.Generation()
-	} else if sourceJoin.Generation() != (attemptgeneration.Generation{}) {
-		return fmt.Errorf("fork barrier requires its admitted child generation")
-	}
-	fanOutDeclaration, identityErr := selectedRef.ElementRef.DeclarationIdentity()
-	if identityErr != nil {
-		return fmt.Errorf("selected fan-out declaration: %w", identityErr)
-	}
-	selectedJoin, err := timeridentity.NewFanOutDeliveryJoinRef(
-		sourceJoin.Node(), sourceJoin.HandlerEvent(), sourceJoin.JoinID(),
-		fanOutDeclaration,
-		selectedRef.BundleHash, selectedRef.SemanticDigest,
-	)
+	registration, err := runfork.ProjectFanOutBarrierRegistration(source.Registration, forkRunID, selectedRef, generation, at)
 	if err != nil {
 		return err
 	}
-	selectedJoin, err = selectedJoin.BindFanOutIntent(source.Registration.IntentKey.TriggeringDeliveryID, childGeneration)
-	if err != nil {
-		return err
-	}
-	handle, err := timeridentity.JoinCompleteHandle(selectedJoin)
-	if err != nil {
-		return err
-	}
-	registration := source.Registration
-	entityProjection, err := runfork.ProjectEntityOwnership(source.Registration.IntentKey.RunID, forkRunID, registration.EntityID, registration.Route.InstancePath)
-	if err != nil {
-		return err
-	}
-	registration.Route, err = runfork.ProjectExecutionRoute(source.Registration.IntentKey.RunID, forkRunID, sourceJoin.FlowPath(), registration.Route)
-	if err != nil {
-		return err
-	}
-	registration.RoutingSource, err = runfork.ProjectProducerOwnership(source.Registration.IntentKey.RunID, forkRunID, registration.RoutingSource)
-	if err != nil {
-		return err
-	}
-	registration.EntityID = entityProjection.Fork.EntityID
-	registration.IntentKey.RunID = strings.TrimSpace(forkRunID)
-	registration.IntentKey.ElementRef = selectedRef.ElementRef
-	registration.PlanRef = selectedRef
-	registration.Handle = handle
-	registration.CreatedAt = at.UTC()
 	if err := commitFanOutBarrierRegistrationTx(ctx, attempt, postgres, registration); err != nil {
 		return err
 	}
@@ -1107,7 +1053,7 @@ func materializeRunForkFanOutBarrierTx(
 		scheduleKey = command.ScheduleKey
 		scheduleActivationID = admitted.Activation.ID
 	} else if source.Status == fanoutbarrier.StatusFired || source.Status == fanoutbarrier.StatusOutcomeDeadLettered {
-		scheduleKey = handle.TaskID()
+		scheduleKey = registration.Handle.TaskID()
 	}
 	query := `
 		UPDATE fan_out_obligation_barriers
