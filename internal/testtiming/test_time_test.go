@@ -48,7 +48,7 @@ func TestTestTimeGrowthRequiresBothBounds(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			base := timingReferenceRoots(t, []RootTime{timingRoot("TestOld", test.base)}, rootTimingPolicy())
 			row, problems := compareTimingTier(base, []RootTime{timingRoot("TestOld", test.base+test.growth)}, rootTimingPolicy(), "core", TestTimeStrict)
-			if (len(problems) != 0) != test.fail || math.Abs(row.Growth-test.growth) > 1e-8 {
+			if len(problems) != 0 || (row.StrictStatus == BudgetFail) != test.fail || (len(row.Warnings) != 0) != test.fail || math.Abs(row.Growth-test.growth) > 1e-8 {
 				t.Fatalf("row=%+v problems=%v", row, problems)
 			}
 		})

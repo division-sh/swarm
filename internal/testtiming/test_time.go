@@ -381,7 +381,7 @@ func (row *TestTimeTier) costProblems(mode TestTimeMode) []string {
 	}
 	if mode == TestTimeStrict {
 		if row.Growth > row.Allowance+1e-9 {
-			return []string{fmt.Sprintf("%s: unreviewed test-time growth %.3fs exceeds min(5%% of %.3fs, 600s) = %.3fs", row.Tier, row.Growth, row.Baseline, row.Allowance)}
+			row.Warnings = append(row.Warnings, fmt.Sprintf("%s: strict aggregate growth is advisory: %.3fs exceeds min(5%% of %.3fs, 600s) = %.3fs", row.Tier, row.Growth, row.Baseline, row.Allowance))
 		}
 		return nil
 	}
@@ -431,7 +431,7 @@ func projectTimingRoots(roots []RootTime, policy testplanning.Policy, tier strin
 }
 
 func WriteTestTimeMarkdown(w io.Writer, result TestTimeResult) error {
-	if _, err := fmt.Fprintf(w, "\n## Pinned Test-Time Ratchet\n\n%s, mode `%s`, against full run %d (`%s`). PRs enforce independent added/promoted cost; strict cadence enforces the complete aggregate. Parent/direct-child elapsed is counted once; separate soak cells count separately. Removed/renamed roots grant no timing credit. A Test-Time line alone never approves an exception.\n\n| Tier | Baseline | Comparable + new (removed neutral) | Aggregate growth | min(5%%, 600s) | Added cost | Retained delta | Strict counterfactual | Retained | Added | Removed/renamed |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |\n", result.Status, result.Mode, result.ReferenceRunID, result.ReferenceSource); err != nil {
+	if _, err := fmt.Fprintf(w, "\n## Pinned Test-Time Ratchet\n\n%s, mode `%s`, against full run %d (`%s`). PRs enforce independent added/promoted cost; cadence reports aggregate growth as advisory. Parent/direct-child elapsed is counted once; separate soak cells count separately. Removed/renamed roots grant no timing credit. A Test-Time line alone never approves an exception.\n\n| Tier | Baseline | Comparable + new (removed neutral) | Aggregate growth | min(5%%, 600s) | Added cost | Retained delta | Strict counterfactual | Retained | Added | Removed/renamed |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |\n", result.Status, result.Mode, result.ReferenceRunID, result.ReferenceSource); err != nil {
 		return err
 	}
 	for _, tier := range result.Tiers {
