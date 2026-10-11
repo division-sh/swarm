@@ -53,8 +53,12 @@ type runForkCLIConstructionOwner interface {
 
 // This establishes real source construction, not executable attachment or a
 // public launch. The fork controls keep their original admission assertions.
-func seedRunForkCLIConstruction(t *testing.T, selected runForkCLIConstructionOwner, runID, bundleHash string, at time.Time) {
+func seedRunForkCLIConstruction(t *testing.T, fixture storetest.RunFixtureStore, runID, bundleHash string, at time.Time) {
 	t.Helper()
+	selected, ok := fixture.(runForkCLIConstructionOwner)
+	if !ok || selected == nil {
+		t.Fatal("source construction requires the original selected semantic roles")
+	}
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{
 		RepoRoot: repoRootForTest(), PlatformSpecPath: contracts.DefaultPlatformSpecFile(repoRootForTest()), Store: selected,
 	}
