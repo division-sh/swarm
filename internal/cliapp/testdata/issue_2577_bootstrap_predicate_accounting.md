@@ -155,3 +155,42 @@ The repaired both-store process-death journey is GREEN under `-race`.
 The changed A10/A27 predicate fingerprint is regenerated only after these
 execution proofs and the no-dispatch/no-invented-settlement store proof pass.
 No scanner, inclusion, P08/P10/P21 obligation, deadline or census policy changes.
+
+The cancellation boundary is also retained after inspection: cancellation during
+the pending-row lookup must not return successful recovery or authorize SDK work.
+The selected-store cancellation adapter delegates the real read and then cancels;
+it changes no rows and adds no journal authority.
+
+The actual public `cliapp.Execute` journey additionally consumes the existing
+pre-dispatch API-flag leaf classifier. `channel.logout` was missing there even
+though Cobra declared its flags; the internal command-construction fixture did
+not traverse that public entry point. The classifier now includes the exact
+logout leaf, and its existing surface/isolation table covers all channel leaves
+and still refuses the channel parent. No guessed endpoint, compatibility flag,
+internal client override or private-store access substitutes for public CLI
+admission. CLI unlink/replay execution receipts must pass before claiming closure.
+
+`TestRunServeWhatsAppPublicLogoutBothStores` now initiates the actual unlink
+through public `cliapp.Execute`, explicit server-base/token-file flags, real RPC,
+original SDK and journal. RPC then proves exact terminal replay and historical
+readback. `TestServedWhatsAppLogoutLaunchedProcessDeathBothStores` additionally
+uses that same CLI after each restart and checks the unchanged uncertain result.
+Both-store `-race` journeys pass; the fixture uses a parsed server base, not a
+forbidden direct RPC endpoint or internal client override.
+
+`TestWhatsAppLogoutJournalProcessDeathBothStores` uses the existing private SDK
+and selected-store owners in an owned child. It kills only after acknowledged
+authorization (zero unlink frames) or genuine SDK unlink/deletion/join before
+journal settlement. The parent joins the child, reconciles twice with its
+admitted source/runtime context, and requires one unchanged frozen result.
+Authorized death retains the exact paired device; post-deletion death remains
+uncertain and exact private reopening refuses missing pairing, never recreating
+deleted bytes. All four store/boundary cells pass under `-race`. No SDK patch,
+SQL injection, alternate journal or new startup dispatcher is used.
+
+`TestSessionLogoutJournalBothStores` also attempts concurrent native dispatch
+while the original unlink result is withheld: refusal, unchanged launched
+outcome and zero second frame. The selected-store recovery test's cancellation
+during lookup is independently RED before the post-inspection guard and GREEN
+after it on both stores. These are additional finite N66 proofs, not physical
+P01-P09 or a claim that the remaining served notice/successor matrix is closed.
