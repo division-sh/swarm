@@ -221,14 +221,14 @@ func servedNativeProcessOptions(t *testing.T, backend string) (cliapp.ServeOptio
 
 func requireServedNativeProcessPairing(t *testing.T, endpoint string, peer *serveNativeProtocolPeer) channelonboarding.Result {
 	t.Helper()
-	return requireServedNativeProcessPairingRequest(t, endpoint, peer, channelonboarding.VerbConnect, "native-process-pairing", "SERVED_CLAIM")
+	return requireServedNativeProcessPairingRequest(t, endpoint, peer, channelonboarding.VerbConnect, "native-process-pairing", "SERVED_CLAIM", false)
 }
 
-func requireServedNativeProcessPairingRequest(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, verb channelonboarding.Verb, key, claimMessageID string) channelonboarding.Result {
+func requireServedNativeProcessPairingRequest(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, verb channelonboarding.Verb, key, claimMessageID string, saveProof bool) channelonboarding.Result {
 	t.Helper()
 	var result channelonboarding.Result
 	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_start", map[string]any{
-		"provider": "whatsapp", "verb": string(verb), "save_proof": false, "idempotency_key": key}, &result)
+		"provider": "whatsapp", "verb": string(verb), "save_proof": saveProof, "idempotency_key": key}, &result)
 	id := result.Operation.OperationID
 	deadline := time.Now().Add(5 * time.Second)
 	for result.Pairing == nil || result.Pairing.Code == "" {
