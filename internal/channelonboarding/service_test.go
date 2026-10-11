@@ -2205,6 +2205,11 @@ func (s *cancellationTestStore) CompleteChannelTeardown(ctx context.Context, _ C
 	return TeardownOperation{}, ErrNotFound
 }
 
+func (s *cancellationTestStore) RecoverUnlaunchedChannelLogout(ctx context.Context, _ string, _ int64, _ time.Time) (TeardownOperation, error) {
+	s.observe(ctx)
+	return TeardownOperation{}, ErrNotFound
+}
+
 type cancellationTestIdentities struct {
 	operation             operatorchannel.Operation
 	binding               operatorchannel.Binding
