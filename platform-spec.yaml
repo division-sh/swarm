@@ -6065,6 +6065,11 @@ engine:
           The ActiveFlowInstanceDescriptor DTO, its path-normalizing projection and test-only lifecycle mirror are
           retired. Native observations and captured constructor receipts supply the exact construction assertions;
           a process activation callback records resource follow-up, not instance election or creation authority.
+          MaterializeConnectRoutePlan accepts only the compiled plan and projects static single/set targets with
+          detached set storage. It accepts no payload-key or descriptor input and cannot elect a runtime receiver.
+          The selected root consumes its separate admitted run coordinate. Keyed selection consumes the native
+          index through R5.1; compiled key-material and event-sourced key-material admission remain shared preparation
+          owners, not store lookup or construction permission.
           Constructor, deployment-root, scenario-setup and publication commands MUST NOT carry a derived route-topology
           passenger or persist a parallel subscriber mirror. The existing native transaction retains run/source/grant
           fencing, exact constructor election, immutable creating receipts, initial lifecycle work, delivery evidence,
@@ -14475,7 +14480,7 @@ flow_model:
         runtime_invariant: |
           Connect-route materialization MUST preserve the normalized receiver input pin and receiver-local event as one transient routing fact, then compare that fact before DeliveryRoute or RoutePlanDeliveryIntent normalization can erase it. Distinct receiver pin/event facts mapping to the same subscriber, target, delivery context, and payload projection MUST fail closed with `delivery_topology_invalid`, persist no delivery row, and execute no handler. Runtime MUST NOT add receiver pin to durable delivery identity, choose the first handler, or reconstruct the missing fact during retry or replay.
         pre_mutation_admission: |
-          Runtime-resolved connect plans MUST preview every matched plan without lifecycle activation, reply-context creation or claim, delivery persistence, or handler execution; it MUST admit the complete transient receiver pin/event and durable-delivery-identity set before any of those mutations may begin. Preview route materialization is request-local and cannot install or remove live route-table state. A preview-created template instance MUST also become request-local descriptor evidence for every later matched plan, so a later select may consume the same prospective instance exactly as the real pass consumes the newly persisted descriptor. Exact replay of one pin/event/delivery fact is idempotent; a different pin or local event converging on the same durable delivery identity is a hard conflict.
+          Runtime-resolved connect plans MUST prepare every matched plan without lifecycle activation, reply-context creation or claim, delivery persistence, or handler execution; it MUST admit the complete transient receiver pin/event and durable-delivery-identity set before any of those mutations may begin. Preparation is operation-private and cannot install or remove route-table state. A prepared construction may supply its exact proposed parent/key/identity to later plans in that operation, but remains a proposal until the existing atomic constructor/publication owner acknowledges it. Commit rechecks both the native selector and proposed path. Exact replay of one pin/event/delivery fact is idempotent; a different pin or local event converging on the same durable delivery identity is a hard conflict.
         handler_resolution: |
           Connected-input workflow handler resolution MUST produce exactly one receiver-local handler candidate. Zero or multiple candidates are explicit failures propagated through delivery policy and interception; stale or replayed invalid delivery routes MUST return the failure without passthrough, receipt settlement, or handler execution. These failures apply only when a typed node DeliveryRoute or committed node delivery authority selects that node. Agent-only connect delivery and events without node authority MUST NOT turn an unrelated receiver-flow node into a handler candidate or abort the agent delivery. Execution MUST NOT select the first source-matching input handler.
       implementation_slice_1827_connect_delivery_reply_retirement:
@@ -14516,14 +14521,10 @@ flow_model:
           runtime_resolution_flag: Template or dynamic receivers keep an explicit runtime-resolution requirement instead of fabricating concrete delivery rows.
         materialization_boundary:
           static_receivers: Static receivers can materialize target route facts during lowering because the receiver flow path is concrete.
-          template_receivers: Template/dynamic receivers materialize route facts from the scalar receiver instance key plus runtime descriptors; descriptor materialization remains pre-dispatch route evidence, not delivery execution.
-          descriptor_scope: Descriptor materialization MUST reject descriptors whose flow_instance is not the receiver semantic flow path or a child instance under that path before stamping the receiver flow id onto the route.
-          supported_descriptor_targets:
-            - entity_id / _entity.id
-            - flow_instance / instance.flow_instance
-            - instance_id / instance.instance_id
-            - entity.<instance> for the receiver flow scalar instance field
-          unsupported_descriptor_targets: Every other entity field, nested path, config field, instance metadata field, or arbitrary business-field target is invalid routing authority.
+          template_receivers: Template/dynamic receivers consume the compiled scalar key/source/mode and the native instance index at plan time. Existence, construction provenance, structural parent and actual stored entity identity are not descriptor facts.
+          static_projection: MaterializeConnectRoutePlan accepts only a compiled plan, projects its existing static target or a detached target set, and refuses runtime-resolution plans. Root targets use the separate admitted run coordinate. The projector has no payload-key or descriptor input.
+          indexed_scope: Native lookup binds the exact admitted source, run, declaration, structural parent and immutable typed instance key. A foreign, corrupt or ambiguous observation fails closed; a stored identity is never replaced by a hash derived from its current path or business fields.
+          unsupported_targets: Every unrelated entity field, nested business path, config field, instance metadata field or arbitrary business-field target remains invalid routing authority.
       implementation_slice_1545:
         status: merge_bearing_runtime_behavior
         canonical_code_owner: internal/runtime/core/pinrouting.ConnectRoutePlan.ResolutionKind + ConnectRoutePlan.InstanceKey + internal/runtime/bus.connectRoutePlanResolver
@@ -14539,11 +14540,11 @@ flow_model:
           is the sole compiled owner and exposes no Address, Map, Mappings,
           policy, list, or composite representation.
 
-          Runtime materialization MUST derive one key value from the typed
-          Source, match only receiver-scoped active flow-instance descriptors
-          whose declared instance field equals that value, and then use
-          RouteTable only to locate the concrete receiver carrier for the
-          already-selected identity. Missing source value, unresolved or
+          Runtime materialization MUST admit one key value from the typed
+          Source and consume the native index for the exact declaration,
+          run and structural parent. Stored immutable key material selects
+          the actual receiver; mutable fields, active-only descriptors and
+          route membership cannot substitute for existence. Missing source value, unresolved or
           ambiguous select, create conflict, invalid typed evidence, or
           missing receiver carrier MUST fail closed with zero executable
           routes. Retired output-pin key/carries cannot reconstruct a missing receiver
@@ -14585,7 +14586,7 @@ flow_model:
           - route_plan_instance_conflict
           - route_plan_lifecycle_unavailable
         stage_boundary:
-          produces: Typed lowered connect route artifacts and optional descriptor-materialized target/target_set facts.
+          produces: Typed lowered connect route artifacts and static target/target_set facts; runtime receiver election consumes the native index separately.
           does_not_produce:
             - EventBus dispatch
             - RouteTable publish consumption
@@ -14596,32 +14597,27 @@ flow_model:
             - agent/node delivery parity
             - producer target/broadcast retirement
       implementation_slice_1577:
-        status: merge_bearing_runtime_behavior
-        canonical_code_owner: internal/runtime/bus.TemplateInstanceLifecycleDecision + internal/runtime/bus.templateInstanceLifecycleOwner
+        status: descriptor_lifecycle_interpreter_retired_by_2594
+        canonical_code_owner: internal/runtime/bus connect construction preparation plus internal/runtime/pipeline FlowConstructionPlan and the native atomic construction/publication owner
         rule: |
-          The connect-time template lifecycle owner consumes only the typed
+          Connect construction preparation consumes only the typed
           Mode, scalar Field, and typed Source on ConnectRoutePlan.InstanceKey.
           Mode is exhaustive: create, select, and select-or-create each have
-          one behavior and no policy fallback. The owner derives one key value,
-          then selects exactly one receiver-scoped active descriptor, creates
-          one deterministic receiver flow instance, or fails closed.
-
-          Created instance identity is deterministic: receiver semantic flow
-          id plus ordered field/value key material is hashed into the stored
-          template instance id. The created flow instance persists the key
-          fields only as receiver primary-entity state, with
-          entity_type, instance_kind, last_source_event, and parent-route
-          control metadata carried by activation. Route installation must use
-          the same activation context so stores that expose a publish mutation
-          persist the instance row, entity_state row, route row, event row,
-          delivery rows, and committed replay scope in one semantic mutation.
+          one behavior and no policy fallback. The native index returns the
+          actual constructed receiver for the exact admitted selector, including
+          terminal and constructing identities. Only an authorized missing-
+          receiver creation proposes a derived address. The atomic R5.1 owner
+          persists the header, immutable typed key/parent, declared fields when
+          present, original construction receipt, readiness, event, deliveries
+          and committed replay scope together. No route row or route registry
+          is installed, and mutable fields cannot relocate an existing instance.
 
           Create requires absence and rejects an exact pre-existing identity as
           `route_plan_instance_conflict`. Select requires exactly one existing
           identity and never creates. Select-or-create reuses one exact match
           or creates when absent. Event-id and store idempotency remain
           responsible for retrying the same already committed publish.
-          Ambiguous matches, non-matching descriptors,
+          Ambiguous matches, foreign or corrupt native observations,
           missing activator, missing key values, missing receiver carrier,
           unsupported adapter evidence, delivery rows, replay/readback rows,
           RouteTable lookup before selected identity, live subscribers,
@@ -14631,7 +14627,7 @@ flow_model:
       implementation_slice_1835:
         status: create_select_select_or_create_and_reply_runnable_fan_out_fail_closed_fan_in_retired
         canonical_spec_owner: platform-spec.yaml#flow_model.composition_routing.route_plan_lowering.implementation_slice_1835
-        canonical_code_owner: internal/runtime/contracts.CompiledConnectionInput/FlowInputPinResolution + internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey/ReplyResolution + internal/runtime/bus.templateInstanceLifecycleOwner/connectRoutePlanResolver + internal/store.ReplyContextStore + internal/runtime/bootverify.composition_connect_validation
+        canonical_code_owner: internal/runtime/contracts.CompiledConnectionInput/FlowInputPinResolution + internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey/ReplyResolution + internal/runtime/bus connect construction preparation/connectRoutePlanResolver + internal/runtime/pipeline.FlowInstanceIndexReader + internal/store.ReplyContextStore + internal/runtime/bootverify.composition_connect_validation
         instance_identity_owner_2021:
           status: scalar_typed_owner_finalized_by_2087
           authored_identity_owner: 'flow instance: <field>'
@@ -14771,7 +14767,7 @@ flow_model:
           - route-plan lowering consumes the immutable connection's typed select mode, scalar instance Field and payload Source derived from the required same-named payload field or exact key_from exception
           - EventBus publish/preflight for select routes to exactly one existing receiver instance
           - missing/ambiguous select target failures fail closed with receiver/key/value/remediation detail and no activation
-          - same committed select event replay reuses persisted delivery route/scope and does not reselect after descriptor drift
+          - same committed select event replay reuses persisted delivery route/scope and does not reselect after native instance or source churn
           - standalone #1828 `template-select-existing` conformance fixture verifies and materializes through the canonical select route plan
           - route-plan lowering consumes the immutable connection's typed select-or-create mode, scalar instance Field and payload Source derived from the required same-named payload field or exact key_from exception
           - create rejects an existing exact identity, select requires one exact identity, and select-or-create reuses or creates according to typed mode only
@@ -14780,9 +14776,9 @@ flow_model:
           - EventBus publish/preflight for select-or-create reuses exactly one existing receiver instance
           - EventBus publish/preflight for select-or-create creates exactly one missing receiver instance through the canonical lifecycle path
           - concurrent same-key select-or-create deliveries converge on one receiver instance or fail closed without duplicate key ownership
-          - one matched event may preview-create a template instance on an earlier plan and select that same request-local descriptor on a later plan without preflight mutation
+          - one matched event may prepare a construction on an earlier plan and select that exact operation-private proposal on a later plan without preflight mutation; the atomic owner rechecks all selectors and paths
           - ambiguous select-or-create target failures fail closed with receiver/key/value/remediation detail and no activation
-          - same committed select-or-create event replay reuses persisted delivery route/scope and does not reselect or recreate after descriptor drift
+          - same committed select-or-create event replay reuses persisted delivery route/scope and does not reselect or recreate after native instance or source churn
           - standalone #1828 `template-select-or-create` conformance fixture verifies and materializes through the canonical select-or-create route plan
           - an agent-only connect route with an unrelated receiver-flow node delivers to the selected agent without synthesizing node authority or a connected-input handler failure
           - ordinary compiled connections preserve same-instance contributions, keyed period isolation, explicit-members/count joins and distinct exact fan-out settlement without a fan-in mode or plan passenger
@@ -14804,7 +14800,7 @@ flow_model:
           - receiver scalar template instance field
           - compiled connection input typed Source
           - matched inbound event payload source fields
-          - receiver-scoped active flow-instance descriptors
+          - exact scoped native instance observations with immutable constructor key and parent
         produces:
           - one ConnectRoutePlan.InstanceKey.Source for same-name or renamed payload fields
           - route_plan_instance_source_value_missing when the typed source cannot be read
@@ -14828,7 +14824,7 @@ flow_model:
           matching lowered-plan failures hard-cut legacy fallback delivery and cannot be repaired by later materializer hooks.
         consumes:
           - implementation_slice_1472 typed ConnectRoutePlan artifacts
-          - supported descriptor materialization targets from implementation_slice_1472
+          - compiled static targets and scoped native instance selection from implementation_slice_1472
           - RouteTable concrete receiver subscribers only after target route identity selection
         produces:
           - persisted event_deliveries delivery_target_route rows for supported connected outputs
@@ -14983,9 +14979,9 @@ flow_model:
           receiver target identity; source endpoint keys, raw producer event
           names, live subscriber fallback, and legacy route/subscriber
           interpretations are not carrier lookup inputs for a matched lowered
-          plan. Descriptor loading in the EventBus connect resolver is
-          limited to matched plans whose supported target form requires
-          runtime descriptor evidence. Static and template lowered-connect
+          plan. The EventBus connect resolver consumes graph-scoped native
+          instance observations only for the relevant exact declarations and
+          candidates. Static and template lowered-connect
           receiver subscribers for concrete flow input events materialize
           receiver carrier evidence at the selected receiver path rather than
           relying on producer-key subscription projection.
@@ -14996,8 +14992,8 @@ flow_model:
         proof_obligations:
           - matched connect receiver carrier lookup excludes source/raw fallback keys
           - static and template lowered-connect receiver input subscribers materialize selected receiver-carrier keys
-          - static matched connect plans do not load descriptors
-          - descriptor-backed matched connect plans load only supported descriptor evidence
+          - static projection accepts only the compiled plan, not runtime descriptors or payload keys
+          - runtime-resolution plans consume exact scoped native instance evidence and cannot borrow static targets
           - Publish, PublishInMutation, CheckPublishRecipientPlan, and engineOutbox preserve the corrected RoutePlan path where relevant
       implementation_slice_1496:
         status: merge_bearing_runtime_behavior
@@ -15028,15 +15024,15 @@ flow_model:
         rule: |
           Arbitrary receiver business-field descriptor/index routing is
           removed. `indexed: true` does not grant routing authority. Runtime
-          descriptor matching for template selection is limited to the
-          receiver flow's declared scalar instance field and the typed source
-          on ConnectRoutePlan.InstanceKey. Every input-address or connect-map
+          template selection consumes only the receiver flow's immutable
+          admitted instance key and the compiled Source/Mode through the native
+          index. Every input-address or connect-map
           target, nested path, unrelated entity field, config field, instance
           metadata field, and direct arbitrary-target plan is invalid.
         consumes:
           - receiver scalar template instance field
           - typed ConnectRoutePlan.InstanceKey.Source and Mode
-          - receiver-scoped active flow-instance descriptors
+          - exact scoped native instance observations with immutable constructor key and parent
         produces:
           - one concrete receiver route for select or select-or-create reuse
           - typed unresolved, ambiguous, source-missing, conflict, or invalid-resolution failure

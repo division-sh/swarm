@@ -351,6 +351,10 @@ func TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority(t *testing.
 	}
 	retiredFunctions := map[string]struct{}{
 		"InstanceKeyDescriptorRoutesForConnectRoutePlan": {},
+		"materializeInstanceKeyConnectRoutePlan":         {},
+		"ConnectInstanceKeyDescriptorMatches":            {},
+		"descriptorRouteForReceiver":                     {},
+		"descriptorBelongsToReceiver":                    {},
 		"connectReceiverPinCollisionIssues":              {},
 		"connectReceiverPinFact":                         {},
 		"connectReceiverPinStaticTargetKey":              {},

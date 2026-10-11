@@ -107,143 +107,147 @@ func (s *sqliteScalarTemplateInstanceStore) scalarTemplateInstanceIndexCalls() i
 func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			repo := canonicalrouting.RepoRoot(t)
-			root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
-			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-			if err != nil {
-				t.Fatalf("load scalar resolution fixture: %v", err)
-			}
-			source := semanticview.Wrap(bundle)
-			sourceFact := testSourceArtifactFact(source)
-			runID := uuid.NewString()
-			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
-			selected := newScalarTemplateInstanceParityStore(t, backend, ctx)
-			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: sourceFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC().Add(-time.Minute)})
-			entityID := runtimeflowidentity.EntityID("account/one")
-			constructor, err := runtimepipeline.CompileFlowConstructor(source, "account", "account.ready")
-			if err != nil {
-				t.Fatal(err)
-			}
-			fields, err := constructor.InitialFields(map[string]any{"account_id": "acct-1"}, "acct-1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			contract, declared := entityruntime.ResolveForFlow(source, "account")
-			if !declared {
-				t.Fatal("account fixture lost its state contract")
-			}
-			at := time.Now().UTC()
-			for _, flowID := range []string{".", "producer"} {
-				constructed := runtimebus.ConstructedFlowInstanceIdentityFixture(source, flowID, "", runID)
-				seedComponentFlowConstruction(t, ctx, selected, source, runtimepipeline.WorkflowInstance{
-					InstanceID: constructed.InstanceID, StorageRef: constructed.InstancePath, EntityID: constructed.EntityID,
-					ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
-					WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), EnteredStageAt: at, CreatedAt: at,
+			for _, fixture := range []canonicalrouting.ArtifactID{canonicalrouting.TemplateSelectExisting, canonicalrouting.TemplateSelectOrCreate} {
+				t.Run(string(fixture), func(t *testing.T) {
+					repo := canonicalrouting.RepoRoot(t)
+					root := canonicalrouting.CopyExample(t, fixture)
+					bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+					if err != nil {
+						t.Fatalf("load scalar resolution fixture: %v", err)
+					}
+					source := semanticview.Wrap(bundle)
+					sourceFact := testSourceArtifactFact(source)
+					runID := uuid.NewString()
+					ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
+					selected := newScalarTemplateInstanceParityStore(t, backend, ctx)
+					storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: sourceFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC().Add(-time.Minute)})
+					entityID := runtimeflowidentity.EntityID("account/one")
+					constructor, err := runtimepipeline.CompileFlowConstructor(source, "account", "account.ready")
+					if err != nil {
+						t.Fatal(err)
+					}
+					fields, err := constructor.InitialFields(map[string]any{"account_id": "acct-1"}, "acct-1")
+					if err != nil {
+						t.Fatal(err)
+					}
+					contract, declared := entityruntime.ResolveForFlow(source, "account")
+					if !declared {
+						t.Fatal("account fixture lost its state contract")
+					}
+					at := time.Now().UTC()
+					for _, flowID := range []string{".", "producer"} {
+						constructed := runtimebus.ConstructedFlowInstanceIdentityFixture(source, flowID, "", runID)
+						seedComponentFlowConstruction(t, ctx, selected, source, runtimepipeline.WorkflowInstance{
+							InstanceID: constructed.InstanceID, StorageRef: constructed.InstancePath, EntityID: constructed.EntityID,
+							ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
+							WorkflowName: flowID, WorkflowVersion: source.WorkflowVersion(), EnteredStageAt: at, CreatedAt: at,
+						})
+					}
+					seedComponentFlowConstruction(t, ctx, selected, source, runtimepipeline.WorkflowInstance{
+						InstanceID: "one", StorageRef: "account/one", EntityID: entityID, WorkflowName: "account", InstanceKey: "acct-1",
+						WorkflowVersion: source.WorkflowVersion(), InstanceKind: "template", EntityType: contract.EntityType,
+						ParentFlowID: ".", ParentFlowInstance: runID, ParentEntityID: runtimeflowidentity.EntityID(runID),
+						Fields: fields, EnteredStageAt: at, CreatedAt: at,
+					})
+					eventBus, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
+					if err != nil {
+						t.Fatalf("NewEventBusWithOptions: %v", err)
+					}
+
+					eventID := uuid.NewString()
+					eventTime := time.Now().UTC()
+					producerEntityID := runtimeflowidentity.EntityID("producer")
+					evt := eventtest.ExistingRunRootIngressWithRoutingSource(
+						eventID,
+						events.EventType("producer/account.ready"),
+						"producer",
+						"",
+						json.RawMessage(`{"account_id":"acct-1"}`),
+						0,
+						runID,
+						events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerEntityID}),
+						eventtest.StaticFlowRoutingSource("producer", "producer", producerEntityID), eventTime,
+					)
+					plan, err := eventBus.CheckPublishRecipientPlan(ctx, evt)
+					if err != nil {
+						t.Fatalf("CheckPublishRecipientPlan: %v", err)
+					}
+					wantTarget := events.RouteIdentity{FlowID: "account", FlowInstance: "account/one", EntityID: entityID}
+					if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target.Route().Normalized() != wantTarget.Normalized() {
+						t.Fatalf("preflight failure/routes = %q/%#v, want scalar target %#v", plan.TargetFailure, plan.DeliveryRoutes, wantTarget)
+					}
+					if err := eventBus.Publish(ctx, evt); err != nil {
+						t.Fatalf("Publish: %v", err)
+					}
+					persistedRoutes, err := selected.ListEventDeliveryRoutes(ctx, eventID)
+					if err != nil {
+						t.Fatalf("ListEventDeliveryRoutes: %v", err)
+					}
+					if len(persistedRoutes) != 1 || persistedRoutes[0].Recipient.LocalID() != "account-node" || persistedRoutes[0].Target.Route().Normalized() != wantTarget.Normalized() {
+						t.Fatalf("persisted routes = %#v, want account-node at %#v", persistedRoutes, wantTarget)
+					}
+
+					selected.setScalarTemplateInstanceIndexError(errors.New("instance lookup must not run for a durable duplicate"))
+					selected.resetScalarTemplateInstanceIndexCalls()
+					if err := eventBus.Publish(ctx, evt); err != nil {
+						t.Fatalf("Publish exact duplicate after index failure: %v", err)
+					}
+					if calls := selected.scalarTemplateInstanceIndexCalls(); calls != 0 {
+						t.Fatalf("duplicate index calls = %d, want durable identity short-circuit", calls)
+					}
+					conflicting := eventtest.ExistingRunRootIngressWithRoutingSource(
+						eventID,
+						events.EventType("producer/account.ready"),
+						"producer",
+						"",
+						json.RawMessage(`{"account_id":"acct-2"}`),
+						0,
+						runID,
+						events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerEntityID}),
+						evt.RoutingSource(), eventTime,
+					)
+					if err := eventBus.Publish(ctx, conflicting); !errors.Is(err, events.ErrEventIdentityConflict) {
+						t.Fatalf("Publish conflicting duplicate error = %v, want event identity conflict", err)
+					}
+					if calls := selected.scalarTemplateInstanceIndexCalls(); calls != 0 {
+						t.Fatalf("conflicting duplicate index calls = %d, want durable identity short-circuit", calls)
+					}
+					selected.setScalarTemplateInstanceIndexError(nil)
+
+					replayed := subscribeInternalDeliveriesForTest(t, eventBus, persistedRoutes[0].Recipient.ID())
+					indexFailure := errors.New("committed scalar replay must not query the current instance index")
+					selected.setScalarTemplateInstanceIndexError(indexFailure)
+					selected.resetScalarTemplateInstanceIndexCalls()
+					if _, err := eventBus.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{
+						Event: evt,
+						Scope: runtimepipelineobligation.ScopeSubscribed,
+					}, nil); err != nil {
+						t.Fatalf("RecoverPersistedPipeline: %v", err)
+					}
+					select {
+					case delivery := <-replayed:
+						replayEvent := delivery.Event()
+						if err := delivery.Complete(); err != nil {
+							t.Fatal(err)
+						}
+						if replayEvent.FlowInstance() != "account/one" || replayEvent.EntityID() != entityID {
+							t.Fatalf("replayed target = %q/%q, want account/one/%s", replayEvent.FlowInstance(), replayEvent.EntityID(), entityID)
+						}
+					case <-time.After(time.Second):
+						t.Fatal("timed out waiting for committed scalar-resolution replay")
+					}
+					if calls := selected.scalarTemplateInstanceIndexCalls(); calls != 0 {
+						t.Fatalf("replay index calls = %d, want persisted route authority", calls)
+					}
+					fresh := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), evt.Type(), "producer", "", evt.Payload(), 0, runID,
+						events.EnvelopeForSourceRoute(events.EventEnvelope{}, evt.RoutingSource().Route()), evt.RoutingSource(), eventTime)
+					if _, err := eventBus.CheckPublishRecipientPlan(ctx, fresh); !errors.Is(err, indexFailure) || selected.scalarTemplateInstanceIndexCalls() == 0 {
+						t.Fatalf("fresh scalar plan bypassed poisoned index: calls=%d err=%v", selected.scalarTemplateInstanceIndexCalls(), err)
+					}
+					if persisted, found, err := selected.LoadPreparedPublishEvent(ctx, fresh.ID()); err != nil || found || len(persisted.DeliveryRoutes) != 0 {
+						t.Fatalf("refused scalar preflight mutated storage: %+v found=%t err=%v", persisted, found, err)
+					}
 				})
-			}
-			seedComponentFlowConstruction(t, ctx, selected, source, runtimepipeline.WorkflowInstance{
-				InstanceID: "one", StorageRef: "account/one", EntityID: entityID, WorkflowName: "account", InstanceKey: "acct-1",
-				WorkflowVersion: source.WorkflowVersion(), InstanceKind: "template", EntityType: contract.EntityType,
-				ParentFlowID: ".", ParentFlowInstance: runID, ParentEntityID: runtimeflowidentity.EntityID(runID),
-				Fields: fields, EnteredStageAt: at, CreatedAt: at,
-			})
-			eventBus, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
-			if err != nil {
-				t.Fatalf("NewEventBusWithOptions: %v", err)
-			}
-
-			eventID := uuid.NewString()
-			eventTime := time.Now().UTC()
-			producerEntityID := runtimeflowidentity.EntityID("producer")
-			evt := eventtest.ExistingRunRootIngressWithRoutingSource(
-				eventID,
-				events.EventType("producer/account.ready"),
-				"producer",
-				"",
-				json.RawMessage(`{"account_id":"acct-1"}`),
-				0,
-				runID,
-				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerEntityID}),
-				eventtest.StaticFlowRoutingSource("producer", "producer", producerEntityID), eventTime,
-			)
-			plan, err := eventBus.CheckPublishRecipientPlan(ctx, evt)
-			if err != nil {
-				t.Fatalf("CheckPublishRecipientPlan: %v", err)
-			}
-			wantTarget := events.RouteIdentity{FlowID: "account", FlowInstance: "account/one", EntityID: entityID}
-			if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target.Route().Normalized() != wantTarget.Normalized() {
-				t.Fatalf("preflight failure/routes = %q/%#v, want scalar target %#v", plan.TargetFailure, plan.DeliveryRoutes, wantTarget)
-			}
-			if err := eventBus.Publish(ctx, evt); err != nil {
-				t.Fatalf("Publish: %v", err)
-			}
-			persistedRoutes, err := selected.ListEventDeliveryRoutes(ctx, eventID)
-			if err != nil {
-				t.Fatalf("ListEventDeliveryRoutes: %v", err)
-			}
-			if len(persistedRoutes) != 1 || persistedRoutes[0].Recipient.LocalID() != "account-node" || persistedRoutes[0].Target.Route().Normalized() != wantTarget.Normalized() {
-				t.Fatalf("persisted routes = %#v, want account-node at %#v", persistedRoutes, wantTarget)
-			}
-
-			selected.setScalarTemplateInstanceIndexError(errors.New("instance lookup must not run for a durable duplicate"))
-			selected.resetScalarTemplateInstanceIndexCalls()
-			if err := eventBus.Publish(ctx, evt); err != nil {
-				t.Fatalf("Publish exact duplicate after index failure: %v", err)
-			}
-			if calls := selected.scalarTemplateInstanceIndexCalls(); calls != 0 {
-				t.Fatalf("duplicate index calls = %d, want durable identity short-circuit", calls)
-			}
-			conflicting := eventtest.ExistingRunRootIngressWithRoutingSource(
-				eventID,
-				events.EventType("producer/account.ready"),
-				"producer",
-				"",
-				json.RawMessage(`{"account_id":"acct-2"}`),
-				0,
-				runID,
-				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerEntityID}),
-				evt.RoutingSource(), eventTime,
-			)
-			if err := eventBus.Publish(ctx, conflicting); !errors.Is(err, events.ErrEventIdentityConflict) {
-				t.Fatalf("Publish conflicting duplicate error = %v, want event identity conflict", err)
-			}
-			if calls := selected.scalarTemplateInstanceIndexCalls(); calls != 0 {
-				t.Fatalf("conflicting duplicate index calls = %d, want durable identity short-circuit", calls)
-			}
-			selected.setScalarTemplateInstanceIndexError(nil)
-
-			replayed := subscribeInternalDeliveriesForTest(t, eventBus, persistedRoutes[0].Recipient.ID())
-			indexFailure := errors.New("committed scalar replay must not query the current instance index")
-			selected.setScalarTemplateInstanceIndexError(indexFailure)
-			selected.resetScalarTemplateInstanceIndexCalls()
-			if _, err := eventBus.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{
-				Event: evt,
-				Scope: runtimepipelineobligation.ScopeSubscribed,
-			}, nil); err != nil {
-				t.Fatalf("RecoverPersistedPipeline: %v", err)
-			}
-			select {
-			case delivery := <-replayed:
-				replayEvent := delivery.Event()
-				if err := delivery.Complete(); err != nil {
-					t.Fatal(err)
-				}
-				if replayEvent.FlowInstance() != "account/one" || replayEvent.EntityID() != entityID {
-					t.Fatalf("replayed target = %q/%q, want account/one/%s", replayEvent.FlowInstance(), replayEvent.EntityID(), entityID)
-				}
-			case <-time.After(time.Second):
-				t.Fatal("timed out waiting for committed scalar-resolution replay")
-			}
-			if calls := selected.scalarTemplateInstanceIndexCalls(); calls != 0 {
-				t.Fatalf("replay index calls = %d, want persisted route authority", calls)
-			}
-			fresh := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), evt.Type(), "producer", "", evt.Payload(), 0, runID,
-				events.EnvelopeForSourceRoute(events.EventEnvelope{}, evt.RoutingSource().Route()), evt.RoutingSource(), eventTime)
-			if _, err := eventBus.CheckPublishRecipientPlan(ctx, fresh); !errors.Is(err, indexFailure) || selected.scalarTemplateInstanceIndexCalls() == 0 {
-				t.Fatalf("fresh scalar plan bypassed poisoned index: calls=%d err=%v", selected.scalarTemplateInstanceIndexCalls(), err)
-			}
-			if persisted, found, err := selected.LoadPreparedPublishEvent(ctx, fresh.ID()); err != nil || found || len(persisted.DeliveryRoutes) != 0 {
-				t.Fatalf("refused scalar preflight mutated storage: %+v found=%t err=%v", persisted, found, err)
 			}
 		})
 	}

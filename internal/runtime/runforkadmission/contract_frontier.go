@@ -447,7 +447,7 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selected
 			// The evaluator retains root declaration paths and runless agent plans.
 			targets = []events.RouteIdentity{{FlowID: coordinate.FlowID(), FlowInstance: coordinate.RunID()}}
 		} else if !plan.RequiresRuntimeResolution() {
-			materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{})
+			materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan)
 			if !materialized.Failure.Empty() {
 				return contractFrontierEvaluatedRoute{}, fmt.Errorf("selected static connect materialization: %s", materialized.Failure.Code())
 			}
