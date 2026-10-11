@@ -350,6 +350,12 @@ func (p deliveryPlanner) planIndependentPubsubBranch(ctx context.Context, evt ev
 			return independentPubsubSubscriber(subscriber) && input.AllowsSubscriber(subscriber)
 		}
 	}
+	if selected, ok := selectedForkRecipientPlanFromContext(ctx, evt); ok {
+		previous := include
+		include = func(subscriber Subscriber) bool {
+			return previous(subscriber) && selected.allowsSubscriber(subscriber, evt)
+		}
+	}
 	resolver := p.routeResolver
 	if preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil && preview.table != nil {
 		original := resolver.resolveRoutedSubscribers
@@ -362,6 +368,23 @@ func (p deliveryPlanner) planIndependentPubsubBranch(ctx context.Context, evt ev
 		}
 	}
 	routing := resolver.resolve(localEvent, source, include)
+	if selected, ok := selectedForkRecipientPlanFromContext(ctx, evt); ok {
+		candidates := routing.Recipients[:0]
+		for _, candidate := range routing.Recipients {
+			if !candidate.PersistAsDelivery {
+				candidates = append(candidates, candidate)
+				continue
+			}
+			for _, expected := range selected.recipients {
+				plan, err := candidate.AgentIdentity.Plan()
+				if err == nil && expected.Recipient.IsAgent() && expected.AgentPlan == plan {
+					candidates = append(candidates, candidate)
+					break
+				}
+			}
+		}
+		routing.Recipients = candidates
+	}
 	manifest, err := p.recipientPolicy.evaluate(ctx, localEvent, routing.Recipients, source)
 	if err != nil {
 		return RoutePlan{}, err

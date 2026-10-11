@@ -52,7 +52,10 @@ func requireSelectedSuccessorWorkflowTimers(ctx context.Context, attempt *mutati
 		if err != nil {
 			return err
 		}
-		admission := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+		admission, err := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+		if err != nil {
+			return err
+		}
 		ctx = correlation.WithRunID(ctx, snapshot.RunID)
 		bornAt := runlifecycle.CanonicalTimestamp(snapshot.StartedAt)
 		switch {

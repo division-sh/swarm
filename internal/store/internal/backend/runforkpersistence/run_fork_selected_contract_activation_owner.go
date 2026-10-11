@@ -122,7 +122,10 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		}
 		lineage.ForkPoint = plan.ForkPoint
 		result.ForkPoint = plan.ForkPoint
-		result.ReplayResumeAdmission = runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+		result.ReplayResumeAdmission, err = runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+		if err != nil {
+			return err
+		}
 		expectedRouteRecovery, routeResolved, err := prepareRunForkSelectedContractRouteResolution(
 			plan, lineage.ForkRunID, binding.ContractSelection,
 			req.FrontierAdmission, req.RouteTopology, req.RecipientPlanning,
@@ -350,6 +353,8 @@ func requireSelectedForkMaterializedWorkTx(ctx context.Context, tx *sql.Tx, runI
 }
 
 func selectedForkDurableExecutedEventCountTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	// Continued ordinals already have selected execution lineage. Only fresh
+	// deployment emissions contribute an additional, disjoint execution origin.
 	var total, distinct int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COUNT(DISTINCT event_id) FROM (
 		SELECT fork_event_id AS event_id FROM run_fork_selected_contract_executions WHERE fork_run_id=$1

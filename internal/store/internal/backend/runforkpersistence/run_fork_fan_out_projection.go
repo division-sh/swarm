@@ -160,14 +160,33 @@ func loadRunForkFanOutObligationsFromRevision(snapshot *runForkRevisionSnapshot,
 				InheritedDisposition: fanoutobligation.InheritedTerminalDisposition(outcomeFact.InheritedDisposition),
 				Failure:              failure, CreatedAt: outcomeFact.CreatedAt,
 			}
-			if outcome.Kind == fanoutobligation.OutcomeCommitted && strings.TrimSpace(outcome.EventID) != "" {
+			if err := outcome.Validate(); err != nil {
+				return nil, fmt.Errorf("validate run-fork fan-out %s outcome %d: %w", key, index, err)
+			}
+			if strings.TrimSpace(outcome.EventID) != "" {
+				if outcome.Kind == fanoutobligation.OutcomeContinued {
+					publication, present := eventsByID[outcome.EventID]
+					if !present {
+						return nil, fmt.Errorf("continued fan-out event %s is absent from the cut", outcome.EventID)
+					}
+					admitted, err := decodeRunForkRevisionEvent(publication)
+					if err != nil {
+						return nil, err
+					}
+					lineage, present := admitted.Event().SelectedForkLineage()
+					if !present || lineage.SourceEventID() != outcome.SourceEventID || lineage.DestinationRunID() != snapshot.RunID {
+						return nil, fmt.Errorf("continued fan-out event %s contradicts its source lineage", outcome.EventID)
+					}
+				}
 				if request.Deployment != nil {
-					if err := fanoutobligation.ValidateCommittedDeploymentOrdinalEvent(intent, outcome.Ordinal, outcome.EventID); err != nil {
-						return nil, fmt.Errorf("project run-fork deployment %s outcome %d: %w", key, index, err)
+					if outcome.Kind == fanoutobligation.OutcomeCommitted {
+						if err := fanoutobligation.ValidateCommittedDeploymentOrdinalEvent(intent, outcome.Ordinal, outcome.EventID); err != nil {
+							return nil, fmt.Errorf("project run-fork deployment %s outcome %d: %w", key, index, err)
+						}
 					}
 				}
 				terminal, disposition, deliveryIDs, phase, err := fixedRunForkFanOutEventDisposition(
-					outcome.EventID, snapshot.RunID, request.Deployment, eventsByID, deliveriesByEvent, receiptsByEvent, pendingByDelivery,
+					outcome.EventID, snapshot.RunID, request.Deployment, outcome.InheritedDisposition, eventsByID, deliveriesByEvent, receiptsByEvent, pendingByDelivery,
 				)
 				if err != nil {
 					return nil, fmt.Errorf("project run-fork fan-out %s outcome %d: %w", key, index, err)
@@ -176,15 +195,19 @@ func loadRunForkFanOutObligationsFromRevision(snapshot *runForkRevisionSnapshot,
 					if request.Deployment != nil {
 						pendingDeployment = append(pendingDeployment, runfork.RunForkDeploymentPendingEvent{
 							Ordinal: outcome.Ordinal, SourceEventID: outcome.EventID,
-							SourceDeliveryIDs: deliveryIDs, Phase: phase,
+							SourceDeliveryIDs: deliveryIDs, Phase: phase, InheritedDisposition: disposition,
 						})
 					} else {
-						pendingReplays = append(pendingReplays, runfork.RunForkFanOutPendingReplay{Ordinal: outcome.Ordinal, SourceEventID: outcome.EventID})
+						pendingReplays = append(pendingReplays, runfork.RunForkFanOutPendingReplay{
+							Ordinal: outcome.Ordinal, SourceEventID: outcome.EventID,
+							SourceDeliveryIDs: deliveryIDs, InheritedDisposition: disposition,
+						})
 					}
 					continue
 				}
 				outcome.SourceEventID = outcome.EventID
 				outcome.EventID = ""
+				outcome.Kind = fanoutobligation.OutcomeCommitted
 				outcome.InheritedDisposition = disposition
 			}
 			if err := outcome.Validate(); err != nil {
@@ -296,6 +319,7 @@ func fixedRunForkFanOutEventDisposition(
 	eventID string,
 	runID string,
 	deployment *fanoutobligation.DeploymentOrigin,
+	retained fanoutobligation.InheritedTerminalDisposition,
 	eventsByID map[string]runForkRevisionEvent,
 	deliveriesByEvent map[string][]runForkRevisionDelivery,
 	receiptsByEvent map[string][]runForkRevisionReceipt,
@@ -330,14 +354,25 @@ func fixedRunForkFanOutEventDisposition(
 	if err := settlement.Validate(routes); err != nil {
 		return false, "", nil, "", fmt.Errorf("event %s route settlement contradicts fixed deliveries: %w", eventID, err)
 	}
+	if settlement.NoDelivery() && retained != "" {
+		return false, "", nil, "", fmt.Errorf("continued event %s lost its unfinished recipients", eventID)
+	}
 	if settlement.NoDelivery() {
 		return true, fanoutobligation.InheritedNoRoute, nil, "", nil
 	}
 	recipients := make([]runtimedelivery.Snapshot, len(deliveries))
+	seen := make(map[string]bool, len(deliveries))
 	for i, delivery := range deliveries {
+		if delivery.Snapshot.RunID != runID || delivery.Snapshot.EventID != eventID || seen[delivery.Snapshot.DeliveryID] {
+			return false, "", nil, "", fmt.Errorf("event %s has foreign or duplicate recipient evidence", eventID)
+		}
+		seen[delivery.Snapshot.DeliveryID] = true
 		recipients[i] = delivery.Snapshot
 	}
 	disposition, terminal, err := fanoutbarrier.RecipientDisposition(recipients)
+	if retained != "" {
+		disposition, terminal, err = fanoutbarrier.RecipientDispositionWithRetained(recipients, retained)
+	}
 	if err != nil {
 		return false, "", nil, "", fmt.Errorf("event %s recipient disposition: %w", eventID, err)
 	}
@@ -362,16 +397,21 @@ func fixedRunForkFanOutEventDisposition(
 		}
 	}
 	deliveryIDs := make([]string, 0, len(deliveries))
+	settled := make([]runtimedelivery.Snapshot, 0, len(deliveries))
 	for _, delivery := range deliveries {
 		if delivery.Snapshot.Terminal() {
-			return false, "", nil, "", fmt.Errorf("nonterminal event %s mixes terminal and pending routes; exact fork replay is unsupported", eventID)
+			settled = append(settled, delivery.Snapshot)
+			continue
 		}
 		pending, ok := pendingByDelivery[strings.TrimSpace(delivery.Snapshot.DeliveryID)]
-		if !ok || strings.TrimSpace(pending.EventID) != eventID {
+		if !ok || pending.EventID != eventID || pending.DeliveryID != delivery.Snapshot.DeliveryID ||
+			!events.SameDeliveryRouteIdentity(pending.DeliveryRoute, delivery.Snapshot.Route) || pending.SubscriberType != string(delivery.Snapshot.SubscriberClass) ||
+			pending.SubscriberID != delivery.Snapshot.SubscriberID || pending.Status != string(delivery.Snapshot.Status) ||
+			pending.Classification != classifyRunForkDeliverySnapshot(delivery.Snapshot, false) {
 			return false, "", nil, "", fmt.Errorf("nonterminal event %s delivery %s has no fixed pending evidence", eventID, delivery.Snapshot.DeliveryID)
 		}
-		if deployment == nil && !runfork.RunForkPendingWorkReplayableForHistoricalReplay(pending) {
-			return false, "", nil, "", fmt.Errorf("nonterminal event %s delivery %s has no supported historical replay", eventID, delivery.Snapshot.DeliveryID)
+		if deployment == nil && delivery.Snapshot.SubscriberClass != runtimedelivery.SubscriberNode && delivery.Snapshot.SubscriberClass != runtimedelivery.SubscriberAgent {
+			return false, "", nil, "", fmt.Errorf("nonterminal fan-out event %s has an unsupported recipient class", eventID)
 		}
 		if deployment != nil && (pending.Classification != runfork.RunForkPendingClassificationPending || pending.Status != "pending" ||
 			pending.RetryCount != 0 || pending.ActiveSessionID != "" || pending.StartedAt != nil || pending.DeliveredAt != nil || pending.ReceiptAt != nil ||
@@ -380,8 +420,19 @@ func fixedRunForkFanOutEventDisposition(
 		}
 		deliveryIDs = append(deliveryIDs, delivery.Snapshot.DeliveryID)
 	}
+	if len(settled) != 0 {
+		disposition, _, err = fanoutbarrier.RecipientDisposition(settled)
+		if retained != "" {
+			disposition, _, err = fanoutbarrier.RecipientDispositionWithRetained(settled, retained)
+		}
+		if err != nil {
+			return false, "", nil, "", err
+		}
+	} else {
+		disposition = retained
+	}
 	sort.Strings(deliveryIDs)
-	return false, "", deliveryIDs, phase, nil
+	return false, disposition, deliveryIDs, phase, nil
 }
 
 func outcomeOrdinal(fact runForkRevisionFanOutFact) int {
