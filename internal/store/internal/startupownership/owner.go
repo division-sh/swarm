@@ -30,13 +30,16 @@ import (
 const runtimeSharedStoreOwnershipLock = "swarm:runtime:shared-store-owner"
 
 type StartupPostgresOwner struct {
-	backend          *postgresbackend.Backend
-	schemaGuard      func() error
-	catalogEmpty     func(context.Context) (bool, error)
-	agents           *storeagent.AgentPostgresOwner
-	destructiveReset *storeadmin.DestructiveResetPostgresOwner
-	fanOutPipeline   *storepipeline.PipelinePostgresOwner
-	channelChanges   *runtimechanneldelivery.ReconcileSignal
+	constructionMu       sync.Mutex
+	constructionLease    *postgresbackend.AdvisoryLockLease
+	constructionCapacity func()
+	backend              *postgresbackend.Backend
+	schemaGuard          func() error
+	catalogEmpty         func(context.Context) (bool, error)
+	agents               *storeagent.AgentPostgresOwner
+	destructiveReset     *storeadmin.DestructiveResetPostgresOwner
+	fanOutPipeline       *storepipeline.PipelinePostgresOwner
+	channelChanges       *runtimechanneldelivery.ReconcileSignal
 }
 
 type StartupSQLiteOwner struct {
@@ -98,18 +101,14 @@ func (s *StartupPostgresOwner) AcquireProcessCapability(ctx context.Context, req
 	if err := req.Validate(); err != nil {
 		return nil, err
 	}
-	if err := s.schemaGuard(); err != nil {
+	lease, releaseCapacity, err := s.takeConstructionPossession(ctx)
+	if err != nil {
 		return nil, err
 	}
-	releaseCapacity := s.backend.RetainConnectionCapacity()
-	lease, acquired, err := postgresbackend.AcquireAdvisoryLockLease(ctx, s.backend, runtimeSharedStoreOwnershipLock)
-	if err != nil {
+	if err := s.schemaGuard(); err != nil {
+		releaseErr := lease.Release(ctx)
 		releaseCapacity()
-		return nil, fmt.Errorf("acquire retained runtime store session: %w", err)
-	}
-	if !acquired {
-		releaseCapacity()
-		return nil, s.liveOwnerAcquisitionError(ctx)
+		return nil, errors.Join(err, releaseErr)
 	}
 	var authority runtimestartupownership.Authority
 	if err := lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
