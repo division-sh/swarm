@@ -38,7 +38,14 @@ func TestReporterWindowRequiresFinalReceiptAndPreservesSuccessor(t *testing.T) {
 		t.Fatal("held final receipt admitted early detachment")
 	}
 	last.Finish(nil)
+	read := slot.Begin(true, false)
+	read.Begun()
+	read.RollbackAttempted()
+	read.Finish(nil)
 	issuance := old.Snapshot()
+	if issuance.Total.Failed != 1 || issuance.Total.CommitFailures != 0 {
+		t.Fatalf("rollback-only read changed native outcome meaning: %+v", issuance)
+	}
 	if err := ValidateReporterIssuance(issuance, submitted, 1, delay); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +98,7 @@ func TestReporterWindowRequiresFinalReceiptAndPreservesSuccessor(t *testing.T) {
 	}
 	captured.Finish(errors.New("captured failure after detachment"))
 	final := old.Snapshot()
-	if final.Active != 0 || final.Total.Failed != 1 || final.Total.RollbackAttempts != 0 || successor.Snapshot().Total.Failed != 0 {
+	if final.Active != 0 || final.Total.Failed != issuance.Total.Failed+1 || final.Total.RollbackAttempts != 1 || successor.Snapshot().Total.Failed != 0 {
 		t.Fatalf("captured failure was lost or reassigned: old=%+v successor=%+v", final, successor.Snapshot())
 	}
 	if err := ValidateReporterContinuation(issuance, final, successor.Snapshot()); err == nil {
