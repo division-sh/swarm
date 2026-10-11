@@ -12,6 +12,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
 )
 
 func requireChannelSourceSettlementTx(ctx context.Context, tx *sql.Tx, s runtimeeffects.Settlement, postgres bool) error {
@@ -20,6 +21,8 @@ func requireChannelSourceSettlementTx(ctx context.Context, tx *sql.Tx, s runtime
 		return requireChannelDeliverySettlementAuthorityTx(ctx, tx, s, postgres)
 	case runtimeeffects.AuthorityChannelNativeSetting:
 		return requireChannelNativeSettingSettlementAuthorityTx(ctx, tx, s, postgres)
+	case runtimeeffects.AuthorityChannelLogout:
+		return requireChannelLogoutSettlementAuthorityTx(ctx, tx, s, postgres)
 	default:
 		return nil
 	}
@@ -31,6 +34,8 @@ func projectChannelSourceSettlementTx(ctx context.Context, tx *sql.Tx, s runtime
 		return projectChannelDeliverySettlementTx(ctx, tx, s, postgres)
 	case runtimeeffects.AuthorityChannelNativeSetting:
 		return projectChannelNativeSettingSettlementTx(ctx, tx, s, postgres)
+	case runtimeeffects.AuthorityChannelLogout:
+		return channelonboarding.SettleLogoutEffectTx(ctx, tx, s, postgres)
 	default:
 		return nil
 	}
@@ -75,12 +80,19 @@ type channelSettlementEvidence struct {
 	PackID                       string                       `json:"pack_id"`
 	PackVersion                  string                       `json:"pack_version"`
 	PackManifestHash             string                       `json:"pack_manifest_hash"`
+	TeardownID                   string                       `json:"teardown_id"`
+	TeardownRevision             int64                        `json:"teardown_revision"`
+	TargetFingerprint            string                       `json:"target_fingerprint"`
 }
 
 func (e channelSettlementEvidence) authority(lease time.Time) (runtimeeffects.Authority, error) {
 	a := runtimeeffects.Authority{Kind: e.Kind, ID: e.ID, ExecutionOwner: e.ExecutionOwner,
 		FenceGeneration: e.FenceGeneration, LeaseExpiresAt: lease, ExecutionMode: e.ExecutionMode}
 	switch e.Kind {
+	case runtimeeffects.AuthorityChannelLogout:
+		a.ChannelLogout = runtimeeffects.ChannelLogoutAuthority{EffectOperationID: e.EffectOperationID,
+			TeardownID: e.TeardownID, TeardownRevision: e.TeardownRevision, PrincipalID: e.PrincipalID,
+			BundleHash: e.BundleHash, RuntimeInstanceID: e.RuntimeInstanceID, TargetFingerprint: e.TargetFingerprint}
 	case runtimeeffects.AuthorityChannelDelivery:
 		a.ChannelDelivery = runtimeeffects.ChannelDeliveryAuthority{
 			EffectOperationID: e.EffectOperationID, DeliveryID: e.DeliveryID, RenderID: e.RenderID, RenderHash: e.RenderHash,

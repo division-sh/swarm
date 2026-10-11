@@ -3813,7 +3813,7 @@
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::serveSessionRetirementRequired",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal",
-    "body_sha256": "cd477c14da6b258e9316e122769146e662b97c359cbb61c72a4dd29941323b2f"
+    "body_sha256": "d2be2406c8339682413ddbd08c3a2d3673740c184c59f9f5778d4094f253de1c"
   },
   {
     "owner": "internal/serveapp/channel_session_startup.go::newServeChannelProviderOwners",
@@ -3927,7 +3927,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
-    "body_sha256": "fa5048060b6a123ea9a15df159b0f0cabd1d48e7470ae1b8954fc892af02d4d6"
+    "body_sha256": "1c06fe174b7925f2b28af9aa64261bf45c483eef3c80ed8d4fdf9e7d922d1798"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",

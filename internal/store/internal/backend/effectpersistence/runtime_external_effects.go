@@ -856,6 +856,7 @@ var externalEffectStoryDispositions = map[string]externalEffectStoryDisposition{
 	"channel_delivery/channel_delivery":                  {Launch: true},
 	"channel_delivery/channel_delivery_whatsapp":         {Launch: true},
 	"channel_native_setting/channel_native_setting":      {Launch: true},
+	"channel_logout/channel_logout_whatsapp":             {Launch: true},
 	"channel_action_ack/channel_action_ack":              {Launch: true},
 	"http_tool_target/authored_http_tool":                {Launch: true},
 	"managed_credential_request/managed_credential":      {},
@@ -1677,6 +1678,9 @@ func requiredExternalEffectBundleHash(ctx context.Context, authority runtimeeffe
 	if authority.Kind == runtimeeffects.AuthorityChannelNativeSetting && bundleHash != strings.TrimSpace(authority.ChannelNativeSetting.BundleHash) {
 		return "", fmt.Errorf("external effect operation bundle scope conflicts with channel native setting bundle")
 	}
+	if authority.Kind == runtimeeffects.AuthorityChannelLogout && bundleHash != authority.ChannelLogout.BundleHash {
+		return "", fmt.Errorf("external effect operation bundle scope conflicts with channel logout bundle")
+	}
 	return bundleHash, nil
 }
 
@@ -2067,7 +2071,7 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 			if err := requireChannelSourceSettlementTx(txctx, tx, settlement, true); err != nil {
 				return err
 			}
-			if settlement.Authority.Kind != runtimeeffects.AuthorityChannelDelivery && settlement.Authority.Kind != runtimeeffects.AuthorityChannelNativeSetting && settlement.Authority.Valid() {
+			if settlement.Authority.Kind != runtimeeffects.AuthorityChannelDelivery && settlement.Authority.Kind != runtimeeffects.AuthorityChannelNativeSetting && settlement.Authority.Kind != runtimeeffects.AuthorityChannelLogout && settlement.Authority.Valid() {
 				if err := requireExternalEffectAuthorityPostgres(txctx, tx, settlement.Authority, false); err != nil {
 					return err
 				}
@@ -2118,7 +2122,7 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 			if err := requireChannelSourceSettlementTx(txctx, tx, settlement, false); err != nil {
 				return err
 			}
-			if settlement.Authority.Kind != runtimeeffects.AuthorityChannelDelivery && settlement.Authority.Kind != runtimeeffects.AuthorityChannelNativeSetting && settlement.Authority.Valid() {
+			if settlement.Authority.Kind != runtimeeffects.AuthorityChannelDelivery && settlement.Authority.Kind != runtimeeffects.AuthorityChannelNativeSetting && settlement.Authority.Kind != runtimeeffects.AuthorityChannelLogout && settlement.Authority.Valid() {
 				if err := requireExternalEffectAuthoritySQLite(txctx, tx, settlement.Authority, false); err != nil {
 					return err
 				}
@@ -2565,7 +2569,7 @@ func reconcileGenericExternalEffectCandidates(ctx context.Context, tx *sql.Tx, p
 
 func recoverGenericExternalEffectCandidateTx(ctx context.Context, tx *sql.Tx, candidate externalEffectRecoveryCandidate,
 	targetState string, failure []byte, now time.Time, postgres bool) (bool, error) {
-	if candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelDelivery) || candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelNativeSetting) {
+	if candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelDelivery) || candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelNativeSetting) || candidate.AuthorityKind == string(runtimeeffects.AuthorityChannelLogout) {
 		changed, err := recoverChannelSourceSettlementTx(ctx, tx, candidate, runtimeeffects.State(targetState), failure, now, postgres)
 		if err != nil {
 			return false, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict,
