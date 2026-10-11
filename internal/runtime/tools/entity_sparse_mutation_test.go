@@ -281,6 +281,44 @@ func constructEntityToolFixture(t *testing.T, ctx context.Context, selected any,
 	if err != nil || constructed.InstancePath != flowInstance {
 		t.Fatalf("entity fixture constructor path: constructed=%+v err=%v", constructed, err)
 	}
+	parentOwner, err := flowidentity.NewRunScopedFlowInstance(owner.RunID, parent.Route())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := pc.Load(ctx, parentOwner); err != nil {
+		t.Fatal(err)
+	} else if !found {
+		parentGraph, found := semanticview.WorkflowStageTopology(source, parent.FlowID)
+		if !found {
+			t.Fatal("entity fixture parent requires its declared stage catalog")
+		}
+		parentStage, err := parentGraph.InitialStoredStage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		parentCtx := effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
+		initial, lifecycle, err := pc.PrepareInitialEntryLifecycle(parentCtx, parentOwner, pipeline.WorkflowInstance{
+			WorkflowName: parent.FlowID, WorkflowVersion: source.WorkflowVersion(), StorageRef: parent.InstancePath,
+			InstanceID: parent.InstanceID, EntityID: parent.EntityID, CurrentState: parentStage.ID(),
+			StageDefined: !parentStage.IsStatelessPosture(), CreatedAt: at, EnteredStageAt: at,
+		}, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		command, err := flowactivationfixture.Command(parentCtx, initial, lifecycle, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		committed, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(parentCtx, command)
+		if err != nil || !committed.Acknowledged {
+			t.Fatalf("construct exact entity fixture parent: acknowledged=%v err=%v", committed.Acknowledged, err)
+		}
+		if committed.Created {
+			if err := pc.FinalizeInitialEntryLifecycle(parentCtx, committed.Lifecycle); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	key, err := pipeline.AdmitFlowInstanceKey(source, flowID, constructed.InstanceID)
 	if err != nil {
 		t.Fatalf("admit the component fixture's explicit construction key: %v", err)

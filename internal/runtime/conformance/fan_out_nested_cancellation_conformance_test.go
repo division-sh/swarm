@@ -11,11 +11,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -136,15 +139,23 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 				t.Fatalf("held child before stop=%+v err=%v", heldView, err)
 			}
 			path := heldView.Deliveries[0].Target.FlowInstance
-			var beforeState string
-			var beforeFields []byte
-			var beforeRevision int64
-			if err := db.QueryRowContext(ctx, `SELECT current_state,revision FROM flow_instances WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, runID, heldView.Deliveries[0].Target.EntityID, path).Scan(&beforeState, &beforeRevision); err != nil {
+			owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(heldView.Deliveries[0].Target.FlowID, flowidentity.LogicalInstanceID(path), path))
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := db.QueryRowContext(ctx, `SELECT fields FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3`, runID, heldView.Deliveries[0].Target.EntityID, path).Scan(&beforeFields); err != nil {
+			stateReader, ok := rt.selected.(pipeline.WorkflowTargetPersistenceReader)
+			if !ok {
+				t.Fatal("held child conservation requires its original target reader")
+			}
+			before, err := stateReader.LoadWorkflowTargetPersistence(ctx, owner, identity.NormalizeEntityID(heldView.Deliveries[0].Target.EntityID))
+			if err != nil {
 				t.Fatal(err)
 			}
+			beforeInstance, err := before.DecodeComplete(owner.Route, identity.NormalizeEntityID(heldView.Deliveries[0].Target.EntityID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeState, beforeFields, beforeRevision := beforeInstance.CurrentState, before.State.Fields, beforeInstance.Revision
 			if beforeState != "pending" {
 				t.Fatalf("child mutated before execution gate: %s", beforeState)
 			}
@@ -207,15 +218,15 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 				t.Fatalf("production run-control cancellation=%+v err=%v", result, err)
 			}
 			gate.open()
-			var afterState string
-			var afterFields []byte
-			var afterRevision int64
-			if err := db.QueryRowContext(ctx, `SELECT current_state,revision FROM flow_instances WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, runID, heldView.Deliveries[0].Target.EntityID, path).Scan(&afterState, &afterRevision); err != nil {
+			after, err := stateReader.LoadWorkflowTargetPersistence(ctx, owner, identity.NormalizeEntityID(heldView.Deliveries[0].Target.EntityID))
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := db.QueryRowContext(ctx, `SELECT fields FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3`, runID, heldView.Deliveries[0].Target.EntityID, path).Scan(&afterFields); err != nil {
+			afterInstance, err := after.DecodeComplete(owner.Route, identity.NormalizeEntityID(heldView.Deliveries[0].Target.EntityID))
+			if err != nil {
 				t.Fatal(err)
 			}
+			afterState, afterFields, afterRevision := afterInstance.CurrentState, after.State.Fields, afterInstance.Revision
 			if afterState != beforeState || afterRevision != beforeRevision || string(afterFields) != string(beforeFields) || !reflect.DeepEqual(loadPrefix(), prefix) {
 				t.Fatalf("canceled held child mutated entity/prefix: state=%s/%s revision=%d/%d fields=%s/%s", beforeState, afterState, beforeRevision, afterRevision, beforeFields, afterFields)
 			}
