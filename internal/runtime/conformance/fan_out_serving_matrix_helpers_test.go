@@ -267,7 +267,7 @@ func newServingMatrixFixture(t *testing.T, backend string, workers *int, probes 
 	}
 	f.topology = newNotifyAllChildrenProcessTopology(t, testAuthorActivityContext(context.Background()), f.selected, f.sources...)
 	for i, probe := range probes {
-		runtime := newNotifyAllChildrenRuntime(t, f.selected, f.db, f.sources[i], time.Now, notifyAllChildrenRuntimeOptions{
+		runtime := newNotifyAllChildrenRuntime(t, f.selected, f.sources[i], time.Now, notifyAllChildrenRuntimeOptions{
 			processTopology: f.topology, fanOutWorkers: workers,
 			fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 				probe.PipelineCoordinator = pc

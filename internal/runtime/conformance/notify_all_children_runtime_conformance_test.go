@@ -136,7 +136,6 @@ func (s *failingNotifyAllChildrenSQLiteStore) ReplaceFlowInstanceRouteTopology(
 }
 
 type notifyAllChildrenRuntime struct {
-	db                 *sql.DB
 	bus                *runtimebus.EventBus
 	diagnostics        *fanInBarrierDiagnosticBus
 	manager            *runtimemanager.AgentManager
@@ -500,7 +499,6 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 			runtime := newNotifyAllChildrenRuntime(
 				t,
 				selected,
-				db,
 				source,
 				time.Now,
 				notifyAllChildrenRuntimeOptions{enableGenericSchedules: true},
@@ -686,7 +684,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				NumericReporterSink:     true,
 				RegistrationUUIDField:   true,
 			})
-			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now)
+			runtime := newNotifyAllChildrenRuntime(t, selected, source, time.Now)
 
 			validRunID := uuid.NewString()
 			validCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), validRunID)
@@ -947,7 +945,7 @@ func TestNumericFanOutInternalDeliverySettlementCompletesOnBothBackends(t *testi
 				NumericRegistrationRows:   true,
 				NumericInternalSettlement: true,
 			})
-			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{
+			runtime := newNotifyAllChildrenRuntime(t, selected, source, time.Now, notifyAllChildrenRuntimeOptions{
 				maintenanceInterval: 10 * time.Millisecond,
 			})
 			runID := uuid.NewString()
@@ -999,28 +997,25 @@ func TestNumericFanOutInternalDeliverySettlementCompletesOnBothBackends(t *testi
 func TestNumericFanOutTemplateSelectOrCreateMaterializesOnBothBackends(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
+		setup func(*testing.T) notifyAllChildrenStore
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			setup: func(t *testing.T) notifyAllChildrenStore {
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected, storetest.DatabaseForTest(selected)
+			setup: func(t *testing.T) notifyAllChildrenStore {
+				return storetest.StartSQLiteRuntimeStore(t)
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, db := tc.setup(t)
+			selected := tc.setup(t)
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{NumericRegistrationRows: true})
-			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{maintenanceInterval: 10 * time.Millisecond})
+			runtime := newNotifyAllChildrenRuntime(t, selected, source, time.Now, notifyAllChildrenRuntimeOptions{maintenanceInterval: 10 * time.Millisecond})
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "numeric-fan-out-template-materialization", runtime.sourceArtifactFact)); err != nil {
@@ -1282,7 +1277,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if !ok || len(scopeV1.Agents) != 2 {
 		t.Fatalf("v1 account agent contract = %#v found=%t, want reader/retired", scopeV1.Agents, ok)
 	}
-	runtimeV1 := newNotifyAllChildrenRuntime(t, selected, db, sourceV1, time.Now, notifyAllChildrenRuntimeOptions{
+	runtimeV1 := newNotifyAllChildrenRuntime(t, selected, sourceV1, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: processTopology,
 	})
 	if err := runtimeV1.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "dynamic-flow-source-v1", runtimeV1.sourceArtifactFact)); err != nil {
@@ -1328,7 +1323,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if _, found := scopeV2.Agents["retired"]; found {
 		t.Fatalf("v2 account contract retained removed agent: %#v", scopeV2.Agents)
 	}
-	runtimeV2 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now, notifyAllChildrenRuntimeOptions{
+	runtimeV2 := newNotifyAllChildrenRuntime(t, selected, sourceV2, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: processTopology,
 	})
 	ctxV2 := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), runtimeV2.sourceArtifactFact), runID)
@@ -1388,7 +1383,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	}
 
 	retireNotifyAllChildrenRuntimeForReplacement(t, runtimeV2)
-	runtimeV3 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now, notifyAllChildrenRuntimeOptions{
+	runtimeV3 := newNotifyAllChildrenRuntime(t, selected, sourceV2, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: processTopology,
 	})
 	startupV3, err := runtimeV3.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctxV2, runtimeV3.sourceArtifactFact, true)
@@ -1418,7 +1413,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 		AutoEmitOnCreate:      autoEmit,
 	})
 	retireNotifyAllChildrenRuntimeForReplacement(t, runtimeV3)
-	runtimeV4 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{
+	runtimeV4 := newNotifyAllChildrenRuntime(t, selected, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: processTopology,
 	})
 	ctxV3 := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), runtimeV4.sourceArtifactFact), runID)
@@ -1455,7 +1450,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	}
 
 	retireNotifyAllChildrenRuntimeForReplacement(t, runtimeV4)
-	runtimeV5 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{
+	runtimeV5 := newNotifyAllChildrenRuntime(t, selected, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: processTopology,
 	})
 	startupV5, err := runtimeV5.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctxV3, runtimeV5.sourceArtifactFact, true)
@@ -1552,7 +1547,7 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
-			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now)
+			runtime := newNotifyAllChildrenRuntime(t, selected, source, time.Now)
 
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{
 				"portfolio_id": "portfolio-main",
@@ -1654,7 +1649,6 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 					runtime := newNotifyAllChildrenRuntime(
 						t,
 						backend,
-						db,
 						source,
 						time.Now,
 						notifyAllChildrenRuntimeOptions{realMockAgents: true, agentGate: gate, diagnosticOverlap: cardinality == 3},
@@ -1822,7 +1816,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)),
 				backend,
 			)
-			runtime := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow }, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
+			runtime := newNotifyAllChildrenRuntime(t, backend, source, func() time.Time { return fixedEngineNow }, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
 			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "notify-all-children-stale-route", runtime.sourceArtifactFact)); err != nil {
 				t.Fatalf("run manager: %v", err)
 			}
@@ -1988,7 +1982,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
 			)
 			eventCountBefore := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID)
-			restarted := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow }, notifyAllChildrenRuntimeOptions{
+			restarted := newNotifyAllChildrenRuntime(t, backend, source, func() time.Time { return fixedEngineNow }, notifyAllChildrenRuntimeOptions{
 				processTopology: processTopology, deferContinuationStart: true,
 			})
 			restartCtx := testAuthorActivityContextForBundle(ctx, restarted.sourceArtifactFact)
@@ -2107,7 +2101,6 @@ func startNotifyAllChildrenDeliveryContinuations(
 func newNotifyAllChildrenRuntime(
 	t *testing.T,
 	backend notifyAllChildrenStore,
-	db *sql.DB,
 	source semanticview.Source,
 	engineNow func() time.Time,
 	options ...notifyAllChildrenRuntimeOptions,
@@ -2362,7 +2355,7 @@ func newNotifyAllChildrenRuntime(
 	var lifecycleStore runtimemanager.AgentLifecyclePersistence = generationLifecycle
 	roles := conformanceManagerPersistenceRoles(backend, eventBus, coordinator)
 	if opts.diagnosticOverlap {
-		roles = gateLifecycleDiagnosticOverlap(t, db, roles)
+		roles = gateLifecycleDiagnosticOverlap(t, backend, roles)
 	}
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   posture,
@@ -2473,7 +2466,6 @@ func newNotifyAllChildrenRuntime(
 		<-maintenanceDone
 	})
 	return notifyAllChildrenRuntime{
-		db:      db,
 		posture: posture,
 		bus:     eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,
 		workOwner: workOwner, selected: backend, sourceArtifactFact: sourceArtifactFact, genericSchedules: genericSchedules,
@@ -2796,7 +2788,7 @@ func waitNotifyAllChildrenRuntimeWithin(t *testing.T, runtime notifyAllChildrenR
 	defer ticker.Stop()
 	for {
 		if err := runtime.bus.WaitForQuiescence(ctx); err != nil {
-			logNotifyAllChildrenDrainFailure(t, runtime.db, runID)
+			logNotifyAllChildrenDrainFailure(t, runtime.selected, runID)
 			readCtx, stopRead := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), runtime.sourceArtifactFact), 5*time.Second)
 			if summary, readErr := runtime.selected.FanOutRunSummary(readCtx, runID, time.Now().UTC()); readErr == nil {
 				t.Logf("quiescence failure durable fan-out summary=%#v active_work=%d", summary, runtime.workOwner.ActiveCount())

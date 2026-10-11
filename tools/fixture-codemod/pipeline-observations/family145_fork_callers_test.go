@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 119 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "54105ebc0267e9a6ba9cc4dadd65960a4a7d12e3cbb6c6baa08edf9c18f7b5e6" {
+	if err != nil || len(rows) != 142 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "0ca51ec94eedf1a4d7009a01abe50dc89a7f0cd9b611f23b7faf7484e0b41fa3" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -69,6 +69,14 @@ func assertFamily145SemanticProofs(t testing.TB, function, beforeSource, afterSo
 	t.Helper()
 	if function == "TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity" {
 		assertFamily145ReplayFaultAssertions(t, beforeSource, afterSource)
+		return
+	}
+	if function == "gateLifecycleDiagnosticOverlap" {
+		before, beforeErr := family145DiagnosticBusinessAssertions(beforeSource)
+		after, afterErr := family145DiagnosticBusinessAssertions(afterSource)
+		if beforeErr != nil || afterErr != nil || strings.Join(before, "\n") != strings.Join(after, "\n") {
+			t.Fatalf("diagnostic overlap lost a gate, decode or one-log assertion: %v/%v", beforeErr, afterErr)
+		}
 		return
 	}
 	if function != "TestTerminalPanicFinalizationBothStores" {
@@ -137,10 +145,34 @@ func family145SemanticOwner(function string) bool {
 		"assertSelectedContractDeferredWorkRejectionHasNoForkMutation",
 		"postgresEventDeliveryTargetRoutes", "scanDeliveryTargetRoutes", "seedEventPublishConstructedFlow",
 		"assertRunStartPersistence", "TestTerminalPanicFinalizationBothStores",
-		"TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity":
+		"TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity", "gateLifecycleDiagnosticOverlap":
 		return true
 	}
 	return false
+}
+
+func family145DiagnosticBusinessAssertions(source string) ([]string, error) {
+	file, err := parser.ParseFile(token.NewFileSet(), "diagnostic.go", "package proof\n"+source, parser.AllErrors)
+	if err != nil {
+		return nil, err
+	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		block, ok := node.(*ast.BlockStmt)
+		if !ok {
+			return true
+		}
+		var kept []ast.Stmt
+		for _, stmt := range block.List {
+			conditional, ok := stmt.(*ast.IfStmt)
+			if ok && conditional.Init != nil && (strings.HasPrefix(family145NodeString(conditional.Init), "err := rows.Scan(") || family145NodeString(conditional.Init) == "err := rows.Err()") {
+				continue
+			}
+			kept = append(kept, stmt)
+		}
+		block.List = kept
+		return true
+	})
+	return runSetupAssertions(family145NodeString(file.Decls[0]))
 }
 
 func TestFamily145PublicationCallersHaveNoRawConstructionOrReadback(t *testing.T) {

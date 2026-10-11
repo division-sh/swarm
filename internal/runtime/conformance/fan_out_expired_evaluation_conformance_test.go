@@ -194,7 +194,7 @@ func TestFanOutProductionCallerM35ExpiredEvaluationOnBothBackends(t *testing.T) 
 					close(gate.recover)
 				}
 			}()
-			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{
+			runtime := newNotifyAllChildrenRuntime(t, selected, source, time.Now, notifyAllChildrenRuntimeOptions{
 				fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 					gate.PipelineCoordinator = pc
 					return gate

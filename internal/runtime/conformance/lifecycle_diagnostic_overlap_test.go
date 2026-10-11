@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // Both consumers read the same real terminal row before either can settle it.
@@ -23,7 +24,7 @@ type lifecycleDiagnosticOverlap struct {
 	release  chan struct{}
 }
 
-func gateLifecycleDiagnosticOverlap(t *testing.T, db *sql.DB, roles runtimemanager.PersistenceRoles) runtimemanager.PersistenceRoles {
+func gateLifecycleDiagnosticOverlap(t *testing.T, selected notifyAllChildrenStore, roles runtimemanager.PersistenceRoles) runtimemanager.PersistenceRoles {
 	t.Helper()
 	probe := &lifecycleDiagnosticOverlap{AgentLifecycleDiagnosticPersistence: roles.LifecycleDiagnostics, release: make(chan struct{})}
 	if probe.AgentLifecycleDiagnosticPersistence == nil {
@@ -37,21 +38,15 @@ func gateLifecycleDiagnosticOverlap(t *testing.T, db *sql.DB, roles runtimemanag
 			t.Errorf("terminal diagnostic overlap: id=%q arrivals=%d, want two consumers", id, arrivals)
 			return
 		}
-		rows, err := db.Query("SELECT payload FROM events WHERE event_name = 'platform.runtime_log'")
+		payloads, err := storetest.ReadLifecycleProjectionLogPayloads(context.Background(), notifyAllChildrenNativeObservationOwner(selected))
 		if err != nil {
 			t.Errorf("read durable lifecycle logs: %v", err)
 			return
 		}
-		defer rows.Close()
 		count := 0
-		for rows.Next() {
-			var raw []byte
+		for _, raw := range payloads {
 			var payload struct {
 				Details map[string]any `json:"details"`
-			}
-			if err := rows.Scan(&raw); err != nil {
-				t.Error(err)
-				return
 			}
 			if err := json.Unmarshal(raw, &payload); err != nil {
 				t.Error(err)
@@ -60,9 +55,6 @@ func gateLifecycleDiagnosticOverlap(t *testing.T, db *sql.DB, roles runtimemanag
 			if payload.Details["outbox_id"] == id {
 				count++
 			}
-		}
-		if err := rows.Err(); err != nil {
-			t.Error(err)
 		}
 		if count != 1 {
 			t.Errorf("outbox %s has %d durable log projections, want one", id, count)

@@ -274,7 +274,7 @@ func newSupplementalServingFixture(t *testing.T, backend string, p *supplemental
 	}
 	storetest.RequireBundleDataCatalog(t, testAuthorActivityContextForBundle(context.Background(), fact), f.selected, bundle)
 	f.topology = newNotifyAllChildrenProcessTopology(t, testAuthorActivityContextForBundle(context.Background(), fact), f.selected, source)
-	rt := newNotifyAllChildrenRuntime(t, f.selected, f.db, source, time.Now, notifyAllChildrenRuntimeOptions{
+	rt := newNotifyAllChildrenRuntime(t, f.selected, source, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: f.topology,
 		fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 			p.PipelineCoordinator = pc

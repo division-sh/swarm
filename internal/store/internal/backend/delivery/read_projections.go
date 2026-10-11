@@ -1876,3 +1876,50 @@ func CountStageCompletionNodeDeliveriesTx(ctx context.Context, tx *sql.Tx, runID
 WHERE e.run_id=$1 AND e.event_name=$2 AND d.subscriber_type='node' AND d.subscriber_id IN ($3,$4) AND d.status='delivered'`, runID, eventName, nodeID, rootNodeID).Scan(&count)
 	return count, err
 }
+
+type FanOutDrainDeliveryStorage struct {
+	DeliveryID, EventID, EventName, SubscriberType, SubscriberID            WorkloadNullableText
+	Status, ClaimVersion, RetryCount, NextEligibleAt, ContinuationHandoffAt WorkloadNullableText
+	UpdatedAt, AttemptClosure, LeaseExpiresAt, AttemptOutcome               WorkloadNullableText
+}
+
+func ReadFanOutDrainDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]FanOutDrainDeliveryStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(d.delivery_id AS TEXT),
+CAST(d.event_id AS TEXT), e.event_name, d.subscriber_type, d.subscriber_id,
+d.status, CAST(d.claim_version AS TEXT), CAST(d.retry_count AS TEXT),
+CAST(d.next_eligible_at AS TEXT), CAST(d.continuation_handoff_at AS TEXT),
+CAST(d.updated_at AS TEXT), a.closure_kind, CAST(a.lease_expires_at AS TEXT),
+a.outcome FROM event_deliveries d JOIN events e ON e.event_id=d.event_id
+LEFT JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id
+AND a.claim_version=d.current_attempt_version
+WHERE d.run_id=$1 AND d.status NOT IN ('delivered','dead_letter')
+ORDER BY d.created_at,d.delivery_id LIMIT 33`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FanOutDrainDeliveryStorage
+	for rows.Next() {
+		var values [14]sql.NullString
+		var targets [14]any
+		for i := range values {
+			targets[i] = &values[i]
+		}
+		if err := rows.Scan(targets[:]...); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		var detached [14]WorkloadNullableText
+		for i, value := range values {
+			detached[i] = WorkloadNullableText{String: value.String, Valid: value.Valid}
+		}
+		out = append(out, FanOutDrainDeliveryStorage{
+			DeliveryID: detached[0], EventID: detached[1], EventName: detached[2], SubscriberType: detached[3], SubscriberID: detached[4],
+			Status: detached[5], ClaimVersion: detached[6], RetryCount: detached[7], NextEligibleAt: detached[8], ContinuationHandoffAt: detached[9],
+			UpdatedAt: detached[10], AttemptClosure: detached[11], LeaseExpiresAt: detached[12], AttemptOutcome: detached[13],
+		})
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

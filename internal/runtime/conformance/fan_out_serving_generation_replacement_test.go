@@ -27,7 +27,7 @@ func TestFanOutServingM06SameBundleGenerationReplacementOnBothBackends(t *testin
 				t.Fatal(err)
 			}
 			successor := newServingMatrixProbe(servingMatrixUnheld, 0)
-			replacement := newNotifyAllChildrenRuntime(t, f.selected, f.db, f.sources[0], time.Now, notifyAllChildrenRuntimeOptions{
+			replacement := newNotifyAllChildrenRuntime(t, f.selected, f.sources[0], time.Now, notifyAllChildrenRuntimeOptions{
 				processTopology: f.topology, fanOutWorkers: &workers,
 				fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 					successor.PipelineCoordinator = pc

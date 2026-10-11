@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "54105ebc0267e9a6ba9cc4dadd65960a4a7d12e3cbb6c6baa08edf9c18f7b5e6"
+const targetDigest = "0ca51ec94eedf1a4d7009a01abe50dc89a7f0cd9b611f23b7faf7484e0b41fa3"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -47,6 +47,20 @@ var files = []string{
 	"internal/cliapp/runtime_log_filter_supported_test.go",
 	"internal/runtime/conformance/reply_resolution_conformance_test.go",
 	"internal/runtime/conformance/delivery_lifecycle_conformance_test.go",
+	"internal/runtime/conformance/empty_handler_construction_test.go",
+	"internal/runtime/conformance/fan_out_b17_mixed_dependency_test.go",
+	"internal/runtime/conformance/fan_out_drain_failure_diagnostic_test.go",
+	"internal/runtime/conformance/fan_out_expired_evaluation_conformance_test.go",
+	"internal/runtime/conformance/fan_out_nested_serving_helpers_test.go",
+	"internal/runtime/conformance/fan_out_resource_selected_fork_test.go",
+	"internal/runtime/conformance/fan_out_resource_source_proof_test.go",
+	"internal/runtime/conformance/fan_out_semantic_proof_helpers_test.go",
+	"internal/runtime/conformance/fan_out_serving_generation_replacement_test.go",
+	"internal/runtime/conformance/fan_out_serving_matrix_helpers_test.go",
+	"internal/runtime/conformance/fan_out_shared_serving_conformance_test.go",
+	"internal/runtime/conformance/fan_out_supplemental_helpers_test.go",
+	"internal/runtime/conformance/lifecycle_diagnostic_overlap_test.go",
+	"internal/runtime/conformance/notify_all_children_runtime_conformance_test.go",
 	"internal/runtime/deliverylifecycle/claim_commit_runtime_test.go",
 	"internal/runtime/inbound_postgres_test.go",
 	"internal/runtime/inbound_raw_settlement_store_test.go",

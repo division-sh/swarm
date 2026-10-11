@@ -272,7 +272,7 @@ func b17MixedNestedRuntime(t *testing.T, backend string, source semanticview.Sou
 		t.Fatalf("unsupported B17 backend %q", backend)
 	}
 	workers := 1
-	rt := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{
+	rt := newNotifyAllChildrenRuntime(t, selected, source, time.Now, notifyAllChildrenRuntimeOptions{
 		realMockAgents: true, enableGenericSchedules: true, fanOutWorkers: &workers,
 		nestedPublications: &probe.publications,
 		fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {

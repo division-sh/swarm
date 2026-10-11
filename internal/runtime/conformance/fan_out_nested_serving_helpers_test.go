@@ -251,7 +251,7 @@ func newNestedServingRuntime(t *testing.T, backend string, source semanticview.S
 		t.Fatalf("unsupported nested-serving backend %q", backend)
 	}
 	workers := 1
-	rt := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{
+	rt := newNotifyAllChildrenRuntime(t, selected, source, time.Now, notifyAllChildrenRuntimeOptions{
 		realMockAgents: gate != nil, agentGate: gate, enableGenericSchedules: true, fanOutWorkers: &workers,
 		nestedPublications: &probe.publications,
 		fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {

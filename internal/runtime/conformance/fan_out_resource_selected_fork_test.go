@@ -107,7 +107,7 @@ func selectedDeploymentResourceFixtureConfigured(t *testing.T, backend, route st
 		if wrapDelivery != nil {
 			deliveryLifecycle = wrapDelivery(f.selected)
 		}
-		f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.db, f.source, time.Now, notifyAllChildrenRuntimeOptions{
+		f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.source, time.Now, notifyAllChildrenRuntimeOptions{
 			processTopology: f.topology, testLifecycleProbe: probe, deliveryLifecycle: deliveryLifecycle,
 			fanOutExecutor: func(coordinator *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 				executor := startupownership.FanOutExecutor(deploymentFanOutDiagnostic{FanOutExecutor: coordinator, t: t})

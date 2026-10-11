@@ -367,7 +367,7 @@ func newSemanticProofFixtureWithSourcePreparation(t *testing.T, backend string, 
 	}
 	f.probe = &semanticProofProbe{db: f.db, policies: map[string]semanticProofPolicy{}, intents: map[string]fanoutobligation.Intent{}, attempts: map[string][]semanticProofAttempt{}, sqlFaults: map[string][]semanticProofAttempt{}, outcomeSQLFaults: map[string]int{}, blocks: map[string]pipeline.FanOutBlockRequest{}, retries: map[string]pipeline.FanOutRetryableRelease{}, completed: make(chan semanticProofReceipt, 1024)}
 	f.topology = newNotifyAllChildrenProcessTopology(t, testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, f.source)), f.selected, f.source)
-	f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.db, f.source, time.Now, notifyAllChildrenRuntimeOptions{
+	f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.source, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: f.topology,
 		fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 			f.probe.PipelineCoordinator = pc

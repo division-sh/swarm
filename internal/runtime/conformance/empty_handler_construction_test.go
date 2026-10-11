@@ -39,7 +39,7 @@ func TestEmptyReporterSettlesWithoutConstructedHeaderMutationBothStores(t *testi
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{
 				NumericRegistrationRows: true, NumericReporterSink: true, RegistrationUUIDField: true,
 			})
-			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now)
+			runtime := newNotifyAllChildrenRuntime(t, selected, source, time.Now)
 			runID := uuid.NewString()
 			ctx := correlation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "empty-reporter-header", runtime.sourceArtifactFact)); err != nil {

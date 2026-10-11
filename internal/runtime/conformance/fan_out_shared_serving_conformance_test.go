@@ -42,7 +42,7 @@ func TestFanOutSharedServingAcrossRealBundleGrantsOnBothBackends(t *testing.T) {
 			topology := newNotifyAllChildrenProcessTopology(t, testAuthorActivityContext(context.Background()), selected, sources...)
 			runtimes := make([]notifyAllChildrenRuntime, len(sources))
 			for i, source := range sources {
-				runtimes[i] = newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{processTopology: topology})
+				runtimes[i] = newNotifyAllChildrenRuntime(t, selected, source, time.Now, notifyAllChildrenRuntimeOptions{processTopology: topology})
 			}
 			plan, exists, err := topology.capability.CurrentSourceSet(context.Background())
 			if err != nil || !exists || len(plan.Sources) != 2 || plan.Sources[0].BundleHash == plan.Sources[1].BundleHash {

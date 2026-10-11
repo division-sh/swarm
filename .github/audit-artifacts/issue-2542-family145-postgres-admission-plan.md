@@ -684,3 +684,61 @@ all893 original immutable records independently retain base hash
 The approved24-receipt digest is unchanged. Named admission remaining146, or147
 excluding Docker's qualification-open removal. No fresh global census/ratchet,
 baseline change, tier, push, PR or whole-family/parent closure claim.
+
+## Shared Notify Runtime Lifetime And Diagnostic Observations
+
+The shared newNotifyAllChildrenRuntime constructor and returned fixture no longer
+carry a pool. All24 construction calls across12 files consume their original
+selected owner; the committed finite codemod deletes only the reviewed pool
+argument, pins every intermediate source digest and type-checks the candidate
+before any write. One newly unneeded outer pool opening (the numeric-template
+root) is now native at its original location. The other outer pools, exact
+faults and history readers remain explicit family145 migration debt.
+
+The two original diagnostic reads consume eventrecord and the closed delivery
+read_projections.go owner through original selected read admission. Lifecycle
+teardown keeps the original two-consumer gate, registration/cleanup cuts and
+exact single projection assertion. The log read remains global and preserves
+duplicate physical payloads; it does not substitute canonical decoding or
+run filtering. Drain diagnostics preserve the original14 nullable columns,
+native ordering, actual attempt join,32 display rows plus the33rd truncation
+marker, redaction and original5s diagnostic deadline. Query, scan, iteration
+and close errors refuse partial evidence. No production workload or deadline,
+execution option, scheduling/settlement behavior or fault capability changed.
+
+notify-runtime-native-consumers.jsonl PASS62.904s: three original roots with
+six backend cells under race/count1 (numeric-template materialization, M06
+generation replacement and mixed valid/stale route replay). notify-runtime-
+overlap-consumers.jsonl PASS41.831s: the original omitted-id/n=3 agent emission
+on both stores, including the real two-consumer diagnostic overlap. The new
+global duplicate-log/payload root passed both stores in notify-runtime-native-
+diagnostic-owners-repaired.jsonl; its adjacent drain root initially failed an
+incorrect open-attempt oracle. notify-runtime-drain-owner-corrected.jsonl
+PASS13.037s retains strict original nullable/open-attempt evidence. Both new
+owner roots cover cancellation, closed/raw/nil ownership and actual nonzero
+physical evidence; drain additionally covers33/32 ordering, settlement and
+foreign-run refusal. These are representative executions, not24 caller runs.
+
+Disclosed local preflight/proof repairs: the first atomic codemod preflight
+caught an unused outer pool and wrote no files; native construction repaired
+that dependency. New diagnostic proofs initially assumed equal creation clocks
+and PostgreSQL canonical rather than physical payload bytes; they now compare
+actual persisted ordering and the existing exact physical payload oracle.
+The active attempt expectation is strictly open, not NULL. The propagation
+unit oracle initially selected an auto-added import instead of the function;
+uniqueFunction repairs that oracle, not the rewrite or business assertions.
+No retry-until-green, skip, timeout increase or pressure-cause claim is used.
+
+All affected finite/current/historical source controls passed in notify-runtime-
+finite-controls.jsonl; only that synthetic propagation oracle was RED.
+notify-runtime-propagation-controls-repaired.jsonl PASS1.418s covers all three
+new exact/hostile propagation controls. notify-runtime-adjacent-guards.jsonl
+PASS23.034s covers executable-delivery, event-writer and runforkrevision
+inventories. Six-package U1000 passes, complete dry run is Changes=[], and the
+original893 immutable recipe hash remains
+0064a225ecf4ff477603c8c03ae931c48201cd17e2dcf7507d46d96f7e3464b3.
+The corpus is1006 rows /142 transitions, digest
+0ca51ec94eedf1a4d7009a01abe50dc89a7f0cd9b611f23b7faf7484e0b41fa3;
+the approved24-receipt pin is unchanged. Named admission inventory is145, or146
+excluding Docker's qualification-open removal. No new global census/baseline,
+tier, restart qualification, push, PR or family/parent closure is claimed.

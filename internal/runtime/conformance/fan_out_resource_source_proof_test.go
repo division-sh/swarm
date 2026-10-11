@@ -101,7 +101,7 @@ func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source
 
 func (f *deploymentResourceFixture) boot(t *testing.T) {
 	t.Helper()
-	f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.db, f.source, time.Now, notifyAllChildrenRuntimeOptions{
+	f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.source, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: f.topology,
 		fanOutExecutor: func(coordinator *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 			return deploymentFanOutDiagnostic{FanOutExecutor: coordinator, t: t}
