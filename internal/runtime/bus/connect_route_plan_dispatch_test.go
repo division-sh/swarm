@@ -2872,10 +2872,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionUsesRenamedPayloadSourc
 			store := &connectRoutePlanLifecycleStore{
 				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 					targetRouteMemoryStore: newTargetRouteMemoryStore(),
-					flowInstances: []ActiveFlowInstanceDescriptor{
-						{InstanceID: "authoritative", EntityID: eventtest.UUID("ent-authoritative"), FlowInstance: "account/authoritative", AddressFields: map[string]string{"entity.account_id": "acct-authoritative"}},
-						{InstanceID: "conflicting", EntityID: eventtest.UUID("ent-conflicting"), FlowInstance: "account/conflicting", AddressFields: map[string]string{"entity.account_id": "acct-conflicting"}},
-					},
 				},
 			}
 			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate)})
@@ -2884,8 +2880,9 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionUsesRenamedPayloadSourc
 			}
 			installConnectionSourceConstruction(t, eb, source, "producer")
 			for index, instanceID := range []string{"authoritative", "conflicting"} {
-				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID), []string{"acct-authoritative", "acct-conflicting"}[index]))
-				store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID)), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)})
+				instance := StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, eventtest.UUID("ent-"+instanceID))
+				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, instance, []string{"acct-authoritative", "acct-conflicting"}[index]))
+				store.installConstructionReceipt(testRunScopedFlowRoute(instance.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: instance})
 			}
 			eventID := uuid.NewString()
 			evt := connectRoutePlanStaticProducerEvent(eventID,
@@ -3052,21 +3049,16 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 
 func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGaps(t *testing.T) {
 	tests := []struct {
-		name          string
-		flowInstances []ActiveFlowInstanceDescriptor
-		addRoutes     []string
-		wantFailure   runtimepinrouting.TargetFailure
-		wantDetail    map[string]any
+		name        string
+		entityIDs   []string
+		instanceIDs []string
+		wantFailure runtimepinrouting.TargetFailure
+		wantDetail  map[string]any
 	}{
 		{
-			name: "missing existing instance does not create",
-			flowInstances: []ActiveFlowInstanceDescriptor{{
-				InstanceID:    "other",
-				EntityID:      eventtest.UUID("ent-other"),
-				FlowInstance:  "account/other",
-				AddressFields: map[string]string{"entity.account_id": "acct-2"},
-			}},
-			addRoutes:   []string{"other"},
+			name:        "missing existing instance does not create",
+			entityIDs:   []string{eventtest.UUID("ent-other")},
+			instanceIDs: []string{"other"},
 			wantFailure: runtimepinrouting.TargetFailureFromConnect(runtimepinrouting.ConnectFailureTargetUnresolved),
 			wantDetail: map[string]any{
 				"connect_route_plan_receiver_flow":      "account",
@@ -3075,12 +3067,9 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 			},
 		},
 		{
-			name: "ambiguous existing instances fail closed",
-			flowInstances: []ActiveFlowInstanceDescriptor{
-				{InstanceID: "one", EntityID: eventtest.UUID("ent-1"), FlowInstance: "account/one", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
-				{InstanceID: "two", EntityID: eventtest.UUID("ent-2"), FlowInstance: "account/two", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
-			},
-			addRoutes:   []string{"one", "two"},
+			name:        "ambiguous existing instances fail closed",
+			entityIDs:   []string{eventtest.UUID("ent-1"), eventtest.UUID("ent-2")},
+			instanceIDs: []string{"one", "two"},
 			wantFailure: runtimepinrouting.TargetFailureFromConnect(runtimepinrouting.ConnectFailureTargetAmbiguous),
 			wantDetail: map[string]any{
 				"connect_route_plan_receiver_flow":          "account",
@@ -3096,7 +3085,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 			store := &connectRoutePlanLifecycleStore{
 				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 					targetRouteMemoryStore: newTargetRouteMemoryStore(),
-					flowInstances:          tc.flowInstances,
 				},
 			}
 			eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -3107,13 +3095,14 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			installConnectionSourceConstruction(t, eb, source, "producer")
-			for index, instanceID := range tc.addRoutes {
+			for index, instanceID := range tc.instanceIDs {
 				key := "acct-1"
 				if instanceID == "other" {
 					key = "acct-2"
 				}
-				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID), key))
-				store.installConstructionReceipt(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID)), runtimepipeline.FlowConstructionPublicationEvidence{Identity: StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, store.flowInstances[index].EntityID)})
+				instance := StoredFlowInstanceIdentityFixture(source, "account", instanceID, busInternalTestRunID, tc.entityIDs[index])
+				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, instance, key))
+				store.installConstructionReceipt(testRunScopedFlowRoute(instance.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: instance})
 			}
 			eventID := uuid.NewString()
 			evt := connectRoutePlanStaticProducerEvent(eventID,
