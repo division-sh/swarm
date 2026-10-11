@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 114 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "cb45624dd2a352420ecf13756a172d8b68c190f593a73e055abd87b386bb3d39" {
+	if err != nil || len(rows) != 119 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "54105ebc0267e9a6ba9cc4dadd65960a4a7d12e3cbb6c6baa08edf9c18f7b5e6" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -144,7 +144,7 @@ func family145SemanticOwner(function string) bool {
 }
 
 func TestFamily145PublicationCallersHaveNoRawConstructionOrReadback(t *testing.T) {
-	for _, name := range []string{"operator_event_publish_test.go", "operator_run_start_test.go", "operator_event_replay_test.go", "sqlite_observability_supported_surface_test.go", "operator_agent_control_test.go", "operator_runtime_context_test.go", "operator_test_setup_test.go"} {
+	for _, name := range []string{"operator_event_publish_test.go", "operator_run_start_test.go", "operator_event_replay_test.go", "sqlite_observability_supported_surface_test.go", "operator_agent_control_test.go", "operator_runtime_context_test.go", "operator_test_setup_test.go", "operator_stage_completion_journey_test.go", "operator_stage_completion_read_test.go"} {
 		data, err := os.ReadFile(filepath.Join("../../..", "internal/apiv1", name))
 		if err != nil {
 			t.Fatal(err)
@@ -153,7 +153,7 @@ func TestFamily145PublicationCallersHaveNoRawConstructionOrReadback(t *testing.T
 			t.Fatalf("%s retained a raw publication dependency: %v", name, err)
 		}
 	}
-	for _, expression := range []string{"storetest.AdmitPostgresRuntimeStore(t, db)", "storetest.DatabaseForTest(selected)", "db.QueryRow(query)", "db.Exec(query)"} {
+	for _, expression := range []string{"storetest.AdmitPostgresRuntimeStore(t, db)", "storetest.AdmitSQLiteRuntimeStore(t, db)", "storetest.DatabaseForTest(selected)", "db.QueryRow(query)", "db.Exec(query)"} {
 		source := []byte("package proof\nfunc witness() { " + expression + " }")
 		if err := family145PublicationRawEscape(source); err == nil {
 			t.Fatalf("publication escape control passed: %s", expression)
@@ -176,13 +176,53 @@ func family145PublicationRawEscape(source []byte) error {
 			return true
 		}
 		switch member.Sel.Name {
-		case "AdmitPostgresRuntimeStore", "NewPostgresStoreForTest", "DatabaseForTest", "Database", "QueryRow", "QueryRowContext", "Query", "QueryContext", "Exec", "ExecContext", "Begin", "BeginTx":
+		case "AdmitPostgresRuntimeStore", "AdmitSQLiteRuntimeStore", "NewPostgresStoreForTest", "DatabaseForTest", "Database", "QueryRow", "QueryRowContext", "Query", "QueryContext", "Exec", "ExecContext", "Begin", "BeginTx":
 			err = fmt.Errorf("raw call %s", member.Sel.Name)
 			return false
 		}
 		return err == nil
 	})
 	return err
+}
+
+func TestFamily145StageCompletionIndependenceAssertionRejectsBypass(t *testing.T) {
+	data, err := os.ReadFile("../../../internal/apiv1/operator_stage_completion_journey_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := family145StageCompletionIndependenceAssertion(data); err != nil {
+		t.Fatal(err)
+	}
+	for _, condition := range []string{"false", "recovered == nil", "recovered != original"} {
+		hostile := strings.Replace(string(data), "recovered == nil || recovered == original", condition, 1)
+		if err := family145StageCompletionIndependenceAssertion([]byte(hostile)); err == nil {
+			t.Fatalf("independent-peer assertion bypass accepted: %s", condition)
+		}
+	}
+}
+
+func family145StageCompletionIndependenceAssertion(source []byte) error {
+	file, err := parser.ParseFile(token.NewFileSet(), "journey.go", source, parser.AllErrors)
+	if err != nil {
+		return err
+	}
+	fn, err := uniqueFunction(file, "requireStageCompletionIndependentOwner")
+	if err != nil {
+		return err
+	}
+	expected, err := canonicalFunction(`func requireStageCompletionIndependentOwner(t testing.TB, original, recovered stageCompletionJourneyStore) {
+	t.Helper()
+	if recovered == nil || recovered == original {
+		t.Fatal("stage completion rehydration requires an independent native same-location owner")
+	}
+}`)
+	if err != nil {
+		return err
+	}
+	if family145NodeString(fn) != expected {
+		return fmt.Errorf("stage completion independence assertion changed")
+	}
+	return nil
 }
 
 func TestFamily145ForkCallerRewritePreservesExactWorkload(t *testing.T) {

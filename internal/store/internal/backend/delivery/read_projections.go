@@ -1869,3 +1869,10 @@ func observeH2NodeDeliveriesForTest(ctx context.Context, tx *sql.Tx, runID strin
 	}
 	return out, nil
 }
+
+func CountStageCompletionNodeDeliveriesTx(ctx context.Context, tx *sql.Tx, runID, eventName, nodeID, rootNodeID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id
+WHERE e.run_id=$1 AND e.event_name=$2 AND d.subscriber_type='node' AND d.subscriber_id IN ($3,$4) AND d.status='delivered'`, runID, eventName, nodeID, rootNodeID).Scan(&count)
+	return count, err
+}

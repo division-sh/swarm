@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"testing"
 	"time"
@@ -17,7 +16,6 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -40,14 +38,10 @@ func TestExactStageCompletionPublicReadbackBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected stageCompletionReadStore
-			var db *sql.DB
 			if backend == "sqlite" {
-				s := storetest.StartSQLiteRuntimeStore(t)
-				selected, db = s, storetest.DatabaseForTest(s)
+				selected = storetest.StartSQLiteRuntimeStore(t)
 			} else {
-				_, opened, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected, db = storetest.AdmitPostgresRuntimeStore(t, opened), opened
+				selected = storetest.StartPostgresRuntimeStore(t)
 			}
 			handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Runs: selected})})
 			for _, tc := range []struct {
@@ -89,12 +83,9 @@ func TestExactStageCompletionPublicReadbackBothStores(t *testing.T) {
 					if err != nil || !committed.Acknowledged || !committed.Created {
 						t.Fatalf("construct exact fieldless stage: %+v %v", committed, err)
 					}
-					query := `SELECT (SELECT COUNT(*) FROM flow_instances WHERE run_id = ? AND current_state = ?), (SELECT COUNT(*) FROM entity_state WHERE run_id = ?)`
-					if backend == "postgres" {
-						query = `SELECT (SELECT COUNT(*) FROM flow_instances WHERE run_id = $1::uuid AND current_state = $2), (SELECT COUNT(*) FROM entity_state WHERE run_id = $3::uuid)`
-					}
-					var headers, fields int
-					if err := db.QueryRowContext(ctx, query, runID, tc.stage, runID).Scan(&headers, &fields); err != nil || headers != 1 || fields != 0 {
+					physical, err := storetest.ReadStageCompletionFieldlessStorage(ctx, selected, runID, tc.stage)
+					headers, fields := physical.Headers, physical.Fields
+					if err != nil || headers != 1 || fields != 0 {
 						t.Fatalf("fieldless constructor headers=%d fields=%d err=%v", headers, fields, err)
 					}
 					if _, err := selected.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {

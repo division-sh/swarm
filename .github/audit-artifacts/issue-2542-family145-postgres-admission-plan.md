@@ -634,3 +634,53 @@ No fresh global census/ratchet, whole-family/tier/closure receipt, push or PR.
 The previous600s aggregate codemod RED remains disclosed, not a zero-added-cost
 proof; this cohort uses separated affected roots, not another whole-package run.
 Docker remains unclassified and qualification-open under #2353.
+
+## Stage-Completion Native Same-Location Peers
+
+Both linked stage-completion API fixture files have no pool, getter, SQL or
+supplied-pool constructor. All three named PostgreSQL admission sites and the
+same-helper SQLite reconstruction are retired together. The original opening
+obtains its native same-location factory; retained-source decode/recompilation
+stays unchanged and invokes that factory at each original rehydration cut.
+An explicit assertion rejects nil or reuse of the running original owner. Its
+source-pinned guard rejects weakening/removing independence. These are actual
+independent peer opens while the original bus continues publishing, not a claim
+of process-restart qualification. The pre-consumer factory cleanup ledger owns
+all peers, so a late open cannot jump ahead of runtime join during teardown.
+
+Original delivery convergence retains exact event/run/name join, two node IDs
+(including the empty root coordinate), node type and delivered status. Strict
+stored-state evidence retains exact run/entity and fixed discovery path without
+case folding or extra eligibility. Fieldless proof retains one snapshot of exact
+run/stage header cardinality and all entity rows in that run. The closed delivery
+read_projections.go owner contains the delivery SQL; the extra query file found
+by TestExecutableDeliverySQLHasClosedOwners was deleted, not exempted. No guard
+or inventory allowance was broadened. Raw construction controls now independently
+reject SQLite reconstruction too, not only PostgreSQL reconstruction.
+
+stage-completion-native-consumers-final.jsonl: both original roots, six backend
+cells, PASS19.960s under race/count1. The earlier unchanged workload pass is
+22.557s. stage-completion-reused-owner-counterexample-repaired.jsonl is the
+deliberate RED10.733s at the exact independence assertion on both stores; the
+real native factory is restored in the final candidate. The first counterexample
+attempt instead exposed an invalid YAML colon in the new spec prose; that local
+syntax error is disclosed and corrected, not counted as counterexample proof.
+stage-completion-native-owners.jsonl: two new physical owner roots passed both
+stores14.497s, including nonzero/zero, pending/delivered and duplicate-node union
+controls, foreign run/name/entity/flow refusal and no-partial cancellation/closed
+ownership. stage-completion-closed-owner-repair.jsonl: unchanged native delivery
+proof and repaired closed-owner structural guard PASS20.420s. The other two
+adjacent structural roots passed in the disclosed initial RED sweep and carry.
+
+stage-completion-family-controls.jsonl PASS15.759s, including the new assertion
+bypass controls and all affected finite/current/historical source guards.
+stage-completion-finite-controls.jsonl: finite recipe replay PASS40.852s, not the
+aggregate codemod package or candidate-overlay proof. Six-package U1000 is green;
+the unchanged-function file move additionally passes delivery-package U1000.
+The complete dry run is Changes=[]. The corpus983 rows /119 transitions has
+digest54105ebc0267e9a6ba9cc4dadd65960a4a7d12e3cbb6c6baa08edf9c18f7b5e6;
+all893 original immutable records independently retain base hash
+0064a225ecf4ff477603c8c03ae931c48201cd17e2dcf7507d46d96f7e3464b3.
+The approved24-receipt digest is unchanged. Named admission remaining146, or147
+excluding Docker's qualification-open removal. No fresh global census/ratchet,
+baseline change, tier, push, PR or whole-family/parent closure claim.
