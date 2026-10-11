@@ -220,7 +220,7 @@ func newSQLiteProofSession(t *testing.T, maximum int) (*sqliteSession, *sql.DB) 
 	}
 	retained := identity.takeInitial()
 	t.Cleanup(func() { _ = retained.Release() })
-	if err := generationauthority.SeedProcessGeneration(context.Background(), db); err != nil {
+	if err := platformschema.SeedFreshProcessGeneration(context.Background(), db, []platformschema.TableDDL{{TableName: "runtime_process_generation"}}); err != nil {
 		t.Fatal(err)
 	}
 	var authority runtimestartupownership.Authority
