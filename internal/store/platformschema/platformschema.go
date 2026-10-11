@@ -3,6 +3,7 @@ package platformschema
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 )
 
 const EntityPresenceModel = "sparse-v1"
@@ -47,9 +47,19 @@ func BootstrapFreshPostgres(ctx context.Context, tx *sql.Tx, plans []TableDDL, s
 func SeedFreshProcessGeneration(ctx context.Context, q interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }, plans []TableDDL) error {
+	if ctx == nil || q == nil {
+		return errors.New("fresh process-generation context and writer are required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	for _, plan := range plans {
 		if plan.TableName == "runtime_process_generation" {
-			return generationauthority.SeedProcessGeneration(ctx, q)
+			_, err := q.ExecContext(ctx, `INSERT INTO runtime_process_generation (singleton_id, generation) VALUES (1, 0)`)
+			if err != nil {
+				return fmt.Errorf("seed fresh process generation: %w", err)
+			}
+			return nil
 		}
 	}
 	return nil
