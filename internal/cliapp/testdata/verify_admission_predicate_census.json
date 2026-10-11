@@ -3495,7 +3495,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.ProjectConnectedChannelReadiness",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
-    "body_sha256": "aec26198842df82ea003e44eac1ad2b43b8c02597f9d545faf7cd9840d0c6137"
+    "body_sha256": "a0543cb85e906a574860b5d135b63e8764597d14d131dd8aab383d845071398a"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.observeSessionReadiness",
