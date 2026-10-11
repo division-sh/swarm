@@ -12,7 +12,6 @@ import (
 
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 	storeownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -127,11 +126,7 @@ func TestProcessCapabilityPublicationRequiresAcknowledgedNativeCommitBothStores(
 						t.Fatal(err)
 					}
 					control.Connector = connector
-					backend, err := postgresbackend.New(sql.OpenDB(control))
-					if err != nil {
-						t.Fatal(err)
-					}
-					store, err := newPostgresStoreComposition(backend)
+					store, err := NewPostgresStore(dsn, control)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -160,19 +155,7 @@ func TestProcessCapabilityPublicationRequiresAcknowledgedNativeCommitBothStores(
 					}
 					defer guard.Release()
 					control.Connector = processSQLiteConnector{path: "file:" + path}
-					backend, err := sqlitebackend.New(sql.OpenDB(control))
-					if err != nil {
-						t.Fatal(err)
-					}
-					schema, err := schemastore.NewSQLiteWithBackend(backend, path)
-					if err != nil {
-						t.Fatal(err)
-					}
-					identity, err := guard.BackendIdentity(ctx)
-					if err != nil {
-						t.Fatal(err)
-					}
-					store, err := newSQLiteStoreComposition(schema, backend, identity)
+					store, err := NewSQLiteRuntimeStore(path, nativeSQLiteFixtureConstruction{connector: control, possession: guard})
 					if err != nil {
 						t.Fatal(err)
 					}

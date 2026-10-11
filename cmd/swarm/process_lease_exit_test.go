@@ -5,7 +5,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,7 +25,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/backendselection"
-	"github.com/division-sh/swarm/internal/store/selected"
+	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -98,19 +97,16 @@ func TestServingInternalAndExternalStopKeepLeaseUntilJoinOrDeathBothStores(t *te
 			for _, stop := range []string{"internal", "external_signal"} {
 				t.Run(string(backend)+"/"+work+"/"+stop, func(t *testing.T) {
 					dir := t.TempDir()
-					request := selected.RuntimeRequest{Selection: backendselection.Selection{Backend: backend}}
-					var postgresObserver *sql.DB
+					scope := backendselection.Selection{Backend: backend}
+					var dsn string
+					var postgresWait func(context.Context) (bool, error)
 					configText := "runtime:\n  recovery_on_startup: false\nllm:\n  backend: anthropic\nstore:\n  backend: " + string(backend) + "\n"
 					if backend == backendselection.BackendSQLite {
-						request.Selection.SQLitePath = filepath.Join(dir, "runtime.db")
-						configText += fmt.Sprintf("  sqlite:\n    path: %q\n", request.Selection.SQLitePath)
+						scope.SQLitePath = filepath.Join(dir, "runtime.db")
+						configText += fmt.Sprintf("  sqlite:\n    path: %q\n", scope.SQLitePath)
 					} else {
-						request.PostgresDSN, postgresObserver, _ = testutil.StartEmptyPostgres(t)
-						connection, err := testpostgres.ParseConnection(request.PostgresDSN)
-						if err != nil {
-							t.Fatal(err)
-						}
-						p := connection.Parameters()
+						var p testpostgres.Parameters
+						dsn, p, postgresWait = testutil.StartEmptyPostgresProcessLeaseProof(t)
 						t.Setenv("AGENT_D_R53_DB_PASSWORD", p.Password)
 						configText += fmt.Sprintf("database:\n  host: %q\n  port: %d\n  name: %q\n  user: %q\n  password_env: AGENT_D_R53_DB_PASSWORD\n  sslmode: %q\n", p.Host, p.Port, p.Database, p.User, p.SSLMode)
 					}
@@ -118,14 +114,14 @@ func TestServingInternalAndExternalStopKeepLeaseUntilJoinOrDeathBothStores(t *te
 					if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
 						t.Fatal(err)
 					}
-					var holder *selected.Owner
+					var holder *selectedtest.ProcessLeaseFixture
 					if work == "waiting" {
-						holder, err = selected.OpenRuntime(context.Background(), request)
+						holder, err = selectedtest.OpenProcessLeaseFixture(context.Background(), scope, dsn)
 						if err != nil {
 							t.Fatal(err)
 						}
 						defer func() {
-							if err := holder.CloseUnactivated(); err != nil {
+							if err := holder.Close(); err != nil {
 								t.Error(err)
 							}
 						}()
@@ -209,11 +205,12 @@ func TestServingInternalAndExternalStopKeepLeaseUntilJoinOrDeathBothStores(t *te
 									fields := strings.Fields(line)
 									proved = proved || (len(fields) > 5 && fields[1] == "->" && fields[2] == "FLOCK" && fields[5] == strconv.Itoa(cmd.Process.Pid))
 								}
-							} else if err := postgresObserver.QueryRowContext(deadline, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted
-								AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
-								AND classid::bigint=CASE WHEN hashtext('swarm:runtime:shared-store-owner')<0 THEN 4294967295::bigint ELSE 0::bigint END
-								AND objid::bigint=(hashtext('swarm:runtime:shared-store-owner')::bigint & 4294967295::bigint) AND objsubid=1)`).Scan(&proved); err != nil {
-								t.Fatal(err)
+							} else {
+								var err error
+								proved, err = postgresWait(deadline)
+								if err != nil {
+									t.Fatal(err)
+								}
 							}
 						} else {
 							client := &http.Client{Timeout: time.Second}
@@ -231,7 +228,7 @@ func TestServingInternalAndExternalStopKeepLeaseUntilJoinOrDeathBothStores(t *te
 						}
 						time.Sleep(5 * time.Millisecond)
 					}
-					inspection, err := selected.OpenAdmissionInspection(deadline, selected.AuthorityRequest{Selection: request.Selection, PostgresDSN: request.PostgresDSN})
+					inspection, err := selectedtest.OpenProcessLeaseInspection(deadline, scope, dsn)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -292,15 +289,15 @@ func TestServingInternalAndExternalStopKeepLeaseUntilJoinOrDeathBothStores(t *te
 						if possession.Available || (err != nil && (backend != backendselection.BackendSQLite || err.Error() != busy.Error())) {
 							t.Fatalf("waiter death stole/released incumbent possession: %+v %v", possession, err)
 						}
-						if err := holder.CloseUnactivated(); err != nil {
+						if err := holder.Close(); err != nil {
 							t.Fatal(err)
 						}
 					}
-					available, err := selected.OpenRuntime(deadline, request)
+					available, err := selectedtest.OpenProcessLeaseFixture(deadline, scope, dsn)
 					if err != nil {
 						t.Fatalf("native process disposal leaked possession: %v", err)
 					}
-					if err := available.CloseUnactivated(); err != nil {
+					if err := available.Close(); err != nil {
 						t.Fatal(err)
 					}
 				})
