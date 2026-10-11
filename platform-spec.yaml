@@ -974,8 +974,12 @@ contract_formats:
         terminal source evidence is copied into a fork-local terminal activity_attempt
         and the existing dispatcher republishes that fork-local result without invoking
         the connector. An activity.approval proposal pending at the fork point mints a
-        fork-local card, request identity, effect hash, and continuation, clears source-run
-        reply context authority, and requires a fresh decision. A revised or rejected proposal remains terminal evidence. An
+        fork-local card, request identity, effect hash, and continuation, projects an
+        admitted incoming reply reference into the child's own captured context row,
+        and requires a fresh decision. Lawful absence stays absent; missing or contradictory
+        captured reply evidence refuses, never silently detaches. The owned context rows
+        are materialized before pending effect carriers in the same transaction.
+        A revised or rejected proposal remains terminal evidence. An
         approved proposal may copy only an unambiguous succeeded or failed terminal
         attempt; started, uncertain, missing, or otherwise non-terminal dispatch evidence
         fails the fork closed. Source-run approval never authorizes a fork-local provider
@@ -20588,7 +20592,8 @@ run_model:
         contradictory evidence remain fail-closed. Approved source effects reuse only unambiguous terminal recorded
         results under fork-local identity, never inherited approval as permission for another external call. Missing,
         uncertain or nonterminal evidence remains refused; human-task authority is not copied and fresh pending
-        proposed effects detach source reply authority and consume the existing fork-generation correspondence.
+        proposed effects retain their captured incoming reference through the child's own reply row and consume the
+        existing fork-generation correspondence. That reference grants neither a new decision nor provider dispatch.
     selected_contract_readiness_classifier: 'Selected-contract fixed-event revision readiness explanation is owned by
       runtime.run_fork.selected_contract_readiness_classifier. This owner is non-mutating and consumes the canonical
       store planner, store.run_fork.replay_resume_admission, runtime.run_fork.contract_frontier_admission, selected

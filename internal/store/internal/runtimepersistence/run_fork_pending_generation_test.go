@@ -34,6 +34,8 @@ func TestForkPendingGenerationCorrespondenceBothStores(t *testing.T) {
 					requireRunningRunForTest(t, ctx, store, sourceRun, now)
 					requireRunningRunForTest(t, ctx, store, childRun, now)
 					card, effect := newProposedEffectTestCard(t, sourceRun, now, attemptgeneration.Generation{})
+					// Generation correspondence has no reply row to project.
+					effect.ReplyContextID = ""
 					source, err := loopruntime.New(sourceRun, effect.EntityID, "", "review", "revision", "start", "draft", 4, now)
 					if err != nil {
 						t.Fatal(err)
@@ -156,13 +158,14 @@ func TestForkPendingGenerationCorrespondenceBothStores(t *testing.T) {
 					}
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					point := runfork.RunForkPoint{EventID: uuid.NewString(), Timestamp: now.Add(time.Minute)}
+					plan := runfork.RunForkPlan{SourceRunID: sourceRun, ForkPoint: point}
 					apply := func() error {
 						return runSelectedFixtureMutation(ctx, fixture.store, "test exact pending generation", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 							switch s := fixture.store.(type) {
 							case *PostgresStore:
-								return s.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRun, childRun, runtimecontracts.BundleIdentity{BundleHash: effect.BundleHash, WorkflowVersion: effect.WorkflowVersion}, projection, point, c, now.Add(2*time.Minute), nil)
+								return s.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, plan, childRun, runtimecontracts.BundleIdentity{BundleHash: effect.BundleHash, WorkflowVersion: effect.WorkflowVersion}, projection, c, now.Add(2*time.Minute), nil)
 							case *SQLiteRuntimeStore:
-								return s.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRun, childRun, runtimecontracts.BundleIdentity{BundleHash: effect.BundleHash, WorkflowVersion: effect.WorkflowVersion}, projection, point, c, now.Add(2*time.Minute), nil)
+								return s.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, plan, childRun, runtimecontracts.BundleIdentity{BundleHash: effect.BundleHash, WorkflowVersion: effect.WorkflowVersion}, projection, c, now.Add(2*time.Minute), nil)
 							default:
 								return fmt.Errorf("unsupported store %T", fixture.store)
 							}
@@ -193,7 +196,7 @@ func TestForkPendingGenerationCorrespondenceBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if got.Generation != want || got.RunID != childRun || got.SourceRunID != childRun || got.ReplyContextID != "" || got.State != decisioncard.ProposedEffectPending || !got.Input.Equal(effect.Input) || got.RequestEventID == effect.RequestEventID || got.EffectContentHash == effect.EffectContentHash {
+					if got.Generation != want || got.RunID != childRun || got.SourceRunID != childRun || effect.ReplyContextID != "" || got.ReplyContextID != "" || got.State != decisioncard.ProposedEffectPending || !got.Input.Equal(effect.Input) || got.RequestEventID == effect.RequestEventID || got.EffectContentHash == effect.EffectContentHash {
 						t.Fatalf("pending effect lost exact fresh authority: %#v", got)
 					}
 					original, err := store.LoadProposedEffectContinuation(ctx, effect.CardID)

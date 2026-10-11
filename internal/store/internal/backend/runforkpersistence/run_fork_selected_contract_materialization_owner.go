@@ -350,6 +350,10 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err := attempt.BeginInitialRunProjection(forkCtx, forkRunID); err != nil {
 			return err
 		}
+		replayAdmission, err = materializeRunForkReplyContexts(forkCtx, tx, attempt, port.replies, plan, forkRunID, port.postgres, replayAdmission)
+		if err != nil {
+			return err
+		}
 		forkMutationSource := activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 			return port.activeForkSource(ctx, tx, runID)
 		})
@@ -379,10 +383,6 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			return err
 		}
 		replayAdmission, err = requireMaterializedRunForkTimerHistory(forkCtx, attempt, plan, forkRunID, req.Readiness, port.workflowTimers, port.arrivalSchedules, now, replayAdmission)
-		if err != nil {
-			return err
-		}
-		replayAdmission, err = materializeRunForkReplyContexts(forkCtx, tx, attempt, port.replies, plan, forkRunID, port.postgres, replayAdmission)
 		if err != nil {
 			return err
 		}

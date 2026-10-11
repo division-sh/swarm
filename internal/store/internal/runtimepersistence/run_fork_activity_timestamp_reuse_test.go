@@ -567,6 +567,9 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 	decisionID := ""
 	if approved {
 		requestID, input = continuation.RequestEventID, continuation.Input.Interface()
+		if carryReply {
+			card, continuation = bindActivityFixtureProposedReply(t, card, continuation, replyID)
+		}
 		cards := fixture.store.(decisioncard.ProposedEffectStore)
 		if err := cards.CreateProposedEffectCard(ctx, card, continuation); err != nil {
 			t.Fatal(err)
@@ -580,20 +583,7 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 		pendingAt := at.Add(time.Minute)
 		pending, continuation := newDeclaredRootActivityCard(t, runID, pendingAt, declarations)
 		if carryReply {
-			continuation.ReplyContextID = replyID
-			value, err := continuation.EffectValue()
-			if err != nil {
-				t.Fatal(err)
-			}
-			continuation.EffectContentHash, err = canonicaljson.HashValue(value)
-			if err != nil {
-				t.Fatal(err)
-			}
-			pending.EffectContentHash, pending.CardContentHash = continuation.EffectContentHash, ""
-			pending, err = decisioncard.New(pending)
-			if err != nil {
-				t.Fatal(err)
-			}
+			pending, continuation = bindActivityFixtureProposedReply(t, pending, continuation, replyID)
 		}
 		parent := eventtest.ExistingRunRootIngress(continuation.SourceEventID, "activity.seeded", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, pendingAt)
 		if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, parent); err != nil {
@@ -686,6 +676,9 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 func newDeclaredRootActivityCard(t *testing.T, runID string, at time.Time, declarations semanticview.Source) (decisioncard.Card, decisioncard.ProposedEffectContinuation) {
 	t.Helper()
 	card, continuation := newRootProposedEffectTestCard(t, runID, at)
+	// This declaration fixture has no admitted incoming request. Reply-bearing
+	// fork proofs bind an actual captured row before sealing the effect.
+	continuation.ReplyContextID = ""
 	bundle, ok := semanticview.Bundle(declarations)
 	if !ok || bundle.SourceArtifact == nil {
 		t.Fatal("proposed activity requires its admitted declaration artifact")
@@ -719,6 +712,25 @@ func newDeclaredRootActivityCard(t *testing.T, runID string, at time.Time, decla
 		t.Fatal(err)
 	}
 	card.CardID, card.BundleHash, card.Anchor = continuation.CardID, continuation.BundleHash, anchor
+	card.EffectContentHash, card.CardContentHash = continuation.EffectContentHash, ""
+	card, err = decisioncard.New(card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return card, continuation
+}
+
+func bindActivityFixtureProposedReply(t *testing.T, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation, replyID string) (decisioncard.Card, decisioncard.ProposedEffectContinuation) {
+	t.Helper()
+	continuation.ReplyContextID = replyID
+	value, err := continuation.EffectValue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuation.EffectContentHash, err = canonicaljson.HashValue(value)
+	if err != nil {
+		t.Fatal(err)
+	}
 	card.EffectContentHash, card.CardContentHash = continuation.EffectContentHash, ""
 	card, err = decisioncard.New(card)
 	if err != nil {

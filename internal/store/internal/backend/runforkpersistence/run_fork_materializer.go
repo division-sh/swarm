@@ -805,7 +805,7 @@ func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisio
 	if materializeProposed == nil {
 		return fmt.Errorf("fork proposed-effect materialization owner is required")
 	}
-	if err := materializeProposed(ctx, attempt, plan.SourceRunID, forkRunID, target, projection, plan.ForkPoint, fields.Correspondence, now, changes); err != nil {
+	if err := materializeProposed(ctx, attempt, plan, forkRunID, target, projection, fields.Correspondence, now, changes); err != nil {
 		return err
 	}
 	writer := runtimemutationlog.Writer{
