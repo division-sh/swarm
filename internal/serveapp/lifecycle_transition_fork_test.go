@@ -63,6 +63,7 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 				frontierPayload = map[string]any{"revision_id": readLifecycleLoop(t, rt, seed.RunID, entityID).RevisionID}
 			}
 			frontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": frontierEvent, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": frontierPayload, "idempotency_key": "fork-frontier"})
+			waitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, frontier.EventID)
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "lifecycle-fork"}
 			var fork, duplicate apiv1.RunForkExecutionResult

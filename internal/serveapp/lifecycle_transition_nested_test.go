@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync"
@@ -8,10 +9,29 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
+
+type nestedSeedReadinessBarrier struct {
+	observer lifecycleprobe.Observer
+	release  chan struct{}
+	once     sync.Once
+}
+
+func (b *nestedSeedReadinessBarrier) NotifyLifecycle(ctx context.Context, signal lifecycleprobe.Signal) {
+	b.observer.NotifyLifecycle(ctx, signal)
+	if signal.Kind == lifecycleprobe.PostCommitDispatchStarted && signal.EventType == "left.work.requested" {
+		b.once.Do(func() {
+			select {
+			case <-b.release:
+			case <-ctx.Done():
+			}
+		})
+	}
+}
 
 func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T) {
 	for _, variant := range []struct {
@@ -26,7 +46,11 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 		backend, mode := variant.backend, variant.mode
 		t.Run(string(backend)+"/"+mode, func(t *testing.T) {
 			probe := lifecycletest.New(t)
-			configureOwnedMockLifecycleProbe(t, probe)
+			readiness := &nestedSeedReadinessBarrier{observer: probe, release: make(chan struct{})}
+			releaseReadiness := sync.OnceFunc(func() { close(readiness.release) })
+			t.Cleanup(releaseReadiness)
+			defer releaseReadiness()
+			configureOwnedMockLifecycleProbe(t, readiness)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleNestedCascade(t))
 			var entered chan string
 			var unblock func()
@@ -39,6 +63,9 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			}
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "left.work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "tree-seed"})
 			runID := seed.RunID
+			// Activation precedes this exact milestone; hold delivery so the
+			// complete initial-tree assertion cannot observe a later handler state.
+			probe.Expect(seed.EventID).PostCommitDispatchStarted().Within(servedEventPublishLifecycleProbeWaitTimeout)
 			wantStages := map[string]string{
 				runID: "pending", "outer": "pending",
 				"outer/left": "waiting", "outer/left/sink": "waiting", "outer/left/sink/final": "waiting",
@@ -71,6 +98,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			if !reflect.DeepEqual(gotStages, wantStages) {
 				t.Fatalf("one constructor did not create the complete initial tree: got=%v want=%v", gotStages, wantStages)
 			}
+			releaseReadiness()
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			captured := make(chan map[string][][]string, 1)
 			go func() {

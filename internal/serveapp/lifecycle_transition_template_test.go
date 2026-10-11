@@ -350,6 +350,7 @@ func TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStore
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "template-pause"})
 			frontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.observed", "run_id": runID, "source_event_id": sourceEvent, "payload": map[string]any{"seed": true}, "idempotency_key": "template-frontier"})
+			waitServedEventPublishedLog(t, rt.Endpoint, runID, frontier.EventID)
 			before := snapshotForkReceiverApplication(t, rt)
 			params := map[string]any{"source_run_id": runID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "template-fork"}
 			for attempt := 0; attempt < 2; attempt++ {

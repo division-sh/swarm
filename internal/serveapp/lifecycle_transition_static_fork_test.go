@@ -28,6 +28,7 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 			frontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"event_name": "work.first", "run_id": seed.RunID, "payload": map[string]any{"choice": "alpha"}, "idempotency_key": "static-fork-frontier",
 			})
+			waitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, frontier.EventID)
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "static-fork"}
 			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
