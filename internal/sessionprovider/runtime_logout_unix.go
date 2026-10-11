@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
@@ -51,16 +53,23 @@ func (c *RuntimeConnection) DispatchSessionLogout(ctx context.Context, responsib
 	if err != nil {
 		return err
 	}
-	owned, handle, occurrence, err := c.admitSessionLogout(work.Context(), responsibility)
+	tail, err := c.beginLogoutSettlement()
 	if err != nil {
 		return errors.Join(err, work.Done())
 	}
+	owned, handle, occurrence, err := c.admitSessionLogout(work.Context(), responsibility)
+	if err != nil {
+		return errors.Join(err, work.Done(), tail.Done())
+	}
+	coordinate := responsibility.Logout.Coordinate
+	settlementCtx := authoractivity.WithScope(tail.Context(), authoractivity.BundleScope(coordinate.RuntimeInstanceID, coordinate.BundleHash))
+	settlementCtx = runtimeeffects.WithAuthority(settlementCtx, handle.Attempt().Authority)
 	done := make(chan error, 1)
 	go func() {
-		err := executeSessionLogout(owned, occurrence, handle, func(ctx context.Context) error {
+		err := executeSessionLogout(owned, settlementCtx, occurrence, handle, func(ctx context.Context) error {
 			return c.requireOriginalLogoutOccurrence(ctx, responsibility)
 		})
-		done <- errors.Join(err, work.Done())
+		done <- errors.Join(err, work.Done(), tail.Done())
 	}()
 	select {
 	case err := <-done:
@@ -70,6 +79,16 @@ func (c *RuntimeConnection) DispatchSessionLogout(ctx context.Context, responsib
 	case <-c.ctx.Done():
 		return context.Cause(c.ctx)
 	}
+}
+
+// Journal/history settlement is accepted process work, not renewed execution
+// in a retired runtime. The separate SDK context retains all dispatch fences.
+func (c *RuntimeConnection) beginLogoutSettlement() (*worklifetime.Lease, error) {
+	process, ok := worklifetime.ProcessFromContext(c.ctx)
+	if !ok {
+		return nil, errRuntimeConnection
+	}
+	return process.Begin(context.Background())
 }
 
 func (c *RuntimeConnection) admitSessionLogout(ctx context.Context, op channelonboarding.TeardownOperation) (context.Context, *runtimeeffects.Handle, *clientOccurrence, error) {
@@ -124,10 +143,10 @@ func (c *RuntimeConnection) requireOriginalLogoutOccurrence(ctx context.Context,
 	return ctx.Err()
 }
 
-func executeSessionLogout(ctx context.Context, occurrence *clientOccurrence, handle *runtimeeffects.Handle, preflight func(context.Context) error) error {
+func executeSessionLogout(ctx, settlementCtx context.Context, occurrence *clientOccurrence, handle *runtimeeffects.Handle, preflight func(context.Context) error) error {
 	workCtx, release, err := occurrence.prepareLogout(ctx)
 	if err != nil {
-		return handle.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict, "channel_logout_drain_failed", "channel-logout", "drain", nil, err)
+		return handle.Fail(settlementCtx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict, "channel_logout_drain_failed", "channel-logout", "drain", nil, err)
 	}
 	launched := false
 	launchErr := error(nil)
@@ -152,17 +171,16 @@ func executeSessionLogout(ctx context.Context, occurrence *clientOccurrence, han
 		if launched {
 			state, class = runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain
 		}
-		return errors.Join(launchErr, handle.Fail(ctx, state, class, "channel_logout_failed", "channel-logout", "unlink", nil, err))
+		return errors.Join(launchErr, handle.Fail(settlementCtx, state, class, "channel_logout_failed", "channel-logout", "unlink", nil, err))
 	}
 	// SDK success includes its owned local deletion; original socket, callbacks
 	// and private transactions must also join before projecting complete success.
-	settlementCtx := context.WithoutCancel(ctx)
 	if err := occurrence.join(settlementCtx); err != nil {
-		return errors.Join(launchErr, handle.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
+		return errors.Join(launchErr, handle.Fail(settlementCtx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
 			"channel_logout_join_failed", "channel-logout", "join", nil, err))
 	}
 	if !occurrence.client.Store.Deleted {
-		return handle.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
+		return handle.Fail(settlementCtx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
 			"channel_logout_deletion_unconfirmed", "channel-logout", "settle", nil, fmt.Errorf("SDK unlink did not confirm original device deletion"))
 	}
 	return errors.Join(launchErr, handle.Succeed(settlementCtx, map[string]any{
