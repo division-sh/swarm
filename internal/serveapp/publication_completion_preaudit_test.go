@@ -321,10 +321,10 @@ type publicationCompletionAudit struct {
 	holdRelease         bool
 	entered             chan struct{}
 	release             chan struct{}
-	claimReleased       chan struct{}
-	claimReleaseOnce    sync.Once
-	claimReleaseCount   int
-	claimReleaseError   error
+	claimDisposed       chan struct{}
+	claimDisposeOnce    sync.Once
+	claimDisposeCount   int
+	claimDisposeError   error
 	enterOnce           sync.Once
 	releaseOnce         sync.Once
 	beforeCommit        func(context.Context)
@@ -333,7 +333,7 @@ type publicationCompletionAudit struct {
 }
 
 func installPublicationCompletionAudit(t *testing.T, hold bool) *publicationCompletionAudit {
-	p := &publicationCompletionAudit{hold: hold, entered: make(chan struct{}), release: make(chan struct{}), claimReleased: make(chan struct{})}
+	p := &publicationCompletionAudit{hold: hold, entered: make(chan struct{}), release: make(chan struct{}), claimDisposed: make(chan struct{})}
 	previous := projectRuntimePersistenceForServe
 	projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
 		projected := previous(owner)

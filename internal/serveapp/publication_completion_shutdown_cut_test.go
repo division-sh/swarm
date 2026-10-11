@@ -123,15 +123,15 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 		probe.releaseOnce.Do(func() { close(probe.release) })
 		if method == "event.publish" || eventBacked {
 			select {
-			case <-probe.claimReleased:
+			case <-probe.claimDisposed:
 			case <-time.After(10 * time.Second):
-				t.Fatal("fenced publication did not release its exact native claim")
+				t.Fatal("fenced publication did not settle or release its exact native claim")
 			}
 			probe.mu.Lock()
-			count, releaseErr := probe.claimReleaseCount, probe.claimReleaseError
+			count, disposeErr := probe.claimDisposeCount, probe.claimDisposeError
 			probe.mu.Unlock()
-			if count != 1 || releaseErr != nil {
-				t.Fatalf("fenced publication claim release: count=%d err=%v", count, releaseErr)
+			if count != 1 || disposeErr != nil {
+				t.Fatalf("fenced publication claim disposition: count=%d err=%v", count, disposeErr)
 			}
 		}
 	}
