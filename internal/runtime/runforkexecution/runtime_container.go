@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -666,19 +667,10 @@ func (c selectedContractForkLocalRuntimeContainer) publishCommittedInputs() erro
 				return err
 			}
 		}
-		eventCtx := runtimecorrelation.WithRuntimeLineageSubject(runCtx, forkEventID, sourceEvent.EventName)
-		if _, continuing, err := req.SourcePlan.FanOutPendingRecipientPartition(sourceEvent.SourceEventID); err != nil {
+		eventCtx, err := c.selectedFanOutPublicationContext(
+			runtimecorrelation.WithRuntimeLineageSubject(runCtx, forkEventID, sourceEvent.EventName), evt, sourceEvent.SourceEventID)
+		if err != nil {
 			return err
-		} else if continuing {
-			for _, plan := range req.RecipientPlanning.RecipientPlanEvents {
-				if plan.SourceEventID != sourceEvent.SourceEventID {
-					continue
-				}
-				eventCtx, err = runtimebus.WithSelectedForkRecipientPlan(eventCtx, evt, plan.Recipients)
-				if err != nil {
-					return err
-				}
-			}
 		}
 		if req.Prepared.recoveryChildRunID != "" {
 			admittedCtx, admitted, err := bus.AdmitSelectedForkPublishInput(eventCtx, evt, input)
@@ -766,6 +758,26 @@ func (c selectedContractForkLocalRuntimeContainer) publishCommittedInputs() erro
 		}
 	}
 	return nil
+}
+
+func (c selectedContractForkLocalRuntimeContainer) selectedFanOutPublicationContext(ctx context.Context, event events.Event, sourceEventID string) (context.Context, error) {
+	_, continuing, err := c.req.SourcePlan.FanOutPendingRecipientPartition(sourceEventID)
+	if err != nil {
+		return nil, err
+	}
+	if !continuing {
+		return ctx, nil
+	}
+	for _, plan := range c.req.RecipientPlanning.RecipientPlanEvents {
+		if plan.SourceEventID != sourceEventID {
+			continue
+		}
+		ctx, err = runtimebus.WithSelectedForkRecipientPlan(ctx, event, plan.Recipients)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return ctx, nil
 }
 
 func (c selectedContractForkLocalRuntimeContainer) awaitTerminalSettlement(ctx context.Context, failures <-chan error) error {

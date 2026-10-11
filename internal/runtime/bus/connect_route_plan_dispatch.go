@@ -158,16 +158,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		memo.ready = false
 	}
 
-	matched := r.matchedPlans(ctx, evt)
-	if selected, ok := selectedForkRecipientPlanFromContext(ctx, evt); ok {
-		included := make([]runtimepinrouting.ConnectRoutePlan, 0, len(matched))
-		for _, plan := range matched {
-			if selected.allowsConnectPlan(plan) {
-				included = append(included, plan)
-			}
-		}
-		matched = included
-	}
+	matched := selectedForkConnectPlans(ctx, evt, r.matchedPlans(ctx, evt))
 	if len(matched) == 0 {
 		return connectRoutePlanDispatch{Evaluation: emptyEvaluation}, nil
 	}
