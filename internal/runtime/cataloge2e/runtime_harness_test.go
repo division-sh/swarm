@@ -1417,6 +1417,7 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 			InstanceID:      catalogRuntimeRunID,
 			StorageRef:      catalogRuntimeRunID,
 			EntityID:        entityID,
+			Mode:            h.bundle.FlowTree.Root.Schema.EffectiveMode(),
 			WorkflowName:    h.bundle.WorkflowName(),
 			WorkflowVersion: h.bundle.WorkflowVersion(),
 			CurrentState:    h.initialState,
