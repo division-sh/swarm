@@ -1001,6 +1001,7 @@ units:
       TestPublicPublicationCompletionExactBytesBothStores: [default_sqlite, explicit_postgres]
       TestPublicFeedOnlyCompletionUnloadRestartBothStores: [default_sqlite, explicit_postgres]
       TestPublicPublicationRetirementRecoveryBothStores: [default_sqlite, explicit_postgres]
+      TestPublicPublicationSixHubOriginalDeadlineBothStores: [sqlite, postgres]
       TestProviderSelectedRootStandingBootBothStores: [default_sqlite, explicit_postgres]
       TestIssue2566ReporterFiniteFixtureCanCloseBothStores: [sqlite, postgres]
       TestManagedEmitPublicationExactScopeBothStores: [default_sqlite/root, default_sqlite/imported, default_sqlite/nested, default_sqlite/template, explicit_postgres/root, explicit_postgres/imported, explicit_postgres/nested, explicit_postgres/template]
