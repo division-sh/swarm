@@ -723,12 +723,28 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := runSelectedFixtureMutation(ctx, opened.store, "materialize proposed effect cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-					if store, ok := opened.store.(*PostgresStore); ok {
-						return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, projection, point, correspondence, now.Add(2*time.Minute), nil)
+				materialize := func(c *loopruntime.ForkCorrespondence) error {
+					return runSelectedFixtureMutation(ctx, opened.store, "materialize proposed effect cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+						if store, ok := opened.store.(*PostgresStore); ok {
+							return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, projection, point, c, now.Add(2*time.Minute), nil)
+						}
+						return opened.store.(*SQLiteRuntimeStore).runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, projection, point, c, now.Add(2*time.Minute), nil)
+					})
+				}
+				crossed, err := loopruntime.NewForkCorrespondence(nil, forkRunID, uuid.NewString())
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, invalid := range []*loopruntime.ForkCorrespondence{nil, {}, crossed} {
+					before := snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")
+					if err := materialize(invalid); err == nil || err.Error() != "fork correspondence does not own the exact child run and entity" {
+						t.Fatalf("actual proposed effect lost exact correspondence refusal: %v", err)
 					}
-					return opened.store.(*SQLiteRuntimeStore).runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, projection, point, correspondence, now.Add(2*time.Minute), nil)
-				}); err != nil {
+					if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")) {
+						t.Fatal("refused proposed-effect correspondence changed source or child state")
+					}
+				}
+				if err := materialize(correspondence); err != nil {
 					t.Fatal(err)
 				}
 				items, _, err := cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: forkRunID, Limit: 10})

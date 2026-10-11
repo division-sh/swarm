@@ -20228,10 +20228,13 @@ run_model:
       A missing historical header or changed historical lifecycle/configuration/clock/state fact on exact reuse is corruption and refuses
       without repair. Reuse consumes the canonical paired header/optional-fields reader and the same fixed-revision
       projection as the historical writer, not presence counts alone. Imported state-only rows remain non-executable:
-      exact materialize-only reuse verifies their projected fields, stage, entry time, revision, gates, bookkeeping,
-      accumulator, names and branch-creation clocks through the same paired reader and historical writer projection.
-      Their branch-creation clocks use the canonical run-start timestamp; they do not replace recorded stage-entry
-      time. Changed import evidence refuses without repair or construction. Flow membership
+      exact materialize-only reuse verifies their projected fields, names and recorded data creation/update clocks
+      through the same paired reader and historical data-only writer projection. Lifecycle stage, entry time,
+      revision, gates, bookkeeping and accumulator remain absent; neither branch-start time nor an empty loop
+      correspondence may fabricate them. Proposed-effect discovery uses exact persisted source coordinates:
+      no matching card requires no execution correspondence, while any matching card still requires exact admitted
+      child correspondence before authority can be copied. Changed import evidence or an unexpected constructed
+      header refuses without repair or construction. Flow membership
       alone proves neither entity type nor lifecycle readiness. Every retained frontier event
       association and its execution mode remains explicit; duplicate or conflicting projections cannot elect an owner.
       A child companion and its readiness are fresh work admitted through the canonical selected declaration and
