@@ -12,6 +12,16 @@ type ChannelObservation interface {
 	Close() error
 }
 
+func ReadServedChannelConnection(ctx context.Context, selected ReleaseProcessReadOnlyInspection, operationID string) (string, error) {
+	var connection string
+	err := selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		connection, err = private.ReadServedChannelConnectionForTest(ctx, selected, operationID)
+		return err
+	})
+	return connection, err
+}
+
 type channelObservation struct {
 	selected ReleaseProcessReadOnlyInspection
 }

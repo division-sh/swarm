@@ -11713,6 +11713,11 @@ tool_model:
         temporary cache absence and a still-live authorizer cannot justify settlement. Existing journal evidence stays
         with its effect recovery owner. Exact failed replay preserves the target and pairing, emits no unlink and no
         new attempt, and cannot leave an orphan blocking subsequent context retirement.
+        A later explicit reconnect is a new authenticated responsibility with a new connection identity,
+        fresh signed pairing, an independent claimant and explicit confirmation. It reads the retained
+        predecessor binding revision without requiring the retired connection to execute. Retained identity
+        cannot reuse a session proof, restore the old pairing or authorize an old logout against that successor.
+        Terminal logout replay remains pinned to the original journal, target and immutable result.
       session_private_directory_component: >
         On supported Linux and Darwin hosts, the concrete connection directory is keyed by the retained connection
         UUID under an existing private runtime-state base, never source hash, run or process occurrence. Directory,
@@ -12355,7 +12360,16 @@ tool_model:
         return the original outcome while changed input conflicts. An exact selected-store begin replay is classified
         before credential currentness, active-interface resolution, proof planning, revision admission, fresh challenge
         generation, or any other mutable new-ceremony precondition; a replay recheck precedes return from a failed
-        currentness gate so a racing exact commit cannot be hidden. Credential currentness gates only a genuinely new
+        currentness gate so a racing exact commit cannot be hidden. The operator identity owner separately selects
+        exact retained current binding facts for
+        recovery verb admission, inherited/reconnect/rebind revision selection, confirmed-child reconciliation,
+        non-destructive unbind/credential cleanup and historical readback. It rejects missing or contradictory
+        principal/interface/revision evidence, duplicate rows, cancellation and observation errors rather than
+        guessing an absent binding. Retained facts grant neither SDK execution nor READY. Strict current binding,
+        proof-reuse readiness, Begin/Confirm, proof materialization, confirmation effects and business admission
+        retain their live provider checks. Known unavailable session execution is stale readback with retained
+        identity and actionable explicit reconnect guidance, not an unknown-error waiver or invented absence.
+        Other observation errors remain errors. Credential currentness gates only a genuinely new
         ceremony or a pending approved
         mutation after terminal replay classification. Only a successful currentness observation whose value does not match
         proves staleness; an observation error propagates without changing the pending ceremony, proof responsibility,
