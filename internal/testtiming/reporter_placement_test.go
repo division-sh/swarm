@@ -24,7 +24,7 @@ func TestTestTimeReviewedReporterPlacementIsFiniteAndFullyCharged(t *testing.T) 
 			for _, mode := range []TestTimeMode{TestTimePR, TestTimeStrict} {
 				t.Run(root.Root+"/"+tier+"/"+string(mode), func(t *testing.T) {
 					candidate := append(slices.Clone(base), root)
-					row, problems := compareTimingTier(reference, candidate, rootTimingPolicy(), tier, mode)
+					row, problems := compareTimingTier(reference, candidate, rootTimingPolicy(), tier, mode, true)
 					approved := tier != testplanning.ProfileCore
 					if row.AddedSeconds != root.Seconds || math.Abs(row.Growth-root.Seconds) > 1e-9 || row.Allowance != 100 || len(problems) != 0 || len(row.Warnings) != 1 || (row.StrictStatus == BudgetPass) != approved {
 						t.Fatalf("reporter placement lost scope or charged cost: %+v / %v", row, problems)
@@ -43,7 +43,7 @@ func TestTestTimeReviewedReporterPlacementIsFiniteAndFullyCharged(t *testing.T) 
 						}
 					}
 					candidate[1].Seconds = 100.001
-					row, problems = compareTimingTier(reference, candidate, rootTimingPolicy(), tier, mode)
+					row, problems = compareTimingTier(reference, candidate, rootTimingPolicy(), tier, mode, true)
 					if len(problems) != 0 || row.AddedSeconds != 100.001 || math.Abs(row.Growth-100.001) > 1e-9 || row.Allowance != 100 || row.StrictStatus != BudgetFail {
 						t.Fatalf("reporter placement or counterfactual lost aggregate cost: %+v / %v", row, problems)
 					}
@@ -83,7 +83,7 @@ func TestTestTimeReviewedReporterPlacementRejectsForeignAndPromotedCells(t *test
 		}
 		reference := timingReferenceRoots(t, []RootTime{timingRoot("TestOld", 2000)}, rootTimingPolicy())
 		reference = append(reference, ReferenceRootTime{RootTime: root, Tiers: []string{testplanning.ProfileLifecycle, testplanning.ProfileFull}})
-		row, problems := compareTimingTier(reference, []RootTime{timingRoot("TestOld", 2000), root}, rootTimingPolicy(), testplanning.ProfileCore, TestTimePR)
+		row, problems := compareTimingTier(reference, []RootTime{timingRoot("TestOld", 2000), root}, rootTimingPolicy(), testplanning.ProfileCore, TestTimePR, true)
 		if len(problems) != 0 || row.AddedSeconds != root.Seconds || len(row.Warnings) != 1 || !strings.Contains(row.Warnings[0], ">30s") || row.StrictStatus != BudgetFail {
 			t.Fatalf("core promotion inherited reporter placement: %+v / %v", row, problems)
 		}

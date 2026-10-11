@@ -87,6 +87,90 @@ func TestEvaluateBudgetSnapshotCostAndPlacementAreAdvisory(t *testing.T) {
 	}
 }
 
+func TestEvaluateBudgetCurrentScopeDoesNotRequireHistoricalMatch(t *testing.T) {
+	for _, event := range []string{"pull_request", "push", "schedule", "workflow_dispatch"} {
+		for _, scope := range []string{"build", "environment", "count"} {
+			t.Run(event+"/"+scope, func(t *testing.T) {
+				cfg := ratchetCLIConfig(t, "full", 0, false)
+				cfg.event = event
+				plan, err := readPlan(cfg.planPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(cfg.evidenceRoot, "command-primary-evidence.json")
+				receipt, err := readEvidence(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				original := receipt
+				switch scope {
+				case "build":
+					plan.BuildContext.CGOEnabled = "0"
+					receipt.BuildContext = plan.BuildContext
+				case "environment":
+					plan.Units[0].EnvironmentID = "ci-new-gateway-v2"
+					receipt.EnvironmentID = plan.Units[0].EnvironmentID
+				case "count":
+					plan.Units[0].CountMode = testtiming.CountModeCacheDefault
+					receipt.CountMode = plan.Units[0].CountMode
+				}
+				policy, err := readProofPolicy(cfg.proofPolicyPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for tier, recipe := range policy.Profiles {
+					recipe.CountMode, recipe.EnvironmentID = plan.Units[0].CountMode, plan.Units[0].EnvironmentID
+					policy.Profiles[tier] = recipe
+				}
+				raw, err := yaml.Marshal(policy)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(cfg.proofPolicyPath, raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+				plan.Digest = ""
+				raw, err = json.Marshal(plan)
+				if err != nil {
+					t.Fatal(err)
+				}
+				digest := sha256.Sum256(raw)
+				plan.Digest = hex.EncodeToString(digest[:])
+				receipt.PlanDigest = plan.Digest
+				if err := writeJSON(cfg.planPath, plan); err != nil {
+					t.Fatal(err)
+				}
+				if err := writeJSON(path, receipt); err != nil {
+					t.Fatal(err)
+				}
+				if err := run(cfg); err != nil {
+					t.Fatalf("valid current %s scope refused: %v", scope, err)
+				}
+				result := readRatchetCLIResult(t, cfg)
+				if result.Status != testtiming.BudgetWarn || result.ExitCode() != 0 || result.TestTime == nil || len(result.TestTime.Problems) != 0 || len(result.TestTime.Warnings) == 0 {
+					t.Fatalf("historical scope mismatch did not remain advisory: %+v", result)
+				}
+				for _, row := range result.TestTime.Tiers {
+					if row.Retained != 0 || len(row.RetainedCells) != 0 || len(row.Added) != 1 || row.AddedSeconds != receipt.Report.Tests[0].Elapsed {
+						t.Fatalf("uncomparable current scope earned retained credit: %+v", row)
+					}
+				}
+				receipt.BuildContext, receipt.EnvironmentID, receipt.CountMode = original.BuildContext, original.EnvironmentID, original.CountMode
+				if err := writeJSON(path, receipt); err != nil {
+					t.Fatal(err)
+				}
+				if err := run(cfg); err == nil {
+					t.Fatal("receipt-versus-plan mismatch earned advisory success")
+				}
+				result = readRatchetCLIResult(t, cfg)
+				if result.Status != testtiming.BudgetIncomplete || result.ExitCode() == 0 || result.TestTime == nil || len(result.TestTime.Tiers) != 0 {
+					t.Fatalf("invalid current receipt softened: %+v", result)
+				}
+			})
+		}
+	}
+}
+
 func readRatchetCLIResult(t *testing.T, cfg config) testtiming.BudgetResult {
 	t.Helper()
 	var result testtiming.BudgetResult

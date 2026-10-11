@@ -47,7 +47,7 @@ func TestTestTimePRStrictVerdictMatrix(t *testing.T) {
 					candidate = append(candidate, timingRoot(fmt.Sprintf("TestNew%03d", i), cost))
 					added += cost
 				}
-				row, problems := compareTimingTier(timingReferenceRoots(t, base, rootTimingPolicy()), candidate, rootTimingPolicy(), "core", mode)
+				row, problems := compareTimingTier(timingReferenceRoots(t, base, rootTimingPolicy()), candidate, rootTimingPolicy(), "core", mode, true)
 				status := BudgetPass
 				if len(row.Warnings) != 0 {
 					status = BudgetWarn
@@ -123,7 +123,7 @@ func TestSnapshotAdvisoryChargesFullOnlyCells(t *testing.T) {
 	for _, mode := range []TestTimeMode{TestTimePR, TestTimeStrict} {
 		for _, tier := range []string{"core", "lifecycle", "full"} {
 			t.Run(string(mode)+"/"+tier, func(t *testing.T) {
-				row, problems := compareTimingTier(reference, candidate, policy, tier, mode)
+				row, problems := compareTimingTier(reference, candidate, policy, tier, mode, true)
 				if len(problems) != 0 || row.Baseline != 100 || row.Allowance != 5 || row.Retained != 1 {
 					t.Fatalf("comparison validity or pinned cost changed: %+v / %v", row, problems)
 				}
@@ -281,7 +281,7 @@ func TestTestTimeJSONMarkdownRetainsExhaustiveIdentity(t *testing.T) {
 		baseline = append(baseline, timingRoot(name, 100))
 		candidate = append(candidate, timingRoot(name, 100+float64(i)))
 	}
-	row, problems := compareTimingTier(timingReferenceRoots(t, baseline, rootTimingPolicy()), candidate, rootTimingPolicy(), "core", TestTimePR)
+	row, problems := compareTimingTier(timingReferenceRoots(t, baseline, rootTimingPolicy()), candidate, rootTimingPolicy(), "core", TestTimePR, true)
 	if len(problems) != 0 || len(row.RetainedCells) != 31 || len(row.Warnings) == 0 {
 		t.Fatalf("retained attribution incomplete: %+v %v", row, problems)
 	}

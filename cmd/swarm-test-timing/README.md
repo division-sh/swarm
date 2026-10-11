@@ -115,6 +115,13 @@ ceilings remains visible in advisory tables rather than automatically blocking
 delivery. No recurring re-pin or Go1.26 timing re-pin is required by this policy;
 effective compiler identity remains a separate proof-validity obligation.
 
+Current plan and receipt build/environment/count identity must match exactly.
+A valid current build or scope need not match the historical reference: divergence
+is an advisory warning, not `INCOMPLETE`. Changed build contexts and new scope
+cells are charged as added/uncomparable, never as retained timing or speedup
+credit; historical cells remain removal-neutral. Reference bytes/digest, policy
+integrity and invalid/zero populations still fail closed.
+
 JSON records `comparison_mode`, independent added cost, exhaustive
 `tiers[].retained_cells` identities/before/after/delta and strict counterfactual.
 Markdown labels the bounded largest-delta view. Command, ratchet and actual-job

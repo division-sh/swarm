@@ -24233,6 +24233,11 @@ test_specification:
         counterfactual. Human summaries label any bounded drift display and point to the exhaustive JSON.
         Command, ratchet and actual-job statuses compose monotonically: PASS < WARN < FAIL < INCOMPLETE. Advisory timing
         cannot downgrade missing, failed, cancelled, corrupt, duplicate or foreign proof or actual-job evidence.
+        Current plan-to-receipt build, environment and count identity remains exact and hard. A valid current
+        build context or declared environment/count scope differing from the historical snapshot is advisory,
+        not incomplete proof. Changed build contexts and new scopes are charged as added/uncomparable cells,
+        never as retained timing or speedup credit; historical cells remain removal-neutral. Reference byte/digest
+        and policy integrity, malformed or zero populations remain hard validity failures.
         This split accepts that a real slowdown in retained work may first be detected by the next full nightly;
         it grants no runtime waiver, workload reduction or compounded automatically refreshed merge-base anchor.
         A new or promoted top-level root above 30 seconds without an existing exact-cell placement approval produces

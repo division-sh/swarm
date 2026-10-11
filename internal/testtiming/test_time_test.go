@@ -47,7 +47,7 @@ func TestTestTimeGrowthRequiresBothBounds(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			base := timingReferenceRoots(t, []RootTime{timingRoot("TestOld", test.base)}, rootTimingPolicy())
-			row, problems := compareTimingTier(base, []RootTime{timingRoot("TestOld", test.base+test.growth)}, rootTimingPolicy(), "core", TestTimeStrict)
+			row, problems := compareTimingTier(base, []RootTime{timingRoot("TestOld", test.base+test.growth)}, rootTimingPolicy(), "core", TestTimeStrict, true)
 			if len(problems) != 0 || (row.StrictStatus == BudgetFail) != test.fail || (len(row.Warnings) != 0) != test.fail || math.Abs(row.Growth-test.growth) > 1e-8 {
 				t.Fatalf("row=%+v problems=%v", row, problems)
 			}
@@ -58,12 +58,12 @@ func TestTestTimeGrowthRequiresBothBounds(t *testing.T) {
 func TestTestTimePopulationChangesCannotHideGrowth(t *testing.T) {
 	base := timingReferenceRoots(t, []RootTime{timingRoot("TestOld", 100), timingRoot("TestRemoved", 3000)}, rootTimingPolicy())
 	candidate := []RootTime{timingRoot("TestOld", 101), timingRoot("TestNew", 30.001)}
-	row, problems := compareTimingTier(base, candidate, rootTimingPolicy(), "core", TestTimeStrict)
+	row, problems := compareTimingTier(base, candidate, rootTimingPolicy(), "core", TestTimeStrict, true)
 	if row.Retained != 1 || len(row.Added) != 1 || len(row.Removed) != 1 || math.Abs(row.Growth-31.001) > 1e-8 || len(problems) != 0 || !strings.Contains(strings.Join(row.Warnings, " "), "unreviewed placement is advisory") || row.StrictStatus != BudgetFail {
 		t.Fatalf("row=%+v problems=%v", row, problems)
 	}
 	// A rename cannot be inferred as cheaper retained work or offset other cost.
-	row, _ = compareTimingTier(base, []RootTime{timingRoot("TestRenamed", 1)}, rootTimingPolicy(), "core", TestTimeStrict)
+	row, _ = compareTimingTier(base, []RootTime{timingRoot("TestRenamed", 1)}, rootTimingPolicy(), "core", TestTimeStrict, true)
 	if row.Retained != 0 || len(row.Added) != 1 || len(row.Removed) != 2 || row.Growth != 1 {
 		t.Fatalf("renamed population=%+v", row)
 	}
@@ -106,12 +106,12 @@ func TestTestTimeTierChangesCannotReprojectPinnedBaseline(t *testing.T) {
 			base := timingReferenceRoots(t, roots, timingTierChangePolicy(test.referenceSlow, test.referenceSpecial))
 			current := timingTierChangePolicy(test.currentSlow, test.currentSpecial)
 			for _, tier := range []string{"core", "lifecycle"} {
-				row, problems := compareTimingTier(base, roots, current, tier, TestTimeStrict)
+				row, problems := compareTimingTier(base, roots, current, tier, TestTimeStrict, true)
 				if row.Baseline != test.baseline || row.Growth != test.growth || len(row.Added) != test.added || len(row.Removed) != test.removed || row.Allowance != test.baseline*0.05 || len(problems) != 0 || (row.StrictStatus == BudgetFail) != (test.growth > 0) || (len(row.Warnings) != 0) != (test.growth > 0) {
 					t.Fatalf("%s: row=%+v problems=%v", tier, row, problems)
 				}
 			}
-			row, problems := compareTimingTier(base, roots, current, "full", TestTimeStrict)
+			row, problems := compareTimingTier(base, roots, current, "full", TestTimeStrict, true)
 			if row.Baseline != 600 || row.Growth != 0 || row.Retained != 2 || len(problems) != 0 {
 				t.Fatalf("unchanged full cost: row=%+v problems=%v", row, problems)
 			}
@@ -247,13 +247,13 @@ func TestTestTimeRepinPreservesUnchangedSuccessorAndCostlyNewRootControls(t *tes
 		}
 	}
 	for _, mode := range []TestTimeMode{TestTimePR, TestTimeStrict} {
-		row, problems := compareTimingTier(core, unchanged, rootTimingPolicy(), "core", mode)
+		row, problems := compareTimingTier(core, unchanged, rootTimingPolicy(), "core", mode, true)
 		if len(problems) != 0 || len(row.Added) != 0 || len(row.Removed) != 0 || row.Growth != 0 || row.Retained != len(core) {
 			t.Fatalf("unchanged successor of the admitted core population: %+v / %v", row, problems)
 		}
 		// Synthetic additional work is not a new hosted receipt or placement approval.
 		added := append(slices.Clone(unchanged), timingRoot("TestUnapprovedCostlySuccessorProof", 30.001))
-		row, problems = compareTimingTier(core, added, rootTimingPolicy(), "core", mode)
+		row, problems = compareTimingTier(core, added, rootTimingPolicy(), "core", mode, true)
 		if row.AddedSeconds != 30.001 || row.AddedSeconds >= row.Allowance || len(problems) != 0 || !strings.Contains(strings.Join(row.Warnings, " "), ">30s") || row.StrictStatus != BudgetFail {
 			t.Fatalf("re-pin waived the individual-root rule despite sufficient aggregate room: %+v / %v", row, problems)
 		}
@@ -381,8 +381,14 @@ func TestTestTimeScopeAndTierProjection(t *testing.T) {
 		raw, _ := json.Marshal(reference)
 		_ = json.Unmarshal(raw, &fresh)
 		change(&fresh)
-		if got := EvaluateTestTime(fresh, rootTimingPolicy(), plan, TestTimeReferenceRunID, 1, []CommandEvidence{evidence}, TestTimeStrict); got.Status != BudgetIncomplete {
-			t.Fatalf("scope admitted %+v", got)
+		got := EvaluateTestTime(fresh, rootTimingPolicy(), plan, TestTimeReferenceRunID, 1, []CommandEvidence{evidence}, TestTimeStrict)
+		if got.Status != BudgetWarn || len(got.Problems) != 0 || len(got.Tiers) != 3 {
+			t.Fatalf("historical scope blocked valid current proof: %+v", got)
+		}
+		for _, row := range got.Tiers {
+			if row.Retained != 0 || len(row.RetainedCells) != 0 || len(row.Added) != 1 || row.AddedSeconds != 10 || len(row.Removed) != 1 {
+				t.Fatalf("uncomparable scope earned retained credit: %+v", row)
+			}
 		}
 	}
 	_, policy := committedTimingPolicies(t)
@@ -393,6 +399,54 @@ func TestTestTimeScopeAndTierProjection(t *testing.T) {
 			if err != nil || got != (tier == "full") {
 				t.Fatalf("%s/%s selected=%v err=%v", tier, backend, got, err)
 			}
+		}
+	}
+}
+
+func TestTestTimeCurrentScopeAdmissionIsIndependentOfSnapshot(t *testing.T) {
+	for _, mode := range []TestTimeMode{TestTimePR, TestTimeStrict} {
+		for _, scope := range []string{"build", "environment", "count"} {
+			t.Run(string(mode)+"/"+scope, func(t *testing.T) {
+				plan, receipt := rootEvidenceFixture(t)
+				roots, err := observedRootTimes(plan, TestTimeReferenceRunID, 1, []CommandEvidence{receipt})
+				if err != nil {
+					t.Fatal(err)
+				}
+				reference := TestTimeReference{BuildContext: plan.BuildContext, Roots: timingReferenceRoots(t, roots, rootTimingPolicy())}
+				switch scope {
+				case "build":
+					plan.BuildContext.CGOEnabled = "0"
+					receipt.BuildContext = plan.BuildContext
+				case "environment":
+					plan.Units[0].EnvironmentID = "ci-new-gateway-v2"
+					receipt.EnvironmentID = plan.Units[0].EnvironmentID
+				case "count":
+					plan.Units[0].CountMode = CountModeCacheDefault
+					receipt.CountMode = plan.Units[0].CountMode
+				}
+				rebindTimingFixture(t, &plan, &receipt)
+				got := EvaluateTestTime(reference, rootTimingPolicy(), plan, TestTimeReferenceRunID, 1, []CommandEvidence{receipt}, mode)
+				if got.Status != BudgetWarn || len(got.Problems) != 0 || len(got.Tiers) != 3 {
+					t.Fatalf("valid matching current scope was refused: %+v", got)
+				}
+				for _, row := range got.Tiers {
+					if row.Retained != 0 || row.RetainedDelta != 0 || len(row.RetainedCells) != 0 || len(row.Added) != 1 || row.AddedSeconds != 10 || row.Baseline != 10 || row.Candidate != 20 || len(row.Removed) != 1 {
+						t.Fatalf("historical scope mismatch hid charge or granted retained credit: %+v", row)
+					}
+				}
+				bad := receipt
+				switch scope {
+				case "build":
+					bad.BuildContext = reference.BuildContext
+				case "environment":
+					bad.EnvironmentID = roots[0].Environment
+				case "count":
+					bad.CountMode = roots[0].Count
+				}
+				if got := EvaluateTestTime(reference, rootTimingPolicy(), plan, TestTimeReferenceRunID, 1, []CommandEvidence{bad}, mode); got.Status != BudgetIncomplete || len(got.Tiers) != 0 {
+					t.Fatalf("foreign receipt scope gained advisory admission: %+v", got)
+				}
+			})
 		}
 	}
 }

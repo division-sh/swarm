@@ -265,7 +265,7 @@ func timingCellKey(cell TimingCell) string {
 func EvaluateTestTime(reference TestTimeReference, policy testplanning.Policy, plan testplanning.RunPlan, runID int64, attempt int, evidence []CommandEvidence, mode TestTimeMode) TestTimeResult {
 	result := TestTimeResult{ReferenceRunID: reference.RunID, ReferenceSource: reference.Source, Mode: mode, Status: BudgetPass}
 	roots, err := observedRootTimes(plan, runID, attempt, evidence)
-	if err != nil || plan.Venue != testplanning.VenueCI || plan.BuildContext != reference.BuildContext {
+	if err != nil || plan.Venue != testplanning.VenueCI {
 		result.Status = BudgetIncomplete
 		result.Problems = append(result.Problems, fmt.Sprintf("test-time proof scope mismatch or incomplete: %v", err))
 		return result
@@ -275,19 +275,23 @@ func EvaluateTestTime(reference TestTimeReference, policy testplanning.Policy, p
 		result.Problems = append(result.Problems, "test-time comparison requires an explicit PR mode or a strict full cadence plan")
 		return result
 	}
+	sameBuild := plan.BuildContext == reference.BuildContext
+	if !sameBuild {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("current build context %+v differs from historical reference %+v; timing cells are added/uncomparable, not retained", plan.BuildContext, reference.BuildContext))
+	}
 	scopes := map[string]bool{}
 	for _, root := range reference.Roots {
 		scopes[root.Environment+"\x00"+root.Count] = true
 	}
 	for _, root := range roots {
-		if !scopes[root.Environment+"\x00"+root.Count] {
-			result.Status = BudgetIncomplete
-			result.Problems = append(result.Problems, "test-time execution environment/count differs from the hosted reference")
-			return result
+		scope := root.Environment + "\x00" + root.Count
+		if !scopes[scope] {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("current execution environment %q/count %q is absent from historical reference; timing cells are added/uncomparable, not retained", root.Environment, root.Count))
+			scopes[scope] = true
 		}
 	}
 	for _, tier := range testTimeComparisonTiers(plan) {
-		row, problems := compareTimingTier(reference.Roots, roots, policy, tier, mode)
+		row, problems := compareTimingTier(reference.Roots, roots, policy, tier, mode, sameBuild)
 		result.Tiers = append(result.Tiers, row)
 		result.Problems = append(result.Problems, problems...)
 		result.Warnings = append(result.Warnings, row.Warnings...)
@@ -310,7 +314,7 @@ func testTimeComparisonTiers(plan testplanning.RunPlan) []string {
 	return selected
 }
 
-func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, policy testplanning.Policy, tier string, mode TestTimeMode) (TestTimeTier, []string) {
+func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, policy testplanning.Policy, tier string, mode TestTimeMode, sameBuild bool) (TestTimeTier, []string) {
 	row := TestTimeTier{Tier: tier}
 	unreviewedPlacement := false
 	baseline, problems := projectReferenceTimingRoots(reference, tier)
@@ -323,7 +327,7 @@ func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, poli
 	}
 	for _, root := range candidate {
 		row.Candidate += root.Seconds
-		if prior, exists := base[root.TimingCell]; exists {
+		if prior, exists := base[root.TimingCell]; exists && sameBuild {
 			row.Retained++
 			row.RetainedBaseline += prior.Seconds
 			row.RetainedCandidate += root.Seconds
