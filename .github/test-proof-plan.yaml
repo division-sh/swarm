@@ -997,6 +997,9 @@ units:
       - github.com/division-sh/swarm/internal/serveapp
     run: '^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E|Issue2394(Held.*|Served(F.*|S.*)|Stop.*|Selected.*)|Issue2564(DecisionCard.*|Served(H3.*|M33.*))|Issue2566ReporterFiniteFixtureCanCloseBothStores|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$'
     required_children:
+      TestPublicCompletionPreAckRetirementBothStores: [default_sqlite/event.publish, default_sqlite/run.start, explicit_postgres/event.publish, explicit_postgres/run.start]
+      TestPublicCompletionNativePreAckRetirementBothStores: [default_sqlite/event.publish, default_sqlite/run.start, explicit_postgres/event.publish, explicit_postgres/run.start]
+      TestPublicCompletionAcknowledgedRetirementBothStores: [default_sqlite/event.publish, default_sqlite/run.start, explicit_postgres/event.publish, explicit_postgres/run.start]
       TestPublicPublicationCompletionBoundaryBothStores: [default_sqlite, explicit_postgres]
       TestPublicCompletionCapacityServedBothStores: [default_sqlite, explicit_postgres]
       TestPublicPublicationCompletionExactBytesBothStores: [default_sqlite, explicit_postgres]

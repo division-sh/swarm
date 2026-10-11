@@ -301,25 +301,27 @@ func publicationAuditParams(hash, key string) map[string]any {
 }
 
 type publicationCompletionAudit struct {
-	mu          sync.Mutex
-	native      runtimebus.APIEventPublicationCommitOwner
-	workflow    pipeline.WorkflowPersistenceOwner
-	plan        pipeline.DynamicFlowRuntimeReadinessPlan
-	process     *worklifetime.Process
-	request     apiidempotency.Request
-	committed   runtimebus.CommittedAPIEventPublication
-	deployment  *runtimebus.CommittedDeploymentRunCreation
-	deployments int
-	heldRuns    map[string]pipeline.DynamicFlowRuntimeReadinessPlan
-	commits     int
-	run         string
-	hold        bool
-	resultFault string
-	holdRelease bool
-	entered     chan struct{}
-	release     chan struct{}
-	enterOnce   sync.Once
-	releaseOnce sync.Once
+	mu           sync.Mutex
+	native       runtimebus.APIEventPublicationCommitOwner
+	workflow     pipeline.WorkflowPersistenceOwner
+	plan         pipeline.DynamicFlowRuntimeReadinessPlan
+	process      *worklifetime.Process
+	request      apiidempotency.Request
+	committed    runtimebus.CommittedAPIEventPublication
+	deployment   *runtimebus.CommittedDeploymentRunCreation
+	deployments  int
+	heldRuns     map[string]pipeline.DynamicFlowRuntimeReadinessPlan
+	commits      int
+	run          string
+	hold         bool
+	resultFault  string
+	holdRelease  bool
+	entered      chan struct{}
+	release      chan struct{}
+	enterOnce    sync.Once
+	releaseOnce  sync.Once
+	beforeCommit func(context.Context)
+	afterCommit  func(context.Context, bool)
 }
 
 func installPublicationCompletionAudit(t *testing.T, hold bool) *publicationCompletionAudit {
@@ -350,6 +352,9 @@ func installPublicationCompletionAudit(t *testing.T, hold bool) *publicationComp
 }
 
 func (p *publicationCompletionAudit) commit(ctx context.Context, native runtimebus.APIEventPublicationCommitOwner, command runtimebus.APIEventPublicationCommand) (runtimebus.CommittedAPIEventPublication, error) {
+	if p.beforeCommit != nil {
+		p.beforeCommit(ctx)
+	}
 	result, err := native.CommitAPIEventPublication(ctx, command)
 	p.mu.Lock()
 	p.commits++
@@ -358,6 +363,9 @@ func (p *publicationCompletionAudit) commit(ctx context.Context, native runtimeb
 	p.run = command.Publication.Commit.Event.Event().RunID()
 	fault := p.resultFault
 	p.mu.Unlock()
+	if p.afterCommit != nil {
+		p.afterCommit(ctx, result.Acknowledged)
+	}
 	return corruptPublicationAuditResult(result, err, fault)
 }
 
@@ -386,8 +394,14 @@ func (s *publicationAuditPublication) CommitAPIEventPublication(ctx context.Cont
 }
 
 func (s *publicationAuditPublication) CommitDeploymentRunCreation(ctx context.Context, command runtimebus.DeploymentRunCreationCommand) (runtimebus.CommittedDeploymentRunCreation, error) {
+	if s.probe.beforeCommit != nil {
+		s.probe.beforeCommit(ctx)
+	}
 	result, err := s.publicationAuditStore.CommitDeploymentRunCreation(ctx, command)
 	s.probe.observeDeployment(ctx, command, result)
+	if s.probe.afterCommit != nil {
+		s.probe.afterCommit(ctx, result.Acknowledged)
+	}
 	return s.probe.corruptDeployment(result, err)
 }
 

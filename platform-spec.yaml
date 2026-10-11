@@ -40003,7 +40003,11 @@ process_local_work_lifetime_authority:
       Admission is nonblocking, linearized against fencing/retirement and precedes construction, exact
       publication claim acquisition and native COMMIT. Native store capacity can impose a stricter bound.
       A slot owns an existing exact occurrence lease detached from caller cancellation before escape;
-      original request cancellation still governs precommit admission and COMMIT. Acknowledged work,
+      both original request cancellation and exact occurrence retirement cancel preparation and COMMIT.
+      This precommit cancellation bridge is stopped or joined on every return, before unused lease
+      disposition; a mere fence never cancels accepted work. Cancellation racing native COMMIT does
+      not prove rollback: a native ACK retains consequence ownership even if cancellation wins the
+      caller response. Acknowledged work,
       including commit with a keyed terminal-release error, retains that lease until actual handoff/disposition
       and exact claim cleanup, not merely worker spawn or asynchronous-dispatch return. Feed-only starts
       retain their eventless activation responsibility under the same bound. Every refusal, rollback and
