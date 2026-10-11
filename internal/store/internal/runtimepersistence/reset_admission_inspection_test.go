@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -50,8 +51,8 @@ func TestPendingResetAdmissionReadOnlyBothStores(t *testing.T) {
 			if releaseErr := capability.Release(ctx); err != nil || releaseErr != nil {
 				t.Fatalf("seed/release: %v, %v", err, releaseErr)
 			}
-			var before int
-			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_startup_authority_facts`).Scan(&before); err != nil {
+			before, err := generationauthority.ReadProcessGeneration(ctx, db, backend == "sqlite")
+			if err != nil {
 				t.Fatal(err)
 			}
 			var expired context.Context
@@ -77,9 +78,9 @@ func TestPendingResetAdmissionReadOnlyBothStores(t *testing.T) {
 			if err != nil || len(pending) != 1 || !reflect.DeepEqual(pending[0], operation) {
 				t.Fatalf("inspection advanced or settled reset evidence: %+v err=%v", pending, err)
 			}
-			var after int
-			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_startup_authority_facts`).Scan(&after); err != nil || after != before {
-				t.Fatalf("inspection changed authority lineage: before=%d after=%d err=%v", before, after, err)
+			after, err := generationauthority.ReadProcessGeneration(ctx, db, backend == "sqlite")
+			if err != nil || after != before {
+				t.Fatalf("inspection changed process generation: before=%+v after=%+v err=%v", before, after, err)
 			}
 		})
 	}

@@ -39,6 +39,10 @@ func acquireSQLiteFilePossession(selectedPath string) (sqlitePossession, error) 
 	return acquireSQLitePossession(selectedPath, false)
 }
 
+func waitSQLiteFilePossession(ctx context.Context, selectedPath string) (sqlitePossession, error) {
+	return sqlitePossessionForConstruction(ctx, selectedPath, false, true)
+}
+
 func acquireSQLiteConstructionPossession(selectedPath string) (sqlitePossession, error) {
 	return acquireSQLitePossession(selectedPath, true)
 }
