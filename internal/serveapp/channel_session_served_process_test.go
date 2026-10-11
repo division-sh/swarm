@@ -39,6 +39,7 @@ type servedNativeProcessConfig struct {
 }
 
 const servedNativeProcessEnv = "TEST_SERVED_WHATSAPP_PROCESS"
+const servedNativeTraceDirectoryEnv = "TEST_SERVED_WHATSAPP_TRACE_DIRECTORY"
 
 func startServedNativeSDKProcess(t *testing.T, opts cliapp.ServeOptions, peer *serveNativeProtocolPeer) *channelOnboardingCrashServeProcess {
 	return startServedNativeSDKProcessWithLogoutCut(t, opts, peer, false)
@@ -92,6 +93,7 @@ func TestServedWhatsAppSDKProcessHelper(t *testing.T) {
 	if config.LogoutReservationCut {
 		installServedNativeLogoutReservationCut(t)
 	}
+	startServedNativeDiagnosticTrace(t)
 	host, _, err := net.SplitHostPort(config.Trust.Address)
 	if err != nil || !net.ParseIP(host).IsLoopback() {
 		t.Fatal("SDK process peer must be loopback", err)
