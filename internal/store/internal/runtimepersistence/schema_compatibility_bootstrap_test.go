@@ -42,6 +42,7 @@ func TestRetiredPlatformTableRegistryIsExact(t *testing.T) {
 		"agent_external_effect_operations",
 		"agent_external_effect_attempts",
 		"schedules",
+		"routing_rules",
 	}
 	if got := platformschema.RetiredPlatformTables(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("retired platform table registry = %v, want %v", got, want)
@@ -94,6 +95,7 @@ func assertRetiredPlatformTableRejectedUnchanged(t *testing.T, backend SchemaDia
 	}
 
 	identifier := string(table)
+	assertSchemaTableExists(t, backend, db, identifier, false)
 	if _, err := db.ExecContext(ctx, `CREATE TABLE `+identifier+` (marker TEXT)`); err != nil {
 		t.Fatal(err)
 	}

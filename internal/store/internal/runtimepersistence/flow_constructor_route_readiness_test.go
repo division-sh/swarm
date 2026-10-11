@@ -4,7 +4,6 @@ import (
 	"errors"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -22,7 +21,11 @@ func TestFlowConstructorRouteReadinessCorruptionBothStores(t *testing.T) {
 			{"static_fieldless", 1},
 			{"static_fields", 2},
 		} {
-			for _, cut := range []string{"missing_readiness", "missing_receipt", "inactive_route_missing_readiness", "header_delete_refused"} {
+			cuts := []string{"missing_readiness", "missing_receipt"}
+			if target.index < 2 {
+				cuts = append(cuts, "parent_delete_refused")
+			}
+			for _, cut := range cuts {
 				t.Run(backend+"/"+target.name+"/"+cut, func(t *testing.T) {
 					f := newEagerFlowConstructorFixture(t, backend)
 					plan := eagerFlowConstructorPlan(t, f)
@@ -40,16 +43,6 @@ func TestFlowConstructorRouteReadinessCorruptionBothStores(t *testing.T) {
 					if projection, err := reader.InspectDynamicFlowRuntimeReadinessForSource(f.ctx, fact); err != nil || len(projection.CurrentPending) != len(plan.ConstructionPlans())+1 {
 						t.Fatalf("healthy constructed tree: %+v %v", projection, err)
 					}
-					if cut == "inactive_route_missing_readiness" || cut == "header_delete_refused" {
-						status := "inactive"
-						if cut == "header_delete_refused" {
-							status = "active"
-						}
-						query := `INSERT INTO routing_rules (run_id, event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at) VALUES ($1, $2, 'node', 'readiness-fixture', $3, $4, TRUE, $6, $5)`
-						if _, err := f.db.ExecContext(f.ctx, query, runID, path+"/fixture", path, instance.Identity.TemplateID, time.Now().UTC(), status); err != nil {
-							t.Fatal(err)
-						}
-					}
 					for _, inspect := range []string{"source", "run"} {
 						if err := inspectConstructedRouteReadiness(f, reader, fact, runID, inspect); err != nil {
 							t.Fatalf("healthy %s inspection: %v", inspect, err)
@@ -59,11 +52,11 @@ func TestFlowConstructorRouteReadinessCorruptionBothStores(t *testing.T) {
 					if cut == "missing_receipt" {
 						query = `DELETE FROM workflow_instance_initial_materializations WHERE run_id=$1 AND instance_path=$2`
 					}
-					if cut == "header_delete_refused" {
+					if cut == "parent_delete_refused" {
 						query = `DELETE FROM flow_instances WHERE run_id=$1 AND instance_path=$2`
 						before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
 						if _, err := f.db.ExecContext(f.ctx, query, runID, path); err == nil {
-							t.Fatal("active route lost its foreign-key-bound constructed header")
+							t.Fatal("constructed descendant lost its exact foreign-key-bound parent")
 						}
 						if after := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres"); !reflect.DeepEqual(before, after) {
 							t.Fatal("refused header deletion changed durable construction evidence")
