@@ -13,6 +13,7 @@ import (
 	"time"
 
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/google/uuid"
 )
@@ -76,8 +77,37 @@ func TestSQLiteOwnershipProofSurvivesWorkloadPoolPressure(t *testing.T) {
 	}
 }
 
-func TestSQLiteOwnershipProofFreshFailuresFenceAndClose(t *testing.T) {
-	for _, fault := range []string{"missing head", "corrupt head", "changed head", "database replacement", "coordinate replacement", "backend disposal", "database locked"} {
+func TestSQLiteProcessObservationSeparatesPossessionFromAdmittedStamp(t *testing.T) {
+	session, db := newSQLiteProofSession(t, 1)
+	ctx := context.Background()
+	session.owner.catalogEmpty = func(context.Context) (bool, error) { return false, nil }
+	before, err := generationauthority.ReadProcessGeneration(ctx, db, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, released := range []bool{false, true} {
+		if released {
+			if err := session.Release(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		observation, err := session.owner.ProbePossession(ctx)
+		if err != nil || observation.Available != released || observation.Validate() != nil {
+			t.Fatalf("native availability: released=%t observation=%#v, %v", released, observation, err)
+		}
+		inspection, err := session.owner.InspectAuthority(ctx)
+		if err != nil || inspection.Authority == nil || *inspection.Authority != session.authority || inspection.Possession != nil {
+			t.Fatalf("MVCC stamp reader inferred native possession: %#v, %v", inspection, err)
+		}
+	}
+	after, err := generationauthority.ReadProcessGeneration(ctx, db, true)
+	if err != nil || after != before {
+		t.Fatalf("read-only native observation changed generation: %#v -> %#v, %v", before, after, err)
+	}
+}
+
+func TestSQLiteOwnershipProofFreshFailuresFenceWithoutEarlyUnlock(t *testing.T) {
+	for _, fault := range []string{"missing generation", "corrupt generation", "crossed stamp", "database replacement", "coordinate replacement", "backend disposal", "database locked"} {
 		t.Run(fault, func(t *testing.T) {
 			session, db := newSQLiteProofSession(t, 1)
 			terminal := &sqliteSessionTerminalProbe{results: make(chan runtimestartupownership.TerminalResult, 2)}
@@ -88,22 +118,16 @@ func TestSQLiteOwnershipProofFreshFailuresFenceAndClose(t *testing.T) {
 				t.Fatal(err)
 			}
 			switch fault {
-			case "missing head":
-				if _, err := db.Exec(`DELETE FROM runtime_startup_authority_facts`); err != nil {
+			case "missing generation":
+				if _, err := db.Exec(`DELETE FROM runtime_process_generation`); err != nil {
 					t.Fatal(err)
 				}
-			case "corrupt head":
-				if _, err := db.Exec(`UPDATE runtime_startup_authority_facts SET snapshot = '{'`); err != nil {
+			case "corrupt generation":
+				if _, err := db.Exec(`UPDATE runtime_process_generation SET lease_id = 'not-a-uuid'`); err != nil {
 					t.Fatal(err)
 				}
-			case "changed head":
-				next, err := runtimestartupownership.ReleasedAuthority(session.authority)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := session.owner.backend.RunTransaction(context.Background(), "change durable ownership proof", func(ctx context.Context, tx *sql.Tx) error {
-					return recordAuthorityTransitionTx(ctx, tx, &session.authority, next, true)
-				}); err != nil {
+			case "crossed stamp":
+				if _, err := db.Exec(`UPDATE runtime_process_generation SET lease_id = ?`, uuid.NewString()); err != nil {
 					t.Fatal(err)
 				}
 			case "database replacement", "coordinate replacement":
@@ -144,8 +168,21 @@ func TestSQLiteOwnershipProofFreshFailuresFenceAndClose(t *testing.T) {
 			if _, err := session.Authority(); err == nil {
 				t.Fatal("failed proof retained live authority")
 			}
+			if fault != "backend disposal" && db.Stats().MaxOpenConnections != 2 {
+				t.Fatalf("terminal notification disposed reserved access before joined release: %#v", db.Stats())
+			}
+			// A replaced coordinate is already a native ownership loss, not a safe
+			// unlock. Every still-valid coordinate must exclude a successor until join.
+			if fault != "coordinate replacement" {
+				if contender, err := acquireSQLiteFilePossession(session.owner.path); contender != nil || !isSQLitePossessionFailure(err, runtimestartupownership.AcquisitionTakeoverRequired) {
+					t.Fatalf("terminal notification unlocked before accepted work joined: contender=%#v err=%v", contender, err)
+				}
+			}
+			if err := session.Release(context.Background()); err != nil {
+				t.Fatalf("joined release: %v", err)
+			}
 			if stats := db.Stats(); stats.MaxOpenConnections != 1 {
-				t.Fatalf("terminalization leaked capacity: %#v", stats)
+				t.Fatalf("joined release leaked reserved capacity: %#v", stats)
 			}
 		})
 	}
@@ -158,11 +195,10 @@ func TestSQLiteOwnershipProofFailedReleaseRearmsAndSerializes(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = capability.Release(context.Background()) })
-	if _, err := db.Exec(`CREATE TRIGGER fail_release BEFORE INSERT ON runtime_startup_authority_facts WHEN NEW.state = 'released' BEGIN SELECT RAISE(ABORT, 'injected release failure'); END`); err != nil {
-		t.Fatal(err)
-	}
-	if err := capability.Release(context.Background()); err == nil {
-		t.Fatal("failed durable release reported success")
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := capability.Release(cancelled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled release error=%v, want caller cancellation", err)
 	}
 	if _, terminal := capability.TerminalResult(); terminal {
 		t.Fatal("failed release retired healthy possession")
@@ -172,9 +208,6 @@ func TestSQLiteOwnershipProofFailedReleaseRearmsAndSerializes(t *testing.T) {
 	}
 	if err := capability.ProveCurrent(context.Background()); err != nil {
 		t.Fatalf("failed-release reproof: %v", err)
-	}
-	if _, err := db.Exec("DROP TRIGGER fail_release"); err != nil {
-		t.Fatal(err)
 	}
 	var group sync.WaitGroup
 	group.Add(3)
@@ -193,6 +226,91 @@ func TestSQLiteOwnershipProofFailedReleaseRearmsAndSerializes(t *testing.T) {
 	if stats := db.Stats(); stats.MaxOpenConnections != 1 || stats.InUse != 0 {
 		t.Fatalf("release did not join proof access: %#v", stats)
 	}
+	stamp, err := generationauthority.ReadProcessGeneration(context.Background(), db, true)
+	if err != nil || stamp != session.authority.LeaseStamp() {
+		t.Fatalf("release rewrote last-admitted evidence: %#v, %v", stamp, err)
+	}
+}
+
+type joinedSQLiteRelease struct {
+	sqlitePossession
+	entered, resume chan struct{}
+	once            sync.Once
+	failure         error
+}
+
+func (p *joinedSQLiteRelease) Release() error {
+	p.once.Do(func() { close(p.entered); <-p.resume })
+	if p.failure != nil {
+		return p.failure
+	}
+	return p.sqlitePossession.Release()
+}
+
+func TestSQLiteProcessReleaseJoinsNativeDisposal(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("release_failure_%t", fail), func(t *testing.T) {
+			session, db := newSQLiteProofSession(t, 1)
+			injected := errors.New("injected native possession release failure")
+			release := &joinedSQLiteRelease{sqlitePossession: session.possession, entered: make(chan struct{}), resume: make(chan struct{})}
+			t.Cleanup(func() {
+				select {
+				case <-release.resume:
+				default:
+					close(release.resume)
+				}
+			})
+			if fail {
+				release.failure = injected
+			}
+			session.possession = release
+			done := make(chan error, 1)
+			go func() { done <- session.Release(context.Background()) }()
+			select {
+			case <-release.entered:
+			case <-time.After(time.Second):
+				t.Fatal("native release did not start")
+			}
+			select {
+			case err := <-done:
+				t.Fatalf("release returned before joining native disposal: %v", err)
+			default:
+			}
+			if peer, err := acquireSQLiteFilePossession(session.owner.path); peer != nil || !isSQLitePossessionFailure(err, runtimestartupownership.AcquisitionTakeoverRequired) {
+				t.Fatalf("unjoined native release admitted a successor: %#v, %v", peer, err)
+			}
+			close(release.resume)
+			err := <-done
+			if fail {
+				if !errors.Is(err, injected) {
+					t.Fatalf("native failure lost: %v", err)
+				}
+				if _, err := session.Authority(); err == nil {
+					t.Fatal("failed disposal reissued a capability")
+				}
+				if peer, err := acquireSQLiteFilePossession(session.owner.path); peer != nil || !isSQLitePossessionFailure(err, runtimestartupownership.AcquisitionTakeoverRequired) {
+					t.Fatalf("failed disposal unlocked possession: %#v, %v", peer, err)
+				}
+				release.failure = nil
+				if err := session.Release(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			peer, err := acquireSQLiteFilePossession(session.owner.path)
+			if err != nil {
+				t.Fatalf("joined disposal did not release possession: %v", err)
+			}
+			if err := peer.Release(); err != nil {
+				t.Fatal(err)
+			}
+			stamp, err := generationauthority.ReadProcessGeneration(context.Background(), db, true)
+			if err != nil || stamp != session.authority.LeaseStamp() {
+				t.Fatalf("disposal changed durable evidence: %#v, %v", stamp, err)
+			}
+		})
+	}
 }
 
 func TestSQLiteOwnershipProofStartupFailureCleansUp(t *testing.T) {
@@ -204,16 +322,13 @@ func TestSQLiteOwnershipProofStartupFailureCleansUp(t *testing.T) {
 			}
 			owner := session.owner
 			owner.fanOutPipeline = &storepipeline.PipelineSQLiteOwner{}
-			if _, err := db.Exec(`DELETE FROM runtime_startup_authority_facts`); err != nil {
-				t.Fatal(err)
-			}
 			switch phase {
 			case "reservation":
 				if err := owner.backend.Close(); err != nil {
 					t.Fatal(err)
 				}
 			case "authority transaction":
-				if _, err := db.Exec(`CREATE TRIGGER fail_acquire BEFORE INSERT ON runtime_startup_authority_facts BEGIN SELECT RAISE(ABORT, 'injected acquisition failure'); END`); err != nil {
+				if _, err := db.Exec(`CREATE TRIGGER fail_acquire BEFORE UPDATE ON runtime_process_generation BEGIN SELECT RAISE(ABORT, 'injected acquisition failure'); END`); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -232,16 +347,16 @@ func TestSQLiteOwnershipProofStartupFailureCleansUp(t *testing.T) {
 				t.Fatal(err)
 			}
 			if phase != "reservation" {
-				var count int
-				if err := db.QueryRow(`SELECT COUNT(*) FROM runtime_startup_authority_facts`).Scan(&count); err != nil {
+				var count, generation int
+				if err := db.QueryRow(`SELECT COUNT(*), generation FROM runtime_process_generation`).Scan(&count, &generation); err != nil {
 					t.Fatal(err)
 				}
-				want := 0
+				want := 1
 				if phase == "pipeline assembly" {
-					want = 1
+					want = 2
 				}
-				if count != want {
-					t.Fatalf("startup changed transaction semantics: facts=%d want=%d", count, want)
+				if count != 1 || generation != want {
+					t.Fatalf("startup changed acknowledged transaction semantics: rows=%d generation=%d want=%d", count, generation, want)
 				}
 			}
 		})
@@ -279,22 +394,11 @@ func TestSQLiteOwnershipProofSuccessorReadbackUsesReservedFreshAccess(t *testing
 			if err := session.MonitorProveCurrent(context.Background(), 2*time.Second); err != nil {
 				t.Fatal(err)
 			}
-			successor, err := runtimestartupownership.NewAuthority(runtimestartupownership.AcquireRequest{
-				OwnerID: "fresh-successor", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
-			}, session.authority.Backend, 2, session.authority.AuthorityID, runtimestartupownership.AcquisitionCrashTakeover)
-			if err != nil {
-				t.Fatal(err)
-			}
-			superseded, err := runtimestartupownership.SupersededAuthority(session.authority, successor.AuthorityID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := session.owner.backend.RunTransaction(context.Background(), "seed exact successor proof", func(ctx context.Context, tx *sql.Tx) error {
-				if err := recordAuthorityTransitionTx(ctx, tx, &session.authority, superseded, true); err != nil {
-					return err
-				}
-				return recordAuthorityTransitionTx(ctx, tx, nil, successor, true)
-			}); err != nil {
+			// This injects diagnostic readback only, not a second admitted holder.
+			successor := session.authority
+			successor.AuthorityID = uuid.NewString()
+			successor.AuthorityGeneration++
+			if _, err := db.Exec(`UPDATE runtime_process_generation SET lease_id = ?, generation = ?`, successor.AuthorityID, successor.AuthorityGeneration); err != nil {
 				t.Fatal(err)
 			}
 			held, err := db.Conn(context.Background())
@@ -303,7 +407,7 @@ func TestSQLiteOwnershipProofSuccessorReadbackUsesReservedFreshAccess(t *testing
 			}
 			defer held.Close()
 			if corrupt {
-				if _, err := held.ExecContext(context.Background(), `UPDATE runtime_startup_authority_facts SET snapshot = '{' WHERE authority_id = ?`, successor.AuthorityID); err != nil {
+				if _, err := held.ExecContext(context.Background(), `UPDATE runtime_process_generation SET lease_id = 'not-a-uuid'`); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -322,8 +426,14 @@ func TestSQLiteOwnershipProofSuccessorReadbackUsesReservedFreshAccess(t *testing
 			} else if result.Cause != runtimestartupownership.TerminalOwnershipSuperseded || result.SuccessorAuthorityID != successor.AuthorityID {
 				t.Fatalf("lost exact fresh successor: %#v", result)
 			}
-			if after := db.Stats(); after.WaitCount != before.WaitCount || after.MaxOpenConnections != 1 || after.InUse != 1 {
-				t.Fatalf("terminal readback used workload pool or leaked its reservation: before=%#v after=%#v", before, after)
+			if after := db.Stats(); after.WaitCount != before.WaitCount || after.MaxOpenConnections != 2 || after.InUse != 2 {
+				t.Fatalf("terminal readback used workload pool or released before join: before=%#v after=%#v", before, after)
+			}
+			if err := session.Release(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if after := db.Stats(); after.MaxOpenConnections != 1 || after.InUse != 1 {
+				t.Fatalf("joined release leaked its reservation: %#v", after)
 			}
 		})
 	}

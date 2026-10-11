@@ -107,7 +107,7 @@ func TestServePostgresLossAndRestartFromDurableState(t *testing.T) {
 			entityID := requireServedEventPublishEntityState(t, observer, "postgres", initial.RunID, "", "waiting")
 			requireServedEntityReadback(t, endpoint, initial.RunID, entityID, "waiting")
 			var beforeAuthority string
-			if err := observer.QueryRow(`SELECT authority_id::text FROM runtime_startup_authority_facts ORDER BY authority_generation DESC, transition_ordinal DESC LIMIT 1`).Scan(&beforeAuthority); err != nil {
+			if err := observer.QueryRow(`SELECT lease_id::text FROM runtime_process_generation WHERE singleton_id=1`).Scan(&beforeAuthority); err != nil {
 				t.Fatal(err)
 			}
 			if loss == "server" {
@@ -149,7 +149,7 @@ func TestServePostgresLossAndRestartFromDurableState(t *testing.T) {
 			nextEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, restarted.outputString()) + "/v1/rpc"
 			requireServedEntityReadback(t, nextEndpoint, initial.RunID, entityID, "waiting")
 			var afterAuthority string
-			if err := observer.QueryRow(`SELECT authority_id::text FROM runtime_startup_authority_facts ORDER BY authority_generation DESC, transition_ordinal DESC LIMIT 1`).Scan(&afterAuthority); err != nil {
+			if err := observer.QueryRow(`SELECT lease_id::text FROM runtime_process_generation WHERE singleton_id=1`).Scan(&afterAuthority); err != nil {
 				t.Fatal(err)
 			}
 			if afterAuthority == beforeAuthority {

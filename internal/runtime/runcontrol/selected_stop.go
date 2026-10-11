@@ -49,8 +49,5 @@ func (r SelectedStopRequest) Validate() error {
 	if err := r.Process.Validate(); err != nil {
 		return err
 	}
-	if r.Process.State != startupownership.StateActive {
-		return fmt.Errorf("selected stop requires active process possession")
-	}
 	return nil
 }
