@@ -400,11 +400,12 @@ func (eb *EventBus) PublishAPIEventWithRunCreationAcknowledged(
 	if commitErr != nil && !committed.Acknowledged && !committed.Replay {
 		return apiidempotency.Completion{}, false, errors.Join(commitErr, prepared.publicationClaim.Release(preparedCtx))
 	}
-	if err := committed.Validate(); err != nil {
-		return apiidempotency.Completion{}, false, errors.Join(commitErr, err, prepared.publicationClaim.Release(publicationHandoffContext(preparedCtx, commitErr)))
+	validationErr := committed.Validate()
+	if validationErr != nil && (!committed.Acknowledged || committed.Replay) {
+		return apiidempotency.Completion{}, false, errors.Join(commitErr, validationErr, prepared.publicationClaim.Release(publicationHandoffContext(preparedCtx, commitErr)))
 	}
 	handoffCtx := publicationHandoffContext(preparedCtx, commitErr)
-	if committed.RunCreation != nil && committed.RunCreation.Summary.Outcome != "created" {
+	if validationErr == nil && committed.RunCreation != nil && committed.RunCreation.Summary.Outcome != "created" {
 		code := durabledata.CodeRunDataRejected
 		if committed.RunCreation.Summary.Outcome == "head_conflict" {
 			code = durabledata.CodeRunHeadConflict
@@ -425,6 +426,12 @@ func (eb *EventBus) PublishAPIEventWithRunCreationAcknowledged(
 	acceptedCtx := eb.publicCompletionContext(preparedCtx, lease, evt.RunID())
 	transferred = true
 	go eb.finishPublicPublication(acceptedCtx, lease, prepared, committed.Publication)
+	if validationErr != nil {
+		// Native ACK owns consequence even when the returned projection is invalid.
+		// The worker either validates its handoff or joins exact claim release,
+		// leaving the unchanged durable obligation to existing startup recovery.
+		return apiidempotency.Completion{}, false, errors.Join(commitErr, validationErr)
+	}
 	return committed.Completion, false, commitErr
 }
 

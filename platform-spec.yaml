@@ -37206,6 +37206,10 @@ api_specification:
         server-side waiting queue. Pure keyed replay/conflict precedes this reservation. Acknowledged
         insertion transfers consequence ownership before the recorded response returns; readiness and actual
         claim handoff/disposition remain owned and joined, not abandoned with the HTTP caller.
+        An acknowledged commit with an invalid returned completion or publication projection remains a
+        fail-closed caller error, but retains this accepted responsibility. Validate before handoff; if
+        the projection cannot be used, join exact claim release without fabricating settlement or clearing
+        committed event/scope/readiness evidence. Existing authorized recovery owns that durable remainder.
 
         Existing-run publication preflights selected recipients before event/idempotency persistence. Missing recipients,
         noncanonical route ownership, or target failure returns EVENT_NOT_DECLARED, not success with zero deliveries.

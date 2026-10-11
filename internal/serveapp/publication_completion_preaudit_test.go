@@ -18,6 +18,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store"
@@ -311,6 +312,8 @@ type publicationCompletionAudit struct {
 	commits     int
 	run         string
 	hold        bool
+	resultFault string
+	holdRelease bool
 	entered     chan struct{}
 	release     chan struct{}
 	enterOnce   sync.Once
@@ -334,6 +337,11 @@ func installPublicationCompletionAudit(t *testing.T, hold bool) *publicationComp
 			panic(fmt.Sprintf("audit requires native selected owner, got %T", native))
 		}
 		projected.deps.WorkflowPersistence = pipeline.NewWorkflowPersistence(&publicationAuditReadiness{WorkflowPersistenceOwner: workflows, probe: p})
+		preflight, ok := projected.deps.PipelineObligations.(pipelineobligation.ResumeAdmissionPreflighter)
+		if !ok {
+			panic("audit requires the native pending-work preflight owner")
+		}
+		projected.deps.PipelineObligations = &publicationAuditPipelineRelease{Store: projected.deps.PipelineObligations, ResumeAdmissionPreflighter: preflight, probe: p}
 		p.workflow = workflows
 		return projected
 	}
@@ -351,8 +359,9 @@ func (p *publicationCompletionAudit) commit(ctx context.Context, native runtimeb
 	p.request, p.committed = command.Idempotency, result
 	p.process, _ = worklifetime.ProcessFromContext(ctx)
 	p.run = command.Publication.Commit.Event.Event().RunID()
+	fault := p.resultFault
 	p.mu.Unlock()
-	return result, err
+	return corruptPublicationAuditResult(result, err, fault)
 }
 
 type publicationAuditSQLite struct {
