@@ -28,31 +28,33 @@ import (
 // Only the external TLS/Noise peer is replaced. RunServe constructs the real
 // SDK, selected persistence, capture, identity and target owners.
 type serveNativeProtocolPeer struct {
-	t             *testing.T
-	ctx           context.Context
-	account       types.JID
-	lid           types.JID
-	mu            sync.Mutex
-	wire          *whatsappfixture.Transport
-	registration  *waWa6.ClientPayload_DevicePairingRegistrationData
-	prekeys       []waBinary.Node
-	prekeyUploads int
-	postLogins    int
-	connections   int
-	disconnected  int
-	paired        chan struct{}
-	pairOnce      sync.Once
-	receipts      chan waBinary.Node
-	sender        *whatsappfixture.SignalSender
-	receivers     map[types.JID]servedNativeReceiver
-	ownedSenders  []*whatsappfixture.SignalSender
-	from          types.JID
-	fromLID       types.JID
-	sent          chan servedNativeMessage
-	malformedAck  string
-	withholdAck   string
-	clientTrust   servedNativeClientTrust
-	onACKTimeout  func(string)
+	t              *testing.T
+	ctx            context.Context
+	account        types.JID
+	lid            types.JID
+	mu             sync.Mutex
+	wire           *whatsappfixture.Transport
+	registration   *waWa6.ClientPayload_DevicePairingRegistrationData
+	prekeys        []waBinary.Node
+	prekeyUploads  int
+	postLogins     int
+	connections    int
+	disconnected   int
+	paired         chan struct{}
+	pairOnce       sync.Once
+	receipts       chan waBinary.Node
+	sender         *whatsappfixture.SignalSender
+	receivers      map[types.JID]servedNativeReceiver
+	ownedSenders   []*whatsappfixture.SignalSender
+	from           types.JID
+	fromLID        types.JID
+	sent           chan servedNativeMessage
+	logouts        chan waBinary.Node
+	withholdLogout bool
+	malformedAck   string
+	withholdAck    string
+	clientTrust    servedNativeClientTrust
+	onACKTimeout   func(string)
 }
 
 type servedNativeMessage struct {
@@ -73,7 +75,7 @@ func newServeNativeProtocolPeer(t *testing.T) *serveNativeProtocolPeer {
 	peer := &serveNativeProtocolPeer{t: t, ctx: ctx,
 		account: types.NewJID("15551234567", types.DefaultUserServer),
 		lid:     types.NewJID("100000000001", types.HiddenUserServer), paired: make(chan struct{}),
-		receipts: make(chan waBinary.Node, 16), sent: make(chan servedNativeMessage, 16), receivers: map[types.JID]servedNativeReceiver{}}
+		receipts: make(chan waBinary.Node, 16), sent: make(chan servedNativeMessage, 16), logouts: make(chan waBinary.Node, 4), receivers: map[types.JID]servedNativeReceiver{}}
 	peer.account.Device, peer.lid.Device = 1, 1
 	var mu sync.Mutex
 	var sockets []*websocket.Conn
@@ -212,6 +214,25 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 		}
 		if node.Attrs["type"] == "result" {
 			continue
+		}
+		if node.Attrs["xmlns"] == "md" && node.Attrs["type"] == "set" {
+			unlink := node.GetChildByTag("remove-companion-device")
+			if unlink.Attrs["jid"] != p.account || unlink.Attrs["reason"] != "user_initiated" {
+				p.t.Error("logout did not select the exact linked SDK account", node)
+				return
+			}
+			select {
+			case p.logouts <- *node:
+			default:
+				p.t.Error("served peer logout evidence overflow")
+				return
+			}
+			p.mu.Lock()
+			withheld := p.withholdLogout
+			p.mu.Unlock()
+			if withheld {
+				continue
+			}
 		}
 		if node.Attrs["xmlns"] == "encrypt" && node.Attrs["type"] == "set" {
 			list := node.GetChildByTag("list")
