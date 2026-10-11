@@ -27,7 +27,7 @@ func TestRunForkExactFactsSQLiteBusyRetryGeneratedIDs(t *testing.T) {
 			f := newExactFactFixture(t, s)
 			exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 				seedRunForkRevisionMatrixEvent(t, ctx, tx, f.runID, f.eventID, f.at, false)
-				mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,name,current_state,created_at,updated_at) VALUES ($1,$2,'retry','retry','Before Retry','ready',$3,$3)`, f.runID, f.entityID, f.at)
+				mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,name,created_at,updated_at) VALUES ($1,$2,'retry','retry','Before Retry',$3,$3)`, f.runID, f.entityID, f.at)
 				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyEvents, f.eventID), exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID)), 1, true)
 			})
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)

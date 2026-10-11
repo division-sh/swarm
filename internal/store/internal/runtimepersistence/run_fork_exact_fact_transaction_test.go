@@ -99,7 +99,9 @@ func TestRunForkExactFactsFixedEventMaterializationBothStores(t *testing.T) {
 		stateMutation, nameMutation := uuid.NewString(), uuid.NewString()
 		exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 			seedRunForkRevisionMatrixEvent(t, ctx, tx, f.runID, f.eventID, f.at, s.postgres)
-			mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,name,current_state,fields,created_at,updated_at) VALUES ($1,$2,'flow-a/1','fork_entity','Snapshot Entity','ready',$3,$4,$4)`, f.runID, f.entityID, `{"name":"Snapshot Entity"}`, f.at)
+			seedWorkflowHeaderProjectionFixture(t, ctx, tx, f.runID, f.entityID, "flow-a/1", "flow-a", "fork_entity", "ready", "{}", f.at)
+			mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE flow_instances SET name='Snapshot Entity' WHERE run_id=$1 AND entity_id=$2`, f.runID, f.entityID)
+			mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,name,fields,created_at,updated_at) VALUES ($1,$2,'flow-a/1','fork_entity','Snapshot Entity',$3,$4,$4)`, f.runID, f.entityID, `{"name":"Snapshot Entity"}`, f.at)
 			mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_mutations (mutation_id,run_id,entity_id,domain,path,new_value,caused_by_event,writer_type,writer_id,created_at) VALUES ($1,$2,$3,'lifecycle_state','',$4,$5,'platform','exact-fork',$6),($7,$2,$3,'authored_field','name',$8,$5,'platform','exact-fork',$6)`, stateMutation, f.runID, f.entityID, `"ready"`, f.eventID, f.at, nameMutation, `"Snapshot Entity"`)
 			compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID,
 				exactFactRef(t, runforkrevision.FamilyEvents, f.eventID), exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID),
@@ -108,7 +110,8 @@ func TestRunForkExactFactsFixedEventMaterializationBothStores(t *testing.T) {
 		laterEvent, laterMutation := uuid.NewString(), uuid.NewString()
 		exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 			seedRunForkRevisionMatrixEvent(t, ctx, tx, f.runID, laterEvent, f.at.Add(time.Second), s.postgres)
-			mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE entity_state SET name='Later Entity',fields=$1 WHERE run_id=$2 AND entity_id=$3`, `{"name":"Later Entity"}`, f.runID, f.entityID)
+			mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE entity_state SET name='Later Entity',fields=$1,updated_at=$4 WHERE run_id=$2 AND entity_id=$3`, `{"name":"Later Entity"}`, f.runID, f.entityID, f.at.Add(time.Second))
+			mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE flow_instances SET name='Later Entity',revision=revision+1,updated_at=$3 WHERE run_id=$1 AND entity_id=$2`, f.runID, f.entityID, f.at.Add(time.Second))
 			mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_mutations (mutation_id,run_id,entity_id,domain,path,new_value,caused_by_event,writer_type,writer_id,created_at) VALUES ($1,$2,$3,'authored_field','name',$4,$5,'platform','exact-fork',$6)`, laterMutation, f.runID, f.entityID, `"Later Entity"`, laterEvent, f.at.Add(time.Second))
 			compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID,
 				exactFactRef(t, runforkrevision.FamilyEvents, laterEvent), exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID), exactFactRef(t, runforkrevision.FamilyEntityMutations, laterMutation)), 2, true)
@@ -139,7 +142,7 @@ func TestRunForkExactFactsFixedEventMaterializationBothStores(t *testing.T) {
 				t.Fatalf("materialized cut=%#v", child)
 			}
 			var name, state, sourceRun, sourceEvent string
-			if err := s.db.QueryRowContext(ctx, `SELECT e.name,e.current_state,r.forked_from_run_id,r.forked_from_event_id FROM entity_state e JOIN runs r ON r.run_id=e.run_id WHERE e.run_id=$1 AND e.entity_id=$2`, child.ForkRunID, f.entityID).Scan(&name, &state, &sourceRun, &sourceEvent); err != nil {
+			if err := s.db.QueryRowContext(ctx, `SELECT e.name,fi.current_state,r.forked_from_run_id,r.forked_from_event_id FROM entity_state e JOIN runs r ON r.run_id=e.run_id JOIN flow_instances fi ON fi.run_id=e.run_id AND fi.instance_path=e.flow_instance AND fi.entity_id=e.entity_id WHERE e.run_id=$1 AND e.entity_id=$2`, child.ForkRunID, f.entityID).Scan(&name, &state, &sourceRun, &sourceEvent); err != nil {
 				t.Fatal(err)
 			}
 			if name != point.name || state != "ready" || sourceRun != f.runID || sourceEvent != point.event {
