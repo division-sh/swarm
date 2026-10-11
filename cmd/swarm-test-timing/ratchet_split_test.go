@@ -390,6 +390,64 @@ func TestEvaluateBudgetCadenceCommandCeilingStaysHard(t *testing.T) {
 	}
 }
 
+func TestEvaluateBudgetPRBufferedCommandCeilingIsAdvisory(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		seconds float64
+		want    testtiming.BudgetStatus
+	}{
+		{"within", 10, testtiming.BudgetPass},
+		{"buffered-boundary", 13, testtiming.BudgetPass},
+		{"over-buffered-ceiling", 13.001, testtiming.BudgetWarn},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := ratchetCLIConfig(t, "full", 0, false)
+			cfg.event = "pull_request"
+			plan, err := readPlan(cfg.planPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.RemoveAll(cfg.evidenceRoot); err != nil {
+				t.Fatal(err)
+			}
+			root := plan.Units[0].SelectedRoots[0]
+			writeRatchetCLIProof(t, cfg, plan, root.Package, root.Name, tc.seconds)
+			budget := "version: 1\nhard:\n  max_shard_command_seconds: {limit_seconds: 10, justification: synthetic boundary proof}\n  full_conformance_command_seconds: {limit_seconds: 10, justification: synthetic boundary proof}\n"
+			if err := os.WriteFile(cfg.budgetPath, []byte(budget), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := run(cfg); err != nil {
+				t.Fatalf("successful PR command was refused: %v", err)
+			}
+			result := readRatchetCLIResult(t, cfg)
+			if result.Status != tc.want || result.ExitCode() != 0 || len(result.Surfaces) != 1 || result.Surfaces[0].Status != tc.want || result.Surfaces[0].LimitSeconds != 10 || result.Surfaces[0].BufferedCeilingSeconds != 13 || len(result.Surfaces[0].Problems) != 0 {
+				t.Fatalf("PR buffered ceiling was mislabeled or changed: %+v", result)
+			}
+			if (len(result.Surfaces[0].Warnings) != 0) != (tc.seconds > 10) {
+				t.Fatalf("PR ceiling warning lost: %+v", result.Surfaces[0])
+			}
+			if (strings.Contains(strings.Join(result.Surfaces[0].Warnings, " "), "buffered timing ceiling")) != (tc.want == testtiming.BudgetWarn) {
+				t.Fatalf("baseline warning confused with buffered overrun: %+v", result.Surfaces[0])
+			}
+			path := filepath.Join(cfg.evidenceRoot, "command-primary-evidence.json")
+			receipt, err := readEvidence(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			receipt.ExitCode = 1
+			if err := writeJSON(path, receipt); err != nil {
+				t.Fatal(err)
+			}
+			if err := run(cfg); err == nil {
+				t.Fatal("failed PR command gained advisory success")
+			}
+			if result := readRatchetCLIResult(t, cfg); result.Status != testtiming.BudgetIncomplete || result.ExitCode() == 0 {
+				t.Fatalf("PR advisory softened actual command failure: %+v", result)
+			}
+		})
+	}
+}
+
 func TestEvaluateBudgetCadenceInvalidEvidenceStaysFatal(t *testing.T) {
 	for _, defect := range []string{"missing", "duplicate", "wrong-run", "wrong-attempt", "wrong-head", "wrong-plan"} {
 		t.Run(defect, func(t *testing.T) {

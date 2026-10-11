@@ -107,9 +107,11 @@ failing summary. Only exact `pull_request`, `push`, `schedule`, and
 `workflow_dispatch` events are admitted; missing, unknown or malformed events
 produce `INCOMPLETE` before either timing policy is selected. Both comparison
 modes retain their full cost accounting and historical strict counterfactual,
-but no snapshot-derived cost or placement verdict fails the summary. Independently
-enforced command ceilings/timeouts and invalid-evidence failures stay hard and
-unchanged. The pinned reference, numbers, selection
+but no snapshot-derived cost or placement verdict fails the summary. Buffered
+command-ceiling overruns remain advisory on PRs only after complete successful
+proof admission; push/schedule/manual buffered ceilings remain enforced.
+Go/workflow timeouts and invalid/incomplete proof or failed/cancelled jobs remain
+hard on every event. The pinned reference, numbers, selection
 syntax, cadence and gate freshness are unchanged. Diffuse real creep below unit
 ceilings remains visible in advisory tables rather than automatically blocking
 delivery. No recurring re-pin or Go1.26 timing re-pin is required by this policy;

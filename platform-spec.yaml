@@ -24127,7 +24127,9 @@ test_specification:
         event selects cost reporting: PRs report independent added/promoted cost and retained drift; fresh full master
         cadence reports the complete retained-plus-added aggregate. Both snapshot-derived cost and placement verdicts
         are advisory under user-confirmed LEAD #2535 comment6113532469. Named extras cannot evade either comparison,
-        change the reference epoch or weaken exact proof admission and independently enforced command ceilings.
+        change the reference epoch or weaken exact proof admission or the per-event command policy: PR buffered
+        ceilings are advisory after complete successful proof, cadence buffered ceilings are enforced,
+        and Go/workflow timeouts are hard on every event.
         Logical commands retain their own processes, stores, workspaces, deadlines, backend children and receipts.
         Only explicitly eligible short units with valid measured weights may share a physical runner. Each physical
         job is matched to its exact planned logical units and counted once, while every logical budget and failure
@@ -24224,8 +24226,11 @@ test_specification:
         (2026-10-11 20:40Z) supersedes items 1-2 of comment 6110280108: all pinned-snapshot-derived cost and placement
         comparisons are advisory on every event, including pr_added_cost overruns and unreviewed new/promoted roots
         above 30 seconds. They remain computed and attributed in the artifact and report, never failing the timing
-        budget or Required summary by themselves. Proof validity, complete exact evidence and independently enforced
-        per-unit/command ceilings and timeouts remain unchanged and hard. No reference re-pin, numeric allowance change,
+        budget or Required summary by themselves. Proof validity and complete exact evidence remain hard.
+        Per-command buffered-ceiling overruns remain advisory on PRs after complete successful proof admission;
+        push/schedule/manual buffered ceilings remain enforced. Go/workflow timeouts and actual failed/cancelled
+        jobs remain hard everywhere. These existing per-event command semantics are unchanged by the snapshot
+        disposition. No reference re-pin, numeric allowance change,
         codemod retier or base-relative derivation follows from this disposition. Diffuse real creep below command
         ceilings remains visible for human review; historical placement approvals remain attributed, not required for success.
         Removed/renamed roots are reported separately and remain cost-neutral in that comparison, never credited as savings.
