@@ -145,6 +145,12 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 	requireStaticReadinessCalls(t, calls, "reconcileDynamicFlowRuntimeReadinessPlan", map[string]int{
 		"flow_readiness_plan.go": 1,
 	})
+	requireStaticReadinessCalls(t, calls, "startReadinessReconciliation", map[string]int{
+		"runtime.go": 2,
+	})
+	requireStaticReadinessCalls(t, calls, "readinessReconciliationLoop", map[string]int{
+		"runtime.go": 1,
+	})
 	requireStaticReadinessCalls(t, calls, "dynamicFlowRuntimeReadinessSource", map[string]int{
 		"flow_activation.go":          3, // Includes process-only standing preparation before executable publication.
 		"flow_readiness_admission.go": 4,

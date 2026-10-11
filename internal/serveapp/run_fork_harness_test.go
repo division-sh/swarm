@@ -439,7 +439,11 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		return 1
 	}
 	if selectedBundleRequested {
-		replayAdmission := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+		replayAdmission, err := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
+		if err != nil {
+			writeForkContractLoadError(out, "fork failed: selected pending work", err)
+			return cliapp.CLIExitValidation
+		}
 		if len(plan.ReplayResumeAdmission.Dispositions) > 0 || len(plan.ReplayResumeAdmission.UnsupportedBlockers) > 0 {
 			plan.UnsupportedBlockers = replayAdmission.UnsupportedBlockers
 			plan.UnsupportedBlockerCount = len(replayAdmission.UnsupportedBlockers)

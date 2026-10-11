@@ -2,6 +2,7 @@ package semanticview
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -88,6 +89,36 @@ func (c OriginalLoopCarriage) RequireSource(bundleHash string) error {
 	return nil
 }
 
+// Historical fan-out declarations keep their original role after a selected
+// artifact removes them. Add only artifact-admitted evidence, never a guessed
+// role from the current contract or caller-authored capsule.
+func (c OriginalLoopCarriage) WithFanOutHistory(source Source) (OriginalLoopCarriage, error) {
+	if c.state == nil || c.state.bundleHash == "" {
+		return OriginalLoopCarriage{}, fmt.Errorf("fan-out history requires the original source carriage")
+	}
+	proofs, err := CompileFanOutPlanCarriage(source)
+	if err != nil {
+		return OriginalLoopCarriage{}, err
+	}
+	history, err := CompileOriginalLoopCarriage(source)
+	if err != nil {
+		return OriginalLoopCarriage{}, err
+	}
+	state := *c.state
+	state.fanOuts = maps.Clone(state.fanOuts)
+	for ref, meaning := range history.state.fanOuts {
+		proof, _, err := proofs.Resolve(ref.ElementRef)
+		if err != nil || proof != ref {
+			return OriginalLoopCarriage{}, fmt.Errorf("historical fan-out role lacks exact artifact evidence")
+		}
+		if prior, exists := state.fanOuts[ref]; exists && prior != meaning {
+			return OriginalLoopCarriage{}, fmt.Errorf("historical fan-out has conflicting original roles")
+		}
+		state.fanOuts[ref] = meaning
+	}
+	return OriginalLoopCarriage{state: &state}, nil
+}
+
 func (c OriginalLoopCarriage) Resolve(scope LoopEventScope) (LoopRevisionRole, bool, error) {
 	if c.state == nil || c.state.bundleHash == "" {
 		return LoopRevisionRole{}, false, fmt.Errorf("original loop carriage is not admitted")
@@ -143,7 +174,7 @@ func (c OriginalLoopCarriage) ResolveActivity(node identity.ExecutableNode, hand
 }
 
 func (c OriginalLoopCarriage) ResolveFanOut(ref contracts.FanOutPlanRef, node identity.ExecutableNode, handler string) (LoopRevisionRole, bool, error) {
-	if c.state == nil || c.state.bundleHash == "" || ref.BundleHash != c.state.bundleHash {
+	if c.state == nil || c.state.bundleHash == "" {
 		return LoopRevisionRole{}, false, fmt.Errorf("fan-out carriage requires its exact original artifact")
 	}
 	meaning, found := c.state.fanOuts[ref]

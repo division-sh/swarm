@@ -204,6 +204,8 @@ func TestRunForkRevisionStateAccessorInventoryIsClosed(t *testing.T) {
 		"internal/store/internal/backend/runforkpersistence/run_fork_revision_snapshot.go",
 		"internal/store/internal/backend/runforkrevision/postgres.go",
 		"internal/store/internal/backend/runforkrevision/sqlite.go",
+		// Canonical creation publication and immutable start-cut lookup only.
+		"internal/store/internal/backend/runforkrevision/start_projection.go",
 		"internal/store/platformschema/platformschema.go",
 	}
 	var got []string

@@ -41,12 +41,8 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEventModes(ctx con
 			}
 			return fmt.Errorf("load selected-contract source event admission status: %w", err)
 		}
-		if !runForkSelectedContractBranchSourceStatusSupported(sourceStatus) {
-			state, parseErr := runtimerunlifecycle.ParseState(sourceStatus)
-			if parseErr != nil {
-				return parseErr
-			}
-			return fmt.Errorf("selected-contract source event admission state %s is unsupported", state)
+		if _, err := runtimerunlifecycle.ParseState(sourceStatus); err != nil {
+			return fmt.Errorf("validate historical selected source state: %w", err)
 		}
 		events, err := loadSQLiteRunForkSelectedContractEvents(txctx, tx, ids)
 		if err != nil {
@@ -93,12 +89,8 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 				}
 				return fmt.Errorf("load selected-contract source event preparation status: %w", err)
 			}
-			if !runForkSelectedContractBranchSourceStatusSupported(sourceStatus) {
-				state, parseErr := runtimerunlifecycle.ParseState(sourceStatus)
-				if parseErr != nil {
-					return parseErr
-				}
-				return fmt.Errorf("selected-contract source event preparation state %s is unsupported", state)
+			if _, err := runtimerunlifecycle.ParseState(sourceStatus); err != nil {
+				return fmt.Errorf("validate historical selected source state: %w", err)
 			}
 			if err := requireSQLiteRunActive(txctx, tx, forkRunID); err != nil {
 				return fmt.Errorf("admit selected-contract source event preparation fork: %w", err)
@@ -155,22 +147,6 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 		return out, &selectedForkSourceEventsPostCommitError{sourceRunID: sourceRunID, forkRunID: forkRunID, value: out, cause: err}
 	}
 	return out, result.Err()
-}
-
-func (s *RunForkSQLiteOwner) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID, forkEventID string) error {
-	if s == nil || s.backend == nil {
-		return fmt.Errorf("sqlite store is required")
-	}
-	return s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := runforkrevision.ValidateCompleteSQLite(txctx, tx, sourceRunID); err != nil {
-			return err
-		}
-		point, err := resolveRunForkRevisionPoint(txctx, tx, sourceRunID, forkEventID)
-		if err != nil {
-			return fmt.Errorf("resolve committed replay-scope fork revision: %w", err)
-		}
-		return ensureRunForkNoPostForkCommittedReplayScopeMarkersAtRevision(txctx, tx, sourceRunID, point.Revision)
-	})
 }
 
 func (s *RunForkSQLiteOwner) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (result runfork.RunForkActivation, err error) {
@@ -249,7 +225,11 @@ func insertSQLiteRunForkSelectedContractBranchDivergence(ctx context.Context, tx
 
 func (s *RunForkSQLiteOwner) ensureSQLiteRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string, source semanticview.Source) error {
 	allowedEvents := uniqueNonEmptyStrings(allowedSourceEventIDs)
-	if len(allowedEvents) == 0 {
+	timerEvents, err := selectedContractTimerLineage(ctx, tx, forkRunID, false, s.PipelineSQLiteOwner.ReadWorkflowTimerActivationTx)
+	if err != nil {
+		return err
+	}
+	if len(allowedEvents) == 0 && len(timerEvents) == 0 {
 		feed, err := selectedDeploymentFeedPresentTx(ctx, tx, forkRunID)
 		if err != nil {
 			return fmt.Errorf("check selected deployment feed: %w", err)
@@ -327,12 +307,15 @@ func (s *RunForkSQLiteOwner) ensureSQLiteRunForkSelectedContractExecutionForkSta
 		return err
 	}
 	observationsJSON, _ := json.Marshal(observations)
+	timerJSON, _ := json.Marshal(timerEvents)
 	var strayEvents int
 	var strayEventEvidence string
 	if err := tx.QueryRowContext(ctx, `
 		WITH RECURSIVE selected_agents(run_id, agent_id, flow_instance) AS (
 			SELECT json_extract(value, '$.run_id'), json_extract(value, '$.agent_id'), json_extract(value, '$.flow_instance') FROM json_each($4)
 		), selected_tree(event_id) AS (
+			SELECT e.event_id FROM events e WHERE e.run_id=$1 AND e.event_id IN (SELECT value FROM json_each($7))
+			UNION
 			SELECT e.event_id FROM events e
 			JOIN run_fork_selected_contract_executions x ON x.fork_event_id = e.event_id AND x.fork_run_id = $1
 			WHERE e.run_id = $1 AND x.source_event_id IN (SELECT value FROM json_each($2))
@@ -354,7 +337,7 @@ func (s *RunForkSQLiteOwner) ensureSQLiteRunForkSelectedContractExecutionForkSta
 		FROM events e
 		WHERE e.run_id = $1 AND NOT EXISTS (SELECT 1 FROM selected_tree tree WHERE tree.event_id = e.event_id)
 		  AND e.event_id NOT IN (SELECT value FROM json_each($6))
-	`, forkRunID, string(allowedJSON), string(platformJSON), string(agentsJSON), string(activityJSON), string(observationsJSON)).Scan(&strayEvents, &strayEventEvidence); err != nil {
+	`, forkRunID, string(allowedJSON), string(platformJSON), string(agentsJSON), string(activityJSON), string(observationsJSON), string(timerJSON)).Scan(&strayEvents, &strayEventEvidence); err != nil {
 		return fmt.Errorf("check selected-contract fork event lineage: %w", err)
 	}
 	if strayEvents > 0 {
