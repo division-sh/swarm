@@ -17,15 +17,15 @@ import (
 
 func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 	for _, tc := range []struct {
-		name, payload              string
-		reuse, descriptor, invalid bool
+		name, payload           string
+		reuse, indexed, invalid bool
 	}{
 		{"typed zero false", `{"account_id":"acct-1","count":0,"ratio":2.0,"active":false,"label":"kept","attributes":{"nested":[1,2.0]}}`, false, false, false},
 		{"optional state omitted", `{"account_id":"acct-1","active":true,"label":"kept","attributes":[]}`, false, false, false},
 		{"missing required message field", `{"account_id":"acct-1","active":true,"attributes":{}}`, false, false, true},
 		{"null required message field", `{"account_id":"acct-1","active":true,"label":null,"attributes":{}}`, false, false, true},
 		{"wrong integer", `{"account_id":"acct-1","count":"3","active":true,"label":"kept","attributes":{}}`, false, false, true},
-		{"descriptor reuse missing initialization", `{"account_id":"acct-1"}`, true, true, false},
+		{"indexed reuse missing initialization", `{"account_id":"acct-1"}`, true, true, false},
 		{"route without matching key cannot reuse", `{"account_id":"acct-1"}`, true, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -49,9 +49,6 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 				t.Fatal(err)
 			}
 			store := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}}
-			if tc.descriptor {
-				store.flowInstances = []ActiveFlowInstanceDescriptor{{InstanceID: instance.InstanceID, EntityID: instance.EntityID, FlowInstance: instance.InstancePath, FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-1"}}}
-			}
 			owner := newTestFlowInstanceActivationOwner(store.Activate)
 			bus, err := newScopedTestEventBus(store, EventBusOptions{
 				ContractBundle: source, TemplateInstancePlanner: owner,
@@ -65,7 +62,7 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 				store.installConstructionReceipt(testRunScopedFlowRoute(construction.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: construction})
 			}
 			if tc.reuse {
-				if tc.descriptor {
+				if tc.indexed {
 					store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, instance, "acct-1"))
 				}
 				store.setTargetOwnerRoutes(plan.ReceiverRoute(instance.InstancePath, instance.EntityID))
