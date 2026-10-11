@@ -137,9 +137,8 @@ func TestMaterializeRunForkGateAuthoritiesSelectedStoreParity(t *testing.T) {
 			seedWorkflowHeaderProjectionFixture(t, ctx, db, forkRunID, sourceEffect.EntityID, "root", sourceEffect.FlowID, "default", "operating", "{}", now)
 			if _, err := db.ExecContext(ctx, `
 				INSERT INTO entity_state (
-					run_id, entity_id, flow_instance, entity_type, current_state,
-					gates, fields, accumulator, entered_state_at, created_at, updated_at
-				) VALUES ($1, $2, 'root', 'default', 'operating', '{}', '{}', '{}', $3, $3, $3)
+					run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
+				) VALUES ($1, $2, 'root', 'default', '{}', $3, $3)
 			`, forkRunID, sourceEffect.EntityID, now); err != nil {
 				t.Fatalf("create fork proposed-effect entity: %v", err)
 			}
@@ -344,10 +343,9 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			seedWorkflowHeaderProjectionFixture(t, ctx, db, forkRunID, forkRunID, forkRunID, ".", "default", forkActivation.Stage, string(accumulator), now)
 			if _, err := db.ExecContext(ctx, `
 				INSERT INTO entity_state (
-					run_id, entity_id, flow_instance, entity_type, current_state,
-					gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-				) VALUES ($1, $2, $3, 'default', $4, '{}', '{}', $5, 1, $6, $6, $6)
-			`, forkRunID, forkRunID, forkRunID, forkActivation.Stage, string(accumulator), now); err != nil {
+					run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
+				) VALUES ($1, $2, $3, 'default', '{}', $4, $4)
+			`, forkRunID, forkRunID, forkRunID, now); err != nil {
 				t.Fatalf("create fork root entity: %v", err)
 			}
 
@@ -416,9 +414,9 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 				t.Fatalf("execute fork root gate through coordinator = forward:%v emitted:%d outcome:%#v error:%v", forward, len(emitted), outcome, err)
 			}
 			var currentState string
-			stateQuery := `SELECT current_state FROM entity_state WHERE run_id = ? AND entity_id = ?`
+			stateQuery := `SELECT current_state FROM flow_instances WHERE run_id = ? AND entity_id = ? AND instance_path = ?`
 			if backend == "postgres" {
-				stateQuery = `SELECT current_state FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+				stateQuery = `SELECT current_state FROM flow_instances WHERE run_id = $1::uuid AND entity_id = $2::uuid AND instance_path = $3`
 			}
 			routedActivation := loadDecisionCardGateActivation(t, db, backend == "postgres", forkRunID, forkRunID)
 			var outputCount int
@@ -426,7 +424,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if backend == "postgres" {
 				outputCountQuery = `SELECT COUNT(*) FROM events WHERE event_name = $1 AND run_id = $2::uuid`
 			}
-			stateErr := db.QueryRowContext(pipelineCtx, stateQuery, forkRunID, forkRunID).Scan(&currentState)
+			stateErr := db.QueryRowContext(pipelineCtx, stateQuery, forkRunID, forkRunID, forkRunID).Scan(&currentState)
 			outputErr := db.QueryRowContext(pipelineCtx, outputCountQuery, "run_fork.compiled_root_gate_approved", forkRunID).Scan(&outputCount)
 			if stateErr != nil || currentState != "done" {
 				t.Fatalf("fork root gate state=%q state_err=%v activation=%#v output_count=%d output_err=%v intercept_outcome=%#v, want done/routed/one", currentState, stateErr, routedActivation, outputCount, outputErr, outcome)

@@ -313,10 +313,8 @@ func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorAc
 		Mode: "static", StageDefined: true, CurrentState: "waiting", Fields: map[string]any{"marker": "source-owned"}, CreatedAt: at, EnteredStageAt: at,
 	}, at)
 	// Native snapshot correspondence retains a deliberately non-initial revision.
-	for _, table := range []string{"flow_instances", "entity_state"} {
-		if _, err := fixture.db.ExecContext(ctx, `UPDATE `+table+` SET revision=7 WHERE run_id=$1`, runID); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET revision=7 WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, runID, runID, runID); err != nil {
+		t.Fatal(err)
 	}
 	captureFanOutBarrierForkRevision(t, ctx, fixture.db, runID, postgres)
 	if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(node), Target: target}}); err != nil {
@@ -338,7 +336,9 @@ func requireForkWorkflowOwnershipPreserved(t *testing.T, db *sql.DB, sourceRun, 
 	for _, runID := range []string{sourceRun, forkRun} {
 		var entity, route, entityType, state, fields string
 		var revision int
-		if err := db.QueryRow(`SELECT CAST(entity_id AS TEXT), flow_instance, entity_type, current_state, fields, revision FROM entity_state WHERE run_id = $1`, runID).Scan(&entity, &route, &entityType, &state, &fields, &revision); err != nil {
+		if err := db.QueryRow(`SELECT CAST(e.entity_id AS TEXT), e.flow_instance, e.entity_type, f.current_state, e.fields, f.revision
+			FROM entity_state e JOIN flow_instances f ON f.run_id=e.run_id AND f.entity_id=e.entity_id AND f.instance_path=e.flow_instance AND f.entity_type=e.entity_type
+			WHERE e.run_id = $1`, runID).Scan(&entity, &route, &entityType, &state, &fields, &revision); err != nil {
 			t.Fatal(err)
 		}
 		wantRevision := 7
