@@ -28,7 +28,8 @@ func (p *PreparedSelectedFork) settleExecutionFailure() error {
 	ctx := pending.container.failureDispositionContext(context.WithoutCancel(p.operation.preparation.Context()))
 	if p.operation.stopOwnsDisposition() {
 		// The accepted stop owns the child's terminal outcome, not this executor.
-		if err := pending.container.Fail(ctx, context.Canceled); err != nil {
+		acknowledged, err := pending.container.Fail(ctx, context.Canceled)
+		if !acknowledged {
 			return err
 		}
 	} else {

@@ -254,9 +254,9 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	container.proof.AuthorityExecutionOwner = authority.ExecutionOwner
 	defer func() {
 		if finalErr != nil && out.authority.Valid() {
-			if cleanupErr := out.Fail(ctx, finalErr); cleanupErr != nil {
-				finalErr = errors.Join(finalErr, cleanupErr)
-			} else {
+			acknowledged, cleanupErr := out.Fail(ctx, finalErr)
+			finalErr = errors.Join(finalErr, cleanupErr)
+			if acknowledged {
 				out.authority = runtimeeffects.Authority{}
 			}
 		}
@@ -1008,24 +1008,37 @@ func (c selectedContractForkLocalRuntimeContainer) Quiesce(ctx context.Context) 
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Close(ctx context.Context) error {
-	return c.ports.runtimeExecution.CloseRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority.ID)
+	acknowledged, err := c.closeAcknowledged(ctx)
+	if acknowledged {
+		return nil
+	}
+	return err
 }
 
-func (c selectedContractForkLocalRuntimeContainer) Fail(ctx context.Context, cause error) error {
+func (c selectedContractForkLocalRuntimeContainer) closeAcknowledged(ctx context.Context) (bool, error) {
+	acknowledged, err := c.ports.runtimeExecution.CloseRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority.ID)
+	if !acknowledged {
+		return false, errors.Join(errors.New("selected execution close remains unacknowledged"), err)
+	}
+	c.diagnostics.add(err)
+	return true, err
+}
+
+func (c selectedContractForkLocalRuntimeContainer) Fail(ctx context.Context, cause error) (bool, error) {
 	if errors.Is(cause, worklifetime.ErrRetired) || errors.Is(context.Cause(ctx), worklifetime.ErrRetired) {
 		// The process owner already withdrew execution. Startup recovery must
 		// fence this generation and its open claims before issuing a successor.
-		return fmt.Errorf("selected predecessor awaits fenced recovery: %w", worklifetime.ErrRetired)
+		return false, fmt.Errorf("selected predecessor awaits fenced recovery: %w", worklifetime.ErrRetired)
 	}
 	failure := runtimefailures.FromError(cause, runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, "execute")
 	raw, err := json.Marshal(failure.Failure)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := c.ports.runtimeExecution.FailRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority, raw); err != nil {
-		return err
+		return false, err
 	}
-	return c.Close(ctx)
+	return c.closeAcknowledged(ctx)
 }
 
 func (c selectedContractForkLocalRuntimeContainer) FailActivated(ctx context.Context, cause error) (bool, error) {

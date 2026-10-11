@@ -67,7 +67,14 @@ var eventRecordImportFiles = map[string]struct{}{
 	// The materialization dependency owner decodes complete publication records; it does not reconstruct event identity.
 	"internal/store/internal/backend/delivery/receiver_materialization.go": {},
 	// Historical inherited ordinals are revalidated by the complete-record decoder before the shared fan-out owner.
-	"internal/store/internal/backend/runforkpersistence/run_fork_inherited_fan_out_history.go":            {},
+	"internal/store/internal/backend/runforkpersistence/run_fork_inherited_fan_out_history.go": {},
+	// Continuing fixed-cut outcomes consume canonical complete records; this is
+	// readback, not another event decoder or publication admission owner.
+	// Selected publication evidence consumes the same decoder before exact
+	// lineage binding; the immutable revision projection is its source owner.
+	"internal/store/internal/backend/runforkpersistence/run_fork_selected_fan_out_evidence.go":            {},
+	"internal/store/internal/backend/runforkrevision/projection.go":                                       {},
+	"internal/store/internal/backend/runforkpersistence/run_fork_continued_readback.go":                   {},
 	"internal/store/eventfixture/event.go":                                                                {},
 	"internal/store/internal/backend/delivery/lifecycle.go":                                               {},
 	"internal/store/internal/backend/eventpersistence/event_persistence_identity.go":                      {},

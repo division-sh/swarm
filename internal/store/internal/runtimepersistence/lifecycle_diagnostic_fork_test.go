@@ -134,8 +134,8 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 					if err := selected.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
 						t.Fatal(err)
 					}
-					if err := selected.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
-						t.Fatal(err)
+					if acknowledged, err := selected.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); !acknowledged || err != nil {
+						t.Fatalf("close selected execution: acknowledged=%t error=%v", acknowledged, err)
 					}
 					if scenario == "malformed_provenance" {
 						proveMalformedDiagnosticProvenance(t, db, projector, item)

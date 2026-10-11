@@ -133,8 +133,8 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 						if err := owner.ports.runtimeExecution.QuiesceRunForkSelectedContractRuntimeExecution(callCtx, claimedAuthority); err != nil {
 							t.Fatal(err)
 						}
-						if err := owner.ports.runtimeExecution.CloseRunForkSelectedContractRuntimeExecution(callCtx, bound.Identity().ExecutionID); err != nil {
-							t.Fatal(err)
+						if acknowledged, err := owner.ports.runtimeExecution.CloseRunForkSelectedContractRuntimeExecution(callCtx, bound.Identity().ExecutionID); !acknowledged || err != nil {
+							t.Fatalf("close selected execution: acknowledged=%t error=%v", acknowledged, err)
 						}
 					}
 				}}

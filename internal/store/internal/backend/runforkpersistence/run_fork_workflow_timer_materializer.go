@@ -15,8 +15,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type runForkWorkflowTimerSelectionOwner = runfork.InheritedWorkflowTimerSelection
-
 type runForkWorkflowTimerMaterializationOwner interface {
 	MaterializeRunForkWorkflowTimerTx(context.Context, *mutationprotocol.Attempt, pipeline.WorkflowTimerActivation, bool) error
 	ReadRunForkWorkflowTimerInventoryTx(context.Context, *mutationprotocol.Attempt, string) ([]pipeline.WorkflowTimerActivation, error)
@@ -37,7 +35,7 @@ const (
 // This family readback cannot discharge the combined source-history blocker.
 func readRunForkWorkflowTimerInventory(
 	ctx context.Context, attempt *mutationprotocol.Attempt, plan runfork.RunForkPlan,
-	forkRunID string, selection runForkWorkflowTimerSelectionOwner,
+	forkRunID string, selection runfork.InheritedWorkflowTimerSelection,
 	owner runForkWorkflowTimerMaterializationOwner, bornAt time.Time,
 	phase runForkWorkflowTimerReadbackPhase,
 ) ([]runForkWorkflowTimerProjection, error) {
@@ -132,7 +130,7 @@ func materializeRunForkWorkflowTimers(
 	attempt *mutationprotocol.Attempt,
 	plan runfork.RunForkPlan,
 	forkRunID string,
-	selection runForkWorkflowTimerSelectionOwner,
+	selection runfork.InheritedWorkflowTimerSelection,
 	owner runForkWorkflowTimerMaterializationOwner,
 	bornAt time.Time,
 ) ([]pipeline.WorkflowTimerActivation, error) {
@@ -166,7 +164,7 @@ func materializeRunForkWorkflowTimers(
 	return removed, nil
 }
 
-func prepareRunForkWorkflowTimers(plan runfork.RunForkPlan, forkRunID string, selection runForkWorkflowTimerSelectionOwner, bornAt time.Time) ([]runForkWorkflowTimerProjection, error) {
+func prepareRunForkWorkflowTimers(plan runfork.RunForkPlan, forkRunID string, selection runfork.InheritedWorkflowTimerSelection, bornAt time.Time) ([]runForkWorkflowTimerProjection, error) {
 	if err := plan.ForkPoint.Validate(); err != nil {
 		return nil, err
 	}

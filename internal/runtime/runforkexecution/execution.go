@@ -176,9 +176,9 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return result, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, req.ForkOperation, err)
 	}
 	if err := container.PrepareAttachment(ctx); err != nil {
-		if authorityErr := container.Fail(ctx, err); authorityErr != nil {
-			err = errors.Join(err, authorityErr)
-		} else {
+		acknowledged, authorityErr := container.Fail(ctx, err)
+		err = errors.Join(err, authorityErr)
+		if acknowledged {
 			err = prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, req.ForkOperation, err)
 		}
 		return result, err
@@ -218,10 +218,11 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		if err == nil {
 			err = errors.New("selected fork activation was not acknowledged")
 		}
-		if authorityErr := container.Fail(ctx, err); authorityErr != nil {
+		acknowledged, authorityErr := container.Fail(ctx, err)
+		if !acknowledged {
 			return result, errors.Join(err, authorityErr)
 		}
-		return result, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, req.ForkOperation, err)
+		return result, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, req.ForkOperation, errors.Join(err, authorityErr))
 	}
 	// The permanent result owns acknowledgment; registration or cleanup loss
 	// cannot reverse it. Recovery resumes the committed child and owed work.

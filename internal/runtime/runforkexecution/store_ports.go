@@ -65,7 +65,7 @@ type SelectedContractRuntimeExecutionLifecycle interface {
 	HeartbeatRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, time.Duration) error
 	RequireRunForkSelectedContractExecutionSettlement(context.Context, runtimeeffects.Authority, []string, semanticview.Source) error
 	QuiesceRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority) error
-	CloseRunForkSelectedContractRuntimeExecution(context.Context, string) error
+	CloseRunForkSelectedContractRuntimeExecution(context.Context, string) (bool, error)
 	FailRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, json.RawMessage) error
 	FailActivatedRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, json.RawMessage) (bool, error)
 }

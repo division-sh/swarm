@@ -406,9 +406,9 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		}
 		ctx = operation.Context()
 		if err := container.PrepareAttachment(ctx); err != nil {
-			if authorityErr := container.Fail(ctx, err); authorityErr != nil {
-				err = errors.Join(err, authorityErr)
-			} else {
+			acknowledged, authorityErr := container.Fail(ctx, err)
+			err = errors.Join(err, authorityErr)
+			if acknowledged {
 				err = resources.cleanupExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, err)
 			}
 			return result, err
@@ -432,10 +432,11 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		if err == nil {
 			err = errors.New("selected staged activation was not acknowledged")
 		}
-		if authorityErr := container.Fail(ctx, err); authorityErr != nil {
+		acknowledged, authorityErr := container.Fail(ctx, err)
+		if !acknowledged {
 			return result, errors.Join(err, authorityErr)
 		}
-		return result, resources.cleanupExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, err)
+		return result, resources.cleanupExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, errors.Join(err, authorityErr))
 	}
 	if plan.ReplayResumeAdmission.ReplayResumeFactsPresent {
 		return result, fmt.Errorf("selected-contract activation gate blocks historical replay before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))

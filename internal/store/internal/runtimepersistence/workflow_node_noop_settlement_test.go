@@ -270,8 +270,8 @@ func TestSelectedWorkflowNodeNoopSettlementBothStores(t *testing.T) {
 					if err := fixture.store.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
 						t.Fatal(err)
 					}
-					if err := fixture.store.CloseRunForkSelectedContractRuntimeExecution(ctx, issued.ExecutionID); err != nil {
-						t.Fatal(err)
+					if acknowledged, err := fixture.store.CloseRunForkSelectedContractRuntimeExecution(ctx, issued.ExecutionID); !acknowledged || err != nil {
+						t.Fatalf("close selected execution: acknowledged=%t error=%v", acknowledged, err)
 					}
 					successor, err := fixture.store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 					if err != nil || successor.Generation != issued.Generation+1 {

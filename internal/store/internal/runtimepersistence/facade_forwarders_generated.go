@@ -187,7 +187,7 @@ func (s *PostgresStore) ClaimRunForkSelectedContractRuntimeExecution(ctx context
 	return s.runForkPostgresOwner.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, owner, lease)
 }
 
-func (s *PostgresStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) error {
+func (s *PostgresStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) (bool, error) {
 	return s.runForkPostgresOwner.CloseRunForkSelectedContractRuntimeExecution(ctx, executionID)
 }
 
@@ -1479,7 +1479,7 @@ func (s *SQLiteRuntimeStore) ClaimRunForkSelectedContractRuntimeExecution(ctx co
 	return s.runForkSQLiteOwner.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, owner, lease)
 }
 
-func (s *SQLiteRuntimeStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) error {
+func (s *SQLiteRuntimeStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) (bool, error) {
 	return s.runForkSQLiteOwner.CloseRunForkSelectedContractRuntimeExecution(ctx, executionID)
 }
 

@@ -491,11 +491,11 @@ func requireSelectedRuntimeNoLiveAttempts(ctx context.Context, tx *sql.Tx, owner
 	})
 }
 
-func (s *RunForkPostgresOwner) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) error {
+func (s *RunForkPostgresOwner) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) (bool, error) {
 	if s == nil || s.backend == nil {
-		return fmt.Errorf("postgres store is required")
+		return false, fmt.Errorf("postgres store is required")
 	}
-	return s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	return s.backend.RunTransactionOutcome(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		now := time.Now().UTC()
 		res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='closed',lease_expires_at=NULL,terminal_at=COALESCE(terminal_at,$2),updated_at=$2 WHERE execution_id=$1::uuid AND state IN ('quiesced','failed')`, executionID, now)
 		if err := requireExactlyOneMutation(res, err, "close selected-contract runtime execution"); err != nil {
@@ -505,8 +505,11 @@ func (s *RunForkPostgresOwner) CloseRunForkSelectedContractRuntimeExecution(ctx 
 	})
 }
 
-func (s *RunForkSQLiteOwner) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) error {
-	return s.runRuntimeMutation(ctx, "sqlite selected-contract runtime close", func(txctx context.Context, tx *sql.Tx) error {
+func (s *RunForkSQLiteOwner) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) (bool, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return false, err
+	}
+	return s.backend.RunTransactionOutcome(ctx, "sqlite selected-contract runtime close", func(txctx context.Context, tx *sql.Tx) error {
 		now := time.Now().UTC()
 		res, err := tx.ExecContext(txctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='closed',lease_expires_at=NULL,terminal_at=COALESCE(terminal_at,?),updated_at=? WHERE execution_id=? AND state IN ('quiesced','failed')`, now, now, executionID)
 		return requireExactlyOneMutation(res, err, "close sqlite selected-contract runtime execution")

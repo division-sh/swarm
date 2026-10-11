@@ -21100,6 +21100,11 @@ run_model:
         After terminal business and delivery settlement, the retained manager joins provider lifecycle self-release
         while the exact selected execution grant is still current, before executor quiesce/close. Scheduler and
         completion serving work join after the serving goroutine exits; failed joins retain exact cleanup ownership.
+        Executor close carries its native commit acknowledgment independently of cleanup errors. An acknowledged
+        close remains terminal and retains cleanup diagnostics; it is not reinterpreted as a new execution failure.
+        An unacknowledged close remains an unsettled disposition, including when its commit outcome is uncertain.
+        Before activation, acknowledged failure close permits the existing materialization discard even when
+        cleanup reports an error; the refused API result retains both the original failure and cleanup diagnostics.
         Missing owners, failed construction admission or stale authority still refuse before dependent execution. The admission is
         carried through selected execution admission and every container construction. Exact fan-out barrier historical
         materialization is separately admitted by the fan_out fork contract; copying that family does not authorize
