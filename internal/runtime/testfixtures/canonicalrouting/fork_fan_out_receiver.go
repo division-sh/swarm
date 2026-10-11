@@ -32,7 +32,12 @@ func CopyForkFanOutReceiverOwnership(t testing.TB) string {
         fields:
           owner: "settled"
           token: payload.token
-`, "")
+`, `      data_accumulation:
+        writes:
+          - {target_field: number, value: int(payload.token)}
+`)
+	applyClosedReplacement(t, filepath.Join(root, "settled/entities.yaml"),
+		"  marker: text\n", "  marker: text\n  number: {type: integer, initial: 0}\n")
 	for _, receiver := range []string{"consumer", "settled"} {
 		applyClosedReplacement(t, filepath.Join(root, receiver, "schema.yaml"), "  outputs:\n    - receiver.finished\n", "")
 		removeClosedVariantFiles(t, root, receiver+"/events.yaml")
@@ -59,8 +64,11 @@ func CopyForkFanOutReceiverOwnership(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"),
 		"    - start.closed\n", "    - start.closed\n    - start.checkpointed\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
-		"start.closed:\n", "start.closed:\nstart.checkpointed:\n")
+		"start.closed:\n", "start.closed:\nstart.checkpointed:\nwork.cut:\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+		"  outputs: [work.requested, receiver.closed, receiver.seeded]\n",
+		"  outputs: [work.requested, receiver.closed, receiver.seeded, work.cut]\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"),
-		"    start.closed:\n      advances_to: done\n", "    start.closed:\n      advances_to: done\n    start.checkpointed: {}\n")
+		"    start.closed:\n      advances_to: done\n", "    start.closed:\n      advances_to: done\n    start.checkpointed:\n      emit:\n        event: work.cut\n")
 	return root
 }

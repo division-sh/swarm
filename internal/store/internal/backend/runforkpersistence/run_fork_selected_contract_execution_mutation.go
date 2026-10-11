@@ -938,7 +938,7 @@ func runForkSelectedContractExecutionPlanBlockersFromAdmission(plan runfork.RunF
 		if runfork.ActiveSourceDeliveryConversationCouplingAdmitted(plan, item) {
 			continue
 		}
-		if runfork.PendingWorkHasActiveDeliverySessionCoupling(item) {
+		if runfork.PendingWorkHasActiveDeliverySessionCoupling(item) && !runfork.SelectedFanOutReplayDeliveryAdmitted(admission, item) {
 			if blocker, ok := runForkSelectedContractAdmissionBlockerForPendingWork(admission, item); ok {
 				blockers = appendRunForkBlocker(blockers, blocker)
 			} else {

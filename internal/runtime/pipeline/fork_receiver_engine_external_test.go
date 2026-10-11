@@ -516,6 +516,17 @@ func waitForkEngineCompletion(t *testing.T, db *sql.DB, runID string) {
 
 func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.Runtime, *storeselected.Owner, *sql.DB, string, startupownership.ProcessCapability) {
 	t.Helper()
+	rt, selected, repo, capability, driver, address := startForkEngineRuntimeOwner(t, backend, root, nil)
+	db, err := sql.Open(driver, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return rt, selected, db, repo, capability
+}
+
+func startForkEngineRuntimeOwner(t *testing.T, backend, root string, probe lifecycleprobe.Observer) (*swarmruntime.Runtime, *storeselected.Owner, string, startupownership.ProcessCapability, string, string) {
+	t.Helper()
 	repo, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)
@@ -532,13 +543,12 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 		"store":   map[string]any{"backend": backend, "sqlite": map[string]any{"path": sqlitePath}},
 		"llm":     map[string]any{"backend": "anthropic", "session": map[string]any{"lock_ttl": "10s", "rotate_after_turns": 40, "rotate_on_parse_failures": 3}},
 	}
-	var db *sql.DB
 	var dsn string
+	driver, address := "sqlite", sqlitePath
 	selection := storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: sqlitePath}
 	if backend == "postgres" {
-		var cleanup func()
-		dsn, db, cleanup = testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
+		dsn = testutil.StartPostgresDSN(t)
+		driver, address = "postgres", dsn
 		connection, err := testpostgres.ParseConnection(dsn)
 		if err != nil {
 			t.Fatal(err)
@@ -603,7 +613,7 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 	}
 	deps := selected.RuntimeDeps()
 	deps.Config = cfg
-	deps.Options = swarmruntime.RuntimeOptions{ExecutionPosture: executionposture.Live, WorkflowModule: module, SourceArtifactFact: fact, RuntimeInstanceID: runtimeID, ProcessWorkOwner: process, ProviderTriggerCatalog: catalog, ProviderCredentials: credentials}
+	deps.Options = swarmruntime.RuntimeOptions{ExecutionPosture: executionposture.Live, WorkflowModule: module, SourceArtifactFact: fact, RuntimeInstanceID: runtimeID, ProcessWorkOwner: process, ProviderTriggerCatalog: catalog, ProviderCredentials: credentials, TestLifecycleProbe: probe}
 	rt, err := swarmruntime.NewRuntime(ctx, deps)
 	if err != nil {
 		t.Fatal(err)
@@ -664,12 +674,5 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 	if err := rt.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if db == nil {
-		db, err = sql.Open("sqlite", sqlitePath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = db.Close() })
-	}
-	return rt, selected, db, repo, capability
+	return rt, selected, repo, capability, driver, address
 }
