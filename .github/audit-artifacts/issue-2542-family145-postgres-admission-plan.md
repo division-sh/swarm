@@ -2280,3 +2280,36 @@ M0/D89/S37. No fresh global census, baseline/ratchet update or parent closure.
 The prior semantic/M01/Docker holds remain unchanged; no full cardinality rerun.
 Next: ready serving/supplemental dependencies, keeping their exact live-fault
 and possession-loss S cuts separate from mechanical propagation.
+
+### Daily integration over reporter and Test-Time ownership
+
+Rebased the entire local stack onto master2b2079761. The only substantive source
+conflict was the reporter helper: retain master's collector join, issuance,
+drain, continuation and serving-window assertions; keep the native opening and
+selected count readback from this migration. No workload, deadline, generation
+admission or cancellation cut changes. D3 SQL-order and M07 possession loss
+remain explicit S work rather than admission-wait substitutes.
+
+The finite corpus now has1088 rows /236 transitions. The two new transitions
+are master's existing reporter wrappers gaining the serving-window argument,
+not new migration credit. All893 immutable transformation tuples and24
+historical receipts are unchanged. The reporter's complete30 assertion-call
+list is pinned to masterf8ffc42420a93b6dfb3575c4a3dddeee9d858693, with all
+pre-migration assertions retained in order. Removing any assertion or replacing
+native construction is rejected. Historical After/Before values remain intact;
+only the current reporter correspondence is reconciled.
+
+The first timing rerun exposed the obsolete strict-aggregate expectation on
+masterf8ffc4242 itself (paired master receipt recorded). Master's subsequent
+2b2079761 fixes that expectation; it is included by rebase, not a local policy
+override. Actual #2618/#2613 Test-Time intersections now pass; PR hard new-work
+cost and strict advisory cost remain fully charged, with provenance checked.
+No timing-reference, placement, planner or budget changes are made here.
+
+Focused receipts in swarm-2542-family145: daily-rebase-finite-guards.jsonl,
+daily-rebase-test-time-restored.jsonl, daily-rebase-reporter-owner.jsonl and
+daily-rebase-source-correspondence.jsonl PASS. Current finite codemod is inert
+(Changes empty). Overlay and final static checks are recorded at this checkpoint.
+The source-spelling queue remains126 =111 outside +15 private; no global census
+or baseline update and no additional qualified-removal claim. Eight previously
+qualified removals carry; semantic drains, M01 and Docker remain unwaived.

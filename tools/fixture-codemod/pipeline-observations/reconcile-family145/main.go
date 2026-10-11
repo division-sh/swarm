@@ -18,7 +18,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "8c0d8e736f3fd7125dc18871106eb676a91bac37f173df5fa57c7c410fcf51b5"
+const targetDigest = "96b64ef0b6e56464e82219966713393cd99b69390e2a3cd37aa02ac320e9d20b"
 
 type recipe struct {
 	Family, File, Function, Before, After string

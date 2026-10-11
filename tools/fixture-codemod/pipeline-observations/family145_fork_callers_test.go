@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 234 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "8c0d8e736f3fd7125dc18871106eb676a91bac37f173df5fa57c7c410fcf51b5" {
+	if err != nil || len(rows) != 236 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "96b64ef0b6e56464e82219966713393cd99b69390e2a3cd37aa02ac320e9d20b" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -71,6 +71,12 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		}
 		if calls, ok := family145NestedReadCalls[row.File+"|"+row.Function]; ok {
 			if err := family145NestedReadProofError(row.Function, row.Before, row.After, calls); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if row.File == "internal/runtime/conformance/notify_all_children_runtime_conformance_test.go" && row.Function == "runNumericFanOutReporterShape" {
+			if err := family145ReporterRebaseProofError(row.Before, row.After); err != nil {
 				t.Fatal(err)
 			}
 			continue
