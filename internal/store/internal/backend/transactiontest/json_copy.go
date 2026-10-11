@@ -2,7 +2,7 @@ package transactiontest
 
 import "context"
 
-// CopyCounts measures serialized arguments at two explicit write sites, not
+// CopyCounts measures serialized arguments at explicit owned write sites, not
 // stored JSON, WAL or whole-workload SQL. Success is the write call's returned
 // result; only commit acknowledgment can attribute successful bytes as durable.
 type CopyCounts struct {
@@ -49,16 +49,22 @@ func (c *CopyCounts) settle(acknowledged, commitAttempted, rollbackAttempted boo
 type JSONCopyCounts struct {
 	WorkflowHeader CopyCounts
 	EntityMetadata CopyCounts
+	LifecycleState CopyCounts
+	EntityData     CopyCounts
 }
 
 func (c *JSONCopyCounts) add(other JSONCopyCounts) {
 	c.WorkflowHeader.add(other.WorkflowHeader)
 	c.EntityMetadata.add(other.EntityMetadata)
+	c.LifecycleState.add(other.LifecycleState)
+	c.EntityData.add(other.EntityData)
 }
 
 func (c *JSONCopyCounts) settle(acknowledged, commitAttempted, rollbackAttempted bool) {
 	c.WorkflowHeader.settle(acknowledged, commitAttempted, rollbackAttempted)
 	c.EntityMetadata.settle(acknowledged, commitAttempted, rollbackAttempted)
+	c.LifecycleState.settle(acknowledged, commitAttempted, rollbackAttempted)
+	c.EntityData.settle(acknowledged, commitAttempted, rollbackAttempted)
 }
 
 type JSONCopyWrite struct {
@@ -82,6 +88,24 @@ func BeginEntityMetadataJSON(ctx context.Context, length, copies int) *JSONCopyW
 		return nil
 	}
 	return beginJSONCopy(a, &a.jsonCopies.EntityMetadata, length, copies)
+}
+
+// Lifecycle/data receipts count all submitted JSON arguments, independently of
+// Q6's config-copy and immutable metadata measurements.
+func BeginLifecycleStateJSON(ctx context.Context, length int) *JSONCopyWrite {
+	a := revisionAttempt(ctx)
+	if a == nil {
+		return nil
+	}
+	return beginJSONCopy(a, &a.jsonCopies.LifecycleState, length, 1)
+}
+
+func BeginEntityDataJSON(ctx context.Context, length int) *JSONCopyWrite {
+	a := revisionAttempt(ctx)
+	if a == nil {
+		return nil
+	}
+	return beginJSONCopy(a, &a.jsonCopies.EntityData, length, 1)
 }
 
 func beginJSONCopy(a *Attempt, counts *CopyCounts, length, copies int) *JSONCopyWrite {

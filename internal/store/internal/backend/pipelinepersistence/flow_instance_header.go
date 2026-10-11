@@ -78,8 +78,10 @@ func commitWorkflowInstanceHeader(ctx context.Context, tx *sql.Tx, postgres bool
 	}
 	var fact workflowEngineStateFact
 	write := transactiontest.BeginWorkflowHeaderJSON(ctx, len(record.Config))
+	stateWrite := transactiontest.BeginLifecycleStateJSON(ctx, len(record.Config)+len(record.Gates)+len(record.Bookkeeping)+len(record.Accumulator))
 	err := tx.QueryRowContext(ctx, query+` RETURNING CAST(run_id AS TEXT), CAST(entity_id AS TEXT)`, args...).Scan(&fact.runID, &fact.entityID)
 	write.End(err)
+	stateWrite.End(err)
 	if err == sql.ErrNoRows {
 		return workflowEngineStateFact{}, workflowEngineStateRevisionConflict(record)
 	}

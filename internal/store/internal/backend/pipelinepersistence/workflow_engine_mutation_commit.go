@@ -152,7 +152,9 @@ func commitWorkflowHeaderAndFields(ctx context.Context, tx *sql.Tx, postgres boo
 		args = []any{record.Slug, record.Name, string(record.Fields), record.UpdatedAt,
 			record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.EntityType}
 	}
+	write := transactiontest.BeginEntityDataJSON(ctx, len(record.Fields))
 	result, err := tx.ExecContext(ctx, query, args...)
+	write.End(err)
 	if err != nil {
 		return workflowEngineStateFact{}, fmt.Errorf("commit declared workflow fields: %w", err)
 	}
