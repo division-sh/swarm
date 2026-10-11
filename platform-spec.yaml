@@ -7358,6 +7358,12 @@ engine:
           the original selected-store transaction. An existing-entity follower cannot claim ahead of an
           unfinished creating delivery to that exact receiver from the same sender. A public ACK remains
           durable acceptance, never handler completion, and SourceEventID is not ordering authority.
+          This gate applies only to the first claim of an existing-entity follower: pending, claim_version=0.
+          Entityless and materializing targets retain their independent admission rules. Claimed followers
+          retain their lease and retry dispositions and opaque wakes; reclaimable and eligible retry work
+          follows its existing lifecycle rules without reapplying the creating-turn gate. On a supported new
+          store the creator settled before that first claim and cannot regress. An unfinished creator paired
+          with follower claim history is an impossible-state diagnostic, not zero-wake predecessor deferral.
           Pending, executing and retry-scheduled creating turns defer followers without minting their
           claims. A committed delivered, dead-letter or canceled outcome releases them; a follower's
           missing-field or handler failure is its own typed outcome, never inherited from the creator.
