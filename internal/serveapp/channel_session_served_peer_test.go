@@ -41,7 +41,6 @@ type serveNativeProtocolPeer struct {
 	connections    int
 	disconnected   int
 	paired         chan struct{}
-	pairOnce       sync.Once
 	receipts       chan waBinary.Node
 	sender         *whatsappfixture.SignalSender
 	receivers      map[types.JID]servedNativeReceiver
@@ -74,7 +73,7 @@ func newServeNativeProtocolPeer(t *testing.T) *serveNativeProtocolPeer {
 	ctx, cancel := context.WithCancel(context.Background())
 	peer := &serveNativeProtocolPeer{t: t, ctx: ctx,
 		account: types.NewJID("15551234567", types.DefaultUserServer),
-		lid:     types.NewJID("100000000001", types.HiddenUserServer), paired: make(chan struct{}),
+		lid:     types.NewJID("100000000001", types.HiddenUserServer), paired: make(chan struct{}, 4),
 		receipts: make(chan waBinary.Node, 16), sent: make(chan servedNativeMessage, 16), logouts: make(chan waBinary.Node, 4), receivers: map[types.JID]servedNativeReceiver{}}
 	peer.account.Device, peer.lid.Device = 1, 1
 	var mu sync.Mutex
@@ -205,7 +204,12 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 				p.t.Error("SDK did not complete signed pairing")
 				return
 			}
-			p.pairOnce.Do(func() { close(p.paired) })
+			select {
+			case p.paired <- struct{}{}:
+			default:
+				p.t.Error("served peer pairing evidence overflow")
+				return
+			}
 			if err := p.success(wire); err != nil {
 				p.t.Error(err)
 				return
@@ -339,12 +343,16 @@ func (p *serveNativeProtocolPeer) claim(challenge string) types.JID {
 
 func (p *serveNativeProtocolPeer) claimMessage(challenge, messageID string) types.JID {
 	p.t.Helper()
+	return p.claimMessageFrom(challenge, messageID,
+		types.NewJID("15551234568", types.DefaultUserServer), types.NewJID("100000000002", types.HiddenUserServer))
+}
+
+func (p *serveNativeProtocolPeer) claimMessageFrom(challenge, messageID string, from, fromLID types.JID) types.JID {
+	p.t.Helper()
 	p.mu.Lock()
 	registration := p.registration
 	p.mu.Unlock()
-	from := types.NewJID("15551234568", types.DefaultUserServer)
 	from.Device = 1
-	fromLID := types.NewJID("100000000002", types.HiddenUserServer)
 	fromLID.Device = 1
 	sender := whatsappfixture.NewPairingSender(p.t, registration, p.account, from, fromLID)
 	p.mu.Lock()
