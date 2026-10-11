@@ -270,9 +270,14 @@ func retainedJoinOutcomesComplete(joins []joinruntime.Activation, expected []tim
 		return false, fmt.Errorf("retained join catalog has %d entries, want %d exact generations", len(joins), len(expected))
 	}
 	complete := true
-	for _, ref := range expected {
+	for index, ref := range expected {
 		if !ref.Valid() || !ref.Generation().Valid() {
 			return false, fmt.Errorf("retained join requires a valid captured generation")
+		}
+		for _, previous := range expected[:index] {
+			if ref.Equal(previous) {
+				return false, fmt.Errorf("retained join contains a duplicate expected generation")
+			}
 		}
 		found := 0
 		for _, join := range joins {
@@ -280,6 +285,9 @@ func retainedJoinOutcomesComplete(joins []joinruntime.Activation, expected []tim
 				continue
 			}
 			found++
+			if join.Status == joinruntime.StatusClosed && join.CloseReason != joinruntime.CloseReasonComplete {
+				return false, fmt.Errorf("retained join closed with %q instead of completed outcome", join.CloseReason)
+			}
 			if join.Status != joinruntime.StatusClosed || join.CloseReason != joinruntime.CloseReasonComplete || !join.TimerCancelled || join.OutcomePending || !join.OutcomeFired {
 				complete = false
 			}
@@ -329,5 +337,32 @@ func TestRetainedJoinOutcomeFenceDoesNotBorrowRunReadiness(t *testing.T) {
 	}
 	if complete, err := retainedJoinOutcomesComplete([]joinruntime.Activation{completed}, []timeridentity.JoinRef{foreignRef}); err == nil || complete {
 		t.Fatalf("another completed generation released the fence: complete=%t err=%v", complete, err)
+	}
+	if _, err := loop.Repeat("working", "repeat", at.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	secondRef, err := ref.WithGeneration(loop.Generation())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := joinruntime.NewActivation(secondRef, []string{"member-one"}, nil, at, at.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.Status, second.CloseReason, second.OutcomePending = joinruntime.StatusClosed, joinruntime.CloseReasonComplete, true
+	expected := []timeridentity.JoinRef{ref, secondRef}
+	if complete, err := retainedJoinOutcomesComplete([]joinruntime.Activation{completed, second}, expected); err != nil || complete {
+		t.Fatalf("one completed generation released a two-generation fence: complete=%t err=%v", complete, err)
+	}
+	second.TimerCancelled, second.OutcomePending, second.OutcomeFired = true, false, true
+	if complete, err := retainedJoinOutcomesComplete([]joinruntime.Activation{second, completed}, expected); err != nil || !complete {
+		t.Fatalf("exact completed generations were order-dependent: complete=%t err=%v", complete, err)
+	}
+	if complete, err := retainedJoinOutcomesComplete([]joinruntime.Activation{completed, second}, []timeridentity.JoinRef{ref, ref}); err == nil || complete {
+		t.Fatalf("duplicated expectation hid another generation: complete=%t err=%v", complete, err)
+	}
+	completed.CloseReason = joinruntime.CloseReasonDeadline
+	if complete, err := retainedJoinOutcomesComplete([]joinruntime.Activation{completed}, []timeridentity.JoinRef{ref}); err == nil || complete {
+		t.Fatalf("wrong closed outcome was treated as retryable completion: complete=%t err=%v", complete, err)
 	}
 }
