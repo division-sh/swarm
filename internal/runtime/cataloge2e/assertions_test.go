@@ -58,21 +58,19 @@ func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	for _, stmt := range []struct {
 		entityID string
 		flow     string
-		state    string
 	}{
-		{entityID: rootID, flow: rootID, state: "done"},
-		{entityID: childID, flow: "child", state: "completed"},
-		{entityID: grandchildID, flow: "grandchild", state: "finished"},
+		{entityID: rootID, flow: rootID},
+		{entityID: childID, flow: "child"},
+		{entityID: grandchildID, flow: "grandchild"},
 	} {
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO entity_state (
-				run_id, entity_id, flow_instance, entity_type, current_state,
-				gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+				run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
 			)
 			VALUES (
-				$1::uuid, $2::uuid, $3, 'default', $4, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
+				$1::uuid, $2::uuid, $3, 'default', '{}'::jsonb, now(), now()
 			)
-		`, catalogRuntimeRunID, stmt.entityID, stmt.flow, stmt.state); err != nil {
+		`, catalogRuntimeRunID, stmt.entityID, stmt.flow); err != nil {
 			t.Fatalf("insert entity_state %s: %v", stmt.entityID, err)
 		}
 	}
