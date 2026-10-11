@@ -2115,12 +2115,6 @@ func TestEventRouteSettlementDuplicateAndRecoveryPreserveOriginalFact(t *testing
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		flowInstances: []ActiveFlowInstanceDescriptor{{
-			InstanceID:    "one",
-			EntityID:      eventtest.UUID("ent-1"),
-			FlowInstance:  "consumer/one",
-			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-		}},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
@@ -2151,7 +2145,6 @@ func TestEventRouteSettlementDuplicateAndRecoveryPreserveOriginalFact(t *testing
 		t.Fatalf("clear initial pending outbox operation: %v", err)
 	}
 
-	store.flowInstances = nil
 	store.refuseInstanceIndexReads(t)
 	if err := write(); err != nil {
 		t.Fatalf("duplicate WriteOutbox with instance-index reads refused: %v", err)
@@ -2177,10 +2170,6 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 	betaEntityID := eventtest.UUID("ent-beta")
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
-		flowInstances: []ActiveFlowInstanceDescriptor{{
-			InstanceID: "alpha", EntityID: alphaEntityID, FlowInstance: "consumer/alpha",
-			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-		}},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
 	if err != nil {
@@ -2194,10 +2183,6 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 		t.Fatalf("ResetInMemoryState: %v", err)
 	}
 	installConnectionSourceConstruction(t, eb, source, "producer")
-	store.flowInstances = []ActiveFlowInstanceDescriptor{{
-		InstanceID: "beta", EntityID: betaEntityID, FlowInstance: "consumer/beta",
-		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
-	}}
 	store.mu.Lock()
 	store.instanceObservations = slices.DeleteFunc(store.instanceObservations, func(observed runtimepipeline.FlowInstanceObservation) bool {
 		return observed.Identity().TemplateID == "consumer"
