@@ -2,9 +2,11 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
 	"github.com/google/uuid"
 )
 
@@ -26,4 +28,23 @@ func ReadServedActivityAttemptForTest(ctx context.Context, selected any, request
 	default:
 		return pipeline.ActivityAttemptRecord{}, false, fmt.Errorf("served activity observation requires the original native read owner")
 	}
+}
+
+// Only the opaque connection coordinate is needed by the served successor
+// oracle; private account/state evidence and mutation capabilities stay closed.
+func ReadServedChannelConnectionForTest(ctx context.Context, selected any, operationID string) (string, error) {
+	if uuid.Validate(operationID) != nil {
+		return "", fmt.Errorf("served connection observation requires an exact operation identity")
+	}
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return "", err
+	}
+	_, postgres := selected.(*PostgresStore)
+	var connection string
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		connection, err = channelonboarding.ReadSessionConnectionForTest(ctx, tx, postgres, operationID)
+		return err
+	})
+	return connection, err
 }
