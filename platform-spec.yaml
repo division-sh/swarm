@@ -12412,6 +12412,9 @@ tool_model:
         proof-reuse readiness, Begin/Confirm, proof materialization, confirmation effects and business admission
         retain their live provider checks. Known unavailable session execution is stale readback with retained
         identity and actionable explicit reconnect guidance, not an unknown-error waiver or invented absence.
+        Bootstrap similarly leaves an exact known unavailable native proof as non-executable retained history
+        without creating a binding or blocking fresh explicit recovery. It does not restore an SDK connection
+        from that proof; installed-implementation qualification and fresh live provider admission remain required.
         Other observation errors remain errors. Credential currentness gates only a genuinely new
         ceremony or a pending approved
         mutation after terminal replay classification. Only a successful currentness observation whose value does not match
