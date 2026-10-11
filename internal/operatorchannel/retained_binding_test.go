@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/sessionprovider/authority"
@@ -16,6 +17,21 @@ type retainedBindingTestStore struct {
 	rows      []Binding
 	err       error
 	afterRead func()
+	principal Principal
+	bootBinds int
+}
+
+func (s *retainedBindingTestStore) EnsureOperatorPrincipal(context.Context, time.Time) (Principal, error) {
+	return s.principal, nil
+}
+
+func (*retainedBindingTestStore) ListPendingProofResponsibilities(context.Context) ([]ProofResponsibility, error) {
+	return nil, nil
+}
+
+func (s *retainedBindingTestStore) BindOperatorChannelFromProof(context.Context, BootBindRequest) (Binding, error) {
+	s.bootBinds++
+	return Binding{}, errors.New("unavailable native proof must not bind")
 }
 
 func (s *retainedBindingTestStore) ListOperatorChannelBindings(context.Context, string) ([]Binding, error) {
@@ -49,7 +65,7 @@ func retainedBindingServiceFixture(t *testing.T) (*Service, *retainedBindingTest
 	binding.ProviderAuthority = ProviderAuthority{Kind: ProviderAuthoritySession,
 		Session: SessionAccountAdmission{Provider: "whatsapp", ConnectionID: uuid.NewString(),
 			AccountRef: "exact-account@s.whatsapp.net", AdmissionID: uuid.NewString(), Revision: 1}}
-	store := &retainedBindingTestStore{rows: []Binding{binding}}
+	store := &retainedBindingTestStore{rows: []Binding{binding}, principal: Principal{ID: binding.PrincipalID, CreatedAt: binding.UpdatedAt}}
 	proofs, err := NewFileProofStore(filepath.Join(t.TempDir(), ".swarm"))
 	if err != nil {
 		t.Fatal(err)
@@ -57,6 +73,47 @@ func retainedBindingServiceFixture(t *testing.T) (*Service, *retainedBindingTest
 	service := &Service{store: store, proofs: proofs, credentials: retainedBindingTestCredentials{},
 		principal: Principal{ID: binding.PrincipalID, CreatedAt: binding.UpdatedAt}, interfaces: []InterfaceIdentity{binding.Interface}}
 	return service, store, binding
+}
+
+func TestBootstrapRetiredNativeProofKeepsRecoveryReachableWithoutBinding(t *testing.T) {
+	service, selected, binding := retainedBindingServiceFixture(t)
+	proof := testVerifiedProof(binding.UpdatedAt)
+	proof.Interface, proof.MintingStoreID, proof.ProviderAuthority = binding.Interface, binding.PrincipalID, binding.ProviderAuthority
+	if err := service.proofs.Put(context.Background(), proof); err != nil {
+		t.Fatal(err)
+	}
+	_, bound, err := service.Bootstrap(context.Background(), binding.UpdatedAt)
+	if err != nil || len(bound) != 0 || selected.bootBinds != 0 {
+		t.Fatal("retired native proof either blocked recovery or acquired binding authority", err, bound, selected.bootBinds)
+	}
+}
+
+func TestBootstrapUnavailableNativeProofDoesNotHideUnknownOrCanceledObservation(t *testing.T) {
+	for _, mode := range []string{"unknown", "joined", "canceled"} {
+		t.Run(mode, func(t *testing.T) {
+			service, selected, binding := retainedBindingServiceFixture(t)
+			proof := testVerifiedProof(binding.UpdatedAt)
+			proof.Interface, proof.MintingStoreID, proof.ProviderAuthority = binding.Interface, binding.PrincipalID, binding.ProviderAuthority
+			if err := service.proofs.Put(context.Background(), proof); err != nil {
+				t.Fatal(err)
+			}
+			cause := errors.New("native proof observation failed")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if mode == "joined" {
+				service.credentials = retainedBindingTestCredentials{cause: errors.Join(cause, &SessionProviderUnavailableError{Provider: "whatsapp"})}
+			} else if mode == "canceled" {
+				cancel()
+				cause = context.Canceled
+			} else {
+				service.credentials = retainedBindingTestCredentials{cause: cause}
+			}
+			_, bound, err := service.Bootstrap(ctx, binding.UpdatedAt)
+			if !errors.Is(err, cause) || len(bound) != 0 || selected.bootBinds != 0 {
+				t.Fatal("unknown/canceled native proof granted or concealed admission", err, bound, selected.bootBinds)
+			}
+		})
+	}
 }
 
 func TestRetainedBindingDoesNotRequireOrGrantNativeExecution(t *testing.T) {
