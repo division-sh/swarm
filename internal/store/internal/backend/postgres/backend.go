@@ -16,6 +16,7 @@ import (
 // persistence adapters may retain it; public selected-store facades expose
 // closed semantic operations instead.
 type Backend struct {
+	diagnostic2353     *transactiontest.Diagnostic2353Observer
 	db                 *sql.DB
 	inspectionConfig   *pq.Config
 	inspectionDialer   *observationDialer
@@ -94,7 +95,9 @@ func New(db *sql.DB) (*Backend, error) {
 	if db == nil {
 		return nil, fmt.Errorf("postgres database is required")
 	}
-	return &Backend{db: db}, nil
+	backend := &Backend{db: db}
+	backend.diagnostic2353 = transactiontest.NewDiagnostic2353(&backend.testTransactions, "postgres", func() any { return db.Stats() })
+	return backend, nil
 }
 
 // NewWithInspectionConfig freezes the same native configuration used by the
@@ -129,6 +132,7 @@ func (b *Backend) Close() error {
 	if !b.Valid() {
 		return nil
 	}
+	defer b.diagnostic2353.Stop()
 	if b.inspectionDialer != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

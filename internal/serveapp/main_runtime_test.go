@@ -39,6 +39,7 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/testutil/sqlite2353"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -5585,7 +5586,10 @@ func requestServedJSONRPCWithTimeout(t *testing.T, endpoint, method string, para
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiv1.DefaultLoopbackAPIToken)
+	req, finish2353 := deadline2353ObserveHTTP(t, req, endpoint, method, timeout, params)
+	defer finish2353()
 	resp, err := (&http.Client{Timeout: timeout}).Do(req)
+	sqlite2353.Record("client.do_result", map[string]any{"method": method, "error": fmt.Sprint(err)})
 	if err != nil {
 		t.Fatalf("post %s request: %v", method, err)
 	}
@@ -9006,6 +9010,9 @@ func startRuntimeTestProcessWithRunner(t *testing.T, repo string, opts cliapp.Se
 func (p *serveRuntimeTestProcess) waitForReadyLine() {
 	p.t.Helper()
 	deadline := time.After(serveRuntimeReadyTimeout)
+	if sqlite2353.Enabled() && os.Getenv("TEST_2353_ROW") == "S03" {
+		defer sqlite2353.Window(context.Background(), "serve.ready_wait", []time.Duration{5 * time.Second, 15 * time.Second, 29 * time.Second})()
+	}
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
