@@ -1316,3 +1316,76 @@ capability and its receipt protocol, not another Admit call. No fresh global
 raw-site census/debt-baseline result, whole-family closure, restart or flake/
 performance claim. #2542/#2151 and existing watchlist mapping remain open;
 M01/Docker remain qualification-open under #2353. No push, PR or tier run.
+
+## Complete Replay-Scope Marker And Post-Fork Event Helper Chain
+
+Both marker calls and the one post-fork source-event call now carry their
+original selected instance and context. Both affected PostgreSQL roots open
+natively at the original point; no pool survives in either helper. The scope
+parameter is the existing canonical CommittedScope type, not a free-text receipt
+reason interpreter. The existing pipelinepersistence committed-scope owner
+performs insertion/conflict validation; the bounded historical refresh changes
+only created_at/updated_at for the exact event/run/same scope. The existing
+eventrecord identity read refuses a caller-supplied foreign run. A conflicting
+scope formerly produced a silent zero-row success; the native fixture now
+refuses without mutation. This is fixture validation, not a live scope override.
+
+The fixed post-fork source.after seed consumes the unchanged ExistingRunRoot
+constructor/adapter, external source-runtime producer, empty payload, original
+entity/flow-a/1 envelope and timestamp. Producer identity uses the public events
+constructor, not an eventtest import in a runtime adapter. Its canonical event
+revision finalization is unchanged. Event insertion and marker stamping remain
+separate acknowledged native cuts, and subsequent caller revision capture is
+unchanged. The historical scope write is deliberately unrevisioned, like the
+original marker helper. No scope/header/readiness/source bootstrap is appended
+to the event seed. Two separate fixed scalar reads retain exact run/event
+equality and inequality in the existing pipeline row owner, without eligibility
+or source ownership inference. Public ports expose only exact data coordinates
+and typed scope, no pool, dialect, callback, arbitrary event facts or SQL.
+
+| Manifestation | Disposition | Exact proof |
+| --- | --- | --- |
+| Post-T marker blocks before publication or executable residue | execution-proven through the same corrected path | TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMarker, unchanged typed blocker, zero result/publication and all refusal-storage counts |
+| Pre-T subscribed marker stays lineage-only; fork creates local facts | execution-proven through the same corrected path | TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage, unchanged activation/no-blocker and zero copied/nonzero local cardinalities |
+| Missing/matching marker retains exact scope and both clocks | execution-proven through the same corrected path | TestReplayScopeHistoryPreservesExactClocksAndOriginalCutsBothStores, existing deletion fault then insertion, clock refresh, original unrevisioned writer counters |
+| Post-fork event retains exact stored facts and separate cuts | execution-proven through the same corrected path | Same root, canonical returned/stored event, event revision counters, no marker between commits, separate marker acknowledgment |
+| Scalar equality/inequality and read cuts remain exact | execution-proven through the same corrected path | Same root, nonzero physical evidence, foreign-run zero, two read commits/no writes |
+| Conflicting scope/foreign run/invalid/absent/cancelled/raw/closed refuses | execution-proven through the same corrected path | TestReplayScopeHistoryRefusesContradictionsAndForeignOwnersBothStores, complete scope/run/clock equality, zero writes/revisions and no active work |
+| Invalid/absent post-fork event setup yields no provisional event | execution-proven through the same corrected path | TestPostForkSourceEventRefusesInvalidAndAbsentSetupBothStores, absent run, invalid identity/time/cancellation and unchanged source-domain snapshot |
+| Entire helper/caller inventory and historical semantics stay finite | execution-proven through the same corrected path | TestFamily145ReplayScopeHistoryCompleteCallerInventory and TestFamily145ReplayScopeHistoryControlsRejectLostCoordinates, exact two-plus-one calls, source-pinned rewrites and hostile coordinate controls |
+
+Focused native consumer receipt replay-scope-native-consumers is GREEN under
+race/count1 (both PostgreSQL roots, 9.815s). Native owner controls are GREEN on
+both backends in replay-scope-owner-controls-native-time (19.449s). Initial new
+proof build used an incorrect Event accessor; it was corrected to the existing
+Type method. The initial clock read also exposed SQLite's TEXT driver value;
+the existing pipeline timestamp decoder now owns conversion, with no new clock
+fallback or tolerance. The first structural sweep rejected an eventtest import
+in a runtime adapter; the fixed public producer constructor preserves identical
+producer facts without an exception. These setup/guard reds are not execution
+counterexamples and are not waived.
+
+The actual pipeline clock UPDATE was mutated to add one second to both original
+clocks. replay-scope-clock-counterexample is expected RED on SQLite/PostgreSQL
+(11.393s) at exact clock equality. Mutation stayed until the command completed,
+then was restored. Final owner/structural evidence is rerun on restored code;
+unchanged consumer receipts carry. No assertion relaxation, timeout/retry/skip,
+new fault facility or simulated transaction was introduced.
+
+Complete cheap TestFamily145 prefix plus historical/finite/successor controls
+are GREEN in replay-scope-family-controls (4.941s). Corpus1027/168 transitions,
+digest d6169404cf392db6bf037e75de4dddc6b452cf4e5e377888740e5667f2593236;
+the original893 immutable rows and24 historical receipts stay unchanged.
+Complete codemod dry run Changes=[]; exact generated outputs, affected event/
+scope/delivery/revision guards, U1000 and committed-head complexity qualify the
+checkpoint. Authoritative spec records this exact fixture/read contract.
+
+Named supplied-pool admissions133 ->131 (132 excluding unqualified Docker).
+This is the complete external marker/post-fork helper chain, not every replay
+scope writer: private backend coordinator tests and the real write-skew fault
+root remain separately enumerated family tail. The generic supplied-pool
+ExistingRunRootEventRecord constructor still serves other families and is not
+claimed retired. No fresh global raw-site census/debt-baseline result, whole
+family or parent closure, restart, flake or measured throughput claim. Existing
+#2542/#2151/watchlist mapping and M01/Docker qualification obligations remain.
+Local signed checkpoint only; no push, PR, tier or server2 use.

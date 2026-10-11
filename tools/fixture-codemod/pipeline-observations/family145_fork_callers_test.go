@@ -26,7 +26,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)
-	if err != nil || len(rows) != 166 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "465d137a5142b5000fb14792799282cd98a1276023e3280e74c37d11c037dbea" {
+	if err != nil || len(rows) != 168 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "d6169404cf392db6bf037e75de4dddc6b452cf4e5e377888740e5667f2593236" {
 		t.Fatalf("finite family145 source transition changed: %d/%v", len(rows), err)
 	}
 	for _, row := range rows {
@@ -67,6 +67,10 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 
 func assertFamily145SemanticProofs(t testing.TB, function, beforeSource, afterSource string) {
 	t.Helper()
+	if function == "seedSelectedExecutionSourceReplayScopeMarker" || function == "seedSelectedExecutionPostForkSourceEvent" {
+		assertFamily145ReplayScopeHistoryProofs(t, function, beforeSource, afterSource)
+		return
+	}
 	if function == "seedSelectedExecutionDiagnosticPlatformDeadLetter" || function == "seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter" {
 		assertFamily145DiagnosticHistoryProofs(t, function, beforeSource, afterSource)
 		return
@@ -165,6 +169,8 @@ func family145SemanticOwner(function string) bool {
 	case "assertNoForkExecutionRowsForRun", "assertNoSelectedContractExecutionMutationForSource":
 		return true
 	case "seedSelectedExecutionDiagnosticPlatformDeadLetter", "seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter":
+		return true
+	case "seedSelectedExecutionSourceReplayScopeMarker", "seedSelectedExecutionPostForkSourceEvent":
 		return true
 	}
 	return false

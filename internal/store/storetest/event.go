@@ -319,6 +319,15 @@ func InsertDiagnosticDirectEventRecord(
 	return event
 }
 
+func SeedPostForkSourceEvent(t testing.TB, ctx context.Context, selected any, runID, eventID, entityID string, createdAt time.Time) events.Event {
+	t.Helper()
+	event, err := private.SeedPostForkSourceEventForTest(ctx, selected, runID, eventID, entityID, createdAt)
+	if err != nil {
+		t.Fatalf("seed post-fork source event: %v", err)
+	}
+	return event
+}
+
 func SeedRunDiagnosticDeadLetterHistory(t testing.TB, ctx context.Context, selected any, runID, eventID string, payload []byte, createdAt time.Time) events.Event {
 	t.Helper()
 	event, err := private.SeedRunDiagnosticDeadLetterHistoryForTest(ctx, selected, runID, eventID, payload, createdAt)

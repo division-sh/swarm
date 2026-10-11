@@ -14,6 +14,37 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 )
 
+func SeedPostForkSourceEventForTest(ctx context.Context, selected any, runID, eventID, entityID string, at time.Time) (events.Event, error) {
+	var empty, event events.Event
+	for _, id := range []string{runID, eventID, entityID} {
+		if err := validateStandaloneStorageEvent(selected, id); err != nil {
+			return empty, err
+		}
+	}
+	if at.IsZero() {
+		return empty, fmt.Errorf("post-fork source fixture requires its original timestamp")
+	}
+	producer, err := events.NewProducerIdentity(events.EventProducerExternal, "source-runtime")
+	if err != nil {
+		return empty, err
+	}
+	dialect, err := eventFixtureDialectForTest(selected)
+	if err != nil {
+		return empty, err
+	}
+	err = runEventFixtureMutationForTest(ctx, selected, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+		var err error
+		event, err = eventfixture.ExistingRunRoot(ctx, attempt, dialect, eventID, runID, "source.after",
+			producer, []byte(`{}`),
+			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at)
+		return err
+	})
+	if err != nil {
+		return empty, err
+	}
+	return event, nil
+}
+
 func SeedRunDiagnosticDeadLetterHistoryForTest(ctx context.Context, selected any, runID, eventID string, payload []byte, at time.Time) (events.Event, error) {
 	var empty, event events.Event
 	for _, id := range []string{runID, eventID} {

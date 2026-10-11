@@ -3877,8 +3877,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 }
 
 func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMarker(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
@@ -3905,8 +3904,8 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	captureSelectedExecutionSourceRevision(t, pg, sourceRunID)
 
 	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded, selection, sourceRunID, sourceEventID)
-	seedSelectedExecutionPostForkSourceEvent(t, db, sourceRunID, afterEventID, entityID, at.Add(time.Second))
-	seedSelectedExecutionSourceReplayScopeMarker(t, db, sourceRunID, afterEventID, "replay_scope_direct", at.Add(time.Second))
+	seedSelectedExecutionPostForkSourceEvent(t, ctx, pg, sourceRunID, afterEventID, entityID, at.Add(time.Second))
+	seedSelectedExecutionSourceReplayScopeMarker(t, ctx, pg, sourceRunID, afterEventID, runtimepipelineobligation.ScopeDirect, at.Add(time.Second))
 	captureSelectedExecutionSourceRevision(t, pg, sourceRunID,
 		runforkrevision.FamilyEvents,
 		runforkrevision.FamilyEventDeliveries,
@@ -4304,8 +4303,7 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 }
 
 func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
@@ -4323,7 +4321,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 	at := time.Unix(1700002315, 0).UTC()
 	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
-	seedSelectedExecutionSourceReplayScopeMarker(t, db, sourceRunID, sourceEventID, "replay_scope_subscribed", at)
+	seedSelectedExecutionSourceReplayScopeMarker(t, ctx, pg, sourceRunID, sourceEventID, runtimepipelineobligation.ScopeSubscribed, at)
 	captureSelectedExecutionSourceRevision(t, pg, sourceRunID)
 
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -4347,25 +4345,15 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 		t.Fatalf("selected execution retained committed replay-scope blocker: materialization=%#v activation=%#v", result.Materialization.UnsupportedBlockers, result.Activation.UnsupportedBlockers)
 	}
 
-	var copiedSourceMarkers int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM committed_replay_scopes
-		WHERE run_id = $1::uuid
-		  AND event_id = $2::uuid
-	`, result.Materialization.ForkRunID, sourceEventID).Scan(&copiedSourceMarkers); err != nil {
+	copiedSourceMarkers, err := storetest.CountCopiedSourceReplayScopeStorage(ctx, pg, result.Materialization.ForkRunID, sourceEventID)
+	if err != nil {
 		t.Fatalf("count copied source replay-scope facts: %v", err)
 	}
 	if copiedSourceMarkers != 0 {
 		t.Fatalf("copied source replay-scope facts into fork = %d, want 0", copiedSourceMarkers)
 	}
-	var forkLocalMarkers int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM committed_replay_scopes
-		WHERE run_id = $1::uuid
-		  AND event_id <> $2::uuid
-	`, result.Materialization.ForkRunID, sourceEventID).Scan(&forkLocalMarkers); err != nil {
+	forkLocalMarkers, err := storetest.CountForkLocalReplayScopeStorage(ctx, pg, result.Materialization.ForkRunID, sourceEventID)
+	if err != nil {
 		t.Fatalf("count fork-local replay-scope facts: %v", err)
 	}
 	if forkLocalMarkers == 0 {
@@ -5527,33 +5515,16 @@ func seedSelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, ctx context
 	storetest.SeedRunDiagnosticDeadLetterHistory(t, ctx, selected, sourceRunID, diagnosticEventID, payload, at)
 }
 
-func seedSelectedExecutionSourceReplayScopeMarker(t *testing.T, db *sql.DB, sourceRunID, sourceEventID, reasonCode string, at time.Time) {
+func seedSelectedExecutionSourceReplayScopeMarker(t *testing.T, ctx context.Context, selected any, sourceRunID, sourceEventID string, scope runtimepipelineobligation.CommittedScope, at time.Time) {
 	t.Helper()
-	var scope runtimepipelineobligation.CommittedScope
-	switch strings.TrimSpace(reasonCode) {
-	case "replay_scope_direct":
-		scope = runtimepipelineobligation.ScopeDirect
-	case "replay_scope_subscribed":
-		scope = runtimepipelineobligation.ScopeSubscribed
-	default:
-		t.Fatalf("unsupported replay-scope fixture reason %q", reasonCode)
-	}
-	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO committed_replay_scopes (event_id, run_id, scope, created_at, updated_at)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $4)
-		ON CONFLICT (event_id) DO UPDATE
-		SET created_at = EXCLUDED.created_at, updated_at = EXCLUDED.updated_at
-		WHERE committed_replay_scopes.scope = EXCLUDED.scope
-	`, sourceEventID, sourceRunID, string(scope), at); err != nil {
+	if err := storetest.StampHistoricalReplayScope(ctx, selected, sourceRunID, sourceEventID, scope, at); err != nil {
 		t.Fatalf("seed source replay-scope marker: %v", err)
 	}
 }
 
-func seedSelectedExecutionPostForkSourceEvent(t *testing.T, db *sql.DB, sourceRunID, sourceEventID, entityID string, at time.Time) {
+func seedSelectedExecutionPostForkSourceEvent(t *testing.T, ctx context.Context, selected any, sourceRunID, sourceEventID, entityID string, at time.Time) {
 	t.Helper()
-	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, authoractivityfixture.DialectPostgres, sourceEventID, sourceRunID, "source.after",
-		eventtest.Producer(events.EventProducerExternal, "source-runtime"), []byte(`{}`),
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at)
+	storetest.SeedPostForkSourceEvent(t, ctx, selected, sourceRunID, sourceEventID, entityID, at)
 }
 
 func assertNoForkExecutionRowsForRun(t *testing.T, ctx context.Context, selected any, forkRunID string) {

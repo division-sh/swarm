@@ -33,6 +33,25 @@ type SelectedCausalDiagnosticStorage struct {
 	Projection []byte
 }
 
+func StampHistoricalReplayScopeForTest(ctx context.Context, selected any, runID, eventID string, scope runtimepipelineobligation.CommittedScope, at time.Time) error {
+	for _, id := range []string{runID, eventID} {
+		if err := validateStandaloneStorageEvent(selected, id); err != nil {
+			return err
+		}
+	}
+	_, postgres := selected.(*PostgresStore)
+	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		identity, err := eventrecord.ReadPublicationEventIdentityStorageTx(ctx, tx, eventID)
+		if err != nil {
+			return err
+		}
+		if identity.RunID != runID {
+			return fmt.Errorf("historical replay scope event belongs to a different run")
+		}
+		return pipelinepersistence.StampHistoricalReplayScopeFixtureTx(ctx, tx, postgres, runID, eventID, scope, at)
+	})
+}
+
 func ReadSelectedSourceRefusalStorageForTest(ctx context.Context, selected any, sourceRunID, sourceEventID string) (map[string]int, error) {
 	for _, id := range []string{sourceRunID, sourceEventID} {
 		if err := validateStandaloneStorageEvent(selected, id); err != nil {
