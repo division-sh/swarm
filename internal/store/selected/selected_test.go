@@ -9,6 +9,7 @@ import (
 
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/construction"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -61,7 +62,11 @@ func TestPostgresFailedPingClosesTheConstructedPool(t *testing.T) {
 		t.Fatalf("serialize missing PostgreSQL database DSN: %v", err)
 	}
 
-	owner, err := openPostgresRuntime(missingDSN, 0)
+	selected, _, err := construction.OpenPostgres(missingDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := composePostgres(selected)
 	if err != nil {
 		t.Fatalf("construct PostgreSQL owner before Ping: %v", err)
 	}
