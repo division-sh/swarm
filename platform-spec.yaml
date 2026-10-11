@@ -1444,8 +1444,8 @@ contract_formats:
         revision, selected fork, or another publication group. Ordinary and selected-fork single
         publications continue to compile their own evidence at the original classification boundary.
 
-        SQLite may retain named, fixed read-statement handles for canonical single-event lookup,
-        and active flow-instance descriptors under its existing pool owner.
+        SQLite may retain named, fixed read-statement handles for canonical single-event lookup
+        under its existing pool owner.
         These handles retain no rows, absence decisions, snapshots, or execution authority. Every call
         executes its unchanged read and strict decoding at the original observation boundary. Failed or
         canceled preparation is not retained; pool shutdown closes all owned handles and cannot reopen
@@ -1933,15 +1933,17 @@ contract_formats:
           route authority.
         compiled_connect_evaluation:
           status: merge_bearing_runtime_behavior
-          canonical_code_owner: internal/runtime/core/pinrouting.CompiledConnectGraph plus the EventBus generation-bound admitted evaluator
+          canonical_code_owner: internal/runtime/core/pinrouting.CompiledConnectGraph plus source-bound EventBus planning and internal/runtime/pipeline.FlowInstanceIndexReader
           rule: |
             Authored FlowConnect rows are compiler input only. One immutable compiled graph owns endpoint identity,
             source matching, receiver resolution, static verification projections, and deterministic edge identity. Runtime
             events carry one exhaustive RoutingSource variant admitted at construction and hydrated exactly; target routes,
             event-name shape, empty fields, UUID shape, flow-instance paths, and diagnostic strings cannot reconstruct source.
-            For each publish, the evaluator reads one immutable graph/descriptor/route snapshot and produces a complete typed
-            result before lifecycle, reply-context, route-table, delivery, or event persistence mutation. Application is once
-            against the same snapshot generation. A stale generation rejects before mutation and requires a fresh evaluation.
+            For each publish, the evaluator consumes the immutable source graph and exact scoped native instance
+            observations to produce a complete typed result before construction, reply-context, delivery or event mutation.
+            Lookup observations do not grant commit authority: the existing atomic owner rechecks selectors, proposed
+            paths, source/run admission and exact construction evidence. Instance churn never mutates the route table
+            or supplies a routing-snapshot generation. Run, standing and attachment-attempt fences remain mandatory.
             The compiled graph also owns receiver-pin collision evidence through one typed admission ledger shared by static
             verification and live delivery planning. Routing-topology/readback DTOs may render that evidence but cannot create,
             suppress, or reinterpret a collision.
@@ -1957,19 +1959,16 @@ contract_formats:
             For each concrete materialized target, the compiled graph selects only registrations with the admitted receiver
             pin and exact target scope before constructing candidate evidence. Other instances, pins, and flows are not
             negative recipient evidence. A malformed registration within the selected scope still fails strict admission.
-            The graph also selects the active flow-template/instance dependencies and affected route owners of an activation;
-            EventBus derives only those complete owner route sets from freshly selected run/source-admitted descriptors.
-            A bounded fan-out publication group may share compiled static graph and authored-producer evidence among its
-            members only while the exact route-table source owner is unchanged. Every member still reads current route
-            and descriptor state, constructs an isolated receiver preview route table, and commits against its own fenced
-            generation. Receiver preview derivation may consume the same group-scoped static evidence, but never shares
-            the preview table or its materialized routes with another member. Compiled evidence is not retained beyond
-            the group or treated as a cache of mutable routing state.
-            Selected-store queries may use conservative key prefilters, but only the canonical descriptor matcher decides
-            identity; a prefilter may never exclude a possible canonical match. A run-wide descriptor or target-owner census,
-            source-specific shortcut, stale process cache, or replacing only a newly created owner is not authority for
-            an activation whose compiled dependency scope contains other route owners. Whole-run source-revision and
-            recovery operations retain their separately governed complete-census obligations.
+            The graph selects the complete relevant declaration and candidate scope. Native lookups validate the exact
+            admitted run/source, recorded structural parent, immutable typed key and actual stored identity. A bounded
+            publication group may share compiled graph and authored-producer evidence under the same admitted source,
+            but every member reads current native evidence and retains its own pure construction proposals and commit
+            admission. No member shares a preview router or mutable existence cache. Prepared parent/child proposals
+            remain operation-private and must be revalidated atomically before acknowledgment.
+            Selected-store query restrictions must cover the complete compiled dependency scope without excluding a
+            possible admitted match. Native construction validation decides existence; active-only descriptors, path
+            hashes, a run-wide routing census, source-specific shortcuts and process caches do not. Whole-run source-
+            revision and recovery operations retain their separately governed complete-census obligations.
             RouteTable uniqueness uses one normalized resolved subscriber-role equivalence across template observers,
             materialized patterns, exact/root-input construction, wildcard expansion, and final deduplication. The behavioral
             role preserves recipient, path/scope, AgentIdentity, route source, localized/effective event, admitted target and
@@ -1993,12 +1992,13 @@ contract_formats:
             semantic value as a string, expose mutable package variables as variants, or permit an enclosing compiled value
             to recover semantic authority from a recursively nested string field. Explicit exhaustive persistence and
             diagnostic codecs are boundary projections only; they cannot become behavioral equality or dispatch authority.
-          generation_linearization: |
-            Snapshot generation validation and lifecycle/reply application are one exclusive linearized operation. The
-            EventBus holds generation ownership for every base and transaction-staged RouteTable whose snapshot participated
-            in the evaluation until all admitted lifecycle and reply mutations finish. Route installation and retirement
-            consume that same owner. A stale base or staged generation produces no lifecycle or reply effect, and no
-            concurrent evaluation or post-check route mutation may interleave before those effects complete.
+          construction_linearization: |
+            The native atomic constructor/publication owner rechecks selector occupancy and proposed paths before domain
+            writes. A concurrent winner is consumed only through the canonical durable observation and existing stale-
+            selection rollback/replan contract; explicit create conflicts remain errors. Construction receipts remain
+            immutable and distinct publications retain distinct delivery evidence. Pure preparation never acquires
+            execution authority. Route installation, routing-snapshot generations and staged preview routers are absent;
+            existing run/source/grant fencing, transaction admission and acknowledgment rules remain unchanged.
           target_owner_projection: |
             Compile-time plans own receiver route blueprints only and never mint run-specific entity ownership from source
             entities, route text, path hashes, leaf/suffix matching, or descriptor normalization. Before publication admission,
@@ -2348,7 +2348,7 @@ contract_formats:
           - EventBus semantic source selected for the publish operation
           - immutable producer event schema and receiver instance-source evidence carried by ConnectRoutePlan.InstanceKey
           - RouteTable concrete receiver subscribers only after a lowered plan selects the receiver route identity
-          - active flow-instance descriptors for receiver scalar instance identity
+          - graph-scoped native instance observations with exact admitted construction and immutable key/parent
           produces:
           - typed RoutePlanDeliveryIntent rows with source=connect_route_plan and reason=lowered_connect_route_plan
           - concrete delivery_target_route values for supported singular event.target delivery
@@ -2361,7 +2361,7 @@ contract_formats:
             recipient-plan materializer, or structural fallback routing.
             Publish, PublishInMutation, CheckPublishRecipientPlan, and engineOutbox MUST share this RoutePlan authority path.
             Static lowered ConnectRoutePlan matches MUST NOT require or be blocked by legacy active-agent descriptor lookup;
-            descriptor loading is limited to lowered plans whose supported target form requires runtime resolution.
+            runtime receiver selection instead consumes the scoped native instance index.
             Template receiver plans MUST materialize from the receiver input's same-named required producer payload field,
             or the connection's one admitted `key_from` exception, plus scalar instance identity and typed resolution mode carried
             on ConnectRoutePlan.InstanceKey. Producer output-pin key/carries are retired and MUST NOT own receiver identity.
@@ -2395,21 +2395,20 @@ contract_formats:
               recipient is admitted for the selected receiver, the matched plan
               fails closed. Route-source text is a private diagnostic codec only
               and MUST NOT authorize runtime or selected-fork admission.
-          descriptor_evidence_boundary:
+          instance_evidence_boundary:
             status: merge_bearing_runtime_behavior
-            implementation_slice: '#1485/#1479'
-            canonical_code_owner: internal/runtime/bus.connectRoutePlanResolver.descriptorsForPlans and internal/runtime/core/pinrouting.MaterializeConnectRoutePlan
+            implementation_slice: '#2594/#1485/#1479'
+            canonical_code_owner: internal/runtime/pipeline.FlowInstanceIndexReader and native construction validation; internal/runtime/core/pinrouting.MaterializeConnectRoutePlan is static projection only
             rule: |
-              Descriptor loading during lowered-connect EventBus planning is
-              evidence for supported runtime-resolution target forms only.
-              Static lowered ConnectRoutePlan matches MUST NOT load or depend on
-              legacy active-agent recipient-policy descriptors. Runtime
-              descriptor evidence may materialize only the receiver's declared
-              scalar instance identity field. Descriptor evidence MUST NOT
-              promote arbitrary business fields, indexed or unindexed entity
-              fields unrelated to that identity, config fields, instance fields, delivery
-              rows, receipts, replay/readback, RouteTable state, live
-              subscriptions, or handler lookup into route topology authority.
+              Runtime receiver selection consumes exact source/run/declaration/parent/key evidence from the selected
+              store's constructed-header index. Absent, constructing, live, terminal and corrupt remain distinct.
+              Native corruption cannot become absence or missing-row historical fallback; admitted historical
+              construction intentionally lacks fresh constructor/readiness companions. Its fixed captured receipt and
+              lineage remain required, and selected execution additionally needs current fork-local authority.
+              Static materialization consumes only compiled target facts, not descriptor or payload-key input. Agent
+              descriptors remain separately owned carrier/recipient evidence, never instance-existence authority.
+              Arbitrary business fields, current field-derived keys, config, deliveries, receipts, replay/readback,
+              route membership, live subscriptions and handler lookup cannot repair missing construction evidence.
           route_authority_drift_guardrails:
             status: merge_bearing_conformance_guardrail
             implementation_slice: '#1494'
@@ -2437,7 +2436,7 @@ contract_formats:
               behavior without a separately approved issue gate.
           supported_surface:
           - static receiver singular delivery
-          - identity-style template/dynamic receiver fanout through supported descriptor targets
+          - identity-style template/dynamic receiver fanout through scoped native instance observations
           - typed reply-resolution context preservation
           - persisted delivery rows, pipeline receipts, and committed replay scope as separate owners
           unsupported_or_split:
@@ -3053,8 +3052,9 @@ entity_contracts:
     rule: |
       Entity fields marked `indexed: true` serve query and store enforcement owned by their consuming
       feature. They are not composition-routing selectors. Template receiver
-      routing matches active descriptors only by the receiver flow's declared
-      scalar instance field and the typed source on ConnectRoutePlan.InstanceKey.
+      routing consumes the native immutable instance key for the receiver's
+      exact declaration/run/structural parent and the compiled connection source.
+      Later business-field changes cannot change construction identity or selection.
       Input address, connect map, arbitrary entity-field targets, and the old
       business-field materializer are invalid and cannot be repaired by an
       indexed field.
@@ -13906,6 +13906,7 @@ flow_model:
             hard invalidity with a teaching error naming receiver-local declaration or input pins plus nearest-LCA connect;
             it never creates an inert consumer endpoint or runtime route.
             Relation enumeration also evaluates every declared same-flow materializable event independently of current producer-census membership,
+            because low-level event.publish can publish a declared event without an authored static producer endpoint.
             Pubsub planning and connect-recipient evaluation consume the exact admitted run_id and canonical
             flowidentity.RunScopedFlowInstance through the selected-store index and existing constructor proposal owner.
             Declaration-only bindings are not evidence of native existence or execution readiness. Resolve/ResolveForRun,
@@ -13913,8 +13914,7 @@ flow_model:
             maps, mutable exact/wildcard resolution caches and cache rebuild/indexing
             are retired; source-only bindings never
             authorize runless execution. Another run at the same path is an independent owner, never fallback authority.
-            because low-level event.publish can publish a declared event without an authored static producer endpoint. The
-            complete ordered relation result is consumed by static topology projection, boot verification, and runtime route
+            The complete ordered relation result is consumed by static topology projection, boot verification, and runtime route
             admission. Typed relation ambiguity is a hard invalidity: runtime contract validation, route-table construction,
             and EventBus construction fail closed without runtime delivery authority, including when a caller supplies a prebuilt
             route table. Canonical name equality alone never authorizes a cross-flow edge.
