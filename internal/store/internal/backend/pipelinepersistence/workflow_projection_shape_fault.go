@@ -57,10 +57,6 @@ func SetWorkflowProjectionPlatformBookkeepingForTest(ctx context.Context, tx *sq
 	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE flow_instances SET bookkeeping = '{"platform_fact":"preserve"}' WHERE run_id = $2 AND instance_path = $1`, path, run))
 }
 
-func SetEntityProjectionPrivateBookkeepingForTest(ctx context.Context, tx *sql.Tx, run, entity string) (int64, error) {
-	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE entity_state SET bookkeeping = '{"private_fact":"must-not-leak"}' WHERE run_id = $1 AND entity_id = $2`, run, entity))
-}
-
 func SetWorkflowProjectionConflictingEntityTypeForTest(ctx context.Context, tx *sql.Tx, run, entity string) (int64, error) {
 	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE entity_state SET entity_type = 'wrong_entity_type' WHERE run_id = $1 AND entity_id = $2`, run, entity))
 }
