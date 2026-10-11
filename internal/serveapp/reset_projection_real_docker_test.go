@@ -17,7 +17,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -32,6 +31,7 @@ func TestResetStartupProjectionDisposalRealDocker(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, mode := range []string{"ordinary", "lost-ack", "remove-rejected"} {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
+				started := time.Now()
 				ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 				defer cancel()
 				docker := workspace.NewDockerManager()
@@ -115,8 +115,13 @@ func TestResetStartupProjectionDisposalRealDocker(t *testing.T) {
 				}
 				owned := []string{create(containeridentity.KindScaffold, true, true), create(containeridentity.KindSystem, true, true), create(containeridentity.KindAgent, true, false), create(containeridentity.KindFlow, true, false)}
 				foreign := create(containeridentity.KindScaffold, false, true)
+				t.Logf("reset projection phase containers-ready elapsed=%s context=%v", time.Since(started), ctx.Err())
 				settler := workspace.NewDockerManager()
 				settler.SetRunDockerFnForTest(func(ctx context.Context, args ...string) (string, error) {
+					commandStarted := time.Now()
+					defer func() {
+						t.Logf("reset projection Docker %v elapsed=%s context=%v", args, time.Since(commandStarted), ctx.Err())
+					}()
 					if args[0] == "rm" {
 						if _, err := os.Stat(intent.Root); err != nil {
 							t.Errorf("source removed before Docker disposal: %v", err)
@@ -136,10 +141,9 @@ func TestResetStartupProjectionDisposalRealDocker(t *testing.T) {
 				if backend == "sqlite" {
 					selected = storetest.StartSQLiteRuntimeStore(t)
 				} else {
-					_, db, cleanup := testutil.StartPostgres(t)
-					t.Cleanup(cleanup)
-					selected = storetest.AdmitPostgresRuntimeStore(t, db)
+					selected = storetest.StartPostgresRuntimeStore(t)
 				}
+				t.Logf("reset projection phase store-ready elapsed=%s context=%v", time.Since(started), ctx.Err())
 				capability, err := selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "reset-resource-proof", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()})
 				if err != nil {
 					t.Fatal(err)

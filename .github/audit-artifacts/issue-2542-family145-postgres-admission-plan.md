@@ -340,6 +340,41 @@ immutable historical records. Digest:
 40f2674454a39193feee705a18000dc3bb9446b518ff45d44d04dbf932970c02.
 Named live Admit calls: 158 -> 157 (202 initially). No fresh global census,
 baseline decrease, broader tier, push, PR or full-family closure is claimed.
+
+## Real Docker Constructor Candidate, Qualification Open
+
+The remaining reset-projection PostgreSQL opening now uses the native owner at
+its original resource-opening point. It has no coupled SQL, pool capacity,
+hidden getter or pool callback. Exact projection/container identities, the
+foreign projection, real image/containers, loss-of-ack and rejected-removal cuts,
+all cleanup and every behavioral assertion are unchanged. Added phase/command
+logs are diagnostics, not closure-bearing proof or a timing policy change.
+The named inventory is 157 -> 156, but this cohort's qualification remains open.
+
+The first actual SWARM_TEST_REAL_DOCKER=1 race/count1 execution on vemew was RED:
+reset-projection-native-real-docker.jsonl, 287.647s. SQLite ordinary and lost-ack,
+and PostgreSQL ordinary reached the original one-minute settlement deadline.
+SQLite rejected-removal, PostgreSQL lost-ack and rejected-removal passed. No
+skipped proof, timeout change, weakening or retry loop is claimed.
+
+One bounded comparison against the exact prior 8f3350639 tree ran both ordinary
+cells: reset-projection-base-ordinary.jsonl passed, 62.861s (SQLite 45.37s,
+PostgreSQL 16.45s). The temporary clean base worktree was then removed. One
+instrumented candidate diagnostic of those same ordinary cells also passed:
+reset-projection-candidate-ordinary-diagnostic.jsonl, 48.354s. SQLite container
+setup took 28.391s before selected construction; its store was ready at 32.727s.
+PostgreSQL container setup took 1.440s, store ready 6.448s; removal commands took
+milliseconds to 3.901s. This points to substantial pre-constructor host/Docker
+variance, but neither passing comparison proves the earlier failures resolved
+or conclusively inherited. The red aggregate remains explicit and unwaived;
+reviewer disposition is required before this cohort can claim qualification.
+
+All evidence is local, with no push or PR. The finite corpus has 964 rows / 93
+exact transitions, digest
+7d45308e73d8c4ca810e1d93da08efb4b98c130182b303c3314bc8086a2be974.
+Earlier qualified cohorts end at 8f3350639 (157 remaining). The broader admission
+family, other same-concept constructor spellings and final global ratchet remain
+open; the last qualified global census is still 10698 / 7754 / 67 unresolved.
 No fresh global census, zero additions, lowered baseline or final systematic
 consumption closure is asserted; those belong to the single whole-family
 checkpoint. The committed 10698/7754/67 census remains the last qualified global
