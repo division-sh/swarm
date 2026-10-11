@@ -117,7 +117,7 @@ func installCompilerReplayAPI(t *testing.T, plan, admitted testplanning.RunPlan)
 			testplanning.QualifiedRun
 			Started time.Time `json:"run_started_at"`
 		}{run, started},
-		runPath + "/artifacts?per_page=100": map[string]any{"total_count": 1, "artifacts": []map[string]any{{"id": 5, "name": "ci-plan-123-attempt-2", "expired": false, "created_at": started}}},
+		runPath + "/artifacts?name=ci-plan-123-2&per_page=100": map[string]any{"total_count": 1, "artifacts": []map[string]any{{"id": 5, "name": "ci-plan-123-2", "expired": false, "created_at": started}}},
 	}
 	var jobs []testplanning.MergeJob
 	var protection []testplanning.ProtectedCheck

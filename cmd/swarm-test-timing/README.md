@@ -136,6 +136,10 @@ delivery. No recurring re-pin or Go1.26 timing re-pin is required by this policy
 effective compiler identity remains a separate proof-validity obligation.
 
 Current plan and receipt build/environment/count identity must match exactly.
+Effective GOVERSION comes from the producing `go env` and is required in bound
+plans, receipts, reference metadata and replay. Missing/blank compiler versions
+or current plan-to-receipt version mismatches refuse before execution credit;
+the observer's compiler, module minimum and cache cannot reconstruct them.
 Pure pre-bind plans remain valid planning outputs, but command evidence requires
 a complete bound current build context and nonempty selected/required roots in
 every executable unit, with exact classification/package/child binding and no

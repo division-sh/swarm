@@ -74,7 +74,7 @@ func TestQualificationRejectsMissingCompilerOnEitherSide(t *testing.T) {
 						t.Fatalf("valid current proof refused on historical compiler divergence: %+v", result)
 					}
 					for _, tier := range result.Tiers {
-						if len(tier.Retained) != 0 || tier.AddedSeconds != 10 {
+						if tier.Retained != 0 || tier.AddedSeconds != 10 {
 							t.Fatalf("historical compiler mismatch granted retained credit: %+v", tier)
 						}
 					}
