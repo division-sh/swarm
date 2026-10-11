@@ -340,11 +340,11 @@ func VerifyWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityFie
 
 	observed, err := fixture.ReadControl(ctx, testPipelineRunID, workflowInstanceRowID(entityID))
 	if err != nil {
-		t.Fatalf("query entity_state projection: %v", err)
+		t.Fatalf("query workflow control projection: %v", err)
 	}
 	currentState, fieldsRaw, controlStatus := observed.CurrentState, observed.Fields, observed.ControlStatus
 	if got := strings.TrimSpace(currentState); got != "reviewing" {
-		t.Fatalf("entity_state.current_state = %q, want reviewing", got)
+		t.Fatalf("flow_instances.current_state = %q, want reviewing", got)
 	}
 	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", fieldsRaw)
 	if err != nil {
@@ -414,7 +414,7 @@ func VerifyWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjectionF
 	}
 	revision, configName, fieldsRaw := observed.Revision, observed.FieldName, observed.Fields
 	if revision != 1 {
-		t.Fatalf("entity_state.revision = %d, want 1", revision)
+		t.Fatalf("flow_instances.revision = %d, want 1", revision)
 	}
 	if configName != "alpha" {
 		t.Fatalf("entity_state.fields name = %q, want alpha", configName)

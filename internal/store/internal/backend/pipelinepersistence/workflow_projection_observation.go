@@ -88,8 +88,8 @@ func ReadWorkflowControlProjectionStorageForTest(ctx context.Context, tx *sql.Tx
 	}
 	var out WorkflowControlProjectionStorage
 	var fields []byte
-	err := tx.QueryRowContext(ctx, `SELECT es.current_state, es.fields, COALESCE(`+status+`, '')
-		FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance
+	err := tx.QueryRowContext(ctx, `SELECT fi.current_state, es.fields, COALESCE(`+status+`, '')
+		FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
 		WHERE es.run_id=$1 AND es.entity_id=$2`, run, entity).Scan(&out.CurrentState, &fields, &out.ControlStatus)
 	if err != nil {
 		return WorkflowControlProjectionStorage{}, err
@@ -105,8 +105,8 @@ func ReadWorkflowDuplicateProjectionStorageForTest(ctx context.Context, tx *sql.
 	}
 	var out WorkflowDuplicateProjectionStorage
 	var fields []byte
-	err := tx.QueryRowContext(ctx, `SELECT es.revision, COALESCE(`+name+`, ''), es.fields
-		FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance
+	err := tx.QueryRowContext(ctx, `SELECT fi.revision, COALESCE(`+name+`, ''), es.fields
+		FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
 		WHERE es.run_id=$1 AND es.entity_id=$2`, run, entity).Scan(&out.Revision, &out.FieldName, &fields)
 	if err != nil {
 		return WorkflowDuplicateProjectionStorage{}, err
