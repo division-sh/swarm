@@ -686,15 +686,16 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 		eventID, events.EventType("producer/"+eventName), "", "", []byte(`{"proof":"mixed-owner"}`), 0, runID, "",
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), time.Now().UTC(),
 	)
+	poisonedStore.requireConstructionUnchanged(t)
 	if _, err := poisonedBus.CheckPublishRecipientPlan(ctx, event); err == nil || !isolatedInstanceLookupMiss(err) {
 		t.Fatalf("poisoned fan-out preflight error = %v, want missing required owner", err)
 	}
 	if err := poisonedBus.Publish(ctx, event); err == nil || !isolatedInstanceLookupMiss(err) {
 		t.Fatalf("poisoned fan-out publish error = %v, want missing required owner", err)
 	}
-	if len(poisonedStore.events) != 0 || len(poisonedStore.routes) != 0 || len(poisonedStore.settlements) != 0 || len(poisonedStore.scopes) != 0 || len(poisonedStore.receipts) != 0 || len(poisonedStore.flowRoutes) != 0 {
-		t.Fatalf("poisoned fan-out partially mutated durable state: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",
-			poisonedStore.events, poisonedStore.routes, poisonedStore.settlements, poisonedStore.scopes, poisonedStore.receipts, poisonedStore.flowRoutes)
+	if len(poisonedStore.events) != 0 || len(poisonedStore.routes) != 0 || len(poisonedStore.settlements) != 0 || len(poisonedStore.scopes) != 0 || len(poisonedStore.receipts) != 0 {
+		t.Fatalf("poisoned fan-out partially mutated durable state: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v",
+			poisonedStore.events, poisonedStore.routes, poisonedStore.settlements, poisonedStore.scopes, poisonedStore.receipts)
 	}
 
 	legalStore := newTargetRouteMemoryStore()

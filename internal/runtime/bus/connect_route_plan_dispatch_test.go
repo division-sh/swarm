@@ -1353,6 +1353,7 @@ func TestEventBusPublish_RootConnectParentContextCannotSupplyMissingReceiver(t *
 		uuid.NewString(), events.EventType("root.ready"), "root-dispatcher", "", json.RawMessage(`{"request_id":"hostile"}`), 0,
 		currentTarget.FlowInstance, "", events.EnvelopeForEntityID(events.EnvelopeForFlowInstance(events.EventEnvelope{}, currentTarget.FlowInstance), currentTarget.EntityID), time.Now().UTC(),
 	)
+	store.requireConstructionUnchanged(t)
 
 	preflight, err := eb.CheckPublishRecipientPlan(ctx, evt)
 	if !isolatedInstanceLookupMiss(err) {
@@ -1361,9 +1362,9 @@ func TestEventBusPublish_RootConnectParentContextCannotSupplyMissingReceiver(t *
 	if err := eb.Publish(ctx, evt); !isolatedInstanceLookupMiss(err) {
 		t.Fatalf("Publish error = %v, want missing receiver rejection", err)
 	}
-	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 || len(store.flowRoutes) != 0 {
-		t.Fatalf("rejected publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v",
-			store.events, store.routes, store.settlements, store.scopes, store.receipts, store.flowRoutes)
+	if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 {
+		t.Fatalf("rejected publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v",
+			store.events, store.routes, store.settlements, store.scopes, store.receipts)
 	}
 }
 
@@ -1654,6 +1655,7 @@ func TestEventBusPublish_SingletonConnectToRootRejectsMissingOrAmbiguousSelected
 				routingSource, time.Now().UTC(),
 			)
 			ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+			store.requireConstructionUnchanged(t)
 			_, err = eb.CheckPublishRecipientPlan(ctx, evt)
 			if tc.duplicate && (err == nil || !strings.Contains(err.Error(), "receiver inventory repeats a native coordinate")) || !tc.duplicate && !isolatedInstanceLookupMiss(err) {
 				t.Fatalf("CheckPublishRecipientPlan error = %v, want exact native-root refusal", err)
@@ -1662,9 +1664,9 @@ func TestEventBusPublish_SingletonConnectToRootRejectsMissingOrAmbiguousSelected
 			if tc.duplicate && (err == nil || !strings.Contains(err.Error(), "receiver inventory repeats a native coordinate")) || !tc.duplicate && !isolatedInstanceLookupMiss(err) {
 				t.Fatalf("Publish error = %v, want exact native-root refusal", err)
 			}
-			if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 || len(store.flowRoutes) != 0 || len(store.claims) != 0 || len(store.scans) != 0 || len(store.active) != 0 {
-				t.Fatalf("rejected publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v flow_routes=%#v claims=%#v scans=%#v active=%#v",
-					store.events, store.routes, store.settlements, store.scopes, store.receipts, store.flowRoutes, store.claims, store.scans, store.active)
+			if len(store.events) != 0 || len(store.routes) != 0 || len(store.settlements) != 0 || len(store.scopes) != 0 || len(store.receipts) != 0 || len(store.claims) != 0 || len(store.scans) != 0 || len(store.active) != 0 {
+				t.Fatalf("rejected publication mutated store: events=%#v routes=%#v settlements=%#v scopes=%#v receipts=%#v claims=%#v scans=%#v active=%#v",
+					store.events, store.routes, store.settlements, store.scopes, store.receipts, store.claims, store.scans, store.active)
 			}
 		})
 	}

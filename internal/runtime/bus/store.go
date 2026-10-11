@@ -511,14 +511,6 @@ func (r CommittedSelectedForkEvent) Validate() error {
 	return nil
 }
 
-type FlowInstanceRouteRecord struct {
-	Identity       runtimeflowidentity.RunScopedFlowInstance
-	EventPattern   string
-	SubscriberType string
-	SubscriberID   string
-	SourceFlow     string
-}
-
 type ActiveAgentDescriptor struct {
 	Identity agentidentity.Identity
 	EntityID string
