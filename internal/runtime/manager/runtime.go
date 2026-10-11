@@ -927,6 +927,10 @@ func (am *AgentManager) Run(ctx context.Context) error {
 		}
 	}
 
+	return am.startReadinessReconciliation(runCtx)
+}
+
+func (am *AgentManager) startReadinessReconciliation(runCtx context.Context) error {
 	retryLease, err := am.beginStandingWork(runCtx, "manager readiness reconciliation")
 	if err != nil {
 		transition := am.lifecycle.requestShutdownTransition()
@@ -952,8 +956,8 @@ func (am *AgentManager) Run(ctx context.Context) error {
 
 // RunAuthoritativeDeliveryOnly starts agent loops with authoritative recipient
 // channels only. It intentionally avoids live subscription patterns and
-// retry/recovery loops so selected-fork execution can consume canonical
-// recipient planning without reintroducing subscription-derived recipient truth.
+// generic replay recovery. Readiness retry consumes persisted construction and
+// rechecks current run ownership; it does not derive recipients from subscriptions.
 func (am *AgentManager) RunAuthoritativeDeliveryOnly(ctx context.Context) error {
 	if _, err := managedexecution.Require(ctx); err != nil {
 		return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_execution_admission_missing", "agent-manager", "start_authoritative_loops", nil, err)
@@ -985,7 +989,7 @@ func (am *AgentManager) RunAuthoritativeDeliveryOnly(ctx context.Context) error 
 			return errors.Join(err, waitForRuntimeLifecycleTransition(transition, grace, "failed authoritative agent start shutdown drain"))
 		}
 	}
-	return nil
+	return am.startReadinessReconciliation(runCtx)
 }
 
 func (am *AgentManager) startShutdownWatcher(runCtx context.Context, kind string) error {
