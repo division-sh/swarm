@@ -51,7 +51,7 @@ func TestEvaluateBudgetCadenceRejectsForgedTier(t *testing.T) {
 	}
 }
 
-func TestEvaluateBudgetIncompleteDominatesRatchetFailure(t *testing.T) {
+func TestEvaluateBudgetIncompleteDominatesSnapshotAdvisory(t *testing.T) {
 	cfg := ratchetCLIConfig(t, "core", 2000, true)
 	cfg.event = "pull_request"
 	if err := os.WriteFile(filepath.Join(cfg.evidenceRoot, "broken-evidence.json"), []byte("{broken"), 0600); err != nil {
@@ -61,8 +61,29 @@ func TestEvaluateBudgetIncompleteDominatesRatchetFailure(t *testing.T) {
 		t.Fatal("invalid proof earned success")
 	}
 	result := readRatchetCLIResult(t, cfg)
-	if result.Status != testtiming.BudgetIncomplete || result.TestTime == nil || result.TestTime.Status != testtiming.BudgetFail {
-		t.Fatalf("ratchet failure downgraded incomplete command evidence: %+v", result)
+	if result.Status != testtiming.BudgetIncomplete || result.TestTime == nil || result.TestTime.Status != testtiming.BudgetWarn {
+		t.Fatalf("snapshot advisory downgraded incomplete command evidence: %+v", result)
+	}
+}
+
+func TestEvaluateBudgetSnapshotCostAndPlacementAreAdvisory(t *testing.T) {
+	for _, event := range []string{"pull_request", "push", "schedule", "workflow_dispatch"} {
+		t.Run(event, func(t *testing.T) {
+			cfg := ratchetCLIConfig(t, "full", 2000, true)
+			cfg.event = event
+			if err := run(cfg); err != nil {
+				t.Fatalf("complete snapshot-only growth blocked: %v", err)
+			}
+			result := readRatchetCLIResult(t, cfg)
+			if result.Status != testtiming.BudgetWarn || result.ExitCode() != 0 || result.TestTime == nil || result.TestTime.Status != testtiming.BudgetWarn || len(result.TestTime.Problems) != 0 || len(result.TestTime.Tiers) != 3 {
+				t.Fatalf("snapshot cost earned a hard failure or lost evidence: %+v", result)
+			}
+			for _, row := range result.TestTime.Tiers {
+				if len(row.Added) != 1 || row.AddedSeconds < 2000 || row.AddedSeconds <= row.Allowance || row.StrictStatus != testtiming.BudgetFail || !strings.Contains(strings.Join(row.Warnings, " "), ">30s") {
+					t.Fatalf("snapshot advisory hid placement, charge or counterfactual: %+v", row)
+				}
+			}
+		})
 	}
 }
 

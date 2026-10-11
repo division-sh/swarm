@@ -90,25 +90,30 @@ regression, rate or lag is known.
 ## PR And Cadence Timing
 
 `-evaluate-budget` uses the existing trusted `-event` input. Only exact
-`pull_request` selects independent PR added/promoted-cost enforcement. Complete
-plan-bound proof and unapproved >30s placement still fail closed; new-work cost
-must satisfy both 5% of the frozen tier baseline and 600 seconds. Retained
+`pull_request` selects independent PR added/promoted-cost reporting. Complete
+plan-bound proof still fails closed. Snapshot-derived new-work cost above either
+5% of the frozen tier baseline or 600 seconds is advisory, as is unreviewed >30s
+new/promoted-root placement. Historical placement approvals remain attributed
+without requiring new hardcoded approvals. Retained
 speedups and removed roots cannot subsidize new work. Retained drift that would
 fail the original aggregate is an explicit PR warning, not a proof waiver.
 
 Fresh schedule/manual/master evaluation requires a full hosted plan and reports
 complete aggregate growth as advisory under the user-ratified
-[LEAD ruling](https://github.com/division-sh/swarm/issues/2535#issuecomment-6110280108).
+[user-confirmed LEAD ruling](https://github.com/division-sh/swarm/issues/2535#issuecomment-6113532469).
 The `strict_aggregate` mode keeps its name, full tier table, exhaustive retained
 deltas and strict counterfactual; excess aggregate cost produces `WARN`, not a
 failing summary. Only exact `pull_request`, `push`, `schedule`, and
 `workflow_dispatch` events are admitted; missing, unknown or malformed events
-produce `INCOMPLETE` before either timing policy is selected. PR added-cost
-bounds, placement admission, command ceilings and
-invalid-evidence failures stay hard. The pinned reference, numbers, selection
+produce `INCOMPLETE` before either timing policy is selected. Both comparison
+modes retain their full cost accounting and historical strict counterfactual,
+but no snapshot-derived cost or placement verdict fails the summary. Independently
+enforced command ceilings/timeouts and invalid-evidence failures stay hard and
+unchanged. The pinned reference, numbers, selection
 syntax, cadence and gate freshness are unchanged. Diffuse real creep below unit
-ceilings remains visible in nightly tables and every reviewed re-pin's growth
-table rather than automatically blocking the next full nightly.
+ceilings remains visible in advisory tables rather than automatically blocking
+delivery. No recurring re-pin or Go1.26 timing re-pin is required by this policy;
+effective compiler identity remains a separate proof-validity obligation.
 
 JSON records `comparison_mode`, independent added cost, exhaustive
 `tiers[].retained_cells` identities/before/after/delta and strict counterfactual.

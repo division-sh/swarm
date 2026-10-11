@@ -24108,7 +24108,8 @@ test_specification:
         ci-postgres-gateway-empty-v1/count-1 root cells. Core promotion, aliases, foreign package/environment/count
         and backend relabeling do not inherit approval. The evaluator records the approval/source/run in its
         warning evidence and charges all observed seconds under unchanged aggregate and command budgets.
-        Every other new/promoted over-30-second root still fails without its own reviewed versioned disposition.
+        Every other new/promoted over-30-second root is reported without inheriting those historical approvals;
+        its unreviewed placement is advisory under user-confirmed LEAD #2535 comment6113532469, not a proof waiver.
       execution: >-
         Proof policy resolves each profile shard and named unit's environment from its explicit ci/local recipe
         declaration before plan hashing, weighting, batching or receipt production. Hosted selection of a local-named
@@ -24122,9 +24123,11 @@ test_specification:
         unselected-plan diagnostics, not proof that full coverage was removed or timing savings were earned.
         A supplemented lower-tier plan adds the frozen full projection as a cost-accounting row, without reprojecting the frozen lower-tier
         reference membership or changing the timing anchor/thresholds. Absent full cells remain removal-neutral and earn no execution credit;
-        new/promoted roots retain the unchanged placement rule. The trusted workflow event selects cost enforcement:
-        PRs hard-charge independent added/promoted cost and report retained drift as advisory; fresh full master cadence
-        reports the complete retained-plus-added aggregate as advisory. Named extras cannot evade either comparison or change the reference epoch.
+        new/promoted roots retain their complete charged cost and historical placement attribution. The trusted workflow
+        event selects cost reporting: PRs report independent added/promoted cost and retained drift; fresh full master
+        cadence reports the complete retained-plus-added aggregate. Both snapshot-derived cost and placement verdicts
+        are advisory under user-confirmed LEAD #2535 comment6113532469. Named extras cannot evade either comparison,
+        change the reference epoch or weaken exact proof admission and independently enforced command ceilings.
         Logical commands retain their own processes, stores, workspaces, deadlines, backend children and receipts.
         Only explicitly eligible short units with valid measured weights may share a physical runner. Each physical
         job is matched to its exact planned logical units and counted once, while every logical budget and failure
@@ -24205,22 +24208,26 @@ test_specification:
         into a tier counts as added cost, while a demotion remains reported removed work without granting savings.
         Count a root and its direct children once and separately executed original soak backend cells separately.
         Complete source/plan/run/attempt/root/child/build/environment/count evidence is admitted before either timing decision.
-        Only the exact trusted pull_request event selects PR cost enforcement; tier names, body text or plan reasons do not.
+        Only the exact trusted pull_request event selects independent PR added-cost reporting; tier names, body text or plan reasons do not.
         The CLI admits only exact pull_request, push, schedule or workflow_dispatch events. Missing, unknown or
         malformed events report INCOMPLETE before either timing policy is selected and never grant advisory treatment.
         Supported non-PR evaluation requires a full hosted cadence plan;
         a supplied core/lifecycle cadence plan is refused even if ordinary planning would never produce it.
-        PRs hard-charge the independent sum of added/promoted-cell seconds under both five percent of the pinned tier cost
-        and 600 test-seconds. Retained speedups and removed/renamed cells cannot subsidize that new-work charge.
+        PRs report the independent sum of added/promoted-cell seconds against both five percent of the pinned tier cost
+        and 600 test-seconds. Retained speedups and removed/renamed cells cannot subsidize that reported new-work charge.
         Retained-cell drift is reported with exhaustive exact cell identities and baseline/candidate/signed-delta attribution;
         when the original aggregate would exceed its allowance, valid PR proof receives an explicit advisory warning.
         Fresh full schedule/manual/master cadence reports the complete retained-plus-added aggregate as advisory under
         the user-ratified LEAD ruling #2535 comment 6110280108 (2026-10-11). The strict_aggregate mode retains its name,
         tier table, exhaustive retained-cell deltas, unchanged allowance and strict counterfactual; aggregate growth
-        alone produces a warning and cannot fail the summary. The pr_added_cost mode, independent added/promoted-cost
-        bounds, new-root placement admission, proof validity and per-unit command ceilings remain unchanged and hard.
-        No reference re-pin, numeric allowance change or codemod retier follows from this disposition. Diffuse real
-        creep below command ceilings may remain advisory; humans inspect the nightly table and every reviewed re-pin's growth table.
+        alone produces a warning and cannot fail the summary. The user-confirmed LEAD ruling #2535 comment 6113532469
+        (2026-10-11 20:40Z) supersedes items 1-2 of comment 6110280108: all pinned-snapshot-derived cost and placement
+        comparisons are advisory on every event, including pr_added_cost overruns and unreviewed new/promoted roots
+        above 30 seconds. They remain computed and attributed in the artifact and report, never failing the timing
+        budget or Required summary by themselves. Proof validity, complete exact evidence and independently enforced
+        per-unit/command ceilings and timeouts remain unchanged and hard. No reference re-pin, numeric allowance change,
+        codemod retier or base-relative derivation follows from this disposition. Diffuse real creep below command
+        ceilings remains visible for human review; historical placement approvals remain attributed, not required for success.
         Removed/renamed roots are reported separately and remain cost-neutral in that comparison, never credited as savings.
         JSON retains the decision mode, independent added cost, retained totals/cells, unchanged allowance and strict aggregate
         counterfactual. Human summaries label any bounded drift display and point to the exhaustive JSON.
@@ -24228,15 +24235,15 @@ test_specification:
         cannot downgrade missing, failed, cancelled, corrupt, duplicate or foreign proof or actual-job evidence.
         This split accepts that a real slowdown in retained work may first be detected by the next full nightly;
         it grants no runtime waiver, workload reduction or compounded automatically refreshed merge-base anchor.
-        A new or promoted top-level root above 30 seconds requires a Test-Time rationale
-        and an explicit independent reviewer or lead placement decision even below the aggregate limit.
-        A rationale alone grants no exception. A reviewed versioned anchor/policy adjustment must name the explicit
-        approval and exact source evidence; moving correctness coverage also requires the lead's coverage ruling.
-        Over-threshold host variance requires attribution/review rather than silent baseline widening or blind full reruns.
+        A new or promoted top-level root above 30 seconds without an existing exact-cell placement approval produces
+        an explicit advisory warning with its complete charged cost. No new hardcoded approval or recurring re-pin is
+        required, including for Go 1.26; effective compiler identity remains a separate proof-validity obligation.
+        Moving correctness coverage still requires the lead's coverage ruling. Over-threshold host variance remains
+        attributed rather than silently changing the reference or relabeling an earlier failed receipt.
         Reporter serving-window timing records native injected delay, acknowledgment-bounded issuance and
         subsequent drain/mixed/readback separately. Reduced injected fault lifetime is not runtime throughput
-        improvement; full retains the original stress compute. New roots above 30 seconds still require measured
-        source-bound cost and an explicit finite reviewer placement decision; this split grants no timing waiver.
+        improvement; full retains the original stress compute. New roots above 30 seconds retain measured source-bound
+        cost and attributed placement warnings under the user-confirmed advisory snapshot rule; no workload is reduced.
         Timing weights remain useful for partitioning, short-unit packing and ETA. Only exact successful full
         evidence and a model-only diff authorize the master-only publisher; both create/update PR bodies declare
         CI-Tier: core and Local-Tier: core, with ordinary native PR checks and no automatic duplicate dispatch.

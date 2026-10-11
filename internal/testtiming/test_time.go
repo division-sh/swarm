@@ -312,6 +312,7 @@ func testTimeComparisonTiers(plan testplanning.RunPlan) []string {
 
 func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, policy testplanning.Policy, tier string, mode TestTimeMode) (TestTimeTier, []string) {
 	row := TestTimeTier{Tier: tier}
+	unreviewedPlacement := false
 	baseline, problems := projectReferenceTimingRoots(reference, tier)
 	candidate, candidateProblems := projectTimingRoots(candidate, policy, tier)
 	problems = append(problems, candidateProblems...)
@@ -335,7 +336,8 @@ func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, poli
 				if approval := reviewedTimingPlacement(root.TimingCell, tier); approval != "" {
 					row.Warnings = append(row.Warnings, fmt.Sprintf("%s: %.3fs added root %s.%s has reviewed placement %s; its entire cost remains charged", tier, root.Seconds, root.Package, root.Root, approval))
 				} else {
-					problems = append(problems, fmt.Sprintf("%s: new or promoted root %s.%s/%s is %.3fs (>30s): Test-Time rationale AND independent placement approval require a reviewed versioned policy adjustment", tier, root.Package, root.Root, root.Backend, root.Seconds))
+					unreviewedPlacement = true
+					row.Warnings = append(row.Warnings, fmt.Sprintf("%s: new or promoted root %s.%s/%s is %.3fs (>30s): unreviewed placement is advisory; its entire cost remains charged", tier, root.Package, root.Root, root.Backend, root.Seconds))
 				}
 			}
 		}
@@ -356,7 +358,7 @@ func compareTimingTier(reference []ReferenceRootTime, candidate []RootTime, poli
 	row.Growth = row.Candidate - row.Baseline
 	row.Allowance = math.Min(row.Baseline*0.05, 600)
 	row.StrictStatus = BudgetPass
-	if len(problems) != 0 || row.Baseline == 0 || row.Growth > row.Allowance+1e-9 {
+	if len(problems) != 0 || unreviewedPlacement || row.Baseline == 0 || row.Growth > row.Allowance+1e-9 {
 		row.StrictStatus = BudgetFail
 	}
 	problems = append(problems, row.costProblems(mode)...)
@@ -413,7 +415,7 @@ func (row *TestTimeTier) costProblems(mode TestTimeMode) []string {
 		row.Warnings = append(row.Warnings, fmt.Sprintf("%s: retained-cell drift is advisory on PRs: %.3fs retained delta, %.3fs added cost, %.3fs strict aggregate growth vs %.3fs allowance", row.Tier, row.RetainedDelta, row.AddedSeconds, row.Growth, row.Allowance))
 	}
 	if row.AddedSeconds > row.Allowance+1e-9 {
-		return []string{fmt.Sprintf("%s: added/promoted test-time cost %.3fs exceeds min(5%% of %.3fs, 600s) = %.3fs; retained speedups and removals grant no savings", row.Tier, row.AddedSeconds, row.Baseline, row.Allowance)}
+		row.Warnings = append(row.Warnings, fmt.Sprintf("%s: added/promoted test-time cost is advisory: %.3fs exceeds min(5%% of %.3fs, 600s) = %.3fs; retained speedups and removals grant no savings", row.Tier, row.AddedSeconds, row.Baseline, row.Allowance))
 	}
 	return nil
 }
@@ -455,7 +457,7 @@ func projectTimingRoots(roots []RootTime, policy testplanning.Policy, tier strin
 }
 
 func WriteTestTimeMarkdown(w io.Writer, result TestTimeResult) error {
-	if _, err := fmt.Fprintf(w, "\n## Pinned Test-Time Ratchet\n\n%s, mode `%s`, against full run %d (`%s`). PRs enforce independent added/promoted cost; cadence reports aggregate growth as advisory. Parent/direct-child elapsed is counted once; separate soak cells count separately. Removed/renamed roots grant no timing credit. A Test-Time line alone never approves an exception.\n\n| Tier | Baseline | Comparable + new (removed neutral) | Aggregate growth | min(5%%, 600s) | Added cost | Retained delta | Strict counterfactual | Retained | Added | Removed/renamed |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |\n", result.Status, result.Mode, result.ReferenceRunID, result.ReferenceSource); err != nil {
+	if _, err := fmt.Fprintf(w, "\n## Pinned Test-Time Ratchet\n\n%s, mode `%s`, against full run %d (`%s`). All snapshot-derived cost and placement comparisons are advisory; cadence reports aggregate growth as advisory. Proof validity and independently enforced command ceilings remain hard. Parent/direct-child elapsed is counted once; separate soak cells count separately. Removed/renamed roots grant no timing credit. Historical placement approvals remain attributed, not required for success.\n\n| Tier | Baseline | Comparable + new (removed neutral) | Aggregate growth | min(5%%, 600s) | Added cost | Retained delta | Strict counterfactual | Retained | Added | Removed/renamed |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: |\n", result.Status, result.Mode, result.ReferenceRunID, result.ReferenceSource); err != nil {
 		return err
 	}
 	for _, tier := range result.Tiers {

@@ -59,7 +59,7 @@ func TestTestTimePopulationChangesCannotHideGrowth(t *testing.T) {
 	base := timingReferenceRoots(t, []RootTime{timingRoot("TestOld", 100), timingRoot("TestRemoved", 3000)}, rootTimingPolicy())
 	candidate := []RootTime{timingRoot("TestOld", 101), timingRoot("TestNew", 30.001)}
 	row, problems := compareTimingTier(base, candidate, rootTimingPolicy(), "core", TestTimeStrict)
-	if row.Retained != 1 || len(row.Added) != 1 || len(row.Removed) != 1 || math.Abs(row.Growth-31.001) > 1e-8 || len(problems) != 1 || !strings.Contains(problems[0], "independent placement approval") {
+	if row.Retained != 1 || len(row.Added) != 1 || len(row.Removed) != 1 || math.Abs(row.Growth-31.001) > 1e-8 || len(problems) != 0 || !strings.Contains(strings.Join(row.Warnings, " "), "unreviewed placement is advisory") || row.StrictStatus != BudgetFail {
 		t.Fatalf("row=%+v problems=%v", row, problems)
 	}
 	// A rename cannot be inferred as cheaper retained work or offset other cost.
@@ -107,7 +107,7 @@ func TestTestTimeTierChangesCannotReprojectPinnedBaseline(t *testing.T) {
 			current := timingTierChangePolicy(test.currentSlow, test.currentSpecial)
 			for _, tier := range []string{"core", "lifecycle"} {
 				row, problems := compareTimingTier(base, roots, current, tier, TestTimeStrict)
-				if row.Baseline != test.baseline || row.Growth != test.growth || len(row.Added) != test.added || len(row.Removed) != test.removed || row.Allowance != test.baseline*0.05 || (len(problems) != 0) != (test.growth > 0) {
+				if row.Baseline != test.baseline || row.Growth != test.growth || len(row.Added) != test.added || len(row.Removed) != test.removed || row.Allowance != test.baseline*0.05 || len(problems) != 0 || (row.StrictStatus == BudgetFail) != (test.growth > 0) || (len(row.Warnings) != 0) != (test.growth > 0) {
 					t.Fatalf("%s: row=%+v problems=%v", tier, row, problems)
 				}
 			}
@@ -254,7 +254,7 @@ func TestTestTimeRepinPreservesUnchangedSuccessorAndCostlyNewRootControls(t *tes
 		// Synthetic additional work is not a new hosted receipt or placement approval.
 		added := append(slices.Clone(unchanged), timingRoot("TestUnapprovedCostlySuccessorProof", 30.001))
 		row, problems = compareTimingTier(core, added, rootTimingPolicy(), "core", mode)
-		if row.AddedSeconds != 30.001 || row.AddedSeconds >= row.Allowance || len(problems) != 1 || !strings.Contains(problems[0], ">30s") {
+		if row.AddedSeconds != 30.001 || row.AddedSeconds >= row.Allowance || len(problems) != 0 || !strings.Contains(strings.Join(row.Warnings, " "), ">30s") || row.StrictStatus != BudgetFail {
 			t.Fatalf("re-pin waived the individual-root rule despite sufficient aggregate room: %+v / %v", row, problems)
 		}
 	}
