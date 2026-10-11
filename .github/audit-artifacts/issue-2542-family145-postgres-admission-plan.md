@@ -758,7 +758,7 @@ Three outer fixtures now open native owners at their original location: empty
 reporter, shared multi-grant serving and internal-delivery settlement. The first
 two complete files contain no SQL, raw getter, supplied pool or reconstructed
 store. The guarded codemod pins the owner-repaired six-file intermediate and
-deletes only the exact third pool argument in eight calls. Its first complete
+deletes only the exact fourth argument (the pool) in eight calls. Its first complete
 preflight caught the third newly unused outer pool, wrote no files, and forced
 that original fixture dependency to be repaired natively. The unchanged opaque
 source, clocks,25-item/chunk workloads, runtime join and cleanup cuts remain.
