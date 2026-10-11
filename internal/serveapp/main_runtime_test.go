@@ -7856,7 +7856,7 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 	if entityID != runID {
 		t.Fatal("selected root fixture must use the constructed run entity")
 	}
-	seedRunForkCLIConstruction(t, db, runID, bundleHash, at)
+	seedRunForkCLIConstruction(t, selected, runID, bundleHash, at)
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),

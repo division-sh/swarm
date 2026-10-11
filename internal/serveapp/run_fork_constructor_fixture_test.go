@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
@@ -22,14 +21,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 // This establishes real source construction, not executable attachment or a
 // public launch. The fork controls keep their original admission assertions.
-func seedRunForkCLIConstruction(t *testing.T, db *sql.DB, runID, bundleHash string, at time.Time) {
+func seedRunForkCLIConstruction(t *testing.T, selected *store.PostgresStore, runID, bundleHash string, at time.Time) {
 	t.Helper()
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{
 		RepoRoot: repoRootForTest(), PlatformSpecPath: contracts.DefaultPlatformSpecFile(repoRootForTest()), Store: selected,
 	}
