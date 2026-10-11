@@ -3714,6 +3714,12 @@ runtime_enforcement:
       Unassigned root fields remain omitted. Explicit zero, empty text, false,
       and empty collections remain present; reads never initialize fields or
       reconstruct cleared values from request snapshots.
+      Generated role-scoped whole-entity read schemas keep current_state required
+      and admit exactly text or null. A data-only import or constructed instance
+      with no named stages returns null, not a missing key or an invented stage.
+      A declared business field named current_state retains its independent
+      authored type under fields. This does not expand the read envelope or
+      expose private bookkeeping or loop facts.
   query_entities:
     rule: |
       query_entities validates filter paths against the inferred entity
