@@ -2509,7 +2509,7 @@ classified, not claimed closed or converted to an admission-wait substitute.
 
 | Canonical owner | Exhaustive affected consumption and surviving scope |
 | --- | --- |
-| native storetest construction/close ledger | All six newSupplementalServingFixture call occurrences, including finite/full contention, suffix, reservation and optional soak, use original-location native construction. Source/catalog/topology/runtime wiring and releaseAll-before-joined-close cleanup are unchanged. No second lifetime owner. |
+| native storetest construction/close ledger | All five newSupplementalServingFixture call occurrences (six references including its definition), including finite/full contention, suffix, reservation and optional soak, use original-location native construction. Source/catalog/topology/runtime wiring and releaseAll-before-joined-close cleanup are unchanged. No second lifetime owner. |
 | pipelinepersistence physical observations | Ten fixed ports retain global outcome/intent/capacity/cardinality/claim/progress/pressure scopes, exact committed-run DISTINCT event counts and the five-coordinate expired-claim row/outcome join. Original strict SUM NULL error and explicit COALESCE zero cases stay distinct, with no eligibility/run filter added to global reads. |
 | original selected native read coordinator | Every detached observation has its own original read cut; raw/absent/typed-nil/cancelled/closed owners refuse without provisional data. Failed required rows retain absence failure. Real expired held claims preserve nullable ownership, lease/retry fields, generation and exact clocks. |
 | existing runforkrevision physical-history owner | Supplemental history retains fact_key,revision ordering and complete physical fact bytes. Reporter revision,fact_key remains a distinct named operation; both share the original detached-row/error handling, not an ordering selector exposed to callers. |
@@ -2534,7 +2534,7 @@ SQL operation; no code exception or substring allowance is introduced.
 | Durable three-second pressure population | execution-proven through the same corrected path: unchanged TestIssue2394SupplementalPressureFiniteProbeBothStores under race on both stores |
 | Real expired held/released claim and FIFO reservation | execution-proven through the same corrected path: unchanged TestIssue2394PressureReservationFIFOControlPostgres under race; original nullable lease/generation/outcome assertions retained |
 | Key-major versus revision-major history interpretation | reproduced and fixed: actual SQL ORDER BY revision,fact_key mutant is RED at exact versions=1/want2 in the real PostgreSQL one-run finite workload; restore GREEN |
-| Full cardinality and continuous optional-soak workload | split / escalated as separate class: workload/profile/temporal assertions are unchanged and every observer source mapping is conserved, but no full or real-soak execution is claimed in this focused checkpoint; existing landing qualification/hold remains |
+| Full cardinality and continuous optional-soak workload | qualification-open, NOT a separate semantic class: workload/profile/temporal assertions and every observer source mapping are conserved, but no full or real-soak execution is claimed in this focused checkpoint; the existing landing qualification obligation remains |
 
 Vemew: complete restored suffix/contention/M04 roots race PASS60.626s; real
 pressure/FIFO roots race PASS70.250s. First finite13.485s was RED at the hidden
