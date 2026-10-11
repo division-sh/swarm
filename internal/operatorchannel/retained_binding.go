@@ -100,10 +100,13 @@ func (s *Service) bindingReadbackCurrent(ctx context.Context, binding Binding) (
 	if ctx.Err() != nil {
 		return false, errors.Join(err, ctx.Err())
 	}
-	unavailable, knownUnavailable := err.(*SessionProviderUnavailableError)
-	if binding.ProviderAuthority.Kind == ProviderAuthoritySession && knownUnavailable &&
-		unavailable.Provider == binding.ProviderAuthority.Session.Provider {
+	if knownUnavailableSession(binding.ProviderAuthority, err) {
 		return false, nil
 	}
 	return current, err
+}
+
+func knownUnavailableSession(provider ProviderAuthority, err error) bool {
+	unavailable, known := err.(*SessionProviderUnavailableError)
+	return known && provider.Kind == ProviderAuthoritySession && unavailable.Provider == provider.Session.Provider
 }

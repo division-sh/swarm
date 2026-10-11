@@ -14,6 +14,15 @@ import (
 )
 
 func TestServedWhatsAppLogoutKeepsFreshSameAccountSuccessorBothStores(t *testing.T) {
+	testServedWhatsAppLogoutFreshSuccessor(t, false)
+}
+
+func TestServedWhatsAppProofBackedLogoutFreshSuccessorBothStores(t *testing.T) {
+	testServedWhatsAppLogoutFreshSuccessor(t, true)
+}
+
+func testServedWhatsAppLogoutFreshSuccessor(t *testing.T, saveProof bool) {
+	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
@@ -22,7 +31,8 @@ func TestServedWhatsAppLogoutKeepsFreshSameAccountSuccessorBothStores(t *testing
 			opts, location := servedNativeProcessOptions(t, backend)
 			process := startServedNativeSDKProcess(t, opts, originalPeer)
 			endpoint := process.endpoint(t) + "/v1/rpc"
-			original := requireServedNativeProcessPairing(t, endpoint, originalPeer)
+			original := requireServedNativeProcessPairingRequest(t, endpoint, originalPeer,
+				channelonboarding.VerbConnect, "native-process-pairing", "SERVED_CLAIM", saveProof)
 			originalConnection := readServedNativeConnectionID(t, backend, location, original.Operation.OperationID)
 			params := map[string]any{"operation_id": original.Operation.OperationID,
 				"expected_revision": original.Operation.Revision, "idempotency_key": "logout-before-fresh-pairing"}
@@ -40,11 +50,15 @@ func TestServedWhatsAppLogoutKeepsFreshSameAccountSuccessorBothStores(t *testing
 			process = startServedNativeSDKProcess(t, opts, successorPeer)
 			endpoint = process.endpoint(t) + "/v1/rpc"
 			successor := requireServedNativeProcessPairingRequest(t, endpoint, successorPeer,
-				channelonboarding.VerbReconnect, "explicit-successor-pairing", "SERVED_SUCCESSOR_CLAIM")
+				channelonboarding.VerbReconnect, "explicit-successor-pairing", "SERVED_SUCCESSOR_CLAIM", saveProof)
 			if successor.Operation.OperationID == original.Operation.OperationID ||
 				readServedNativeConnectionID(t, backend, location, successor.Operation.OperationID) == originalConnection ||
 				successor.Operation.BindingRevision <= original.Operation.BindingRevision {
 				t.Fatal("fresh ceremony adopted original operator responsibility", successor.Operation)
+			}
+			if saveProof && (original.Binding == nil || successor.Binding == nil || original.Binding.ProofID == "" ||
+				original.Binding.ProofID != successor.Binding.ProofID || successor.Binding.ProofRevision <= original.Binding.ProofRevision) {
+				t.Fatal("fresh pairing reused original native proof authority")
 			}
 			requireServedNativeHistoricalLogoutIsolation(t, endpoint, params, completed, successor)
 			successorPeer.text("/inbox", "SERVED_SUCCESSOR_INBOX")
