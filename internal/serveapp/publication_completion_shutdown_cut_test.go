@@ -33,6 +33,7 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 	probe.holdBeforeReadiness = true
 	defer probe.releaseOnce.Do(func() { close(probe.release) })
 	h := newChannelOnboardingE2EHarness(t, backend, false)
+	h.opts.AbandonActiveRuns = false
 	h.opts.SourceRoot = canonicalrouting.CopyPublicCompletionFeedOnlyActivation(t)
 	runtimes := make(chan *runtimepkg.Runtime, 2)
 	h.opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) { runtimes <- rt }
@@ -92,7 +93,7 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 	probe.holdBeforeReadiness = false
 	probe.mu.Unlock()
 	h.start(t)
-	<-runtimes
+	restarted := <-runtimes
 	replay := publicationCompletionHTTPMethod(t.Context(), h.rpcEndpoint(), method, params)
 	if replay.err != nil || replay.rpcError != nil || !bytes.Equal(replay.result, stored.Response) {
 		t.Fatalf("recovery changed the exact ACK: %+v stored=%s", replay, stored.Response)
@@ -123,7 +124,7 @@ func provePublicCompletionAcknowledgedShutdownCut(t *testing.T, backend servedpa
 		}
 	}
 	h.stop(t)
-	if probe.process.PublicCompletionCount() != 0 {
-		t.Fatal("restarted serving owner leaked completion capacity")
+	if _, err := restarted.WorkOccurrence().RetireAndWait(t.Context()); err != nil {
+		t.Fatalf("restarted serving owner did not join: %v", err)
 	}
 }
